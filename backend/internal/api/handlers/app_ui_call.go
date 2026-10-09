@@ -10,10 +10,11 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"strconv"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/auth"
-	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
 
@@ -29,7 +30,7 @@ type uiCallRequest struct {
 // like a view's — confinement, ACL viewer, not in an encrypted folder — and
 // handed to the module as refs.
 func (h *AppPlugins) UICall(w http.ResponseWriter, r *http.Request) {
-	if h.off(w) {
+	if h.off(w, r) {
 		return
 	}
 	p, v, ok := h.uiView(w, r)
@@ -38,11 +39,11 @@ func (h *AppPlugins) UICall(w http.ResponseWriter, r *http.Request) {
 	}
 	var req uiCallRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		writeError(w, r, http.StatusBadRequest, "bad_json", nil)
 		return
 	}
 	if len(req.Paths) > maxPluginPaths {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too many paths"})
+		writeError(w, r, http.StatusBadRequest, "too_many_paths", apierr.Params{"max": strconv.Itoa(maxPluginPaths)}, "max", maxPluginPaths)
 		return
 	}
 	var storageID int64
@@ -50,24 +51,22 @@ func (h *AppPlugins) UICall(w http.ResponseWriter, r *http.Request) {
 	if len(req.Paths) > 0 {
 		sid, resolved, err := h.resolvePaths(r.Context(), 0, req.Paths)
 		if err != nil {
-			writePathsRefused(w, err)
+			writePathsRefused(w, r, err)
 			return
 		}
 		if !ownsStorage(w, r, sid, "storage") {
 			return
 		}
-		lk, _ := h.Store.(e2e.NodeByPathLookup)
 		for _, rel := range resolved {
 			if !rootAllows(r.Context(), h.Store, sid, rel) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "outside this token's root: " + rel})
+				refuseOutsideRoot(w, r)
 				return
 			}
 			if !aclAllowID(r.Context(), h.ACL, h.Store, sid, rel, acl.LevelViewer) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "insufficient permission: " + rel})
+				writeErrorSaid(w, r, http.StatusForbidden, "permission_denied", "app_input_denied", apierr.Params{"name": rel})
 				return
 			}
-			if lk != nil && e2e.UnderEncrypted(r.Context(), lk, sid, "/"+rel) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "encrypted", "message": "an app cannot read files in an encrypted folder"})
+			if refuseEncryptedAtDoor(w, r, encryptedAtDoor(r.Context(), h.Store, sid, rel), rel, false) {
 				return
 			}
 			if !h.openAllowed(w, r, p, v, path.Base(rel)) {
@@ -79,7 +78,7 @@ func (h *AppPlugins) UICall(w http.ResponseWriter, r *http.Request) {
 	ctx := wasmplugin.WithActorIP(r.Context(), clientIP(r))
 	out, err := h.Registry.UICall(ctx, p.Row.Name, v.ID, storageID, rels, auth.UserFrom(r.Context()), pluginLang(r), req.Method, req.Params)
 	if err != nil {
-		h.callFail(w, err)
+		h.callFail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]json.RawMessage{"result": out})

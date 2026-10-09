@@ -1345,9 +1345,9 @@ my-editor/
   a public page, `schedule`, an engine, `http:` - refuses the install and
   says which line needs it.
 - **Don't list `ui` permissions yourself.** `ui`, `ui:eval`, `ui:wasm-eval`,
-  `ui:package-fetch`, `ui:download`, `ui-net:<as>:<url>`, `ui-viewer:<kind>`
-  and `ui-new:.<ext>` are derived from the manifest; the review shows them like
-  any other.
+  `ui:package-fetch`, `ui:download`, `ui:frame-package`, `ui:connect-blob`, `ui:print`,
+  `ui-net:<as>:<url>`, `ui-viewer:<kind>` and `ui-new:.<ext>` are derived from
+  the manifest; the review shows them like any other.
 - **New files of your kind.** `"new_documents": [{ "ext": "fxtxt", "label":
   {…}, "view": "editor", "template": "new/blank.txt" }]` adds a row to
   filex's **New document** dialog: the file is a copy of the template (a
@@ -1357,10 +1357,41 @@ my-editor/
   call `fx.download('plan.png', blob)` from a click: filex saves it where
   the person picks (Chromium streams it there) or downloads it, 256 MiB at
   most. Without a click filex asks them first.
+- **Something to print?** A sandboxed frame may not open the print dialog.
+  Say `"ui": { …, "print": true }` and `"filex": ">=0.55.0"`, make a PDF and
+  call `fx.print('report.pdf', pdfBytes)` from a click: filex asks the person
+  every time and prints it from its own page on their *Allow* (64 MiB at
+  most). An older filex answers `unknown_method`, and a host whose print page
+  may not be shown `unavailable`: hand the PDF over with `fx.download` then.
+- **Your files may be end-to-end encrypted?** `fx.session.files[i].encrypted`
+  is `'folder'`, `'vault'` or `'file'` (a single `.fxe`) when the server says
+  the file is (filex 0.55), and absent otherwise. It is information only:
+  filex 0.55 decrypts nothing for an app. The explorer offers an encrypted
+  file to no app, and should one reach your interface anyway it is
+  `readOnly`, its read is refused (`encrypted`) and so is a save
+  ([APP-PLUGINS-API.md → Which rows say `encrypted`](APP-PLUGINS-API.md#which-rows-say-encrypted)).
 - **Your interface loads its own files at run time?** Say
   `"ui": { …, "package_fetch": true }`. `fetch('stencils/basic.xml')` and a
   (synchronous) `XMLHttpRequest` then reach the package's own files - this
   version's, nothing else. Without it every connection is refused.
+- **Your editor opens a page of its own in a frame?** Say
+  `"ui": { …, "frame_package": true }` and `"filex": ">=0.55.0"`. An
+  `<iframe src="editor/main.html">` then loads that page of your package -
+  this version's pages only, never `data:` or `blob:`, nothing outside the
+  package. The framed page is served like your first page: the same policy,
+  a sandbox of its own (another opaque origin: it cannot touch the page that
+  framed it, nor that page it), WebRTC removed. filex's bridge answers only
+  the frame filex drew, so `connect()` belongs in that page; your framed
+  pages talk to it with `postMessage` (check `event.source`, as the bridge
+  does).
+- **Your editor loads a document from a `blob:` address?** Say
+  `"ui": { …, "connect_blob": true }` and `"filex": ">=0.55.0"`:
+  `fetch(blobURL)` and `XMLHttpRequest` then read a `blob:` address. Nothing
+  else opens. A `blob:` address belongs to the origin that made it, and a
+  framed page is another origin (whether one may read the other's differs
+  between browsers - do not count on it), so make it in the page that reads
+  it: send the bytes there with `postMessage` (transfer the `ArrayBuffer`)
+  and call `URL.createObjectURL` there.
 - **`placement: "viewer"`** opens files of the types in `applies` the way
   filex's own viewers do (and adds **Open with** to the file menu). Name
   them: a viewer's `applies` needs an `ext` or `mime` list (`image/*` is
@@ -1425,14 +1456,19 @@ your package can widen it.
   `data:`.
 - **No network.** `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`,
   `sendBeacon` are refused. Read files with `fx.open()`; ask your module with
-  `fx.call()` (its `http:<host>` permission is where the network is).
+  `fx.call()` (its `http:<host>` permission is where the network is). The
+  only exceptions are the ones your manifest asks for: your own package's
+  files with `package_fetch`, and `blob:` addresses with `connect_blob`
+  (filex 0.55) - above.
 - **No storage.** The frame is an opaque origin: `localStorage`,
   `sessionStorage`, `IndexedDB`, `document.cookie` throw. Use `fx.state`.
 - **Workers only from `blob:`** (`new Worker(URL.createObjectURL(blob))`); a
   worker from a URL cannot start on an opaque origin.
 - **No frames, forms, pop-ups or top-level navigation.** One page: build a
   single-page interface. ⚠ If your page navigates itself to another page,
-  filex closes the channel - the second page gets no connection.
+  filex closes the channel - the second page gets no connection. The one
+  frame there can be is a page of your own package, with `frame_package`
+  (filex 0.55, above). No print dialog either: print with `fx.print`.
 - **Keys stay yours.** filex does not see the keys pressed in your frame;
   Ctrl+S reaches your `onSave` through the SDK.
 - **External files.** A font or a stylesheet from a CDN: name it in

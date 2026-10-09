@@ -412,9 +412,9 @@ onBeforeUnmount(() => {
               <span class="tbl-clamp font-medium">{{ row.name }}</span>
               <span
                 v-if="row.isDefault"
-                class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-200"
+                class="tbl-pill inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-200"
               >
-                <Check class="h-3 w-3" /> {{ t('appearance.isDefault') }}
+                <Check class="h-3 w-3" /> <span class="tbl-pill__text">{{ t('appearance.isDefault') }}</span>
               </span>
             </span>
           </template>

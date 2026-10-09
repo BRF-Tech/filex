@@ -13,7 +13,6 @@ import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 import type { AppPlugin } from '@/api/appPlugins';
 import { updateRank, updateView } from '@/lib/appPluginUpdates';
-import { formatDate } from '@/lib/format';
 
 const WIRE = path.resolve(__dirname, '../../../backend/internal/api/handlers/testdata/wire');
 const check = JSON.parse(readFileSync(path.join(WIRE, 'app-plugin-update-check.json'), 'utf8'));
@@ -32,9 +31,12 @@ describe('updateView', () => {
     expect(v.lines).toEqual(['1.2.0 → 1.3.0 · new: mail:send']);
     expect(v.reviewable).toBe(true);
 
-    const trv = updateView(sign, tOf('tr'), 'tr');
+    // What it adds is the server's line (update_said), said in the reader's
+    // language when the list was read; the list lays it after the jump.
+    expect(sign.update_said).toBe('new: mail:send');
+    const trv = updateView({ ...sign, update_said: 'yeni: mail:send' }, tOf('tr'), 'tr');
     expect(trv.badges[0].label).toBe('Onay bekliyor');
-    expect(trv.lines[0]).toContain('yeni: mail:send');
+    expect(trv.lines[0]).toBe('1.2.0 → 1.3.0 · yeni: mail:send');
   });
 
   it('an app outside its own range for this filex is marked — and still says what waits, and what is kept', () => {
@@ -43,36 +45,33 @@ describe('updateView', () => {
       [en.appPlugins.compat.bad, 'rose'],
       [en.appPlugins.update.available, 'sky'],
     ]);
-    const replaced = pack.previous!.replaced_at;
+    // The range and the kept version are the server's lines (compat.message,
+    // previous.message - on the reader's clock), in English in the fixture.
     expect(v.lines).toEqual([
       'Works with filex >=0.45.0 <0.47.0; this is 0.47.0. It keeps running.',
       '1.0.0 → 1.1.0',
-      `Version 0.9.0 is kept to go back to (replaced ${formatDate(replaced, 'en')})`,
+      'Version 0.9.0 is kept to go back to (replaced 2026-09-24 08:00 UTC)',
     ]);
+    expect(v.badges[0].title).toBe(pack.compat!.message);
     expect(v.reviewable).toBe(true);
     expect(updateRank(pack)).toBeLessThan(updateRank(sign));
-    expect(updateView(pack, tOf('tr'), 'tr').lines[2]).toBe(
-      `0.9.0 sürümü geri dönmek için saklanıyor (${formatDate(replaced, 'tr')} tarihinde değiştirildi)`,
-    );
   });
 
-  it('the kept version says when it was replaced: every value the code passes has a place in both texts', () => {
-    // The line was called with {version} and {when}, and the texts carried
-    // only {version}: the date was worked out and thrown away.
+  // RED before 0.55: the list built these lines from the row's fields with
+  // copies of its own (appPlugins.update.needsNewerFilex, failedDetail,
+  // newPermissions, addsModule, noSource, noManifestAddress, previous,
+  // appPlugins.compat.needs) and decided which one a row got.
+  it('builds no line of its own: every sentence is the server’s, and the locales keep no copy', () => {
     const src = readFileSync(path.resolve(__dirname, '../../src/lib/appPluginUpdates.ts'), 'utf8');
-    const call = src.match(/t\('appPlugins\.update\.previous', \{([^}]*)\}/);
-    expect(call, 'the line is still built from appPlugins.update.previous').not.toBeNull();
-    const passed = [...call![1].matchAll(/(\w+):/g)].map((m) => m[1]).sort();
-    expect(passed).toEqual(['version', 'when']);
-    for (const text of [en.appPlugins.update.previous, tr.appPlugins.update.previous]) {
-      const holes = [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
-      expect(holes, text).toEqual(passed);
+    expect(src).not.toMatch(/appPlugins\.update\.(needsNewerFilex|failedDetail|newPermissions|addsModule|noSource|noManifestAddress|previous)\b/);
+    expect(src).not.toMatch(/appPlugins\.compat\.needs/);
+    for (const cat of [en, tr] as Array<{ appPlugins: { update: Record<string, unknown>; compat: Record<string, unknown> } }>) {
+      for (const k of ['needsNewerFilex', 'failedDetail', 'newPermissions', 'addsModule', 'noSource', 'noManifestAddress', 'previous']) {
+        expect(cat.appPlugins.update[k], k).toBeUndefined();
+      }
+      expect(cat.appPlugins.compat.needs).toBeUndefined();
     }
-    for (const locale of ['en', 'tr'] as const) {
-      const line = updateView(pack, tOf(locale), locale).lines.at(-1)!;
-      expect(line).not.toMatch(/[{}]/);
-      expect(line).toContain(formatDate(pack.previous!.replaced_at, locale));
-    }
+    expect(updateView(pack, tOf('tr'), 'tr').lines.at(-1)).toBe(pack.previous!.message);
   });
 
   it('⚠⚠ nothing updates itself: no "updated automatically", no switch said to be off', () => {
@@ -83,48 +82,62 @@ describe('updateView', () => {
     expect(v.lines).toContain(en.appPlugins.update.upToDate);
   });
 
-  it('an app with no source says so, and is never offered an update', () => {
-    const upload = { ...sign, source: 'upload', update_source: undefined, update: undefined } as AppPlugin;
+  it('an app with no source says so in the server’s line, and is never offered an update', () => {
+    // Which line (from a file, or from an address filex did not keep) is the
+    // server's decision too (handlers appUpdateSaid).
+    const said = 'Dosyadan kuruldu: güncellemelerin denetleneceği bir kaynak yok';
+    const upload = { ...sign, source: 'upload', update_source: undefined, update: undefined, update_said: said } as AppPlugin;
     const v = updateView(upload, tOf('tr'), 'tr');
     expect(v.badges).toEqual([]);
-    expect(v.lines).toEqual([tr.appPlugins.update.noSource]);
+    expect(v.lines).toEqual([said]);
     expect(v.reviewable).toBe(false);
   });
 
-  it('an app installed from an address before its manifest address was kept says that, not "from a file"', () => {
-    const old = { ...sign, source: 'url', update_source: undefined, update: undefined } as AppPlugin;
-    expect(updateView(old, tOf('en'), 'en').lines).toEqual([en.appPlugins.update.noManifestAddress]);
-  });
-
-  it('a failed automatic update (a row filex 0.47 wrote) says the refusal in the reader’s words', () => {
+  // The server says the stored refusal in the reader's language when the list
+  // is read (handlers sayStatus, 0.55): `message` is that sentence and the
+  // English is `detail`. RED before: the list built the sentence itself from
+  // the code (lib/appPluginRefusal.ts) and the server's English was dropped.
+  it('a failed automatic update (a row filex 0.47 wrote) says the server’s sentence', () => {
+    const said = 'Modül kendini manifestten farklı tarif ediyor - derleme ile manifest birbirine ait değil.';
     const failed = {
       ...sign,
       update: {
         status: 'failed',
         version: '1.3.0',
-        refusal: { error: 'describe_mismatch', message: 'describe: version 1.2.0 != manifest 1.3.0' },
+        refusal: { error: 'describe_mismatch', message: said, detail: 'describe: version 1.2.0 != manifest 1.3.0' },
       },
+      update_said: '1.3.0 denendi ve geri alındı; 1.2.0 çalışmaya devam ediyor',
     } as AppPlugin;
     const v = updateView(failed, tOf('tr'), 'tr');
     expect(v.badges[0].label).toBe(tr.appPlugins.update.failed);
-    expect(v.badges[0].title).toBe(tr.appPlugins.wizard.errors.describe_mismatch);
+    expect(v.badges[0].title).toBe(said);
     expect(v.lines).toEqual(['1.3.0 denendi ve geri alındı; 1.2.0 çalışmaya devam ediyor']);
     expect(v.reviewable).toBe(true);
   });
 
-  it('a source that could not be read says why with the wizard’s own sentence', () => {
+  it('a source that could not be read says why in the server’s sentence, never its English detail', () => {
+    const said = 'The server could not reach BRF-Tech/filex-sign. Check that it can reach the internet (or that host), then try again.';
     const unread = {
       ...sign,
-      update: { status: 'check_failed', refusal: { error: 'fetch_failed', reason: 'unreachable', where: 'BRF-Tech/filex-sign' } },
+      update: {
+        status: 'check_failed',
+        refusal: { error: 'fetch_failed', reason: 'unreachable', where: 'BRF-Tech/filex-sign', message: said, detail: 'dial tcp: i/o timeout' },
+      },
+      update_said: said,
     } as AppPlugin;
     const v = updateView(unread, tOf('en'), 'en');
     expect(v.badges[0].label).toBe(en.appPlugins.update.checkFailed);
-    expect(v.lines[0]).toBe(en.appPlugins.wizard.errors.fetch.unreachable.replace('{where}', 'BRF-Tech/filex-sign'));
+    expect(v.lines[0]).toBe(said);
+    expect(v.lines.join(' ')).not.toContain('i/o timeout');
     expect(v.reviewable).toBe(false);
   });
 
   it('newer versions that need a newer filex are said, and nothing is offered', () => {
-    const ahead = { ...sign, update: { status: 'incompatible', version: '2.0.0', requires: '>=0.48.0' } } as AppPlugin;
+    const ahead = {
+      ...sign,
+      update: { status: 'incompatible', version: '2.0.0', requires: '>=0.48.0' },
+      update_said: '2.0.0 needs filex >=0.48.0',
+    } as AppPlugin;
     const v = updateView(ahead, tOf('en'), 'en');
     expect(v.badges).toEqual([]);
     expect(v.lines).toEqual(['2.0.0 needs filex >=0.48.0']);

@@ -1668,6 +1668,7 @@ read content is **off or limited** inside an encrypted folder:
 | **Open in a new tab** | **Off** - the standalone viewer route fetches raw bytes from the server, which would show ciphertext |
 | **OnlyOffice** | **Off** - the document server would have to read the file. The backend's config endpoint sniffs the magic and returns **415 `file is e2e-encrypted`**, and the UI does not offer OnlyOffice at all |
 | **Convert** | **Off** - the action is hidden; ciphertext is meaningless to the converter |
+| **Apps** (an action, *Open with* an app's interface, a screen) | **Off** (0.55) - the explorer offers an encrypted file no app, in its folder and in Recent, Starred, a tag, a search or Shared with me alike, because the server stamps every file row with `encrypted`; and every app door - an action's run, a screen's event, an interface's read, call and save - answers `403 encrypted`. filex decrypts nothing for an app: an interface opened on such a file anyway is told so (`FileInfo.encrypted`) and gets it read-only, its bytes refused ([APP-PLUGINS-API.md → Which rows say `encrypted`](APP-PLUGINS-API.md#which-rows-say-encrypted)) |
 | **Share links / file requests** | **Off** - the whole **Share** entry is hidden, inside the folder and on the folder's own row in its parent (since v0.50), and so is the details panel's **Create link**, because a recipient would download ciphertext with no way to decrypt it and a file request would store a visitor's upload in the folder unencrypted. The server refuses such a link on every door with `409 E2E_ENCRYPTED` - the explorer's Share, `POST /api/ai/share` and the MCP `file_share` tool, and a file request through the MCP `file_request_create` tool (until v0.50 the API minted it anyway). Note this also hides per-item permissions for that folder |
 | **Password change** | **Works** - **Encryption settings… → Change password…**, with the current password or the recovery key. A folder with its own key rewrites only its key file; a folder from before v0.31 re-wraps every file's key, resumably. See [Changing the password](#changing-the-password) |
 | **Desktop "keep local" / folder sync pinning** | **Off** - not offered for encrypted folders or their contents |
@@ -1683,7 +1684,7 @@ read content is **off or limited** inside an encrypted folder:
 | **Drag out to the desktop** | **Off** for rows inside an encrypted folder - the operating system would save the ciphertext under the plaintext name. Download instead (decrypted), or drag within filex |
 | **Download a folder** | **Decrypted**, while the folder is unlocked: a zip made in the browser with the plaintext names ([Downloading a decrypted copy](#downloading-a-decrypted-copy)). **Download encrypted copy** is the server's zip of the ciphertext; zip the encrypted folder itself from its parent and the key file comes with it, for [`filex decrypt`](#taking-a-folder-out-filex-decrypt) |
 | **Upload size** | No limit of its own. Up to 200 MB a file is encrypted in one shot (`0x01`); above, as a [STREAM](#streaming-content-stream) (`0x02`), encrypted as it is uploaded. A server without the staged upload path cannot take a file over 200 MB into an encrypted folder, and says so |
-| **Single encrypted files (`.fxe`)** | No thumbnail, no content index, OnlyOffice `415`, no Convert - the same as a file in an encrypted folder. Preview and download decrypt in the browser; share links and WebDAV hand out the `.fxe` as it is (the AI surface's share answer says `encrypted: true`, so an agent tells the recipient a password is needed); the AI surface's `file_read` refuses it (`E2E_ENCRYPTED`) |
+| **Single encrypted files (`.fxe`)** | No thumbnail, no content index, OnlyOffice `415`, no Convert and no other app (0.55) - the same as a file in an encrypted folder. Preview and download decrypt in the browser; share links and WebDAV hand out the `.fxe` as it is (the AI surface's share answer says `encrypted: true`, so an agent tells the recipient a password is needed); the AI surface's `file_read` refuses it (`E2E_ENCRYPTED`) |
 
 ---
 
@@ -1824,11 +1825,11 @@ entry with a readable (and meaningless) name, shown as such.
 
 | | |
 |---|---|
-| ![Creating an encrypted folder](https://filex.sh/shots/e2e-recovery/create-encrypted-folder.83f4e4a875bd.png) | ![The recovery key, shown once](https://filex.sh/shots/e2e-recovery/recovery-key-shown-once.3ccf13ec7486.png) |
+| ![Creating an encrypted folder](https://filex.sh/shots/e2e-recovery/create-encrypted-folder.83f4e4a875bd.png) | ![The recovery key, shown once](https://filex.sh/shots/e2e-recovery/recovery-key-shown-once.565d587f56fe.png) |
 | Creating the folder. The escrow notice appears only when the installation has escrow on. | The recovery key, shown once. The dialog will not close until you tick that you saved it. |
 | ![The lock screen](https://filex.sh/shots/e2e-recovery/locked-folder.ab407a10763a.png) | ![Unlocking with a recovery key](https://filex.sh/shots/e2e-recovery/unlock-with-recovery-key.24da26a5d602.png) |
 | A wrong password, and the way out underneath it. | The recovery-key dialog. The **Escrow key** tab appears only when both the installation and the folder have escrow. |
-| ![The escrow tab](https://filex.sh/shots/e2e-recovery/unlock-with-escrow-key.446c79dbb6c6.png) | ![The offer to a pre-v0.31 folder](https://filex.sh/shots/e2e-recovery/legacy-folder-upgrade-offer.0230e9658c97.png) |
+| ![The escrow tab](https://filex.sh/shots/e2e-recovery/unlock-with-escrow-key.0d7ea71a0557.png) | ![The offer to a pre-v0.31 folder](https://filex.sh/shots/e2e-recovery/legacy-folder-upgrade-offer.0230e9658c97.png) |
 | Escrow says up front that the owner will be told. | A folder from before v0.31, just opened by password: the offer is visible, and it discloses the escrow consequence. |
 
 Retake them with
@@ -1971,9 +1972,15 @@ stop doing pointless - and potentially leaky - work:
    disagrees with the environment.
 10. **Which folder a row sits in** (`internal/api/handlers/e2e_rows.go`) -
     rows that arrive outside a folder listing (Recent, Starred, tags, the
-    trash, search hits) carry `e2e_root`, so the client can decrypt their
-    names or say they are locked. The same marker-path lookup as above; the
-    root's own name is already public.
+    trash, search hits, Shared with me) carry `e2e_root`, so the client can
+    decrypt their names or say they are locked. A file row of a folder
+    listing, a search answer, Recent, Starred, a tag view and Shared with me
+    (not the trash) also says `encrypted: "folder"` or `"vault"` (the vault
+    rule writegate uses, read from the vault's key file), or `"file"` for a
+    `.fxe` outside both - what an app's interface is told
+    (`FileInfo.encrypted`), and what an app is refused the bytes of (its
+    interface's read answers `403 encrypted`). The same marker-path lookup
+    as above; the root's own name is already public.
 11. **No invented names** (`internal/ops/service.go` → `uniqueCopyDest`,
     `internal/e2e` → `LooksEncryptedName`) - a colliding copy or move of a
     name *shaped* like an encrypted one, into a folder with a marker above it,

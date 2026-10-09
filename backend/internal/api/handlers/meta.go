@@ -103,6 +103,11 @@ type metaRow struct {
 	// path — absent for every other node. The client needs it to name a row
 	// whose name is encrypted (see e2eRoots).
 	E2eRoot string `json:"e2e_root,omitempty"`
+	// Encrypted is how a FILE row is end-to-end encrypted, "folder", "vault"
+	// or "file" (a `.fxe`; encryptedKind, the folder listing's rule; task
+	// #189) - absent for a folder and for a plain file. An app's interface
+	// opened from Recent, Starred or a tag view is told it as is.
+	Encrypted string `json:"encrypted,omitempty"`
 	// Kind is what the row is (nodefilter.KindOf), as on a folder listing.
 	Kind string `json:"kind,omitempty"`
 	// Starred: the caller starred this node (one query per response,
@@ -137,7 +142,7 @@ func (h *Meta) rows(ctx context.Context, nodes []*model.Node) []metaRow {
 	}
 	user := auth.UserFrom(ctx)
 	sets := map[int64]*acl.Set{}
-	roots := newE2eRoots(h.Store)
+	roots := newE2eRoots(h.Store).withVaults(h.ACL)
 	hydrateThumbs(ctx, h.Store, h.ThumbRefresh, nodes)
 	// A link row says why it will not open (`link_state` on the node, read
 	// by packages/core lib/nodeRow), as the folder listing does.
@@ -179,6 +184,7 @@ func (h *Meta) rows(ctx context.Context, nodes []*model.Node) []metaRow {
 			n.Storage = st.Name
 			row.ReadOnly = st.ReadOnly
 			row.E2eRoot = roots.of(ctx, n.StorageID, st.Name, n.Path)
+			row.Encrypted = roots.encryptedOf(ctx, n.StorageID, n.Path, n.Type != model.NodeTypeDirectory)
 			if h.ACL != nil {
 				set, ok := sets[n.StorageID]
 				if !ok {

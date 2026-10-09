@@ -36,6 +36,12 @@ import {
   type ToastParams,
   type DownloadResult,
   type LicenseInfo,
+  type PrintResult,
+  type CoEditHello,
+  type CoEditKind,
+  type CoEditAppendResult,
+  type CoEditLeaseResult,
+  type CoEditBlobGetResult,
 } from './protocol';
 
 export * from './protocol';
@@ -97,6 +103,32 @@ export interface FilexApp {
    * filex asks the person first. `cancelled` when they say no.
    */
   download(name: string, data: SaveData, mime?: string): Promise<DownloadResult>;
+  /**
+   * Print a PDF (filex 0.55; the app needs `ui.print` in its manifest): a
+   * sandboxed frame may not open the print dialog, so filex prints it from
+   * its own page. filex asks the person every time, and the dialog opens on
+   * their click on filex's Allow; at most LIMITS.maxPrintBytes. filex 0.54
+   * and older answer `unknown_method`, and a host whose print page may not
+   * be shown `unavailable`: hand the PDF over with `download` then.
+   */
+  print(name: string, pdf: Blob | ArrayBuffer | ArrayBufferView | ReadableStream<Uint8Array>): Promise<PrintResult>;
+  /**
+   * Editing together (filex 0.55: defined, not offered - every call answers
+   * `unavailable`, and the app edits alone). filex seals what the app
+   * appends, orders it through its relay and hands every member the same
+   * entries in the same order (`coedit.entry` events after `subscribe`);
+   * the app never holds a key.
+   */
+  coedit: {
+    join(index?: number): Promise<CoEditHello>;
+    subscribe(from: number): Promise<void>;
+    append(kind: CoEditKind, body: unknown): Promise<CoEditAppendResult>;
+    lease(op: 'acquire' | 'release', changesSeen: number): Promise<boolean>;
+    cursor(cursor: unknown): void;
+    putBlob(name: string, data: Blob | ArrayBuffer | ArrayBufferView): Promise<void>;
+    getBlob(name: string): Promise<ArrayBuffer>;
+    leave(): Promise<void>;
+  };
   /** Call the app's own module (`ui_call` export) with the opened files. */
   call<T = unknown>(method: string, params?: unknown): Promise<T>;
   /** Queue one of the app's actions on the opened files; answers the op. */
@@ -310,6 +342,40 @@ function bridge(port: MessagePort, opts: ConnectOptions): FilexApp {
     async download(name, data, mime) {
       const p = await payload(data);
       return request<DownloadResult>('ui.download', { name, data: p.data, mime }, p.transfer);
+    },
+    async print(name, pdf) {
+      const p = await payload(pdf);
+      return request<PrintResult>('ui.print', { name, data: p.data, mime: 'application/pdf' }, p.transfer);
+    },
+    coedit: {
+      join(index = 0) {
+        return request<CoEditHello>('coedit.join', { index });
+      },
+      subscribe(from: number) {
+        return request<void>('coedit.subscribe', { from });
+      },
+      append(kind: CoEditKind, body: unknown) {
+        return request<CoEditAppendResult>('coedit.append', { kind, body });
+      },
+      async lease(op: 'acquire' | 'release', changesSeen: number) {
+        const r = await request<CoEditLeaseResult>('coedit.lease', { op, changesSeen });
+        return !!r?.granted;
+      },
+      cursor(cursor: unknown) {
+        notify('coedit.cursor', { cursor });
+      },
+      async putBlob(name: string, data: Blob | ArrayBuffer | ArrayBufferView) {
+        const p = await payload(data);
+        if (!(p.data instanceof ArrayBuffer)) throw new FilexError({ code: 'invalid', message: 'a blob is bytes' });
+        await request<void>('coedit.blob.put', { name, data: p.data }, p.transfer);
+      },
+      async getBlob(name: string) {
+        const r = await request<CoEditBlobGetResult>('coedit.blob.get', { name });
+        return r.bytes;
+      },
+      async leave() {
+        await request<void>('coedit.leave');
+      },
     },
     dirty(on) {
       notify('ui.dirty', { dirty: !!on });

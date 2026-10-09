@@ -74,6 +74,54 @@ type TreeWalker interface {
 	WalkTree(ctx context.Context, path string, fn func(Object) error) error
 }
 
+// ObjectByObject reports whether d moves, copies and trashes a folder one
+// object at a time: an object store (it walks a tree in one pass, TreeWalker),
+// directly or as a replicated storage's primary. Moving or trashing a folder
+// there takes as long as the folder is large - minutes, hours - where a
+// storage with real folders renames it in one call; such a change fences the
+// folder's prefixes rather than holding the storage's row gate
+// (internal/rowgate FenceCtx, FenceFor).
+func ObjectByObject(d Driver) bool {
+	if r, ok := d.(*ReplicatedDriver); ok {
+		d = r.Primary()
+	}
+	_, ok := d.(TreeWalker)
+	return ok
+}
+
+// FenceFor answers the prefixes a change of a folder must fence on d instead
+// of holding the storage's row gate (rowgate.HoldCtx): paths - the folder's
+// path and, for a move, its destination's - when the change is a folder (dir)
+// moved or trashed object by object (ObjectByObject); nil for every other
+// change, which holds the gate as before. Empty paths are left out (a trash's
+// destination is the storage's trash, which no scan walks).
+func FenceFor(d Driver, dir bool, paths ...string) []string {
+	if !dir || d == nil || !ObjectByObject(d) {
+		return nil
+	}
+	var out []string
+	for _, p := range paths {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// FenceAt is FenceFor asking d whether paths[0], the change's source, is a
+// folder: one Stat, and only on an object store. A Stat that fails answers nil
+// (the change holds the gate, as before).
+func FenceAt(ctx context.Context, d Driver, paths ...string) []string {
+	if len(paths) == 0 || d == nil || !ObjectByObject(d) {
+		return nil
+	}
+	obj, err := d.Stat(ctx, paths[0])
+	if err != nil {
+		return nil
+	}
+	return FenceFor(d, obj.Kind == KindDirectory, paths...)
+}
+
 // Writer adds upload support.
 type Writer interface {
 	Write(ctx context.Context, path string, r io.Reader, size int64) error

@@ -37,13 +37,21 @@
  * (closed by Connection-Allowlist in Chrome, by the bootstrap in Firefox;
  * docs/APP-PLUGINS.md → What a sandbox cannot promise).
  *
+ * `ui.print` (0.55, task #189): a sandboxed frame may not open the print
+ * dialog, so the interface hands over a PDF and filex prints it from the
+ * server's print page (lib/printPdf) — never from a frame of this page,
+ * whose policy frames no `blob:` (backend internal/secheaders). filex asks
+ * every time, and the row's Allow IS the print page's own button (a frame of
+ * it in the row): only a click in that page counts as the person's there
+ * (security review sec055 S9).
+ *
  * ⚠ `file.saveAs` asks the person for a folder in filex's own dialog — the
  * one Move to… / Copy to… use (modals/DestinationPickerModal) — and THIS
  * frame draws it, so every placement in every host offers save-as the same
  * way. It used to be a prop no host passed: save-as answered `unavailable`
  * everywhere while the documentation promised the dialog (task #149).
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   BRIDGE_VERSION,
   LIMITS,
@@ -53,6 +61,7 @@ import {
   type FileInfo,
   type JobSubmitParams,
   type LicenseInfo,
+  type PrintParams,
   type ReadParams,
   type SaveAsParams,
   type SaveParams,
@@ -72,6 +81,8 @@ import { onAppUpdated } from '../../lib/appUpdates';
 import { labelOf } from '../../lib/pluginLabel';
 import { parentOfWire } from '../../lib/destinationTree';
 import { isInternalPath, listingAddress } from '../../lib/internalPaths';
+import { collectPdf, isPdf, lookOf, printPdf, PrintFailure } from '../../lib/printPdf';
+import { isEncryptedKind, type EncryptedKind } from '../../lib/encryptedRow';
 import PluginConfirmModal from './PluginConfirmModal.vue';
 import Modal from '../../modals/Modal.vue';
 import DestinationPickerModal from '../../modals/DestinationPickerModal.vue';
@@ -84,6 +95,9 @@ export interface AppFrameFile {
   mime?: string;
   /** Cannot be written (read-only storage, view-only opening). */
   readOnly?: boolean;
+  /** End-to-end encrypted, as the server stamped the row (#189): handed to
+   *  the interface as `FileInfo.encrypted`, and never saved over. */
+  encrypted?: EncryptedKind;
 }
 
 const props = defineProps<{
@@ -194,15 +208,24 @@ function extOf(name: string): string {
   return i > 0 ? name.slice(i + 1).toLowerCase() : '';
 }
 
+/** filex 0.55 saves no app's work over an end-to-end encrypted file: the
+ *  server holds it only as ciphertext and refuses the app its bytes and its
+ *  save (`403 encrypted`), so the interface is told it is read-only. */
+function cannotSave(f: AppFrameFile): boolean {
+  return !!props.readOnly || !!f.readOnly || isEncryptedKind(f.encrypted);
+}
+
 function fileInfos(): FileInfo[] {
-  const writable = grants.value.has('files:write') && !props.readOnly;
+  const writable = grants.value.has('files:write');
   return (props.files ?? []).map((f, index) => ({
     index,
     name: f.name,
     ext: extOf(f.name),
     size: f.size ?? 0,
     mime: f.mime ?? '',
-    readOnly: !writable || !!f.readOnly,
+    readOnly: !writable || cannotSave(f),
+    // Only when the server said so: absent means not encrypted.
+    ...(isEncryptedKind(f.encrypted) ? { encrypted: f.encrypted } : {}),
   }));
 }
 
@@ -343,6 +366,14 @@ function jobQuestion(action: string): string {
 function downloadQuestion(name: string): string {
   return t('appframe.consent_download', { app: who.value, name });
 }
+function printQuestion(name: string): string {
+  return t('appframe.consent_print', { app: who.value, name });
+}
+
+/** The print page's one button: filex's Allow, in the reader's language now. */
+function printAllowLabel(): string {
+  return t('appframe.consent_allow');
+}
 
 function answerConsent(yes: boolean) {
   if (yes && !consentArmed.value) return;
@@ -454,6 +485,65 @@ async function saveToDisk(name: string, data: string | ArrayBuffer | ReadableStr
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
   return { saved: true as const, size };
+}
+
+/* ── ui.print: a PDF for the browser's print dialog ─────────────────── */
+
+/**
+ * The print question row (security review sec055 S9). filex asks EVERY time:
+ * the browser's print dialog opens only on the person's click on the row's
+ * Allow, and that Allow is the print page's own button - a frame of
+ * `/_print/` in the row (`printSlot`, lib/printPdf). A click on a button of
+ * this page would be the person's activation HERE, which a browser shares
+ * with a frame of the same origin only (not in every engine) and never where
+ * the explorer is embedded in another site or runs in the desktop app.
+ *
+ * The row is drawn from the start of a print and stays, PARKED (laid out,
+ * not seen, inert), while the print page loads and after it printed: the
+ * frame in it holds the PDF the browser may still be reading for the dialog,
+ * and moving a frame reloads it. It goes with the next print or the frame.
+ */
+const printAsk = ref<{ text: string; shown: boolean; width: number; height: number } | null>(null);
+const printSlot = ref<HTMLElement | null>(null);
+/** The print page's frame of the last print. */
+let printFrame: HTMLIFrameElement | null = null;
+/** The person's "Don't allow" for the print being asked about. */
+let printAbort: AbortController | null = null;
+/** One print at a time: a second waits for nobody, it is `unavailable`. */
+let printing = false;
+
+function dropPrintFrame() {
+  printAbort?.abort();
+  printAbort = null;
+  printFrame?.remove();
+  printFrame = null;
+  printAsk.value = null;
+}
+
+function denyPrint() {
+  printAbort?.abort();
+}
+
+/** filex's primary button as computed here (theme, density): the print
+ *  page draws its Allow with it. */
+function primaryLook(): Record<string, string> {
+  const at = host.value;
+  if (!at) return {};
+  const probe = document.createElement('span');
+  probe.className = 'fe-btn fe-btn--primary';
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;inset-inline-start:0;top:0';
+  probe.textContent = t('appframe.consent_allow');
+  at.appendChild(probe);
+  try {
+    return lookOf(probe);
+  } finally {
+    probe.remove();
+  }
+}
+
+function tooLargeToPrint(): BridgeFailure {
+  return new BridgeFailure('too_large', `at most ${LIMITS.maxPrintBytes >> 20} MiB`);
 }
 
 /* ── file.saveAs: a new file, in a folder the person picks ────────────── */
@@ -587,7 +677,7 @@ const handlers = {
     const p = (params ?? {}) as SaveParams;
     const index = typeof p.index === 'number' ? p.index : 0;
     const f = fileAt(index);
-    if (props.readOnly || f.readOnly) throw new BridgeFailure('read_only', 'this file cannot be saved over here');
+    if (cannotSave(f)) throw new BridgeFailure('read_only', 'this file cannot be saved over here');
     const body = await toBody(p.data, p.mime);
     const target = index === 0 && props.savePath ? props.savePath : f.path;
     const r = await props.api.pluginUISave(props.app, props.view, { path: target }, body);
@@ -704,6 +794,83 @@ const handlers = {
     return saveToDisk(name, data as string | ArrayBuffer | ReadableStream<Uint8Array>, type);
   },
 
+  /**
+   * 0.55: print a PDF the interface hands over (`ui:print`) - the print
+   * dialog can save the PDF, so it is the person's call every time: filex
+   * asks, and the dialog opens on their click on the row's Allow, a button of
+   * the server's print page (lib/printPdf; security review sec055 S9). The
+   * PDF is held once, as one Blob: refused at its first bytes when they are
+   * not a PDF's and past LIMITS.maxPrintBytes (S10). `unavailable` where the
+   * host names no print page, or while another print is being asked about.
+   */
+  async 'ui.print'(params: unknown) {
+    need('ui:print');
+    const p = (params ?? {}) as PrintParams;
+    const data = p.data as unknown;
+    const isStream = typeof ReadableStream !== 'undefined' && data instanceof ReadableStream;
+    const letGo = async () => {
+      if (isStream) await (data as ReadableStream).cancel().catch(() => undefined);
+    };
+    let name = '';
+    try {
+      name = downloadName(p.name);
+      if (!(data instanceof ArrayBuffer) && !isStream) {
+        throw new BridgeFailure('invalid', 'print takes a PDF as an ArrayBuffer or a ReadableStream');
+      }
+      if (p.mime !== undefined && p.mime !== 'application/pdf') throw new BridgeFailure('invalid', 'print takes a PDF (application/pdf)');
+      if (data instanceof ArrayBuffer && data.byteLength > LIMITS.maxPrintBytes) throw tooLargeToPrint();
+      if (data instanceof ArrayBuffer && !isPdf(data)) throw new BridgeFailure('invalid', 'the data is not a PDF');
+    } catch (e) {
+      await letGo();
+      throw e;
+    }
+    const url = typeof props.api.printFrameUrl === 'function' ? props.api.printFrameUrl() : '';
+    if (!url) {
+      await letGo();
+      throw new BridgeFailure('unavailable', 'this host offers no printing');
+    }
+    if (printing) {
+      await letGo();
+      throw new BridgeFailure('unavailable', 'another print is waiting for the person');
+    }
+    printing = true;
+    try {
+      let pdf: Blob;
+      try {
+        pdf = await collectPdf(data instanceof ArrayBuffer ? data : chunksOf(data as ReadableStream<Uint8Array>), LIMITS.maxPrintBytes);
+      } catch (e) {
+        if (e instanceof PrintFailure) throw e.code === 'too_large' ? tooLargeToPrint() : new BridgeFailure(e.code, e.message);
+        throw e;
+      }
+      dropPrintFrame();
+      const ask = new AbortController();
+      printAbort = ask;
+      printAsk.value = { text: printQuestion(name), shown: false, width: 0, height: 0 };
+      await nextTick();
+      try {
+        printFrame = await printPdf(url, pdf, {
+          mount: printSlot.value ?? host.value,
+          label: printAllowLabel(),
+          look: primaryLook(),
+          armMs: CONSENT_ARM_MS,
+          signal: ask.signal,
+          onAsk: ({ width, height }) => {
+            if (printAbort === ask && printAsk.value) printAsk.value = { ...printAsk.value, shown: true, width, height };
+          },
+        });
+      } catch (e) {
+        if (printAbort === ask) printAsk.value = null;
+        if (e instanceof PrintFailure) throw new BridgeFailure(e.code, e.message);
+        throw e;
+      }
+      if (printAsk.value) printAsk.value = { ...printAsk.value, shown: false };
+      return { printed: true as const, size: pdf.size };
+    } finally {
+      printing = false;
+      printAbort = null;
+    }
+  },
+
   async 'engine.call'(params: unknown) {
     if (!current.value.engine) throw new BridgeFailure('unavailable', 'this app has no module');
     const p = (params ?? {}) as EngineCallParams;
@@ -810,6 +977,7 @@ function mount() {
 function unmount() {
   bridge?.destroy();
   bridge = null;
+  dropPrintFrame();
   if (frame) {
     frame.remove();
     frame = null;
@@ -1005,6 +1173,27 @@ defineExpose({ requestSave, confirmClose, notifyUpdated, notifyClosing, reload, 
         {{ t('appframe.consent_deny') }}
       </button>
     </div>
+    <div
+      v-if="printAsk"
+      class="fe-appframe__note fe-appframe__consent"
+      :class="{ 'fe-appframe__print--parked': !printAsk.shown }"
+      :role="printAsk.shown ? 'alertdialog' : undefined"
+      :aria-live="printAsk.shown ? 'assertive' : undefined"
+      :aria-hidden="printAsk.shown ? undefined : 'true'"
+      :inert="printAsk.shown ? undefined : true"
+      :data-shown="printAsk.shown ? 'true' : 'false'"
+      data-testid="appframe-print-ask"
+    >
+      <span class="fe-appframe__note-text">{{ printAsk.text }}</span>
+      <span
+        ref="printSlot"
+        class="fe-appframe__print-slot"
+        :style="printAsk.shown ? { width: `${printAsk.width}px`, height: `${printAsk.height}px` } : undefined"
+      />
+      <button type="button" class="fe-btn" data-testid="appframe-print-deny" @click="denyPrint">
+        {{ t('appframe.consent_deny') }}
+      </button>
+    </div>
     <PluginConfirmModal
       v-if="confirmAsk"
       :open="true"
@@ -1092,6 +1281,26 @@ defineExpose({ requestSave, confirmClose, notifyUpdated, notifyClosing, reload, 
 .fe-appframe__note-text {
   flex: 1 1 16rem;
   min-width: 0;
+}
+/* The print question while nobody is asked (the print page loading, or the
+   PDF already handed to the dialog): laid out, so the frame in it keeps its
+   PDF, but not seen and not reachable. */
+.fe-appframe__print--parked {
+  position: absolute;
+  inset-inline-start: -10000px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+/* Where the print page's own Allow goes: the frame, at the size it asks. */
+.fe-appframe__print-slot {
+  display: inline-block;
+  flex: none;
+  max-width: 100%;
+  line-height: 0;
 }
 .fe-appframe__frame {
   flex: 1;

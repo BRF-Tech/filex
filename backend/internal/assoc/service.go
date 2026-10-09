@@ -265,13 +265,19 @@ func (s *Service) OpenAllowed(ctx context.Context, name, id string) bool {
 	return true
 }
 
-// ErrInvalid is a rule a caller may not store; the message says why.
-type ErrInvalid struct{ Message string }
+// ErrInvalid is a rule a caller may not store. Message says why in English,
+// for a log; Say names the reader's sentence (server.error.rule_<Say>) and
+// Params fill it (handlers/file_types_admin.go answers it).
+type ErrInvalid struct {
+	Message string
+	Say     string
+	Params  map[string]string
+}
 
 func (e *ErrInvalid) Error() string { return e.Message }
 
-func invalid(format string, args ...any) error {
-	return &ErrInvalid{Message: fmt.Sprintf(format, args...)}
+func invalid(say string, params map[string]string, format string, args ...any) error {
+	return &ErrInvalid{Message: fmt.Sprintf(format, args...), Say: say, Params: params}
 }
 
 // Put stores the administrator's rule for one kind and capability, after
@@ -297,10 +303,10 @@ func (s *Service) Put(ctx context.Context, capability, ext string, r Rule, by *i
 // does not have here.
 func (s *Service) Check(capability, ext string, r Rule) error {
 	if !ValidCapability(capability) {
-		return invalid("capability %q must be open or thumbnail", capability)
+		return invalid("capability", map[string]string{"capability": capability}, "capability %q must be open or thumbnail", capability)
 	}
 	if !ValidExt(ext) {
-		return invalid("%q is not a kind of file (an extension, lower-case, no dot)", ext)
+		return invalid("kind", map[string]string{"ext": ext}, "%q is not a kind of file (an extension, lower-case, no dot)", ext)
 	}
 	clean := Clean(r)
 	avail := map[string]bool{}
@@ -309,10 +315,10 @@ func (s *Service) Check(capability, ext string, r Rule) error {
 	}
 	for _, id := range append(append([]string{}, clean.Order...), clean.Off...) {
 		if !ValidID(capability, id) {
-			return invalid("%q is not a %s handler", id, capability)
+			return invalid("not_handler", map[string]string{"id": id, "capability": capability}, "%q is not a %s handler", id, capability)
 		}
 		if !avail[id] {
-			return invalid("%q does not %s .%s files here", id, verbOf(capability), ext)
+			return invalid("cannot", map[string]string{"id": id, "ext": ext}, "%q does not %s .%s files here", id, verbOf(capability), ext)
 		}
 	}
 	return nil
@@ -365,7 +371,7 @@ func (s *Service) PruneApp(ctx context.Context, app string) error {
 // was one.
 func (s *Service) Reset(ctx context.Context, capability, ext string) (bool, error) {
 	if !ValidCapability(capability) || !ValidExt(ext) {
-		return false, invalid("no such kind or capability")
+		return false, invalid("unknown", nil, "no such kind or capability")
 	}
 	ok, err := s.store.DeleteFileAssociation(ctx, capability, ext)
 	s.Forget()
@@ -404,7 +410,7 @@ type Placement struct {
 // anybody else.
 func (s *Service) Place(ctx context.Context, p Placement, by *int64) error {
 	if !ValidCapability(p.Capability) || !ValidExt(p.Ext) || !ValidID(p.Capability, p.Handler) {
-		return invalid("placement %s .%s %s is not well formed", p.Capability, p.Ext, p.Handler)
+		return invalid("placement", map[string]string{"placement": p.Capability + " ." + p.Ext + " " + p.Handler}, "placement %s .%s %s is not well formed", p.Capability, p.Ext, p.Handler)
 	}
 	chain := s.Chain(ctx, p.Capability, "file."+p.Ext, MimeOf(p.Ext))
 	others := []string{}
@@ -428,7 +434,7 @@ func (s *Service) Place(ctx context.Context, p Placement, by *int64) error {
 	case PlaceOff:
 		r = Rule{Order: others, Off: append(off, p.Handler)}
 	default:
-		return invalid("place %q must be first, last or off", p.Place)
+		return invalid("place", map[string]string{"place": string(p.Place)}, "place %q must be first, last or off", p.Place)
 	}
 	_, err := s.Put(ctx, p.Capability, p.Ext, r, by)
 	return err

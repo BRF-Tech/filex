@@ -84,7 +84,7 @@ func TestErrorEnvelope_EveryCodeIsSaidInBothLanguages(t *testing.T) {
 	for _, code := range []string{"read_only", "quota_exceeded", "name_taken", "locked", "reserved_name",
 		"not_cancellable", "finished", "bad_kind", "too_many", "draft_limit", "draft_folder_gone",
 		"drafts_unavailable", "entry_unavailable", "no_secret_key", "e2e_policy_undecided", "kind_mismatch",
-		"not_requestable", "path_missing", "too_many_pending", "not_in_trash", "restarted"} {
+		"not_requestable", "path_missing", "too_many_pending", "not_in_trash", "restarted", "not_applicable"} {
 		assert.Contains(t, codes, code)
 		for _, lang := range []string{"en", "tr"} {
 			assert.NotEmpty(t, apierr.Text(lang, code, apierr.Params{"name": "x", "max": "2", "limit": "3"}), "%s %s", lang, code)

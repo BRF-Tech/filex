@@ -192,7 +192,7 @@ func (h *E2EVault) place(w http.ResponseWriter, r *http.Request, wire string) (*
 		return nil, "", false
 	}
 	if !rootAllowsNamed(ctx, adapter, rel) {
-		refuseOutsideRoot(w)
+		refuseOutsideRoot(w, r)
 		return nil, "", false
 	}
 	st, err := h.M.Store.GetStorageByName(ctx, adapter)
@@ -201,7 +201,7 @@ func (h *E2EVault) place(w http.ResponseWriter, r *http.Request, wire string) (*
 		return nil, "", false
 	}
 	if !rootAllowsIn(ctx, st, rel) {
-		refuseOutsideRoot(w)
+		refuseOutsideRoot(w, r)
 		return nil, "", false
 	}
 	return st, rel, true
@@ -556,7 +556,7 @@ func vaultMarker(raw []byte) (e2e.VaultInfo, string) {
 // its key file and generation 1's index file, in that order - and removes
 // what it wrote when a step fails.
 //
-//	POST /api/files/e2e/vault/create {path, marker, index} → 201 {generation: 1}
+//	POST /api/files/e2e/vault/create {path, marker, index} → 201 {generation: 1, owner_id, owner_name, owner_self}
 func (h *E2EVault) Create(w http.ResponseWriter, r *http.Request) {
 	if !h.on(w, r) {
 		return
@@ -695,17 +695,24 @@ func (h *E2EVault) Create(w http.ResponseWriter, r *http.Request) {
 		"pack_log2": info.PackLog2,
 	})
 	emitFolderChange(st.ID, parent, realtime.ChangeEvent{Action: "create", Name: path.Base(rel)})
-	writeJSON(w, http.StatusCreated, map[string]any{"generation": 1})
+	// Who owns the new vault, as `state` says it: the tab that made it opens
+	// it without asking `state`.
+	answer := h.folderOwner(ctx, st, rel, vaultViewer(ctx))
+	answer["generation"] = 1
+	writeJSON(w, http.StatusCreated, answer)
 }
 
 // ── GET /state ──────────────────────────────────────────────────────────
 
 // State answers a vault's id, pack size, latest generation and lock.
 //
-//	GET /api/files/e2e/vault/state?path= → 200 {vault_id, pack_log2, generation, lock}
+//	GET /api/files/e2e/vault/state?path= → 200 {vault_id, pack_log2, generation, lock, owner_id, owner_name, owner_self}
 //
 // lock is null or {holder: {name, client, label}, since, expires_at, mine};
-// mine is true for the session whose token the request carries.
+// mine is true for the session whose token the request carries. owner_id,
+// owner_name and owner_self say who owns the vault folder, as a listing row
+// does (each omitted when there is nothing to say; folderOwner): the
+// explorer draws every row inside the vault with them.
 func (h *E2EVault) State(w http.ResponseWriter, r *http.Request) {
 	if !h.on(w, r) {
 		return
@@ -734,12 +741,12 @@ func (h *E2EVault) State(w http.ResponseWriter, r *http.Request) {
 			"mine":       lock.Mine(r.Header.Get(VaultLockHeader)),
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"vault_id":   base64.RawURLEncoding.EncodeToString(v.info.ID[:]),
-		"pack_log2":  v.info.PackLog2,
-		"generation": latestOf(idx),
-		"lock":       lockJSON,
-	})
+	answer := h.folderOwner(ctx, v.st, v.rel, vaultViewer(ctx))
+	answer["vault_id"] = base64.RawURLEncoding.EncodeToString(v.info.ID[:])
+	answer["pack_log2"] = v.info.PackLog2
+	answer["generation"] = latestOf(idx)
+	answer["lock"] = lockJSON
+	writeJSON(w, http.StatusOK, answer)
 }
 
 // ── GET /list ───────────────────────────────────────────────────────────
@@ -1042,6 +1049,47 @@ func (h *E2EVault) Break(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// folderOwner says who owns the vault folder at rel, in the keys a listing
+// row carries (owner_id, owner_name, owner_self; handlers/manager.go), each
+// omitted when it has nothing to say - a folder nobody owns answers none.
+//
+// ⚠ Every row INSIDE a vault is the vault folder's: the server knows no file
+// in it and the index records no author (docs/E2E-VAULT-FORMAT.md), so the
+// explorer drew them with no owner, and a row without one reads "System" -
+// the word for a file nobody put here through filex, said of a file the
+// person had just uploaded (0.54 screenshots). The answer is the server's,
+// the client only shows it.
+func (h *E2EVault) folderOwner(ctx context.Context, st *model.Storage, rel string, viewer int64) map[string]any {
+	out := map[string]any{}
+	if h.M == nil || h.M.Store == nil {
+		return out
+	}
+	n, err := h.M.Store.GetNodeByPath(ctx, st.ID, pathkey.Hash(st.ID, normalizeDBPath(rel)))
+	if err != nil || n == nil {
+		return out
+	}
+	owner, err := h.M.Store.GetNodeOwner(ctx, n.ID)
+	if err != nil || owner == nil || *owner <= 0 {
+		return out
+	}
+	out["owner_id"] = *owner
+	if names, err := h.M.Store.GetUserDisplayNames(ctx, []int64{*owner}); err == nil && names[*owner] != "" {
+		out["owner_name"] = names[*owner]
+	}
+	if viewer > 0 && *owner == viewer {
+		out["owner_self"] = true
+	}
+	return out
+}
+
+// vaultViewer is the id of the account asking, 0 for nobody.
+func vaultViewer(ctx context.Context) int64 {
+	if u := auth.UserFrom(ctx); u != nil {
+		return u.ID
+	}
+	return 0
 }
 
 // ownsFolder reports whether u is the recorded owner of the vault folder.

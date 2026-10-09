@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { AppLicense } from './appStore';
 
 // Storage plugins — drivers that live outside the filex binary
 // (/api/admin/plugins, backend/internal/plugin, docs/PLUGINS.md).
@@ -23,7 +24,8 @@ export interface PluginCapabilities {
 }
 
 /** Runtime states the server reports. */
-export type PluginState = 'disabled' | 'starting' | 'running' | 'failed' | 'refused';
+/** `held`: installed from a store, and its license does not hold (#215) - nothing runs. */
+export type PluginState = 'disabled' | 'starting' | 'running' | 'failed' | 'refused' | 'held';
 
 /** How the server treats a plugin that fails its own claims. */
 export type ConformanceMode = 'enforce' | 'warn' | 'off';
@@ -102,6 +104,20 @@ export interface Plugin {
   source?: string;
   /** What the last check of the source found; absent before the first. */
   update?: PluginUpdate;
+  /** The line the list shows about its updates, in the reader's language (0.55). */
+  update_said?: string;
+  /** The app store it was installed from (#215); absent = not from a store. */
+  from_store?: string;
+  /**
+   * The build's signature verified only in the old form, over its SHA-256
+   * alone (not over its name, version and platform): still accepted in 0.55,
+   * refused from 0.56. `signature_notice` is the server's sentence for it, in
+   * the reader's language - shown as it is.
+   */
+  legacy_signature?: boolean;
+  signature_notice?: string;
+  /** A paid plugin's license, from that store. */
+  license?: AppLicense;
 }
 
 /**
@@ -232,22 +248,27 @@ export const PluginsApi = {
     return data;
   },
 
-  /** Upload a plugin binary. `signature` is required when the instance trusts keys. */
-  async upload(name: string, file: File, signature = '', source = ''): Promise<Plugin> {
+  /**
+   * Upload a plugin binary. `signature` is required when the instance trusts
+   * keys; `version` is the version it was signed as (the signature is over the
+   * build's name, version, platform and SHA-256).
+   */
+  async upload(name: string, file: File, signature = '', source = '', version = ''): Promise<Plugin> {
     const form = new FormData();
     form.append('name', name);
     form.append('file', file);
     if (signature) form.append('signature', signature);
+    if (version) form.append('version', version);
     if (source) form.append('source', source);
     const { data } = await api.post<Plugin>('/admin/plugins', form, { timeout: PLUGIN_INSTALL_TIMEOUT_MS });
     return data;
   },
 
   /** Download a plugin binary from a URL. sha256 is required by the server. */
-  async fromUrl(name: string, url: string, sha256: string, signature = '', source = ''): Promise<Plugin> {
+  async fromUrl(name: string, url: string, sha256: string, signature = '', source = '', version = ''): Promise<Plugin> {
     const { data } = await api.post<Plugin>(
       '/admin/plugins',
-      { name, url, sha256, signature, ...(source ? { source } : {}) },
+      { name, url, sha256, signature, ...(version ? { version } : {}), ...(source ? { source } : {}) },
       { timeout: PLUGIN_INSTALL_TIMEOUT_MS },
     );
     return data;
@@ -258,10 +279,11 @@ export const PluginsApi = {
    * every storage built on it survive; a failed upgrade rolls back and
    * answers 400 with the restored plugin (see `rolledBackPlugin`).
    */
-  async upgrade(id: number, file: File, signature = ''): Promise<Plugin> {
+  async upgrade(id: number, file: File, signature = '', version = ''): Promise<Plugin> {
     const form = new FormData();
     form.append('file', file);
     if (signature) form.append('signature', signature);
+    if (version) form.append('version', version);
     const { data } = await api.post<Plugin>(`/admin/plugins/${id}/upgrade`, form, { timeout: PLUGIN_INSTALL_TIMEOUT_MS });
     return data;
   },

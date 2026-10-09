@@ -509,7 +509,23 @@ export function hostFields(h) {
     mem_full_max: h.mem_full_max,
     io_full_max: h.io_full_max,
     disk_write_ms_max: h.disk_write_ms_max,
+    // Whether run.sh's pause hook freed the host first: the pressure of a
+    // paused night and of one that was not are not the same measurement.
+    ...(h.pause?.status ? { pause: h.pause.status } : {}),
   };
+}
+
+/**
+ * What run.sh's pause hook (CHAIN_PAUSE_CMD) did before the run, in the words
+ * of chain.log and the morning report; '' when none ran. `p`: result.json
+ * `host.pause`, { status: paused|failed|timeout, exit, secs }.
+ */
+export function pauseWords(p) {
+  if (!p?.status) return '';
+  const secs = Number.isFinite(p.secs) ? ` after ${p.secs} s` : '';
+  if (p.status === 'paused') return `pause hook done${secs}, before the budget was measured`;
+  const what = p.status === 'timeout' ? 'timed out (CHAIN_HOOK_TIMEOUT_S)' : `failed (exit ${Number.isFinite(p.exit) ? p.exit : '?'})`;
+  return `pause hook ${what}${secs}: the run went on beside what it was to pause, and nothing was resumed`;
 }
 
 /**
@@ -543,7 +559,8 @@ export function hostLine(h) {
     Number.isFinite(h.disk_write_ms_max) ? `disk writes ${Math.round(h.disk_write_ms_max)} ms${h.disk ? ` (${h.disk})` : ''}` : null,
   ].filter(Boolean);
   const temp = h.temp_wait_secs > 0 ? `; waited ${Math.round(h.temp_wait_secs / 60)} min for the disk to cool` : '';
-  return `host: ${budget}${peaks.length ? `; worst ${peaks.join(', ')}` : ''}${temp}`;
+  const pause = pauseWords(h.pause);
+  return `host: ${budget}${peaks.length ? `; worst ${peaks.join(', ')}` : ''}${temp}${pause ? `; ${pause}` : ''}`;
 }
 
 /** What history.jsonl keeps of a night: the record without the night's working fields. */

@@ -17,6 +17,7 @@ import type { GlobalSearchHit } from '../composables/useFileApi';
 import type { SearchAccount } from '../types/ExplorerConfig';
 import type { FileNode } from '../types/FileNode';
 import type { DragItem } from './dragOut';
+import { isEncryptedKind } from './encryptedRow';
 
 /** What the explorer knows about drives when a hit does not say its own. */
 export interface HitDriveContext {
@@ -89,6 +90,10 @@ export function hitToNode(h: GlobalSearchHit, storageName: string): FileNode {
     /* wiring:e2 names — the encrypted folder the hit sits in (the server
        answers it); the explorer's name view reads it. */
     ...(typeof h.e2e_root === 'string' && h.e2e_root ? { e2e_root: h.e2e_root } : {}),
+    /* #189 - how the hit is end-to-end encrypted, as the server stamps it
+       (`folder` / `vault` / `file`); an app's interface opened from a
+       search result is handed it as is (FileInfo.encrypted). */
+    ...(isEncryptedKind(h.encrypted) ? { encrypted: h.encrypted } : {}),
   };
 }
 

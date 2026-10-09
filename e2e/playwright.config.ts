@@ -55,6 +55,18 @@ const BROWSER_DEVICES: Record<string, string> = {
  * run, half of what the whole run wrote, on a disk that stalls under it
  * (task #194). No spec reads either: a page's cache and its back/forward
  * history live in memory either way.
+ *
+ * ⚠⚠ WebKit runs without the panel's service worker (task #199, the owner's
+ * decision of 2026-10-08). On GitHub's full matrix Playwright's WebKit lost
+ * its network process in 158, 109 and 139 (runs 37606303144, 37613557303,
+ * 37624094959): every load in flight failed with "WebKit encountered an
+ * internal error" and the session cookie went with the process. In all three
+ * traces the worker had registered on the sign-in page 2.4 to 3.3 seconds
+ * before - its install fetches the whole precache - while the next page
+ * loaded. The worker also sent /api requests without the session cookie in
+ * WebKit (97's note). A spec that tests the worker itself opts back in with
+ * `test.use({ serviceWorkers: 'allow' })` (164's installable-app test); the
+ * other engines keep it.
  */
 const ENGINE_USE: Record<string, Project['use']> = {
   firefox: {
@@ -66,6 +78,9 @@ const ENGINE_USE: Record<string, Project['use']> = {
         'places.history.enabled': false,
       },
     },
+  },
+  webkit: {
+    serviceWorkers: 'block',
   },
 };
 

@@ -39,6 +39,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/brf-tech/filex/backend/internal/rowgate"
 	"github.com/brf-tech/filex/backend/internal/throughput"
 )
 
@@ -279,6 +280,7 @@ func init() {
 		PluginOps, PluginOpDuration, PluginInFlight, PluginRestarts, PluginUp,
 		LazyFolders, LazyWatches, LazyReconciles, LazyHeldBack,
 		throughputCollector{},
+		rowgateCollector{},
 		// Go runtime + process metrics: goroutines, heap, GC pause, open FDs.
 		// Free, and the first thing anyone wants when "filex is slow".
 		collectors.NewGoCollector(),
@@ -324,6 +326,70 @@ func (throughputCollector) Collect(ch chan<- prometheus.Metric) {
 			throughputDesc, prometheus.GaugeValue, s.BytesPerSec,
 			strconv.FormatInt(s.StorageID, 10), string(s.Direction),
 		)
+	}
+}
+
+// ── the row gate (internal/rowgate, sec055) ─────────────────────────────────
+//
+// "Is a long change holding a storage's scan off?" A two-step change holds the
+// storage's row gate while it runs; the scan steps back meanwhile (it never
+// keeps a change out) and is deferred. A folder moved or trashed object by
+// object on an object store fences its prefixes instead (rowgate.FenceCtx):
+// only they are left out of the scan, for as long as the fence stands. Read
+// from rowgate.Snapshot at scrape time, like throughput.
+var (
+	rowgateOldestDesc = prometheus.NewDesc(
+		"filex_rowgate_oldest_change_seconds",
+		"How long the oldest two-step change holding a storage's row gate has held it (0 with none): the storage's scan has waited that long.",
+		[]string{"storage"}, nil,
+	)
+	rowgateChangesDesc = prometheus.NewDesc(
+		"filex_rowgate_changes",
+		"Two-step changes (rename, move, delete, restore) holding a storage's row gate now.",
+		[]string{"storage"}, nil,
+	)
+	rowgateLongDesc = prometheus.NewDesc(
+		"filex_rowgate_long_changes_total",
+		"Changes that held a storage's row gate for rowgate.LongHold (a minute) or more.",
+		[]string{"storage"}, nil,
+	)
+	rowgateFencesDesc = prometheus.NewDesc(
+		"filex_rowgate_fences",
+		"Prefixes of a storage fenced now by long changes (a folder moved or trashed object by object on an object store): the scan leaves them alone and goes on everywhere else.",
+		[]string{"storage"}, nil,
+	)
+	rowgateOldestFenceDesc = prometheus.NewDesc(
+		"filex_rowgate_oldest_fence_seconds",
+		"How long the oldest fence on a storage has stood (0 with none): its prefixes have not been scanned for that long.",
+		[]string{"storage"}, nil,
+	)
+	rowgateDeferredDesc = prometheus.NewDesc(
+		"filex_rowgate_deferred_judgements_total",
+		"Storage scan judgements (a directory, a tombstone batch, a lazy folder) deferred because the row gate stayed held - by a change, or by another judgement - for all of their wait.",
+		[]string{"storage"}, nil,
+	)
+)
+
+type rowgateCollector struct{}
+
+func (rowgateCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- rowgateOldestDesc
+	ch <- rowgateChangesDesc
+	ch <- rowgateLongDesc
+	ch <- rowgateDeferredDesc
+	ch <- rowgateFencesDesc
+	ch <- rowgateOldestFenceDesc
+}
+
+func (rowgateCollector) Collect(ch chan<- prometheus.Metric) {
+	for _, s := range rowgate.Snapshot() {
+		lbl := strconv.FormatInt(s.StorageID, 10)
+		ch <- prometheus.MustNewConstMetric(rowgateOldestDesc, prometheus.GaugeValue, s.OldestChange.Seconds(), lbl)
+		ch <- prometheus.MustNewConstMetric(rowgateChangesDesc, prometheus.GaugeValue, float64(s.Changes), lbl)
+		ch <- prometheus.MustNewConstMetric(rowgateLongDesc, prometheus.CounterValue, float64(s.LongChanges), lbl)
+		ch <- prometheus.MustNewConstMetric(rowgateDeferredDesc, prometheus.CounterValue, float64(s.DeferredJudgements), lbl)
+		ch <- prometheus.MustNewConstMetric(rowgateFencesDesc, prometheus.GaugeValue, float64(s.Fences), lbl)
+		ch <- prometheus.MustNewConstMetric(rowgateOldestFenceDesc, prometheus.GaugeValue, s.OldestFence.Seconds(), lbl)
 	}
 }
 

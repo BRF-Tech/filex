@@ -188,8 +188,13 @@ describe('AppPluginInstallWizard', () => {
     w.unmount();
   });
 
-  it('names the missing permissions when the server answers permissions_incomplete', async () => {
-    refuse = { status: 400, data: { error: 'permissions_incomplete', missing: ['net:tsa'] } };
+  // The refusal's sentence is the server's (server.install.*, written in the
+  // reader's language; 0.55): the wizard prints `message` as it came and keeps
+  // no table of its own. RED before: it built the sentence from the code
+  // (lib/appPluginRefusal.ts) and threw `message` away.
+  it('names the missing permissions in the server’s sentence when it answers permissions_incomplete', async () => {
+    const said = 'Manifestteki her izin verilmek zorunda; eksik: net:tsa. Listeyi yeniden inceleyip tekrar deneyin.';
+    refuse = { status: 400, data: { error: 'permissions_incomplete', missing: ['net:tsa'], message: said, detail: 'permissions not granted: net:tsa' } };
     const w = mountWizard('tr');
     await reachReview(w);
     await w.find('input[type="checkbox"]').setValue(true);
@@ -197,22 +202,23 @@ describe('AppPluginInstallWizard', () => {
     await flushPromises();
     const msg = w.find('[data-testid="app-plugin-wizard-error"]').text();
     expect(msg).toContain('net:tsa');
-    expect(msg).toBe(tr.appPlugins.wizard.errors.permissions_incomplete.replace('{missing}', 'net:tsa'));
+    expect(msg).toBe(said);
+    expect(msg).not.toContain('permissions not granted');
     expect(w.emitted('installed')).toBeUndefined();
     w.unmount();
   });
 
-  it('has a sentence for every refusal code the contract names', async () => {
+  it('says every refusal code the contract names in the server’s sentence, never its English detail', async () => {
     for (const code of ['sha256_mismatch', 'sha256_required', 'manifest_invalid', 'signature_required', 'name_taken', 'describe_mismatch', 'too_large', 'demo_refused', 'not_found'] as const) {
-      refuse = { status: code === 'name_taken' ? 409 : 400, data: { error: code, message: 'detail' } };
+      const said = `the server's sentence for ${code}`;
+      refuse = { status: code === 'name_taken' ? 409 : 400, data: { error: code, message: said, detail: 'go detail' } };
       posts.length = 0;
       const w = mountWizard();
       await reachReview(w);
       await w.find('input[type="checkbox"]').setValue(true);
       await w.find('[data-testid="app-plugin-install"]').trigger('click');
       await flushPromises();
-      const expected = (en.appPlugins.wizard.errors as Record<string, string>)[code].replace('{message}', 'detail');
-      expect(w.find('[data-testid="app-plugin-wizard-error"]').text()).toBe(expected);
+      expect(w.find('[data-testid="app-plugin-wizard-error"]').text()).toBe(said);
       unmountAll();
     }
   });
@@ -220,8 +226,12 @@ describe('AppPluginInstallWizard', () => {
   // ⚠ The release-candidate sweep (2026-09-21): a repository that does not
   // exist answered, in the Turkish wizard, "filex-app.json not found in
   // BRF-Tech/yok-boyle-bir-depo: http 404 from raw.githubusercontent.com".
-  it('says a refused fetch in the reader\'s words, with what to check — not the server\'s English', async () => {
+  // The fixture is the server's own body (app_plugins_wire_test.go writes it,
+  // said in English): `message` is the sentence with what to check, `detail`
+  // the download's own words, which the wizard never shows.
+  it('says a refused fetch in the server\'s sentence, with what to check — never the download\'s English', async () => {
     const fetchFailed = JSON.parse(readFileSync(path.join(WIRE, 'app-plugin-fetch-failed.json'), 'utf8'));
+    expect(fetchFailed.detail, 'the fixture predates 0.55: regenerate it (FILEX_UPDATE_WIRE_FIXTURES=1)').toBeTruthy();
     const w = mountWizard('tr');
     // The dry run itself is refused: the mock answers dry runs, so make it throw.
     const { api } = await import('@/api/client');
@@ -230,10 +240,10 @@ describe('AppPluginInstallWizard', () => {
     });
     await reachReview(w);
     const msg = w.find('[data-testid="app-plugin-wizard-error"]').text();
+    expect(msg).toBe(fetchFailed.message);
     expect(msg).toContain('BRF-Tech/yok-boyle-bir-depo');
     expect(msg).toContain('main, master');
-    expect(msg).toContain('herkese açık'); // "public" — what to check
-    expect(msg).not.toContain('not found');
+    expect(msg).toContain('public'); // what to check
     expect(msg).not.toContain('raw.githubusercontent.com');
     w.unmount();
   });
@@ -421,13 +431,19 @@ describe('AppPluginInstallWizard — upgrade review and range', () => {
     w.unmount();
   });
 
-  it('a range that leaves this filex out is said at the review, and nothing can be installed from it', async () => {
+  // The sentence is the server's (compat.message, written in the reader's
+  // language; the fixture says it in English): RED before 0.55, when the
+  // wizard built it from requires and filex with a copy of its own.
+  it('a range that leaves this filex out is said at the review in the server’s sentence, and nothing can be installed from it', async () => {
     dryRunAnswer = upgradeReview();
+    const said = (dryRunAnswer.compat as { message?: string } | undefined)?.message;
+    expect(said, 'the fixture predates 0.55: regenerate it (FILEX_UPDATE_WIRE_FIXTURES=1)').toBeTruthy();
     const w = mountUpdate('tr');
     await w.setProps({ modelValue: true });
     await flushPromises();
     const box = w.find('[data-testid="app-plugin-incompatible"]');
-    expect(box.text()).toBe('sign 1.2.0, filex >=0.48.0 ile çalışıyor; bu sunucu filex 0.47.0. Burada kurulamaz.');
+    expect(box.text()).toBe(said);
+    expect(box.text()).toBe('sign 1.2.0 works with filex >=0.48.0; this is filex 0.47.0. It cannot be installed here.');
     await w.find('input[type="checkbox"]').setValue(true);
     expect(w.find('[data-testid="app-plugin-install"]').attributes('disabled'), 'Install stays off').toBeDefined();
     w.unmount();
@@ -440,8 +456,9 @@ describe('AppPluginInstallWizard — upgrade review and range', () => {
     await w.find('input[type="checkbox"]').setValue(true);
     await w.find('[data-testid="app-plugin-install"]').trigger('click');
     await flushPromises();
+    // The server's sentence as the fixture carries it (said in English there).
     expect(w.find('[data-testid="app-plugin-wizard-error"]').text()).toBe(
-      'Bu sürüm filex >=0.48.0 ile çalışıyor; bu sunucu filex 0.47.0, bu yüzden burada kurulamaz.',
+      'This version works with filex >=0.48.0; this is filex 0.47.0, so it cannot be installed here.',
     );
     w.unmount();
   });

@@ -12,6 +12,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
@@ -284,10 +285,13 @@ func (f *davFS) RemoveAll(ctx context.Context, name string) error {
 	if err != nil {
 		return mapErr(err)
 	}
-	// From here the storage changes, and a client that gives up on a folder's
-	// DELETE must not leave it half in the trash (storage.DetachMutation).
-	ctx, cancel := storage.DetachMutation(ctx)
-	defer cancel()
+	// From the moment the storage's row gate is held the change detaches
+	// from the client: one that gives up on a folder's DELETE must not leave
+	// it half in the trash (storage.DetachMutation). The gate is waited for
+	// on the request (a client gone by then deletes nothing), and the item is
+	// asked again under it: a DELETE that waited does not trash a file that
+	// took the old one's place meanwhile (protocolsync.StillAsSeen, sec055).
+	unchanged := protocolsync.StillAsSeen(drv, rel, obj)
 
 	// DAV DELETE is a SOFT delete, mirroring the manager UI: the bytes are
 	// renamed into `.filex-trash/<key>` so they stay restorable via the trash
@@ -298,16 +302,18 @@ func (f *davFS) RemoveAll(ctx context.Context, name string) error {
 	// The bytes and the DB bookkeeping below both run detached (above): once
 	// the bytes have moved, a client that hangs up mid-DELETE must not leave
 	// the node row pointing at a path the file no longer occupies.
-	out, terr := trash.Put(ctx, drv, rel)
+	//
+	// The bytes and the rows go under the storage's row gate (Syncer.Discard,
+	// internal/rowgate): a storage scan never judges the catalogue between
+	// the two (issue #201).
+	out, terr := f.h.sync.Discard(ctx, st, drv, rel, unchanged)
 	switch {
 	case terr == nil && out.Trashed:
-		f.h.syncTrash(ctx, st, rel, out.Key)
 		return nil
 
 	case terr == nil && out.Missing:
-		// Source already gone (stale index / out-of-band delete): drop the
-		// cache rows outright rather than trashing a phantom.
-		f.h.syncDelete(ctx, st, rel)
+		// Source already gone (stale index / out-of-band delete): Discard
+		// dropped the cache rows outright rather than trashing a phantom.
 		return nil
 
 	case errors.Is(terr, trash.ErrUnsupported):
@@ -326,23 +332,22 @@ func (f *davFS) RemoveAll(ctx context.Context, name string) error {
 		if obj.Kind == storage.KindDirectory {
 			// Object stores have no real object at a prefix, so a single
 			// Delete of it is driver-dependent: files first, then a
-			// best-effort sweep of the marker variants.
-			files, werr := walkFiles(ctx, drv, rel)
-			if werr != nil {
-				return mapErr(werr)
-			}
-			for _, fp := range files {
-				if err := del.Delete(ctx, fp); err != nil && !errors.Is(err, storage.ErrNotFound) {
-					return mapErr(err)
-				}
-			}
-			_ = del.Delete(ctx, rel)
-			_ = del.Delete(ctx, strings.TrimRight(rel, "/")+"/")
-		} else if err := del.Delete(ctx, rel); err != nil && !errors.Is(err, storage.ErrNotFound) {
-			return mapErr(err)
+			// best-effort sweep of the marker variants. The bytes and the
+			// rows a batch at a time under the storage's row gate
+			// (Syncer.PurgeTree): a folder of many objects does not hold the
+			// storage's scan off for all of its deletes.
+			return mapErr(f.h.sync.PurgeTree(ctx, st, del, rel, func(ctx context.Context) ([]string, error) {
+				return walkFiles(ctx, drv, rel)
+			}, unchanged))
 		}
-		f.h.syncDelete(ctx, st, rel)
-		return nil
+		// The bytes, then the rows, under the storage's row gate
+		// (Syncer.Purge).
+		return mapErr(f.h.sync.Purge(ctx, st, rel, func(ctx context.Context) error {
+			if err := del.Delete(ctx, rel); err != nil && !errors.Is(err, storage.ErrNotFound) {
+				return err
+			}
+			return nil
+		}, unchanged))
 
 	default:
 		return mapErr(terr)
@@ -394,33 +399,41 @@ func (f *davFS) Rename(ctx context.Context, oldName, newName string) error {
 	if err != nil {
 		return mapErr(err)
 	}
-	// From here the storage changes: a folder MOVE the client gives up on is
-	// finished all the same (storage.DetachMutation).
-	ctx, cancel := storage.DetachMutation(ctx)
-	defer cancel()
-	if err := mv.Move(ctx, relSrc, relDst); err != nil {
+	// The bytes, then the rows, under the storage's row gate
+	// (Syncer.Relocate, internal/rowgate): a storage scan never sees the
+	// folder at its new name while its rows still sit at the old one (issues
+	// #192 and #201). The gate is waited for on the request; once it is held,
+	// a folder MOVE the client gives up on is finished all the same
+	// (storage.DetachMutation). x/net/webdav checked the destination before
+	// it got here (free, or removed for Overwrite: T): asked again under the
+	// gate, with the source, a MOVE that waited refuses a file that landed on
+	// the name meanwhile instead of replacing it (sec055).
+	return mapErr(f.h.sync.Relocate(ctx, st, relSrc, relDst, func(ctx context.Context) error {
+		err := mv.Move(ctx, relSrc, relDst)
+		if err == nil {
+			return nil
+		}
 		if obj.Kind != storage.KindDirectory {
-			return mapErr(err)
+			return err
 		}
 		// Directory Move failed (typical for object stores) — move each
 		// file under the prefix instead.
 		files, werr := walkFiles(ctx, drv, relSrc)
 		if werr != nil {
-			return mapErr(err)
+			return err
 		}
 		prefix := strings.TrimRight(relSrc, "/") + "/"
 		for _, fp := range files {
 			if merr := mv.Move(ctx, fp, relDst+"/"+strings.TrimPrefix(fp, prefix)); merr != nil {
-				return mapErr(merr)
+				return merr
 			}
 		}
 		if del, ok := drv.(storage.Deleter); ok {
 			_ = del.Delete(ctx, relSrc)
 			_ = del.Delete(ctx, prefix)
 		}
-	}
-	f.h.syncMove(ctx, st, relSrc, relDst)
-	return nil
+		return nil
+	}, protocolsync.StillAsSeen(drv, relSrc, obj), protocolsync.StillFree(drv, relDst, relSrc)))
 }
 
 func (f *davFS) Stat(ctx context.Context, name string) (os.FileInfo, error) {

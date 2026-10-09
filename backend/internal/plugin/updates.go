@@ -94,8 +94,11 @@ type Feed struct {
 type FeedBinary struct {
 	URL    string `json:"url"`
 	SHA256 string `json:"sha256"`
-	// Signature is the detached ed25519 signature over the sha256, for an
-	// instance that only runs signed plugins (FILEX_PLUGIN_TRUSTED_KEYS).
+	// Signature is the detached ed25519 signature over the build - its
+	// name, the feed's version, this key's platform and the sha256
+	// (signature.go VerifyBuild; the sha256 alone is the old form, accepted
+	// during 0.55) - for an instance that only runs signed plugins
+	// (FILEX_PLUGIN_TRUSTED_KEYS).
 	Signature string `json:"signature,omitempty"`
 }
 
@@ -230,6 +233,11 @@ func (m *Manager) fetchFeed(ctx context.Context, source string) (*Feed, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", FeedFileName, err)
 	}
+	return parseFeed(body)
+}
+
+// parseFeed reads a feed's bytes: a version, and a sha256 for every build.
+func parseFeed(body []byte) (*Feed, error) {
 	var f Feed
 	if err := json.Unmarshal(body, &f); err != nil {
 		return nil, fmt.Errorf("%s is not valid JSON: %w", FeedFileName, err)
@@ -524,7 +532,7 @@ func (m *Manager) UpgradeFromSourcePinned(ctx context.Context, id int64, wantSHA
 		return m.statusOf(ctx, e), err
 	}
 	defer resp.Body.Close()
-	st, err := m.upgrade(ctx, id, resp.Body, bin.Signature, bin.SHA256)
+	st, err := m.upgrade(ctx, id, resp.Body, bin.Signature, bin.SHA256, buildSource{version: build.Feed.Version})
 	if err != nil {
 		return st, err
 	}
@@ -556,7 +564,7 @@ func (m *Manager) InstallFromSourcePinned(ctx context.Context, name, source, wan
 		return nil, RejectedError{fmt.Errorf("%w (%s %s is %s…, the approval named %s…)", ErrSourceChanged,
 			name, build.Feed.Version, short(b.SHA256), short(want))}
 	}
-	st, err := m.InstallFromURL(ctx, name, b.URL, b.SHA256, b.Signature)
+	st, err := m.installFromURL(ctx, name, b.URL, b.SHA256, b.Signature, buildSource{version: build.Feed.Version})
 	if err != nil {
 		return st, err
 	}

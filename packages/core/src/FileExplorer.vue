@@ -293,13 +293,13 @@ import { appliesItemOf, appliesMatches } from './lib/pluginApplies';
 import {
   isOfficeHandler,
   officeOpensKind,
+  onlyBuiltinOpens,
   openHandlersFor,
   openKindOf,
   pickOpenHandler,
   ONLYOFFICE_VIEWER,
   type OpenHandler,
   type OpenHandlerOptions,
-  type OpenHandlers,
 } from './lib/appViewer';
 import { followOpenWithChoices, openWithChoice, setOpenWithChoice } from './lib/openWith';
 import OpenWithDialog from './modals/OpenWithDialog.vue';
@@ -1845,7 +1845,7 @@ const appFrameView = ref<{
   placement: 'modal' | 'home';
   ui: NonNullable<PluginViewRow['ui']>;
   label: string;
-  files: { path: string; name: string; size?: number; mime?: string; readOnly?: boolean }[];
+  files: { path: string; name: string; size?: number; mime?: string; readOnly?: boolean; encrypted?: FileNode['encrypted'] }[];
 } | null>(null);
 
 /** The file rows an interface is opened with (never more than it needs). */
@@ -1858,6 +1858,7 @@ function appFrameFiles(targets: FileNode[]) {
       size: n.size,
       mime: n.mime_type,
       readOnly: !!n.read_only || !nodeCanEdit(n),
+      ...(n.encrypted ? { encrypted: n.encrypted } : {}),
     }));
 }
 
@@ -1873,19 +1874,20 @@ const pluginOpenRules = computed(() => (pluginsEnabled.value ? pluginActions.ope
  *  answer an office document's Open reads (effectiveOnlyOfficeBase). */
 const openOpts = computed<OpenHandlerOptions>(() => ({ onlyOffice: !!effectiveOnlyOfficeBase.value }));
 
-/** The handlers that open a file (lib/appViewer): on, in the administrator's
- *  order, and off. Inside an encrypted folder only filex's own (decrypting)
- *  viewer opens anything. */
-/** Only filex's own viewer opens it: an encrypted folder's file, a vault's. */
-function builtinOpenOnly(n: FileNode | null | undefined): OpenHandlers {
-  return { on: n && n.type === 'file' ? [{ id: 'builtin', view: null }] : [], off: [], custom: false };
+/** What only this explorer knows about a file's handlers: ONLYOFFICE's
+ *  answer, and whether the file is where everything is end-to-end encrypted -
+ *  this encrypted folder's listing, or a vault this tab has open (also seen
+ *  from the other pane). lib/appViewer then gives such a file, and any row
+ *  that says it is encrypted (Recent, Starred, a tag view, a search, Shared
+ *  with me: lib/encryptedRow), filex's own viewer and nothing else. */
+function openOptsFor(n: FileNode | null | undefined): OpenHandlerOptions {
+  return { ...openOpts.value, inEncrypted: e2eActive.value || vault.isVaultRow(n) };
 }
+
+/** The handlers that open a file (lib/appViewer): on, in the administrator's
+ *  order, and off. */
 function openHandlersOf(n: FileNode | null | undefined) {
-  if (e2eActive.value) return builtinOpenOnly(n);
-  /* wiring:e2 vault — a row of a vault (also seen from the other pane): the
-     same, only filex's own viewer, which reads it from the tab. */
-  if (vault.isVaultRow(n)) return builtinOpenOnly(n);
-  return openHandlersFor(pluginViewList.value, n, pluginOpenRules.value, openOpts.value);
+  return openHandlersFor(pluginViewList.value, n, pluginOpenRules.value, openOptsFor(n));
 }
 
 /** The person's "always open with" choice for a file's kind (lib/openWith). */
@@ -1900,17 +1902,18 @@ function personalOpenChoice(n: FileNode | null | undefined): string | null {
  * own viewer.
  */
 const previewAppChoice = ref<string | null>(null);
+/* wiring:e2 - an encrypted file (this listing's, a vault's - an app would ask
+   the server for it by its path - or one whose row says so) gets filex's own
+   viewer here: openOptsFor + lib/appViewer. */
 const previewHandler = computed<OpenHandler | null>(() =>
-  e2eActive.value || vaultPreviewing.value /* wiring:e2 vault — an app would ask the server for the file by its path */
-    ? null
-    : pickOpenHandler(
-        pluginViewList.value,
-        previewTarget.value,
-        previewAppChoice.value,
-        pluginOpenRules.value,
-        personalOpenChoice(previewTarget.value),
-        openOpts.value,
-      ),
+  pickOpenHandler(
+    pluginViewList.value,
+    previewTarget.value,
+    previewAppChoice.value,
+    pluginOpenRules.value,
+    personalOpenChoice(previewTarget.value),
+    openOptsFor(previewTarget.value),
+  ),
 );
 const previewAppViewer = computed<PluginViewRow | null>(() => previewHandler.value?.view ?? null);
 /** 0.51 - the file being previewed opens in ONLYOFFICE (a .csv, by default
@@ -1938,7 +1941,10 @@ function openWithRows(sel: FileNode[]): ContextAction[] {
   if (sel.length !== 1) return [];
   const { on } = openHandlersOf(sel[0]);
   const missing: ContextAction[] =
-    !e2eActive.value && sel[0]?.type === 'file' && officeOpensKind(openKindOf(sel[0])) && !openOpts.value.onlyOffice
+    !onlyBuiltinOpens(sel[0], openOptsFor(sel[0])) &&
+    sel[0]?.type === 'file' &&
+    officeOpensKind(openKindOf(sel[0])) &&
+    !openOpts.value.onlyOffice
       ? [
           {
             key: `open-with:${ONLYOFFICE_VIEWER}`,
@@ -1964,7 +1970,7 @@ const openWithKind = computed(() => (openWithTarget.value ? openKindOf(openWithT
 const openWithCurrent = computed(() => {
   const n = openWithTarget.value;
   if (!n) return null;
-  return pickOpenHandler(pluginViewList.value, n, null, pluginOpenRules.value, personalOpenChoice(n), openOpts.value)?.id ?? null;
+  return pickOpenHandler(pluginViewList.value, n, null, pluginOpenRules.value, personalOpenChoice(n), openOptsFor(n))?.id ?? null;
 });
 
 /** Open the file with the chosen handler; with `always`, keep it for the kind. */
@@ -2226,13 +2232,12 @@ async function runPluginAction(action: PluginActionRow, targets: FileNode[]) {
   } catch (e) {
     if (stillOpening(ticket)) pluginView.value = null;
     const err = e as Error & { status?: number; detail?: string };
-    const detail = String(err?.detail ?? '');
     const held = lockedRefusal(err);
     if (held) flashToast(lockWords(held, { t, formatDate, locale: locale.value }));
-    else if (err?.status === 422 && detail.includes('not_applicable')) flashToast(t('plugin.not_applicable'));
-    else if (err?.status === 409 && detail.includes('read_only')) flashToast(t('plugin.read_only'));
     // Said in the failure words (the server's sentence for a refusal a person
-    // can act on, the app's failure otherwise) — never a raw message.
+    // can act on - `read_only` and `not_applicable` among them, which this
+    // explorer used to word itself - the app's failure otherwise), never a
+    // raw message.
     else showToast({ message: failureText(err, t('plugin.failed', { label })) }, ERROR_TOAST_MS);
   }
 }
@@ -5333,11 +5338,20 @@ function trashRowsOf(entries: TrashEntry[]): FileNode[] {
 
 async function loadTrash() {
   const ticket = tickets.view();
+  /* A reload of the trash on screen (a realtime refresh, Refresh, the end of
+   * an action) keeps what the person picked, as a folder's reload does
+   * (loadListing); only arriving in the trash starts with nothing picked.
+   * ⚠ It cleared the selection on every load: a refresh that landed between
+   * the right-click and the confirmation left "Delete permanently" nothing to
+   * delete, and the dialog closed having sent no request (WebKit, GitHub full
+   * matrix 37661356185 and 37702037032, e2e 163; task #199). A row that left
+   * the trash drops out of `selection.nodes` by itself. */
+  const reloading = trashMode.value;
   loading.value = true;
   trashOrigin.value = adapter.value || '';
   trashMode.value = true;
   e2eRoot.value = ''; /* wiring:e2 — the trash view is outside the encrypted context */
-  selection.clear();
+  if (!reloading) selection.clear();
   try {
     const page = await api.listTrash(undefined, { limit: TRASH_PAGE });
     /* wiring:e2 names — a trashed item keeps its stored name; decrypt it the
@@ -6161,9 +6175,7 @@ function openNode(n: FileNode) {
   // the one the person's choice or the administrator's order opens it with.
   // 0.51 - ONLYOFFICE opening a .csv is an office document's open: a look
   // first (view), its Edit button to change it - as a .xlsx opens.
-  const handler = e2eActive.value
-    ? null
-    : pickOpenHandler(pluginViewList.value, n, null, pluginOpenRules.value, personalOpenChoice(n), openOpts.value);
+  const handler = pickOpenHandler(pluginViewList.value, n, null, pluginOpenRules.value, personalOpenChoice(n), openOptsFor(n));
   if (handler?.view && nodeCanEdit(n)) {
     previewMode.value = 'edit';
   } else if (isOfficeHandler(handler)) {

@@ -35,7 +35,9 @@ Admin → Plugins → Storage plugins  Admin → Storages → Add storage
 
 ## Install one
 
-**Admin → Plugins → Storage plugins → Install a plugin**, in one of four ways.
+**Admin → Plugins → Storage plugins → Install a plugin**, in one of four ways -
+or, from 0.55, from an app store's install link ([Installing from a
+store](#installing-from-a-store)).
 (The Plugins page has two tabs, **Storage plugins** and **Apps** - the other
 kind of plugin, [APP-PLUGINS.md](APP-PLUGINS.md). It opens on **Apps** when the
 app runtime is on and at least one app is installed.)
@@ -46,6 +48,7 @@ app runtime is on and at least one app is installed.)
 | **From its source** | A GitHub repository (`owner/name`) or the https address of a `filex-storage.json` ([Updates](#updates-from-a-source)): filex reads it, takes the build for **this server's** platform, holds it to the SHA-256 the feed names, and installs it as a URL install would. The source is kept, so newer versions are announced. | A plugin its author publishes with a feed. |
 | **From a URL** | Downloaded, checked against a **required** SHA256 (and the signature, when required) **before anything is executed**, then as above. The URL must point at a **public** host: private, loopback and link-local targets are refused, after DNS and on every redirect (at most five), so a plugin URL cannot become a probe of the server's own network; a redirect from `https://` to plain `http://` is refused too. Apps are downloaded by the same client ([APP-PLUGINS.md → Install one](APP-PLUGINS.md#install-one)); for development, `FILEX_PLUGIN_LOOPBACK_SOURCES=1` opens this machine to it ([CONFIGURATION.md](CONFIGURATION.md#storage-plugins)). | Unattended installs, scripted setups. |
 | **Remote service** | Nothing is launched: filex connects to an address you give it with a bearer token you give it. **Remote = TLS**: `https://` anywhere; plain `http://` only when the address is on the private network (loopback, link-local, RFC 1918, ULA), because the token and every storage credential travel on that connection. | A sidecar container, a plugin on another host, or a plugin you are developing. |
+| **From a store** (0.55) | A store's install link opens a review; **Install** reads the release's feed the store reviewed, holds this server's build to the store's pin and installs it as **From its source** would ([Installing from a store](#installing-from-a-store)). | A plugin a store lists - reviewed, its builds pinned and signed, its claims checked by the store. |
 
 ![The Plugins page with the example plugin running](https://filex.sh/shots/admin-plugins.c25fa69cfc7c.png)
 
@@ -132,6 +135,7 @@ reads the list, one plugin and the update check, and may **Restart** one.
 | **Failed** | Exited or became unreachable. A binary is restarted with backoff - up to **ten starts in a row** that never come up, after which filex stops trying and says so (`not restarting until Restart`); a remote is re-checked every few seconds. |
 | **Refused** | filex will not use it: protocol mismatch, an invalid describe, a driver-name collision or a changed driver name, a binary whose SHA256 no longer matches what was installed (checked at **every** start, a restart after a crash included), a missing or bad signature where one is required, a handshake that names anything but its own socket or a loopback port, a remote that answers with a redirect, or **conformance failure** - it declared a capability it could not perform. `state_error` carries the reason. Fix it and choose **Restart** from the plugin's **Actions** menu. |
 | **Off** | Disabled by the toggle. The driver is unregistered, and storages on it stop opening. |
+| **Held** | Installed from a store, and its **license** does not hold (0.55, [A paid storage plugin](#a-paid-storage-plugin)): nothing runs, its driver is unregistered and its storages do not open; nothing is removed. It starts again by itself as soon as the license holds. |
 
 **Removing** a plugin deletes its files and its registration. Storages created
 on it are **left alone** - they simply cannot open until the plugin is back.
@@ -223,8 +227,9 @@ discover that the safety net is down by meeting a broken storage.
 
 ## Upgrade in place
 
-`POST /api/admin/plugins/{id}/upgrade` - multipart, `file` (and `signature` when
-this instance requires one). Admin → Plugins → Storage plugins → the plugin's
+`POST /api/admin/plugins/{id}/upgrade` - multipart, `file` (and `signature` and
+the `version` it was signed as when this instance requires one - [What is
+signed](#what-is-signed)). Admin → Plugins → Storage plugins → the plugin's
 **Actions** menu → **Upgrade** does the same thing.
 
 The row, the name, the driver and every storage built on it survive. What
@@ -307,9 +312,233 @@ compared with the version the running plugin **describes** (a pre-release is
 never taken); `filex` is a range in the grammar apps use
 ([PLUGIN-KIT.md](PLUGIN-KIT.md#which-filex-it-works-with)); each build's
 `sha256` is required, and `signature` (a detached ed25519 signature over the
-sha256, as for an upload) is needed on an instance that only runs signed
-plugins. The feed is read through the same guarded client as a URL install
+build - the plugin's name, the feed's `version`, that build's platform and its
+sha256, [What is signed](#what-is-signed)) is needed on an instance that only
+runs signed plugins. The feed is read through the same guarded client as a URL install
 and is capped at 1 MiB; its notes at 8 KiB.
+
+---
+
+## Installing from a store
+
+From 0.55 an app store lists storage plugins beside apps - the reference one is
+[filex Apps](https://apps.filex.sh). Installing one goes the way an app from a
+store goes ([APP-PLUGINS.md → Installing from a store](APP-PLUGINS.md#installing-from-a-store)):
+the store's **Install** asks for this filex's address and opens an install
+link on `/admin/store-install`, or a person asks for it on the store screen's
+**Storage plugins** tab and an administrator's approval asks the store for a
+fresh link. The same trust question, the same page, the same session gate;
+nothing is installed until **Install** is pressed.
+
+On the store screen the tab says first, in the server's words, what a
+storage plugin is; each row's **Store checks** says what the store's run
+proved and on which platform, and a plugin the store has no build of for
+this server says so in red and offers nothing to ask for:
+
+![The store screen's Storage plugins tab: the server's note, the Store checks column, a plugin with no build for this server](https://filex.sh/shots/store/store-screen-storage-tab-1280.29d3996ec137.png)
+
+What the store did before it listed the plugin - the part a link vouches for:
+
+- It read the plugin's **feed** - the `filex-storage.json` attached to the
+  release the publisher submitted, the file **From its source** reads - and
+  pinned it by SHA-256.
+- It downloaded **every build** the feed names and held each to the SHA-256
+  the feed gives. A listed plugin has a build for `linux/amd64` and
+  `linux/arm64` at least; `windows/*` and `darwin/*` builds are pinned when
+  the feed names them.
+- Its **plugin validator** ran the build for its own platform with filex's own
+  code - the handshake, the describe filex accepts, and every conformance
+  probe of the capabilities the plugin declared, against its `/v1/selftest`
+  area - in a container with no network, the plugin as an unprivileged user
+  ([The store's plugin validator](#the-stores-plugin-validator)). A plugin
+  that offers no selftest proves nothing, and is not listed.
+- It **signed** every build with its artifact key - the plugin's name, the
+  version, the build's platform and its SHA-256 together
+  ([What is signed](#what-is-signed)), never the SHA-256 alone.
+
+**The review** shows, in the reader's language and from the server: what the
+plugin is (a program that runs on this server with filex's own rights, outside
+any sandbox, handed every storage's credentials), the build for **this**
+server (its platform, SHA-256, size), what the store's run measured and on
+which platform (a build for another platform is pinned and signed, but was not
+run by the store - the review says so), the capabilities it proved, the
+release notes, and where the build's signature stands against
+`FILEX_PLUGIN_TRUSTED_KEYS`:
+
+| This server | The review | Install |
+|---|---|---|
+| requires signed plugins, and the store's or the publisher's signature verifies for this build - its name, the link's version, this platform ([What is signed](#what-is-signed)) | says it verifies | goes ahead; the signature that verified is kept beside the binary, with the version |
+| requires signed plugins, and neither verifies | says so, in red | is refused (`intent_signature_required`) - add the store's `artifact` key to `FILEX_PLUGIN_TRUSTED_KEYS` |
+| does not require signed plugins | says the store signed it | goes ahead; the store's signature is kept and checked from the day trusted keys are set |
+
+![A storage plugin's store review: the server's notices, this server's build and its SHA-256, the capabilities the store's run proved, the release notes](https://filex.sh/shots/store/storage-store-review-1280.335ba665cf51.png)
+
+To run **only** builds a store vouched for, list its artifact key in
+`FILEX_PLUGIN_TRUSTED_KEYS` - for filex Apps, `artifact-2026-10`,
+`3dda5d791aeae607cd92cbef9b2a7d635b7a99bbb2f6cea040557527f72f797c`
+([APP-PLUGINS.md → Trusted stores](APP-PLUGINS.md#trusted-stores) has every
+key and fingerprint). That key then vouches for a build through this review,
+and any other way only while the store still lists that version ([A build a
+store signed](#a-build-a-store-signed)).
+
+**Install** reads the feed again and checks every pin again - the feed's
+SHA-256, the plugin's name and version, this platform's build - so what lands
+is what was reviewed, not what the release serves a minute later. Then it
+downloads the build through the guarded client, refuses other bytes before
+anything runs, and installs it as an ordinary binary plugin: started,
+described and **probed again by filex itself** - the store's run is not a
+reason to skip filex's own conformance gate. The plugin's source is kept as
+its repository (`owner/name`), so the daily check announces newer releases.
+
+The rules a store link keeps for an app hold here too: a link for a plugin of
+the same name that came from another store or another repository is refused
+(`store_source_changed`, remove the installed plugin first), a link for the
+same version or an older one is refused (`intent_version_rollback`), a newer
+one **upgrades** in place ([Upgrade in place](#upgrade-in-place)). A server
+whose platform the store has no build for is told so (`intent_no_build`);
+with storage plugins off (`FILEX_PLUGINS_DISABLED=1`) the link is refused
+(`plugins_disabled`) and the store screen shows no storage plugin. Every
+refusal of a storage plugin's link carries the server's sentence in
+`message`, in the reader's language, and `detail.kind: "storage"`
+([API-ERRORS.md](API-ERRORS.md)): the panel shows it as it came, never an
+app's wording.
+
+The store screen's **Storage plugins** tab is shown to the same people as
+the store screen itself (**Admin → Plugins → Apps → Store screen**): there
+is no separate audience for it. A person there can only ask; installing a
+storage plugin stays an administrator's decision on this review. A storage
+plugin is the whole server's, so the tab tells a person who is not the
+server's administrator only whether it is installed here (`state:
+"installed"`), never which version (no `installed_version`, never `state:
+"update"`) and never the server's platform (no `storage.platform`; "No build
+for this server" without naming it). The administrator - of the platform, in
+a multi-tenant filex - sees both.
+
+> ⚠⚠ **A store's review is not a sandbox.** A storage plugin from a store runs
+> exactly as one you uploaded: as filex's own user, with filex's rights and
+> every storage's credentials. What the store adds is that the bytes are the
+> bytes it reviewed, who vouches for them, and that the plugin's claims held
+> on the store's validator. Whether you trust that publisher is still yours
+> to decide - the review says it in those words.
+
+### A paid storage plugin
+
+A store may sell a storage plugin as it sells an app ([APP-PLUGINS.md → Paid
+apps](APP-PLUGINS.md#paid-apps)): its license is the store's, kept here under
+its own row (`storage:` and the plugin's name - an app of the same name never
+shares it), its key sealed with `FILEX_SECRET_KEY`, checked with the store
+every day and on **Verify now**. The review asks for the key (the link usually
+carries one). The plugin is **held** from before it lands until the store
+confirms the license, and whenever the license stops holding (revoked,
+expired, its grace ended): state **Held**, nothing runs, its storages do not
+open, nothing is removed. **Admin → Plugins → Storage plugins → the row's
+Actions → License…** shows the license and takes a new key; a held plugin
+also names itself on the warning band above every admin page.
+
+The hold is in place **before any storage plugin starts**: at start-up filex
+judges every license from the rows it keeps (the store's last signed answers)
+and only then starts the plugins, so a license that lapsed while the server
+was down does not run its plugin for a moment after every restart. With the
+app store off on this server (no app plugin runtime), nobody can check a
+license, so every storage plugin under a store's license starts **held**
+(`license: not checked - the app store is off on this server`).
+
+An upgrade that lands while the plugin is held is not counted as done: the
+new binary has not started, let alone passed its probes. The previous binary
+stays beside it (`<binary>.previous`) until the new one first comes up; when
+the license holds and the new one does not come up, the previous one is put
+back and started, as a failed upgrade always is.
+
+### Listing your plugin in a store
+
+What a storage plugin needs to be listed (filex Apps; the store's own pages
+say the rest):
+
+- a public GitHub repository with a release whose assets include
+  `filex-storage.json` ([the feed](#updates-from-a-source)) and the builds it
+  names - `linux/amd64` and `linux/arm64` at least - and a
+  `.filex-apps.json` (the store's consent file) at the tag;
+- self-contained builds: every build must be its platform's own executable
+  (ELF for `linux/*`, PE for `windows/*`, Mach-O for `darwin/*`, thin or
+  universal) for the platform's architecture (an amd64 build in the
+  `linux/arm64` slot is refused) - a script that needs an interpreter is
+  refused (`build_not_native`), because nothing promises a filex server has
+  that interpreter. For the same reason a `linux/*` build is **statically
+  linked**: an ELF that names a program interpreter (`PT_INTERP`, the dynamic
+  loader of the C library it was linked against) is refused too. Go with
+  `CGO_ENABLED=0` builds this way; Rust and C need their static (musl)
+  target. A plugin written in a scripting language ships a self-contained
+  build of itself;
+- `windows/*` and `darwin/*` builds are optional (filex servers run on Linux
+  far more often); when the feed names one it is downloaded, pinned and
+  signed like the Linux builds, but the store's validator runs only the
+  Linux build;
+- a `/v1/selftest` area ([Write one](#write-one-go): `SelfTest` in the SDK) -
+  without it nothing can be probed, and the store lists only what proved its
+  claims;
+- a describe version equal to the feed's `version`: filex compares the two to
+  tell a newer release.
+
+### The store's plugin validator
+
+`filex plugin-validator --spool DIR` - on Linux with `--plugin-uid` and
+`--work-dir` as well, which it refuses to start without (below) -
+is what a store runs to check a build (filex 0.55 and later). The store and the validator share one directory,
+because the validator's container has no network at all:
+
+| File | Written by | Holds |
+|---|---|---|
+| `status.json` | the validator, every few seconds | this filex's version and platform, the job it is running |
+| `in/<id>.bin` | the store | the build, held to its SHA-256 by both |
+| `in/<id>.json` | the store, last | the job: its id, the build's SHA-256, the feed's name and version |
+| `out/<id>.json` | the validator | the result: `ok`, a `code` and `message` when not, the plugin's `describe`, the `conformance` report |
+
+Each build is copied into a private directory while it is hashed (what runs is
+what was checked), started as `--plugin-uid`/`--plugin-gid`, described and
+probed against its selftest area (`plugin.CheckBinary`, the code a Manager
+runs at every start), and stopped. `in/` is handed to the store's user
+(`--store-uid`) and `out/` stays the validator's, so the plugin under test can
+neither leave a job nor forge a result; a job file another user wrote is not
+run. A run is capped by `--job-timeout` (3 minutes; the start is 20 seconds
+and the probes 90 of it), a build by `--max-binary-mb` (512).
+
+**What it refuses to start with.** On Linux `--plugin-uid` and `--work-dir`
+are required. The plugin's user is never uid or gid 0, never the validator's
+own user and never `--store-uid`, and nothing else in the container should run
+as it (between two runs every process of that user is killed). `--work-dir`
+is a directory of the validator's own, not a link and not a shared one such as
+`/tmp` (sticky or writable by anyone is refused); the validator makes it
+`0711`. A spool the plugin's user could write in is refused too. Outside Linux
+there is no other user to start the plugin as, so the validator starts only
+with `--insecure-dev`, which is for developing a plugin, not for a store.
+
+**What one run can reach of another.** Every run uses the same user, and a
+plugin can start a helper that leaves its process group (`setsid`), so:
+
+- the run's directory (`0711`) and the build (`0555`) stay the validator's,
+  under `--work-dir`, which the plugin's user can pass through but not list:
+  the plugin can start its build and enter its working directory, never
+  change either. Its one directory of its own is its socket directory
+  (`FILEX_PLUGIN_SOCKET_DIR`); for scratch files it has the temporary
+  directory, as on any filex;
+- before and after every run, every process of the plugin's user is killed,
+  and a run does not start while one is still alive; what that user left at
+  the top of `/tmp`, `/var/tmp` and `/dev/shm` is removed.
+
+A PID namespace per run would do the killing by itself, but creating one
+needs `CAP_SYS_ADMIN`, which the store's container does not have (Docker's
+default seccomp profile refuses new namespaces without it); the sweep by user
+needs only `CAP_KILL`.
+
+The container the store runs it in: `network_mode: none`; a read-only root
+with a `tmpfs` for `--work-dir` (mounted `exec`, `mode=0711`: Docker mounts a
+tmpfs `noexec` and `1777` unless told otherwise, and the build runs from
+there) and the plugin's own `/tmp`, while the image's PID 1 (`tini`) reaps what
+the sweep kills; `cap_drop: ALL` plus `CHOWN`, `SETUID`, `SETGID`,
+`KILL` (to hand the socket directory over, start the plugin as its user and
+kill what it leaves) and `DAC_OVERRIDE`, `FOWNER` (to clear the socket
+directory and the temporary files that user owned); `no-new-privileges`;
+and a memory, CPU and process ceiling.
 
 ---
 
@@ -323,15 +552,99 @@ upgrade both refuse an unsigned or badly signed binary, and the admin API
 reports `requires_signature: true` so the UI can ask for the signature up front
 rather than after a rejection.
 
-What is signed is the binary's **sha256, hex-encoded and lower-cased** - not the
-file itself. That keeps verification cheap and lets you sign the same digest you
-already publish:
+### What is signed
+
+A storage plugin build's signature is over the build **as a whole thing**:
+its plugin name, its version, the platform it is for and its SHA256. filex
+builds this text and verifies an ed25519 signature over it, exactly as it is
+(not hashed again):
+
+```text
+filex-storage-build:v1
+<name>
+<version>
+<platform>
+<sha256>
+```
+
+- `<name>` is the name the plugin is installed under, `<version>` the version
+  without a leading `v` (`1.3.0`), `<platform>` the `GOOS/GOARCH` key
+  (`linux/amd64`, `windows/amd64`) and `<sha256>` the build's SHA256 in lower-case
+  hex;
+- the five lines are joined by a single line feed (`\n`), with **no** line
+  feed at the end;
+- the signature is sent as hex or standard base64.
+
+So a signature says "this file is version 1.3.0 of `myfs` for `linux/amd64`",
+and it does not verify as anything else: not as another version (an older one
+the publisher or a store has since withdrawn), not as another plugin, not for
+another platform. Where filex takes each field from:
+
+| Install path | name | version | platform |
+|---|---|---|---|
+| Upload or URL (`POST /api/admin/plugins`) | the `name` you install it under | the `version` field you send beside `signature` | this server's |
+| Upgrade (`POST /api/admin/plugins/{id}/upgrade`) | the installed plugin's name | the `version` field | this server's |
+| From its source (`{source}`, Review update) | the plugin's name here | the feed's `version` | this server's |
+| From a store (the store review) | the link's plugin | the link's version | this server's |
+
+The name a signed plugin is installed under must therefore be the name it was
+signed as. The version is kept beside the signature (`<binary>.sig`, second
+line `version <v>`), and every start rebuilds the text from it, the plugin's
+name and SHA256 and this server's platform.
+
+To sign a build, write the text to a file without a trailing line feed and sign
+that file with your ed25519 key:
 
 ```bash
-sha256sum myfs | cut -d' ' -f1 | tr -d '\n' > myfs.sha256
-# sign the CONTENTS of myfs.sha256 with your ed25519 key; send the detached
-# signature (hex or base64) as the `signature` field alongside the upload
+sha=$(sha256sum myfs-linux-amd64 | cut -d' ' -f1)
+printf 'filex-storage-build:v1\n%s\n%s\n%s\n%s' myfs 1.3.0 linux/amd64 "$sha" > myfs-linux-amd64.build
+# sign myfs-linux-amd64.build with your ed25519 key; send the detached
+# signature (hex or base64) as `signature`, and `version: 1.3.0` beside it
 ```
+
+The store's own tool signs the same text:
+
+```bash
+fapps sign -key store.seed -sha256 "$sha" -name myfs -version 1.3.0 -platform linux/amd64
+```
+
+> ⚠ **The old form - a signature over the SHA256 alone - is accepted in 0.55
+> only, with a warning, and refused from 0.56.** Until 0.55 the signature was
+> over the lower-hex SHA256 and nothing else; it vouched for the bytes but not
+> for which plugin, which version or which platform they were. A build whose
+> signature verifies only that way still installs and starts in 0.55, and:
+> its row on **Admin → Plugins → Storage plugins** says so (`legacy_signature:
+> true` and the server's sentence in `signature_notice` on
+> `GET /api/admin/plugins`), its log says so at every start, and the audit row
+> of the install or upgrade carries `legacy_signature: true`. Sign your builds
+> over the text above, and send `version`, before you upgrade to 0.56. A store's
+> signature in the old form is never taken (stores sign the text).
+
+> ⚠ A plugin installed with the new form is refused at its next start by a
+> filex older than 0.55 (it cannot read the text, nor the `.sig` file's second
+> line); downgrading below 0.55 means reinstalling signed storage plugins.
+
+#### A build a store signed
+
+A store signs every storage plugin build it lists with its `artifact` key. Put
+that key in `FILEX_PLUGIN_TRUSTED_KEYS` and only builds the store reviewed run
+here - but the store has signed every version it ever listed, including ones it
+has since withdrawn. So filex remembers which keys are a trusted store's
+`artifact` keys (it reads them from the store's `keys.json` when it trusts the
+store and whenever it refreshes that trust, and remembers them even after the
+store is no longer trusted), and a build signed by one of them is taken:
+
+- through that store's own install link (the review page) - the link is
+  fresh, signed with the store's index key and names the current version; or
+- any other way (an upload, an address, a source, another store's link) only
+  while that store's current, verified catalog still lists that version of
+  that plugin, not yanked, and the plugin itself is not revoked. A store that
+  cannot be reached, is no longer trusted, or - with the app store off on this
+  server - cannot be asked at all, does not vouch: the install is refused, and
+  the store's link is the way to install it.
+
+A publisher's own key (one that is no store's) is not asked anything more: it
+verifies the build's text or it does not.
 
 > ⚠ A checksum and a signature answer different questions. The SHA256 an install
 > already requires only proves the file has not changed since it arrived; it
@@ -345,8 +658,8 @@ FILEX_PLUGIN_TRUSTED_KEYS=3d40…e91b,7ac2… filex serve
 > a single-admin instance, and the wrong one for a shared server where "admin"
 > is several people.
 
-The signature is **kept beside the binary** as `<binary>.sig` and verified
-again at **every start**, not only at install: a trusted key set is a rule
+The signature is **kept beside the binary** as `<binary>.sig` (with the
+version it names) and verified again at **every start**, not only at install: a trusted key set is a rule
 about what may run, not a check on one upload. So setting a key *does* reach
 plugins already installed - one installed before the keys were set has no
 `.sig` and is refused at its next start with `signature required (installed
@@ -773,11 +1086,12 @@ restart invisible to the person using the file manager.
 | Sockets a plugin creates | `<data-dir>/plugins/<name>/run/` (directory mode 0700; the SDK gives the socket 0600) |
 | The copy a start runs | `<data-dir>/plugins/.verified/<name>-<random>/<binary>` (mode 0700): at every start - each restart after a crash included - filex checks the installed binary against its SHA256 and its stored signature **while copying it**, runs the copy, and removes it when the process ends. What runs is the bytes that were checked, whatever happens to the installed file meanwhile; leftovers are cleared the next time filex starts. The working directory is still the plugin's own folder |
 | A binary that is arriving | `<binary>.staged` beside it (mode 0600, not executable) until the SHA256 and the signature have passed; only then does it become the executable `<binary>` |
-| A binary's signature | `<data-dir>/plugins/<name>/<binary>.sig` (mode 0600) - written at install/upgrade when a signature was supplied, verified again at every start while trusted keys are configured |
+| A binary's signature | `<data-dir>/plugins/<name>/<binary>.sig` (mode 0600) - the signature on its first line and, when the install knew it, `version <v>` on the second ([What is signed](#what-is-signed)); written at install/upgrade when a signature was supplied, verified again at every start while trusted keys are configured |
 | Registration | the `plugins` table (migration 00029) |
 | Install requests an API key left | the `plugin_requests` table (migration 00070), shared with apps - [Install requests](#install-requests) |
+| A plugin installed from a store: the store, and a paid one's license | the `app_store_state` table (migration 00081), under `source:storage:` and `license:storage:` and the plugin's name - [Installing from a store](#installing-from-a-store) |
 | A remote plugin's token | sealed with `FILEX_SECRET_KEY` - registering one without that key is refused rather than stored in plaintext |
-| The previous binary, during an upgrade | `<data-dir>/plugins/<name>/<binary>.previous` (and `<binary>.sig.previous`), removed once the new one is up (and used to roll back when it is not) |
+| The previous binary, during an upgrade | `<data-dir>/plugins/<name>/<binary>.previous` (and `<binary>.sig.previous`), removed once the new one is up (and used to roll back when it is not) - an upgrade that landed while the plugin was held keeps it until the new binary first comes up, across restarts |
 | Conformance probe leftovers | `.filex-conformance-<random>/` at a storage's root - named so an operator who finds one knows what made it |
 | Host implementation | [`backend/internal/plugin`](../backend/internal/plugin) |
 | Driver shapes | `internal/plugin/driver_shapes.go` - **generated**, 20 combinations: `go run ./internal/plugin/gen > internal/plugin/driver_shapes.go`. ⚠ Regenerate it after touching the generator: `TestGeneratedShapesAreCurrent` runs the generator and fails CI when the file differs (it skips under `go test -short`) |

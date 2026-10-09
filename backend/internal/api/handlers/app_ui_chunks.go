@@ -28,6 +28,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/apierr"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 )
@@ -85,7 +87,7 @@ func (h *AppPlugins) uiSaveChunk(w http.ResponseWriter, r *http.Request, p *wasm
 	q := r.URL.Query()
 	target, ok := uiChunkTarget(r)
 	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad name", "message": "give path, or dir and a file name"})
+		writeError(w, r, http.StatusBadRequest, "bad_name", nil)
 		return
 	}
 	now := time.Now()
@@ -97,7 +99,7 @@ func (h *AppPlugins) uiSaveChunk(w http.ResponseWriter, r *http.Request, p *wasm
 		f, err := os.CreateTemp("", "filex-ui-save-*")
 		if err != nil {
 			uiChunks.Unlock()
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "spool unavailable"})
+			writeError(w, r, http.StatusInternalServerError, "spool_unavailable", nil)
 			return
 		}
 		b := make([]byte, 16)
@@ -111,7 +113,7 @@ func (h *AppPlugins) uiSaveChunk(w http.ResponseWriter, r *http.Request, p *wasm
 		// not exist for this caller.
 		if s == nil || s.user != uid || s.plugin != p.Row.Name || s.view != v.ID || s.target != target {
 			uiChunks.Unlock()
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "no such save in progress"})
+			writeErrorSaid(w, r, http.StatusNotFound, "not_found", "save_gone", nil)
 			return
 		}
 		s.touched = now
@@ -121,7 +123,7 @@ func (h *AppPlugins) uiSaveChunk(w http.ResponseWriter, r *http.Request, p *wasm
 	defer s.mu.Unlock()
 	if q.Get("chunk") != "start" {
 		if off, err := strconv.ParseInt(q.Get("offset"), 10, 64); err != nil || off != s.received {
-			writeJSON(w, http.StatusConflict, map[string]any{"error": "offset", "message": "the save continues from " + strconv.FormatInt(s.received, 10), "received": s.received})
+			writeError(w, r, http.StatusConflict, "offset", apierr.Params{"received": strconv.FormatInt(s.received, 10)}, "received", s.received)
 			return
 		}
 	}
@@ -136,12 +138,12 @@ func (h *AppPlugins) uiSaveChunk(w http.ResponseWriter, r *http.Request, p *wasm
 	}
 	if err != nil {
 		drop()
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too_large", "message": "a chunk is at most 8 MiB"})
+		writeErrorSaid(w, r, http.StatusRequestEntityTooLarge, "too_large", "chunk_too_large", apierr.Params{"max": srvtext.Bytes(langOf(r), uiChunkMax)})
 		return
 	}
 	if s.received > limit {
 		drop()
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too_large"})
+		writeError(w, r, http.StatusRequestEntityTooLarge, "too_large", apierr.Params{"max": srvtext.Bytes(langOf(r), limit)})
 		return
 	}
 	if q.Get("final") != "1" {
@@ -150,7 +152,7 @@ func (h *AppPlugins) uiSaveChunk(w http.ResponseWriter, r *http.Request, p *wasm
 	}
 	defer drop()
 	if _, err := s.file.Seek(0, io.SeekStart); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "spool unreadable"})
+		writeError(w, r, http.StatusInternalServerError, "spool_unavailable", nil)
 		return
 	}
 	size := s.received

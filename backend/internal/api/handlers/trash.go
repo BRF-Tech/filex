@@ -38,6 +38,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/realtime"
+	"github.com/brf-tech/filex/backend/internal/rowgate"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -127,24 +128,27 @@ func (h *Trash) Restore(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing node_id"})
 		return
 	}
-	if _, ok := h.mayRestore(w, r, req.NodeID); !ok {
+	node, ok := h.mayRestore(w, r, req.NodeID)
+	if !ok {
 		return
 	}
 	// A folder on an object store comes back one object at a time: finished
 	// even if the client leaves (detachedMutation).
 	ctx, cancel := detachedMutation(r.Context())
 	defer cancel()
-	if err := h.Service.Restore(ctx, req.NodeID); err != nil {
+	if err := h.restoreGated(r.Context(), ctx, node, req.NodeID); err != nil {
 		var conflict *trash.ConflictError
 		if errors.As(err, &conflict) {
 			// Nothing moved and the entry is still in the trash: the name was
-			// taken, and a restore does not destroy what holds it.
-			writeJSON(w, http.StatusConflict, map[string]string{
-				"error": "something already exists at this path: " + path.Base(conflict.Path),
-				"code":  "EXISTS",
-				"name":  path.Base(conflict.Path),
-				"path":  conflict.Path,
-			})
+			// taken, and a restore does not destroy what holds it. ⚠ The one
+			// envelope (apierr, docs/API-ERRORS.md): `name_taken` and its
+			// sentence in the reader's language, the code the queued restore's
+			// row keeps too. It used to be an English sentence in `error`, and
+			// the admin Trash page worded the refusal itself from `code`.
+			// `code` EXISTS, `name` and `path` stay for the clients that read them.
+			name := path.Base(conflict.Path)
+			writeError(w, r, http.StatusConflict, "name_taken", apierr.Params{"name": name},
+				"code", "EXISTS", "name", name, "path", conflict.Path)
 			return
 		}
 		if errors.Is(err, trash.ErrNotInTrash) {
@@ -405,6 +409,10 @@ func (h *Trash) restoreBatch(w http.ResponseWriter, r *http.Request, ids []int64
 	var ans trashBatch
 	var restored []*model.Node
 	seen := make(map[int64]bool, len(ids))
+	// The row gate is waited for on the request until the first entry holds
+	// it: a client gone before anything came back restores nothing; one that
+	// leaves half way does not leave the batch half done (sec055).
+	wait := r.Context()
 	for _, id := range ids {
 		if seen[id] {
 			continue
@@ -425,7 +433,9 @@ func (h *Trash) restoreBatch(w http.ResponseWriter, r *http.Request, ids []int64
 			ans.fail(ops.ReasonNotFound, "")
 			continue
 		}
-		if err := h.Service.Restore(ctx, id); err != nil {
+		err := h.restoreGated(wait, ctx, node, id)
+		wait = ctx
+		if err != nil {
 			var conflict *trash.ConflictError
 			switch {
 			case errors.As(err, &conflict):
@@ -507,6 +517,47 @@ func (h *Trash) queuedEntry(ctx context.Context, storageID, nodeID int64) (*mode
 		return nil, errNotThisJobsEntry
 	}
 	return n, nil
+}
+
+// restoreGated is Service.Restore under the storage's row gate
+// (internal/rowgate, issue #201), as a queued restore runs (ops.runRestore):
+// the bytes come out of the trash, then the row does, and a storage scan
+// between the two would find the bytes back at their path with no live row,
+// catalogue them as a NEW file, and that row would then hold the place the
+// restored one is going back to. node is the trash entry mayRestore judged;
+// without one there is no storage to hold and Restore answers on its own.
+//
+// ⚠ Not for RestoreNode: the queue already holds the gate there (rowgate: a
+// change takes the gate once, at its outermost step).
+//
+// The gate is waited for on wait (the request's context: a client gone by
+// then restores nothing, rowgate.MoveCtx); the entry comes back on ctx.
+// Restore asks whether the place is free itself, under the gate.
+//
+// A folder on an object store comes back one object at a time: it fences its
+// trash key and its original path instead of holding the storage's gate
+// (RestoreFence, rowgate.HoldCtx), so the rest of the storage is scanned
+// meanwhile.
+func (h *Trash) restoreGated(wait, ctx context.Context, node *model.Node, id int64) error {
+	if node != nil {
+		release, err := rowgate.HoldCtx(wait, node.StorageID, h.RestoreFence(ctx, node.StorageID, id)...)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
+	return h.Service.Restore(ctx, id)
+}
+
+// RestoreFence implements ops.RestoreFencer: the prefixes a restore of nodeID
+// fences instead of holding the storage's row gate (trash.Service.RestoreFence;
+// nil: the gate). One answer for the request's restore (restoreGated) and the
+// queue's (ops.runRestore).
+func (h *Trash) RestoreFence(ctx context.Context, storageID, nodeID int64) []string {
+	if h == nil {
+		return nil
+	}
+	return h.Service.RestoreFence(ctx, storageID, nodeID)
 }
 
 // RestoreNode implements ops.Restorer: Restore's work for a queued restore.

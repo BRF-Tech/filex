@@ -3,11 +3,11 @@
 // Admin surface for storage plugins (internal/plugin, docs/PLUGINS.md):
 //
 //	GET    /api/admin/plugins              — every plugin with its live state
-//	POST   /api/admin/plugins              — install: multipart {name, file[, source]} | JSON {name,url,sha256[,source]} | JSON {name,source} | JSON {name,kind:"remote",address,token}
+//	POST   /api/admin/plugins              — install: multipart {name, file[, signature, version, source]} | JSON {name,url,sha256[,signature,version,source]} | JSON {name,source} | JSON {name,kind:"remote",address,token}
 //	GET    /api/admin/plugins/{id}
 //	PATCH  /api/admin/plugins/{id}         — {"enabled"?: bool, "source"?: string}
 //	POST   /api/admin/plugins/{id}/restart
-//	POST   /api/admin/plugins/{id}/upgrade — multipart {file} | JSON {"from_source": true}
+//	POST   /api/admin/plugins/{id}/upgrade — multipart {file[, signature, version]} | JSON {"from_source": true}
 //	POST   /api/admin/plugins/updates/check — read every source now; installs nothing
 //
 // ⚠⚠ Nothing updates itself (plugin/updates.go): a binary plugin that names a
@@ -15,6 +15,12 @@
 // the administrator's {"from_source": true} upgrade installs it.
 //
 //	DELETE /api/admin/plugins/{id}
+//
+// `version` is the version a build's signature names (docs/PLUGINS.md →
+// "What is signed"): a signature is over the plugin's name, its version, the
+// platform and the sha256. Without it only the old sha256-only form can
+// verify - accepted during 0.55, with `legacy_signature` on the plugin's row,
+// its sentence in `signature_notice`, and `legacy_signature` in the audit.
 //
 // ⚠⚠ Install, upgrade, PATCH and DELETE need an administrator SIGNED IN to
 // the panel (requireSession): an API key gets 403 and is pointed at
@@ -37,7 +43,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/apierr"
+	"github.com/brf-tech/filex/backend/internal/appstore"
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/plugin"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
 // Plugins is the handler set. Manager may be nil when the subsystem is
@@ -50,6 +60,75 @@ type Plugins struct {
 	// scope, which is attached only in multi-tenant mode, so the flag and the
 	// scope can never disagree.
 	MultiTenant bool
+	// Store says which store a plugin was installed from and, for a paid
+	// one, its license (#215). Nil: the app store is off; nothing is added.
+	Store *appstore.Service
+}
+
+// pluginWire is a plugin as the panel reads it: its status, and - installed
+// from a store - the store and a paid plugin's license.
+type pluginWire struct {
+	*plugin.Status
+	FromStore string         `json:"from_store,omitempty"`
+	License   *appstore.View `json:"license,omitempty"`
+	// UpdateSaid is the list's line about the plugin's updates in the
+	// reader's language (storageUpdateSaid, 0.55); empty where the status
+	// word says it all.
+	UpdateSaid string `json:"update_said,omitempty"`
+	// SignatureNotice is the server's sentence, in the reader's language,
+	// for a build whose signature verified only in the old sha256-only form
+	// (Status.LegacySignature).
+	SignatureNotice string `json:"signature_notice,omitempty"`
+}
+
+// wire adds where a plugin came from to its status, its update line and a
+// legacy signature's notice in the reader's language.
+func (h *Plugins) wire(r *http.Request, st *plugin.Status) pluginWire {
+	ctx := r.Context()
+	out := pluginWire{Status: st}
+	if st != nil {
+		out.UpdateSaid = storageUpdateSaid(langOf(r), st.Update)
+	}
+	if st != nil && st.LegacySignature {
+		out.SignatureNotice = srvtext.Text(langOf(r), "server.store_storage.legacy_signature", nil)
+	}
+	if h.Store == nil || st == nil || st.Plugin == nil {
+		return out
+	}
+	out.FromStore, _ = h.Store.StorageInstalledFrom(ctx, st.Name)
+	if out.FromStore != "" {
+		out.License, _ = h.Store.LicenseOf(ctx, appstore.LicenseID(appstore.KindStorage, st.Name))
+	}
+	return out
+}
+
+// wireAll is wire for a list.
+func (h *Plugins) wireAll(r *http.Request, list []*plugin.Status) []pluginWire {
+	out := make([]pluginWire, 0, len(list))
+	for _, st := range list {
+		out = append(out, h.wire(r, st))
+	}
+	return out
+}
+
+// installSaid is the sentence an install's refusal is said with: the build
+// gate's own (a store signed the build and does not vouch for it here,
+// plugin.ErrStoreBuild) or the generic one (failed - the version that ran
+// before stays, for an upgrade).
+func installSaid(err error, generic string) string {
+	if errors.Is(err, plugin.ErrStoreBuild) {
+		return "store_signed_build"
+	}
+	return generic
+}
+
+// auditLegacySignature marks the request's audit row when the build it
+// installed or upgraded was taken with a signature in the old sha256-only
+// form (accepted during 0.55, with a warning).
+func auditLegacySignature(r *http.Request, st *plugin.Status) {
+	if st != nil && st.LegacySignature {
+		auth.AddAuditDetail(r.Context(), "legacy_signature", true)
+	}
 }
 
 // NewPlugins constructs the handler.
@@ -68,10 +147,7 @@ func (h *Plugins) gate(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	if h.Manager == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"error":   "plugins_disabled",
-			"message": "storage plugins are disabled on this instance (FILEX_PLUGINS_DISABLED)",
-		})
+		writeError(w, r, http.StatusServiceUnavailable, "plugins_disabled", nil)
 		return false
 	}
 	return true
@@ -83,11 +159,11 @@ func (h *Plugins) List(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := h.Manager.List(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"plugins": list,
+		"plugins": h.wireAll(r, list),
 		"dir":     h.Manager.Dir(),
 		// Surfaces show these so nobody discovers the rules from a rejection.
 		"requires_signature": h.Manager.RequiresSignature(),
@@ -113,15 +189,15 @@ func (h *Plugins) CheckUpdates(w http.ResponseWriter, r *http.Request) {
 	}
 	rep, err := h.Manager.CheckUpdates(context.WithoutCancel(r.Context()))
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", err.Error())
 		return
 	}
 	list, err := h.Manager.List(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"report": rep, "plugins": list})
+	writeJSON(w, http.StatusOK, map[string]any{"report": rep, "plugins": h.wireAll(r, list)})
 }
 
 func (h *Plugins) Get(w http.ResponseWriter, r *http.Request) {
@@ -130,15 +206,15 @@ func (h *Plugins) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		writeError(w, r, http.StatusBadRequest, "bad_id", nil)
 		return
 	}
 	st, err := h.Manager.Get(r.Context(), id)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "storage_plugin_missing", nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, st)
+	writeJSON(w, http.StatusOK, h.wire(r, st))
 }
 
 // Logs answers a storage plugin's log - its starts and failures, and the
@@ -152,13 +228,13 @@ func (h *Plugins) Logs(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		writeError(w, r, http.StatusBadRequest, "bad_id", nil)
 		return
 	}
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	lines, next, err := h.Manager.Logs(r.Context(), id, after)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "storage_plugin_missing", nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"lines": lines, "next": next})
@@ -171,9 +247,13 @@ type pluginInstallReq struct {
 	SHA256  string `json:"sha256"`
 	Address string `json:"address"`
 	Token   string `json:"token"`
-	// Signature is a detached ed25519 signature over the binary's sha256.
-	// Required only when the instance configures trusted keys.
+	// Signature is a detached ed25519 signature over the build: its name,
+	// Version, the platform and its sha256 (plugin.VerifyBuild). Required
+	// only when the instance configures trusted keys.
 	Signature string `json:"signature"`
+	// Version is the version the signature names. Without it only the old
+	// sha256-only form verifies (accepted during 0.55, with a warning).
+	Version string `json:"version"`
 	// Source is where newer versions are published (plugin/updates.go):
 	// alone, the plugin is installed from it; beside a url or a file, it is
 	// only kept for the daily check.
@@ -200,18 +280,19 @@ func (h *Plugins) Install(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimSpace(r.FormValue("name"))
 		f, hdr, err := r.FormFile("file")
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file is required"})
+			writeError(w, r, http.StatusBadRequest, "file_required", nil)
 			return
 		}
 		defer f.Close()
-		st, err := h.Manager.InstallBinary(r.Context(), name, hdr.Filename, f, r.FormValue("signature"))
+		st, err := h.Manager.InstallBinaryVersion(r.Context(), name, hdr.Filename, f, r.FormValue("signature"), strings.TrimSpace(r.FormValue("version")))
 		if err == nil && strings.TrimSpace(r.FormValue("source")) != "" {
 			st, err = h.Manager.SetSource(r.Context(), st.ID, r.FormValue("source"))
 		}
 		if err != nil {
-			writeJSON(w, installStatus(err), map[string]string{"error": err.Error()})
+			writeErrorSaid(w, r, installStatus(err), "install_failed", installSaid(err, "plugin_install_failed"), apierr.Params{"detail": err.Error()}, "detail", err.Error())
 			return
 		}
+		auditLegacySignature(r, st)
 		writeJSON(w, http.StatusCreated, st)
 		return
 	}
@@ -228,20 +309,21 @@ func (h *Plugins) Install(w http.ResponseWriter, r *http.Request) {
 	case req.Kind == "remote" || (req.Address != "" && req.URL == ""):
 		st, err = h.Manager.InstallRemote(r.Context(), req.Name, strings.TrimSpace(req.Address), req.Token)
 	case req.URL != "":
-		st, err = h.Manager.InstallFromURL(r.Context(), req.Name, strings.TrimSpace(req.URL), req.SHA256, req.Signature)
+		st, err = h.Manager.InstallFromURLVersion(r.Context(), req.Name, strings.TrimSpace(req.URL), req.SHA256, req.Signature, strings.TrimSpace(req.Version))
 		if err == nil && strings.TrimSpace(req.Source) != "" {
 			st, err = h.Manager.SetSource(r.Context(), st.ID, req.Source)
 		}
 	case strings.TrimSpace(req.Source) != "":
 		st, err = h.Manager.InstallFromSource(r.Context(), req.Name, req.Source)
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send a multipart file, or {url, sha256}, or {source}, or {kind:\"remote\", address, token}"})
+		writeError(w, r, http.StatusBadRequest, "plugin_source_missing", nil)
 		return
 	}
 	if err != nil {
-		writeJSON(w, installStatus(err), map[string]string{"error": err.Error()})
+		writeErrorSaid(w, r, installStatus(err), "install_failed", installSaid(err, "plugin_install_failed"), apierr.Params{"detail": err.Error()}, "detail", err.Error())
 		return
 	}
+	auditLegacySignature(r, st)
 	writeJSON(w, http.StatusCreated, st)
 }
 
@@ -259,10 +341,10 @@ func decodeAdminJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	}
 	var tooBig *http.MaxBytesError
 	if errors.As(err, &tooBig) {
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+		writeError(w, r, http.StatusRequestEntityTooLarge, "request_too_large", apierr.Params{"max": srvtext.Bytes(langOf(r), pluginJSONMax)})
 		return false
 	}
-	writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+	writeError(w, r, http.StatusBadRequest, "bad_json", nil)
 	return false
 }
 
@@ -279,10 +361,10 @@ func (h *Plugins) parseMultipart(w http.ResponseWriter, r *http.Request) bool {
 	}
 	var tooBig *http.MaxBytesError
 	if errors.As(err, &tooBig) {
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+		writeError(w, r, http.StatusRequestEntityTooLarge, "request_too_large", apierr.Params{"max": srvtext.Bytes(langOf(r), h.Manager.MaxBinaryBytes()+1<<20)})
 		return false
 	}
-	writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad multipart: " + err.Error()})
+	writeError(w, r, http.StatusBadRequest, "bad_multipart", nil, "detail", err.Error())
 	return false
 }
 
@@ -317,7 +399,7 @@ func (h *Plugins) Upgrade(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		writeError(w, r, http.StatusBadRequest, "bad_id", nil)
 		return
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
@@ -330,14 +412,15 @@ func (h *Plugins) Upgrade(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !req.FromSource {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send a multipart file, or {\"from_source\": true}"})
+			writeError(w, r, http.StatusBadRequest, "from_source_required", nil)
 			return
 		}
 		st, err := h.Manager.UpgradeFromSource(context.WithoutCancel(r.Context()), id)
 		if err != nil {
-			writeJSON(w, installStatus(err), map[string]any{"error": err.Error(), "plugin": st})
+			writeErrorSaid(w, r, installStatus(err), "upgrade_failed", installSaid(err, "plugin_upgrade_failed"), apierr.Params{"detail": err.Error()}, "detail", err.Error(), "plugin", st)
 			return
 		}
+		auditLegacySignature(r, st)
 		writeJSON(w, http.StatusOK, st)
 		return
 	}
@@ -351,17 +434,18 @@ func (h *Plugins) Upgrade(w http.ResponseWriter, r *http.Request) {
 	}()
 	f, hdr, err := r.FormFile("file")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file is required"})
+		writeError(w, r, http.StatusBadRequest, "file_required", nil)
 		return
 	}
 	defer f.Close()
-	st, err := h.Manager.Upgrade(r.Context(), id, hdr.Filename, f, r.FormValue("signature"))
+	st, err := h.Manager.UpgradeVersion(r.Context(), id, hdr.Filename, f, r.FormValue("signature"), strings.TrimSpace(r.FormValue("version")))
 	if err != nil {
 		// A rollback still returns the status, so the page shows what is
 		// running now rather than leaving the operator guessing.
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "plugin": st})
+		writeErrorSaid(w, r, http.StatusBadRequest, "upgrade_failed", installSaid(err, "plugin_upgrade_failed"), apierr.Params{"detail": err.Error()}, "detail", err.Error(), "plugin", st)
 		return
 	}
+	auditLegacySignature(r, st)
 	writeJSON(w, http.StatusOK, st)
 }
 
@@ -374,7 +458,7 @@ func (h *Plugins) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		writeError(w, r, http.StatusBadRequest, "bad_id", nil)
 		return
 	}
 	var req struct {
@@ -385,19 +469,19 @@ func (h *Plugins) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Enabled == nil && req.Source == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body must be {\"enabled\": true|false} and/or {\"source\": \"owner/name\"}"})
+		writeError(w, r, http.StatusBadRequest, "plugin_patch_shape", nil)
 		return
 	}
 	var st *plugin.Status
 	if req.Source != nil {
 		if st, err = h.Manager.SetSource(r.Context(), id, *req.Source); err != nil {
-			writeJSON(w, installStatus(err), map[string]string{"error": err.Error()})
+			writeErrorSaid(w, r, installStatus(err), "change_failed", "plugin_change_failed", apierr.Params{"detail": err.Error()}, "detail", err.Error())
 			return
 		}
 	}
 	if req.Enabled != nil {
 		if st, err = h.Manager.SetEnabled(r.Context(), id, *req.Enabled); err != nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			writeErrorSaid(w, r, http.StatusNotFound, "not_found", "storage_plugin_missing", nil, "detail", err.Error())
 			return
 		}
 	}
@@ -410,12 +494,12 @@ func (h *Plugins) Restart(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		writeError(w, r, http.StatusBadRequest, "bad_id", nil)
 		return
 	}
 	st, err := h.Manager.Restart(r.Context(), id)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "storage_plugin_missing", nil, "detail", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
@@ -427,11 +511,11 @@ func (h *Plugins) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		writeError(w, r, http.StatusBadRequest, "bad_id", nil)
 		return
 	}
 	if err := h.Manager.Remove(r.Context(), id); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "storage_plugin_missing", nil, "detail", err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

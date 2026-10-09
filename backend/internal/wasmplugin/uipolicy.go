@@ -29,9 +29,32 @@ import (
 //     opened directly in a tab is still an opaque origin with no storage and
 //     no cookie (measured: without it, filex's localStorage and session cookie
 //     were reachable in all three).
-//   - frame-src/child-src 'none': the interface opens no frame of its own;
-//     worker-src blob: only (a URL worker cannot start from an opaque origin
+//   - frame-src/child-src 'none': the interface opens no frame of its own —
+//     or, with `ui:frame-package`, frames of this version's own path and
+//     nothing else. Never data: or blob: (a document of the page's own
+//     making is a fresh realm the bootstrap never ran in), never another
+//     version, another app, a page of filex or the network. Each such page
+//     is a page of the package, so it is served HERE under the same policy:
+//     the same `sandbox allow-scripts` (an opaque origin of its own, distinct
+//     from the frame that opened it), the bootstrap first, connect-src as
+//     granted. The frame's own sandbox attribute is inherited by every frame
+//     inside it, whatever the app writes on the inner element.
+//   - worker-src blob: only (a URL worker cannot start from an opaque origin
 //     anyway, measured).
+//   - connect-src gains `blob:` with `ui:connect-blob`: an address the page
+//     made itself, in memory (an editor that only loads a document from an
+//     address). It names no server. A blob: address is bound to the origin
+//     that made it, and a framed page is an origin of its own: the page that
+//     reads one makes it (docs/PLUGIN-KIT.md says so to authors).
+//   - NO frame-ancestors, on purpose: any page may frame an interface (the
+//     explorer is embedded in sites filex cannot list), and with
+//     `ui:frame-package` the page that frames one of its pages is the
+//     interface itself, an opaque origin that no source expression matches
+//     - Chromium refused the framed page under `frame-ancestors *`
+//     (2026-10-08, filex-office-editor's e2e). The page holds nothing for
+//     whoever frames it: the sandbox and the bridge protect it. uiserve.go
+//     tells the security-headers middleware (secheaders.OpenFraming) so it
+//     does not add filex's own `frame-ancestors 'self'` either.
 
 // uiBootstrap is the script filex puts first in every HTML file of an
 // interface, before the app's own code: it takes WebRTC away — from the page
@@ -119,10 +142,23 @@ func UIPolicy(grants Grants, pkg string) (csp, allowlist string) {
 	}
 	// connect-src: nothing — or, with `ui:package-fetch`, this version's own
 	// path and nothing else: not another version, not another app, not
-	// filex's API or pages, not the network.
-	connect := "'none'"
+	// filex's API or pages, not the network; with `ui:connect-blob`, the
+	// page's own blob: addresses too.
+	var connect []string
 	if grants.Has(PermUIPackageFetch) {
-		connect = pkg
+		connect = append(connect, pkg)
+	}
+	if grants.Has(PermUIConnectBlob) {
+		connect = append(connect, "blob:")
+	}
+	if len(connect) == 0 {
+		connect = []string{"'none'"}
+	}
+	// frame-src and child-src: no frame — or, with `ui:frame-package`, the
+	// pages of this version's own path, and only them.
+	frame := "'none'"
+	if grants.Has(PermUIFramePackage) {
+		frame = pkg
 	}
 	csp = strings.Join([]string{
 		"default-src 'none'",
@@ -131,15 +167,14 @@ func UIPolicy(grants Grants, pkg string) (csp, allowlist string) {
 		"img-src " + src([]string{pkg, "data:", "blob:"}, "img"),
 		"font-src " + src([]string{pkg, "data:"}, "font"),
 		"media-src " + src([]string{pkg, "blob:"}, "media"),
-		"connect-src " + connect,
+		"connect-src " + strings.Join(connect, " "),
 		"worker-src blob:",
-		"frame-src 'none'",
-		"child-src 'none'",
+		"frame-src " + frame,
+		"child-src " + frame,
 		"object-src 'none'",
 		"manifest-src 'none'",
 		"form-action 'none'",
 		"base-uri 'none'",
-		"frame-ancestors *",
 		"sandbox allow-scripts",
 	}, "; ")
 	// Connection-Allowlist (Chrome): what the document may connect to at all.
@@ -147,7 +182,10 @@ func UIPolicy(grants Grants, pkg string) (csp, allowlist string) {
 	// well (measured: 0 hits for a CDN missing from it).
 	// The package's own path, not `response-origin` (which is filex's whole
 	// origin): everything the interface loads of its own — its files, its
-	// mirrors (ext/…), what `ui:package-fetch` reads — is under it.
+	// mirrors (ext/…), what `ui:package-fetch` reads, the pages
+	// `ui:frame-package` frames — is under it. `blob:` is named nowhere here:
+	// it is no network address, and e2e 228 measures in Chromium that a page
+	// with `ui:connect-blob` reads its own blob: under this allowlist.
 	patterns := []string{`"` + pkg + `*"`}
 	for _, u := range liveURLs {
 		if strings.HasSuffix(u, "/") {

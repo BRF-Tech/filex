@@ -158,6 +158,7 @@ func (s *Service) Approve(ctx context.Context, origin string, fingerprints []str
 	if err := s.putJSON(ctx, keyTrustPrefix+origin, t); err != nil {
 		return nil, err
 	}
+	s.noteBuildKeys(ctx, origin, ks)
 	// A catalog read under the keys before is read again under these.
 	s.DropCatalog(origin)
 	meta := map[string]any{"store": origin, "fingerprints": Fingerprints(keys)}
@@ -246,6 +247,7 @@ func (s *Service) trustFor(ctx context.Context, origin string, refresh bool) (*T
 			return nil, trustRequired(CodeKeyChanged, origin, fresh, t.Keys)
 		}
 	}
+	s.noteBuildKeys(ctx, origin, ks)
 	// Narrow: keep the pinned keys the store still publishes (not retired),
 	// with the status it gives them now.
 	kept := []Key{}
@@ -311,6 +313,7 @@ func (s *Service) configTrust(ctx context.Context, origin string, refresh bool) 
 			Detail:  map[string]any{"store": origin, "keys": viewsOf(ks.TrustedKeys())}}
 		return nil, e
 	}
+	s.noteBuildKeys(ctx, origin, ks)
 	t := &Trust{Origin: origin, Keys: keys, Source: SourceConfig, ApprovedAt: time.Now().UTC()}
 	if !have || !slices.Equal(Fingerprints(stored.Keys), Fingerprints(keys)) || !sameStatuses(stored.Keys, keys) {
 		if err := s.putJSON(ctx, keyTrustPrefix+origin, t); err != nil {

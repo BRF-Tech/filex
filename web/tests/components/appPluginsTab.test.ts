@@ -12,6 +12,15 @@ import { createI18n } from 'vue-i18n';
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 
+// The header's sentences are the SERVER's (handlers runtimeSaid,
+// server.app_runtime.*; 0.55): the tab prints runtime.said as it came. These
+// mocks carry what the server would say, read from its own catalogue.
+const SERVER: Record<'en' | 'tr', Record<string, string>> = {
+  en: JSON.parse(readFileSync(path.resolve(__dirname, '../../../backend/internal/srvtext/locales/en.json'), 'utf8')),
+  tr: JSON.parse(readFileSync(path.resolve(__dirname, '../../../backend/internal/srvtext/locales/tr.json'), 'utf8')),
+};
+const said = (locale: 'en' | 'tr', key: string) => SERVER[locale][`server.app_runtime.${key}`];
+
 let listAnswer: Record<string, unknown> = {};
 let listStatus = 200;
 
@@ -78,6 +87,7 @@ describe('AppPluginsTab', () => {
         requires_signature: false,
         engines: { ffmpeg: true, libreoffice: false },
         engine_names: { ffmpeg: 'FFmpeg', libreoffice: 'LibreOffice' },
+        said: { state: said('en', 'on') },
       },
       plugins: rows,
     };
@@ -87,7 +97,7 @@ describe('AppPluginsTab', () => {
     const w = mountTab();
     await flushPromises();
 
-    expect(w.find('[data-testid="app-plugins-runtime"]').text()).toContain(en.appPlugins.runtime.on);
+    expect(w.find('[data-testid="app-plugins-runtime"]').text()).toContain(said('en', 'on'));
     expect(w.find('[data-testid="engine-ffmpeg"]').exists()).toBe(true);
     // An engine by the name a person reads — the server's — not its id.
     expect(w.find('[data-testid="engine-libreoffice"]').text()).toBe('LibreOffice');
@@ -157,11 +167,17 @@ describe('AppPluginsTab', () => {
   // names". An interface (draw.io, filextext) is a package and a language is
   // its manifest alone; the platform is off for all of them on such a host.
   it('the processor warning and the empty state name every kind of app', async () => {
-    listAnswer = { runtime: { enabled: false, arch_ok: false, disabled_reason: '', requires_signature: false, engines: {} }, plugins: [] };
     for (const [locale, words] of [
       ['en', { iface: /\binterface\b/i, lang: /\blanguage\b/i, pkg: /interface package/i, oldBanner: /so no app can start here/, oldEmpty: /fetches the module it names and/ }],
       ['tr', { iface: /arayüz/i, lang: /(?<!\p{L})dil(?!\p{L})/iu, pkg: /arayüz paketi/i, oldBanner: /burada hiçbir uygulama başlayamaz/, oldEmpty: /adını verdiği modülü indirir/ }],
     ] as const) {
+      listAnswer = {
+        runtime: {
+          enabled: false, arch_ok: false, disabled_reason: '', requires_signature: false, engines: {},
+          said: { state: said(locale, 'off'), arch: said(locale, 'arch_bad') },
+        },
+        plugins: [],
+      };
       const w = mountTab(locale);
       await flushPromises();
       const banner = w.find('[data-testid="app-plugins-runtime"]').text();
@@ -176,14 +192,22 @@ describe('AppPluginsTab', () => {
   });
 
   it('shows the off banner, the reason, and the empty state that explains the GitHub install', async () => {
-    listAnswer = { runtime: { enabled: false, arch_ok: false, disabled_reason: 'FILEX_APP_PLUGINS=off', requires_signature: true, engines: {} }, plugins: [] };
+    listAnswer = {
+      runtime: {
+        enabled: false, arch_ok: false, disabled_reason: 'FILEX_APP_PLUGINS=off', requires_signature: true, engines: {},
+        said: { state: said('en', 'off'), arch: said('en', 'arch_bad'), signature: said('en', 'signature') },
+      },
+      plugins: [],
+    };
     const w = mountTab();
     await flushPromises();
     const banner = w.find('[data-testid="app-plugins-runtime"]');
-    expect(banner.text()).toContain(en.appPlugins.runtime.off);
-    expect(banner.text()).toContain(en.appPlugins.runtime.archBad);
+    expect(banner.text()).toContain(said('en', 'off'));
+    expect(banner.text()).toContain(said('en', 'arch_bad'));
     expect(banner.text()).toContain('FILEX_APP_PLUGINS=off');
-    expect(banner.text()).toContain(en.appPlugins.runtime.signature);
+    expect(banner.text()).toContain(said('en', 'signature'));
+    // RED before 0.55: the tab worded the header itself (appPlugins.runtime.*).
+    expect((en as { appPlugins: { runtime: Record<string, unknown> } }).appPlugins.runtime.on).toBeUndefined();
     expect(w.text()).toContain(en.appPlugins.empty.title);
     expect(w.text()).toContain(en.appPlugins.empty.description);
     expect(w.find('[data-testid="app-plugin-add"]').attributes('disabled')).toBeDefined();

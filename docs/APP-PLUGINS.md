@@ -209,7 +209,7 @@ app comes with its license.
 4. **Install**, or close the dialog. Either way the store is told how the link
    ended (`installed` or `cancelled`), and the link is used up on this filex.
 
-![The install review opened from a store's link, marked From store](https://filex.sh/shots/store/store-review-1440.b863df3efed9.png)
+![The install review opened from a store's link, marked From store](https://filex.sh/shots/store/store-review-1440.01ab061907d0.png)
 
 ### What filex checks before the review opens
 
@@ -286,7 +286,7 @@ characters of each fingerprint, in groups of four:
 |---|---|---|
 | `index-2026-10` | install links | `205cd1302b9a5025776636b189b6ef80c5a72f4128acb802b917434380bc4c88` |
 | `license-2026-10` | license answers | `2807b0749a94944285c293ee82ae46600877925a0815cbc0484a93789e0371b4` |
-| `artifact-2026-10` | app modules - not asked about on the trust question; a module's signature is [`FILEX_PLUGIN_TRUSTED_KEYS`](CONFIGURATION.md#storage-plugins)'s | `94974dbae4cc3106406cbf812a4f33b530030ac244b57b73a8989bb23d4df62e` |
+| `artifact-2026-10` | app modules and storage plugin builds - not asked about on the trust question; a module's or a build's signature is [`FILEX_PLUGIN_TRUSTED_KEYS`](CONFIGURATION.md#storage-plugins)'s (a storage build's over its name, version, platform and sha256, [PLUGINS.md → What is signed](PLUGINS.md#what-is-signed)) | `94974dbae4cc3106406cbf812a4f33b530030ac244b57b73a8989bb23d4df62e` |
 
 The public keys themselves: `index-2026-10`
 `df18ded0d71e46e2d53cd479526744ebb9c3ddadb854a32879448fa64453636c`,
@@ -303,8 +303,10 @@ cannot trust a store for anybody, and no `GET` changes anything.
 
 ### Paid apps
 
-A store may sell an app. Its **license** is issued, kept and answered for by
-the store; filex keeps the license key - encrypted with
+A store may sell an app - or, from 0.55, a storage plugin, whose license is
+kept the same way under a row of its own ([PLUGINS.md → A paid storage
+plugin](PLUGINS.md#a-paid-storage-plugin)). Its **license** is issued, kept
+and answered for by the store; filex keeps the license key - encrypted with
 [`FILEX_SECRET_KEY`](CONFIGURATION.md#storage-plugins), shown everywhere by its
 first characters only (`FXL-7Q…`), never in an answer, a log or the audit log -
 and asks the store about it:
@@ -357,7 +359,7 @@ and when it is next, the store, the key's prefix and the last failed check;
 there you enter a new key and press **Verify now**. An app reads its own
 status with [`fx.license.get()`](APP-PLUGINS-API.md#the-app-reads-its-license).
 
-![An app's License section: valid, licensed to, seats, dates, the key's prefix](https://filex.sh/shots/store/store-license-1440.05d0c308b19f.png)
+![An app's License section: valid, licensed to, seats, dates, the key's prefix](https://filex.sh/shots/store/store-license-1440.403ea4de46ec.png)
 
 ![The same app held after the store revoked its license, the band on an admin page](https://filex.sh/shots/store/store-license-held-1440.2dd9518d7e87.png)
 
@@ -440,6 +442,26 @@ from the store's API - **never a frame of the store**:
   rejected (with the administrator's note), expired.
 - A person has at most ten requests waiting; asking again for the same app
   answers the waiting request.
+- What each row is here - installed, an older version installed, asked for,
+  nothing - is the server's answer (`state`), never worked out again in the
+  page (0.55).
+
+![The App store page: a trusted store's catalog as filex verified it, one app installed, one to ask for](https://filex.sh/shots/store/store-screen-1440.ea70abf83dfc.png)
+
+![Asking for an app on the store screen, with a reason](https://filex.sh/shots/store/store-screen-request-1440.264281b5b76d.png)
+
+**Storage plugins** (0.55, [PLUGINS.md → Installing from a
+store](PLUGINS.md#installing-from-a-store)): a store that lists them shows
+them on a tab of their own, **Storage plugins**, where this server runs
+storage plugins (with `FILEX_PLUGINS_DISABLED=1` the screen shows none). Each
+row says, in the server's words, whether the store has a build for this
+server and what the store's checks proved; the tab says first what a storage
+plugin is - a program an administrator installs on the server, outside any
+sandbox. **Ask for this plugin** leaves the same kind of request, and its
+approval opens the storage plugin's own review; a plugin the store has no
+build of for this server is offered no request.
+
+![The store screen's Storage plugins tab: the server's note, the Store checks column, a plugin with no build for this server](https://filex.sh/shots/store/store-screen-storage-tab-1280.29d3996ec137.png)
 
 **Who sees it** is the platform operator's choice, on **Admin → Plugins →
 Apps → Store screen**: turn it on, pick which trusted stores it shows, and
@@ -469,6 +491,8 @@ rejected or approved again. A paid app's license key may be given with the
 approval (it goes to the store, which takes it only for a license with a
 seat for this filex) or in the review. The review page still refuses to run
 inside a frame.
+
+![A request from the store screen on Install requests: from the store, Approve opens the store review](https://filex.sh/shots/store/store-request-review-1440.eed84fbd9997.png)
 
 Nothing here opens a door that was closed: reading a link, trusting a store,
 connecting to one and installing stay the platform operator's, signed in to
@@ -503,6 +527,8 @@ store](APP-PLUGINS-API.md#the-embedded-store-053-162)). **Connect again**
 replaces the key; **Disconnect** forgets it and tells the store to forget it
 too. A store the screen shows but this filex is not connected to still takes
 requests; they wait until it is connected.
+
+![Trusted stores with the store connected, its key's fingerprint, and the Store screen settings under it](https://filex.sh/shots/store/store-connected-1440.d04928e3f7ff.png)
 
 ## Install requests
 
@@ -583,9 +609,9 @@ install link and opens the store review, where the permissions are read and
 approved when that install ends; **Reject** works as for any request, and the
 person reads the reason on their *My requests*.
 
-![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.a64df82ef245.png)
+![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.ec6723def503.png)
 
-![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.8217c4046e38.png)
+![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.4f18ee6e170c.png)
 
 ### Leaving one
 
@@ -622,7 +648,7 @@ here, which engines this host has, whether signatures are required, and when
 the apps' sources were last checked for updates; **Check for updates** beside
 **Refresh** asks them now.
 
-![The Apps tab, a language pack among the apps](https://filex.sh/shots/langpack/apps-list-1440.50e11eedf3d4.png)
+![The Apps tab, a language pack among the apps](https://filex.sh/shots/langpack/apps-list-1440.004f0c819981.png)
 
 A **language pack** (below) sits in the same list and is read the same way -
 its row says what it is, and, per language, how much of THIS filex it
@@ -949,7 +975,10 @@ database - is [APP-PLUGINS-API.md → The scheduled wake-up](APP-PLUGINS-API.md#
   writes needs *editor* on the file; a storage that is read-only refuses
   writing actions (the server says on each action whether a click there would
   go through, and the menu shows only those); files inside an encrypted folder
-  are never offered - the server has no key to hand the app; filex's own
+  and single encrypted files (`.fxe`) are never offered - the server has no
+  key to hand the app, and every app door refuses them (`403 encrypted`) - in
+  the folder or in Recent, Starred, a tag view, a search or Shared with me,
+  whose rows say they are encrypted (and neither is *Open with* an app); filex's own
   folders (the trash, the version history) are never an app's input either -
   a run on a path there is answered *not found*; and an action that needs one of the
   app's own permissions is offered only to the people who hold it
@@ -1057,8 +1086,9 @@ filex serves the interface from the app's own package and runs it in a
   opaque origin (`sandbox="allow-scripts"`, never `allow-same-origin`), and
   every page of the interface is served with a policy filex builds from the
   app's grant - `connect-src 'none'`, scripts only from the package, no frame
-  of its own, no form, no plug-in. The interface cannot read filex's session,
-  cannot call filex's API, cannot see the page around it.
+  of its own, no form, no plug-in, unless you granted one of the narrow
+  exceptions below. The interface cannot read filex's session, cannot call
+  filex's API, cannot see the page around it.
 - **Everything else goes through filex.** The interface talks to filex over a
   message channel filex set up with that one frame, and filex decides every
   call: it reads only the files the interface was opened with, saves only over
@@ -1079,9 +1109,12 @@ reach the network".
 
 **Decided on purpose** (from the security review of this feature):
 
-- **Any page may frame an interface** (`frame-ancestors *`). The explorer is
+- **Any page may frame an interface** (its pages carry no
+  `frame-ancestors` at all, and filex adds none). The explorer is
   embedded in other sites (the web component, the desktop app), and filex
-  cannot list them. A page that frames an interface directly, without filex,
+  cannot list them; an interface with `ui:frame-package` frames its own
+  pages from its sandbox, an opaque origin that no `frame-ancestors` source
+  matches, not even `*`. A page that frames an interface directly, without filex,
   gets nothing from it: the interface holds no session, no storage and no
   file of the person's - everything it has comes from the page that answered
   its hello, and that page is then the one it talks to.
@@ -1125,6 +1158,27 @@ On top of the permission list, an app with an interface gets an
     own files while it runs (an editor's shape libraries and translations). This
     version's files and nothing else; it reaches no other app, not filex, not
     the network.
+  - **Opens pages of its own package in frames** - `ui:frame-package`: an
+    editor that puts its document in a frame of its own (the office editor
+    app runs ONLYOFFICE's editor that way). Only pages of this version of the
+    package, each served under the same policy: a sandbox of its own, the
+    same script that removes WebRTC, no connection the interface itself does
+    not have. Never another site, another app, a page of filex, or a page the
+    interface wrote itself (`data:` / `blob:`). filex talks only to the frame
+    it drew; the frames inside it talk to that frame, not to filex.
+  - **Reads blob: addresses it made itself** - `ui:connect-blob`: the
+    interface can read, with `fetch` / `XMLHttpRequest`, a `blob:` address
+    it created in your browser (a document it unpacked in memory, handed to
+    an editor that only loads from an address). A `blob:` address is the
+    page's own memory: it reaches no server and opens no other connection.
+  - **Prints documents it hands to filex** - `ui:print`: a sandboxed
+    interface may not open the browser's print dialog, so it hands filex a
+    PDF and filex prints it from a page of its own, each time only after
+    you click *Allow* in filex's question. The print dialog can save the PDF
+    too, so it is the same kind of permission as saving files to your
+    computer.
+  - An app that asks for any of these three needs filex 0.55 or later
+    (`"filex": ">=0.55.0"`): an older filex refuses the manifest.
 - The honest note about WebRTC, always.
 
 An upgrade that adds an address, changes one, or adds an exception is a new
@@ -1164,10 +1218,20 @@ permission and stops at the review like any other.
 - **Its own small store.** An interface cannot keep anything in the browser;
   what it keeps (a panel's width, a recent colour) lives with the person's
   preferences, 16 KiB per app.
+- **Printing** (0.55, `ui:print`). An interface hands filex a PDF and filex
+  opens the browser's print dialog for it - always after asking, above the
+  interface and in its own words - *Reports wants to print “Q3 2026.pdf”.* -
+  with **Allow** and **Don’t allow** (no to the app means `cancelled`, and
+  nothing is printed). Only your click on that *Allow* opens the dialog, even
+  right after you clicked Print in the app: it is a button of filex's own
+  print page, and nothing else can press it. Downloads (`ui:download`) are
+  asked the same way when the app asks on its own.
+
+![An app's interface asks to print a PDF: filex asks above the frame, Allow or Don't allow](https://filex.sh/shots/appprint/print-consent-1280.ae34e6af4815.png)
 
 | The review of an app with its own interface | Its kind of file in **New document**, under **Apps** |
 |---|---|
-| ![The install review's Interface group](https://filex.sh/shots/apps/app-interface-review-1440.5e0e3009d2ba.png) | ![New document offering the app's kind of file](https://filex.sh/shots/apps/app-new-document-1440.3d03f7fa7b67.png) |
+| ![The install review's Interface group](https://filex.sh/shots/apps/app-interface-review-1440.51df0aa460ad.png) | ![New document offering the app's kind of file](https://filex.sh/shots/apps/app-new-document-1440.3d03f7fa7b67.png) |
 
 | …and the interface open on its file type, where filex's preview would be (a small example app, written for these pictures) |
 |---|
@@ -1534,7 +1598,7 @@ fingerprint, and the certificate files to keep.
   file), and the audit trail saved. These controls are offered to anybody who
   may edit the document, not only to the requester.
 
-  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.b5bfdbd379c3.png)
+  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.9642990b704d.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* - and,
@@ -1962,7 +2026,7 @@ license route (`/stores`, `/store-intent…`, `/stores/connection`,
 
 | Route | Purpose |
 |---|---|
-| `GET /` | `{runtime: {enabled, arch_ok, disabled_reason, requires_signature, engines, filex_version, compat_enforced, update_check, updates_checked_at}, plugins: [...]}` - a row carries `compat`, `update_source`, `update` (what the last check found, with the release's `notes`), `previous` (the version kept to go back to), `engine` and `ui` |
+| `GET /` | `{runtime: {enabled, arch_ok, disabled_reason, requires_signature, engines, filex_version, compat_enforced, update_check, updates_checked_at}, plugins: [...]}` - a row carries `compat`, `update_source`, `update` (what the last check found, with the release's `notes`), `previous` (the version kept to go back to), `engine` and `ui`; the lines the list shows are the server's, in the reader's language (0.55: `runtime.said`, `update_said`, `compat.message`, `previous.message` - [APP-PLUGINS-API.md](APP-PLUGINS-API.md#get-apiadminapp-plugins)) |
 | `POST /` | install - multipart `wasm` + `manifest` (+ `ui`, `signature`, `grant` JSON), or JSON `{github_repo, ref, permissions}`, or JSON `{url, manifest_url, sha256, permissions}`; `?dry_run=1` answers the permission review without installing |
 | `GET /{id}` | row + manifest + granted permissions + settings (secrets masked) + overrides + the schedule |
 | `PATCH /{id}` | `{enabled}`. `{auto_update}` answers `400`: nothing updates itself |
@@ -2002,7 +2066,8 @@ Errors carry a code the wizard switches on: `manifest_invalid`,
 `permissions_incomplete` (with `missing`), `name_taken`, `describe_mismatch`,
 `permissions_changed`, `too_large`, `fetch_failed`, `demo_refused`,
 `incompatible` (the app's `filex` range leaves this filex out, with
-`requires` and `filex`), `up_to_date` - see
+`requires` and `filex`), `up_to_date` - and the server's sentence for it in
+the reader's language (`message`); see
 [APP-PLUGINS-API.md → Errors](APP-PLUGINS-API.md#errors).
 
 The user-side routes (`/api/files/plugins/*`, `/api/files/ops/{id}/cancel`)

@@ -286,16 +286,18 @@ func (h *Handler) deleteObject(w http.ResponseWriter, r *http.Request, p *protoc
 		return
 	}
 
-	out, terr := trash.Put(ctx, drv, key)
-	sctx := context.WithoutCancel(ctx)
+	// The bytes and the rows under the storage's row gate (Syncer.Discard,
+	// Purge; issue #201): a storage scan never judges the catalogue between
+	// the two. The gate is waited for on the request; once it is held, the
+	// bytes and the rows go on a context the client cannot cancel (sec055).
+	out, terr := h.sync().Discard(ctx, st, drv, key)
 	switch {
 	case terr == nil && out.Trashed:
-		h.sync().Trash(sctx, st, key, out.Key)
 	case terr == nil && out.Missing:
 		// ⚠ Deleting something that is not there is a SUCCESS in S3, not a
 		// 404. Clients delete optimistically and treat an error as a failed
 		// operation to retry; answering 404 turns a no-op into a retry loop.
-		h.sync().Delete(sctx, st, key)
+		// (Discard dropped whatever rows were left.)
 	case errors.Is(terr, trash.ErrUnsupported):
 		// No trash on this storage: the delete is for good — files.purge.
 		if !set.Can(key, perm.FilesPurge) {
@@ -307,13 +309,17 @@ func (h *Handler) deleteObject(w http.ResponseWriter, r *http.Request, p *protoc
 			WriteError(w, r, http.StatusNotImplemented, "NotImplemented", "this storage cannot delete")
 			return
 		}
-		if derr := del.Delete(ctx, key); derr != nil && !errors.Is(derr, storage.ErrNotFound) {
+		// The bytes are gone for good, so the rows go too rather than sitting
+		// in the trash behind a Restore that could never work.
+		if derr := h.sync().Purge(ctx, st, key, func(ctx context.Context) error {
+			if derr := del.Delete(ctx, key); derr != nil && !errors.Is(derr, storage.ErrNotFound) {
+				return derr
+			}
+			return nil
+		}); derr != nil {
 			WriteError(w, r, statusForStorageErr(derr), codeForWriteErr(derr), derr.Error())
 			return
 		}
-		// The bytes are gone for good, so the rows go too rather than sitting
-		// in the trash behind a Restore that could never work.
-		h.sync().Delete(sctx, st, key)
 	default:
 		WriteError(w, r, statusForStorageErr(terr), codeForWriteErr(terr), terr.Error())
 		return
@@ -497,7 +503,6 @@ func (h *Handler) deleteObjects(w http.ResponseWriter, r *http.Request, p *proto
 	}
 
 	out := DeleteResult{}
-	sctx := context.WithoutCancel(ctx)
 	for _, o := range req.Objects {
 		key := strings.TrimPrefix(o.Key, "/")
 		if key == "" {
@@ -508,13 +513,14 @@ func (h *Handler) deleteObjects(w http.ResponseWriter, r *http.Request, p *proto
 			out.Errors = append(out.Errors, DeleteErrorEntry{Key: o.Key, Code: "AccessDenied", Message: "no write access to this key"})
 			continue
 		}
-		res, terr := trash.Put(ctx, drv, key)
+		// Each key's bytes and rows under the storage's row gate
+		// (Syncer.Discard, issue #201) - one key at a time, so a scan waits
+		// for one object, not for the whole batch.
+		res, terr := h.sync().Discard(ctx, st, drv, key)
 		switch {
 		case terr == nil && res.Trashed:
-			h.sync().Trash(sctx, st, key, res.Key)
 		case terr == nil && res.Missing:
 			// Already gone counts as deleted — see deleteObject.
-			h.sync().Delete(sctx, st, key)
 		default:
 			out.Errors = append(out.Errors, DeleteErrorEntry{
 				Key: o.Key, Code: codeForWriteErr(terr), Message: errString(terr),

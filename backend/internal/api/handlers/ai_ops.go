@@ -29,6 +29,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/realtime"
+	"github.com/brf-tech/filex/backend/internal/rowgate"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -834,7 +835,9 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 	}
 	base := path.Base(rel)
 	// Finished even if the caller leaves half-way through a folder
-	// (detachedMutation).
+	// (detachedMutation), once the row gate below is held: it is waited for
+	// on the caller's own context (waitCtx).
+	waitCtx := ctx
 	ctx, cancel := detachedMutation(ctx)
 	defer cancel()
 
@@ -848,6 +851,18 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 	// of time, so a driver with Delete but no Move permanently erased a
 	// folder's contents while still reporting OnFileTrashed and retagging the
 	// row into the trash — the UI offered a Restore for bytes long gone.
+	//
+	// ⚠ The bytes and the rows go under the storage's row gate
+	// (internal/rowgate, issue #201), held until every branch below has
+	// written its rows: a storage scan between the two would see a live row
+	// whose bytes had left, confirm it gone and drop it - and with it the
+	// trash entry the person could restore from. A folder on an object store
+	// goes object by object: it fences its prefix instead (storage.FenceAt).
+	release, gerr := rowgate.HoldCtx(waitCtx, s.ID, storage.FenceAt(ctx, drv, rel)...)
+	if gerr != nil {
+		return gerr
+	}
+	defer release()
 	out, terr := trash.Put(ctx, drv, rel)
 	switch {
 	case terr == nil && out.Trashed:
@@ -1042,7 +1057,9 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (out *aiEntry, err er
 	}
 
 	// Finished even if the caller leaves half-way through a folder, on either
-	// arm (detachedMutation).
+	// arm (detachedMutation). The row gate is waited for on the caller's own
+	// context (waitCtx): a caller gone before the gate is held moves nothing.
+	waitCtx := ctx
 	ctx, cancel := detachedMutation(ctx)
 	defer cancel()
 
@@ -1050,7 +1067,7 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (out *aiEntry, err er
 		// Two storages have no rename between them, so the bytes travel — the
 		// same engine the queue uses for a cross-depo paste, deliberately not a
 		// second copy of it (ops.Transfer).
-		return a.moveAcross(ctx, sSrc, relSrc, sDst, relDst)
+		return a.moveAcross(waitCtx, ctx, sSrc, relSrc, sDst, relDst)
 	}
 	drv, err := a.resolver(sSrc.ID)
 	if err != nil {
@@ -1115,10 +1132,25 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (out *aiEntry, err er
 			return nil, err
 		}
 	}
-	if err := mv.Move(ctx, relSrc, relDst); err != nil {
+	// The bytes, then the rows, under the storage's row gate
+	// (internal/rowgate, issue #201) - the explorer's move does the same
+	// (vfMove): a storage scan never sees the item at its new name while its
+	// rows still sit at the old one. The name picked above is asked again
+	// once the gate is held: one taken while the move waited is refused, not
+	// replaced (storage.ErrTakenMeanwhile, sec055). A folder on an object
+	// store fences its old and new prefixes instead of holding the storage's
+	// gate while it moves (storage.FenceAt, rowgate.FencedChangeCtx).
+	if err := rowgate.FencedChangeCtx(waitCtx, sSrc.ID, storage.FenceAt(ctx, drv, relSrc, relDst),
+		func() error {
+			if err := storage.StillFree(ctx, drv, relDst, relSrc); err != nil {
+				return err
+			}
+			return mv.Move(ctx, relSrc, relDst)
+		},
+		func() { a.cacheMove(ctx, sSrc, relSrc, relDst) },
+	); err != nil {
 		return nil, err
 	}
-	a.cacheMove(ctx, sSrc, relSrc, relDst)
 	/* bag:b3 event */
 	writehook.OnFileMoved(ctx, sSrc.ID, normalizeDBPath(relSrc), normalizeDBPath(relDst), path.Base(relDst), a.origin)
 	return &aiEntry{
@@ -1135,7 +1167,13 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (out *aiEntry, err er
 // transfer that fails leaves the original where it was. Like the queue's
 // cross-storage move — and unlike a same-storage delete — the source does NOT
 // go through the trash: moving between depolar is done to free the first one.
-func (a *aiOps) moveAcross(ctx context.Context, sSrc *model.Storage, relSrc string, sDst *model.Storage, relDst string) (*aiEntry, error) {
+//
+// The source storage's row gate (sec055): the copy does not start while a
+// judgement holds it, waited for on wait - the caller's own context, so a
+// caller gone in the meantime copies and deletes nothing (rowgate.Await).
+// Once the copy has started the move is finished: the delete waits for the
+// gate on ctx, the detached context the move runs on (rowgate.MoveCtx).
+func (a *aiOps) moveAcross(wait, ctx context.Context, sSrc *model.Storage, relSrc string, sDst *model.Storage, relDst string) (*aiEntry, error) {
 	if sDst.ReadOnly {
 		return nil, storage.ErrReadOnly
 	}
@@ -1191,6 +1229,9 @@ func (a *aiOps) moveAcross(ctx context.Context, sSrc *model.Storage, relSrc stri
 		return nil, err
 	}
 
+	if err := rowgate.Await(wait, sSrc.ID); err != nil {
+		return nil, err
+	}
 	hooks := ops.TransferHooks{
 		OnDir:  func(_, dst string) { a.cacheUpsertDir(ctx, sDst, dst) },
 		OnFile: func(_, dst string, size int64) { a.cacheUpsertFile(ctx, sDst, dst, size, "") },
@@ -1222,14 +1263,29 @@ func (a *aiOps) moveAcross(ctx context.Context, sSrc *model.Storage, relSrc stri
 	// Cache rows for the source side go before the bytes: a row pointing at a
 	// path that is about to disappear is what makes a listing show a file that
 	// is not there.
-	if files, lerr := a.listAllFiles(ctx, srcDrv, relSrc); lerr == nil {
-		for _, f := range files {
-			a.dropCacheRow(ctx, sSrc, f)
+	//
+	// Both steps under the source storage's row gate (internal/rowgate, issue
+	// #201): a storage scan between them would find bytes with no rows and
+	// catalogue them again, as new files about to vanish. Released by defer,
+	// so nothing that panics in between (the rows, the driver) can leave it
+	// held: a held gate keeps every later scan of the storage waiting, and
+	// every later change behind that scan.
+	derr := func() error {
+		release, gerr := rowgate.HoldCtx(ctx, sSrc.ID, storage.FenceAt(ctx, srcDrv, relSrc)...)
+		if gerr != nil {
+			return gerr
 		}
-	}
-	a.dropCacheRow(ctx, sSrc, relSrc)
-	if err := del.Delete(ctx, relSrc); err != nil {
-		return nil, fmt.Errorf("copied to %s, but deleting the source failed: %w", sDst.Name, err)
+		defer release()
+		if files, lerr := a.listAllFiles(ctx, srcDrv, relSrc); lerr == nil {
+			for _, f := range files {
+				a.dropCacheRow(ctx, sSrc, f)
+			}
+		}
+		a.dropCacheRow(ctx, sSrc, relSrc)
+		return del.Delete(ctx, relSrc)
+	}()
+	if derr != nil {
+		return nil, fmt.Errorf("copied to %s, but deleting the source failed: %w", sDst.Name, derr)
 	}
 	/* bag:b3 event — written on the far side, gone on this one */
 	writehook.OnFileDeleted(ctx, sSrc.ID, normalizeDBPath(relSrc), path.Base(relSrc), a.origin)

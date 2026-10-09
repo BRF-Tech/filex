@@ -194,6 +194,11 @@ type searchResult struct {
 	// E2eRoot is the end-to-end encrypted folder the hit sits in (a wire
 	// path); absent otherwise. See e2eRoots.
 	E2eRoot string `json:"e2e_root,omitempty"`
+	// Encrypted is how a FILE hit is end-to-end encrypted, "folder", "vault"
+	// or "file" (a `.fxe`; encryptedKind, the folder listing's rule; task
+	// #189); absent otherwise. An app's interface opened from a search
+	// result is told it.
+	Encrypted string `json:"encrypted,omitempty"`
 	// Score is the ranker's number for this hit, bigger is better within a
 	// tier (filex 0.54, audit D7: the admin search test printed 0.000 for
 	// every row because the client made it up).
@@ -565,10 +570,11 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	// to drop — and so a dropped row can never leak the name of whoever owns
 	// it.
 	h.describeHits(r.Context(), results)
-	roots := newE2eRoots(h.Store)
+	roots := newE2eRoots(h.Store).withVaults(h.ACL)
 	ids := make([]int64, 0, len(results))
 	for i := range results {
 		results[i].E2eRoot = roots.of(r.Context(), results[i].StorageID, results[i].Storage, results[i].Path)
+		results[i].Encrypted = roots.encryptedOf(r.Context(), results[i].StorageID, results[i].Path, results[i].Type != model.NodeTypeDirectory)
 		results[i].Kind = nodefilter.KindOf(results[i].Name, results[i].Mime, results[i].Type == model.NodeTypeDirectory)
 		ids = append(ids, results[i].ID)
 	}

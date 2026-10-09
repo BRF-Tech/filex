@@ -54,6 +54,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/pluginreq"
+	"github.com/brf-tech/filex/backend/internal/printframe"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/queue"
@@ -891,6 +892,9 @@ func BuildRouter(d *Deps) http.Handler {
 		metaH.ThumbRefresh = d.ThumbRefresh
 	}
 	sharedH := handlers.NewShared(d.Store)
+	// The vault rule the rows' `encrypted` asks (#189): the resolver it was
+	// attached to above (AttachVaults).
+	sharedH.AttachACL(d.ACL)
 	sharedH.AttachThumbSigner(thumbSigner)
 	if d.ThumbRefresh != nil {
 		sharedH.ThumbRefresh = d.ThumbRefresh
@@ -1043,6 +1047,17 @@ func BuildRouter(d *Deps) http.Handler {
 	// browser's drag-out, `"mode":"file"`) redeems here too, and is re-judged
 	// as its owner at the redeem — see handlers/download_link.go.
 	r.Get("/z/{ticket}", ah.DownloadArchive)
+
+	// The page filex prints an app's PDF from (`ui.print`, task #189;
+	// internal/printframe): the same for everybody, credential-free, reading
+	// nothing on the server. Filex's pages frame it by path (pageOwnFrames);
+	// it may be framed only by filex, the desktop app and the pages the
+	// operator allows to frame filex (FILEX_FRAME_ANCESTORS).
+	// ⚠ The path is printframe.Path, spelt out so docs/BACKEND.md's route
+	// check reads it.
+	printPage := printframe.Handler(d.Cfg.FrameAncestors)
+	r.Get("/_print/", printPage)
+	r.Head("/_print/", printPage)
 
 	// An app's own interface (internal/wasmplugin uiserve.go): the approved
 	// package's files, credential-free and cookieless by design — what makes
@@ -1528,6 +1543,8 @@ func BuildRouter(d *Deps) http.Handler {
 		apStoreUser := handlers.NewAppStore(d.AppStore, handlers.NewAppPluginsAdmin(d.AppPlugins, d.AppPluginsDisabledReason), d.Cfg.Demo.Mode)
 		apStoreUser.Requests = pluginRequests
 		apStoreUser.Groups = d.Store
+		// Storage plugins on the screen (#215): shown only where they run.
+		apStoreUser.Plugins = d.Plugins
 		r.Route("/api/app-store", apStoreUser.MountUser)
 
 		// Per-user notifications (bell + history + read/unread).
@@ -2051,6 +2068,8 @@ func BuildRouter(d *Deps) http.Handler {
 				// Their descriptors show up in /storage-drivers above the moment
 				// a plugin is running. See handlers/plugins.go, docs/PLUGINS.md.
 				pluginsH := handlers.NewPlugins(d.Plugins, d.Cfg.MultiTenant)
+				// Where a plugin came from, and a paid one's license (#215).
+				pluginsH.Store = d.AppStore
 				r.Route("/plugins", func(r chi.Router) {
 					r.Get("/", pluginsH.List)
 					r.Post("/", pluginsH.Install)
@@ -2105,6 +2124,9 @@ func BuildRouter(d *Deps) http.Handler {
 				// approved through the store review, and that install closes it.
 				apStore.Requests = pluginRequests
 				apStore.Groups = d.Store
+				// A store link for a storage plugin installs through the
+				// plugin manager (#215, handlers/app_store_storage.go).
+				apStore.Plugins = d.Plugins
 				pluginReqH.Store = apStore
 				r.Route("/app-plugins", func(r chi.Router) {
 					apStore.MountAdmin(r)
@@ -3152,8 +3174,9 @@ func officeFrameHost(origin, basePath string, frame func() http.Handler) func(ht
 
 // pageOwnFrames is what a filex page may show of filex ITSELF in a frame, by
 // path (security review UI-11): the app interfaces (`/_appui/`, unless they
-// have an origin of their own) and the download frame an archive starts in
-// (`/z/`). Named for the host the page was asked on and, when the operator
+// have an origin of their own), the download frame an archive starts in
+// (`/z/`) and the page an app's PDF is printed from (`/_print/`,
+// internal/printframe). Named for the host the page was asked on and, when the operator
 // set one, the public URL's host too — behind a proxy that does not pass the
 // Host on, that is the one the browser used.
 func pageOwnFrames(d *Deps) func(*http.Request) []string {
@@ -3174,6 +3197,7 @@ func pageOwnFrames(d *Deps) func(*http.Request) []string {
 				out = append(out, host+base+"/_appui/")
 			}
 			out = append(out, host+base+"/z/")
+			out = append(out, host+base+printframe.Path)
 		}
 		return out
 	}

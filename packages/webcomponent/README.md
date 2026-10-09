@@ -27,13 +27,20 @@ import '@brftech/filex';
 <script type="module" src="https://cdn.jsdelivr.net/npm/@brftech/filex/dist/filex.js"></script>
 ```
 
-> ⚠ **`@brftech/filex` 0.54 needs a filex 0.54 server.** Which files open for editing
+> ⚠ **`@brftech/filex` 0.55 needs a filex 0.55 server.** Which files open for editing
 > (`edit_kinds`), the input limits (`limits`) and the version line
 > (`release`, `commit`, `built`) come from the server's
 > `/api/files/capabilities`; the package keeps no list of its own to fall
 > back on, so against an older server nothing is offered Edit and nothing
 > opens as an office document. Update the server with the package
 > ([API.md](https://github.com/BRF-Tech/filex/blob/main/docs/API.md)).
+
+> ⚠ **An app that prints** (`ui.print`, filex 0.55) prints from filex's own
+> print page, which the explorer frames in your page. Only filex, its desktop
+> app and the server's `FILEX_FRAME_ANCESTORS` may frame that page, so on
+> another site list your page's origin there - otherwise the app is told
+> printing is `unavailable`
+> ([CONFIGURATION.md → Security headers and framing](https://github.com/BRF-Tech/filex/blob/main/docs/CONFIGURATION.md#security-headers-and-framing)).
 
 ## Styles
 

@@ -41,13 +41,69 @@ type Intent struct {
 	// without FILEX_PUBLIC_URL the filex's own origin is the request's Host
 	// (and X-Forwarded-Proto), which that person controls.
 	FilexOrigin string `json:"filex_origin"`
+
+	// A storage plugin's link (Kind == KindStorage, #215): the release's feed
+	// the store reviewed (its sha256 is ManifestSHA256), every build by
+	// platform with the store's artifact signature over the build (its name,
+	// version, platform and sha256 - plugin.VerifyBuild), and what
+	// the store's plugin validator measured. Absent for an app.
+	FeedURL     string                 `json:"feed_url,omitempty"`
+	Binaries    map[string]IntentBuild `json:"binaries,omitempty"`
+	Conformance *Conformance           `json:"conformance,omitempty"`
+}
+
+// IntentBuild is one platform's build of a storage plugin, as a link pins it.
+type IntentBuild struct {
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size,omitempty"`
+	// Sig is the store's artifact key's signature over the build's text -
+	// the link's app and version, this platform, SHA256 (plugin.BuildClaim):
+	// what FILEX_PLUGIN_TRUSTED_KEYS checks when it lists that key.
+	Sig string `json:"sig"`
+}
+
+// Conformance is the store's plugin validator's run of a storage plugin
+// build: filex's own conformance probes against the plugin's selftest area.
+type Conformance struct {
+	Platform     string   `json:"platform"`
+	Filex        string   `json:"filex"`
+	Verified     bool     `json:"verified"`
+	Passed       int      `json:"passed"`
+	Failed       int      `json:"failed"`
+	Skipped      int      `json:"skipped"`
+	Driver       string   `json:"driver,omitempty"`
+	Capabilities []string `json:"capabilities"`
 }
 
 // Intent kinds a link may stand for.
 const (
 	KindApp          = "app"
 	KindLanguagePack = "language_pack"
+	// KindStorage is a storage plugin (#215): installed "from its source",
+	// held to the link's pins (handlers/app_store_storage.go).
+	KindStorage = "storage"
 )
+
+// IsStorage reports whether the link stands for a storage plugin.
+func (in *Intent) IsStorage() bool { return in.Kind == KindStorage }
+
+// LicenseID is the row a link's license is kept under: the app's name, and
+// for a storage plugin "storage:<name>" - so a storage plugin and an app of
+// the same name, from two stores, never share one license.
+func (in *Intent) LicenseID() string { return LicenseID(in.Kind, in.App) }
+
+// LicenseID is the license row of a store entry of kind called name.
+func LicenseID(kind, name string) string {
+	if kind == KindStorage {
+		return StoragePrefix + name
+	}
+	return name
+}
+
+// StoragePrefix starts every license id (and Holder name) of a storage
+// plugin; no app name holds a colon.
+const StoragePrefix = "storage:"
 
 var (
 	repoRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
@@ -136,8 +192,13 @@ func (in *Intent) validate(origin, instance string, now time.Time) error {
 			Message: "this install link was made for " + target + ", not for this filex (" + instance + "); open the store's Install again from this filex",
 			Detail:  map[string]any{"filex_origin": target, "this_filex": instance}}
 	}
-	if in.Kind != KindApp && in.Kind != KindLanguagePack {
-		return errf(CodeIntentInvalid, "the link is for a %q; filex installs apps and language packs from a store", in.Kind)
+	if in.Kind != KindApp && in.Kind != KindLanguagePack && in.Kind != KindStorage {
+		return errf(CodeIntentInvalid, "the link is for a %q; filex installs apps, language packs and storage plugins from a store", in.Kind)
+	}
+	if in.Kind == KindStorage {
+		if err := in.validateStorage(); err != nil {
+			return err
+		}
 	}
 	for _, h := range []string{in.ManifestSHA256, in.WasmSHA256, in.UISHA256} {
 		if h != "" && !shaRe.MatchString(h) {
@@ -190,6 +251,26 @@ func (s *Service) ReadIntent(ctx context.Context, origin, token, instance string
 		return nil, errf(CodeIntentUsed, "this install link was already used here (%s, %s)", used.Result, used.At.UTC().Format(time.RFC3339))
 	}
 	return &in, nil
+}
+
+// validateStorage checks a storage plugin link's own fields: a feed read from
+// https, at least one build, and every build pinned and addressed over https.
+func (in *Intent) validateStorage() error {
+	if !strings.HasPrefix(strings.TrimSpace(in.FeedURL), "https://") {
+		return errf(CodeIntentInvalid, "the link names no feed (feed_url, an https address)")
+	}
+	if len(in.Binaries) == 0 {
+		return errf(CodeIntentInvalid, "the link names no build")
+	}
+	for plat, b := range in.Binaries {
+		if !shaRe.MatchString(b.SHA256) {
+			return errf(CodeIntentInvalid, "the %s build in the link is not pinned by a lower-case SHA-256", plat)
+		}
+		if !strings.HasPrefix(strings.TrimSpace(b.URL), "https://") {
+			return errf(CodeIntentInvalid, "the %s build in the link is not an https address", plat)
+		}
+	}
+	return nil
 }
 
 // usedIntent is the row an install link leaves once it is done.
@@ -250,6 +331,10 @@ type Pending struct {
 	// RequestID is the plugin request (pluginreq) the link was asked for by
 	// an approval in the embedded store (RequestFor); 0 for a magic link.
 	RequestID int64
+	// LegacySignature: the storage plugin's build was taken with a
+	// signature in the old sha256-only form (plugin.VerifyBuild; accepted
+	// during 0.55 with a warning). Finish says so in the audit row.
+	LegacySignature bool
 }
 
 // pendingLife bounds how long a reviewed link waits (its own expiry, if
@@ -351,6 +436,17 @@ type installSource struct {
 // install link was signed by, or the one its license is with; "" when it was
 // not installed from a store.
 func (s *Service) InstalledFrom(ctx context.Context, app string) (string, error) {
+	return s.installedFrom(ctx, app)
+}
+
+// StorageInstalledFrom is InstalledFrom for a storage plugin.
+func (s *Service) StorageInstalledFrom(ctx context.Context, name string) (string, error) {
+	return s.installedFrom(ctx, LicenseID(KindStorage, name))
+}
+
+// installedFrom is InstalledFrom by the id a store entry is kept under
+// (LicenseID).
+func (s *Service) installedFrom(ctx context.Context, app string) (string, error) {
 	var src installSource
 	if ok, err := s.getJSON(ctx, keySourcePrefix+app, &src); err != nil {
 		return "", err
@@ -372,7 +468,7 @@ func (s *Service) Finish(ctx context.Context, p *Pending, result string, actorID
 	s.markUsed(ctx, p.Origin, p.Intent, result)
 	if result == "installed" {
 		src := installSource{Store: p.Origin, Repo: p.Intent.Repo, Version: p.Intent.Version, At: s.opts.Now().UTC()}
-		if err := s.putJSON(ctx, keySourcePrefix+p.Intent.App, src); err != nil {
+		if err := s.putJSON(ctx, keySourcePrefix+p.Intent.LicenseID(), src); err != nil {
 			s.log.Warn("app-store: where the app came from was not recorded", slog.String("app", p.Intent.App), slog.Any("err", err))
 		}
 	}
@@ -388,10 +484,18 @@ func (s *Service) Finish(ctx context.Context, p *Pending, result string, actorID
 	if result != "installed" {
 		action = "app_store.cancel"
 	}
-	s.audit(ctx, actorID, action, "app_plugin", p.Intent.App, map[string]any{
-		"store": p.Origin, "app": p.Intent.App, "version": p.Intent.Version, "repo": p.Intent.Repo, "ref": p.Intent.Ref,
+	target := "app_plugin"
+	if p.Intent.IsStorage() {
+		target = "plugin"
+	}
+	meta := map[string]any{
+		"store": p.Origin, "app": p.Intent.App, "kind": p.Intent.Kind, "version": p.Intent.Version, "repo": p.Intent.Repo, "ref": p.Intent.Ref,
 		"token_id": p.Intent.TokenID, "paid": p.Intent.Paid,
-	})
+	}
+	if p.LegacySignature {
+		meta["legacy_signature"] = true
+	}
+	s.audit(ctx, actorID, action, target, p.Intent.App, meta)
 }
 
 // ── What the source serves, against what the link pinned ───────────────
@@ -486,7 +590,7 @@ func normalizePerms(ids []string) []string {
 
 func derivedPermission(id string) bool {
 	switch id {
-	case "ui", "ui:eval", "ui:wasm-eval", "ui:package-fetch", "ui:download":
+	case "ui", "ui:eval", "ui:wasm-eval", "ui:package-fetch", "ui:download", "ui:frame-package", "ui:connect-blob", "ui:print":
 		return true
 	}
 	for _, p := range []string{"ui:", "ui-net:", "ui-viewer:", "ui-new:", "thumbnail:"} {

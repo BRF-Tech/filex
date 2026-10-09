@@ -62,6 +62,9 @@ describe('AppPluginsApi', () => {
       compat_enforced: true,
       update_check: false,
       updates_checked_at: undefined,
+      // The header's lines are the server's (runtime.said, 0.55): none said,
+      // none drawn.
+      said: {},
     });
     expect(res.plugins).toEqual([]);
   });

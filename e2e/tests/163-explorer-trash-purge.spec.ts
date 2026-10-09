@@ -87,4 +87,45 @@ test.describe('The explorer Trash deletes permanently', () => {
     const entries = ((await list.json()).entries ?? []) as Array<{ name: string }>;
     expect(entries.map((e) => e.name)).not.toContain(name);
   });
+
+  // The test above was red in WebKit on GitHub's full matrix (runs
+  // 37661356185, 37702037032; task #199): the dialog closed and no purge left.
+  // The trash was listed a second time right at the right-click (a realtime
+  // refresh), and every listing of the trash cleared the selection, so
+  // "Delete permanently" found nothing to delete. Here the refresh is the
+  // Refresh button's, at a moment the test chooses.
+  test('a refresh of the trash keeps what was selected, and "Delete permanently" then deletes it', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('filex.tourDone', '1'));
+    await page.addInitScript(() => localStorage.setItem('filex.locale', 'tr'));
+    await loginAs(page);
+    await setAccountViewMode(page.request, 'list');
+    const name = `yenilenen-${STAMP}.txt`;
+    await trashed(page.request, name);
+
+    await page.goto(`/drive/explore?storage=${encodeURIComponent(STORAGE)}`);
+    await page.getByTestId('sidenav').getByText(/^(Trash|Çöp kutusu)$/i).click();
+    const row = page.locator('.fe-list__row').filter({ hasText: name }).first();
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await row.locator('.fe-list__check').first().click();
+    await expect(row).toHaveAttribute('aria-selected', 'true');
+
+    const relisted = page.waitForResponse(
+      (r) => r.request().method() === 'GET' && new URL(r.url()).pathname === '/api/files/manager/trash',
+    );
+    await page.getByRole('button', { name: /^(Refresh|Yenile)$/ }).first().click();
+    expect((await relisted).ok()).toBe(true);
+    await expect(row, 'the refresh dropped the selection').toHaveAttribute('aria-selected', 'true');
+
+    await row.click({ button: 'right' });
+    await page.getByRole('menu').first().getByRole('menuitem', { name: /^(Delete permanently|Kalıcı olarak sil)$/ }).click();
+    const dialog = page.locator('.fe-modal__card').last();
+    await expect(dialog).toContainText('kalıcı olarak silinecek');
+    const purged = page.waitForResponse(
+      (r) => r.request().method() === 'POST' && r.url().includes('/api/admin/trash/purge'),
+    );
+    await dialog.getByRole('button', { name: /^(Delete permanently|Kalıcı olarak sil)$/ }).click();
+    const res = await purged;
+    expect(res.ok(), `purge ${res.status()}`).toBeTruthy();
+    await expect(row, 'the item is still in the trash').toHaveCount(0, { timeout: 15_000 });
+  });
 });

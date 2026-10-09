@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/api"
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
@@ -396,6 +397,13 @@ func TestAppPlugins_Run_RefusesWhatDoesNotApply(t *testing.T) {
 		map[string]any{"storage_id": f.st.ID, "paths": []string{"img.png"}})
 	assert.Equal(t, http.StatusUnprocessableEntity, status, string(raw))
 	assert.Contains(t, string(raw), "not_applicable")
+	// The one envelope: the code and the server's sentence (it was an
+	// English sentence for every reader, and the explorer worded it itself).
+	var refused map[string]any
+	require.NoError(t, json.Unmarshal(raw, &refused))
+	assert.Equal(t, "not_applicable", refused["error"])
+	assert.Contains(t, []any{apierr.Text("en", "not_applicable", nil), apierr.Text("tr", "not_applicable", nil)}, refused["message"])
+	assert.NotEqual(t, "this action does not apply to the selected items", refused["message"])
 
 	status, raw = doReq(t, f.admin, http.MethodPost, f.srv.URL+"/api/files/plugins/actions/echo/nope/run",
 		map[string]any{"storage_id": f.st.ID, "paths": []string{"img.png"}})

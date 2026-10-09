@@ -12,6 +12,7 @@ import { useCapabilitiesStore } from '@/stores/capabilities';
 import { usePendingOpsStore } from '@/stores/pendingOps';
 import type { PendingOp } from '@/api/ops';
 import { trashApi, type TrashEntry, type TrashEmptyPreview, type TrashEmptyStatus } from '@/api/trash';
+import { extractError } from '@/api/client';
 import Button from '@/components/ui/Button.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Select from '@/components/ui/Select.vue';
@@ -58,7 +59,8 @@ async function load() {
     total.value = res.total;
     summary.value = res.summary ?? '';
   } catch (err: any) {
-    toast.error(err?.response?.data?.error ?? String(err));
+    // The server's sentence (`message`), never its code or axios's English.
+    toast.error(extractError(err, t('errors.generic')));
   } finally {
     loading.value = false;
   }
@@ -127,8 +129,11 @@ function sayJobEnd(entry: TrashEntry, job: RowJob, op: PendingOp) {
   // ⚠ Why it did not go is the SERVER's sentence (the job row's `summary`,
   // 0.54 finding A15): this page matched the job's English error with a
   // regex ("already exists") and worded the rest itself.
-  if (op.summary) {
-    toast.error(op.summary);
+  // A row without a summary (a job that is not the trash's own) still has
+  // the server's sentence for its failure (`error_text`, ops errcode.go).
+  const said = op.summary || op.error_text;
+  if (said) {
+    toast.error(said);
     return;
   }
   const reason = op.error_message ?? '';
@@ -137,10 +142,14 @@ function sayJobEnd(entry: TrashEntry, job: RowJob, op: PendingOp) {
 
 /** A refused request, said. One that got no answer at all has been said
  *  already, once for the page, by the client (errors.network); printing it here
- *  put "AxiosError: timeout of 30000ms exceeded" beside that. */
+ *  put "AxiosError: timeout of 30000ms exceeded" beside that.
+ *
+ *  ⚠ What it says is the SERVER's sentence (`message`, internal/apierr): since
+ *  0.54 `error` holds a code ("name_taken", "locked"), and this page printed
+ *  it as it came. */
 function sayRefusal(err: any) {
   if (!err?.response) return;
-  toast.error(err.response.data?.error ?? t('errors.generic'));
+  toast.error(extractError(err, t('errors.generic')));
 }
 
 async function restore(entry: TrashEntry) {
@@ -158,13 +167,9 @@ async function restore(entry: TrashEntry) {
     await load();
   } catch (err: any) {
     markWorking(entry.id, null);
-    // 409 EXISTS: something holds the original path, and the server refused
-    // rather than overwrite it. Said in the reader's language — the server's
-    // own sentence is English and names no remedy.
-    if (err?.response?.status === 409 && err?.response?.data?.code === 'EXISTS') {
-      toast.error(t('trash.restore_taken', { name: err.response.data.name || entry.name }));
-      return;
-    }
+    // 409 `name_taken` (EXISTS): something holds the original path, and the
+    // server refused rather than overwrite it. Its sentence says so, in the
+    // reader's language; this page used to word it itself from `code`.
     sayRefusal(err);
   }
 }
@@ -242,10 +247,7 @@ async function askPreview() {
     });
     if (ask === previewAsk) emptyPreview.value = p;
   } catch (err: any) {
-    if (ask === previewAsk) {
-      const data = err?.response?.data;
-      emptyPreviewError.value = data?.message ?? data?.error ?? t('errors.generic');
-    }
+    if (ask === previewAsk) emptyPreviewError.value = extractError(err, t('errors.generic'));
   }
 }
 
@@ -278,7 +280,7 @@ async function emptyTrash() {
     }
     // The server's sentence (`message`, the run's `summary`), never its
     // English record or a status code (finding A4).
-    toast.error(data?.message ?? data?.summary ?? data?.error ?? String(err));
+    toast.error(data?.message ?? data?.summary ?? extractError(err, t('errors.generic')));
   } finally {
     emptyStarting.value = false;
   }
@@ -354,7 +356,9 @@ async function stopEmpty() {
   try {
     await trashApi.cancelEmpty(id);
   } catch (err: any) {
-    toast.error(err?.response?.data?.error ?? String(err));
+    // NOT_CANCELLABLE / FINISHED come with the server's sentence (`message`);
+    // `error` is their code.
+    toast.error(extractError(err, t('errors.generic')));
   } finally {
     emptyStopping.value = false;
   }

@@ -368,14 +368,17 @@ describe('StoreInstall', () => {
     expect(w.find('[data-testid="store-install-cancelled"]').exists()).toBe(true);
   });
 
-  it('a refusal is a sentence, not the server\'s English', async () => {
+  it("a refusal is the server's sentence, as it came", async () => {
     waitingLink();
-    intentAnswers = [{ status: 409, data: { error: 'intent_pin_mismatch', message: 'raw', detail: { mismatches: [{ field: 'manifest_sha256', link: 'a', source: 'b' }] } } }];
+    // 0.55 (#209): the sentence is the server's (srvtext
+    // server.store.intent_pin_mismatch, in the reader's language), printed as
+    // it came - the page builds none of its own from the code and the detail.
+    const said = "What the app's repository serves is not what the store approved (manifest_sha256). Nothing was installed.";
+    intentAnswers = [{ status: 409, data: { error: 'intent_pin_mismatch', message: said, detail: { mismatches: [{ field: 'manifest_sha256', link: 'a', source: 'b' }] } } }];
     const w = mountPage();
     await flushPromises();
     const err = w.find('[data-testid="store-install-error"]').text();
-    expect(err).toContain('manifest_sha256');
-    expect(err).toContain('Nothing was installed');
-    expect(err).not.toContain('raw');
+    expect(err).toContain(said);
+    expect(err, 'no code on the screen').not.toContain('intent_pin_mismatch');
   });
 });

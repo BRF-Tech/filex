@@ -726,7 +726,7 @@ describe('Sign-in security - a public demo', () => {
       expect(fwd.text()).toContain(hidden);
       expect(w.findAll('[data-testid^="login-forwarder-trust-"]'), 'a masked peer names nothing to trust').toHaveLength(0);
       const card = w.get('[data-testid="login-proxies-auto"]');
-      expect(card.findAll('[data-testid="login-proxies-auto-believes"] span').map((s) => s.text()).filter((x) => x === hidden)).toHaveLength(2);
+      expect(card.findAll('[data-testid="login-proxies-auto-believes"] > span').map((s) => s.text()).filter((x) => x === hidden)).toHaveLength(2);
       expect(card.text()).toContain(hidden);
       if (locale === 'tr') {
         expect(fwd.text()).not.toContain(MASK);

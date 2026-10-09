@@ -25,6 +25,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 )
@@ -80,11 +81,11 @@ func (h *FileTypesAdmin) writable(w http.ResponseWriter, r *http.Request, what s
 		return false
 	}
 	if h.Demo {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "demo_refused", "message": "default apps cannot be changed on the demo instance"})
+		writeErrorSaid(w, r, http.StatusForbidden, "demo_refused", "default_apps_demo", nil)
 		return false
 	}
 	if h.Assoc == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "app_plugins_disabled", "message": "app plugins are off here: filex alone opens and draws every kind"})
+		writeErrorSaid(w, r, http.StatusServiceUnavailable, "app_plugins_disabled", "default_apps_off", nil)
 		return false
 	}
 	return true
@@ -104,12 +105,12 @@ func (h *FileTypesAdmin) Put(w http.ResponseWriter, r *http.Request) {
 	}
 	ext := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(chi.URLParam(r, "ext")), "."))
 	if !assoc.ValidExt(ext) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_kind", "message": "a kind is a file extension: lower-case letters and digits, no dot"})
+		writeErrorSaid(w, r, http.StatusBadRequest, "bad_kind", "bad_file_kind", nil)
 		return
 	}
 	var req putFileTypeRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		writeError(w, r, http.StatusBadRequest, "bad_json", nil)
 		return
 	}
 	type change struct {
@@ -131,13 +132,13 @@ func (h *FileTypesAdmin) Put(w http.ResponseWriter, r *http.Request) {
 		}
 		var rule assoc.Rule
 		if err := json.Unmarshal(c.raw, &rule); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json", "message": c.capability + ": {order: [...], off: [...]}"})
+			writeErrorSaid(w, r, http.StatusBadRequest, "bad_json", "rule_shape", apierr.Params{"capability": c.capability}, "field", c.capability)
 			return
 		}
 		changes = append(changes, change{capability: c.capability, rule: &rule})
 	}
 	if len(changes) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "give open and/or thumbnail"})
+		writeErrorSaid(w, r, http.StatusBadRequest, "bad_request", "open_or_thumbnail", nil)
 		return
 	}
 	ctx := r.Context()
@@ -146,7 +147,7 @@ func (h *FileTypesAdmin) Put(w http.ResponseWriter, r *http.Request) {
 	for _, c := range changes {
 		if c.rule != nil {
 			if err := h.Assoc.Check(c.capability, ext, *c.rule); err != nil {
-				h.fail(w, err)
+				h.fail(w, r, err)
 				return
 			}
 		}
@@ -158,7 +159,7 @@ func (h *FileTypesAdmin) Put(w http.ResponseWriter, r *http.Request) {
 		before[c.capability] = ruleOrDefault(h.Assoc.Rule(ctx, c.capability, ext))
 		if c.rule == nil {
 			if _, err := h.Assoc.Reset(ctx, c.capability, ext); err != nil {
-				h.fail(w, err)
+				h.fail(w, r, err)
 				return
 			}
 			after[c.capability] = "default"
@@ -166,7 +167,7 @@ func (h *FileTypesAdmin) Put(w http.ResponseWriter, r *http.Request) {
 		}
 		stored, err := h.Assoc.Put(ctx, c.capability, ext, *c.rule, by)
 		if err != nil {
-			h.fail(w, err)
+			h.fail(w, r, err)
 			return
 		}
 		after[c.capability] = stored
@@ -186,7 +187,7 @@ func (h *FileTypesAdmin) Reset(w http.ResponseWriter, r *http.Request) {
 	}
 	ext := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(chi.URLParam(r, "ext")), "."))
 	if !assoc.ValidExt(ext) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_kind", "message": "a kind is a file extension: lower-case letters and digits, no dot"})
+		writeErrorSaid(w, r, http.StatusBadRequest, "bad_kind", "bad_file_kind", nil)
 		return
 	}
 	ctx := r.Context()
@@ -194,7 +195,7 @@ func (h *FileTypesAdmin) Reset(w http.ResponseWriter, r *http.Request) {
 	for _, c := range []string{assoc.CapOpen, assoc.CapThumbnail} {
 		before[c] = ruleOrDefault(h.Assoc.Rule(ctx, c, ext))
 		if _, err := h.Assoc.Reset(ctx, c, ext); err != nil {
-			h.fail(w, err)
+			h.fail(w, r, err)
 			return
 		}
 	}
@@ -211,11 +212,17 @@ func ruleOrDefault(r *assoc.Rule) any {
 	return r
 }
 
-func (h *FileTypesAdmin) fail(w http.ResponseWriter, err error) {
+func (h *FileTypesAdmin) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var bad *assoc.ErrInvalid
 	if errors.As(err, &bad) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_rule", "message": bad.Message})
+		// The rule's own reason in the reader's language
+		// (server.error.rule_<say>); the English stays as detail.
+		said := "rule_" + bad.Say
+		if bad.Say == "" || !apierr.Known(said) {
+			said = "rule_unknown"
+		}
+		writeErrorSaid(w, r, http.StatusBadRequest, "invalid_rule", said, apierr.Params(bad.Params), "detail", bad.Message)
 		return
 	}
-	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", err.Error())
 }

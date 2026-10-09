@@ -12179,6 +12179,9 @@ filex-explorer {
    page draws it:
      · `.tbl-sub` / `.tbl-clamp` / `.tbl-mono` — secondary text, a
        free-text value that must not stretch its column, a technical value;
+     · `.tbl-pill` / `.tbl-pill__text` — a pill in a cell, which shortens
+       inside its own border (the rule is at the end of this file,
+       "fix/055-narrow-table"; the panel's Badge carries both classes);
      · `.tbl-rowactions*` — the row's ONE labelled Actions control
        (components/RowActions.vue), the admin counterpart of the ⋮;
      · `.tbl-bar` / `.tbl-foot` / `.tbl-page` — the toolbar above a framed
@@ -15463,3 +15466,98 @@ filex-explorer {
   color: var(--fe-text);
 }
 /* === /#168 === */
+
+/* === fix/055-narrow-table - a header and a pill narrower than their words ===
+   Appended at the END, like every wave's block: the table's rules above are
+   files several agents edit at once.
+
+   The 0.55 release shots at 390px, light and dark, English and Turkish:
+   "Mağaza denetimi" drawn as "Mağaza d" and "Store checks" as "Store che" -
+   cut mid-letter with no ellipsis - and the requests table's "Bekliyor" /
+   "Waiting" running out through the border of its own pill, its dot squeezed
+   to nothing. Both are the ONE table's rules, so both are fixed here, for
+   every table at once, and nowhere else. */
+
+/* 1. A HEADER cut short ends in an ellipsis, and its whole name is the title
+   (DataTable: the label's `title`, the sort button's "Sort by {col}").
+
+   ⚠ The sort button is a flex row (label + arrow), and `text-overflow` cuts
+   only the text of a BLOCK box: on the button it clipped the anonymous text
+   at the edge and drew no ellipsis at all. The words are now a box of their
+   own (`fe-list__sort-label`), and the arrow keeps its size beside them. */
+.fe-list__head .fe-list__sort {
+  max-width: 100%;
+}
+.fe-list__sort-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-list__sort-arrow {
+  flex: 0 0 auto;
+}
+
+/* 2. A PILL IN A CELL - a status ("Waiting"), "Installed", a role, a source,
+   the explorer's lock and link chips: `tbl-pill`, its words `tbl-pill__text`
+   (the panel's Badge carries both by itself).
+
+   The choice was between a column that makes room (`min-width: max-content`
+   on the pill's cell) and a pill that shortens inside its own border. The
+   pill shortens: a cell's width is its column's track, shared with the header
+   and every other row, so a cell that grew to fit its pill would push that
+   one row out of line with its header, and a column a person dragged narrower
+   than a pill would quietly refuse to go. Every other value in a cell already
+   ends in an ellipsis with its whole text on hover; a pill now does the same -
+   its border stays whole, the words end in "...", the dot and any glyph keep
+   their size, and DataTable gives the whole text as the pill's title while it
+   is cut (lib/cutTitle). A pill that fits draws exactly as before.
+
+   ⚠ Zero specificity on the cell, one class on the pill: wins over the chips'
+   own `flex: 0 0 auto` (earlier in this file) by order, and a page's own rule
+   for its pill still wins over this. */
+:where(.fe-list__cell) .tbl-pill {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  /* For a pill whose words are its own text (a storage's tags): a flex pill
+     ignores these, and its `tbl-pill__text` below does the cutting. */
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:where(.fe-list__cell) .tbl-pill > * {
+  flex-shrink: 0;
+}
+:where(.fe-list__cell) .tbl-pill > .tbl-pill__text {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* In the explorer's Name cell the NAME gives way first: the lock or link chip
+   beside it starts to shorten only once the name is down to nothing. The
+   lopsided factor does that - flex shrinks each item in proportion to factor
+   times size, and once the name is frozen at zero the chip is the only one
+   left to give.
+   ⚠ Not 1000: until the name is gone the chip still loses up to its own
+   width / factor, and 60px / 1000 is 0.06px - more than a layout unit
+   (1/64px), enough for a browser to end "Locked" in an ellipsis beside a name
+   that still had room to give. At 100000 that share is far below one unit.
+   A row with no chip has nothing else that shrinks, so it is unchanged. */
+:where(.fe-list__cell) .fe-list__name-wrap {
+  flex-shrink: 100000;
+}
+
+/* 3. The frozen ⋮'s edge while the table runs on UNDER it (DataTable
+   `is-more-end`), not only after it has been scrolled. At 390px the
+   explorer's Modified column continued beneath the ⋮ of a table nobody had
+   scrolled yet, and its header read "Mo" against a cell with no edge - a word
+   cut short, to the eye, rather than a column that goes on. The label was not
+   overflowing its own box there, so no ellipsis could say it; the edge does.
+   The same edge, on the same side, as the scrolled one above. */
+.fe-list.is-pin-menu.is-more-end .fe-list__col--menu {
+  box-shadow: calc(-1px * var(--filex-dir-x, 1)) 0 0 0 var(--fe-border);
+}
+/* === /fix/055-narrow-table === */

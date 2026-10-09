@@ -16,9 +16,16 @@
  *  - the one that opens it: what "Open with" chose, else the person's own
  *    "always open with" choice (lib/openWith), else the first that is on -
  *    each only when it is on. With every handler off, filex's own viewer
- *    opens it: a file must open somewhere.
+ *    opens it: a file must open somewhere;
+ *  - an end-to-end encrypted file (lib/encryptedRow, or a file of a listing
+ *    the host knows is encrypted: `inEncrypted`) has ONE handler, filex's own
+ *    viewer, which decrypts it in the tab - no app's interface and no
+ *    ONLYOFFICE, whatever the rule or the person's choice says (#189). The
+ *    same answer from a folder, Recent, Starred, a tag view, a search or
+ *    Shared with me.
  */
 import type { OpenRule, PluginViewRow } from '../types/Plugins';
+import { rowIsEncrypted, type EncryptedRowLike } from './encryptedRow';
 import { appliesItemOf, appliesMatches, type AppliesNodeLike } from './pluginApplies';
 
 /** filex's own viewer, as a handler id (and "Open with"'s choice of it). */
@@ -49,9 +56,25 @@ export interface OpenHandlerOptions {
    * nothing, and a choice of it falls through to the next handler.
    */
   onlyOffice?: boolean;
+  /**
+   * The file sits where the host already knows everything is end-to-end
+   * encrypted (an encrypted folder's listing, a vault the tab has open) -
+   * for a row that may not say so itself. Only filex's own viewer opens it
+   * (onlyBuiltinOpens).
+   */
+  inEncrypted?: boolean;
 }
 
-type NodeLike = (AppliesNodeLike & { type?: string }) | null | undefined;
+type NodeLike = (AppliesNodeLike & EncryptedRowLike & { type?: string }) | null | undefined;
+
+/**
+ * Only filex's own viewer opens this file: it is end-to-end encrypted, by its
+ * own row (lib/encryptedRow) or by where the host found it (`inEncrypted`).
+ * THE rule for every surface that offers an app or ONLYOFFICE a file.
+ */
+export function onlyBuiltinOpens(node: NodeLike, opts?: OpenHandlerOptions | null): boolean {
+  return !!node && node.type === 'file' && (!!opts?.inEncrypted || rowIsEncrypted(node));
+}
 
 /** One handler that opens a file: an app's interface, or filex's own (view null). */
 export interface OpenHandler {
@@ -114,6 +137,7 @@ export function openHandlersFor(
   opts?: OpenHandlerOptions | null,
 ): OpenHandlers {
   if (!node || node.type !== 'file') return { on: [], off: [], custom: false };
+  if (onlyBuiltinOpens(node, opts)) return { on: [{ id: BUILTIN_VIEWER, view: null }], off: [], custom: false };
   const avail: OpenHandler[] = [
     ...(opts?.onlyOffice && officeOpensKind(openKindOf(node)) ? [{ id: ONLYOFFICE_VIEWER, view: null }] : []),
     ...appViewersFor(views, node).map((v) => ({ id: openHandlerId(v), view: v })),

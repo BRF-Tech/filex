@@ -149,6 +149,10 @@ type InstallRefusal struct {
 	Status   int      `json:"status,omitempty"`
 	Requires string   `json:"requires,omitempty"`
 	Filex    string   `json:"filex,omitempty"`
+	// Detail is the server's English behind Message once the refusal is
+	// said to a reader (Said): Message is then the reader's sentence.
+	// Empty on a stored refusal, whose Message is still the English.
+	Detail string `json:"detail,omitempty"`
 }
 
 // AutoUpdated is one automatic update: from which version, to which, when.

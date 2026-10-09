@@ -2,6 +2,7 @@ package assoc
 
 import (
 	"context"
+	"errors"
 	"sort"
 )
 
@@ -91,22 +92,52 @@ func OnlyNewInstallKinds(rows []InstallKind, before map[string]bool) []InstallKi
 //     administrator already has for a kind the app handled before stays as it
 //     is.
 func (s *Service) PlaceForApp(ctx context.Context, app string, placements []Placement, only map[string]bool, by *int64) []string {
+	var failed []string
+	for _, f := range s.PlaceForAppFailures(ctx, app, placements, only, by) {
+		failed = append(failed, f.Capability+" ."+f.Ext+": "+f.Message)
+	}
+	return failed
+}
+
+// PlaceFailure is one File types choice that was not written: the kind, and
+// why. Say names the reader's sentence (server.error.<Say>, said by the
+// handlers in the reader's language) and Params fill it; Message is the
+// English, for a log.
+type PlaceFailure struct {
+	Capability string
+	Ext        string
+	Handler    string
+	Say        string
+	Params     map[string]string
+	Message    string
+}
+
+// PlaceForAppFailures is PlaceForApp answering each choice it could not
+// write with the sentence it is said in.
+func (s *Service) PlaceForAppFailures(ctx context.Context, app string, placements []Placement, only map[string]bool, by *int64) []PlaceFailure {
 	if s == nil || len(placements) == 0 {
 		return nil
 	}
-	var failed []string
+	var failed []PlaceFailure
 	for _, p := range placements {
-		what := p.Capability + " ." + p.Ext + ": "
+		f := PlaceFailure{Capability: p.Capability, Ext: p.Ext, Handler: p.Handler}
 		if AppOf(p.Handler) != app {
-			failed = append(failed, what+p.Handler+" is not this app's")
+			f.Say, f.Message = "place_not_own", p.Handler+" is not this app's"
+			failed = append(failed, f)
 			continue
 		}
 		if only != nil && !only[KindKey(p.Capability, p.Ext)] {
-			failed = append(failed, what+"not a kind this version adds; its order stays as it is")
+			f.Say, f.Message = "place_not_new", "not a kind this version adds; its order stays as it is"
+			failed = append(failed, f)
 			continue
 		}
 		if err := s.Place(ctx, p, by); err != nil {
-			failed = append(failed, what+err.Error())
+			f.Say, f.Message = "place_failed", err.Error()
+			var bad *ErrInvalid
+			if errors.As(err, &bad) && bad.Say != "" {
+				f.Say, f.Params = "rule_"+bad.Say, bad.Params
+			}
+			failed = append(failed, f)
 		}
 	}
 	return failed

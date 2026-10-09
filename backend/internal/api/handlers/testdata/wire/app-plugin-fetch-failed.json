@@ -1,6 +1,7 @@
 {
+  "detail": "filex-app.json not found in BRF-Tech/yok-boyle-bir-depo: http 404 from raw.githubusercontent.com",
   "error": "fetch_failed",
-  "message": "filex-app.json not found in BRF-Tech/yok-boyle-bir-depo: http 404 from raw.githubusercontent.com",
+  "message": "No filex-app.json was found in BRF-Tech/yok-boyle-bir-depo (tried: main, master). Check that the repository exists and is public, that filex-app.json is at its root, and - if you entered a ref - that the tag or branch exists.",
   "reason": "manifest_not_found",
   "refs": [
     "main",

@@ -199,6 +199,30 @@ func (s *Service) occupied(ctx context.Context, drv storage.Driver, n *model.Nod
 	return storage.Exists(ctx, drv, rel)
 }
 
+// RestoreFence answers the prefixes a restore of nodeID on storageID fences
+// instead of holding the storage's row gate (rowgate.HoldCtx): the entry's
+// trash key and its original path, when the entry is a folder on a storage
+// that brings a folder back one object at a time (TakeBack's per-object walk
+// on an object store, storage.FenceFor) - minutes or hours for a large one,
+// during which the storage's whole scan would otherwise wait. nil for a file,
+// a storage with real folders, a legacy or vanished entry, or anything it
+// cannot read: the restore then holds the gate as before. It reads one row and
+// asks no storage (the row says whether the entry is a folder).
+func (s *Service) RestoreFence(ctx context.Context, storageID, nodeID int64) []string {
+	if s == nil || s.Store == nil || s.Resolver == nil {
+		return nil
+	}
+	n, err := s.Store.GetNode(ctx, nodeID)
+	if err != nil || n == nil || n.StorageID != storageID || n.DeletedAt == nil || n.StorageKey == "" || Vanished(n) {
+		return nil
+	}
+	drv, err := s.Resolver(storageID)
+	if err != nil {
+		return nil
+	}
+	return storage.FenceFor(drv, n.Type == model.NodeTypeDirectory, n.Path, n.StorageKey)
+}
+
 // Restore lifts the deleted_at flag on a node AND moves the underlying
 // file back from the `.filex-trash/` location to its original path
 // (saved in `storage_key` at delete time).

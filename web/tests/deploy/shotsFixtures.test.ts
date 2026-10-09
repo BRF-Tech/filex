@@ -569,3 +569,77 @@ describe('the scenes run on one clock', () => {
     });
   });
 });
+
+// ⚠ A file a scene uploads through the browser carries ITS OWN time: the
+// File's lastModified. The server ignores it for an ordinary upload, but in a
+// vault it IS the Modified time (docs/E2E-VAULT-FORMAT.md, an entry's
+// `mtime`), kept in the encrypted index where the clock's route cannot move
+// it. A `{ buffer }` handed to setInputFiles becomes a File stamped with the
+// REAL now (the browser's File constructor does not read the page's clock):
+// the 0.54 vault pictures showed the day the scene ran beside September 15.
+// A path carries its file's mtime, pinned to fixtureTime.
+describe('a file a scene uploads through the browser', () => {
+  it('is given by path, never as a buffer stamped with the real now', () => {
+    for (const name of readdirSync(SHOTS).filter((f) => f.endsWith('.mjs'))) {
+      const src = readFileSync(path.join(SHOTS, name), 'utf8');
+      const buffers = src.match(/setInputFiles\(\s*\[?\s*\{[^}]*\bbuffer\s*:/g) ?? [];
+      expect(buffers, `e2e/shots/${name} uploads a buffer through setInputFiles`).toEqual([]);
+    }
+  });
+
+  it('the vault scene pins its uploads to the fixtures’ fixed times', () => {
+    const src = readFileSync(path.join(SHOTS, 'vault.mjs'), 'utf8');
+    expect(src).toMatch(/utimesSync\(full, at, at\)/);
+    expect(src).toMatch(/fixtureTime\(`vault\/\$\{name\}`\)/);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// The 0.55 screens (#215, #189): the store screen's Storage plugins tab, a
+// storage plugin's store review and the question filex asks when an app
+// prints. Read off the scripts - they need a browser and a server to run.
+
+describe('the 0.55 screens have their scenes', () => {
+  const store = readFileSync(path.join(SHOTS, 'store.mjs'), 'utf8');
+  const print = readFileSync(path.join(SHOTS, 'appprint.mjs'), 'utf8');
+
+  it('in every look the owner asked for: English and Turkish, light and dark, 1280 and 390 px', () => {
+    for (const [name, src] of [['store.mjs', store], ['appprint.mjs', print]] as const) {
+      expect(src, name).toContain("for (const scheme of ['light', 'dark'])");
+      expect(src, name).toContain("for (const locale of ['en', 'tr'])");
+      expect(src, name).toContain('for (const width of [1280, 390])');
+      // Measured in every look, photographed in four of them.
+      expect(src, name).toMatch(/for \(const look of LOOKS\)/);
+    }
+  });
+
+  it('the store scene takes the Storage plugins tab and the storage review', () => {
+    expect(store).toContain('`store-screen-storage-tab-${look.suffix}.png`');
+    expect(store).toContain('`storage-store-review-${look.suffix}.png`');
+    expect(store).toContain("getByTestId('store-screen-kind-storage')");
+    // Its index lists a storage plugin with no build for a Linux server: the row
+    // the tab draws in red.
+    expect(store).toMatch(/platforms: \['darwin\/amd64', 'darwin\/arm64'\]/);
+  });
+
+  it('the storage review only from a store over https, and a run without one says it left the review out', () => {
+    // A storage link names its feed and builds by https addresses
+    // (appstore validateStorage), and the review reads the feed
+    // (plugin.ReadPinnedFeed): over plain http there is no review to take
+    // (lesson #1366). The chain serves the store over https.
+    expect(store).toContain("if (!origin.startsWith('https://')) {");
+    expect(store).toContain('left out: the storage plugin review');
+    expect(store).toContain('feed_url: `${origin}${storageFeedPath(p)}`');
+    expect(readFileSync(path.join(REPO, 'scripts', 'chain', 'job', 'shots.sh'), 'utf8')).toContain('export SHOTS_STORE_HOST=store.example.com');
+  });
+
+  it('the print scene asks for ui:print in its app, shoots the question and answers no', () => {
+    expect(print).toContain('print: true');
+    expect(print).toContain("rows.includes('ui:print')");
+    expect(print).toContain('`print-consent-${look.suffix}.png`');
+    // The print row's own "Don't allow" (sec055 S9: the print question is a
+    // row of its own, its Allow the print page's button).
+    expect(print).toContain("getByTestId('appframe-print-deny').click()");
+    expect(print).toContain("answer?.error?.code !== 'cancelled'");
+  });
+});

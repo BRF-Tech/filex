@@ -373,7 +373,7 @@ describe("this repository's release plan", () => {
 
   it('names the workflow guards by titles that exist, so a rename cannot make the gate vacuous', () => {
     const guards = p.exportGates.find((g: { vitest?: unknown }) => g.vitest).vitest.mustPass as string[];
-    const sources = ['releaseGatesImages.test.ts', 'goreleaserTemplates.test.ts', 'wingetCla.test.ts', 'msstoreSubmit.test.ts', 'releaseArm64.test.ts', 'releaseMacosOnly.test.ts', 'releaseSnapArm64Only.test.ts', 'releaseNpmTrusted.test.ts', 'ciFullMatrix.test.ts', 'releasePromote.test.ts', 'releaseVerifyCircleci.test.ts', 'releaseStoresOnly.test.ts'].map((f) =>
+    const sources = ['releaseGatesImages.test.ts', 'goreleaserTemplates.test.ts', 'wingetCla.test.ts', 'msstoreSubmit.test.ts', 'releaseArm64.test.ts', 'releaseMacosOnly.test.ts', 'releaseSnapArm64Only.test.ts', 'releaseNpmTrusted.test.ts', 'ciFullMatrix.test.ts', 'releasePromote.test.ts', 'releaseVerifyCircleci.test.ts', 'releaseStoresOnly.test.ts', 'releaseDesktopUpgrade.test.ts'].map((f) =>
       fs.readFileSync(path.join(REPO, 'web', 'tests', 'deploy', f), 'utf8'),
     );
     expect(guards.length).toBeGreaterThanOrEqual(5);

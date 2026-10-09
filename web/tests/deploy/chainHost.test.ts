@@ -179,6 +179,19 @@ describe('what a Firefox line writes to the disk', () => {
   });
 });
 
+describe("WebKit's line and the panel's service worker", () => {
+  // Task #199: Playwright's WebKit lost its network process while the
+  // worker installed (158, 109, 139 on GitHub's full matrix). WebKit runs
+  // without it; the spec that tests the worker lets it back in.
+  it('blocks the worker for WebKit alone, and 164 lets it back in for the installable-app test', () => {
+    const pw = fs.readFileSync(path.join(REPO, 'e2e', 'playwright.config.ts'), 'utf8');
+    expect(pw).toMatch(/\n {2}webkit: \{\s*serviceWorkers: 'block',\s*\}/);
+    expect(pw.match(/serviceWorkers: 'block'/g) ?? [], 'no other engine and no global block').toHaveLength(1);
+    const sub = fs.readFileSync(path.join(REPO, 'e2e', 'tests', '164-sub-path.spec.ts'), 'utf8');
+    expect(sub).toMatch(/test\.describe\('the installable app', \(\) => \{\s*test\.use\(\{ serviceWorkers: 'allow' \}\);/);
+  });
+});
+
 describe('the run and the morning report', () => {
   const load = (over: Record<string, number | null>) => ({
     host_mem_full: 0.02, host_io_full: 0.1, disk_write_ms: 120, mem_gb: 1, mem_peak_gb: 1.2, written_gb: 0.5, stalled_mem_s: 0, stalled_io_s: 1, ...over,

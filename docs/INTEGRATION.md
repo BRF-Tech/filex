@@ -45,6 +45,15 @@ their own). Two things follow for the page that embeds the explorer:
   filex's own pages send one; on your page it is yours to send. List only
   what your page really frames: filex's origin (or the interface origin),
   never `data:` or `blob:`.
+- **An app that prints** (`ui.print`, 0.55) prints from filex's print page
+  (`/_print/`, on filex's own origin), which the explorer frames in your
+  page above the interface - so your `frame-src` must allow filex's origin
+  even when interfaces have an origin of their own. That page says itself
+  who may frame it: filex, the desktop app and the origins
+  of the server's `FILEX_FRAME_ANCESTORS`. So **list your site there** for
+  its apps to print; otherwise the browser refuses the page and the app is
+  told printing is `unavailable`
+  ([CONFIGURATION.md → Security headers and framing](CONFIGURATION.md#security-headers-and-framing)).
 
 ⚠ The stylesheet column is not a detail: the look is one global sheet plus the
 `--fe-*` tokens on it, and only the Vue wrapper imports it by hand. The web

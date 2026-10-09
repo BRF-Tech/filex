@@ -22,6 +22,7 @@
  */
 
 import type { StorageInfo } from '../lib/catalogCoverage';
+import type { EncryptedKind } from '../lib/encryptedRow';
 import type { MeasuredDrive } from '../lib/storageLine';
 import type { ExplorerConfig, AuthConfig, EndpointMap, SearchAccount } from '../types/ExplorerConfig';
 import type { LicenseInfo } from '@brftech/filex-app-ui/protocol';
@@ -303,6 +304,10 @@ export interface GlobalSearchHit {
   matched?: 'name' | 'content' | 'both';
   /** Drive NAME the hit lives on (the server fills it; older ones did not). */
   storage?: string;
+  /** #189 (0.55) - a file hit inside a vault (`vault`) or another end-to-end
+   *  encrypted folder (`folder`), or a single encrypted file (`file`, a
+   *  `.fxe`), as the server stamps it; absent otherwise. */
+  encrypted?: EncryptedKind;
   /**
    * #47 — which signed-in account the hit came from. Never on the wire: the
    * explorer stamps it when the host searches several accounts
@@ -1338,6 +1343,17 @@ export function useFileApi(config: ExplorerConfig) {
   }
 
   /**
+   * The page filex prints an app's PDF from (`ui.print`, task #189; backend
+   * internal/printframe): `<root>/_print/` on this server, joined like
+   * appUIUrl. filex's pages may frame it; it frames only the `blob:` PDF it
+   * makes itself (lib/printPdf).
+   */
+  function printFrameUrl(): string {
+    const root = endpoints.manager.replace(/\/api\/files\/manager(\?.*)?$/, '');
+    return root.replace(/\/$/, '') + '/_print/';
+  }
+
+  /**
    * `GET …/plugins/license/{plugin}` - what an app reads about its own license
    * (fx.license.get()): `{status, valid_until?, updates_until?}`,
    * `{status: "free"}` for a free app. Never the key, the licensee or the store.
@@ -1958,6 +1974,7 @@ export function useFileApi(config: ExplorerConfig) {
     pluginUsers,
     opsCancel,
     appUIUrl,
+    printFrameUrl,
     pluginUICall,
     pluginUISave,
     pluginUIRead,

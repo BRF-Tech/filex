@@ -50,6 +50,12 @@ func applyLimits(cmd *exec.Cmd) {
 func adoptChild(cmd *exec.Cmd) error { return nil }
 
 // killGroup kills the plugin AND anything it started.
+//
+// ⚠ Anything that stayed in its group: a child that called setsid() has left
+// it and is not reached. A Manager's plugin runs as filex's own user, so
+// there is nothing narrower to kill by; the store's validator, which runs
+// someone else's build as a user of its own, kills every process of that user
+// between two runs (cmd/filex plugin_validator_linux.go, pvKillUser).
 func killGroup(pid int) {
 	// Negative pid = the whole process group (Setpgid above made one).
 	_ = syscall.Kill(-pid, syscall.SIGKILL)

@@ -158,6 +158,9 @@ type Op struct {
 	// it ended (claimWhere): a rename carries on what it had started
 	// (runRename).
 	resumed bool
+	// putBack: execute returned the row to the queue with the items it had
+	// not reached (putBackFrom), so its lane leaves the storage for the round.
+	putBack bool
 }
 
 // shape finishes a scanned row. An OpTrashEmpty row stores its request where
@@ -944,9 +947,14 @@ func (s *Service) runArchiveLane(ctx context.Context, stop <-chan struct{}) {
 }
 
 // drain pops queued rows one at a time and executes them.
+//
+// A job whose storage a judgement holds the gate of right now goes back to
+// the queue (gate_lane.go), and so does every later job of that storage this
+// round, so one storage's jobs keep their order; the other storages' run on.
 func (s *Service) drain(ctx context.Context) {
+	var held []int64
 	for {
-		op, ok, err := s.claimNext(ctx)
+		op, ok, err := s.claimWhere(ctx, skipping(mainLaneCond, held))
 		if err != nil {
 			slog.Warn("ops: claim next", slog.String("err", err.Error()))
 			return
@@ -954,9 +962,20 @@ func (s *Service) drain(ctx context.Context) {
 		if !ok {
 			return
 		}
+		if waitsForAJudgement(op) {
+			s.putBack(ctx, op)
+			held = append(held, op.StorageID)
+			continue
+		}
 		s.execute(ctx, op)
+		if op.putBack {
+			held = append(held, op.StorageID)
+		}
 	}
 }
+
+// mainLaneCond selects the main worker's rows (claimNext says which).
+const mainLaneCond = `kind <> 'trash-empty' AND kind <> 'thumb-repair' AND kind NOT IN (` + archiveKinds + `) AND kind NOT IN (` + finishingKinds + `)`
 
 // claimNext atomically picks the oldest pending row and marks it running.
 //
@@ -970,7 +989,7 @@ func (s *Service) claimNext(ctx context.Context) (*Op, bool, error) {
 	// (trash_empty.go) and would hold the whole queue for as long as it runs.
 	// Nor is an archive job (runArchiveLane), nor a rename, a restore or a
 	// purge (runFinishingLane): each lasts as long as its folder does.
-	return s.claimWhere(ctx, `kind <> 'trash-empty' AND kind <> 'thumb-repair' AND kind NOT IN (`+archiveKinds+`) AND kind NOT IN (`+finishingKinds+`)`)
+	return s.claimWhere(ctx, mainLaneCond)
 }
 
 // claimWhere is claimNext restricted to the rows cond selects.
@@ -1025,7 +1044,13 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 		s.executeJob(ctx, op)
 		return
 	}
-	defer s.forgetSettled(op.ID)
+	// A row put back to the queue (putBackFrom) keeps what its submission
+	// settled: it runs again.
+	defer func() {
+		if !op.putBack {
+			s.forgetSettled(op.ID)
+		}
+	}()
 	if s.storageResolver == nil {
 		s.fail(ctx, op, "no storage resolver")
 		return
@@ -1110,11 +1135,29 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 		// job itself still runs in queue order, like every other.
 		lastErr = s.runDeletes(ctx, drv, dstDrv, op)
 	} else {
-		for _, src := range op.Sources {
+		for i, src := range op.Sources {
 			if ctx.Err() != nil {
 				break
 			}
 			err := s.runOne(ctx, drv, dstDrv, op, src)
+			// A cross-storage move found its source storage being judged
+			// before a byte travelled (crossTransfer, gate_lane.go): the row
+			// goes back to the queue from this item on, and the lane runs the
+			// other storages' jobs. When this run has something to report
+			// that a put-back would lose (an item failed or left entries
+			// behind), it waits for the judgement instead - on the job's own
+			// context, which Cancel ends - and starts the item again: nothing
+			// of it had changed.
+			for errors.Is(err, errSourceJudged) {
+				if left == nil && lastErr == nil && s.putBackFrom(ctx, op, i) {
+					return
+				}
+				if werr := rowgate.Await(ctx, op.StorageID); werr != nil {
+					err = werr
+					break
+				}
+				err = s.runOne(ctx, drv, dstDrv, op, src)
+			}
 			var skips *SkipsError
 			switch {
 			case err == nil:
@@ -1301,8 +1344,10 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 		// The bytes go first and the rows after, under the storage's row gate
 		// (internal/rowgate): a scan between the two would see a live row
 		// whose bytes had left, confirm it gone and drop it, and the trash
-		// entry the person could restore from would be lost with it.
-		release := rowgate.Move(op.StorageID)
+		// entry the person could restore from would be lost with it. A folder
+		// on an object store goes to the trash object by object: it fences
+		// its prefix instead (holdFor).
+		release, _ := holdFor(ctx, drv, op.StorageID, src)
 		defer release()
 		out, terr := trash.Put(ctx, drv, src)
 		switch {
@@ -1350,6 +1395,15 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 		if !ok {
 			return errors.New("driver not movable")
 		}
+		// From the first byte that moves to the last row that follows, under
+		// the storage's row gate (internal/rowgate, issue #192): see runRename.
+		// The destination is picked once the gate is held, so a name taken
+		// while the job waited for it is skipped, not replaced (sec055).
+		// A folder on an object store fences its prefix, and its
+		// destination's once picked, instead of holding the storage's gate
+		// (holdFor, fenceToo).
+		release, fenced := holdFor(ctx, drv, op.StorageID, src)
+		defer release()
 		dst, err := MoveDest(ctx, drv, src, joinIntoDir(op.Dest, src))
 		if err != nil {
 			return err
@@ -1357,10 +1411,8 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 		if normOpPath(dst) == normOpPath(src) {
 			return nil
 		}
-		// From the first byte that moves to the last row that follows, under
-		// the storage's row gate (internal/rowgate, issue #192): see runRename.
-		release := rowgate.Move(op.StorageID)
-		defer release()
+		releaseDst := fenceToo(fenced, op.StorageID, dst)
+		defer releaseDst()
 		if err := m.Move(ctx, src, dst); err != nil {
 			if !errors.Is(err, storage.ErrNotFound) {
 				return err

@@ -139,7 +139,12 @@ describe('PluginRequestsPanel - a request from the store screen', () => {
   });
 
   it('says a store that is not connected in a sentence, and opens nothing', async () => {
-    approveRefusal = { status: 409, data: { error: 'store_not_connected', message: 'not connected' } };
+    // The sentence is the server's (srvtext server.store.store_not_connected,
+    // 0.55): the panel prints it as it came and builds none of its own.
+    approveRefusal = {
+      status: 409,
+      data: { error: 'store_not_connected', message: 'This filex is not connected to the store. An administrator connects it under Plugins, Apps, Trusted stores, Connect.' },
+    };
     const w = mountPanel();
     const dialog = await openReview(w);
     await dialog.find('[data-testid="plugin-request-approve-store"]').trigger('click');

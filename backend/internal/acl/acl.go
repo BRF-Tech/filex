@@ -148,6 +148,18 @@ func (r *Resolver) vaultLookup(ctx context.Context, storageID int64) func(rel st
 	return func(rel string) (string, bool) { return f.VaultRoot(ctx, storageID, CleanRel(rel)) }
 }
 
+// VaultRoot is the attached finder's answer (AttachVaults) for a path on a
+// storage: the vault folder rel is inside of, or is. ok is false while vaults
+// are off, and on a nil resolver. It makes the Resolver a VaultFinder for the
+// readers that ask about rows from many storages at once without a Set per
+// storage (the `encrypted` stamp on Recent, Starred, search hits, task #189).
+func (r *Resolver) VaultRoot(ctx context.Context, storageID int64, rel string) (string, bool) {
+	if r == nil || r.vaults == nil {
+		return "", false
+	}
+	return r.vaults.VaultRoot(ctx, storageID, CleanRel(rel))
+}
+
 // New returns a Resolver backed by store.
 func New(store db.Store) *Resolver {
 	r := &Resolver{store: store}

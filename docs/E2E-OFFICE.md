@@ -23,9 +23,10 @@ all MIT.
 | The relay: one order for the editors' sealed entries, the changes lease, who is in a session, which part of the log a save holds | `backend/internal/e2eoffice` | Prototype: in memory, one process, no route reaches it |
 | Session keys, sealed entries, the reader that refuses a log the editors did not write | `packages/core/src/lib/e2eoffice.ts` | Prototype: no screen uses it |
 | Who saves, and when | `packages/core/src/lib/e2eofficeSave.ts` | Prototype: no screen uses it |
-| The bridge (a Document Server for one editor, in the browser), the socket.io stand-in, the x2t driver | the `filex-office-editor` app (AGPL-3.0-or-later) | Prototype: unit tests, no build, no release yet |
-| The app's page and editor frame, ONLYOFFICE's editor files in its package, the x2t WebAssembly build | the `filex-office-editor` app | Not built |
-| The platform features the app needs, the relay's routes and database tables, "Edit (encrypted)" in the explorer | filex | Not built |
+| The bridge (a Document Server for one editor, in the browser), the socket.io stand-in, the x2t driver | the `filex-office-editor` app (AGPL-3.0-or-later) | Built for one person; no release yet |
+| The app's page and editor frame, ONLYOFFICE's editor files in its package, the x2t WebAssembly build | the `filex-office-editor` app | Built and measured in Chromium, Firefox and WebKit, one person editing an ordinary (not encrypted) document, with Download as and Print through x2t and a phone layout ([On a phone](#on-a-phone)); x2t is CryptPad's build until the app's own; no release yet |
+| The platform features the app needs | filex | 0.55: a frame of its own package, `blob:` reads, printing, the `encrypted` field ([What filex gives the app](#what-filex-gives-the-app)) |
+| The relay's routes and database tables, the plaintext of an encrypted document for the app, "Edit (encrypted)" in the explorer | filex | Not built |
 
 ## The idea
 
@@ -199,18 +200,61 @@ The editor needs a few doors in it. Each is a general platform feature -
 any app may ask for it, and the administrator sees it in the install review
 like every other permission - and each is MIT, in filex:
 
-| The editor needs | Today | Planned |
+| The editor needs | Without it | What filex gives |
 |---|---|---|
-| A frame of its own: ONLYOFFICE's `DocsAPI.DocEditor` opens the editor page in a frame | `frame-src 'none'` | frames from the app's own package only, in the same sandbox (a permission) |
-| To load the document from a `blob:` address | `connect-src 'none'`, or the package | `blob:` in `connect-src` (a permission; a `blob:` address never leaves the page) |
-| The plaintext of a document in an unlocked encrypted folder | an app is never given a file there | the explorer decrypts and hands the bytes over, and encrypts the save as a new version written only if the file is still the one the editor opened; a permission of its own, with a stern warning in the review: the app sees every document opened with it in an encrypted folder |
-| Editing together | - | the relay's routes and WebSocket, its tables and blob store, and a bridge method to append to and read the session's log |
-| A package of about 80-95 MB zipped (1,400 files, the largest 38.8 MB) | within the limits (128 MiB zipped, 20 000 files, 64 MiB a file), served uncompressed | the package's files served compressed and cached by version, so a first opening downloads about 15-20 MB, not 80-90 MB |
+| A frame of its own: ONLYOFFICE's `DocsAPI.DocEditor` opens the editor page in a frame | `frame-src 'none'` | **filex 0.55:** `ui:frame-package` (`ui.frame_package`) - frames from the app's own package only, each page in a sandbox of its own under the same policy ([APP-PLUGINS-API.md → An app's own interface](APP-PLUGINS-API.md#an-apps-own-interface-v4)) |
+| To load the document from a `blob:` address | `connect-src 'none'`, or the package | **filex 0.55:** `ui:connect-blob` (`ui.connect_blob`) - `blob:` in `connect-src`; a `blob:` address never leaves the page, and the frame that reads it makes it |
+| To print: a sandboxed frame may not open the print dialog | `window.print()` is ignored in the frame | **filex 0.55:** `ui:print` (`ui.print`) - the app hands filex the PDF and filex prints it from its own print page ([APP-PLUGINS-API.md → Printing a PDF](APP-PLUGINS-API.md#printing-a-pdf-uiprint-055)) |
+| To know a file is encrypted (one person at a time in a vault) | - | **filex 0.55:** `encrypted: "folder" \| "vault" \| "file"` on the file's `FileInfo`, as the server stamps the file's row; absent for a plain file. Information only in 0.55: filex does not open an encrypted file in an app and refuses an app its bytes (the plaintext is the next row) |
+| The plaintext of a document in an unlocked encrypted folder | an app is never given a file there | planned: the explorer decrypts and hands the bytes over, and encrypts the save as a new version written only if the file is still the one the editor opened; a permission of its own, with a stern warning in the review: the app sees every document opened with it in an encrypted folder |
+| Editing together | - | **filex 0.55:** the bridge's `coedit.*` methods are defined ([APP-PLUGINS-API.md → Editing together](APP-PLUGINS-API.md#editing-together-coedit-055-defined-not-offered)) and answer `unavailable`; planned: the relay's routes and WebSocket, its tables and blob store, and the `files:co-edit` permission |
+| A package of about 80-95 MB zipped (1,400 files, the largest 38.8 MB) | within the limits (128 MiB zipped, 20 000 files, 64 MiB a file), served uncompressed | planned: the package's files served compressed and cached by version, so a first opening downloads about 15-20 MB, not 80-90 MB |
 
 Two more things the editor expects - `localStorage`, which an opaque frame
 does not have, and inline scripts, which the package's policy refuses - the
 app handles itself (an in-memory stand-in, and a build that moves the
 scripts into files).
+
+### Printing
+
+The app's manifest asks for `"ui": {"print": true}` (the review lists it as
+printing documents it hands to filex, with the app's reason). The editor's
+**Print** - and the phone app's - makes the PDF in the browser with x2t,
+from the pages as the editor laid them out and with the fonts it drew them
+with, and hands it to filex with `ui.print`; filex prints it from its own
+print page ([APP-PLUGINS-API.md → Printing a PDF](APP-PLUGINS-API.md#printing-a-pdf-uiprint-055)).
+filex asks every time, above the editor, and the print dialog opens on the
+person's click on its *Allow*. Without the grant, on a filex without
+`ui.print` (0.54 and older answer `unknown_method`), or where filex's print
+page may not be shown (`unavailable`: the web component in a site the server
+does not list in `FILEX_FRAME_ANCESTORS`), the app hands the PDF over as a
+download instead (`ui.download`) and tells the person so. No Document Server is asked for
+either.
+
+### On a phone
+
+ONLYOFFICE's editors each have a **phone app** (`web-apps/apps/<editor>/mobile/`),
+and the app carries them. But the phone apps in ONLYOFFICE's Document
+Server image are the **open-source build, which only reads**: its editing
+controller is a stub (`isSupportEditFeature()` returns false in all three
+of 9.4.0.129), and in edit mode it says that editing on a phone needs a
+commercial licence and stays read-only. Editing in ONLYOFFICE's phone apps
+is a commercial ONLYOFFICE feature, not in the open-source code. So on a
+phone - a frame narrower than 600 px on a touch screen - the app:
+
+- opens the document in the phone app, **to read**: touch-sized, with its
+  own search, navigation, Download and Print (through x2t and filex, like
+  the editor's);
+- puts an **Edit** button under it (the app's own), which replaces it with
+  the desktop editor **folded** - the ribbon's tabs only, no rulers, the
+  side panel closed - with the document as it is;
+- and a **Reading view** button to go back: the changes are saved first (a
+  new version), then the document goes back to the phone app.
+
+What it opens with is decided at the opening (a phone turned sideways keeps
+it), and the phone app's own "switch to desktop" is off. The details, and
+what was measured in the three browsers, are in the app's README
+([On a phone](https://github.com/BRF-Tech/filex-office-editor#on-a-phone)).
 
 ## Licensing
 
@@ -230,32 +274,31 @@ trademark. The platform features above are filex's and stay MIT.
 
 ## What is not built yet
 
-In the app (`filex-office-editor`):
+In the app (`filex-office-editor`; built so far: ONLYOFFICE's editor files
+from the official Document Server image at a pinned release, checked every
+week for a newer one, the stand-in in place of socket.io, the app's page,
+saving, pictures added while editing, Download as, PDF and Print through
+x2t, the phone layout):
 
-- The editor's files in the app's package: ONLYOFFICE's editor taken from
-  the official Document Server image at a pinned release (without help
-  pages, dictionaries and the editors it does not need), the stand-in in
-  place of socket.io, inline scripts moved into files, so an instance
-  without a Document Server needs nothing else. The app checks every week
-  whether ONLYOFFICE has published a newer release.
 - The x2t WebAssembly build from ONLYOFFICE core at the same version as the
-  editor files, and its comparison with the Document Server's own x2t.
-- The app's page: the editor frame, the protocol over the app's message
-  channel, saving.
-- Images added while editing, printing and PDF, the editor asking for images
-  by address: the bridge says it does not do them yet rather than answer
-  wrongly.
+  editor files, in place of CryptPad's, and its comparison with the
+  Document Server's own x2t (plain text and CSV stay out until then: the
+  pinned build cuts letters outside ASCII there).
+- Measuring the editor against a Document Server on a body of real
+  documents, and in filex 0.55 itself.
+- Encrypted folders and editing together, on the filex features below.
 
 In filex:
 
-- The platform features in [What filex gives the app](#what-filex-gives-the-app).
+- The platform features still marked planned in
+  [What filex gives the app](#what-filex-gives-the-app).
 - The relay's routes and WebSocket, its database tables (sessions and log,
   the lease as a compare-and-set row) and the blob store inside the encrypted
   folder; until then a restart forgets every session.
 - The explorer offering the app in an unlocked encrypted folder, the
-  unsaved-session sign on a file, and the measurements: spreadsheets and
-  presentations in a real editor, large documents, Firefox and Safari,
-  phones.
+  unsaved-session sign on a file, and the measurements of encrypted editing:
+  spreadsheets and presentations, large documents, Firefox and Safari,
+  phones (which read there as everywhere: [On a phone](#on-a-phone)).
 
 ## See also
 

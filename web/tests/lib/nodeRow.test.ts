@@ -97,6 +97,32 @@ describe('nodeRowToFileNode', () => {
     expect(ready?.thumb_url).toBe(url);
   });
 
+  it('keeps how the server says a file is encrypted, for the app it is opened in (#189)', () => {
+    // ⚠ The folder listing stamped `encrypted` and Recent / Starred / a tag
+    // view / Home did not reach it through here: an app's interface opened
+    // from those views was told a vault's file is not encrypted.
+    const vault = nodeRowToFileNode(
+      { id: 70, path: 'Kasa/ek.bin', name: 'ek.bin', type: 'file', storage: 'drive', encrypted: 'vault' },
+      multi,
+    );
+    expect(vault?.encrypted).toBe('vault');
+    const folder = nodeRowToFileNode(
+      { id: 71, path: 'Sifreli/rapor.docx', name: 'rapor.docx', type: 'file', storage: 'drive', encrypted: 'folder' },
+      multi,
+    );
+    expect(folder?.encrypted).toBe('folder');
+    const plain = nodeRowToFileNode({ id: 72, path: 'acik.txt', name: 'acik.txt', type: 'file', storage: 'drive' }, multi);
+    expect('encrypted' in (plain ?? {})).toBe(false);
+    const odd = nodeRowToFileNode({ id: 73, path: 'x.txt', type: 'file', storage: 'drive', encrypted: true }, multi);
+    expect('encrypted' in (odd ?? {})).toBe(false);
+    // sec055 S16: a single encrypted file (.fxe) says `file`.
+    const single = nodeRowToFileNode(
+      { id: 74, path: 'rapor.docx.fxe', name: 'rapor.docx.fxe', type: 'file', storage: 'drive', encrypted: 'file' },
+      multi,
+    );
+    expect(single?.encrypted).toBe('file');
+  });
+
   it('keeps the server\'s starred flag, so Starred and Home rows read as starred (#207)', () => {
     // ⚠ 0.54 full run (001b652e, e2e 106): the explorer stopped matching ids
     // against a star list of its own and reads the row's `starred`; dropped

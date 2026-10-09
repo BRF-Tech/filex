@@ -32,6 +32,22 @@ sees it appear rather than finding out on its next navigation
 an existing file emits `file.updated`, not `file.uploaded` - worth knowing if you have
 a webhook watching protocol traffic ([NOTIFICATIONS.md](NOTIFICATIONS.md)).
 
+A rename (or MOVE) and a delete over any of them also keep out of the storage
+scan's way the way the web UI's do (since 0.55, issue #201): the bytes and the
+rows that follow them go under the storage's row gate, so a scan running beside
+the client never sees a folder at its new name with its rows at the old one,
+and never drops a trashed file's row - and the trash entry it could be
+restored from - before the rename or delete has written it
+([ARCHITECTURE.md → The row gate](ARCHITECTURE.md#the-row-gate)). The verb
+waits for the gate on the client's request or session, so a client that gives
+up while it waits changes nothing, and once it has the gate it asks again what
+it checked before (a destination found free, the item it was asked about):
+a MOVE or rename that waited refuses a file that landed on its name
+meanwhile instead of replacing it. A folder moved or deleted into the trash on
+an object store, which goes one object at a time, fences only its own path and
+its destination's instead of the whole storage: the scan leaves those alone
+and goes on everywhere else until the rows have followed.
+
 ⚠⚠ **One thing is not shared: version history.** WebDAV and the S3 gateway take a
 pre-write snapshot; **SFTP, FTPS and NFS do not**, so an overwrite over those three
 destroys the previous bytes silently. See

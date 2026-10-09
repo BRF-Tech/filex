@@ -117,7 +117,15 @@ func TestInstall_AnAppWhoseRangeLeavesThisFilexOutIsRefused(t *testing.T) {
 	_, dry, err := reg.Install(ctx, in)
 	require.NoError(t, err, "the review is not a refusal")
 	require.NotNil(t, dry.Compat)
-	assert.Equal(t, &Compat{Requires: ">=0.48.0", OK: false, Filex: "0.47.0"}, dry.Compat)
+	// The review's sentence is the server's, in the reader's language (0.55);
+	// RED before: the wizard built it from requires and filex itself.
+	assert.Equal(t, &Compat{Requires: ">=0.48.0", OK: false, Filex: "0.47.0",
+		Message: "lang-es 1.0.0 works with filex >=0.48.0; this is filex 0.47.0. It cannot be installed here."}, dry.Compat)
+	in.Lang = "tr"
+	_, trDry, err := reg.Install(ctx, in)
+	require.NoError(t, err)
+	assert.Equal(t, "lang-es 1.0.0, filex >=0.48.0 ile çalışıyor; bu sunucu filex 0.47.0. Burada kurulamaz.", trDry.Compat.Message)
+	in.Lang = ""
 
 	in.DryRun = false
 	_, _, err = reg.Install(ctx, in)

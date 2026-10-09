@@ -15,6 +15,7 @@
  * separate menu or a separate surface.
  */
 import type { PluginActionRow, PluginGatedRule } from '../types/Plugins';
+import { rowIsEncrypted, type EncryptedRowLike } from './encryptedRow';
 import { appliesToNodes, type AppliesNodeLike } from './pluginApplies';
 import { labelOf } from './pluginLabel';
 
@@ -59,9 +60,10 @@ export interface PluginMenuContext {
   needWords?: (need: PluginGatedRule['needs']) => string;
 }
 
-/** What the menu reads of a selected row. */
-export type PluginMenuNode = AppliesNodeLike & {
-  e2e?: boolean;
+/** What the menu reads of a selected row. `e2e`, `e2e_root` and a file's
+ *  `encrypted` say it is end-to-end encrypted (lib/encryptedRow). */
+export type PluginMenuNode = AppliesNodeLike &
+  EncryptedRowLike & {
   mime_type?: string | null;
   /** The app holding the file read-only, if one does (listing `lock`). */
   lock?: { plugin?: string } | null;
@@ -210,7 +212,10 @@ export function pluginMenuRows(
   ctx: PluginMenuContext,
 ): PluginMenuRow[] {
   if (ctx.trash || ctx.e2e) return [];
-  if (selection.some((n) => n.e2e === true || n.mime_type === 'inode/storage')) return [];
+  /* An end-to-end encrypted row - an encrypted folder, or anything in one as
+     Recent, Starred, a tag view, a search or Shared with me hand it over -
+     is refused here as inside an encrypted folder's listing (#189). */
+  if (selection.some((n) => rowIsEncrypted(n) || n.mime_type === 'inode/storage')) return [];
   const permOf = ctx.permOf;
   const allowed = (a: PluginActionRow) =>
     !(ctx.readOnly && refusedReadOnly(a)) && (!permOf || selection.every((n) => levelAllows(a, n, permOf)));

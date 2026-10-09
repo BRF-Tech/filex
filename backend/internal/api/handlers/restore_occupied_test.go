@@ -16,9 +16,11 @@ package handlers_test
 // wider `if_exists` choice this tree does not have.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/trash"
@@ -103,6 +106,38 @@ func TestTrashRestore_FileOntoTakenName_409_OccupantBytesIntact(t *testing.T) {
 	assert.Equal(t, "EXISTS", body["code"])
 	assert.Equal(t, "rapor.txt", body["name"])
 	f.stillTrashed(t, gone.ID, "/belgeler/rapor.txt")
+}
+
+// The refusal is the one envelope (docs/API-ERRORS.md): the code
+// `name_taken` - the one the queued restore's row keeps - and the server's
+// sentence in the reader's language. It used to be an English sentence in
+// `error` ("something already exists at this path: rapor.txt") and no
+// `message`, and the admin Trash page worded the refusal itself from `code`.
+func TestTrashRestore_TakenNameIsSaidByTheServer(t *testing.T) {
+	f := newRestoreFixture(t, false)
+
+	gone := f.seedFile(t, "rapor.txt", "the file that was deleted")
+	trashNow(t, f, gone)
+	f.seedFile(t, "rapor.txt", "the file that is there now")
+
+	raw, err := json.Marshal(map[string]any{"node_id": gone.ID})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/restore", bytes.NewReader(raw))
+	req.Header.Set("Accept-Language", "tr")
+	rec := httptest.NewRecorder()
+	f.trashH.Restore(rec, req)
+
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, "name_taken", body["error"])
+	want := apierr.Text("tr", "name_taken", nil)
+	require.NotEmpty(t, want, "the catalogue has a sentence for name_taken")
+	assert.Equal(t, want, body["message"], "the server's sentence, in the reader's language")
+	assert.Equal(t, "EXISTS", body["code"], "the code older clients read stays")
+	assert.Equal(t, "rapor.txt", body["name"])
+	assert.Equal(t, map[string]any{"name": "rapor.txt"}, body["params"])
+	f.stillTrashed(t, gone.ID, "/rapor.txt")
 }
 
 func TestTrashRestore_FolderOntoTakenName_409_NothingMerged(t *testing.T) {

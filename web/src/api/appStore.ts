@@ -6,6 +6,7 @@ import { api } from './client';
 import { getApiBaseUrl } from './runtimeConfig';
 import { INSTALL_TIMEOUT_MS, type AppPlugin, type AppPluginDryRun, type AppPluginPlacement } from './appPlugins';
 import type { PluginRequest } from './pluginRequests';
+import type { Plugin } from './plugins';
 
 // Installing an app from a store's install link, the stores this filex trusts,
 // and the licenses of paid apps (/api/admin/app-plugins/stores, …/store-intent,
@@ -69,14 +70,63 @@ export interface StoreReview {
   store: string;
   store_trust: 'admin' | 'config' | '';
   intent: StoreIntentView;
+  /** An app's install review (absent for a storage plugin: `storage_review`). */
   review: AppPluginDryRun;
-  /** The installed app this link upgrades, and where it came from. */
-  upgrade_of?: StoreSourceRef & { id: number };
+  /** A storage plugin's review (#215), every sentence the server's. */
+  storage_review?: StorageStoreReview;
+  /** The installed app (or storage plugin) this link upgrades, and where it came from. */
+  upgrade_of?: StoreSourceRef & { id: number; state?: string };
+}
+
+/** A sentence of a storage plugin's review, in the reader's language. */
+export interface StorageNotice {
+  level: 'warning' | 'info' | 'error';
+  text: string;
+}
+
+/** What a store's plugin validator measured of a storage plugin build. */
+export interface StorageConformance {
+  platform: string;
+  filex: string;
+  verified: boolean;
+  passed: number;
+  failed: number;
+  skipped: number;
+  driver?: string;
+  capabilities: string[];
+}
+
+/**
+ * A storage plugin's store review (handlers/app_store_storage.go): the build
+ * for this server, where its signature stands, what the store measured, and
+ * the sentences to read before Install. `can_install` is the server's answer.
+ */
+export interface StorageStoreReview {
+  name: string;
+  version: string;
+  platform: string;
+  platforms: string[];
+  sha256: string;
+  size?: number;
+  url: string;
+  feed_url: string;
+  notes?: string;
+  source: string;
+  paid: boolean;
+  conformance?: StorageConformance;
+  capabilities: Array<{ id: string; label: string }>;
+  signature: { store_signed: boolean; publisher_signed: boolean; required: boolean; verifies: boolean };
+  notices: StorageNotice[];
+  can_install: boolean;
 }
 
 /** A license as the panel shows it. */
 export interface AppLicense {
+  /** The license's id: an app's name, or `storage:<name>` (a storage plugin). */
   app: string;
+  /** The entry's own name, and `storage` for a storage plugin. */
+  name?: string;
+  kind?: string;
   required: boolean;
   status: string;
   held: boolean;
@@ -121,6 +171,10 @@ export interface StoreRefusal {
     filex_origin?: string;
     this_filex?: string;
     public_url_invalid?: boolean;
+    /** `storage`: a storage plugin's link refused (#215); `app` / `language-pack`: an app's. */
+    kind?: string;
+    /** The server's English detail behind `message`, for a log - never shown. */
+    reason?: string;
   };
 }
 
@@ -170,6 +224,14 @@ export const AppStoreApi = {
     return data;
   },
 
+  /** Install a reviewed storage plugin link (#215). `licenseKey` empty = the link's own. */
+  async installStorage(handle: string, licenseKey = ''): Promise<{ plugin: Plugin; license?: AppLicense }> {
+    const body: Record<string, unknown> = { handle };
+    if (licenseKey) body.license_key = licenseKey;
+    const { data } = await api.post(`${BASE}/store-intent/install`, body, { timeout: INSTALL_TIMEOUT_MS });
+    return data;
+  },
+
   /** The administrator closed the review: the store is told, the link is used up. */
   async cancel(handle: string): Promise<void> {
     await api.post(`${BASE}/store-intent/cancel`, { handle });
@@ -192,6 +254,22 @@ export const AppStoreApi = {
 
   async verifyLicense(id: number): Promise<AppLicense> {
     const { data } = await api.post<AppLicense>(`${BASE}/${id}/license/verify`, {});
+    return data;
+  },
+
+  /** A storage plugin's license (#215), by the plugin's name. */
+  async storageLicense(name: string): Promise<AppLicense> {
+    const { data } = await api.get<AppLicense>(`${BASE}/storage/${encodeURIComponent(name)}/license`);
+    return data;
+  },
+
+  async setStorageLicenseKey(name: string, key: string): Promise<AppLicense> {
+    const { data } = await api.put<AppLicense>(`${BASE}/storage/${encodeURIComponent(name)}/license`, { key });
+    return data;
+  },
+
+  async verifyStorageLicense(name: string): Promise<AppLicense> {
+    const { data } = await api.post<AppLicense>(`${BASE}/storage/${encodeURIComponent(name)}/license/verify`, {});
     return data;
   },
 
@@ -267,7 +345,7 @@ export interface StoreViewAnswer {
 /** An app of a store's catalog, as filex verified it. */
 export interface CatalogApp {
   name: string;
-  kind: 'app' | 'language_pack' | string;
+  kind: 'app' | 'language_pack' | 'storage' | string;
   label: PluginText;
   summary?: PluginText;
   publisher: string;
@@ -281,8 +359,28 @@ export interface CatalogApp {
   permissions: string[];
   /** An icon's file name, served through filex (StoreScreenApi.iconUrl). */
   icon?: string;
-  /** The version installed here, when it is. */
+  /**
+   * The version installed here, when it is. For a storage plugin only the
+   * server's administrator is told it (sec055 S15); anybody else hears
+   * `state: 'installed'` and no version.
+   */
   installed_version?: string;
+  /**
+   * The server's answer for this person: installed, update, pending or none.
+   * For a storage plugin a person who is not the administrator never hears
+   * `update` - only whether it is here.
+   */
+  state: 'installed' | 'update' | 'pending' | 'none';
+  /** A storage plugin's part (#215), said by the server. */
+  storage?: {
+    /** This server's platform: the administrator's answer only. */
+    platform?: string;
+    for_here: boolean;
+    summary: string;
+    capabilities: Array<{ id: string; label: string }>;
+  };
+  platforms?: string[];
+  conformance?: StorageConformance;
 }
 
 export interface StoreCatalog {
@@ -292,6 +390,8 @@ export interface StoreCatalog {
   /** The store could not be reached: the last catalog that verified. */
   stale: boolean;
   apps: CatalogApp[];
+  /** Where storage plugins run here: what the Storage tab says first. */
+  storage_note?: string;
 }
 
 /**

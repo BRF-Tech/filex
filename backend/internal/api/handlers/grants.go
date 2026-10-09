@@ -129,7 +129,7 @@ func (h *Grants) resolvePath(w http.ResponseWriter, r *http.Request, raw string)
 	// granted, invited to and linked files outside the root
 	// (GHSA-8gvc-6w52-6c7j).
 	if !rootAllowsIn(r.Context(), st, rel) {
-		refuseOutsideRoot(w)
+		refuseOutsideRoot(w, r)
 		return nil, "", false
 	}
 	return st, rel, true

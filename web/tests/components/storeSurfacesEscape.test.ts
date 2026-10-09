@@ -21,6 +21,10 @@ const SURFACES = [
   // The review a store link opens: the app's name, repository, release and
   // the store's origin (store fe review #9a).
   'components/plugins/AppPluginInstallWizard.vue',
+  // A storage plugin's review (#215): its name, its build, the server's
+  // sentences. The release notes go through ReleaseNotes, the sanitized
+  // Markdown every feed's notes take.
+  'components/plugins/StorageStoreReview.vue',
   'components/plugins/AppPluginLicense.vue',
   'components/plugins/AppStoresPanel.vue',
   'components/AppLicenseAlert.vue',
@@ -100,6 +104,29 @@ describe('store surfaces draw a store’s words as text', () => {
     await flushPromises();
     expect(w.find('[data-testid="store-trust-origin"]').text()).toBe(EVIL);
     expect(w.text()).toContain(EVIL);
+    noInjectedMarkup();
+  });
+
+  it('a storage plugin’s review (#215)', async () => {
+    sessionStorage.setItem('filex.storeLink', JSON.stringify({ store: 'https://s.example', token: 'tok_0123456789', at: Date.now() }));
+    intentAnswer = {
+      status: 200,
+      data: {
+        handle: 'h', store: EVIL, store_trust: 'admin',
+        intent: { store: EVIL, token_id: 't', app: EVIL, kind: 'storage', version: EVIL, repo: EVIL, ref: EVIL, paid: false, expires_at: '2026-10-08T18:30:00Z' },
+        storage_review: {
+          name: EVIL, version: EVIL, platform: EVIL, platforms: [EVIL], sha256: EVIL, url: EVIL, feed_url: EVIL, source: EVIL, paid: false,
+          capabilities: [{ id: 'write', label: EVIL }],
+          signature: { store_signed: true, publisher_signed: false, required: false, verifies: false },
+          notices: [{ level: 'warning', text: EVIL }],
+          can_install: true,
+        },
+      },
+    };
+    mount(StoreInstall, { global: global(), attachTo: document.body });
+    await flushPromises();
+    expect(document.body.querySelector('[data-testid="storage-store-notices"]')?.textContent).toContain(EVIL);
+    expect(document.body.querySelector('[data-testid="storage-store-sha256"]')?.textContent).toBe(EVIL);
     noInjectedMarkup();
   });
 

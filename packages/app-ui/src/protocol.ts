@@ -52,7 +52,23 @@ export type Method =
   | 'state.get'
   | 'state.set'
   /** 0.52.0: what the app's license says (a paid app from a store), `LicenseInfo`. */
-  | 'license.get';
+  | 'license.get'
+  /** 0.55.0: filex prints a PDF the app hands it (`PrintParams`, grant `ui:print`). */
+  | 'ui.print'
+  /**
+   * 0.55.0, editing together (`coedit.*`, task #189): the session's log the
+   * host seals, orders through filex's relay and opens again. Defined so an
+   * app can be written against them; filex 0.55 offers no relay yet, so each
+   * answers `unavailable` - edit alone then (see `CoEditHello`).
+   */
+  | 'coedit.join'
+  | 'coedit.subscribe'
+  | 'coedit.append'
+  | 'coedit.lease'
+  | 'coedit.cursor'
+  | 'coedit.blob.put'
+  | 'coedit.blob.get'
+  | 'coedit.leave';
 
 export const METHODS: readonly Method[] = [
   'session.get',
@@ -71,6 +87,15 @@ export const METHODS: readonly Method[] = [
   'state.get',
   'state.set',
   'license.get',
+  'ui.print',
+  'coedit.join',
+  'coedit.subscribe',
+  'coedit.append',
+  'coedit.lease',
+  'coedit.cursor',
+  'coedit.blob.put',
+  'coedit.blob.get',
+  'coedit.leave',
 ];
 
 /** What the host tells the app, unasked. */
@@ -84,7 +109,17 @@ export type HostEvent =
   /** The person closed the frame's surroundings; last chance to say so. */
   | 'close.request'
   /** An administrator installed a new version of this app: reload to use it. */
-  | 'app.updated';
+  | 'app.updated'
+  /** Editing together: the next entry of the session's log, opened. `data: CoEditEntry`. */
+  | 'coedit.entry'
+  /** Editing together: another member's cursor (not kept). `data: CoEditCursor`. */
+  | 'coedit.cursor'
+  /**
+   * Editing together: the host stopped handing entries over (the app fell
+   * behind, or the connection dropped). `data: {from}` - subscribe again
+   * from the last entry the app holds.
+   */
+  | 'coedit.dropped';
 
 /** What the host may ask the app (and wait for). */
 export type HostRequest =
@@ -178,6 +213,19 @@ export interface FileInfo {
   /** It cannot be saved over: read-only storage, view-only opening, or the
    *  app holds no `files:write`. */
   readOnly: boolean;
+  /**
+   * 0.55.0: the file is end-to-end encrypted - `folder` in an encrypted
+   * folder, `vault` in a vault (where only one person edits at a time),
+   * `file` for a single encrypted file (`.fxe`). As the server says it;
+   * ABSENT for a file that is not encrypted.
+   *
+   * ⚠ filex 0.55 decrypts nothing for an app: the server holds such a file
+   * only as ciphertext and has no key, so `file.read` is refused
+   * (`failed` with `encrypted`), a save is refused, and `readOnly` is true.
+   * The explorer offers no app an encrypted file in the first place; the
+   * field is information, not a promise of plaintext.
+   */
+  encrypted?: 'folder' | 'vault' | 'file';
 }
 
 /** What `session.get` answers — what the app knows about where it runs. */
@@ -221,6 +269,12 @@ export interface SaveParams {
   /** A transferred ReadableStream<Uint8Array>, an ArrayBuffer or a string. */
   data: ReadableStream<Uint8Array> | ArrayBuffer | string;
   mime?: string;
+  /**
+   * 0.55.0, editing together: the last log entry (`CoEditEntry.seq`) the
+   * saved document holds, so the session knows what is saved. Ignored
+   * outside a session.
+   */
+  through?: number;
 }
 
 export interface SaveResult {
@@ -244,6 +298,143 @@ export interface DownloadParams {
 export interface DownloadResult {
   saved: true;
   size: number;
+}
+
+/**
+ * `ui.print` (filex 0.55.0): a PDF for the browser's print dialog. A
+ * sandboxed frame may not open that dialog (measured: Chromium ignores
+ * `print()` there and says so, Firefox ignores it), so filex prints the PDF
+ * from a page of its own, with the app's `ui:print` grant, never over
+ * LIMITS.maxPrintBytes. filex asks every time, above the frame, and the
+ * dialog opens only on the person's click on filex's Allow. The print dialog
+ * can save the PDF too, so `ui:print` is the same kind of grant as
+ * `ui:download`. filex 0.54 and older answer `unknown_method`.
+ */
+export interface PrintParams {
+  /** The document's name, for the question filex may ask - a name, not a path. */
+  name: string;
+  /** The PDF: a transferred ArrayBuffer or ReadableStream<Uint8Array>. */
+  data: ReadableStream<Uint8Array> | ArrayBuffer;
+  /** `application/pdf` when given; nothing else is printed. */
+  mime?: string;
+}
+
+export interface PrintResult {
+  /** The browser's print dialog was opened with the PDF. */
+  printed: true;
+  size: number;
+}
+
+/* ── editing together (coedit.*, filex 0.55.0: defined, not offered) ────── */
+
+/** What a member appends: the editor's changes, a lock request, a release. */
+export type CoEditKind = 'changes' | 'lock' | 'release';
+
+/** A member of the session. */
+export interface CoEditMember {
+  /** The relay's id for the connection. */
+  client: string;
+  /** An opaque id of the person, the same for each of their connections in
+   *  this session; never an account id. */
+  user: string;
+  /** The person's display name. */
+  name: string;
+  /** The editor's per-session user index: given once, never twice. */
+  indexUser: number;
+  /** May append changes (an editor role and the right to change the file). */
+  canEdit: boolean;
+}
+
+/** `coedit.join` params: join (or start) the session of an opened file. */
+export interface CoEditJoinParams {
+  index?: number;
+}
+
+/**
+ * What `coedit.join` answers: who the app is in the session and how far
+ * the log has gone. The entries come as `coedit.entry` events once the app
+ * subscribes (`coedit.subscribe` from 0 for the whole log). `unavailable`
+ * when filex offers no editing together here (filex 0.55, a vault, a file
+ * that cannot be shared): the app edits alone.
+ */
+export interface CoEditHello {
+  session: string;
+  me: CoEditMember;
+  /** The last entry's seq (0: an empty log). */
+  head: number;
+  /** The last `changes` entry's seq. */
+  changesHead: number;
+  /** The last entry the file on the storage holds. */
+  savedThrough: number;
+}
+
+/** `coedit.subscribe` params: entries after `from` arrive as `coedit.entry`. */
+export interface CoEditSubscribeParams {
+  from: number;
+}
+
+/** `coedit.append` params: the host seals it and the relay places it. */
+export interface CoEditAppendParams {
+  kind: CoEditKind;
+  body: unknown;
+}
+
+export interface CoEditAppendResult {
+  /** Where it landed; it comes back as a `coedit.entry` too. */
+  seq: number;
+}
+
+/** `coedit.lease`: the changes lease (one writer at a time, one that has
+ *  seen every change). */
+export interface CoEditLeaseParams {
+  op: 'acquire' | 'release';
+  /** The seq of the last `changes` entry the app applied. */
+  changesSeen: number;
+}
+
+export interface CoEditLeaseResult {
+  granted: boolean;
+}
+
+/** `coedit.cursor` params: passed to the other members, not kept. */
+export interface CoEditCursorParams {
+  cursor: unknown;
+}
+
+/** `coedit.blob.put` / `coedit.blob.get`: the session's sealed blobs (the
+ *  base document, images added while editing). A name, not a path. */
+export interface CoEditBlobPutParams {
+  name: string;
+  data: ArrayBuffer;
+}
+
+export interface CoEditBlobGetParams {
+  name: string;
+}
+
+export interface CoEditBlobGetResult {
+  name: string;
+  bytes: ArrayBuffer;
+}
+
+interface CoEditEntryBase {
+  seq: number;
+  /** The relay's time, Unix ms - the same for every member. */
+  at: number;
+  client: string;
+}
+
+/** One entry of the session's log, opened and checked by filex. */
+export type CoEditEntry =
+  | (CoEditEntryBase & { kind: CoEditKind; body: unknown })
+  | (CoEditEntryBase & { kind: 'join'; member: CoEditMember })
+  | (CoEditEntryBase & { kind: 'leave' })
+  | (CoEditEntryBase & { kind: 'saved'; through: number });
+
+/** `coedit.cursor` event data. */
+export interface CoEditCursor {
+  client: string;
+  cursor: unknown;
 }
 
 /**
@@ -325,6 +516,13 @@ export const LIMITS = {
   connectTimeoutMs: 10_000,
   /** The largest file `ui.download` hands the person (streamed or not). */
   maxDownloadBytes: 256 << 20,
+  /**
+   * The largest PDF `ui.print` prints (filex 0.55). Lower than a download:
+   * a download can stream to disk, a print is held whole in the page (one
+   * Blob) until the print dialog has read it, and a document worth printing
+   * is far smaller.
+   */
+  maxPrintBytes: 64 << 20,
 } as const;
 
 /* ── guards ────────────────────────────────────────────────────────────── */

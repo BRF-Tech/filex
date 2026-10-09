@@ -7,7 +7,7 @@
 name: filex
 services:
   filex:
-    image: ghcr.io/brf-tech/filex:v0.54.0
+    image: ghcr.io/brf-tech/filex:v0.55.0
     container_name: filex
     network_mode: bridge
     restart: unless-stopped
@@ -111,7 +111,7 @@ x-casaos:
   screenshot_link:
     - https://filex.sh/shots/explorer-grid-light.484fb070ca19.png
     - https://filex.sh/shots/admin-dashboard.d94a065baab6.png
-    - https://filex.sh/shots/share-modal.c8a399c36424.png
+    - https://filex.sh/shots/share-modal.e296e9b6ceea.png
   tips:
     before_install:
       en_US: >-
@@ -125,7 +125,7 @@ x-casaos:
   port_map: "5212"
   scheme: http
   store_app_id: filex
-  version: "0.54.0"
+  version: "0.55.0"
   website: https://filex.sh
   repo: https://github.com/BRF-Tech/filex
   support: https://github.com/BRF-Tech/filex/issues

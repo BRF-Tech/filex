@@ -5,6 +5,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
 
@@ -20,9 +21,11 @@ import (
 // granted files:read, and the administrator did not turn the app off for this
 // kind (openAllowed). What follows is the preview read itself - the person's
 // read permission, confinement, the storage, ranges - so an app reads nothing
-// its person could not read.
+// its person could not read. Nor a file the server holds only as ciphertext
+// (refuseEncryptedRead): its row says `encrypted`, and the app is refused it
+// as its other doors refuse an encrypted folder.
 func (h *AppPlugins) UIRead(w http.ResponseWriter, r *http.Request) {
-	if h.off(w) {
+	if h.off(w, r) {
 		return
 	}
 	p, v, ok := h.uiView(w, r)
@@ -30,19 +33,22 @@ func (h *AppPlugins) UIRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !p.Grants.Has(wasmplugin.PermFilesRead) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not_granted", "message": "this app was not granted files:read"})
+		writeError(w, r, http.StatusForbidden, "not_granted", apierr.Params{"permission": string(wasmplugin.PermFilesRead)})
 		return
 	}
 	target := strings.TrimSpace(r.URL.Query().Get("path"))
 	if target == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
+		writeError(w, r, http.StatusBadRequest, "bad_path", nil)
 		return
 	}
 	if !h.openAllowed(w, r, p, v, path.Base(strings.ReplaceAll(target, "\\", "/"))) {
 		return
 	}
+	if h.refuseEncryptedRead(w, r, target) {
+		return
+	}
 	if h.Preview == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "path_missing", nil)
 		return
 	}
 	q := r.URL.Query()

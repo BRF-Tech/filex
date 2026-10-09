@@ -13,6 +13,7 @@
 //	filex e2e-escrow keygen                      # install-time E2E key escrow
 //	filex decrypt <folder|zip|file> [-o DIR]     # offline: decrypt a downloaded E2E folder
 //	filex vault mount|prune adapter://vault      # a vault (E2E level 3) on a server
+//	filex plugin-validator --spool DIR           # an app store's storage plugin conformance runner
 //	filex --version
 package main
 
@@ -71,6 +72,7 @@ func main() {
 		decryptCmd(),
 		encryptCmd(),
 		vaultCmd(),
+		pluginValidatorCmd(),
 	)
 
 	if err := root.Execute(); err != nil {

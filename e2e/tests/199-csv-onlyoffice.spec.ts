@@ -158,21 +158,46 @@ test.describe.serial('a .csv opens in ONLYOFFICE', () => {
     const frame = await spreadsheetReady(tab);
     await expect(frame.getByText('Choose CSV options')).toHaveCount(0);
 
-    // B2 ("3") becomes 42, through the cell name box. Typed key by key, and
-    // read back before typing the value: on Firefox, fill() set the box
-    // without the key events ONLYOFFICE listens for, the box never moved,
-    // the Enter went to the grid (A1 -> A2) and 42 landed in A2 (GitHub
-    // run 37606303144, v0.53.0).
+    // B2 ("3") becomes 42, through the cell name box. Typed key by key: on
+    // Firefox, fill() set the box without the key events ONLYOFFICE listens
+    // for, the box never moved, the Enter went to the grid (A1 -> A2) and 42
+    // landed in A2 (GitHub run 37606303144, v0.53.0).
+    //
+    // ⚠ Emptied first, and read back before the Enter (task #199). Ctrl+A in
+    // the box did not always select its text in Firefox (ONLYOFFICE takes the
+    // shortcut for its grid): "B2" went in front of the old "A1", the Enter
+    // sent "B2A1", which is no cell, and the value landed in A1 (GitHub runs
+    // 37606303144 and 37661356185). Each step waits for what it needs, not
+    // for a number of milliseconds.
     const nameBox = frame.locator('#ce-cell-name');
     await nameBox.click();
-    await nameBox.press('ControlOrMeta+a');
+    await nameBox.fill('');
+    await expect(nameBox, 'the name box is empty before the address').toHaveValue('');
     await nameBox.pressSequentially('B2');
+    await expect(nameBox, 'the name box holds the address, and only it').toHaveValue('B2');
     await nameBox.press('Enter');
     await expect(nameBox, 'the name box went to B2').toHaveValue('B2');
-    await tab.waitForTimeout(500);
+    await expect(nameBox, 'the grid has the keys again').not.toBeFocused();
     await tab.keyboard.type('42');
     await tab.keyboard.press('Enter');
-    await tab.waitForTimeout(2_000);
+    // The Enter wrote the cell and moved down: the edit is in the document.
+    await expect(nameBox, 'the value went in and the cursor moved on').toHaveValue('B3');
+    // ...and the document server has it before the editor closes: ONLYOFFICE
+    // says the document is modified until its changes are saved there.
+    const editor = tab.frames().find((f) => f.name().startsWith('frameEditor'));
+    expect(editor, 'the editor frame').toBeTruthy();
+    await expect
+      .poll(
+        () =>
+          editor!.evaluate(() => {
+            type Api = { asc_isDocumentModified?: () => boolean };
+            const w = window as unknown as { Asc?: { editor?: Api }; editor?: Api };
+            const api = w.Asc?.editor ?? w.editor;
+            return api?.asc_isDocumentModified ? api.asc_isDocumentModified() : 'no such call';
+          }),
+        { message: 'the edit reached the document server', timeout: 30_000 },
+      )
+      .toBe(false);
 
     // Closing the last editor ends the session: the document server assembles
     // the file and calls filex back (status 2, ~10 s later).

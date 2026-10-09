@@ -167,6 +167,11 @@ func (h *Manager) AttachSearchIndex(idx *search.Index) {
 // are gated by the caller's grants. Optional — nil means no enforcement.
 func (h *Manager) AttachACL(r *acl.Resolver) { h.ACL = r }
 
+// e2eRoots is one request's answer to "which encrypted folder, which vault"
+// for rows outside a folder listing (e2e_rows.go), with the vault rule this
+// manager's resolver carries.
+func (h *Manager) e2eRoots() *e2eRoots { return newE2eRoots(h.Store).withVaults(h.ACL) }
+
 // aclSet loads the caller's ACL set for storage s (nil when ACL is unwired).
 func (h *Manager) aclSet(ctx context.Context, s *model.Storage) (*acl.Set, error) {
 	if h.ACL == nil {
@@ -217,7 +222,7 @@ func (h *Manager) require(w http.ResponseWriter, r *http.Request, s *model.Stora
 	// The token's `root:` first, as in allowed: outside it nothing else is
 	// asked (and nothing about the entry, not even "unavailable", is told).
 	if !rootAllowsIn(r.Context(), s, rel) {
-		refuseOutsideRoot(w)
+		refuseOutsideRoot(w, r)
 		return false
 	}
 	// An entry the storage could not answer for, or anything inside one
@@ -377,7 +382,7 @@ func (h *Manager) List(w http.ResponseWriter, r *http.Request) {
 	// folder outside its root. Drop the out-of-root rows (inert unconfined).
 	nodes = confineNodesToRoot(r.Context(), h.Store, nodes)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"nodes": nodes,
+		"nodes": h.e2eNodeRows(r.Context(), storageID, nodes),
 	})
 }
 
@@ -504,7 +509,7 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 	// root are refused here; a preview or download is also refused in
 	// streamBody (allowed/require).
 	if !rootAllowsIn(r.Context(), current, rel) {
-		refuseOutsideRoot(w)
+		refuseOutsideRoot(w, r)
 		return
 	}
 	// Into an entry the storage could not answer for (issue #104): no
@@ -938,6 +943,7 @@ func (h *Manager) respondIndex(w http.ResponseWriter, r *http.Request, s *model.
 		resp["e2e_root"] = joinAdapterPath(s.Name, strings.Trim(rel, "/"))
 	}
 	annotateVaults(set, s.Name, rel, files, resp)
+	stampListingEncrypted(files, resp)
 	/* /wiring:e2 */
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1372,7 +1378,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 	annotateStarred(r.Context(), h.Store, files)
 	// wiring:e2 names — a hit inside an encrypted folder says which one, so
 	// the client can name it (or say it is locked) rather than show ciphertext.
-	annotateRowsE2e(r.Context(), h.Store, s.ID, s.Name, files)
+	annotateRowsE2e(r.Context(), h.e2eRoots(), s.ID, s.Name, files)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"adapter":      s.Name,
 		"storages":     storageNames,
@@ -1466,7 +1472,40 @@ func (h *Manager) Stat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
-	writeJSON(w, http.StatusOK, node)
+	writeJSON(w, http.StatusOK, h.e2eNodeRows(r.Context(), node.StorageID, []*model.Node{node})[0])
+}
+
+// e2eNodeRow is a raw node row as these two routes always sent it (a file's
+// own stat, the id-based listing) plus what it says about end-to-end
+// encryption, as every row outside a folder listing does: `e2e_root` (the
+// encrypted folder it sits in) and `encrypted` (encryptedKind, task #189).
+type e2eNodeRow struct {
+	*model.Node
+	E2eRoot   string `json:"e2e_root,omitempty"`
+	Encrypted string `json:"encrypted,omitempty"`
+}
+
+// e2eNodeRows wraps the nodes of one storage (nil stays nil: the body is
+// what it was). One storage lookup, one ancestor walk per parent folder.
+func (h *Manager) e2eNodeRows(ctx context.Context, storageID int64, nodes []*model.Node) []e2eNodeRow {
+	if nodes == nil {
+		return nil
+	}
+	name := ""
+	if st, err := h.Store.GetStorage(ctx, storageID); err == nil && st != nil {
+		name = st.Name
+	}
+	roots := h.e2eRoots()
+	out := make([]e2eNodeRow, 0, len(nodes))
+	for _, n := range nodes {
+		row := e2eNodeRow{Node: n}
+		if n != nil {
+			row.E2eRoot = roots.of(ctx, n.StorageID, name, n.Path)
+			row.Encrypted = roots.encryptedOf(ctx, n.StorageID, n.Path, n.Type != model.NodeTypeDirectory)
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // Read streams a file by node ID or by storage_id+path.

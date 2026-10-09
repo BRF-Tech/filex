@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index b10edc9893dcb4ff0b1c797ee3cf5bf8befa32e4..036369d99463721398b9d7c49dfb46a4082658e3 100644
+index b10edc9893dcb4ff0b1c797ee3cf5bf8befa32e4..515516a1335d7425d8d1f8e65b91896d5d39511b 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -1,51 +1,104 @@
@@ -541,7 +541,7 @@ index b10edc9893dcb4ff0b1c797ee3cf5bf8befa32e4..036369d99463721398b9d7c49dfb46a4
        - name: Upload failure screenshots + video
          if: failure()
          uses: actions/upload-artifact@v4
-@@ -216,26 +567,252 @@ jobs:
+@@ -216,26 +567,258 @@ jobs:
              web/cypress/videos
              e2e/.artifacts/server.log
            # ⚠ e2e/.artifacts is a dot-directory: upload-artifact v4.4+ leaves
@@ -593,6 +593,10 @@ index b10edc9893dcb4ff0b1c797ee3cf5bf8befa32e4..036369d99463721398b9d7c49dfb46a4
 +      - name: The apps the suite installs
 +        run: bash .github/workflows/scripts/ci-apps.sh "$RUNNER_TEMP/apps"
 +      - name: The browser, with its system libraries
++        # The runner's apt-get update hung here for 44 minutes once (run
++        # 37661356185) and the part was cancelled at the job's 45-minute
++        # limit: a hang ends after 10, and the part is re-run.
++        timeout-minutes: 10
 +        run: pnpm --dir e2e exec playwright install --with-deps "$E2E_BROWSERS"
 +      - name: Latin fonts for the layout checks
 +        run: bash .github/workflows/scripts/ci-fonts.sh
@@ -656,6 +660,7 @@ index b10edc9893dcb4ff0b1c797ee3cf5bf8befa32e4..036369d99463721398b9d7c49dfb46a4
 +      - name: A Document Server, and its way back to filex
 +        run: bash .github/workflows/scripts/ci-docserver.sh "$E2E_PORT" 18080
 +      - name: The browser, with its system libraries
++        timeout-minutes: 10
 +        run: pnpm --dir e2e exec playwright install --with-deps "$E2E_BROWSERS"
 +      - name: Latin fonts for the layout checks
 +        run: bash .github/workflows/scripts/ci-fonts.sh
@@ -730,6 +735,7 @@ index b10edc9893dcb4ff0b1c797ee3cf5bf8befa32e4..036369d99463721398b9d7c49dfb46a4
 +        if: matrix.kind == 's3'
 +        run: bash .github/workflows/scripts/ci-s3.sh
 +      - name: The browsers, with their system libraries
++        timeout-minutes: 10
 +        run: pnpm --dir e2e exec playwright install --with-deps ${E2E_BROWSERS//,/ }
 +      - name: Latin fonts for the layout checks
 +        run: bash .github/workflows/scripts/ci-fonts.sh

@@ -143,7 +143,7 @@ async function save() {
     toast.success(t('appStore.view.saved'));
   } catch (e: unknown) {
     const r = storeRefusal(e);
-    failure.value = (r && storeSentence(r, t)) || r?.message || extractError(e, t('errors.generic'));
+    failure.value = (r && storeSentence(r)) || r?.message || extractError(e, t('errors.generic'));
   } finally {
     saving.value = false;
   }

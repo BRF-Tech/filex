@@ -19,12 +19,13 @@
  * carries its own key slots, and its recipient opens it with its password
  * (docs/E2E-ENCRYPTION.md, "Single encrypted files").
  */
-export interface E2eLinkRow {
-  e2e?: boolean;
-  e2e_root?: string;
-}
+import { rowInEncryptedFolder, type EncryptedRowLike } from './encryptedRow';
+
+/** What the rule reads of a row (lib/encryptedRow: `e2e`, `e2e_root`, and a
+ *  file row's `encrypted` - `file`, a `.fxe`, is not refused). */
+export type E2eLinkRow = EncryptedRowLike;
 
 export function publicLinksOff(rows: readonly E2eLinkRow[], insideEncrypted: boolean): boolean {
   if (insideEncrypted) return true;
-  return rows.some((r) => r.e2e === true || (typeof r.e2e_root === 'string' && r.e2e_root !== ''));
+  return rows.some(rowInEncryptedFolder);
 }

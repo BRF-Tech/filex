@@ -353,7 +353,8 @@ func (r *Registry) PutThumbLimits(ctx context.Context, id int64, l ThumbLimits) 
 		{"concurrency", l.Concurrency, lo.Concurrency, hi.Concurrency},
 	} {
 		if f.v != 0 && (f.v < f.lo || f.v > f.hi) {
-			return nil, &InstallError{Code: ErrCodeOutOfRange, Message: fmt.Sprintf("%s must be %d..%d (0 = the default)", f.name, f.lo, f.hi), Where: f.name}
+			return nil, &InstallError{Code: ErrCodeOutOfRange, Message: fmt.Sprintf("%s must be %d..%d (0 = the default)", f.name, f.lo, f.hi), Where: f.name,
+				Requires: fmt.Sprintf("%d..%d", f.lo, f.hi)}
 		}
 	}
 	if err := r.opts.Store.PutAppThumbLimits(ctx, &model.AppThumbLimits{

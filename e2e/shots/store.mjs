@@ -27,6 +27,42 @@
 //   store-screen-request-1440.png #162: asking for an app, with a reason
 //   store-request-review-1440.png #162: that request on Install requests, its
 //                              review: from the store, "open the store review"
+//   store-screen-storage-tab-1280.png #215: the store screen's Storage plugins
+//                              tab - the server's note first, the Checks
+//                              column (what the store's plugin validator
+//                              proved), a plugin the store has no build of for
+//                              this server in red, with nothing to ask for
+//   store-screen-storage-tab-dark-tr-1280.png   the same, Turkish, dark
+//   store-screen-storage-tab-390.png            the same on a 390-px phone
+//   store-screen-storage-tab-dark-tr-390.png    the phone, Turkish, dark
+//   storage-store-review-1280.png #215: a storage plugin's install link, its
+//                              review - the server's notices (a program
+//                              outside any sandbox, what the store's run
+//                              measured, filex probing again, the store's
+//                              signature), the build for this server and its
+//                              SHA-256, the capabilities, the release notes
+//   storage-store-review-dark-tr-1280.png       the same, Turkish, dark
+//   storage-store-review-390.png                the same on a 390-px phone
+//   storage-store-review-dark-tr-390.png        the phone, Turkish, dark
+//
+// The #215 pictures are MEASURED too, in a real browser, at 1280 and 390 px,
+// light and dark, in English and Turkish (nothing scrolls sideways, no
+// control on another, the review fits the window); a failed measurement
+// throws. They are shown in docs/PLUGINS.md → Installing from a store and
+// docs/APP-PLUGINS.md → The store screen (the `<!-- shot: … -->` lines there
+// become the pictures once they are published: scripts/lib/shots-site.mjs →
+// relinkText).
+//
+// ⚠⚠ The storage review needs the store over https. A storage plugin's link
+// names its release feed and every build by an https address (appstore
+// validateStorage), and the review READS the feed (plugin.ReadPinnedFeed,
+// https only) - here from the store's own server, which serves the feed of
+// the plugin it lists. So the four review pictures are taken only with
+// SHOTS_STORE_HOST (the chain sets it): without it the link is refused
+// before any review, and the scene says it left them out. The e2e suite
+// cannot reach this review at all (e2e/tests/230-store-storage-plugins.spec.ts,
+// lesson #1366): this scene, with its CA handed to filex, is the one place a
+// browser opens it.
 //
 // The store is a small server here that signs exactly as a store must
 // (ed25519 over the lower-hex SHA-256 of the canonical JSON, as
@@ -58,7 +94,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
 import { packBoardApp } from './board-app/pack.mjs';
-import { PUBLIC_URL, bootInstance, client, dismissToasts, log, mustSay, newContext, shootWhole, shot, signIn, sleep } from './scene.mjs';
+import {
+  PUBLIC_URL,
+  bootInstance,
+  client,
+  dismissToasts,
+  layoutProblems,
+  log,
+  mustSay,
+  newContext,
+  setLanguage,
+  shootWhole,
+  shot,
+  signIn,
+  sleep,
+} from './scene.mjs';
 
 const SET = 'store';
 const ADMIN = { email: 'demo@demo.com', password: 'demo-shots' };
@@ -69,6 +119,98 @@ const LICENSEE = 'Northwind Traders';
 /** #162: the store's one-time connection code, and the app its catalog offers beside the board. */
 const CONNECT_CODE = 'fxc_' + 'S'.repeat(43);
 const OTHER_APP = 'pdf-tools';
+
+/* ── #215: the store's storage plugins ───────────────────────────────────── */
+
+/** Every platform a store pins a storage plugin's build for (docs/PLUGINS.md). */
+const STORAGE_PLATFORMS = ['darwin/amd64', 'darwin/arm64', 'linux/amd64', 'linux/arm64', 'windows/amd64', 'windows/arm64'];
+
+/**
+ * The storage plugins the store lists. The first is the one whose install
+ * link is reviewed; the last has builds for macOS alone, so a Linux or
+ * Windows server reads "No build for this server" on its row.
+ */
+const STORAGE_PLUGINS = [
+  {
+    name: 's3-archive',
+    label: { en: 'S3 Archive', tr: 'S3 Arşivi' },
+    summary: { en: 'Moves old files to a cheaper S3 storage class', tr: 'Eski dosyaları daha ucuz bir S3 depolama sınıfına taşır' },
+    version: '1.4.0',
+    platforms: STORAGE_PLATFORMS,
+    notes: 'Multipart uploads resume after a restart.\nListing a bucket of 100,000 objects is twice as fast.',
+    conformance: { platform: 'linux/amd64', filex: '0.55.0', verified: true, passed: 67, failed: 0, skipped: 12, driver: 's3archive',
+      capabilities: ['write', 'delete', 'range', 'move', 'copy', 'mkdir', 'multipart'] },
+  },
+  {
+    name: 'sharepoint',
+    label: { en: 'SharePoint Online', tr: 'SharePoint Online' },
+    summary: { en: 'Document libraries of a Microsoft 365 tenant', tr: 'Bir Microsoft 365 kiracısının belge kitaplıkları' },
+    version: '2.1.0',
+    platforms: STORAGE_PLATFORMS,
+    notes: '',
+    conformance: { platform: 'linux/amd64', filex: '0.55.0', verified: true, passed: 61, failed: 0, skipped: 18, driver: 'sharepoint',
+      capabilities: ['write', 'delete', 'range', 'move', 'mkdir', 'set_mtime'] },
+  },
+  {
+    name: 'icloud-drive',
+    label: { en: 'iCloud Drive', tr: 'iCloud Drive' },
+    summary: { en: 'The iCloud Drive of the Mac filex runs on', tr: 'filex’in çalıştığı Mac’in iCloud Drive’ı' },
+    version: '0.9.2',
+    platforms: ['darwin/amd64', 'darwin/arm64'],
+    notes: '',
+    conformance: { platform: 'darwin/arm64', filex: '0.55.0', verified: true, passed: 58, failed: 0, skipped: 21, driver: 'icloud',
+      capabilities: ['write', 'delete', 'move', 'mkdir'] },
+  },
+];
+
+/** The release a storage plugin's builds hang off (an https address: never fetched by the review). */
+const storageBuildUrl = (p, plat) =>
+  `https://github.com/${OWNER}/filex-${p.name}/releases/download/v${p.version}/${p.name}-${plat.replace('/', '-')}${plat.startsWith('windows/') ? '.exe' : ''}`;
+
+/** A build's pinned SHA-256: fixed, so the review shows the same one every take. */
+const storageBuildSha = (p, plat) => sha256hex(Buffer.from(`${p.name}@${p.version}@${plat}`, 'utf8'));
+
+/** The store's path of the release feed it reviewed (served by the store's own server here). */
+const storageFeedPath = (p) => `/releases/${p.name}/v${p.version}/filex-storage.json`;
+
+/**
+ * The four looks every #215 picture is taken in, of the eight the scene
+ * measures: English light and Turkish dark, at 1280 and 390 px.
+ */
+const LOOKS = [];
+for (const scheme of ['light', 'dark']) {
+  for (const locale of ['en', 'tr']) {
+    for (const width of [1280, 390]) {
+      const shoots = (scheme === 'light' && locale === 'en') || (scheme === 'dark' && locale === 'tr');
+      LOOKS.push({ scheme, locale, width, height: width === 390 ? 844 : 900, suffix: shoots ? `${scheme === 'dark' ? 'dark-tr-' : ''}${width}` : '' });
+    }
+  }
+}
+
+/**
+ * What of a dialog does not fit: the dialog past the window's sides, or a
+ * piece of it past the dialog's own (a long SHA-256 or address that did not
+ * break). layoutProblems reads the page under a dialog, not the dialog.
+ */
+async function dialogProblems(dialog) {
+  return dialog.evaluate((el) => {
+    const out = [];
+    const view = window.innerWidth;
+    const box = el.getBoundingClientRect();
+    if (box.left < -0.5 || box.right > view + 0.5) out.push(`the dialog sticks out: ${Math.round(box.left)}..${Math.round(box.right)} of ${view}`);
+    for (const c of el.querySelectorAll('p, li, dd, dt, h2, h3, button, input, span')) {
+      const cs = getComputedStyle(c);
+      if (cs.visibility === 'hidden' || cs.opacity === '0') continue;
+      for (const r of c.getClientRects()) {
+        if (r.width > 0 && (r.left < box.left - 0.5 || r.right > box.right + 0.5)) {
+          out.push(`${c.tagName.toLowerCase()} "${(c.textContent || '').trim().slice(0, 40)}" sticks out of the dialog: ${Math.round(r.left)}..${Math.round(r.right)} of ${Math.round(box.left)}..${Math.round(box.right)}`);
+        }
+      }
+    }
+    if (el.scrollWidth > el.clientWidth + 1) out.push(`the dialog scrolls sideways (${el.scrollWidth} > ${el.clientWidth})`);
+    return out;
+  });
+}
 
 /* ── signing as a store must ─────────────────────────────────────────────── */
 
@@ -165,6 +307,8 @@ async function main() {
     let indexBytes = Buffer.from('');
     let indexSig = '';
     const media = new Map();
+    /* #215: the release feeds of the storage plugins it lists, by path, as the store reviewed them. */
+    const feeds = new Map();
     const connected = { key: '', id: randomUUID() };
     const handler = (req, res) => {
       const url = req.url ?? '';
@@ -202,6 +346,10 @@ async function main() {
           const body = media.get(icon[1]);
           if (!body) return send(404, { error: 'not_found' });
           res.writeHead(200, { 'Content-Type': 'image/png' }).end(body);
+          return;
+        }
+        if (req.method === 'GET' && feeds.has(url)) {
+          res.writeHead(200, { 'Content-Type': 'application/json' }).end(feeds.get(url));
           return;
         }
         if (req.method === 'POST' && url === '/v1/instances/connect') {
@@ -276,12 +424,42 @@ async function main() {
         permissions: perms, languages: [], engines: [], security: false, yanked: null,
       }],
     });
+    /* #215: its storage plugins - every build pinned by SHA-256 and signed with
+       the store's artifact key, the feed it reviewed pinned too, and what its
+       plugin validator measured. */
+    const artifact = seededKey('artifact-shots', 'artifact');
+    const storageBuilds = (p) => Object.fromEntries(p.platforms.map((plat) => {
+      const sha = storageBuildSha(p, plat);
+      const sig = sign(null, Buffer.from(sha, 'utf8'), artifact.priv).toString('hex');
+      return [plat, { url: storageBuildUrl(p, plat), sha256: sha, size: 18_874_368, sig }];
+    }));
+    const feedSha = new Map();
+    for (const p of STORAGE_PLUGINS) {
+      const feed = {
+        name: p.name, version: p.version, filex: '>=0.54.0', notes: p.notes,
+        binaries: Object.fromEntries(p.platforms.map((plat) => [plat, { url: storageBuildUrl(p, plat), sha256: storageBuildSha(p, plat) }])),
+      };
+      const bytes = Buffer.from(JSON.stringify(feed, null, 2), 'utf8');
+      feeds.set(storageFeedPath(p), bytes);
+      feedSha.set(p.name, sha256hex(bytes));
+    }
+    const indexStorage = (p) => ({
+      name: p.name, kind: 'storage', publisher: 'example', repo: `${OWNER}/filex-${p.name}`, categories: [],
+      label: p.label, summary: p.summary, screenshots: [], latest: p.version, revoked: null,
+      versions: [{
+        version: p.version, filex: '>=0.54.0', published_at: '2026-09-28', manifest: { sha256: feedSha.get(p.name) },
+        permissions: [], yanked: null,
+        binaries: Object.fromEntries(p.platforms.map((plat) => [plat, { sha256: storageBuildSha(p, plat) }])),
+        conformance: p.conformance,
+      }],
+    });
     const indexDoc = {
       schema: 1, serial: 12, generated_at: iso(new Date()), expires_at: iso(new Date(Date.now() + 30 * 86400_000)),
       keys: [], publishers: [{ id: 'example', name: 'Example Apps', github: 'example', verified: true, official: false }],
       apps: [
         indexApp(app, 'Board', 'A kanban board in a file', board.manifest.permissions, false),
         indexApp(OTHER_APP, 'PDF tools', 'Merge, split and rotate PDFs', ['files:read', 'files:write'], true),
+        ...STORAGE_PLUGINS.map(indexStorage),
       ],
     };
     indexBytes = Buffer.from(JSON.stringify(indexDoc, null, 2) + '\n', 'utf8');
@@ -294,6 +472,17 @@ async function main() {
         manifest_sha256: sha256hex(manifestBytes), ui_sha256: sha256hex(uiBytes),
         permissions: board.manifest.permissions, filex_range: '>=0.52.0', paid: true,
         license_key: LICENSE_KEY, expires_at: iso(new Date(Date.now() + 30 * 60_000)),
+      });
+      return `/admin/store-install#store=${encodeURIComponent(origin)}&intent=${token}`;
+    };
+    /** #215: a signed install link for a storage plugin - its feed, every build, the store's run. */
+    const storageLink = (token, p) => {
+      intents.set(token, {
+        store: origin, token_id: `tid-${token}`, app: p.name, kind: 'storage', version: p.version,
+        repo: `${OWNER}/filex-${p.name}`, ref: `v${p.version}`, commit: createHash('sha1').update(`${p.name}@${p.version}`).digest('hex'),
+        filex_origin: PUBLIC_URL, manifest_sha256: feedSha.get(p.name), feed_url: `${origin}${storageFeedPath(p)}`,
+        binaries: storageBuilds(p), conformance: p.conformance, permissions: [],
+        filex_range: '>=0.54.0', paid: false, expires_at: iso(new Date(Date.now() + 30 * 60_000)),
       });
       return `/admin/store-install#store=${encodeURIComponent(origin)}&intent=${token}`;
     };
@@ -444,6 +633,85 @@ async function main() {
     });
     log('a store link: trusting the store, its review, the trusted stores, a license valid and held, the store screen');
     await ctx.close();
+
+    // 10. #215: the store screen's Storage plugins tab, in every look - the
+    //     server's note, the Checks column, the plugin with no build here.
+    const [archive, , mac] = STORAGE_PLUGINS;
+    // A filex on a Mac (FILEX_BIN on this machine) runs a build of the
+    // macOS-only plugin: its row is then not the one without a build.
+    const macHere = process.platform === 'darwin' && !inst.container;
+    const problems = [];
+    for (const look of LOOKS) {
+      const vctx = await newContext(browser, { scheme: look.scheme, width: look.width, height: look.height });
+      const vpage = await vctx.newPage();
+      await signIn(vpage, inst.url, ADMIN);
+      await setLanguage(admin, vpage, look.locale);
+      await vpage.goto(`${inst.url}/drive/app-store`);
+      await vpage.waitForFunction((l) => document.documentElement.lang === l, look.locale, { timeout: 20_000 });
+      await vpage.getByTestId('store-screen').waitFor({ timeout: 20_000 });
+      await vpage.getByTestId('store-screen-kind-storage').click();
+      await vpage.getByTestId('store-screen-storage-note').waitFor({ timeout: 20_000 });
+      for (const p of STORAGE_PLUGINS) await vpage.getByTestId(`store-app-${p.name}`).waitFor({ timeout: 20_000 });
+      if ((await vpage.getByTestId(`store-app-${board.manifest.name}`).count()) !== 0) throw new Error('the Storage tab lists an app');
+      await mustSay(vpage.getByTestId(`store-app-checks-${archive.name}`), 'the Checks column', [String(archive.conformance.passed)]);
+      const red = (await vpage.getByTestId(`store-app-checks-${mac.name}`).getAttribute('class')) ?? '';
+      if (!macHere && !red.includes('text-rose-600')) throw new Error(`the row of ${mac.name}, which has no build for this server, is not drawn as such`);
+      for (const x of await layoutProblems(vpage)) problems.push(`Storage tab, ${look.scheme} ${look.locale} ${look.width}px: ${x}`);
+      if (look.suffix) {
+        await dismissToasts(vpage);
+        await vpage.mouse.move(2, 2);
+        await sleep(500);
+        await shot(vpage, SET, `store-screen-storage-tab-${look.suffix}.png`);
+      }
+      await setLanguage(admin, vpage, 'en');
+      await vctx.close();
+    }
+    log('the Storage plugins tab fits at 1280 and 390 px, light and dark, in English and Turkish');
+
+    // 11. #215: a storage plugin's install link and its review - only from a
+    //     store served over https (SHOTS_STORE_HOST): the link names its feed
+    //     and builds by https addresses, and the review reads the feed.
+    if (!origin.startsWith('https://')) {
+      log('left out: the storage plugin review (storage-store-review-*.png) needs the store over https - set SHOTS_STORE_HOST (the chain does)');
+    } else {
+      let n = 0;
+      for (const look of LOOKS) {
+        const vctx = await newContext(browser, { scheme: look.scheme, width: look.width, height: look.height });
+        const vpage = await vctx.newPage();
+        await signIn(vpage, inst.url, ADMIN);
+        await setLanguage(admin, vpage, look.locale);
+        n += 1;
+        await vpage.goto(`${inst.url}${storageLink(`shots-storage-${String(n).padStart(4, '0')}`, archive)}`);
+        const review = vpage.getByTestId('storage-store-review');
+        await review.waitFor({ timeout: 30_000 });
+        await vpage.waitForFunction((l) => document.documentElement.lang === l, look.locale, { timeout: 20_000 });
+        await vpage.getByTestId('storage-store-notice-warning').first().waitFor({ timeout: 10_000 });
+        if ((await vpage.getByTestId('storage-store-notice-info').count()) < 3) {
+          throw new Error(`the review says too little: ${(await review.innerText()).slice(0, 600)}`);
+        }
+        const sha = (await vpage.getByTestId('storage-store-sha256').innerText()).trim();
+        if (!archive.platforms.some((plat) => storageBuildSha(archive, plat) === sha)) {
+          throw new Error(`the review shows the build's SHA-256 as ${sha}, which the link does not pin`);
+        }
+        await vpage.getByTestId('storage-store-capabilities').waitFor({ timeout: 10_000 });
+        await vpage.getByTestId('storage-store-notes').waitFor({ timeout: 10_000 });
+        if (await vpage.getByTestId('storage-store-install').isDisabled()) throw new Error('the review refuses the install');
+        const dialog = vpage.locator('dialog[open] [role="dialog"]').last();
+        for (const x of await dialogProblems(dialog)) problems.push(`review, ${look.scheme} ${look.locale} ${look.width}px: ${x}`);
+        if (look.suffix) {
+          await vpage.mouse.move(2, 2);
+          await sleep(500);
+          await shootWhole(vpage, dialog, SET, `storage-store-review-${look.suffix}.png`, { restore: { width: look.width, height: look.height } });
+        }
+        // Closed without installing: the store is told the link was cancelled.
+        await vpage.getByTestId('storage-store-cancel').click();
+        await vpage.getByTestId('store-install-cancelled').waitFor({ timeout: 20_000 });
+        await setLanguage(admin, vpage, 'en');
+        await vctx.close();
+      }
+      log('the storage plugin review: its notices, the build and its SHA-256, at 1280 and 390 px, light and dark, in English and Turkish');
+    }
+    if (problems.length) throw new Error(`layout problems:\n  ${problems.join('\n  ')}`);
   } finally {
     if (browser) await browser.close();
     if (inst) await inst.stop();

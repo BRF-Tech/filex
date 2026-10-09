@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path"
 	"strconv"
 	"strings"
 	gosync "sync"
@@ -398,9 +399,22 @@ func (lc *lazyCatalogue) reconcileOnce(ctx context.Context, dir string, why lazy
 	// drop (rowgate.Judge, issue #192): a rename, a move or a delete filex is
 	// making on the storage is wholly before this folder's listing or wholly
 	// after it. Taken before the transaction (applyListing's) opens, never
-	// inside it - see rowgate.
-	release := rowgate.Judge(st.ID)
+	// inside it - see rowgate. A change that holds the gate for all of
+	// GateWait defers the folder (rowgate.ErrBusy): the judgement steps back
+	// without keeping that change, or any other, out.
+	release, err := rowgate.JudgeWithin(ctx, st.ID, GateWait)
+	if err != nil {
+		return res, err
+	}
 	defer release()
+	// A folder a long change fences (a folder moved or trashed object by
+	// object, rowgate.FenceCtx) is deferred like a busy gate: half way, its
+	// listing says neither what it was nor what it will be. Read under the
+	// gate, so a fence not seen here is not set until this reconcile ends.
+	fences := rowgate.Fences(st.ID)
+	if fences.Covers(dir) {
+		return res, fmt.Errorf("%w (%s is being moved or trashed object by object)", rowgate.ErrBusy, dir)
+	}
 	objs, err := s.driver.List(ctx, dir)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -423,6 +437,11 @@ func (lc *lazyCatalogue) reconcileOnce(ctx context.Context, dir string, why lazy
 		}
 	}
 
+	// A fenced child is left out of the listing, and counts as seen for the
+	// delete pass: neither its objects nor its row are judged until the fence
+	// opens.
+	fenced := fences.Kids(dir)
+	objs = fencedOut(fences, dir, objs, nil)
 	markerFirst(objs)
 	stamp := time.Now().UTC().Truncate(time.Second)
 	c := &walkCounts{}
@@ -434,7 +453,10 @@ func (lc *lazyCatalogue) reconcileOnce(ctx context.Context, dir string, why lazy
 	// its delete pass: one transaction (applyListing's finish), so what this
 	// listing found and what it removed commit together or not at all.
 	_, err = s.applyListing(ctx, dir, parent, objs, c, func(ctx context.Context, listed []listedEntry, b *entryBatch) error {
-		seen = make(map[string]bool, len(listed))
+		seen = make(map[string]bool, len(listed)+len(fenced))
+		for _, k := range fenced {
+			seen[path.Base(k)] = true
+		}
 		res.ChildDirs = nil
 		var found []model.CatalogueFolder
 		for _, e := range listed {

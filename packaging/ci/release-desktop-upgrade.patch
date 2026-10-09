@@ -1,0 +1,654 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index a98d77b..bc4ebc6 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -1696,6 +1696,9 @@ jobs:
+           esac
+       # The arm64 packages, for desktop-arm64-check to install and open on a
+       # real arm64 machine (and for a person to try from a dry run).
++      # The Windows row adds its x64 installer: desktop-arm64-check updates an
++      # installed x64 copy of the previous release with it too (under the
++      # x64 emulation of Windows on Arm), the copy most Windows users have.
+       - name: Keep the arm64 packages for the check on arm64 machines
+         if: matrix.label == 'windows' || matrix.label == 'linux-arm64'
+         uses: actions/upload-artifact@v4
+@@ -1703,6 +1706,7 @@ jobs:
+           name: desktop-arm64-${{ matrix.label }}
+           path: |
+             desktop/release/*arm64*.exe
++            desktop/release/filex-desktop-x64.exe
+             desktop/release/*arm64*.AppImage
+             desktop/release/*arm64*.deb
+             desktop/release/*aarch64*.rpm
+@@ -2016,6 +2020,21 @@ jobs:
+   # enforce mode with a seccomp filter (--expect-snap-confinement). The same
+   # on an x64 machine (linux-x64), since the launcher is in every Linux package.
+   #
++  # ⚠⚠ Since 0.55 (#68), before any of that: an UPDATE. The previous
++  # release's packages are installed and opened first, and this build's are
++  # installed over them the way an installed copy updates itself
++  # (desktop-upgrade-windows.ps1: the NSIS installer with `--updated /S
++  # --force-run`, x64 and arm64; desktop-upgrade-linux.sh: `dpkg -i` over the
++  # .deb, the AppImage replaced in place, the snap refreshed to a new
++  # revision). Each must leave ONE copy, of this version, where the old one
++  # was, with the user's data. 0.55 moved the packages from electron-builder
++  # 24 to 26 and the snap from core20 to core24, and a fresh install never
++  # runs what an update runs: the uninstall key the old version wrote, its
++  # uninstaller, the new package's scripts over the old files, snapd's copy
++  # of the user's data. previous-release.mjs picks the newest release below
++  # this build's version, so a dry run of a branch still on the last
++  # release's version updates from the one before.
++  #
+   # Not in a run that adds only the macOS packages (only=macos) or only the
+   # arm64 snap (only=snap-arm64), or sends to the stores alone (only=stores):
+   # none builds the .deb, the AppImage or the Windows installers checked
+@@ -2046,6 +2065,63 @@ jobs:
+         with:
+           name: ${{ matrix.artifact }}
+           path: pkg
++      - name: The previous release's desktop packages
++        shell: bash
++        env:
++          LABEL: ${{ matrix.label }}
++          VER: ${{ needs.plan.outputs.version }}
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          set -euo pipefail
++          case "$LABEL" in
++            linux-arm64) assets=(filex-desktop-arm64.deb filex-desktop-arm64.AppImage filex-desktop-arm64.snap) ;;
++            linux-x64) assets=(filex-desktop-amd64.deb filex-desktop-x86_64.AppImage filex-desktop-amd64.snap) ;;
++            windows) assets=(filex-desktop-x64.exe filex-desktop-arm64.exe) ;;
++            *) echo "::error::no previous packages for $LABEL"; exit 1 ;;
++          esac
++          args=()
++          for a in "${assets[@]}"; do args+=(--asset "$a"); done
++          node "$CI_SCRIPTS"/previous-release.mjs --repo "$GITHUB_REPOSITORY" --below "$VER" --out prev "${args[@]}"
++          ls -la prev
++      - name: Update from the previous release on Linux
++        if: startsWith(matrix.label, 'linux')
++        shell: bash
++        timeout-minutes: 30
++        env:
++          LABEL: ${{ matrix.label }}
++        run: |
++          set -euo pipefail
++          case "$LABEL" in
++            linux-arm64) DEB=arm64; IMG=arm64; SNAP=arm64 ;;
++            *) DEB=amd64; IMG=x86_64; SNAP=amd64 ;;
++          esac
++          bash "$CI_SCRIPTS"/desktop-upgrade-linux.sh --old prev --new pkg --label "$LABEL" --shots shots \
++            --deb "$DEB" --img "$IMG" --snap "$SNAP"
++      - name: Update from the previous release on Windows, x64 and arm64
++        if: matrix.label == 'windows'
++        shell: pwsh
++        timeout-minutes: 30
++        env:
++          FULL: ${{ needs.plan.outputs.full }}
++        run: |
++          $ErrorActionPreference = 'Stop'
++          New-Item -ItemType Directory -Force shots | Out-Null
++          foreach ($arch in @('x64', 'arm64')) {
++            $old = "prev/filex-desktop-$arch.exe"
++            $new = "pkg/filex-desktop-$arch.exe"
++            if (-not (Test-Path $new)) {
++              if ($env:FULL -eq 'true') { throw "this build has no $new" }
++              Write-Host "::warning title=desktop upgrade (windows-$arch)::this run built no filex-desktop-$arch.exe: no $arch update checked"
++              continue
++            }
++            if (-not (Test-Path $old)) {
++              Write-Host "::warning title=desktop upgrade (windows-$arch)::the previous release has no filex-desktop-$arch.exe: no $arch update checked"
++              continue
++            }
++            & pwsh -NoProfile -File "$env:CI_SCRIPTS/desktop-upgrade-windows.ps1" -Old (Resolve-Path $old).Path -New (Resolve-Path $new).Path -Label "windows-$arch" -Shots (Resolve-Path shots).Path -Scripts $env:CI_SCRIPTS
++            if ($LASTEXITCODE -ne 0) { throw "the $arch update failed" }
++          }
++          exit 0
+       - name: .deb, AppImage and snap on Linux, sandboxed or confined
+         if: startsWith(matrix.label, 'linux')
+         shell: bash
+diff --git a/.github/workflows/scripts/desktop-upgrade-linux.sh b/.github/workflows/scripts/desktop-upgrade-linux.sh
+new file mode 100755
+index 0000000..e81a5c3
+--- /dev/null
++++ b/.github/workflows/scripts/desktop-upgrade-linux.sh
+@@ -0,0 +1,193 @@
++#!/usr/bin/env bash
++# An installed copy of the previous release updates to this build, on Linux.
++#
++#   desktop-upgrade-linux.sh --old <dir> --new <dir> --label <name> --shots <dir>
++#                            --deb amd64|arm64 --img x86_64|arm64 --snap amd64|arm64
++#
++# <dir> holds the packages under their Release names (filex-desktop-<deb>.deb,
++# filex-desktop-<img>.AppImage, filex-desktop-<snap>.snap).
++#
++#   .deb      the previous release's .deb installed, opened (sandboxed) and
++#             closed, a marker left in the app's user data
++#             (~/.config/@brftech/filex-desktop); then this build's .deb
++#             installed over it the way the app's updater does it
++#             (electron-updater's DebUpdater: `dpkg -i`, then
++#             `apt-get install -f` if that fails). After: one filex package,
++#             this version, /usr/bin/filex-app still the launcher, the
++#             setuid sandbox helper still setuid root and no AppArmor profile
++#             of electron-builder's (desktop/build/linux/after-install.tpl),
++#             the marker and the files the previous version wrote still there,
++#             the app opens sandboxed, and its user data is still in one place.
++#   AppImage  replaced in place, as electron-updater's AppImageUpdater does
++#             (same file name, new file moved over the old): the image at
++#             that path then says this version.
++#   snap      the previous release's snap installed, opened (confined) and
++#             closed, markers in $SNAP_USER_DATA and $SNAP_USER_COMMON; then
++#             this build's installed over it (a new revision, as a refresh
++#             makes; 0.54 -> 0.55 is core20 -> core24). After: this version,
++#             both markers carried over, the app opens confined, and keeps
++#             its user data where the previous revision kept it.
++#
++# Everything is removed again at the end, so the checks after this one start
++# from a clean machine.
++#
++# ⚠ Why (0.55, #68): the desktop packages moved from electron-builder 24 to
++# 26 and the snap from core20 to core24. A fresh install of each package is
++# checked; what an installed copy goes through on an update (the new
++# package's scripts run over the old one's files, snapd's copy of the user's
++# data to a revision on another base) was checked nowhere.
++set -euo pipefail
++
++old='' new='' label='' shots='' deb='' img='' snap=''
++while [ $# -gt 0 ]; do
++  case "$1" in
++    --old) old=$2; shift 2 ;;
++    --new) new=$2; shift 2 ;;
++    --label) label=$2; shift 2 ;;
++    --shots) shots=$2; shift 2 ;;
++    --deb) deb=$2; shift 2 ;;
++    --img) img=$2; shift 2 ;;
++    --snap) snap=$2; shift 2 ;;
++    *) echo "unknown argument $1" >&2; exit 2 ;;
++  esac
++done
++for v in old new label shots deb img snap; do
++  [ -n "${!v}" ] || { echo "missing --$v" >&2; exit 2; }
++done
++old=$(realpath "$old")
++new=$(realpath "$new")
++mkdir -p "$shots"
++shots=$(realpath "$shots")
++here=$(cd "$(dirname "$0")" && pwd)
++
++fail() { echo "::error title=desktop upgrade ($label)::$*"; exit 1; }
++look() { xvfb-run -a -s "-screen 0 1280x800x24" node "$here"/desktop-look.mjs "$@"; }
++user_data_dirs() { find "$1" -maxdepth 6 -type d -path '*/@brftech/filex-desktop' 2>/dev/null | sort; }
++count() { printf '%s' "$1" | grep -c . || true; }
++app_version() { printf '%s' "$1" | tr '~' '-'; }
++token=$(cat /proc/sys/kernel/random/uuid)
++MARK=filex-upgrade-check.txt
++
++# ── .deb ───────────────────────────────────────────────────────────────────
++olddeb="$old/filex-desktop-$deb.deb"
++newdeb="$new/filex-desktop-$deb.deb"
++[ -f "$olddeb" ] || fail "the previous release has no $(basename "$olddeb")"
++[ -f "$newdeb" ] || fail "this build has no $(basename "$newdeb")"
++oldv=$(dpkg-deb -f "$olddeb" Version)
++newv=$(dpkg-deb -f "$newdeb" Version)
++echo "previous release: $oldv  this build: $newv"
++if [ "$oldv" = "$newv" ]; then
++  echo "::warning title=desktop upgrade ($label)::the previous release and this build are both $newv: the same version installs over itself"
++fi
++if dpkg-query -W filex-app > /dev/null 2>&1; then fail "the machine is not clean: filex-app is installed before the test"; fi
++conf="$HOME/.config/@brftech/filex-desktop"
++[ ! -e "$conf" ] || fail "the machine is not clean: $conf exists before the test"
++
++sudo apt-get update -qq
++sudo apt-get install -y -qq xvfb
++sudo apt-get install -y "$olddeb"
++[ "$(dpkg-query -W -f='${Version}' filex-app)" = "$oldv" ] || fail "the previous .deb did not install as $oldv"
++look --exe /usr/bin/filex-app --out "$shots/$label-upgrade-deb-previous.png" --port 9340 --expect-sandbox
++[ -d "$conf" ] || { user_data_dirs "$HOME"; fail "the previous release wrote no user data to $conf"; }
++printf '%s' "$token" > "$conf/$MARK"
++kept=()
++for n in 'Local State' Preferences desktop-state.bin logs; do
++  if [ -e "$conf/$n" ]; then kept+=("$n"); fi
++done
++echo "user data before the update: $(ls -A "$conf" | tr '\n' ' ')"
++
++if ! sudo dpkg -i "$newdeb"; then
++  echo 'dpkg -i failed; apt-get install -f, as the updater does'
++  sudo apt-get install -f -y
++fi
++
++[ "$(dpkg-query -W -f='${Version}' filex-app)" = "$newv" ] || fail "after the update dpkg says filex-app $(dpkg-query -W -f='${Version}' filex-app), this build is $newv"
++installed=$(dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\n' 'filex*' 2>/dev/null | awk '$3 ~ /^ii/' || true)
++echo "installed: $installed"
++[ "$(count "$installed")" = 1 ] || fail "after the update more than one filex package is installed: $installed"
++[ "$(readlink -f /usr/bin/filex-app)" = /opt/filex/filex-app ] || fail "/usr/bin/filex-app leads to $(readlink -f /usr/bin/filex-app), not /opt/filex/filex-app"
++head -1 /opt/filex/filex-app | grep -qx '#!/bin/sh' || fail '/opt/filex/filex-app is not the launcher'
++if ! { [ -u /opt/filex/chrome-sandbox ] && [ "$(stat -c %u /opt/filex/chrome-sandbox)" = 0 ]; }; then
++  fail "the update left /opt/filex/chrome-sandbox $(stat -c '%A %U' /opt/filex/chrome-sandbox): not setuid root"
++fi
++[ ! -e /etc/apparmor.d/filex-app ] || fail 'the update installed /etc/apparmor.d/filex-app (electron-builder 26 after-install)'
++[ "$(cat "$conf/$MARK" 2>/dev/null)" = "$token" ] || fail "the update lost the user's data: $conf/$MARK"
++for n in ${kept[@]+"${kept[@]}"}; do
++  [ -e "$conf/$n" ] || fail "the update deleted $n from $conf"
++done
++look --exe /usr/bin/filex-app --out "$shots/$label-upgrade-deb-updated.png" --port 9341 --expect-sandbox
++[ "$(cat "$conf/$MARK" 2>/dev/null)" = "$token" ] || fail "the updated app lost $conf/$MARK"
++places=$(user_data_dirs "$HOME/.config")
++[ "$(count "$places")" = 1 ] || fail "the user data is in more than one place: $places"
++echo "user data after the update: $(ls -A "$conf" | tr '\n' ' ')"
++sudo apt-get purge -y filex-app
++rm -rf "$HOME/.config/@brftech"
++echo "### Desktop update ($label, .deb): $oldv -> $newv, one package, sandbox helper setuid, user data kept" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
++
++# ── AppImage ───────────────────────────────────────────────────────────────
++oldimg="$old/filex-desktop-$img.AppImage"
++newimg="$new/filex-desktop-$img.AppImage"
++[ -f "$oldimg" ] || fail "the previous release has no $(basename "$oldimg")"
++[ -f "$newimg" ] || fail "this build has no $(basename "$newimg")"
++apps="$HOME/Apps/upgrade"
++mkdir -p "$apps"
++target="$apps/filex-desktop-$img.AppImage"
++image_version() {
++  local d
++  d=$(mktemp -d)
++  (cd "$d" && APPIMAGE_EXTRACT_AND_RUN=1 "$1" --appimage-extract '*.desktop' > /dev/null)
++  sed -n 's/^X-AppImage-Version=//p' "$d"/squashfs-root/*.desktop | head -1
++  rm -rf "$d"
++}
++cp "$oldimg" "$target"
++chmod +x "$target"
++v=$(image_version "$target")
++[ "$v" = "$(app_version "$oldv")" ] || fail "the previous AppImage says $v, its release is $oldv"
++cp "$newimg" "$target.new"
++chmod +x "$target.new"
++mv -f "$target.new" "$target"
++v=$(image_version "$target")
++[ "$v" = "$(app_version "$newv")" ] || fail "the AppImage at $target says $v after the update, this build is $newv"
++[ ! -e "$target.new" ] || fail "the update left $target.new behind"
++rm -rf "$apps"
++echo "### Desktop update ($label, AppImage): $oldv -> $newv in place" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
++
++# ── snap ───────────────────────────────────────────────────────────────────
++oldsnap="$old/filex-desktop-$snap.snap"
++newsnap="$new/filex-desktop-$snap.snap"
++if [ ! -f "$oldsnap" ] || [ ! -f "$newsnap" ]; then
++  echo "::warning title=desktop upgrade ($label)::no snap update checked: $( [ -f "$oldsnap" ] || printf 'the previous release has no %s ' "$(basename "$oldsnap")")$( [ -f "$newsnap" ] || printf 'this build has no %s' "$(basename "$newsnap")")"
++  exit 0
++fi
++if snap list filex-app > /dev/null 2>&1; then fail 'the machine is not clean: the filex-app snap is installed before the test'; fi
++rev() { snap list filex-app | awk 'NR==2 {print $3}'; }
++ver() { snap list filex-app | awk 'NR==2 {print $2}'; }
++sudo snap install --dangerous "$oldsnap"
++rev1=$(rev)
++[ "$(ver)" = "$(app_version "$oldv")" ] || fail "the previous snap says $(ver), its release is $oldv"
++look --exe /snap/bin/filex-app --out "$shots/$label-upgrade-snap-previous.png" --port 9342 --timeout 150 --expect-snap-confinement
++sdir="$HOME/snap/filex-app"
++first=$(user_data_dirs "$sdir/$rev1")
++[ "$(count "$first")" = 1 ] || { ls -laR "$sdir" 2> /dev/null | head -60 || true; fail "the previous snap's user data: ${first:-none found under $sdir/$rev1}"; }
++rel=${first#"$sdir/$rev1/"}
++echo "the snap keeps its user data in \$SNAP_USER_DATA/$rel"
++printf '%s' "$token" > "$first/$MARK"
++mkdir -p "$sdir/common"
++printf '%s' "$token" > "$sdir/common/$MARK"
++
++sudo snap install --dangerous "$newsnap"
++rev2=$(rev)
++snap list filex-app
++[ "$rev2" != "$rev1" ] || fail "this build's snap did not install as a new revision (still $rev1)"
++[ "$(ver)" = "$(app_version "$newv")" ] || fail "after the update the snap says $(ver), this build is $newv"
++[ "$(readlink "$sdir/current")" = "$rev2" ] || fail "$sdir/current leads to $(readlink "$sdir/current"), not $rev2"
++[ "$(cat "$sdir/$rev2/$rel/$MARK" 2>/dev/null)" = "$token" ] || fail "the refresh did not carry \$SNAP_USER_DATA over: no $sdir/$rev2/$rel/$MARK"
++[ "$(cat "$sdir/common/$MARK" 2>/dev/null)" = "$token" ] || fail "the refresh lost \$SNAP_USER_COMMON: no $sdir/common/$MARK"
++look --exe /snap/bin/filex-app --out "$shots/$label-upgrade-snap-updated.png" --port 9343 --timeout 150 --expect-snap-confinement
++now=$(user_data_dirs "$sdir/$rev2")
++[ "$now" = "$sdir/$rev2/$rel" ] || fail "the updated snap keeps its user data elsewhere: ${now:-none} (the previous revision used \$SNAP_USER_DATA/$rel)"
++[ "$(cat "$sdir/$rev2/$rel/$MARK" 2>/dev/null)" = "$token" ] || fail "the updated app lost $sdir/$rev2/$rel/$MARK"
++sudo snap remove --purge filex-app
++rm -rf "$sdir"
++echo "### Desktop update ($label, snap): $oldv ($rev1) -> $newv ($rev2), \$SNAP_USER_DATA and common kept" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
++echo "updated $oldv -> $newv: .deb, AppImage and snap"
+diff --git a/.github/workflows/scripts/desktop-upgrade-windows.ps1 b/.github/workflows/scripts/desktop-upgrade-windows.ps1
+new file mode 100644
+index 0000000..83f50d4
+--- /dev/null
++++ b/.github/workflows/scripts/desktop-upgrade-windows.ps1
+@@ -0,0 +1,195 @@
++# An installed copy of the previous release updates to this build, on Windows.
++#
++#   pwsh desktop-upgrade-windows.ps1 -Old <previous setup.exe> -New <this setup.exe>
++#        -Label <name for the pictures> -Shots <dir> -Scripts <dir of desktop-look.mjs> [-Port 9340]
++#
++# 1. Installs the previous release's NSIS installer the way a person does
++#    (silent, per-user), opens the app and closes it, and leaves a marker
++#    file in the app's user data (%APPDATA%\@brftech\filex-desktop).
++# 2. Runs this build's installer over it exactly as the app's own updater
++#    does (desktop/src/main.ts: autoUpdater.quitAndInstall(true, true), which
++#    electron-updater's NsisUpdater turns into `--updated /S --force-run`).
++# 3. Checks what is left:
++#    - ONE copy: one uninstall entry for the app in HKCU and HKLM (native and
++#      WOW6432Node), under the key the previous version registered, saying
++#      this version; nothing under Program Files;
++#    - this version: the installer's own version, in the registry and on
++#      filex.exe, in the folder the previous version was installed to;
++#    - the user's data: the marker and the files the previous version wrote;
++#    - the app opens.
++#    Then it uninstalls, so the steps after it start from a clean machine.
++#
++# ⚠ Why (0.55, #68): the desktop packages moved from electron-builder 24 to
++# 26, and the installer that replaces an installed copy is the one thing a
++# fresh install never exercises: the uninstall key the old one wrote (derived
++# from the appId), the old uninstaller run with --updated and /KEEP_APP_DATA,
++# the "is the app running" check. A new key or a new folder leaves two copies
++# behind; a wrong uninstall step deletes the user's sign-in. Nothing tested an
++# update before this.
++#
++# ⚠ The installer started with --force-run brings the app back itself (through
++# the shell, as the signed-in user); that relaunch is reported, not required:
++# the runner's session may have no shell to launch through.
++param(
++  [Parameter(Mandatory = $true)] [string] $Old,
++  [Parameter(Mandatory = $true)] [string] $New,
++  [Parameter(Mandatory = $true)] [string] $Label,
++  [Parameter(Mandatory = $true)] [string] $Shots,
++  [Parameter(Mandatory = $true)] [string] $Scripts,
++  [int] $Port = 9340
++)
++$ErrorActionPreference = 'Stop'
++
++# electron-builder's NSIS installer writes DisplayName "${productName} ${version}".
++$NamePattern = '^filex( |$)'
++$Home_ = Join-Path $env:LOCALAPPDATA 'Programs\filex'
++$App = Join-Path $Home_ 'filex.exe'
++$UserData = Join-Path $env:APPDATA '@brftech\filex-desktop'
++$Marker = Join-Path $UserData 'filex-upgrade-check.txt'
++
++function Fail([string] $why) {
++  Write-Host "::error title=desktop upgrade ($Label)::$why"
++  throw $why
++}
++
++# Every uninstall entry of the app, wherever an installer may have put one.
++function Get-AppEntries {
++  $roots = @(
++    'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
++    'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
++    'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
++  )
++  foreach ($root in $roots) {
++    if (-not (Test-Path $root)) { continue }
++    foreach ($k in Get-ChildItem $root) {
++      $p = Get-ItemProperty $k.PSPath
++      if ($p.DisplayName -and $p.DisplayName -match $NamePattern) {
++        [pscustomobject]@{
++          Key = $k.PSChildName
++          Root = $root
++          DisplayName = $p.DisplayName
++          DisplayVersion = $p.DisplayVersion
++          Publisher = $p.Publisher
++          UninstallString = $p.UninstallString
++          QuietUninstallString = $p.QuietUninstallString
++        }
++      }
++    }
++  }
++}
++
++# 1.2.3 out of 1.2.3, 1.2.3.0 or 1.2.3-rc.1 (the numbers a version resource can hold).
++function Get-Numbers([string] $v) {
++  if ($v -match '^(\d+)\.(\d+)\.(\d+)') { return "$($Matches[1]).$($Matches[2]).$($Matches[3])" }
++  return $v
++}
++
++function Stop-App {
++  Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force
++  for ($i = 0; $i -lt 15; $i++) {
++    $left = Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) }
++    if (-not $left) { return }
++    Start-Sleep -Seconds 1
++  }
++  Fail "the app did not stop: $(($left | ForEach-Object { $_.Id }) -join ', ')"
++}
++
++# Runs an installer and waits for IT, not for what it starts: Start-Process
++# -Wait waits for the whole process tree, and --force-run starts the app.
++function Invoke-Installer([string] $exe, [string[]] $arguments) {
++  $p = Start-Process $exe -ArgumentList $arguments -PassThru
++  $null = $p.Handle
++  if (-not $p.WaitForExit(300000)) { Fail "$(Split-Path $exe -Leaf) $($arguments -join ' ') did not finish in 5 minutes" }
++  return $p.ExitCode
++}
++
++function Open-App([string] $shot) {
++  Stop-App
++  node (Join-Path $Scripts 'desktop-look.mjs') --exe $App --out $shot --port $Port --timeout 150
++  if ($LASTEXITCODE -ne 0) { Fail "the installed app did not open ($shot)" }
++  Stop-App
++}
++
++$oldVersion = (Get-Item $Old).VersionInfo.ProductVersion
++$newVersion = (Get-Item $New).VersionInfo.ProductVersion
++Write-Host "previous release: $oldVersion ($Old)"
++Write-Host "this build:       $newVersion ($New)"
++if (-not $oldVersion -or -not $newVersion) { Fail 'an installer carries no version' }
++if ($oldVersion -eq $newVersion) {
++  Write-Host "::warning title=desktop upgrade ($Label)::the previous release and this build are both ${newVersion}: this installs the same version over itself"
++}
++
++if (Get-AppEntries) { Fail "the machine is not clean: an uninstall entry for filex exists before the test" }
++if (Test-Path $Home_) { Fail "the machine is not clean: $Home_ exists before the test" }
++
++# ── 1. the previous release, as a person installs it ───────────────────────
++$code = Invoke-Installer $Old @('/S', '/currentuser')
++if ($code -ne 0) { Fail "the previous installer exited $code" }
++if (-not (Test-Path $App)) { Fail "the previous installer left no $App" }
++$before = @(Get-AppEntries)
++if ($before.Count -ne 1) { Fail "the previous release registered $($before.Count) uninstall entries" }
++$key = $before[0].Key
++$root = $before[0].Root
++Write-Host "previous release registered: $root\$key ($($before[0].DisplayName))"
++if ($before[0].DisplayVersion -ne $oldVersion) { Fail "the previous release registered version $($before[0].DisplayVersion), its installer says $oldVersion" }
++
++Open-App (Join-Path $Shots "$Label-upgrade-previous.png")
++if (-not (Test-Path $UserData)) {
++  Get-ChildItem $env:APPDATA -Directory | ForEach-Object { Write-Host "  $env:APPDATA\$($_.Name)" }
++  Fail "the previous release wrote no user data to $UserData"
++}
++$token = [guid]::NewGuid().ToString()
++Set-Content -Path $Marker -Value $token -NoNewline
++$kept = @(Get-ChildItem $UserData -Force | ForEach-Object { $_.Name } | Where-Object { $_ -in @('Local State', 'Preferences', 'desktop-state.bin', 'logs') })
++Write-Host "user data before the update: $((Get-ChildItem $UserData -Force | ForEach-Object { $_.Name }) -join ', ')"
++
++# ── 2. this build, as the app's updater runs it ────────────────────────────
++$code = Invoke-Installer $New @('--updated', '/S', '--force-run')
++if ($code -ne 0) { Fail "this installer, run as the updater runs it, exited $code" }
++
++# The relaunch --force-run asks for (reported only, see the top).
++$back = $false
++for ($i = 0; $i -lt 30; $i++) {
++  if (Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) }) { $back = $true; break }
++  Start-Sleep -Seconds 2
++}
++if ($back) { Write-Host 'the app came back after the update (--force-run)' }
++else { Write-Host "::warning title=desktop upgrade ($Label)::the app did not come back after the update within 60 s (--force-run launches it through the shell; the runner may have none)" }
++Stop-App
++
++# ── 3. one copy, this version, the same place, the user's data ─────────────
++$after = @(Get-AppEntries)
++foreach ($e in $after) { Write-Host "after the update: $($e.Root)\$($e.Key) = $($e.DisplayName) [$($e.DisplayVersion)] $($e.QuietUninstallString)" }
++if ($after.Count -ne 1) { Fail "after the update there are $($after.Count) uninstall entries for filex: two copies installed" }
++if ($after[0].Key -ne $key -or $after[0].Root -ne $root) { Fail "the update registered $($after[0].Root)\$($after[0].Key), the previous release $root\$key" }
++if ($after[0].DisplayVersion -ne $newVersion) { Fail "the uninstall entry says $($after[0].DisplayVersion), this build is $newVersion" }
++if ($after[0].QuietUninstallString -notmatch [regex]::Escape($Home_)) { Fail "the uninstall entry points elsewhere: $($after[0].QuietUninstallString)" }
++$location = (Get-ItemProperty "HKCU:\Software\$key" -ErrorAction SilentlyContinue).InstallLocation
++if ($location -and $location.TrimEnd('\') -ne $Home_.TrimEnd('\')) { Fail "InstallLocation is $location, not $Home_" }
++foreach ($pf in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
++  if ($pf -and (Test-Path (Join-Path $pf 'filex'))) { Fail "a copy under $pf\filex" }
++}
++$appVersion = (Get-Item $App).VersionInfo.FileVersion
++if ((Get-Numbers $appVersion) -ne (Get-Numbers $newVersion)) { Fail "filex.exe is $appVersion after the update, this build is $newVersion" }
++$uninstallers = @(Get-ChildItem $Home_ -Filter 'Uninstall*.exe')
++if ($uninstallers.Count -ne 1) { Fail "$($uninstallers.Count) uninstallers in $Home_" }
++
++if (-not (Test-Path $Marker)) { Fail "the update deleted the user's data: $Marker is gone" }
++if ((Get-Content $Marker -Raw) -ne $token) { Fail "the update rewrote $Marker" }
++foreach ($n in $kept) {
++  if (-not (Test-Path (Join-Path $UserData $n))) { Fail "the update deleted $n from the user's data" }
++}
++Write-Host "user data after the update: $((Get-ChildItem $UserData -Force | ForEach-Object { $_.Name }) -join ', ')"
++
++Open-App (Join-Path $Shots "$Label-upgrade-updated.png")
++if (-not (Test-Path $Marker)) { Fail "the updated app deleted $Marker" }
++
++# ── clean up for the steps after this one ──────────────────────────────────
++$code = Invoke-Installer $uninstallers[0].FullName @('/S', '/currentuser')
++# The uninstaller hands over to a copy of itself in %TEMP% and returns.
++for ($i = 0; $i -lt 30 -and (Test-Path $App); $i++) { Start-Sleep -Seconds 2 }
++if (Test-Path $App) { Fail "uninstall (exit $code) left $App behind" }
++Remove-Item -Recurse -Force $UserData -ErrorAction SilentlyContinue
++"### Desktop update ($Label): $oldVersion -> $newVersion, one copy, user data kept" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
++Write-Host "updated $oldVersion -> ${newVersion}: one copy under $Home_, user data kept"
++exit 0
+diff --git a/.github/workflows/scripts/previous-release.mjs b/.github/workflows/scripts/previous-release.mjs
+new file mode 100644
+index 0000000..71f7818
+--- /dev/null
++++ b/.github/workflows/scripts/previous-release.mjs
+@@ -0,0 +1,140 @@
++// The release an installed copy updates FROM, and its desktop packages.
++//
++//   node previous-release.mjs --repo <owner/name> --below <version> --out <dir> [--asset <name>]...
++//
++// Picks the newest published release (no draft, no pre-release) whose version
++// is lower than --below, writes its version to <dir>/version, and downloads
++// each --asset that release has into <dir>. An asset the release does not
++// have is named on stdout ("missing <name>") and skipped: older releases have
++// fewer packages (no arm64 before 0.48.1), and the caller decides what that
++// means. Exit 1 when there is no such release or GitHub cannot be read: a
++// check that cannot find what to update from must not pass as one that did.
++//
++// ⚠ Lower than THIS build's version, not "the latest release": in a tag run
++// the Release of the tag being built exists already (the binaries job makes
++// it), and a dry run of a branch still carries the version of the last
++// release (desktop/package.json is bumped by the release): it then updates
++// from the one before, which is still an update made by this build.
++//
++// Reads GH_TOKEN or GITHUB_TOKEN when set (API rate limit); the downloads are
++// the public Release URLs and carry no token.
++import fs from 'node:fs';
++import path from 'node:path';
++import { Readable } from 'node:stream';
++import { pipeline } from 'node:stream/promises';
++import { fileURLToPath } from 'node:url';
++
++/** {major, minor, patch, pre} of "v1.2.3" / "1.2.3-rc.1", or null. */
++export function parseVersion(v) {
++  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(String(v ?? '').trim());
++  if (!m) return null;
++  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), pre: m[4] ?? '' };
++}
++
++/** Semver order: <0, 0, >0. A pre-release sorts below its release. */
++export function compareVersions(a, b) {
++  const x = parseVersion(a);
++  const y = parseVersion(b);
++  if (!x || !y) throw new Error(`not a version: ${!x ? a : b}`);
++  for (const k of ['major', 'minor', 'patch']) if (x[k] !== y[k]) return x[k] - y[k];
++  if (x.pre === y.pre) return 0;
++  if (!x.pre) return 1;
++  if (!y.pre) return -1;
++  const p = x.pre.split('.');
++  const q = y.pre.split('.');
++  for (let i = 0; i < Math.max(p.length, q.length); i++) {
++    if (p[i] === undefined) return -1;
++    if (q[i] === undefined) return 1;
++    const pn = /^\d+$/.test(p[i]);
++    const qn = /^\d+$/.test(q[i]);
++    if (pn && qn && Number(p[i]) !== Number(q[i])) return Number(p[i]) - Number(q[i]);
++    if (pn !== qn) return pn ? -1 : 1;
++    if (p[i] !== q[i]) return p[i] < q[i] ? -1 : 1;
++  }
++  return 0;
++}
++
++/**
++ * The newest published release lower than `below`, from GitHub's list
++ * (objects with tag_name, draft, prerelease, assets). null when none is.
++ */
++export function previousRelease(releases, below) {
++  if (!parseVersion(below)) throw new Error(`not a version: ${below}`);
++  const older = releases.filter((r) => !r.draft && !r.prerelease && parseVersion(r.tag_name) && compareVersions(r.tag_name, below) < 0);
++  older.sort((a, b) => compareVersions(b.tag_name, a.tag_name));
++  return older[0] ?? null;
++}
++
++async function listReleases(repo) {
++  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
++  const headers = { accept: 'application/vnd.github+json', 'user-agent': 'filex-release' };
++  if (token) headers.authorization = `Bearer ${token}`;
++  const all = [];
++  for (let page = 1; page <= 3; page++) {
++    const r = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=100&page=${page}`, { headers });
++    if (!r.ok) throw new Error(`GitHub answered ${r.status} for the releases of ${repo}`);
++    const list = await r.json();
++    all.push(...list);
++    if (list.length < 100) break;
++  }
++  return all;
++}
++
++async function download(asset, dir) {
++  const dest = path.join(dir, asset.name);
++  const r = await fetch(asset.browser_download_url, { redirect: 'follow', headers: { 'user-agent': 'filex-release' } });
++  if (!r.ok || !r.body) throw new Error(`${asset.name}: HTTP ${r.status}`);
++  await pipeline(Readable.fromWeb(r.body), fs.createWriteStream(dest));
++  const size = fs.statSync(dest).size;
++  if (asset.size && size !== asset.size) throw new Error(`${asset.name}: ${size} bytes, the Release says ${asset.size}`);
++  return dest;
++}
++
++function parse(argv) {
++  const o = { assets: [] };
++  for (let i = 0; i < argv.length; i++) {
++    const k = argv[i];
++    const v = argv[++i];
++    if (v === undefined) throw new Error(`${k} needs a value`);
++    if (k === '--repo') o.repo = v;
++    else if (k === '--below') o.below = v;
++    else if (k === '--out') o.out = v;
++    else if (k === '--asset') o.assets.push(v);
++    else throw new Error(`unknown argument ${k}`);
++  }
++  if (!o.repo || !o.below || !o.out) throw new Error('usage: node previous-release.mjs --repo <owner/name> --below <version> --out <dir> [--asset <name>]...');
++  return o;
++}
++
++async function main(argv) {
++  const o = parse(argv);
++  const prev = previousRelease(await listReleases(o.repo), o.below);
++  if (!prev) {
++    console.error(`${o.repo} has no published release below ${o.below}`);
++    return 1;
++  }
++  fs.mkdirSync(o.out, { recursive: true });
++  const version = prev.tag_name.replace(/^v/, '');
++  fs.writeFileSync(path.join(o.out, 'version'), version);
++  console.log(`previous release: ${prev.tag_name} (this build: ${o.below})`);
++  for (const name of o.assets) {
++    const asset = (prev.assets ?? []).find((a) => a.name === name);
++    if (!asset) {
++      console.log(`missing ${name}`);
++      continue;
++    }
++    const dest = await download(asset, o.out);
++    console.log(`downloaded ${name} (${fs.statSync(dest).size} bytes)`);
++  }
++  return 0;
++}
++
++if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  main(process.argv.slice(2)).then(
++    (code) => process.exit(code),
++    (e) => {
++      console.error(String(e?.message ?? e));
++      process.exit(1);
++    },
++  );
++}

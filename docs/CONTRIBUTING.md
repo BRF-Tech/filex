@@ -218,6 +218,15 @@ yours - and no letter after the number (`web/tests/quality/e2eSpecNumbers.test.t
 refuses a number used twice). Specs run in the file names' plain sort
 (`126-` before `95-`), so a spec never relies on running after another.
 
+WebKit's line runs without the panel's service worker (`serviceWorkers:
+'block'` for the `webkit` project in `e2e/playwright.config.ts`, task #199):
+Playwright's WebKit lost its network process while the worker installed
+(Known flaky tests, below). A spec that tests the worker itself opts back in
+with `test.use({ serviceWorkers: 'allow' })`, as 164's installable-app test
+does. A spec that answers or holds requests with `page.route` blocks it in
+every engine, because a request the worker carries is not routed (85, 97,
+132, 231).
+
 **Which one do I add a test to?**
 
 | | Playwright (`e2e/`) | Cypress (`web/cypress/`) |
@@ -453,15 +462,33 @@ each other instead of sharing the memory. It waits for it as long as it
 takes, or `CHAIN_LOCK_WAIT_MIN` minutes when the process environment sets
 that, and then exits 3 without starting.
 
+**What else the host runs.** A host that also runs something heavy - a
+virtual machine, an Android emulator that holds 3-4 GiB - can hand it out of
+the run's way. Once the lock is held, and before the run measures
+`MemAvailable` for its budget, `run.sh` runs `CHAIN_PAUSE_CMD` with `bash -c`;
+when that exits 0, it runs `CHAIN_RESUME_CMD` once when the run ends - green,
+red, a setup error, or stopped (TERM, INT or HUP reach `run.mjs` as TERM, it
+stops the run, and the resume runs after it), with the run's exit code in
+`CHAIN_EXIT`. Both are commands on the host, one line each, and carry no
+secret: a script there that reads its own settings. They come from the
+settings file (`run.sh --print-hooks` shows them), so a hand run, a CI run and
+the nightly run all take them, and run still under the lock, without its file
+descriptor, in a session of their own (no terminal; a stop of the nightly run
+does not cut them short), at most `CHAIN_HOOK_TIMEOUT_S` seconds each (900).
+A pause that fails or times out does not stop the run: `chain.log` and
+`result.json` `host.pause` say so, the run takes the smaller budget the host
+leaves, and nothing is resumed. The resume gets no second chance from the
+run: a resume script that cannot start what it paused says so itself.
+
 **What it leaves**, under `$CHAIN_ROOT/runs/<run-id>/`: `chain.log`, a
 `JOBSTART` and a `JOBEXIT` line per job; `logs/<job>.log`; `out/<job>/`, the
 job's test output; and `result.json` - per job its name, start, end, seconds,
 exit code, log, a one-line summary and its `load` (the most its container
 held and wrote, and the worst memory and IO "full" and disk write while it
 ran), plus the commit, the budget, the lowest `MemAvailable` the run saw and
-`host` (the budget it took and why, and the worst pressure of the run; the
-nightly report says it, and names a host stall beside the red job it may
-explain). It is rewritten after every job and final
+`host` (the budget it took and why, what the pause hook did, and the worst
+pressure of the run; the nightly report says it, and names a host stall beside
+the red job it may explain). It is rewritten after every job and final
 once `finished` is set; `runs/latest-<profile>.json` is the last final one.
 With `CHAIN_NOTIFY_URL` set, the end of the run is posted there. The exit code
 is 0 when every job is green.
@@ -570,7 +597,11 @@ night: run the installer again to update them.
   Document Server subnet, under `CHAIN_LOCK` - the lock every build on the
   host takes, which the nightly settings must name: a release chain and the
   nightly run wait for each other. It waits for the lock only as long as the
-  run could still end in time.
+  run could still end in time. `CHAIN_PAUSE_CMD` and `CHAIN_RESUME_CMD` in the
+  nightly settings work as in any run (What else the host runs, above): the
+  night's chain pauses what they name and resumes it when the chain ends,
+  before the nightly build. The systemd unit gives a stop 10 minutes, so the
+  resume runs after a stop too.
 
 **What it runs.** The full chain, and in the browser round the extras no
 other run has (`NIGHTLY_EXTRAS` in `scripts/chain/nightly-lib.mjs`;
@@ -712,12 +743,56 @@ showed it. A row leaves the list with the commit that removes its cause.
 
 | Test | Part | Runs | What fails |
 |---|---|---|---|
-| `199-csv-onlyoffice`: "Edit opens it in ONLYOFFICE; the saved file is the same kind of CSV with the new value" | `Playwright + Document Server (firefox)` | red in 37606303144 and 37661356185; green in 37613557303, 37624094959 and 37702037032 | Firefox only: the address typed into ONLYOFFICE's name box keeps part of the old one (`B2A1`), so the value lands in A1. Typing it key by key and reading it back (0.53.0) did not cure it. |
-| `202-store-install`: "the session gone, a second link in that tab goes into no sign-in address" | `Playwright (nopub, ...)`, `Playwright (chromium 3/4)` | red in two parts of 37702037032, both green on the re-run; flaky in 37598598805 and 37661356185 | The sign-in page is opened with `redirect=/home` instead of `/store-install`. Suspected: a race in the panel between the 401 handler (`web/src/main.ts`) and the store page's own `sessionEnded` over the sign-in address - the product's, not the test's. |
-| `163-explorer-trash-purge`: "an operator's Delete permanently removes the item from the trash" | `Playwright (webkit 2/4)` | red in 37702037032 and on its first re-run, green on the second; flaky in 37661356185; green in 37624094959 | WebKit: after the dialog's button is clicked no `DELETE /api/admin/trash/...` leaves within 10 s. |
-| `158-sidebar-storage-order`: "the administrator drags a storage to the top of the Storages table" | `Playwright (webkit 2/4)` | red in 37613557303 | WebKit: the drag does not move the row. |
-| `109-notifications-non-admin`: "paging reaches rows the bell never showed" | `Playwright (webkit 1/4)` | red in 37624094959, green on its re-run | WebKit: a click, then `page.goto` on the retry, time out. |
-| `139-table-scrollbar-loop`: "the table as shipped settles in a pane its rows just fit" | `Playwright (webkit 4/4)` | red in 37606303144 | `page.goto: WebKit encountered an internal error`, then a 15 s `page.goto` timeout on the retry. |
+| `158-sidebar-storage-order`: "sort by name writes a name order", then on the retry "the administrator drags a storage to the top of the Storages table" | `Playwright (webkit 2/4)` | red in 37613557303 | WebKit's network process crashed (see below): the page's loads failed at once with "WebKit encountered an internal error", the panel's row never came, and on the retry `GET /api/admin/storages` answered 401 - the session cookie lives in the network process and went with it. Since #199 WebKit runs without the service worker; the night runs measure whether this goes. |
+| `109-notifications-non-admin`: "paging reaches rows the bell never showed" | `Playwright (webkit 1/4)` | red in 37624094959, green on its re-run | WebKit's network process crashed (see below): ten loads of `/drive/explore` failed within two milliseconds, the explorer's chunk with them, and the page stayed blank under "The server could not be reached"; the retry's `page.goto` timed out. Since #199 WebKit runs without the service worker; the night runs measure whether this goes. |
+| `139-table-scrollbar-loop`: "the table as shipped settles in a pane its rows just fit" | `Playwright (webkit 4/4)` | red in 37606303144 | WebKit's network process crashed: the trace says so ("WebSocket network error: Network process crashed"), `page.goto` failed with "WebKit encountered an internal error", and the retry's `page.goto` timed out. Since #199 WebKit runs without the service worker; the night runs measure whether this goes. |
+
+The three rows above are one fault, and it is the browser's: Playwright's
+WebKit on GitHub's `ubuntu-latest` lost its network process for a moment
+(measured in the traces of runs 37606303144, 37613557303 and 37624094959).
+Every load in flight fails with "WebKit encountered an internal error", and
+the cookies go with the process. In all three traces the panel's service
+worker had registered on the sign-in page 2.4 to 3.3 seconds before (its
+install fetches the precache, every script and stylesheet of the panel)
+and the next page was loading: suspected, not proven, as the trigger.
+Since task #199 WebKit's line runs without the worker (`serviceWorkers:
+'block'` in `e2e/playwright.config.ts`; 164's installable-app test lets it
+back in). Whether that ends the crashes is measured in the night runs that
+follow: the rows stay on this list until those runs say so. Until then, a
+WebKit part red on one of them alone is re-run.
+
+The build host's chain measured the same fault with the worker blocked, so
+the worker is not its only trigger: 0.55's full chain (`3521526c`),
+`129-sign-box-name-and-dates`, "every box on the define step can be reached -
+a phone". Right after the sign-in the next page's manifest load failed with
+"WebKit encountered an internal error", its requests went out with neither
+the session cookie nor the token, the server answered 401 and the page was
+the sign-in page (the server had answered the same requests 200 a moment
+before). The 1440x900 and laptop runs of the same test before it passed.
+
+Left the list with the commit that removed their cause (task #199):
+
+- `202-store-install`, "the session gone, a second link in that tab goes into
+  no sign-in address" (Chromium; red in 37702037032, flaky in 37598598805
+  and 37661356185). The panel's: a 401 sent it to the sign-in page while it
+  still believed in the session, the sign-in page sent that reader on to
+  Home, and Home's own 401 named `/home` over the store page's sign-in. A
+  401 now asks the server first (`web/src/lib/sessionGone.ts`); e2e
+  `231-session-gone-sign-in` forces the order the race needed.
+- `163-explorer-trash-purge`, "an operator's Delete permanently removes the
+  item from the trash" (WebKit; red in 37702037032, flaky in 37661356185).
+  The explorer's: a live refresh of the trash landed at the right-click, and
+  every listing of the trash cleared the selection, so the dialog's button
+  found nothing to delete and closed. A reload of the trash on screen keeps
+  the selection now; the spec's second test refreshes between the pick and
+  the delete on purpose.
+- `199-csv-onlyoffice`, "Edit opens it in ONLYOFFICE; the saved file is the
+  same kind of CSV with the new value" (Firefox; red in 37606303144 and
+  37661356185). The spec's: Ctrl+A in ONLYOFFICE's name box did not always
+  select its text in Firefox, so "B2" went in front of the old "A1". The
+  spec empties the box and reads the address back before the Enter, and
+  waits for the cell to move and the document server to hold the edit
+  instead of for fixed times.
 
 **Flaky: failed once, passed on the retry; the part stayed green.** WebKit
 unless another engine is named:
@@ -764,11 +839,18 @@ unless another engine is named:
 **Not a test.** In run 37661356185 two parts (`chromium 4/4`, `firefox 4/4`)
 hung for 44 minutes in `playwright install --with-deps`, on `apt-get update`,
 and were cancelled at their 45-minute limit; the run took 69.7 minutes.
-Re-run the cancelled parts.
+The install step has a 10-minute limit of its own since (task #199,
+`packaging/ci/ci-full-matrix.patch`): a hang ends there. Re-run the part.
 
 The chain on the build host has reds of its own under load, and they are no
 flaky test: a timeout at a moment the host stalled (memory or disk) is the
 host's. Look at the host first (The whole chain on one Linux host, above).
+What a stall exposes is a fixed wait in a spec, and the fix is to wait for the
+condition: 0.55's full chain (disk writes up to 4.7 s) made a draft's create
+take 5.8 s against `168-drafts`' 5 s for the dialog to close, and a folder's
+listing 1.2 s against `172-e2e-names`' 700 ms after the double click (the
+upload went into the folder still on screen). Both wait for the server's
+answer now.
 
 ### What needs tests
 
@@ -942,6 +1024,17 @@ How to use it:
   Label cell drew the "Language pack" badge over the label and the coverage
   line over the badge, at every width). `.tbl-sub` as a direct child is the
   one shape the stylesheet handles on its own.
+- A pill in a cell (a status, "Installed", "Waiting", a role, a source) is a
+  **`tbl-pill` with its words in a `tbl-pill__text`** - the panel's `Badge`
+  carries both on its own, so a `Badge` needs nothing more. In a column
+  narrower than the pill, it keeps its border and dot and its words end in an
+  ellipsis inside it, and the table gives the whole text as its title while
+  it is cut. A pill drawn by hand (a `rounded-full` span) takes the two
+  classes too, or its words run out through its border at a phone's width
+  (the 0.55 store screen: "Bekliyor" over the edge of its own pill). Do not
+  make the cell grow to fit the pill instead: a cell is its column's track,
+  shared with the header and every other row. A header too narrow for its
+  name ends in an ellipsis the same way, with the whole name in its title.
 - A list the server pages: pass `:page`, `:page-size` and `:total` (or
   `:pages`). ⚠ Pass `:total` even when there is **no pager** and the endpoint
   answers "the first N of M" - that is what tells the table the rows on screen
@@ -2423,6 +2516,21 @@ ones not yet published apply on top of one another in this order:
    `desktop` builds every row. It needs the `CIRCLECI_TOKEN` secret
    ([When GitHub Actions is down](#when-github-actions-is-down), "Setting it
    up").
+5. `release-snap-core24.patch` (#68, 0.55): the desktop job on Node 22
+   (electron-builder 26) and snapcraft + LXD on both Linux rows, for the
+   core24 snap.
+6. `release-desktop-upgrade.patch` (#68, 0.55), on top of 5: before
+   `desktop-arm64-check` installs this build fresh, each of its machines
+   installs the previous release's packages, opens them, and installs this
+   build over them the way an installed copy updates itself - the NSIS
+   installer with `--updated /S --force-run` (x64 and arm64), `dpkg -i` over
+   the .deb, the AppImage replaced in place, the snap refreshed to a new
+   revision - and wants one copy, of this version, where the old one was,
+   with the user's data. The scripts are new:
+   `.github/workflows/scripts/previous-release.mjs` (the newest release below
+   this build's version), `desktop-upgrade-windows.ps1` and
+   `desktop-upgrade-linux.sh`; the Windows row's artifact carries the x64
+   installer as well. The first run of it is the release's dry run.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and
@@ -2430,7 +2538,8 @@ before `--resume` reaches the pretag, which runs their guards against them -
 one commit each (`git apply <patch>`, then commit by path) - and never push
 them on their own: the land pushes them with the export that brings their
 guards (`ciFullMatrix.test.ts`, `releasePromote.test.ts`,
-`releaseVerifyCircleci.test.ts`, `scripts/ci-parts.mjs`).
+`releaseVerifyCircleci.test.ts`, `scripts/ci-parts.mjs`, `releaseArm64.test.ts`,
+`releaseDesktopUpgrade.test.ts`).
 A workflow pushed ahead of its export goes red on GitHub (0.52.0).
 
 9. **Publish the two update feeds, then prove they moved.** CI attaches every
@@ -2732,7 +2841,8 @@ pnpm release X.Y.Z --plan --gate circleci      # what is read from CircleCI, and
   run that starts late, once Actions is back, cannot tag images or attach
   files over the ones packaged off GitHub, which winget and the feeds pin by
   hash. Such a release gets its macOS packages and its arm64 snap from
-  `only=macos` and `only=snap-arm64`, and reaches the Snap Store (amd64),
+  `only=macos` and `only=snap-arm64` (its amd64 snap by hand, see below),
+  and reaches the Snap Store (amd64),
   winget and the Microsoft Store with `only=stores`, which `verify` lets
   through on CircleCI's word.
 
@@ -2773,13 +2883,18 @@ node scripts/release/package-local.mjs X.Y.Z --run --only images,desktop-windows
 - goreleaser creates the Release with the CHANGELOG's notes; both images are
   built for amd64 and arm64 (arm64 under QEMU) with the labels and tags the tag
   run would give them; the Windows installers (x64 and arm64, one
-  `latest.yml`, x64 first) and the Linux packages (x64 and arm64, the amd64
-  snap) are built, checked to be the architecture on their label, and
+  `latest.yml`, x64 first) and the Linux packages (x64 and arm64: AppImage,
+  .deb, .rpm) are built, checked to be the architecture on their label, and
   attached.
-- **macOS is never built here**, and neither is the arm64 snap: the release
-  goes out without them and its notes say so; `only=macos` and
-  `only=snap-arm64` add them once GitHub can - after GitHub has tested the
-  commit, since a run that adds to a release is asked what a tag run is.
+- **macOS is never built here**, and neither is a snap: the release goes out
+  without them and its notes say so. Since 0.55 both snaps are core24, which
+  snapcraft builds in LXD (there is no prebuilt template any more), and WSL
+  has no LXD. `only=macos` and `only=snap-arm64` add the macOS packages and
+  the arm64 snap once GitHub can - after GitHub has tested the commit, since
+  a run that adds to a release is asked what a tag run is. The amd64 snap is
+  built on a Linux machine with snapcraft 8.x and LXD (`pnpm --filter
+  ./desktop run dist:snap` in a tree at the tag) and attached with `gh release
+  upload`, before `only=stores`; the notes print both commands.
   The stores need tokens GitHub alone holds: `only=stores` sends the amd64
   snap, the desktop app's winget pull request and the Microsoft Store bundle
   (the one the dry run kept, or built there: no Release carries one), and

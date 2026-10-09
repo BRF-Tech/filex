@@ -536,9 +536,9 @@ next). Nothing to switch on: it is on by default.
 | **What counts** | A wrong password, and a wrong second-factor code. Not: the form asking for the code, a right password on a disabled account, an API token (not a password). |
 | **What resets** | A success resets the *account's* counter - never the address's, so one valid login between guesses cannot launder a spray. A protocol's cached credential and an API token do not reset it either (a busy client would wipe the counter with every request). |
 
-![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.4221dd3d1185.png)
+![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.961ed40adfd4.png)
 
-![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.386b07b4543a.png)
+![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.fafb1136af30.png)
 
 **The IP allow-list** (`login.ip_allowlist`) is the way back in. An address on it is
 exempt from the per-address limit, and may sign in to **any** locked account (the
@@ -608,7 +608,7 @@ a minute. A database read that fails keeps the last value known (the default whe
 there is none). A `login.*` key written through the generic settings API reaches
 the running limit the same way.
 
-![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](https://filex.sh/shots/loginsecurity/login-security-1440.5a98c09e6f76.png)
+![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](https://filex.sh/shots/loginsecurity/login-security-1440.fa0a391a5c19.png)
 
 | Key | Default | Range |
 |---|---|---|
@@ -764,7 +764,7 @@ Drivers that live outside the binary - see [PLUGINS.md](PLUGINS.md).
 |---|---|---|
 | `FILEX_PLUGINS_DISABLED` | `0`, **`1` in demo mode** | Turns the whole subsystem off: nothing under `<data-dir>/plugins` is launched, no remote plugin is contacted, and the admin API answers 503 saying so. The subsystem is on by default, because a plugin is only ever installed by an admin - but an operator hardening a shared instance may not want the admin role to include “run a program on the server”. ⚠⚠ **`FILEX_DEMO_MODE` moves the default to `1`, so plugins are off on a demo.** A demo publishes an admin login - that is what a demo is - and this API is admin-only, so on a demo "admin-only" means anybody; installing a plugin runs an uploaded program on the host. Setting the variable yourself wins in either direction: `FILEX_PLUGINS_DISABLED=0` turns them back on for a demo, deliberately. |
 | `FILEX_PLUGIN_CONFORMANCE` | `enforce` | `enforce` · `warn` · `off`. filex **probes every capability a plugin declares** - at install against the plugin's own throwaway area, and again when a storage on it is saved, against that real configuration. `enforce` refuses a plugin that fails its own claims and refuses to save a storage on it. `warn` registers it anyway and keeps the report - for somebody *writing* a plugin, never for a shared instance: the cost of a broken claim is paid by the user, who meets an operation the UI offered and reads the failure as filex being broken. `off` skips both gates. Anything unrecognised falls back to `enforce`. |
-| `FILEX_PLUGIN_TRUSTED_KEYS` | - | Comma-separated ed25519 **public** keys (hex or standard base64) allowed to sign a plugin. Set any key and an unsigned or badly signed binary is refused at install *and* at upgrade, the signature is kept beside the binary (`<binary>.sig`) and **verified again at every start** - a plugin installed before the keys were set is refused at its next start until it is reinstalled with a signature - and the admin API reports `requires_signature: true` so the UI asks for the signature up front. Left empty, no signature is asked for and the recorded sha256 is all an install carries. See [PLUGINS.md → Signed plugins](PLUGINS.md#signed-plugins). |
+| `FILEX_PLUGIN_TRUSTED_KEYS` | - | Comma-separated ed25519 **public** keys (hex or standard base64) allowed to sign a plugin. Set any key and an unsigned or badly signed binary is refused at install *and* at upgrade, the signature is kept beside the binary (`<binary>.sig`) and **verified again at every start** - a plugin installed before the keys were set is refused at its next start until it is reinstalled with a signature - and the admin API reports `requires_signature: true` so the UI asks for the signature up front. Left empty, no signature is asked for and the recorded sha256 is all an install carries. A storage plugin build's signature is over its name, version, platform and sha256 (0.55; the old sha256-only form is taken in 0.55 with a warning and refused from 0.56), and a build a store's `artifact` key signed is taken through that store's link or while the store still lists that version - [PLUGINS.md → What is signed](PLUGINS.md#what-is-signed). See [PLUGINS.md → Signed plugins](PLUGINS.md#signed-plugins). |
 | `FILEX_PLUGIN_MAX_INFLIGHT` | `10` | Concurrent operations allowed **per plugin**. A caller that waits 5 s for a slot is refused rather than queued, and counted as `outcome="busy"` in [the metrics](METRICS.md#storage-plugins) - a sizing signal, not a bug. Raise it for a fast local plugin, lower it to keep a slow remote one from occupying the server. `0` or nonsense keeps the default. |
 | `FILEX_PLUGIN_LOOPBACK_SOURCES` | `0` | ⚠ **Development and tests only - never on a server.** `1` lets plugin and app **downloads** reach this machine (`127.0.0.0/8`, `::1`) and nothing else that is private: a storage plugin from a URL or a source, an app's manifest, module and interface bundle, an install request, the update check, an app store (its keys, its install links, a license check). By default every one of them reaches public addresses only (see below). The end-to-end tests set it, because they serve plugin sources from a small server on 127.0.0.1. With it on, a manifest that names a loopback address makes filex send GET requests to its own services, so the server says so in its log at start. An app's own requests (`http_request`, `asset_fetch`) never follow it. YAML: `plugin_loopback_sources`. |
 | `FILEX_APP_PLUGINS_DISABLED` | `0`, **`1` in demo mode** | Turns the [app plugin](APP-PLUGINS.md) runtime off: nothing under `<data-dir>/app-plugins` is loaded, the file menu shows no app rows, the admin tab explains why. Demo mode moves the default to `1` for the same reason as storage plugins; `FILEX_APP_PLUGINS_DISABLED=0` turns them back on deliberately. |
@@ -1392,11 +1392,11 @@ not a reverse proxy adds anything:
 |---|---|---|
 | `X-Content-Type-Options` | `nosniff` | every answer |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | every answer |
-| `Content-Security-Policy` | `frame-ancestors 'self'` + `FILEX_FRAME_ANCESTORS`; `frame-src` filex's own `/_appui/` and `/z/` + the editors below | filex's own pages (HTML) |
+| `Content-Security-Policy` | `frame-ancestors 'self'` + `FILEX_FRAME_ANCESTORS`; `frame-src` filex's own `/_appui/`, `/z/` and (0.55) `/_print/` + the editors below | filex's own pages (HTML) |
 
 | Env var | Default | Description |
 |---|---|---|
-| `FILEX_FRAME_ANCESTORS` | *(empty: filex only)* | The pages, besides filex itself, that may show filex's pages inside a frame - a home dashboard such as Homarr or Organizr. Origins separated by commas or spaces: `https://home.example.com`, `http://10.0.0.5:7575`, `https://*.example.com` for every subdomain, or `*` for any page (the protection is then off). `frame_ancestors` in `config.yaml`. |
+| `FILEX_FRAME_ANCESTORS` | *(empty: filex only)* | The pages, besides filex itself, that may show filex's pages inside a frame - a home dashboard such as Homarr or Organizr - and the sites the web component runs on when its apps print (the print page, below). Origins separated by commas or spaces: `https://home.example.com`, `http://10.0.0.5:7575`, `https://*.example.com` for every subdomain, or `*` for any page (the protection is then off). `frame_ancestors` in `config.yaml`. |
 
 ⚠ A value that is not an origin (`home.example.com` with no scheme, a path, a
 quote) stops the server at startup with a message saying what to write; the
@@ -1412,16 +1412,34 @@ What it does and does not touch:
   site ([INTEGRATION.md](INTEGRATION.md)) runs in the host's page and is not
   affected, and neither is what it shows from filex there - a PDF, an image, a
   download: `frame-ancestors` is sent on filex's pages, not on a file's own
-  bytes.
+  bytes. One exception, below: **printing from an app** there needs the
+  site in `FILEX_FRAME_ANCESTORS`.
 - **The desktop app** opens filex in its own window, not in a frame, and is
-  not affected.
+  not affected; its page may frame the print page without being listed.
+- **The print page** (`/_print/`, 0.55: filex prints an app's PDF from it,
+  [APP-PLUGINS-API.md → Printing a PDF](APP-PLUGINS-API.md#printing-a-pdf-uiprint-055))
+  says who may frame it itself: `frame-ancestors 'self'`, the origins of
+  `FILEX_FRAME_ANCESTORS` and the desktop app's page (`app://filex`). The
+  explorer frames it to print, so where the web component runs in another
+  site, that site must be listed for its apps to print; elsewhere the page
+  is refused and the app is told `unavailable` (an app such as the office
+  editor then hands the PDF over as a download). Why not any site: the page
+  frames a PDF it is handed under filex's address and opens the print
+  dialog, so a page every site could frame would let any site show a PDF of
+  its own as filex's. It prints only on the person's click on its own
+  button, wherever it is framed.
 - `Content-Security-Policy` here is `frame-ancestors` and `frame-src`; a
   handler that sets a policy of its own keeps it, and gets `frame-ancestors`
-  added when it names none (never `frame-src`: that could only widen it).
+  added when it names none (never `frame-src`: that could only widen it) -
+  except an app interface's page, which names none on purpose
+  ([APP-PLUGINS-API.md → An app's own interface](APP-PLUGINS-API.md#an-apps-own-interface-v4)),
+  and the print page, which names its own (above).
 
-**What filex's pages may frame (`frame-src`).** Two paths of filex itself -
+**What filex's pages may frame (`frame-src`).** Three paths of filex itself -
 the app interfaces (`<host>/_appui/`, left out when they have an origin of
-their own) and the frame a download starts in (`<host>/z/`), named for the
+their own), the frame a download starts in (`<host>/z/`) and the page an
+app's PDF is printed from (`<host>/_print/`, 0.55; it frames that PDF as a
+`blob:` of its own, which filex's pages never do), named for the
 host the page was asked on and for the host of `FILEX_PUBLIC_URL` when it is
 set - and the origin of each editor that is switched on under *Admin →
 External services* (draw.io, ONLYOFFICE) - read live, so an edit there

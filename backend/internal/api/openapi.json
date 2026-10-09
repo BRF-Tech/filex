@@ -3918,7 +3918,7 @@
         },
         "responses": {
           "201": {
-            "description": "Made: `{generation: 1}`.",
+            "description": "Made: `{generation: 1, owner_id, owner_name, owner_self}` - who owns the folder, as `state` says it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3926,6 +3926,17 @@
                   "properties": {
                     "generation": {
                       "type": "integer"
+                    },
+                    "owner_id": {
+                      "type": "integer",
+                      "description": "Who owns the vault folder (absent when nobody does)."
+                    },
+                    "owner_name": {
+                      "type": "string"
+                    },
+                    "owner_self": {
+                      "type": "boolean",
+                      "description": "Present (true) when the caller owns it."
                     }
                   },
                   "additionalProperties": true
@@ -3963,7 +3974,7 @@
         ],
         "responses": {
           "200": {
-            "description": "`{vault_id, pack_log2, generation, lock}`; lock is null or `{holder, since, expires_at, mine}`.",
+            "description": "`{vault_id, pack_log2, generation, lock, owner_id, owner_name, owner_self}`; lock is null or `{holder, since, expires_at, mine}`; the owner keys say who owns the vault folder, as a listing row does (each absent when there is nothing to say).",
             "content": {
               "application/json": {
                 "schema": {
@@ -3984,6 +3995,17 @@
                         "null"
                       ],
                       "additionalProperties": true
+                    },
+                    "owner_id": {
+                      "type": "integer",
+                      "description": "Who owns the vault folder (absent when nobody does)."
+                    },
+                    "owner_name": {
+                      "type": "string"
+                    },
+                    "owner_self": {
+                      "type": "boolean",
+                      "description": "Present (true) when the caller owns it."
                     }
                   },
                   "additionalProperties": true

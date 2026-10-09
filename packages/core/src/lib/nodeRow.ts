@@ -8,6 +8,7 @@
  * `read_only` — without mounting the component.
  */
 import type { FileNode } from '../types';
+import { isEncryptedKind } from './encryptedRow';
 
 /** What the explorer knows about the install, as far as a row needs it. */
 export interface NodeRowContext {
@@ -146,6 +147,12 @@ export function nodeRowToFileNode(
        answers it for rows outside a folder listing). The explorer's name view
        reads it to name the row, and openNode to open it in its folder. */
     ...(typeof row.e2e_root === 'string' && row.e2e_root ? { e2e_root: row.e2e_root } : {}),
+    /* #189 - how the file is end-to-end encrypted, as the SERVER stamps the
+       row (`folder` / `vault` / `file`, handlers/meta.go, the folder
+       listing's rule). An app's interface opened from Recent, Starred, a tag
+       view or Home is handed it as is (FileInfo.encrypted); dropped here, it
+       was told an encrypted file is not. */
+    ...(isEncryptedKind(row.encrypted) ? { encrypted: row.encrypted } : {}),
     extra_metadata: {},
   } as unknown as FileNode;
 }

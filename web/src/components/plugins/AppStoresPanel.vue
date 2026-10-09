@@ -104,7 +104,7 @@ async function connect() {
     emit('changed');
   } catch (e: unknown) {
     const r = storeRefusal(e);
-    connectError.value = (r && storeSentence(r, t)) || extractError(e, t('errors.generic'));
+    connectError.value = (r && storeSentence(r)) || extractError(e, t('errors.generic'));
   } finally {
     busy.value = '';
   }

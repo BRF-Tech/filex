@@ -40,6 +40,10 @@ const (
 	StateRunning  = "running"  // described, driver registered
 	StateFailed   = "failed"   // last attempt failed; a binary is backing off, a remote is re-checked
 	StateRefused  = "refused"  // describe or conformance rejected it; not retried until restart
+	// StateHeld: a plugin installed from a store whose license does not hold
+	// (store.go, SetLicenseHold). Nothing runs; its storages do not open;
+	// nothing is removed. It starts again as soon as the license holds.
+	StateHeld = "held"
 )
 
 // Conformance modes (FILEX_PLUGIN_CONFORMANCE).
@@ -79,6 +83,11 @@ type Status struct {
 	// (updates.go); absent for a plugin without a source, or before the
 	// first check.
 	Update *UpdateInfo `json:"update,omitempty"`
+	// LegacySignature: on an instance that requires signatures, the build's
+	// signature verified only in the old form - over its sha256 alone, not
+	// over its name, version and platform (signature.go VerifyBuild). Still
+	// accepted during filex 0.55, with this warning; 0.56 refuses it.
+	LegacySignature bool `json:"legacy_signature,omitempty"`
 }
 
 // Options configure a Manager.
@@ -146,6 +155,12 @@ type Manager struct {
 	// drivers maps DriverPrefix+name → plugin id, so two plugins cannot both
 	// claim "plugin:foo".
 	drivers map[string]int64
+	// holds maps a plugin name to why its license holds it (store.go): a
+	// held plugin is not started.
+	holds map[string]string
+	// gate is asked about every build signature a trusted key verified at an
+	// install or upgrade (SetBuildGate); nil asks nobody.
+	gate BuildGate
 }
 
 // entry is one plugin's runtime.
@@ -162,6 +177,13 @@ type entry struct {
 	state    string
 	stateErr string
 	stopFn   context.CancelFunc // remote checker / binary supervisor ctx
+	// legacySig: the binary's signature verified only in the old form (the
+	// sha256 alone) at its last check - shown as Status.LegacySignature.
+	legacySig bool
+	// pendingBackup: an upgrade landed while the plugin was held, so the
+	// previous binary is still kept beside the new one (<binary>.previous)
+	// until the new one first comes up (settleUpgrade).
+	pendingBackup bool
 
 	// logs is what the plugin's admin page shows (GET
 	// /api/admin/plugins/{id}/logs): its starts and failures, and the
@@ -301,7 +323,16 @@ func (m *Manager) Load(ctx context.Context) error {
 		return err
 	}
 	for _, row := range rows {
-		m.ensureEntry(row)
+		e := m.ensureEntry(row)
+		// An upgrade that landed held before the last stop has not proven
+		// itself yet: its previous binary is still beside it.
+		if row.Kind != model.PluginKindRemote && rowError(row) == nil {
+			if _, err := os.Stat(filepath.Join(m.dir, row.Name, row.Binary) + ".previous"); err == nil {
+				e.mu.Lock()
+				e.pendingBackup = true
+				e.mu.Unlock()
+			}
+		}
 	}
 	m.mu.Lock()
 	es := make([]*entry, 0, len(m.entries))
@@ -312,6 +343,7 @@ func (m *Manager) Load(ctx context.Context) error {
 	for _, e := range es {
 		if e.row.Enabled {
 			m.start(e)
+			m.settleLater(e)
 		}
 	}
 	return nil
@@ -385,6 +417,14 @@ func (m *Manager) start(e *entry) {
 	// or a migration went wrong) is refused here rather than joined to a path.
 	if err := rowError(row); err != nil {
 		m.setFailed(e, StateRefused, err)
+		return
+	}
+	if reason := m.heldReason(row.Name); reason != "" {
+		// A store's license holds it: nothing is started until it holds no
+		// more (SetLicenseHold starts it then).
+		e.mu.Lock()
+		e.state, e.stateErr = StateHeld, reason
+		e.mu.Unlock()
 		return
 	}
 	e.mu.Lock()
@@ -464,10 +504,12 @@ func (m *Manager) runBinary(ctx context.Context, e *entry) {
 		m.setFailed(e, StateRefused, err)
 		return
 	}
-	if err := m.checkStoredSignature(bin, row.SHA256); err != nil {
+	legacy, err := m.checkStoredSignature(bin, row.Name, row.SHA256)
+	if err != nil {
 		m.setFailed(e, StateRefused, err)
 		return
 	}
+	m.noteLegacySignature(e, legacy)
 	token, err := mintToken()
 	if err != nil {
 		m.setFailed(e, StateFailed, err)
@@ -719,6 +761,15 @@ func (m *Manager) adopt(ctx context.Context, e *entry, c *Client) error {
 		}
 	}
 	metrics.PluginUp.WithLabelValues(row.Name).Set(1)
+	// The first start that came up proves a held upgrade: the previous
+	// binary kept beside it (settleUpgrade) is not needed any more.
+	e.mu.Lock()
+	pending := e.pendingBackup
+	e.pendingBackup = false
+	e.mu.Unlock()
+	if pending && row.Kind != model.PluginKindRemote && rowError(row) == nil {
+		dropUpgradeBackup(filepath.Join(m.dir, row.Name, row.Binary))
+	}
 	m.log.Info("plugin up", slog.String("plugin", row.Name), slog.String("driver", driver), slog.String("version", desc.Version))
 	e.logs.Add("info", "plugin up: driver "+driver+", version "+desc.Version)
 	return nil
@@ -910,7 +961,7 @@ const verifiedDir = ".verified"
 // the copy once the process is gone.
 func (m *Manager) verifiedCopy(row *model.Plugin) (string, func(), error) {
 	bin := filepath.Join(m.dir, row.Name, row.Binary)
-	if err := m.checkStoredSignature(bin, row.SHA256); err != nil {
+	if _, err := m.checkStoredSignature(bin, row.Name, row.SHA256); err != nil {
 		return "", nil, err
 	}
 	src, err := os.Open(bin)
@@ -996,7 +1047,24 @@ var ErrBadName = errors.New("plugin name must match [a-z0-9][a-z0-9_-]{0,31}")
 // the name the file will have inside the plugin's directory (its basename
 // is used; an empty one becomes "plugin" or "plugin.exe").
 func (m *Manager) InstallBinary(ctx context.Context, name, filename string, r io.Reader, signature string) (*Status, error) {
-	return m.install(ctx, name, filename, r, signature, "")
+	return m.install(ctx, name, filename, r, signature, "", buildSource{})
+}
+
+// InstallBinaryVersion is InstallBinary for a build whose signature names its
+// version (signature.go VerifyBuild): version is the one the publisher
+// signed, and the name the plugin is installed under must be the one they
+// signed it as.
+func (m *Manager) InstallBinaryVersion(ctx context.Context, name, filename string, r io.Reader, signature, version string) (*Status, error) {
+	return m.install(ctx, name, filename, r, signature, "", buildSource{version: version})
+}
+
+// buildSource is what an install or upgrade knows of a build beyond its
+// bytes: the version its signature names ("" = not known: only the old
+// sha256-only form can verify), and the store whose signed install link
+// brought it ("" = none: an upload, an address, a source).
+type buildSource struct {
+	version string
+	via     string
 }
 
 // install is the one path every binary install takes, in this order and no
@@ -1010,7 +1078,7 @@ func (m *Manager) InstallBinary(ctx context.Context, name, filename string, r io
 // mismatched download was already running as filex's user by the time it was
 // found out and removed. Nothing is executed here until every check that can
 // refuse it has passed.
-func (m *Manager) install(ctx context.Context, name, filename string, r io.Reader, signature, wantSHA string) (*Status, error) {
+func (m *Manager) install(ctx context.Context, name, filename string, r io.Reader, signature, wantSHA string, src buildSource) (*Status, error) {
 	if !validName(name) {
 		return nil, ErrBadName
 	}
@@ -1036,7 +1104,8 @@ func (m *Manager) install(ctx context.Context, name, filename string, r io.Reade
 		_ = os.RemoveAll(dir)
 		return nil, RejectedError{fmt.Errorf("%w: downloaded %s, expected %s", ErrSHA256Mismatch, sum[:12], wantSHA[:min(12, len(wantSHA))])}
 	}
-	if err := m.checkSignature(sum, signature); err != nil {
+	legacy, err := m.verifyBuild(ctx, BuildClaim{Name: name, Version: src.version, Platform: m.platform(), SHA256: sum}, src.via, signature)
+	if err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
@@ -1044,7 +1113,7 @@ func (m *Manager) install(ctx context.Context, name, filename string, r io.Reade
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
-	if err := writeSignature(dst, signature); err != nil {
+	if err := writeSignature(dst, signature, src.version); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
@@ -1055,6 +1124,7 @@ func (m *Manager) install(ctx context.Context, name, filename string, r io.Reade
 		return nil, err
 	}
 	e := m.ensureEntry(row)
+	m.noteLegacySignature(e, legacy)
 	m.start(e)
 	return m.statusOf(ctx, e), nil
 }
@@ -1065,8 +1135,11 @@ func (m *Manager) install(ctx context.Context, name, filename string, r io.Reade
 func signaturePath(bin string) string { return bin + ".sig" }
 
 // writeSignature stores the signature next to the binary (0600), or removes
-// a stale one when the install carried no signature.
-func writeSignature(bin, signature string) error {
+// a stale one when the install carried no signature. The version the
+// signature names, when the install knew it, is kept on a second line
+// ("version <v>"): the start-time check rebuilds the signed text from it,
+// the row's name and sha256 and this server's platform (VerifyBuild).
+func writeSignature(bin, signature, version string) error {
 	signature = strings.TrimSpace(signature)
 	if signature == "" {
 		if err := os.Remove(signaturePath(bin)); err != nil && !os.IsNotExist(err) {
@@ -1074,7 +1147,34 @@ func writeSignature(bin, signature string) error {
 		}
 		return nil
 	}
-	return os.WriteFile(signaturePath(bin), []byte(signature+"\n"), 0o600)
+	body := signature + "\n"
+	if v := strings.TrimSpace(version); v != "" && !strings.ContainsAny(v, "\r\n") {
+		body += sigVersionPrefix + v + "\n"
+	}
+	return os.WriteFile(signaturePath(bin), []byte(body), 0o600)
+}
+
+// sigVersionPrefix opens the .sig file's version line.
+const sigVersionPrefix = "version "
+
+// readSignature reads a .sig file: the signature (its first line) and the
+// version it names ("" in a file written before 0.55, which has no second
+// line).
+func readSignature(bin string) (signature, version string, err error) {
+	b, err := os.ReadFile(signaturePath(bin))
+	if err != nil {
+		return "", "", err
+	}
+	for i, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case i == 0:
+			signature = line
+		case strings.HasPrefix(line, sigVersionPrefix):
+			version = strings.TrimSpace(strings.TrimPrefix(line, sigVersionPrefix))
+		}
+	}
+	return signature, version, nil
 }
 
 // checkStoredSignature re-verifies the signature kept beside the binary
@@ -1085,21 +1185,41 @@ func writeSignature(bin, signature string) error {
 // while they were briefly unset, ran forever with no signature at all, and
 // the setting looked enforced. No trusted keys → nothing is required, as at
 // install. Trusted keys and no signature file → refused with the way out.
-func (m *Manager) checkStoredSignature(bin, sha string) error {
+//
+// The signed text is rebuilt from the row's name and sha256, this server's
+// platform and the version kept beside the signature (VerifyBuild); legacy
+// reports a signature that verified only in the old sha256-only form.
+func (m *Manager) checkStoredSignature(bin, name, sha string) (legacy bool, err error) {
 	if len(m.trusted) == 0 {
-		return nil
+		return false, nil
 	}
-	b, err := os.ReadFile(signaturePath(bin))
+	sig, version, err := readSignature(bin)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return errors.New("signature required (installed before trusted keys were set - reinstall)")
+			return false, errors.New("signature required (installed before trusted keys were set - reinstall)")
 		}
-		return fmt.Errorf("signature file: %w", err)
+		return false, fmt.Errorf("signature file: %w", err)
 	}
-	if err := VerifyDetached(m.trusted, sha, string(b)); err != nil {
-		return fmt.Errorf("stored signature does not verify - reinstall the plugin: %w", err)
+	v, err := VerifyBuild(m.trusted, BuildClaim{Name: name, Version: version, Platform: m.platform(), SHA256: sha}, sig)
+	if err != nil {
+		return false, fmt.Errorf("stored signature does not verify - reinstall the plugin: %w", err)
 	}
-	return nil
+	return v.Legacy, nil
+}
+
+// noteLegacySignature records whether e's build signature verified only in
+// the old form, and says so in the plugin's log and the server's.
+func (m *Manager) noteLegacySignature(e *entry, legacy bool) {
+	e.mu.Lock()
+	e.legacySig = legacy
+	name := e.row.Name
+	e.mu.Unlock()
+	if !legacy {
+		return
+	}
+	const msg = "signature over the sha256 alone: accepted until filex 0.56 - install a build signed over its name, version and platform"
+	e.logs.Add("warn", msg)
+	m.log.Warn("plugin: "+msg, slog.String("plugin", name))
 }
 
 // parsePublicKey accepts an ed25519 key as hex or standard base64.
@@ -1171,25 +1291,78 @@ func (m *Manager) HashURL(ctx context.Context, rawURL string) (string, int64, er
 func (m *Manager) RequiresSignature() bool { return len(m.trusted) > 0 }
 
 // checkSignature verifies a detached ed25519 signature over the binary's
-// sha256, against any configured trusted key.
+// sha256 alone, against any configured trusted key - the OLD form. Installs,
+// upgrades and starts verify a build with verifyBuild / VerifyBuild (over its
+// name, version, platform and sha256), which still takes this form during
+// 0.55, with a warning; this stays for the tests that pin the old form.
 //
-// ⚠ Signing the HASH rather than the file keeps verification cheap and lets
-// an operator sign with the same digest they already publish. The hash is
-// hex-encoded exactly as it appears in the plugin row, so
+// The old form signed the HASH rather than the file: the hash is hex-encoded
+// exactly as it appears in the plugin row, so
 //
 //	sha256sum myfs | cut -d' ' -f1 | tr -d '\n' | signify-like-tool
 //
 // and filex agree on what was signed.
 func (m *Manager) checkSignature(sha, signature string) error {
-	err := VerifyDetached(m.trusted, sha, signature)
+	return signatureRefusal(VerifyDetached(m.trusted, sha, signature))
+}
+
+// signatureRefusal is a verification's error as the caller reads it: nil, or
+// a RejectedError naming what to do.
+func signatureRefusal(err error) error {
 	switch {
 	case err == nil:
 		return nil
 	case errors.Is(err, ErrSignatureRequired):
-		return reject("this instance only accepts signed plugins (FILEX_PLUGIN_TRUSTED_KEYS is set) - supply the detached signature over the binary's sha256")
+		return reject("this instance only accepts signed plugins (FILEX_PLUGIN_TRUSTED_KEYS is set) - supply the detached signature over the build's name, version, platform and sha256 (docs/PLUGINS.md)")
 	default:
 		return reject("signature %s", strings.TrimPrefix(err.Error(), ErrSignatureInvalid.Error()+": "))
 	}
+}
+
+// BuildGate is asked about a build signature a trusted key verified, at an
+// install or an upgrade (never at a start): via is the store whose signed
+// install link brought the build ("" for an upload, an address or a
+// source), key the key that verified, legacy the old sha256-only form. A
+// non-nil error refuses the build. The server wires the app store's
+// (appstore.StorageBuildGate): a build a STORE signed is taken only through
+// that store's own link, or once the store says that version is still
+// listed - so a store's signature over an old, withdrawn build does not
+// install it by address.
+type BuildGate func(ctx context.Context, via string, c BuildClaim, key ed25519.PublicKey, legacy bool) error
+
+// ErrStoreBuild is inside the refusal of a build the gate did not let
+// through (a build a store signed, outside that store's link, that the store
+// does not vouch for now): errors.Is finds it, so a surface says the server's
+// own sentence for it rather than a generic "could not be installed".
+var ErrStoreBuild = errors.New("a store signed this build and does not vouch for it here")
+
+// SetBuildGate wires the gate (nil: none).
+func (m *Manager) SetBuildGate(g BuildGate) {
+	m.mu.Lock()
+	m.gate = g
+	m.mu.Unlock()
+}
+
+// verifyBuild verifies a build's signature for c on an instance that
+// requires one (VerifyBuild), then asks the gate. legacy: it verified only
+// in the old sha256-only form.
+func (m *Manager) verifyBuild(ctx context.Context, c BuildClaim, via, signature string) (legacy bool, err error) {
+	if len(m.trusted) == 0 {
+		return false, nil
+	}
+	v, err := VerifyBuild(m.trusted, c, signature)
+	if err != nil {
+		return false, signatureRefusal(err)
+	}
+	m.mu.Lock()
+	gate := m.gate
+	m.mu.Unlock()
+	if gate != nil {
+		if err := gate(ctx, via, c.Normal(), v.Key, v.Legacy); err != nil {
+			return false, RejectedError{fmt.Errorf("%w: %w", ErrStoreBuild, err)}
+		}
+	}
+	return v.Legacy, nil
 }
 
 // Upgrade replaces a binary plugin's file in place, keeping the row, the
@@ -1207,12 +1380,18 @@ func (m *Manager) checkSignature(sha, signature string) error {
 // lost plugin. filename is accepted for the caller's convenience and not
 // used: the file keeps the name it was installed under (see the note inside).
 func (m *Manager) Upgrade(ctx context.Context, id int64, filename string, r io.Reader, signature string) (*Status, error) {
-	return m.upgrade(ctx, id, r, signature, "")
+	return m.upgrade(ctx, id, r, signature, "", buildSource{})
+}
+
+// UpgradeVersion is Upgrade for a build whose signature names its version
+// (InstallBinaryVersion).
+func (m *Manager) UpgradeVersion(ctx context.Context, id int64, filename string, r io.Reader, signature, version string) (*Status, error) {
+	return m.upgrade(ctx, id, r, signature, "", buildSource{version: version})
 }
 
 // upgrade is Upgrade with the bytes held to wantSHA when it is set (an
 // upgrade from the plugin's source: the feed names the hash, updates.go).
-func (m *Manager) upgrade(ctx context.Context, id int64, r io.Reader, signature, wantSHA string) (*Status, error) {
+func (m *Manager) upgrade(ctx context.Context, id int64, r io.Reader, signature, wantSHA string, src buildSource) (*Status, error) {
 	e, err := m.entryFor(ctx, id)
 	if err != nil {
 		return nil, err
@@ -1253,7 +1432,8 @@ func (m *Manager) upgrade(ctx context.Context, id int64, r io.Reader, signature,
 		_ = os.Remove(staged)
 		return m.statusOf(ctx, e), RejectedError{fmt.Errorf("%w: downloaded %s, the source names %s", ErrSHA256Mismatch, sum[:12], wantSHA[:min(12, len(wantSHA))])}
 	}
-	if err := m.checkSignature(sum, signature); err != nil {
+	legacy, err := m.verifyBuild(ctx, BuildClaim{Name: row.Name, Version: src.version, Platform: m.platform(), SHA256: sum}, src.via, signature)
+	if err != nil {
 		_ = os.Remove(staged)
 		return m.statusOf(ctx, e), err
 	}
@@ -1294,7 +1474,7 @@ func (m *Manager) upgrade(ctx context.Context, id int64, r io.Reader, signature,
 		rollback()
 		return m.statusOf(ctx, e), fmt.Errorf("could not put the new binary in place: %w", err)
 	}
-	if err := writeSignature(target, signature); err != nil {
+	if err := writeSignature(target, signature, src.version); err != nil {
 		rollback()
 		return m.statusOf(ctx, e), err
 	}
@@ -1307,6 +1487,8 @@ func (m *Manager) upgrade(ctx context.Context, id int64, r io.Reader, signature,
 		return m.statusOf(ctx, e), err
 	}
 
+	m.noteLegacySignature(e, legacy)
+
 	if !wasEnabled {
 		_ = os.Remove(backup)
 		_ = os.Remove(sigBackup)
@@ -1318,6 +1500,20 @@ func (m *Manager) upgrade(ctx context.Context, id int64, r io.Reader, signature,
 	if st.State == StateRunning {
 		_ = os.Remove(backup)
 		_ = os.Remove(sigBackup)
+		return st, nil
+	}
+	if st.State == StateHeld {
+		e.mu.Lock()
+		e.pendingBackup = oldExists
+		e.mu.Unlock()
+		// ⚠ Held (a store's license does not hold yet - a paid upgrade is
+		// held from before it lands) is NOT a success: the new binary has
+		// not started, let alone passed its probes. The previous binary stays
+		// beside it (<binary>.previous) until the new one first comes up;
+		// when the license holds and the new one does not come up, the
+		// previous one is put back (settleUpgrade). Before, the backup was
+		// removed here and a build that then failed its probes left nothing
+		// to roll back to.
 		return st, nil
 	}
 
@@ -1354,6 +1550,17 @@ func (m *Manager) waitOutOfStarting(ctx context.Context, e *entry, d time.Durati
 // not a promise about bytes, and the operator has to say what they expect
 // to receive — the same rule the self-update follows.
 func (m *Manager) InstallFromURL(ctx context.Context, name, rawURL, sha, signature string) (*Status, error) {
+	return m.installFromURL(ctx, name, rawURL, sha, signature, buildSource{})
+}
+
+// InstallFromURLVersion is InstallFromURL for a build whose signature names
+// its version (InstallBinaryVersion).
+func (m *Manager) InstallFromURLVersion(ctx context.Context, name, rawURL, sha, signature, version string) (*Status, error) {
+	return m.installFromURL(ctx, name, rawURL, sha, signature, buildSource{version: version})
+}
+
+// installFromURL is InstallFromURL with what is known of the build.
+func (m *Manager) installFromURL(ctx context.Context, name, rawURL, sha, signature string, src buildSource) (*Status, error) {
 	if !validName(name) {
 		return nil, ErrBadName
 	}
@@ -1371,7 +1578,7 @@ func (m *Manager) InstallFromURL(ctx context.Context, name, rawURL, sha, signatu
 	defer resp.Body.Close()
 	filename := filepath.Base(resp.Request.URL.Path)
 	// The sha256 is compared BEFORE anything is started — see install.
-	return m.install(ctx, name, filename, resp.Body, signature, sha)
+	return m.install(ctx, name, filename, resp.Body, signature, sha, src)
 }
 
 // download GETs rawURL through the guarded download client — the one
@@ -1559,6 +1766,7 @@ func (m *Manager) statusOf(ctx context.Context, e *entry) *Status {
 	st.Conformance = e.report
 	st.Load = e.lim.stats()
 	st.Update = updateInfoOf(&rowCopy)
+	st.LegacySignature = e.legacySig
 	driver := rowCopy.Driver
 	e.mu.Unlock()
 	if driver != "" {

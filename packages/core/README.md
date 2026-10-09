@@ -18,7 +18,7 @@ Web Component wrapper, the `@brftech/filex-react` adapter) build against.
 npm i @brftech/filex-core vue
 ```
 
-> ⚠ **`@brftech/filex-core` 0.54 needs a filex 0.54 server.** Which files open for editing
+> ⚠ **`@brftech/filex-core` 0.55 needs a filex 0.55 server.** Which files open for editing
 > (`edit_kinds`), the input limits (`limits`) and the version line
 > (`release`, `commit`, `built`) come from the server's
 > `/api/files/capabilities`; the package keeps no list of its own to fall
@@ -97,6 +97,13 @@ the server's `FILEX_CORS_ALLOWED_ORIGINS` by name - `*` does not grant it, and
 a sibling subdomain is another origin. A bearer token, or a host that proxies
 with a key, needs nothing
 ([CONFIGURATION.md → Requests from other origins](https://github.com/BRF-Tech/filex/blob/main/docs/CONFIGURATION.md#requests-from-other-origins)).
+
+⚠ **An app that prints** (`ui.print`, filex 0.55) prints from filex's own
+print page, which the explorer frames in your page. The page lets only filex,
+its desktop app and the server's `FILEX_FRAME_ANCESTORS` frame it, so on
+another site list your page's origin there, whatever the authentication -
+otherwise the app is told printing is `unavailable`
+([CONFIGURATION.md → Security headers and framing](https://github.com/BRF-Tech/filex/blob/main/docs/CONFIGURATION.md#security-headers-and-framing)).
 
 **What the account may do.** Against a filex server with roles and per-user
 permissions (0.49+), the explorer reads the signed-in account's permissions

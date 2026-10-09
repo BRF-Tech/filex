@@ -578,6 +578,13 @@ apply:
 
 The folder's key file, `.filex-e2e.json`, is never listed or found by search.
 
+⚠ The explorer's own file rows (and an app's `FileInfo`) carry a field of the
+same name with another type: `encrypted: "folder"`, `"vault"` or `"file"` on a
+FILE row only ([APP-PLUGINS-API.md → Which rows say
+`encrypted`](APP-PLUGINS-API.md#which-rows-say-encrypted)). This surface keeps
+its `true` / `false` on every entry, folders included; the two agree on every
+file (`true` here is one of the three there).
+
 **What is refused.** REST answers `409` with the code in `code`; an MCP tool
 answers `isError` with the code as the first word of its text
 (`E2E_ENCRYPTED: …`).

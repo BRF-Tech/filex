@@ -32,10 +32,12 @@
 //
 // A handler's own values win: nosniff and the referrer policy are set before
 // the handler runs, so a handler may replace them, and a handler's own CSP is
-// kept — frame-ancestors is added to it only when it names none.
+// kept — frame-ancestors is added to it only when it names none, unless the
+// handler said its page names none ON PURPOSE (OpenFraming).
 package secheaders
 
 import (
+	"context"
 	"fmt"
 	"mime"
 	"net/http"
@@ -164,8 +166,31 @@ func Middleware(allowed []string, opts ...Option) func(http.Handler) http.Handle
 			h := w.Header()
 			h.Set(headerNoSniff, noSniff)
 			h.Set(headerReferrer, referrer)
-			next.ServeHTTP(&writer{ResponseWriter: w, policy: policy, frames: o.frames, own: o.own, req: r}, r)
+			f := &framing{}
+			r = r.WithContext(context.WithValue(r.Context(), framingKey{}, f))
+			next.ServeHTTP(&writer{ResponseWriter: w, policy: policy, frames: o.frames, own: o.own, req: r, framing: f}, r)
 		})
+	}
+}
+
+type framingKey struct{}
+
+// framing is what a handler tells the middleware about the page it answers.
+type framing struct{ open bool }
+
+// OpenFraming tells the middleware that the page this request answers carries
+// NO frame-ancestors on purpose, so none is added: any page may frame it,
+// a page with an opaque origin included. That is an app interface's page
+// (internal/wasmplugin uiserve.go): the explorer that frames it is embedded in
+// sites filex cannot list, and with `ui:frame-package` the page that frames
+// one of its pages is the interface itself - a sandboxed, opaque origin that
+// no source expression matches, not even `*` (Chromium refused the framed
+// page under `frame-ancestors *`, 2026-10-08). Such a page holds nothing for
+// whoever frames it: its sandbox and its bridge are what protect it. Nothing
+// happens outside this middleware.
+func OpenFraming(r *http.Request) {
+	if f, ok := r.Context().Value(framingKey{}).(*framing); ok {
+		f.open = true
 	}
 }
 
@@ -219,6 +244,7 @@ type writer struct {
 	frames  func(*http.Request) []string
 	own     func(*http.Request) []string
 	req     *http.Request
+	framing *framing
 	decided bool
 }
 
@@ -233,6 +259,9 @@ func (w *writer) decide() {
 	}
 	cur := strings.TrimSpace(h.Get(headerCSP))
 	switch {
+	case w.framing != nil && w.framing.open && cur != "":
+		// The handler's own policy names no frame-ancestors on purpose
+		// (OpenFraming); one added here would refuse the frames it is for.
 	case cur == "":
 		// filex's own page: who may frame it, and what it may frame. A
 		// handler that wrote its own policy decides its own frames (below):

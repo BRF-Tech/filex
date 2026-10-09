@@ -57,6 +57,31 @@ describe('StoragePluginsTab — update source', () => {
     (api.patch as unknown as ReturnType<typeof vi.fn>).mockReset();
   });
 
+  // The line about a newer version this filex cannot run, and a source that
+  // could not be read, is the server's (update_said, in the reader's language;
+  // 0.55). RED before: the tab built plugins.update.incompatible itself and
+  // printed the check's English error.
+  it('says what the server says about an update it cannot offer, never the check’s English', async () => {
+    plugins = [
+      {
+        ...base, id: 6, name: 'ahead', binary: 'ahead', version: '1.0.0', driver: 'ahead', source: 'acme/ahead',
+        update: { status: 'incompatible', version: '2.0.0', requires: '>=0.60.0' },
+        update_said: '2.0.0 için filex >=0.60.0 gerekiyor',
+      },
+      {
+        ...base, id: 7, name: 'gone', binary: 'gone', version: '1.0.0', driver: 'gone', source: 'acme/gone',
+        update: { status: 'check_failed', error: 'filex-storage.json: http 404' },
+        update_said: 'Kaynak denetlenemedi: filex-storage.json: http 404',
+      },
+    ];
+    const w = mountTab('tr');
+    await flushPromises();
+    expect(w.find('[data-testid="plugin-update-ahead"]').text()).toContain('2.0.0 için filex >=0.60.0 gerekiyor');
+    expect(w.find('[data-testid="plugin-update-gone"]').text()).toContain('Kaynak denetlenemedi: filex-storage.json: http 404');
+    expect((en as { plugins: { update: Record<string, unknown> } }).plugins.update.incompatible).toBeUndefined();
+    w.unmount();
+  });
+
   it('says a newer version on the row, and offers the review only there', async () => {
     const w = mountTab();
     await flushPromises();

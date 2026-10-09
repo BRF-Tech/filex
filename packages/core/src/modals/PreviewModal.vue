@@ -365,6 +365,8 @@ const appFiles = computed(() =>
         // The storage takes no writes, or this person may only look: the
         // interface is told it cannot save, and a save is refused here too.
         readOnly: !!props.file.read_only || props.file.perm === 'viewer' || props.file.perm === 'none',
+        // As the server stamped it (#189): the interface is told, never guesses.
+        ...(props.file.encrypted ? { encrypted: props.file.encrypted } : {}),
       }]
     : [],
 );

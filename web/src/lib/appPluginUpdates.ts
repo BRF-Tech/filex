@@ -22,8 +22,6 @@
  * "updated automatically" to say and no switch to say it is off.
  */
 import { refusalOf, type AppPlugin } from '@/api/appPlugins';
-import { refusalSentence } from '@/lib/appPluginRefusal';
-import { formatDate } from '@/lib/format';
 
 type Translate = (key: string, values?: Record<string, unknown>) => string;
 
@@ -60,9 +58,15 @@ export function updateRank(p: AppPlugin): number {
   return RANK[p.update?.status ?? ''] ?? 9;
 }
 
-export function updateView(p: AppPlugin, t: Translate, locale: string): UpdateView {
+/**
+ * ⚠⚠ The lines are the SERVER's (handlers sayStatus, 0.55): `update_said`,
+ * `compat.message` and `previous.message`, written in the reader's language.
+ * This builds no sentence from the row's fields and decides none of them;
+ * it picks the badges (status words) and lays the server's lines out.
+ */
+export function updateView(p: AppPlugin, t: Translate, _locale?: string): UpdateView {
   const view = updateFacts(p, t);
-  if (p.previous) view.lines.push(t('appPlugins.update.previous', { version: p.previous.version, when: formatDate(p.previous.replaced_at, locale) }));
+  if (p.previous?.message) view.lines.push(p.previous.message);
   return view;
 }
 
@@ -72,17 +76,15 @@ function updateFacts(p: AppPlugin, t: Translate): UpdateView {
     view.badges.push({
       tone: 'rose',
       label: t('appPlugins.compat.bad'),
-      title: t('appPlugins.compat.needs', { requires: p.compat.requires, filex: p.compat.filex }),
+      title: p.compat.message || undefined,
       testid: `app-plugin-compat-${p.name}`,
     });
-    view.lines.push(t('appPlugins.compat.needs', { requires: p.compat.requires, filex: p.compat.filex }));
+    if (p.compat.message) view.lines.push(p.compat.message);
   }
   if (!p.update_source) {
-    // ⚠ Not "installed from a file" for every app without one: an app
-    // installed from an ADDRESS before 0.47 has one, but filex did not keep
-    // its manifest's address (manifest_url), and saying "from a file" about
-    // it would be false.
-    view.lines.push(t(p.source === 'url' ? 'appPlugins.update.noManifestAddress' : 'appPlugins.update.noSource'));
+    // No source to check: the server says which (from a file, or from an
+    // address filex did not keep).
+    if (p.update_said) view.lines.push(p.update_said);
     return view;
   }
   const u = p.update;
@@ -95,8 +97,7 @@ function updateFacts(p: AppPlugin, t: Translate): UpdateView {
       return view;
     case 'needs_approval': {
       const parts = [jump];
-      if (u.added?.length) parts.push(t('appPlugins.update.newPermissions', { permissions: u.added.join(', ') }));
-      if (u.adds_module) parts.push(t('appPlugins.update.addsModule'));
+      if (p.update_said) parts.push(p.update_said);
       view.badges.push({ tone: 'amber', label: t('appPlugins.update.needsApproval'), testid: `app-plugin-update-approval-${p.name}` });
       view.lines.push(parts.join(' · '));
       view.reviewable = true;
@@ -107,22 +108,24 @@ function updateFacts(p: AppPlugin, t: Translate): UpdateView {
       view.badges.push({
         tone: 'rose',
         label: t('appPlugins.update.failed'),
-        title: (refusal && refusalSentence(refusal, t)) || undefined,
+        // The server's sentence, said in the reader's language when the
+        // list was read (handlers sayStatus).
+        title: refusal?.message || undefined,
         testid: `app-plugin-update-failed-${p.name}`,
       });
-      view.lines.push(t('appPlugins.update.failedDetail', { version: u.version ?? '', current: p.version }));
+      if (p.update_said) view.lines.push(p.update_said);
       view.reviewable = true;
       return view;
     }
     case 'check_failed': {
       const refusal = refusalOf(u.refusal);
-      const why = (refusal && refusalSentence(refusal, t)) || '';
+      const why = p.update_said || refusal?.message || '';
       view.badges.push({ tone: 'zinc', label: t('appPlugins.update.checkFailed'), title: why || undefined, testid: `app-plugin-update-unchecked-${p.name}` });
       if (why) view.lines.push(why);
       return view;
     }
     case 'incompatible':
-      view.lines.push(t('appPlugins.update.needsNewerFilex', { version: u.version ?? '', requires: u.requires ?? '' }));
+      if (p.update_said) view.lines.push(p.update_said);
       return view;
   }
   view.lines.push(u?.status === 'current' ? t('appPlugins.update.upToDate') : t('appPlugins.update.notChecked'));

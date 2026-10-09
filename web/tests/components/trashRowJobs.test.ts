@@ -30,8 +30,10 @@ let nextOp = 40;
 /** When set, every write is refused with it (or unanswered when `response` is absent). */
 let refusal: unknown = null;
 
-vi.mock('@/api/client', () => ({
-  extractError: (_e: unknown, f: string) => f,
+// ⚠ The REAL extractError: a refusal is said the way the page says it - the
+// server's `message` first (api/client.ts), never the code in `error`.
+vi.mock('@/api/client', async (importOriginal) => ({
+  extractError: (await importOriginal<typeof import('@/api/client')>()).extractError,
   api: {
     get: vi.fn(async (url: string) => {
       calls.push({ method: 'GET', url });
@@ -204,6 +206,40 @@ describe('restore on a server that does not queue it', () => {
     await flushPromises();
     expect(calls).toContainEqual({ method: 'POST', url: '/files/manager/restore', body: { node_id: 7 } });
     expect(toasts()).toContain('Leon restored');
+  });
+
+  // 0.55 (#209 leftovers): a taken place is the server's `name_taken` and its
+  // sentence; the page used to build its own from `code: EXISTS`.
+  it("says a taken place in the server's words", async () => {
+    listed = [entry(7, 'Leon')];
+    const said = 'Aynı adla bir şey zaten var. Oradakinin adını değiştirip yeniden deneyin.';
+    refusal = {
+      isAxiosError: true,
+      message: 'Request failed with status code 409',
+      response: { status: 409, data: { error: 'name_taken', message: said, params: { name: 'Leon' }, code: 'EXISTS', name: 'Leon', path: '/Leon' } },
+    };
+    const w = await mountTrash(undefined);
+    await openRowMenu(w, 'trash-actions-7');
+    await pickMenuItem('trash-actions-7-restore');
+    await flushPromises();
+    expect(toasts()).toEqual([said]);
+  });
+
+  it('never prints the code of a refusal', async () => {
+    vi.stubGlobal('confirm', () => true);
+    listed = [entry(8, 'Arsiv')];
+    const said = 'An app is holding this file, so it cannot be changed now.';
+    refusal = {
+      isAxiosError: true,
+      message: 'Request failed with status code 423',
+      response: { status: 423, data: { error: 'locked', message: said } },
+    };
+    const w = await mountTrash(undefined);
+    await openRowMenu(w, 'trash-actions-8');
+    await pickMenuItem('trash-actions-8-purge');
+    await flushPromises();
+    expect(toasts()).toEqual([said]);
+    expect(toasts()).not.toContain('locked');
   });
 
   it('never prints a request that got no answer as it came', async () => {

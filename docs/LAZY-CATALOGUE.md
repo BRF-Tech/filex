@@ -136,11 +136,24 @@ What they do share is the storage's **row gate** (`internal/rowgate`, issue
 #192), one folder at a time: a reconcile holds it alone from the folder's
 listing to its delete pass's last drop, and the full scan holds it alone for
 each directory it lists and applies. A rename, a move, a delete or a restore
-filex is making on the storage holds it shared from its first byte to its last
-row, so a folder is never judged while such a change is half way - the bytes
+filex is making on the storage - from the explorer, the queue, a protocol
+server, the AI surface or MCP (since 0.55, issue #201) - holds it shared from
+its first byte to its last row, so a folder is never judged while such a change is half way - the bytes
 moved, the rows not yet - and two judgements of the same storage take turns
 ([ARCHITECTURE.md → The row gate](ARCHITECTURE.md#the-row-gate)).
-The gate is taken before the folder's transaction opens, never inside it.
+The gate is taken before the folder's transaction opens, never inside it. A
+reconcile never keeps a change out while it waits for the gate: a change that
+holds it for 30 seconds defers the folder to its next reconcile.
+
+A folder moved or trashed object by object on an object store does not hold
+the gate (since 0.55): it fences its path and its destination's
+(`rowgate.FenceCtx`). Once a reconcile holds the gate it reads the fence set: a
+folder at or below a fenced prefix is deferred like a busy gate (`rowgate.ErrBusy`;
+the filler tries it again later), and a fenced child of the folder is left out
+of the listing and counted as seen, so the delete pass never removes the
+source half way and the destination is not catalogued as a new folder. Every
+other entry of the folder is reconciled as usual; once the fence opens, the
+next reconcile sees the folder where the change put it, with its own row.
 
 Running beside a full scan is safe because every create in both paths tolerates
 losing the race: a unique-key refusal re-reads the row the other one wrote and

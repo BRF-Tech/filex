@@ -60,6 +60,13 @@ describe('which shot scripts need an app build', () => {
     expect(withDS).toEqual(['csvoffice.mjs']);
   });
 
+  it('the 0.55 scenes need no app build: the print question packs its own app, the storage review its own store (#189, #215)', () => {
+    // A scene that needed a build would be left out in CI and refused on a
+    // workstation without it; these two make what they photograph.
+    expect(needs.get('appprint.mjs')).toEqual({ apps: [], set: 'appprint', documentServer: false });
+    expect(needs.get('store.mjs')).toEqual({ apps: [], set: 'store', documentServer: false });
+  });
+
   it('every script that needs one names its folder, so CI can leave it out without calling its pictures leftovers', () => {
     for (const [file, n] of needs) {
       if (n.apps.length || n.documentServer) expect(n.set, `${file} needs ${n.apps.join(', ') || 'a document server'} but has no const SET`).toBeTruthy();

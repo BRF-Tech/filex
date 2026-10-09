@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.54.0"
+version: "0.55.0"
 releaseNotes: |-
-  filex v0.54.0 - 2026-10-08
-  • Push notifications while filex is closed
-  • The ONLYOFFICE editor speaks the person's language
-  • The vault, encryption level 3, in the explorer
-  • Narrow a search on the server
-  • A new link's answer carries its download command
+  filex v0.55.0 - 2026-10-09
+  • Storage plugins from an app store
+  • A frame of its own package and blob: reads for an app's interface
+  • Printing for an app's interface: ui.print
+  • An app's interface is told when a file is end-to-end encrypted
+  • Editing together in the app SDK, defined
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

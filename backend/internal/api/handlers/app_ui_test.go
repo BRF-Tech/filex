@@ -120,7 +120,7 @@ func TestAppUI_AnInterfaceOnlyAppInstallsServesAndIsListed(t *testing.T) {
 	assert.Contains(t, csp, "script-src "+pkg+" 'sha256-", "the package is named by its explicit origin and path")
 	assert.Contains(t, csp, "sandbox allow-scripts")
 	assert.Contains(t, csp, "connect-src 'none'")
-	assert.NotContains(t, csp, "frame-ancestors 'self'", "the explorer on another site frames it too; the middleware must not add filex's own")
+	assert.NotContains(t, csp, "frame-ancestors", "the explorer on another site frames it, and with ui:frame-package the interface (an opaque origin) frames its own pages: no frame-ancestors, and the middleware adds none")
 	assert.Equal(t, `("`+pkg+`*")`, res.Header.Get("Connection-Allowlist"), "this version's path, nothing else")
 	assert.Equal(t, "*", res.Header.Get("Access-Control-Allow-Origin"))
 	assert.Contains(t, string(body), "<script>(()=>{", "the bootstrap is in")

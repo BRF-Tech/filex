@@ -88,12 +88,25 @@ async function newTextDocument(page: Page, name: string) {
   await expect(page.getByTestId('newdoc-modal')).toBeVisible();
   await page.getByTestId('newdoc-type-txt').click();
   const input = page.getByTestId('newdoc-name');
+  // The dialog's own suggestion first (the server's dry run): typing over a
+  // field it has not filled yet races its answer. Since 0.55 a late answer no
+  // longer replaces a typed name; until the first keystroke it still may.
+  await expect(input).toHaveValue(/^Untitled( \(\d+\))?\.txt$/, { timeout: 15_000 });
   await input.click();
   await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.type(name);
   await expect(input).toHaveValue(name);
   await expect(page.getByTestId('newdoc-draft-hint')).toBeVisible();
+  // The draft's own answer, not a fixed 5 s: it is a file and four catalogue
+  // rows, and the 0.55 full chain measured 4.9 and 5.8 s for it on a build
+  // host whose disk writes stalled for seconds (Chromium, while a Go job
+  // wrote 1.7 GiB beside it).
+  const created = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === '/api/files/drafts' && r.request().method() === 'POST',
+    { timeout: 30_000 },
+  );
   await page.getByTestId('newdoc-create').click();
+  expect((await created).status(), 'the draft is created').toBe(201);
   await expect(page.getByTestId('newdoc-modal')).toHaveCount(0);
   await expect(page.getByTestId('draft-bar')).toBeVisible();
 }

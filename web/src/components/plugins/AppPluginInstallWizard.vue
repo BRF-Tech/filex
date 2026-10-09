@@ -86,7 +86,6 @@ import {
   type AppPluginPlace,
 } from '@/api/appPlugins';
 import { extractError } from '@/api/client';
-import { refusalSentence } from '@/lib/appPluginRefusal';
 import { formatBytes } from '@/lib/format';
 import { changedPlacements, defaultPlaces } from '@/lib/fileTypes';
 import { useToastStore } from '@/stores/toast';
@@ -284,19 +283,19 @@ function buildSource(): AppPluginInstallSource | string {
 }
 
 /**
- * Map a refused install onto the sentence written for it, in the reader's
- * language — the one table the Apps list reads an update's failure from too
- * (lib/appPluginRefusal).
+ * A refused install in the server's sentence, written in the reader's
+ * language (`message`, server.install.*) - the same words the Apps list shows
+ * for an update's failure. The wizard keeps no table of its own (0.55).
  */
 function explain(e: unknown): string {
   const sref = props.store ? storeRefusal(e) : null;
   if (sref) {
-    const sentence = storeSentence(sref, t);
+    const sentence = storeSentence(sref);
     if (sentence) return sentence;
   }
   const err = appPluginError(e);
   missing.value = err?.missing ?? [];
-  return (err && refusalSentence(err, t)) || extractError(e, t('errors.generic'));
+  return err?.message || extractError(e, t('errors.generic'));
 }
 
 /** Step 1 → 2: the dry run. */
@@ -786,14 +785,15 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
         </div>
 
         <!-- The app's range leaves this filex out: it cannot be installed
-             here, and the review says so before anybody ticks a box. -->
+             here, and the review says so before anybody ticks a box - in
+             the server's sentence (compat.message, 0.55). -->
         <div
           v-if="review.compat && !review.compat.ok"
           class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200"
           role="alert"
           data-testid="app-plugin-incompatible"
         >
-          {{ t('appPlugins.wizard.incompatible', { name: manifest.name, version: manifest.version, requires: review.compat.requires, filex: review.compat.filex }) }}
+          {{ review.compat.message }}
         </div>
 
         <!-- Said at the review: the name is taken. The operator's way on is

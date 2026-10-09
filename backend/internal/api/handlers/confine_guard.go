@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -100,9 +101,17 @@ func confinedBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, 
 }
 
 // refuseOutsideRoot writes the 403 a path outside the token's root gets (the
-// answer app_ui.go and resolveAdapterDir give).
-func refuseOutsideRoot(w http.ResponseWriter) {
-	writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "outside this token's root"})
+// answer app_ui.go and resolveAdapterDir give): code `permission_denied`, the
+// sentence `server.error.outside_root` in the reader's language. Pass the
+// request - every caller here does; without one (a caller written before
+// 0.55) the sentence is the instance default's.
+func refuseOutsideRoot(w http.ResponseWriter, r ...*http.Request) {
+	if len(r) > 0 && r[0] != nil {
+		writeErrorSaid(w, r[0], http.StatusForbidden, "permission_denied", "outside_root", nil)
+		return
+	}
+	writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied",
+		"message": apierr.Text("", "outside_root", nil)})
 }
 
 // confinedPath reads a client path the way confine.Middleware reads one it

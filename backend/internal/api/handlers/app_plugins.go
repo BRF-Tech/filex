@@ -22,11 +22,13 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -90,9 +92,9 @@ func NewAppPlugins(reg *wasmplugin.Registry, store db.Store, aclr *acl.Resolver,
 	return h
 }
 
-func (h *AppPlugins) off(w http.ResponseWriter) bool {
+func (h *AppPlugins) off(w http.ResponseWriter, r *http.Request) bool {
 	if h.Registry == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "app_plugins_disabled"})
+		writeError(w, r, http.StatusNotFound, "app_plugins_disabled", nil)
 		return true
 	}
 	return false
@@ -113,12 +115,12 @@ func callerID(r *http.Request) int64 {
 
 // Actions answers the menu list for this caller.
 func (h *AppPlugins) Actions(w http.ResponseWriter, r *http.Request) {
-	if h.off(w) {
+	if h.off(w, r) {
 		return
 	}
 	ans, err := h.Registry.ActionsFor(r.Context(), isAdmin(r))
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", err.Error())
 		return
 	}
 	// What needs one of an app's user permissions the caller does not hold
@@ -171,10 +173,7 @@ func (h *AppPlugins) openAllowed(w http.ResponseWriter, r *http.Request, p *wasm
 	if h.Assoc.OpenAllowed(r.Context(), name, assoc.OpenID(p.Row.Name, v.ID)) {
 		return true
 	}
-	writeJSON(w, http.StatusForbidden, map[string]string{
-		"error":   "handler_off",
-		"message": "the administrator turned this app off for ." + assoc.ExtOf(name) + " files",
-	})
+	writeError(w, r, http.StatusForbidden, "handler_off", apierr.Params{"ext": assoc.ExtOf(name)})
 	return false
 }
 
@@ -222,7 +221,7 @@ type outputFolder struct {
 func (h *AppPlugins) checkOutputFolder(w http.ResponseWriter, r *http.Request, qualified string, pluginID int64) (*outputFolder, bool) {
 	adapter, rel := splitAdapterPath(strings.ReplaceAll(strings.TrimSpace(qualified), "\\", "/"))
 	if adapter == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_folder", "message": "output.dir must be an adapter-qualified folder (storage://path)"})
+		writeError(w, r, http.StatusBadRequest, "bad_folder", nil)
 		return nil, false
 	}
 	rel = strings.Trim(path.Clean("/"+rel), "/")
@@ -230,7 +229,7 @@ func (h *AppPlugins) checkOutputFolder(w http.ResponseWriter, r *http.Request, q
 		rel = ""
 	}
 	if !rootAllowsNamed(r.Context(), adapter, rel) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "the chosen folder is outside this token's root"})
+		refuseOutsideRoot(w, r)
 		return nil, false
 	}
 	st, err := h.Store.GetStorageByName(r.Context(), adapter)
@@ -248,7 +247,7 @@ func (h *AppPlugins) checkOutputFolder(w http.ResponseWriter, r *http.Request, q
 	if rel != "" {
 		drv, derr := h.StorageResolver(st.ID)
 		if derr != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "storage unavailable"})
+			writeError(w, r, http.StatusServiceUnavailable, "storage_unavailable", nil)
 			return nil, false
 		}
 		obj, serr := drv.Stat(r.Context(), rel)
@@ -258,7 +257,7 @@ func (h *AppPlugins) checkOutputFolder(w http.ResponseWriter, r *http.Request, q
 		}
 	}
 	if !aclAllowForPlugin(r.Context(), h.ACL, h.Store, st.ID, rel, acl.LevelEditor, pluginID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "you may not write into the chosen folder"})
+		writeErrorSaid(w, r, http.StatusForbidden, "permission_denied", "app_folder_denied", nil)
 		return nil, false
 	}
 	if gate(w, r, h.ACL, st.ID, writegate.Writes(rel)) {
@@ -269,7 +268,7 @@ func (h *AppPlugins) checkOutputFolder(w http.ResponseWriter, r *http.Request, q
 	// review UI-9 — for "save as" and a job's chosen folder alike).
 	if lk, ok := h.Store.(e2e.NodeByPathLookup); ok {
 		if _, enc := e2e.FindRoot(r.Context(), lk, st.ID, rel); enc {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "encrypted", "message": "an app cannot write into an encrypted folder"})
+			writeErrorSaid(w, r, http.StatusForbidden, "encrypted", "app_encrypted_write", nil)
 			return nil, false
 		}
 	}
@@ -380,15 +379,15 @@ func applyJobOutput(params map[string]any, out *wire.Output) map[string]any {
 func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginName, actionID string, storageID int64, paths []string, fromSurface, opening bool, out *wire.Output) (*checked, bool) {
 	storageID, paths, err := h.resolvePaths(r.Context(), storageID, paths)
 	if err != nil {
-		writePathsRefused(w, err)
+		writePathsRefused(w, r, err)
 		return nil, false
 	}
 	if len(paths) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "paths are required"})
+		writeError(w, r, http.StatusBadRequest, "paths_required", nil)
 		return nil, false
 	}
 	if len(paths) > maxPluginPaths {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too many paths"})
+		writeError(w, r, http.StatusBadRequest, "too_many_paths", apierr.Params{"max": strconv.Itoa(maxPluginPaths)}, "max", maxPluginPaths)
 		return nil, false
 	}
 	if !ownsStorage(w, r, storageID, "storage") {
@@ -402,7 +401,7 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 	// an id it cannot resolve.
 	for _, rel := range paths {
 		if !rootAllows(r.Context(), h.Store, storageID, rel) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "outside this token's root: " + rel})
+			refuseOutsideRoot(w, r)
 			return nil, false
 		}
 	}
@@ -413,15 +412,24 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 	}
 	p, action, applies, err := h.Registry.ResolveAction(r.Context(), pluginName, actionID, isAdmin(r))
 	if err != nil {
+		// The reader's sentence; Go's own words ("no such action", "plugin
+		// is not running: ...") stay beside it as `detail`, for a log. A
+		// CallError's own words are its Message: its Error() leads with the
+		// export, which ResolveAction leaves empty (" (unsupported): ...").
+		detail := err.Error()
+		var ce *wasmplugin.CallError
+		if errors.As(err, &ce) && ce.Message != "" {
+			detail = ce.Message
+		}
 		if wasmplugin.IsCode(err, wasmplugin.CodeRefused) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": err.Error()})
+			writeErrorSaid(w, r, http.StatusForbidden, "permission_denied", "action_admin_only", nil, "detail", detail)
 		} else {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": err.Error()})
+			writeErrorSaid(w, r, http.StatusNotFound, "not_found", "action_unavailable", nil, "detail", detail)
 		}
 		return nil, false
 	}
 	if action.Hidden && !fromSurface {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "this action is started by the app, not from the menu"})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "action_from_app", nil)
 		return nil, false
 	}
 	// The app's own user permission (manifest `requires`, perm/app.go):
@@ -431,7 +439,7 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 	}
 	mode, writes, okMode := jobOutputMode(action, out)
 	if !okMode {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad output mode: " + out.Mode})
+		writeError(w, r, http.StatusBadRequest, "bad_output_mode", apierr.Params{"mode": out.Mode})
 		return nil, false
 	}
 	var dest *outputFolder
@@ -441,7 +449,7 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 		// like any other write: its storage, the person's level there, locks
 		// and filex's own folders.
 		if !action.Output.Elsewhere {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "folder_not_offered", "message": "this action writes beside its file, not into a chosen folder"})
+			writeError(w, r, http.StatusBadRequest, "folder_not_offered", nil)
 			return nil, false
 		}
 		d, ok := h.checkOutputFolder(w, r, out.Dir, p.Row.ID)
@@ -471,10 +479,9 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 	}
 	drv, err := h.StorageResolver(storageID)
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "storage unavailable"})
+		writeError(w, r, http.StatusServiceUnavailable, "storage_unavailable", nil)
 		return nil, false
 	}
-	lk, _ := h.Store.(e2e.NodeByPathLookup)
 	c := &checked{plugin: p, action: action, storage: st, output: out, dest: dest}
 	states := map[string][]string{}
 	if len(applies.State) > 0 || len(applies.NoState) > 0 {
@@ -490,20 +497,19 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 	for _, raw := range paths {
 		rel := strings.Trim(path.Clean("/"+strings.ReplaceAll(raw, "\\", "/")), "/")
 		if rel == "" || rel == "." {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a storage root cannot be an input"})
+			writeError(w, r, http.StatusBadRequest, "root_not_input", nil)
 			return nil, false
 		}
 		if !aclAllowForPlugin(r.Context(), h.ACL, h.Store, storageID, rel, need, p.Row.ID) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "insufficient permission: " + rel})
+			writeErrorSaid(w, r, http.StatusForbidden, "permission_denied", "app_input_denied", apierr.Params{"name": rel})
 			return nil, false
 		}
-		if lk != nil && e2e.UnderEncrypted(r.Context(), lk, storageID, "/"+rel) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "encrypted", "message": "plugins cannot read files in an encrypted folder: " + rel})
+		if refuseEncryptedAtDoor(w, r, encryptedAtDoor(r.Context(), h.Store, storageID, rel), rel, false) {
 			return nil, false
 		}
 		obj, err := drv.Stat(r.Context(), rel)
 		if err != nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": rel})
+			writeErrorSaid(w, r, http.StatusNotFound, "not_found", "path_missing", nil, "path", rel)
 			return nil, false
 		}
 		it := appItemOf(rel, obj, states[pathkey.Hash(storageID, "/"+rel)], callerID(r), p.Row.Name)
@@ -511,7 +517,9 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 		c.items = append(c.items, it)
 	}
 	if !wasmplugin.Matches(applies, c.items) {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "not_applicable", "message": "this action does not apply to the selected items"})
+		// The one envelope (apierr): the explorer used to word this itself,
+		// since the sentence here was English for every reader.
+		writeError(w, r, http.StatusUnprocessableEntity, "not_applicable", nil)
 		return nil, false
 	}
 	return c, true
@@ -602,16 +610,25 @@ var errSealedPath = errors.New("not found")
 // writePathsRefused answers a resolvePaths error: 403 for a path outside the
 // token's root, 404 for one inside filex's own folders, 400 for a request
 // that names its paths wrongly.
-func writePathsRefused(w http.ResponseWriter, err error) {
+func writePathsRefused(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, errOutsideRoot) {
-		refuseOutsideRoot(w)
+		refuseOutsideRoot(w, r)
 		return
 	}
 	if errors.Is(err, errSealedPath) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "path_missing", nil)
 		return
 	}
-	writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	// A request that names its paths wrongly: one storage per job, a
+	// storage that is there, and a storage named at all.
+	switch {
+	case errors.Is(err, errMixedAdapters):
+		writeError(w, r, http.StatusBadRequest, "mixed_storages", nil, "detail", err.Error())
+	case strings.HasPrefix(err.Error(), "unknown adapter: "):
+		writeError(w, r, http.StatusBadRequest, "unknown_storage", apierr.Params{"name": strings.TrimPrefix(err.Error(), "unknown adapter: ")}, "detail", err.Error())
+	default:
+		writeError(w, r, http.StatusBadRequest, "storage_required", nil, "detail", err.Error())
+	}
 }
 
 // Users is the people-picker's directory search:
@@ -619,22 +636,22 @@ func writePathsRefused(w http.ResponseWriter, err error) {
 // plugin that holds users:lookup (403 otherwise), through the tenant-scoped
 // store — a tenant's picker never lists another tenant's people.
 func (h *AppPlugins) Users(w http.ResponseWriter, r *http.Request) {
-	if h.off(w) {
+	if h.off(w, r) {
 		return
 	}
 	name := strings.TrimSpace(r.URL.Query().Get("plugin"))
 	p, ok := h.Registry.ByName(name)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "app_missing", nil)
 		return
 	}
 	if state, _ := p.State(); state != wasmplugin.StateRunning || !p.Grants.Has(wasmplugin.PermUsersLookup) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "this app may not look people up"})
+		writeErrorSaid(w, r, http.StatusForbidden, "permission_denied", "app_no_lookup", nil)
 		return
 	}
 	rows, err := h.Registry.LookupUsers(r.Context(), r.URL.Query().Get("q"))
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"users": rows})
@@ -644,12 +661,12 @@ func (h *AppPlugins) Users(w http.ResponseWriter, r *http.Request) {
 // opening surface instead of queueing; the surface's submit comes back
 // through ViewEvent, which queues.
 func (h *AppPlugins) Run(w http.ResponseWriter, r *http.Request) {
-	if h.off(w) {
+	if h.off(w, r) {
 		return
 	}
 	var req runRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		writeError(w, r, http.StatusBadRequest, "bad_json", nil)
 		return
 	}
 	pluginName, actionID := chi.URLParam(r, "plugin"), chi.URLParam(r, "action")
@@ -664,7 +681,7 @@ func (h *AppPlugins) Run(w http.ResponseWriter, r *http.Request) {
 		s, err := h.Registry.ViewEvent(r.Context(), pluginName, c.action.View, c.storage.ID, c.rels, auth.UserFrom(r.Context()), pluginLang(r),
 			wire.ViewEventInput{Event: "open"})
 		if err != nil {
-			h.callFail(w, err)
+			h.callFail(w, r, err)
 			return
 		}
 		if s.Job != nil {
@@ -690,7 +707,7 @@ func (h *AppPlugins) Run(w http.ResponseWriter, r *http.Request) {
 // enqueue writes the job row and the ops row, answering 202.
 func (h *AppPlugins) enqueue(w http.ResponseWriter, r *http.Request, c *checked, params map[string]any) {
 	if h.Ops == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ops queue unavailable"})
+		writeError(w, r, http.StatusServiceUnavailable, "queue_unavailable", nil)
 		return
 	}
 	u := auth.UserFrom(r.Context())
@@ -716,7 +733,7 @@ func (h *AppPlugins) enqueue(w http.ResponseWriter, r *http.Request, c *checked,
 	}
 	pb, _ := json.Marshal(params)
 	if len(pb) > maxJobParamsBytes {
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "params too large"})
+		writeError(w, r, http.StatusRequestEntityTooLarge, "params_too_large", apierr.Params{"max": srvtext.Bytes(langOf(r), maxJobParamsBytes)})
 		return
 	}
 	job := &model.AppPluginJob{
@@ -725,12 +742,12 @@ func (h *AppPlugins) enqueue(w http.ResponseWriter, r *http.Request, c *checked,
 		Label: wasmplugin.EncodeJobText(c.action.Label), Status: model.AppPluginJobPending,
 	}
 	if err := h.Store.CreateAppPluginJob(r.Context(), job); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "job: " + err.Error()})
+		writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", "job: "+err.Error())
 		return
 	}
 	op, err := h.Ops.SubmitTo(r.Context(), ops.OpPluginAction, c.storage.ID, c.storage.ID, c.rels, job.ID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "queue: " + err.Error()})
+		writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", "queue: "+err.Error())
 		return
 	}
 	// ⚠ One column, not the row: the worker may already have finished this
@@ -760,7 +777,7 @@ func (h *AppPlugins) enqueue(w http.ResponseWriter, r *http.Request, c *checked,
 	writeJSON(w, http.StatusAccepted, map[string]any{"op": op, "job_id": job.ID})
 }
 
-func (h *AppPlugins) callFail(w http.ResponseWriter, err error) {
+func (h *AppPlugins) callFail(w http.ResponseWriter, r *http.Request, err error) {
 	var ce *wasmplugin.CallError
 	if errors.As(err, &ce) {
 		code := http.StatusBadGateway
@@ -775,10 +792,29 @@ func (h *AppPlugins) callFail(w http.ResponseWriter, err error) {
 			code = http.StatusServiceUnavailable
 			w.Header().Set("Retry-After", "2")
 		}
+		// The host's own refusals are said by the server in the reader's
+		// language, the host's English as `detail`; plugin_error is the
+		// APP's own words (it answered in the language it was handed) and
+		// passes as it came.
+		if said, ok := callFailSaid[ce.Code]; ok {
+			writeErrorSaid(w, r, code, ce.Code, said, apierr.Params{"detail": ce.Message}, "detail", ce.Message)
+			return
+		}
 		writeJSON(w, code, map[string]string{"error": ce.Code, "message": ce.Message})
 		return
 	}
-	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", err.Error())
+}
+
+// callFailSaid is the sentence (server.error.*) of each refusal the HOST
+// makes in an app call (wasmplugin.CallError).
+var callFailSaid = map[string]string{
+	wasmplugin.CodeUnsupported: "app_unavailable",
+	wasmplugin.CodeRefused:     "app_refused",
+	wasmplugin.CodeTimeout:     "timeout",
+	wasmplugin.CodeBusy:        "app_busy",
+	wasmplugin.CodePluginOOM:   "out_of_memory",
+	wasmplugin.CodePluginTrap:  "crashed",
 }
 
 type viewRequest struct {
@@ -793,7 +829,7 @@ type viewRequest struct {
 
 // View answers a view's opening surface (event "open").
 func (h *AppPlugins) View(w http.ResponseWriter, r *http.Request) {
-	if h.off(w) {
+	if h.off(w, r) {
 		return
 	}
 	var req viewRequest
@@ -815,12 +851,12 @@ func (h *AppPlugins) View(w http.ResponseWriter, r *http.Request) {
 // ViewEvent answers a change/submit/action event. A surface carrying a job
 // request is queued with the same checks as Run.
 func (h *AppPlugins) ViewEvent(w http.ResponseWriter, r *http.Request) {
-	if h.off(w) {
+	if h.off(w, r) {
 		return
 	}
 	var req viewRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		writeError(w, r, http.StatusBadRequest, "bad_json", nil)
 		return
 	}
 	if req.Event == "" {
@@ -853,32 +889,30 @@ func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *view
 		paths = []string{req.Path}
 	}
 	if len(paths) > maxPluginPaths {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too many paths"})
+		writeError(w, r, http.StatusBadRequest, "too_many_paths", apierr.Params{"max": strconv.Itoa(maxPluginPaths)}, "max", maxPluginPaths)
 		return
 	}
 	var rels []string
 	if len(paths) > 0 {
 		sid, resolved, err := h.resolvePaths(r.Context(), req.StorageID, paths)
 		if err != nil {
-			writePathsRefused(w, err)
+			writePathsRefused(w, r, err)
 			return
 		}
 		req.StorageID = sid
 		if !ownsStorage(w, r, req.StorageID, "storage") {
 			return
 		}
-		lk, _ := h.Store.(e2e.NodeByPathLookup)
 		for _, rel := range resolved {
 			if !rootAllows(r.Context(), h.Store, req.StorageID, rel) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "outside this token's root: " + rel})
+				refuseOutsideRoot(w, r)
 				return
 			}
 			if !aclAllowID(r.Context(), h.ACL, h.Store, req.StorageID, rel, acl.LevelViewer) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "insufficient permission: " + rel})
+				writeErrorSaid(w, r, http.StatusForbidden, "permission_denied", "app_input_denied", apierr.Params{"name": rel})
 				return
 			}
-			if lk != nil && e2e.UnderEncrypted(r.Context(), lk, req.StorageID, "/"+rel) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "encrypted", "message": "plugins cannot read files in an encrypted folder"})
+			if refuseEncryptedAtDoor(w, r, encryptedAtDoor(r.Context(), h.Store, req.StorageID, rel), rel, false) {
 				return
 			}
 			rels = append(rels, rel)
@@ -893,7 +927,7 @@ func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *view
 		// the root, whether or not that storage exists (0.52.0): it opened,
 		// with that storage's name and driver in the call's scope.
 		if root, rooted := callerRoot(r.Context()); rooted && rootStorageName(r.Context(), h.Store, req.StorageID) != root.Adapter {
-			refuseOutsideRoot(w)
+			refuseOutsideRoot(w, r)
 			return
 		}
 		if !ownsStorage(w, r, req.StorageID, "storage") {
@@ -915,7 +949,7 @@ func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *view
 	if verdict, gerr := gateSurfaceValues(req.Event, req.State, req.Data, func(in wire.ViewEventInput) (*wire.Surface, error) {
 		return h.Registry.ViewEvent(r.Context(), pluginName, viewID, req.StorageID, rels, auth.UserFrom(r.Context()), pluginLang(r), in)
 	}); gerr != nil {
-		h.callFail(w, gerr)
+		h.callFail(w, r, gerr)
 		return
 	} else if verdict.refused() {
 		writeSurfaceRefused(w, pluginLang(r), verdict)
@@ -924,7 +958,7 @@ func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *view
 	s, err := h.Registry.ViewEvent(r.Context(), pluginName, viewID, req.StorageID, rels, auth.UserFrom(r.Context()), pluginLang(r),
 		wire.ViewEventInput{Event: req.Event, ActionID: req.ActionID, State: req.State, Data: req.Data})
 	if err != nil {
-		h.callFail(w, err)
+		h.callFail(w, r, err)
 		return
 	}
 	if s.Job != nil {
@@ -1122,12 +1156,12 @@ func (h *AppPlugins) appUserPermOK(w http.ResponseWriter, r *http.Request, p *wa
 	up, ok := p.Manifest.UserPermission(id)
 	if !ok {
 		// Validated at install; a row that names an undeclared one refuses.
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied"})
+		writeError(w, r, http.StatusForbidden, "permission_denied", nil)
 		return false
 	}
 	res, err := h.ACL.Perms(r.Context(), auth.UserFrom(r.Context()))
 	if err != nil || res == nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		writeErrorSaid(w, r, http.StatusForbidden, "forbidden", "permission_denied", nil)
 		return false
 	}
 	key, allowed, src := appPermHeld(res, p, up)

@@ -50,7 +50,7 @@ import {
   readDisk,
   readPressure,
 } from './host.mjs';
-import { S3_LIVE_KEYS, STALL, hostLine, s3LiveFile, stallWords } from './nightly-lib.mjs';
+import { S3_LIVE_KEYS, STALL, hostLine, pauseWords, s3LiveFile, stallWords } from './nightly-lib.mjs';
 import { CHAIN_DIR, PROFILES, WEIGHTS, buildPlan, expectedMinutes, loadLists, trackWeight } from './plan.mjs';
 import { hostBudget, pickJobs, poolBudget, poolCeiling, readyJobs, simulate } from './schedule.mjs';
 
@@ -70,6 +70,8 @@ const USAGE = `usage: bash scripts/chain/run.sh [options]
                    time, and run nothing (works on any machine)
   --keep-services  leave the sidecars running at the end
   --print-lock     print the lock file run.sh takes, and exit
+  --print-hooks    print what run.sh runs around the run, one per line:
+                   CHAIN_HOOK_TIMEOUT_S, CHAIN_PAUSE_CMD, CHAIN_RESUME_CMD
 
 Exit: 0 every job green, 1 a job red or skipped, 2 a setup error, 130 stopped;
 run.sh: 3 the lock was not free within CHAIN_LOCK_WAIT_MIN minutes.`;
@@ -93,6 +95,7 @@ export function parseArgs(argv) {
     else if (a === '--plan') args.plan = true;
     else if (a === '--keep-services') args.keepServices = true;
     else if (a === '--print-lock') args.printLock = true;
+    else if (a === '--print-hooks') args.printHooks = true;
     else if (a === '--help' || a === '-h') args.help = true;
     else throw new Error(`unknown option ${a}`);
   }
@@ -101,6 +104,43 @@ export function parseArgs(argv) {
 }
 
 export { parseEnvFile };
+
+/**
+ * The commands run.sh runs around a run (task #194): CHAIN_PAUSE_CMD once the
+ * lock is held, before this process starts and measures the host - a command
+ * that frees the host for the run, such as one that shuts a virtual machine
+ * down - and CHAIN_RESUME_CMD once when the run ends, only after a pause that
+ * succeeded. Each is one line for `bash -c`, and may take at most
+ * CHAIN_HOOK_TIMEOUT_S seconds (0: no limit).
+ */
+export function hookSettings(env) {
+  const cmd = (key) => {
+    const v = String(env[key] ?? '').trim();
+    if (/[\r\n]/.test(v)) throw new Error(`${key} must be one line: run.sh hands it to bash -c`);
+    return v;
+  };
+  const t = env.CHAIN_HOOK_TIMEOUT_S;
+  const timeoutS = t === undefined || t === '' ? 900 : Number(t);
+  if (!Number.isInteger(timeoutS) || timeoutS < 0) throw new Error(`CHAIN_HOOK_TIMEOUT_S=${t} is not a whole number of seconds`);
+  return { pause: cmd('CHAIN_PAUSE_CMD'), resume: cmd('CHAIN_RESUME_CMD'), timeoutS };
+}
+
+/** What `--print-hooks` prints for run.sh: the time limit, the pause, the resume, one per line. */
+export function hookLines(hooks) {
+  return [String(hooks.timeoutS), hooks.pause, hooks.resume].join('\n');
+}
+
+/**
+ * What run.sh's pause hook did, from the environment it starts this process
+ * with (CHAIN_PAUSE_STATUS paused|failed|timeout, CHAIN_PAUSE_EXIT,
+ * CHAIN_PAUSE_SECS); null when it ran none.
+ */
+export function pauseOf(env) {
+  const status = String(env.CHAIN_PAUSE_STATUS ?? '');
+  if (!['paused', 'failed', 'timeout'].includes(status)) return null;
+  const n = (v) => (v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+  return { status, exit: n(env.CHAIN_PAUSE_EXIT), secs: n(env.CHAIN_PAUSE_SECS) };
+}
 
 function environment(args) {
   const fallback = path.join(os.homedir(), '.config', 'filex-chain.env');
@@ -203,6 +243,9 @@ function settings(env, args) {
       group: env.CHAIN_NOTIFY_GROUP || 'infra',
       source: env.CHAIN_NOTIFY_SOURCE || 'filex-chain',
     },
+    // CHAIN_PAUSE_CMD / CHAIN_RESUME_CMD: run.sh runs them, this process only
+    // says what the pause did (hookSettings, pauseOf).
+    hooks: hookSettings(env),
     // The s3-live job of the nightly profile: the FILEX_TEST_S3_* settings,
     // handed to the job in a 0600 file by prepare() (nightly-lib s3LiveFile).
     s3Live: Object.fromEntries(
@@ -279,6 +322,14 @@ function printPlan(cfg, plan) {
       `browser round ${b.trackGb}, databases ${b.dbGb} while a Go or migration job is left, ` +
       `the pool the rest (at most ${b.poolMax} jobs at once); a job also waits while MemAvailable is under its weight + ${cfg.reserveGb} GiB`,
   );
+  if (cfg.hooks.pause) {
+    // MemAvailable above is the host's now: a run measures it after the pause.
+    out.push(
+      `pause hook (run.sh, once the lock is held, before the budget is measured): ${cfg.hooks.pause}; ` +
+        `resume hook (once at the end, after a pause that succeeded): ${cfg.hooks.resume || 'none'}; ` +
+        `at most ${cfg.hooks.timeoutS ? `${cfg.hooks.timeoutS} s` : 'any time'} each`,
+    );
+  }
   out.push('', `${'pool'.padEnd(w + 2)}${'needs'.padEnd(needsW)}GiB   ~min  expected`);
   for (const j of plan.pool) {
     out.push(`  ${j.name.padEnd(w)}${j.needs.join(',').padEnd(needsW)}${String(j.weight).padEnd(6)}${String(expectedMinutes(j)).padEnd(6)}${when.get(j.name) ?? ''}`);
@@ -438,6 +489,8 @@ class Chain {
     // CHAIN_MEM_GB until measureHost() has looked at the host (run()).
     this.budget = budgetOf(cfg, plan);
     this.hostInfo = { configured: cfg.memGb, availStart: null, cut: false, outside: '' };
+    // What run.sh's pause hook did before this process started (null: none ran).
+    this.pause = pauseOf(process.env);
     // What the host went through (host.mjs): the worst of the run, and each
     // running job's tally (`load`, kept in its record when it ends).
     this.hostState = {
@@ -555,8 +608,12 @@ class Chain {
    * less; the containers that are not this chain's are named with what they
    * hold (an Android emulator held 3.2 GiB through every 0.53 run); and the
    * disk the run writes to is the one whose write latency it records.
+   * run.sh's pause hook (CHAIN_PAUSE_CMD) has run by now: what it stopped is
+   * not counted against the run.
    */
   measureHost() {
+    if (this.pause) this.log(pauseWords(this.pause));
+    else if (this.cfg.hooks.pause) this.log('CHAIN_PAUSE_CMD is set, but this run was not started by scripts/chain/run.sh: nothing was paused');
     const avail = memAvailableGb();
     const hb = hostBudget({ memGb: this.cfg.memGb, availGb: avail, reserveGb: this.cfg.reserveGb });
     this.budget = budgetOf(this.cfg, this.plan, hb.gb);
@@ -1162,6 +1219,8 @@ class Chain {
       mem_available_start_gb: round2(this.hostInfo.availStart),
       reserve_gb: this.cfg.reserveGb,
       outside: this.hostInfo.outside || null,
+      // run.sh's pause hook: { status: paused|failed|timeout, exit, secs }, or null.
+      pause: this.pause,
       disk: this.disk?.name ?? null,
       mem_full_max: round2(h.memFullMax),
       io_full_max: round2(h.ioFullMax),
@@ -1309,6 +1368,10 @@ async function main() {
   const cfg = settings(env, args);
   if (args.printLock) {
     console.log(cfg.lock);
+    return 0;
+  }
+  if (args.printHooks) {
+    console.log(hookLines(cfg.hooks));
     return 0;
   }
   const plan = buildPlan({ profile: args.profile, lists: loadLists(env, { cwd: cfg.src }), env, src: cfg.src });

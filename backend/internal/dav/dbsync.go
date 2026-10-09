@@ -30,14 +30,6 @@ func (h *Handler) syncMkdir(ctx context.Context, st *model.Storage, rel string) 
 	h.sync.Mkdir(ctx, st, rel)
 }
 
-func (h *Handler) syncTrash(ctx context.Context, st *model.Storage, rel, trashRel string) {
-	h.sync.Trash(ctx, st, rel, trashRel)
-}
-
-func (h *Handler) syncDelete(ctx context.Context, st *model.Storage, rel string) {
-	h.sync.Delete(ctx, st, rel)
-}
-
-func (h *Handler) syncMove(ctx context.Context, st *model.Storage, srcRel, dstRel string) {
-	h.sync.Move(ctx, st, srcRel, dstRel)
-}
+// A delete and a MOVE are not here: their bytes and their rows go together
+// under the storage's row gate, so fs.go calls h.sync.Discard, Purge and
+// Relocate directly (protocolsync/gated.go, issue #201).

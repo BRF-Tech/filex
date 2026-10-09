@@ -347,7 +347,10 @@ async function refreshDestination(opts: { suggest?: boolean } = {}) {
     const first = `${t('newdoc.untitled')}.${ty.ext}`;
     const answer = await checkName(target, first, ty);
     if (seq !== checkSeq || target !== dest.value) return;
-    name.value = answer?.taken && answer.suggested ? answer.suggested : first;
+    // Asked again after the answer: the person may have started typing while
+    // it was on its way (a slow server), and a suggestion never replaces what
+    // they typed - it landed in the middle of it ("Untitled.txtnutes.txt").
+    if (!nameTouched.value) name.value = answer?.taken && answer.suggested ? answer.suggested : first;
   }
   if (!finalName.value || nameProblem.value) {
     collision.value = false;

@@ -99,7 +99,7 @@ describe('the explorer’s file menu', () => {
 
   it('opens a file with the person’s choice, the administrator’s order and the Open with pick - one rule', () => {
     expect(src).toMatch(
-      /pickOpenHandler\(\s*pluginViewList\.value,\s*previewTarget\.value,\s*previewAppChoice\.value,\s*pluginOpenRules\.value,\s*personalOpenChoice\(previewTarget\.value\),\s*openOpts\.value,\s*\)/,
+      /pickOpenHandler\(\s*pluginViewList\.value,\s*previewTarget\.value,\s*previewAppChoice\.value,\s*pluginOpenRules\.value,\s*personalOpenChoice\(previewTarget\.value\),\s*openOptsFor\(previewTarget\.value\),\s*\)/,
     );
     expect(src).toMatch(/<OpenWithDialog[\s\S]*?@open="openWithChosen"/);
     const chosen = src.slice(src.indexOf('function openWithChosen'), src.indexOf('const stopFollowingOpenWith'));
@@ -111,7 +111,12 @@ describe('the explorer’s file menu', () => {
   });
 
   it('inside an encrypted folder only filex’s own viewer opens anything', () => {
+    // 0.55: the explorer says whether the file is end-to-end encrypted (this
+    // encrypted listing, or a vault's row) and lib/appViewer keeps such a file
+    // to filex's own viewer; every open path reads it through openOptsFor.
+    const optsFor = src.slice(src.indexOf('function openOptsFor'), src.indexOf('function openHandlersOf'));
+    expect(optsFor).toMatch(/inEncrypted: e2eActive\.value \|\| vault\.isVaultRow\(n\)/);
     const of = src.slice(src.indexOf('function openHandlersOf'), src.indexOf('function personalOpenChoice'));
-    expect(of).toMatch(/if \(e2eActive\.value\) return/);
+    expect(of).toMatch(/openOptsFor\(n\)/);
   });
 });

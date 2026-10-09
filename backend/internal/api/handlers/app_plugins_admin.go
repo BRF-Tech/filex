@@ -36,13 +36,16 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/enginebin"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 )
@@ -74,10 +77,7 @@ func (h *AppPluginsAdmin) gate(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	if h.Registry == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"error":   "app_plugins_disabled",
-			"message": h.disabledMessage(),
-		})
+		writeError(w, r, http.StatusServiceUnavailable, "app_plugins_disabled", nil, "detail", h.disabledMessage())
 		return false
 	}
 	return true
@@ -96,7 +96,15 @@ func (h *AppPluginsAdmin) disabledMessage() string {
 // judged against, and whether they are at all (not on a development build —
 // wasmplugin/compat.go). `update_check`: the daily update check runs;
 // `updates_checked_at`: when the last check ran (absent: never).
-func (h *AppPluginsAdmin) runtimeFacts(ctx context.Context) map[string]any {
+func (h *AppPluginsAdmin) runtimeFacts(r *http.Request) map[string]any {
+	facts := h.runtimeFactsOf(r.Context())
+	// The tab's header in the reader's words, on the reader's clock (0.55).
+	facts["said"] = runtimeSaid(langOf(r), func(t time.Time) string { return readerClock(r, t) }, facts)
+	return facts
+}
+
+// runtimeFactsOf is the list answer's header: the platform's facts.
+func (h *AppPluginsAdmin) runtimeFactsOf(ctx context.Context) map[string]any {
 	if h.Registry == nil {
 		return map[string]any{
 			"enabled": false, "arch_ok": wasmplugin.ArchSupported(), "disabled_reason": h.disabledMessage(),
@@ -142,19 +150,20 @@ func (h *AppPluginsAdmin) List(w http.ResponseWriter, r *http.Request) {
 	}
 	// The list is answered even when the runtime is off, so the panel can
 	// show WHY there is nothing to list instead of a bare 503.
-	writeJSON(w, http.StatusOK, h.listBody(r.Context()))
+	writeJSON(w, http.StatusOK, h.listBody(r))
 }
 
 // listBody is the answer of GET /api/admin/app-plugins, and the part of
-// "Check now"'s answer the list redraws from.
-func (h *AppPluginsAdmin) listBody(ctx context.Context) map[string]any {
+// "Check now"'s answer the list redraws from. An app's stored update refusal
+// is said in lang (sayStatus).
+func (h *AppPluginsAdmin) listBody(r *http.Request) map[string]any {
 	list := []*wasmplugin.Status{}
 	if h.Registry != nil {
 		for _, p := range h.Registry.All() {
-			list = append(list, h.Registry.StatusOf(p))
+			list = append(list, sayStatusFor(r, h.Registry.StatusOf(p)))
 		}
 	}
-	return map[string]any{"runtime": h.runtimeFacts(ctx), "plugins": list}
+	return map[string]any{"runtime": h.runtimeFacts(r), "plugins": list}
 }
 
 // CheckUpdates asks every app's source for a newer version now, applies
@@ -171,10 +180,10 @@ func (h *AppPluginsAdmin) CheckUpdates(w http.ResponseWriter, r *http.Request) {
 	}
 	rep, err := h.Registry.CheckUpdates(context.WithoutCancel(r.Context()))
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
-	body := h.listBody(r.Context())
+	body := h.listBody(r)
 	body["report"] = rep
 	writeJSON(w, http.StatusOK, body)
 }
@@ -189,12 +198,12 @@ func (h *AppPluginsAdmin) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	settings, fields, err := h.Registry.Settings(r.Context(), p.Row.ID)
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
 	overrides, err := h.Registry.Overrides(r.Context(), p.Row.ID)
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
 	// The schedule of an app that is woken: the wake-up row (key "") says
@@ -210,7 +219,7 @@ func (h *AppPluginsAdmin) Get(w http.ResponseWriter, r *http.Request) {
 	for _, it := range schedule {
 		it.Error = wasmplugin.LocalizeNote(it.Error, langOf(r))
 	}
-	writeJSON(w, http.StatusOK, appPluginDetailBody(h.Registry.StatusOf(p), p, langOf(r), settings, fields, overrides, schedule))
+	writeJSON(w, http.StatusOK, appPluginDetailBody(sayStatusFor(r, h.Registry.StatusOf(p)), p, langOf(r), settings, fields, overrides, schedule))
 }
 
 // appPluginDetailBody is the answer of GET /api/admin/app-plugins/{id}.
@@ -248,55 +257,36 @@ func appPluginDetailBody(st *wasmplugin.Status, p *wasmplugin.Installed, lang st
 func (h *AppPluginsAdmin) plugin(w http.ResponseWriter, r *http.Request) (*wasmplugin.Installed, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		writeError(w, r, http.StatusBadRequest, "bad_id", nil)
 		return nil, false
 	}
 	p, ok := h.Registry.ByID(id)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "app_missing", nil)
 		return nil, false
 	}
 	return p, true
 }
 
 // fail maps registry errors to HTTP: caller mistakes are 4xx with a code the
-// wizard switches on; everything else is a 500.
-func (h *AppPluginsAdmin) fail(w http.ResponseWriter, err error) {
-	var ie *wasmplugin.InstallError
-	if errors.As(err, &ie) {
-		code := http.StatusBadRequest
-		switch ie.Code {
-		case wasmplugin.ErrCodeNameTaken, wasmplugin.ErrCodeDescribeMismatch, wasmplugin.ErrCodePermissionsChanged, wasmplugin.ErrCodeIncompatible:
-			code = http.StatusConflict
-		case wasmplugin.ErrCodeNotFound:
-			code = http.StatusNotFound
-		case wasmplugin.ErrCodeDemo:
-			code = http.StatusForbidden
-		case wasmplugin.ErrCodeTooLarge:
-			code = http.StatusRequestEntityTooLarge
-		case wasmplugin.ErrCodeUpToDate:
-			code = http.StatusConflict
-		case wasmplugin.ErrCodeFetch:
-			code = http.StatusBadGateway
-		}
-		writeJSON(w, code, installErrorBody(ie))
-		return
-	}
-	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+// wizard switches on; everything else is a 500 (writeAppFailure). Every
+// answer carries the server's sentence in the reader's language.
+func (h *AppPluginsAdmin) fail(w http.ResponseWriter, r *http.Request, err error) {
+	writeAppFailure(w, langOf(r), err)
 }
 
 // installErrorBody is a refused install on the wire. Built here and nowhere
 // else, because app_plugins_wire_test.go serialises it into the fixture the
 // install wizard's tests read (see appPluginDetailBody for why).
 //
-// fetch_failed says WHY (`reason`) and WHAT (`where`, `refs`, `status`), so
-// the wizard writes the sentence in the reader's language and says what to
-// check; `incompatible` says the range (`requires`) and this filex (`filex`);
-// the English `message` stays for the API and the log. The shape is
-// wasmplugin.InstallRefusal — the same one an update check's failure is
-// stored in, so the Apps list explains it with the wizard's sentences.
-func installErrorBody(ie *wasmplugin.InstallError) *wasmplugin.InstallRefusal {
-	return wasmplugin.RefusalOf(ie)
+// `message` is the server's sentence in lang (wasmplugin.InstallRefusal.Said,
+// server.install.*), and the English moves to `detail`, for the API and the
+// log. fetch_failed still says WHY (`reason`) and WHAT (`where`, `refs`,
+// `status`), `incompatible` the range (`requires`) and this filex (`filex`),
+// for a program. The shape is wasmplugin.InstallRefusal - the same one an
+// update check's failure is stored in and said from (sayStatus).
+func installErrorBody(lang string, ie *wasmplugin.InstallError) *wasmplugin.InstallRefusal {
+	return wasmplugin.RefusalOf(ie).Said(lang)
 }
 
 // readInstall gathers an InstallInput from any of the three bodies — or, for
@@ -308,7 +298,7 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 	dry := r.URL.Query().Get("dry_run") == "1" || r.URL.Query().Get("dry_run") == "true"
 	if strings.HasPrefix(ct, "multipart/form-data") {
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad multipart: " + err.Error()})
+			writeError(w, r, http.StatusBadRequest, "bad_multipart", nil, "detail", err.Error())
 			return nil, false
 		}
 		defer func() {
@@ -318,7 +308,7 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 		}()
 		mf, _, err := r.FormFile("manifest")
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "manifest_invalid", "message": "manifest file is required"})
+			writeInstallRefusal(w, r, http.StatusBadRequest, wasmplugin.ErrCodeManifestInvalid, "manifest_missing", "manifest file is required", nil)
 			return nil, false
 		}
 		// ⚠ Read one byte past the ceiling and REFUSE, never truncate: a
@@ -329,11 +319,12 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 		manifest, err := io.ReadAll(io.LimitReader(mf, wire.MaxManifestBytes+1))
 		mf.Close()
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "manifest_invalid", "message": "manifest unreadable"})
+			writeInstallRefusal(w, r, http.StatusBadRequest, wasmplugin.ErrCodeManifestInvalid, "manifest_unreadable", "manifest unreadable", nil)
 			return nil, false
 		}
 		if len(manifest) > wire.MaxManifestBytes {
-			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": wasmplugin.ErrCodeTooLarge, "message": "the manifest is larger than " + strconv.Itoa(wire.MaxManifestBytes>>20) + " MiB"})
+			writeInstallRefusal(w, r, http.StatusRequestEntityTooLarge, wasmplugin.ErrCodeTooLarge, "manifest_too_large",
+				"the manifest is larger than "+strconv.Itoa(wire.MaxManifestBytes>>20)+" MiB", srvtext.Vars{"max": srvtext.Bytes(langOf(r), wire.MaxManifestBytes)})
 			return nil, false
 		}
 		// ⚠ The module is OPTIONAL here, and the registry decides: a language
@@ -346,13 +337,13 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 		switch {
 		case errors.Is(err, http.ErrMissingFile):
 		case err != nil:
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "manifest_invalid", "message": "wasm unreadable"})
+			writeInstallRefusal(w, r, http.StatusBadRequest, wasmplugin.ErrCodeManifestInvalid, "module_unreadable", "wasm unreadable", nil)
 			return nil, false
 		default:
 			wasm, rerr := io.ReadAll(wf)
 			wf.Close()
 			if rerr != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "manifest_invalid", "message": "wasm unreadable"})
+				writeInstallRefusal(w, r, http.StatusBadRequest, wasmplugin.ErrCodeManifestInvalid, "module_unreadable", "wasm unreadable", nil)
 				return nil, false
 			}
 			wasmR = strings.NewReader(string(wasm))
@@ -365,7 +356,7 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 		switch {
 		case errors.Is(err, http.ErrMissingFile):
 		case err != nil:
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "manifest_invalid", "message": "ui bundle unreadable"})
+			writeInstallRefusal(w, r, http.StatusBadRequest, wasmplugin.ErrCodeManifestInvalid, "ui_unreadable", "ui bundle unreadable", nil)
 			return nil, false
 		default:
 			// Read here, like the module: the form's files go when this
@@ -374,7 +365,7 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 			b, rerr := io.ReadAll(io.LimitReader(uf, h.Registry.MaxUIBytes()+1))
 			uf.Close()
 			if rerr != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "manifest_invalid", "message": "ui bundle unreadable"})
+				writeInstallRefusal(w, r, http.StatusBadRequest, wasmplugin.ErrCodeManifestInvalid, "ui_unreadable", "ui bundle unreadable", nil)
 				return nil, false
 			}
 			uiR = bytes.NewReader(b)
@@ -385,7 +376,7 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 				Permissions []string `json:"permissions"`
 			}
 			if err := json.Unmarshal([]byte(g), &body); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad grant json"})
+				writeError(w, r, http.StatusBadRequest, "bad_json", nil, "field", "grant")
 				return nil, false
 			}
 			granted = body.Permissions
@@ -393,7 +384,7 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 		var placements []assoc.Placement
 		if a := strings.TrimSpace(r.FormValue("associations")); a != "" {
 			if err := json.Unmarshal([]byte(a), &placements); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad associations json"})
+				writeError(w, r, http.StatusBadRequest, "bad_json", nil, "field", "associations")
 				return nil, false
 			}
 		}
@@ -406,7 +397,7 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad body"})
+		writeError(w, r, http.StatusBadRequest, "bad_body", nil)
 		return nil, false
 	}
 	var req struct {
@@ -418,7 +409,7 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 		Associations []assoc.Placement `json:"associations"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		writeError(w, r, http.StatusBadRequest, "bad_json", nil)
 		return nil, false
 	}
 	var in *wasmplugin.InstallInput
@@ -426,7 +417,7 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 	case req.FromSource && upgradeID > 0:
 		in, err = h.Registry.FetchUpdate(r.Context(), upgradeID)
 	case req.FromSource:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "manifest_invalid", "message": "from_source upgrades an installed app; an install names its source"})
+		writeInstallRefusal(w, r, http.StatusBadRequest, wasmplugin.ErrCodeManifestInvalid, "from_source_install", "from_source upgrades an installed app; an install names its source", nil)
 		return nil, false
 	case strings.TrimSpace(req.Repo) != "":
 		in, err = h.Registry.FetchGitHub(r.Context(), req.GitHubInput)
@@ -438,11 +429,11 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 	case strings.TrimSpace(req.URL) != "" || strings.TrimSpace(req.ManifestURL) != "":
 		in, err = h.Registry.FetchURL(r.Context(), req.URLInput)
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "manifest_invalid", "message": "give github_repo, or url + manifest_url, or a multipart upload"})
+		writeInstallRefusal(w, r, http.StatusBadRequest, wasmplugin.ErrCodeManifestInvalid, "source_missing", "give github_repo, or url + manifest_url, or a multipart upload", nil)
 		return nil, false
 	}
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return nil, false
 	}
 	in.Granted = req.Permissions
@@ -470,7 +461,7 @@ func (h *AppPluginsAdmin) Install(w http.ResponseWriter, r *http.Request) {
 	}
 	st, dry, err := h.Registry.Install(r.Context(), in)
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
 	if dry != nil {
@@ -478,7 +469,7 @@ func (h *AppPluginsAdmin) Install(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, dry)
 		return
 	}
-	writeJSON(w, http.StatusCreated, installedBody{Status: st, AssociationErrors: h.place(r, st.Name, in.Placements, nil)})
+	writeJSON(w, http.StatusCreated, installedBody{Status: sayStatusFor(r, st), AssociationErrors: h.place(r, st.Name, in.Placements, nil)})
 }
 
 // installedBody is an install's answer: the app, and the File types choices
@@ -528,7 +519,7 @@ func (h *AppPluginsAdmin) place(r *http.Request, app string, placements []assoc.
 		return nil
 	}
 	auth.AddAuditDetail(r.Context(), "file_types", placements)
-	return h.Assoc.PlaceForApp(r.Context(), app, placements, only, actorIDOf(r))
+	return placeFailuresSaid(langOf(r), h.Assoc.PlaceForAppFailures(r.Context(), app, placements, only, actorIDOf(r)))
 }
 
 func (h *AppPluginsAdmin) Upgrade(w http.ResponseWriter, r *http.Request) {
@@ -551,7 +542,7 @@ func (h *AppPluginsAdmin) Upgrade(w http.ResponseWriter, r *http.Request) {
 	before := handledBy(p)
 	st, dry, err := h.Registry.Upgrade(r.Context(), p.Row.ID, in)
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
 	if dry != nil {
@@ -566,7 +557,7 @@ func (h *AppPluginsAdmin) Upgrade(w http.ResponseWriter, r *http.Request) {
 			only = assoc.NewKinds(before, handledBy(now))
 		}
 	}
-	writeJSON(w, http.StatusOK, installedBody{Status: st, AssociationErrors: h.place(r, st.Name, in.Placements, only)})
+	writeJSON(w, http.StatusOK, installedBody{Status: sayStatusFor(r, st), AssociationErrors: h.place(r, st.Name, in.Placements, only)})
 }
 
 func (h *AppPluginsAdmin) Patch(w http.ResponseWriter, r *http.Request) {
@@ -582,21 +573,21 @@ func (h *AppPluginsAdmin) Patch(w http.ResponseWriter, r *http.Request) {
 		AutoUpdate *bool `json:"auto_update"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
-		msg := "enabled (bool) required"
+		said := "enabled_required"
 		if req.AutoUpdate != nil {
 			// ⚠ filex 0.48: nothing updates itself any more — every newer
 			// version waits for an administrator (wasmplugin/updates.go).
-			msg = "automatic updates were removed: every newer version waits for an administrator's approval (Review update)"
+			said = "auto_update_removed"
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": msg})
+		writeErrorSaid(w, r, http.StatusBadRequest, "bad_request", said, nil)
 		return
 	}
 	st, err := h.Registry.SetEnabled(r.Context(), p.Row.ID, *req.Enabled)
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, st)
+	writeJSON(w, http.StatusOK, sayStatusFor(r, st))
 }
 
 // Rollback puts the version an upgrade replaced back:
@@ -612,10 +603,10 @@ func (h *AppPluginsAdmin) Rollback(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := h.Registry.Rollback(context.WithoutCancel(r.Context()), p.Row.ID, actorIDOf(r), langOf(r))
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, st)
+	writeJSON(w, http.StatusOK, sayStatusFor(r, st))
 }
 
 // actorIDOf is the signed-in administrator's id, for the audit row.
@@ -636,7 +627,7 @@ func (h *AppPluginsAdmin) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Registry.Remove(r.Context(), p.Row.ID); err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
 	// Its handlers leave every Default apps rule; the others keep their order.
@@ -661,7 +652,7 @@ func (h *AppPluginsAdmin) ThumbLimits(w http.ResponseWriter, r *http.Request) {
 	}
 	ans, err := h.Registry.ThumbLimits(r.Context(), p.Row.ID)
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, ans)
@@ -679,7 +670,7 @@ func (h *AppPluginsAdmin) PutThumbLimits(w http.ResponseWriter, r *http.Request)
 	}
 	var req wasmplugin.ThumbLimits
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		writeError(w, r, http.StatusBadRequest, "bad_json", nil)
 		return
 	}
 	before, _ := h.Registry.ThumbLimits(r.Context(), p.Row.ID)
@@ -687,10 +678,10 @@ func (h *AppPluginsAdmin) PutThumbLimits(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		var ie *wasmplugin.InstallError
 		if errors.As(err, &ie) && ie.Code == wasmplugin.ErrCodeOutOfRange {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": ie.Code, "message": ie.Message, "field": ie.Where})
+			writeErrorSaid(w, r, http.StatusBadRequest, ie.Code, "out_of_range", apierr.Params{"field": ie.Where, "range": ie.Requires}, "field", ie.Where, "detail", ie.Message)
 			return
 		}
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
 	auth.SetAuditTarget(r.Context(), strconv.FormatInt(p.Row.ID, 10), p.Row.Name)
@@ -711,7 +702,7 @@ func (h *AppPluginsAdmin) GetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	values, fields, err := h.Registry.Settings(r.Context(), p.Row.ID)
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"values": values, "fields": fields})
@@ -729,7 +720,7 @@ func (h *AppPluginsAdmin) PutSettings(w http.ResponseWriter, r *http.Request) {
 		Values map[string]string `json:"values"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		writeError(w, r, http.StatusBadRequest, "bad_json", nil)
 		return
 	}
 	if err := h.Registry.PutSettings(r.Context(), p.Row.ID, req.Values); err != nil {
@@ -747,7 +738,7 @@ func (h *AppPluginsAdmin) PutSettings(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
 	h.GetSettings(w, r)
@@ -763,7 +754,7 @@ func (h *AppPluginsAdmin) GetOverrides(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.Registry.Overrides(r.Context(), p.Row.ID)
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"actions": rows})
@@ -783,11 +774,11 @@ func (h *AppPluginsAdmin) PutOverrides(w http.ResponseWriter, r *http.Request) {
 		Actions []wasmplugin.OverrideRow `json:"actions"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		writeError(w, r, http.StatusBadRequest, "bad_json", nil)
 		return
 	}
 	if err := h.Registry.PutOverrides(r.Context(), p.Row.ID, req.Actions); err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
 	h.GetOverrides(w, r)
@@ -804,7 +795,7 @@ func (h *AppPluginsAdmin) Logs(w http.ResponseWriter, r *http.Request) {
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	lines, next, err := h.Registry.Logs(p.Row.ID, after)
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"lines": lines, "next": next})
@@ -857,7 +848,7 @@ func (h *AppPluginsAdmin) SigningCA(w http.ResponseWriter, r *http.Request) {
 	}
 	pemText, err := h.Registry.CACertPEM(r.Context(), signingTenantOf(r))
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "signing_unavailable", "message": err.Error()})
+		writeError(w, r, http.StatusServiceUnavailable, "signing_unavailable", apierr.Params{"detail": err.Error()}, "detail", err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-pem-file")
@@ -872,7 +863,7 @@ func (h *AppPluginsAdmin) RotateSigningCA(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := h.Registry.RotateCA(r.Context(), signingTenantOf(r)); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rotated": true})
@@ -887,7 +878,7 @@ func (h *AppPluginsAdmin) Locks(w http.ResponseWriter, r *http.Request) {
 	sid, _ := strconv.ParseInt(r.URL.Query().Get("storage_id"), 10, 64)
 	rows, err := h.Registry.Locks(r.Context(), sid)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"locks": h.namedLocks(r.Context(), rows)})
@@ -937,16 +928,16 @@ func (h *AppPluginsAdmin) Unlock(w http.ResponseWriter, r *http.Request) {
 		Path      string `json:"path"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil || req.StorageID <= 0 || strings.Trim(req.Path, "/") == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "storage_id and path are required"})
+		writeError(w, r, http.StatusBadRequest, "lock_place_required", nil)
 		return
 	}
 	was, err := h.Registry.Unlock(r.Context(), req.StorageID, req.Path)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", err.Error())
 		return
 	}
 	if !was {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "nothing is locked there"})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "lock_none", nil)
 		return
 	}
 	rel := strings.Trim(req.Path, "/")
@@ -982,7 +973,7 @@ func (h *AppPluginsAdmin) SigningCAs(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := h.Registry.CAs(r.Context(), signingTenantOf(r))
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"authorities": list})
@@ -1003,7 +994,7 @@ func (h *AppPluginsAdmin) ImportSigningCA(w http.ResponseWriter, r *http.Request
 	var certPEM, keyPEM []byte
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
 		if err := r.ParseMultipartForm(4 << 20); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad multipart: " + err.Error()})
+			writeError(w, r, http.StatusBadRequest, "bad_multipart", nil, "detail", err.Error())
 			return
 		}
 		certPEM = formFileBytes(r, "cert")
@@ -1014,18 +1005,18 @@ func (h *AppPluginsAdmin) ImportSigningCA(w http.ResponseWriter, r *http.Request
 			KeyPEM  string `json:"key_pem"`
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+			writeError(w, r, http.StatusBadRequest, "bad_json", nil)
 			return
 		}
 		certPEM, keyPEM = []byte(body.CertPEM), []byte(body.KeyPEM)
 	}
 	if len(certPEM) == 0 || len(keyPEM) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "both the certificate and its private key are needed, in PEM"})
+		writeError(w, r, http.StatusBadRequest, "ca_pair_required", nil)
 		return
 	}
 	row, err := h.Registry.ImportCA(r.Context(), signingTenantOf(r), certPEM, keyPEM)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ca_invalid", "message": err.Error()})
+		writeError(w, r, http.StatusBadRequest, "ca_invalid", apierr.Params{"detail": err.Error()}, "detail", err.Error())
 		return
 	}
 	if h.Audit != nil {

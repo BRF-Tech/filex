@@ -206,7 +206,8 @@ form) and must all name ONE storage; the older `{"storage_id": 3, "paths":
 ["reports/nda.pdf"]}` spelling is accepted too. Checks: storage ownership,
 ACL ≥ viewer on each path (≥ editor when the action's output mode writes;
 `min_role` raises it further), read-only storage refuses writing actions,
-E2E-encrypted folders refused, `applies` re-checked against the real files
+E2E-encrypted files refused (in an encrypted folder or a vault, or a single
+`.fxe`; 0.55 adds the `.fxe`), `applies` re-checked against the real files
 (state keys included). A file locked by THIS plugin passes the ACL check at
 the level the caller would have without the lock - the app that froze the
 document is the one that must still write the signature into it.
@@ -291,10 +292,11 @@ not only the opening `run` - and the event's `context.inputs` are built from
 it. The explorer sends `paths` beside the older single-row `path`; when both
 come, `paths` wins, and `path` alone (an older client, a deep link) still
 means that one file. Each path is judged again for the person asking (viewer
-ACL, encrypted folders → `403` naming the path, before the plugin is asked);
+ACL, an encrypted folder's file or a `.fxe` → `403 encrypted` naming the path,
+before the plugin is asked);
 a submit that queues a job re-checks the action's `applies` on every file
-(`422 not_applicable`). At most 500 paths, as for `run` (`400 too many
-paths`). Up to 0.44.2 the explorer echoed only `path`, so from the second
+(`422 not_applicable`). At most 500 paths, as for `run` (`400
+too_many_paths`; up to 0.54 the code was the phrase `too many paths`). Up to 0.44.2 the explorer echoed only `path`, so from the second
 event on a multi-file screen was answered about its first file and its job
 ran on that file alone.
 
@@ -537,7 +539,10 @@ those as the pin and the grant.
 ```
 
 `filex_version` is the filex app ranges are judged against; `compat_enforced`
-is false on a development build (no range is checked). `update.status:
+is false on a development build (no range is checked). `runtime.said` (0.55)
+is the tab's header in the reader's language, on their clock: `state`, and -
+only when they apply - `arch`, `signature`, `dev_build` and `update_check`;
+the server picks the lines and words them. `update.status:
 "incompatible"` names the newest newer `version` this filex cannot run and
 what it `requires`: the range it declares, or `">"` this filex when its
 manifest carries a field (or a `manifest_version`) this filex does not know -
@@ -548,15 +553,22 @@ when the manifest declares no range; `ok: false` on an installed app is a
 warning - it keeps running. `update_source` is absent for an app installed
 from a file (nothing to check). `update` is what the last update check found
 (absent before the first): `refusal` is an install refusal's body
-(`error`, `message`, `reason`, `where`, …), so the panel says it with the
-install wizard's sentences; `notes` are the source's release notes for
+(`error`, `message`, `reason`, `where`, …), and its `message` is said in the
+reader's language each time the list is read (0.55; the English the check
+stored is then `detail`); `notes` are the source's release notes for
 `version` (a GitHub release's body as text - Markdown - up to 8 KiB). ⚠⚠ Nothing
 updates itself since 0.48: the check only records what it found. A row
 filex 0.47 wrote may still carry `status: "failed"` and `auto` (its
 automatic update); nothing writes them any more. `previous` is the version
 the last approval replaced, kept to go back to (`POST …/{id}/rollback`);
 absent when none is kept. `engine` is false for an app without a module;
-`ui` describes its own interface (absent without one). The exact bytes:
+`ui` describes its own interface (absent without one). The lines the list
+shows are the server's, in the reader's language (0.55): `update_said` (a
+newer version that needs another filex, what an approval adds, an update
+undone, a source that could not be read, or no source to check - absent
+where the status word says it all), `compat.message` (an installed app
+outside its range) and `previous.message` (on the reader's clock); a client
+prints them and builds none of its own. The exact bytes:
 `backend/internal/api/handlers/testdata/wire/app-plugin-update-check.json`.
 
 ### `POST /api/admin/app-plugins` - install
@@ -575,7 +587,7 @@ A **language pack** takes each body without its module: no `wasm` part, no
 (no module)* below). The manifest part is read up to 16 MiB and a larger one
 is refused `413 too_large` rather than truncated.
 
-`?dry_run=1` answers `200 {"manifest": {…}, "permissions": [{"id": "files:read", "label": "…", "reason": {"en": "…"}}], "wasm_sha256": "…", "wasm_bytes": N, "signed": bool, "kind": "app"|"language_pack", "manifest_sha256": "…", "languages": [{"code", "keys", "translated", "unknown", "total", "percent", "rtl"}], "compat": {"requires", "ok", "filex"}}` without installing - the wizard's permission-review step. `reason` is the manifest's `permission_reasons[id]` (may be absent). `compat` (absent without a range) with `ok: false` means the install will be refused `incompatible`. `engines_missing: [{"id", "name", "kind"?}]` lists the engines the manifest asks for that this server lacks; `kind: "office"` (0.50) marks the office engine, a document server to connect rather than a program to install. `…/{id}/upgrade?dry_run=1` answers the same shape plus `"upgrade"` - the version it leaves, how the grant changes (`added` is what the administrator approves), and what else the version changes:
+`?dry_run=1` answers `200 {"manifest": {…}, "permissions": [{"id": "files:read", "label": "…", "reason": {"en": "…"}}], "wasm_sha256": "…", "wasm_bytes": N, "signed": bool, "kind": "app"|"language_pack", "manifest_sha256": "…", "languages": [{"code", "keys", "translated", "unknown", "total", "percent", "rtl"}], "compat": {"requires", "ok", "filex", "message"?}}` without installing - the wizard's permission-review step. `reason` is the manifest's `permission_reasons[id]` (may be absent). `compat` (absent without a range) with `ok: false` means the install will be refused `incompatible`, and its `message` is the review's sentence for it in the reader's language (0.55; the wizard prints it as it came). `engines_missing: [{"id", "name", "kind"?}]` lists the engines the manifest asks for that this server lacks; `kind: "office"` (0.50) marks the office engine, a document server to connect rather than a program to install. `…/{id}/upgrade?dry_run=1` answers the same shape plus `"upgrade"` - the version it leaves, how the grant changes (`added` is what the administrator approves), and what else the version changes:
 
 ```json
 "upgrade": {"from": "1.1.0", "added": ["public_pages"], "removed": ["mail:send"], "adds_module": false,
@@ -608,7 +620,8 @@ takes the choices as `associations` (JSON field; a multipart form field of
 that name holding the JSON list): `[{"capability", "ext", "handler", "place":
 "first"|"last"|"off"}]`. They are written once the app runs, only for the
 new app's own handlers; the answer carries `association_errors` (a list of
-sentences) for any that could not be. An upgrade's dry run answers
+sentences, in the reader's language since 0.55: `server.error.place_*`) for
+any that could not be. An upgrade's dry run answers
 `file_types` for the kinds the new version ADDS and only those (absent when it
 adds none), and the upgrade takes `associations` the same way: a choice for a
 kind the installed version already handled is refused into
@@ -782,7 +795,8 @@ audited `file_association.update` / `file_association.reset` with `ext`,
 **The server's own line.** An interface switched off for a kind is refused on
 a file of it - its save (`PUT …/ui/{plugin}/{view}/save`, the file's name or
 a save-as name) and its module (`POST …/ui/{plugin}/{view}/call`, each path):
-`403 {"error": "handler_off"}`.
+`403 {"error": "handler_off", "message": "…", "params": {"ext": "pdf"}}`, the
+sentence in the reader's language ([API-ERRORS.md](API-ERRORS.md)).
 
 **A person's own choices** ("always open this kind with this app"), one
 record per account for every surface: `GET /api/me/open-with` →
@@ -796,7 +810,11 @@ drops that key. A choice is not checked against what is installed: the
 explorer uses it only where it is on.
 
 ### Errors
-`{"error": "<code>", "message": "…", "missing": [...]}`. Codes: `manifest_invalid`
+`{"error": "<code>", "message": "…", "detail": "…", "missing": [...]}`. `message`
+is the server's sentence in the reader's language (`server.install.*`, 0.55),
+`detail` the English behind it, for a log; a client prints `message` and keeps
+no sentence of its own ([API-ERRORS.md → App install refusals](API-ERRORS.md#app-install-refusals)).
+Codes: `manifest_invalid`
 (400), `sha256_mismatch` (400), `sha256_required` (400), `signature_required` /
 `signature_invalid` (400), `permissions_incomplete` (400, `missing`), `name_taken`
 (409), `describe_mismatch` (409), `permissions_changed` (409, upgrade, `missing`),
@@ -875,7 +893,16 @@ wrong `key_id` is refused.
 ```
 
 `use`: `index` | `license` | `artifact` (`artifact` keys are not this
-contract's; a module's signature is `FILEX_PLUGIN_TRUSTED_KEYS`). `status`:
+contract's; a module's signature is `FILEX_PLUGIN_TRUSTED_KEYS`). filex does
+remember a trusted store's `artifact` keys (from `keys.json` when it trusts the
+store and whenever it reads it again, kept even after the store is no longer
+trusted) for one thing only: a storage plugin build one of them signed is
+taken through that store's own link, or any other way only while the store's
+verified catalog still lists that version ([PLUGINS.md → A build a store
+signed](PLUGINS.md#a-build-a-store-signed)). Learning them needs nobody's
+approval because they only narrow what is accepted; which signatures verify at
+all is still `FILEX_PLUGIN_TRUSTED_KEYS`'s alone. A store that wants a key of
+its own for storage builds publishes it as another `artifact` key. `status`:
 `active` (signs), `next` (published before it signs), `retired` (signs
 nothing). A key `id` is 1-64 characters of `A-Z a-z 0-9 . _ -` (it is shown
 beside the fingerprint on the trust question, so no spaces, markup or
@@ -907,7 +934,7 @@ store_not_allowed`).
 |---|---|
 | `store` | the store's origin: must be the origin the link named |
 | `token_id` | the store's id of the link; filex refuses it a second time once it has finished |
-| `app`, `kind`, `version` | the app's manifest name, `app` or `language_pack`, the release |
+| `app`, `kind`, `version` | the app's manifest name, `app`, `language_pack` or `storage` (a storage plugin, 0.55 - below), the release |
 | `filex_origin` | the filex the link was made for, as an origin (required; another filex refuses the link, `intent_wrong_instance`) |
 | `repo`, `ref`, `commit` | `owner/name` on GitHub, the release tag, the commit the store reviewed (required: the full lower-case object id) |
 | `manifest_sha256`, `wasm_sha256`, `ui_sha256` | the pins, lower-case hex; `manifest_sha256` required |
@@ -930,6 +957,31 @@ declared permissions are the link's; the module's bytes are held to
 the same or a newer version refuses the link (`409 intent_version_rollback`);
 an older one is upgraded - when it came from the same store and repository
 (`409 store_source_changed` otherwise).
+
+**A storage plugin's link** (`kind: "storage"`, 0.55, [PLUGINS.md →
+Installing from a store](PLUGINS.md#installing-from-a-store)) carries, beside
+the fields above (`manifest_sha256` is then the sha256 of the release's
+`filex-storage.json`):
+
+| Field | |
+|---|---|
+| `feed_url` | the release's `filex-storage.json`, an `https://` address (required) |
+| `binaries` | `{"<goos>/<goarch>": {url, sha256, size?, sig}}`: every build the store pinned (at least one; each an `https://` address and a lower-case sha256); `sig` is the store's `artifact` key's ed25519 signature over that build's text - `filex-storage-build:v1`, the link's `app`, its `version` (without a leading `v`), the platform and the lower-case sha256, joined by single line feeds with none at the end ([PLUGINS.md → What is signed](PLUGINS.md#what-is-signed)) - what `FILEX_PLUGIN_TRUSTED_KEYS` checks. A signature over the sha256 alone is not taken from a store |
+| `conformance` | what the store's plugin validator measured: `{platform, filex, verified, passed, failed, skipped, driver?, capabilities}` (optional; the review says when it is absent) |
+
+filex reads the feed at `feed_url`, holds its bytes to `manifest_sha256`, and
+refuses the link unless the feed's `name`, `version` and this server's build
+are the link's (`409 intent_pin_mismatch`); no build for this server's
+platform is `409 intent_no_build`, a `filex` range that leaves this server out
+`409 intent_incompatible`, a signature this server requires and cannot verify
+`409 intent_signature_required` (its `message` says when it is another store's
+signature that store does not vouch for through this link), storage plugins turned off
+`503 plugins_disabled`. Every refusal of a storage link carries the server's
+sentence in `message` and `detail.kind: "storage"`. The answer is the review
+with `storage_review` in place of `review`; the install
+(`POST …/store-intent/install {handle, license_key?}`) answers
+`201 {kind: "storage", plugin, license?, request?}`, or
+`plugin_install_failed` with the server's sentence.
 
 ### `POST <store>/v1/install/{token}/complete`
 
@@ -1024,8 +1076,14 @@ is not 1 (`store_index_invalid`, 502) - nothing of it is shown then. From a
 verified index filex keeps, per app that is not revoked: its name, kind,
 label and summary, publisher (name, verified, official), categories,
 repository, and the newest version that is not yanked with its `filex`
-range, permissions and pins. A catalog is kept 10 minutes; while the store
-cannot be reached the last one that verified is served marked `stale`.
+range, permissions and pins. An entry of kind `storage` (0.55) keeps its
+version's `binaries` (`{"<goos>/<goarch>": {sha256}}` - an entry with none is
+left out) and `conformance`; it is shown only where this server runs storage
+plugins. For the build gate filex also keeps, of every `storage` entry, revoked
+ones included, which versions the index names and which of them are yanked: a
+build the store signed that arrives other than through the store's link is
+taken only while its version is listed, not yanked, and the entry not revoked. A catalog is kept 10 minutes; while the store cannot be reached the
+last one that verified is served marked `stale`.
 
 #### `GET <store>/v1/media/<sha256>.<png|jpg|jpeg|webp>` - an icon
 
@@ -1141,10 +1199,10 @@ store.
 | Route | Body → answer |
 |---|---|
 | `GET /api/app-store` | → `{visible, stores}`: whether this person sees the screen (their tenant's settings, their role and groups) and its stores |
-| `GET /api/app-store/catalog?store=<origin>` | → `{store, serial, fetched_at, stale, apps: [{name, kind, label, summary?, publisher, publisher_verified?, publisher_official?, categories, repo, version, published_at?, filex_range, permissions, permission_rows, icon?, installed_version?}]}`; `404 store_screen_hidden` for an account the screen is not shown to, `404 not_found` for a store it does not show |
+| `GET /api/app-store/catalog?store=<origin>` | → `{store, serial, fetched_at, stale, apps: [{name, kind, label, summary?, publisher, publisher_verified?, publisher_official?, categories, repo, version, published_at?, filex_range, permissions, permission_rows, icon?, installed_version?, state, storage?, platforms?, conformance?}], storage_note?}`; `state` is the server's answer for this person (`installed`, `update`, `pending`, `none`); a storage plugin (0.55) carries `storage: {platform?, for_here, summary, capabilities}` in the reader's words. Of a storage plugin, only the server's administrator (of the platform, in a multi-tenant filex) is told `installed_version`, `state: "update"` and `storage.platform` (this server's `GOOS/GOARCH`); anybody else hears `state: "installed"` when some version is here, no version, no platform, and a `summary` that does not name the platform (sec055), and `storage_note` is what the Storage plugins tab says first (both absent where storage plugins are off); `404 store_screen_hidden` for an account the screen is not shown to, `404 not_found` for a store it does not show |
 | `GET /api/app-store/media?store=<origin>&file=<name>` | an icon of that catalog (`Content-Security-Policy: default-src 'none'`) |
 | `GET /api/app-store/requests` | → `{requests: [<request>]}`: the requests this person left, without who decided |
-| `POST /api/app-store/requests` | `{store, app, reason}` → `201 {request, created: true}`, or `200` with the one already waiting; `reason_required`, `already_installed`, `429 too_many_requests` (10 waiting per person) |
+| `POST /api/app-store/requests` | `{store, app, reason}` → `201 {request, created: true}`, or `200` with the one already waiting; `reason_required`, `already_installed`, `429 too_many_requests` (10 waiting per person); a storage plugin with no build for this server `409 intent_no_build` |
 
 | Route | Body → answer |
 |---|---|
@@ -1175,7 +1233,11 @@ A `handle` is the administrator's who read the link, lives an hour at most
 `intent_invalid` / `license_key_invalid` / `store_connect_code_invalid` (400),
 `store_not_connected` / `store_connection_refused` / `store_refused` (409),
 `store_media_invalid` (404), and the install's own codes (`incompatible`,
-`name_taken`, …).
+`name_taken`, …). Every store refusal carries the server's sentence for its
+code in `message`, in the reader's language, with `detail.kind` (`app`,
+`language-pack`, `storage`) and the server's English detail in
+`detail.reason`: print `message`, branch on `error`
+([API-ERRORS.md → App store refusals](API-ERRORS.md#app-store-refusals)).
 
 ### The app reads its license
 
@@ -2287,6 +2349,37 @@ app is a module (the wasm engine), an interface, or both:
   cannot download - on a gesture in the frame or the person's yes, never
   over 256 MiB. A permission (`ui:download`), on the review as "can save
   files to your computer - each time you allow it".
+- **`ui.frame_package`** - `true` lets the interface open **pages of its own
+  package in frames of its own** (an editor that puts the document in a
+  frame, as ONLYOFFICE's `DocsAPI.DocEditor` does with its editor page). The
+  page's `frame-src` and `child-src` name the package's own path (`<P>`) and
+  nothing else - never `data:` or `blob:` (a document of the page's own
+  making would be a realm the bootstrap never ran in), never another
+  version, another app, a page of filex or the network. A framed page is a
+  page of the package, so it is served like every other: the policy built
+  from the same grant, `sandbox allow-scripts` (an opaque origin of its own,
+  not the framing page's), the bootstrap first. The frame filex drew is the
+  only one the bridge answers (`event.source`): a framed page talks to it
+  with `postMessage`, never to filex. A permission (`ui:frame-package`).
+  filex 0.55 and later.
+- **`ui.connect_blob`** - `true` puts `blob:` in the page's `connect-src`:
+  the interface reads, with `fetch` / `XMLHttpRequest`, a `blob:` address it
+  made itself (a document it unpacked in memory, for an editor that only
+  loads from an address). Nothing else changes: no network address, not
+  `data:`. A `blob:` address is bound to the origin that made it, and every
+  framed page is an origin of its own (whether one may read another's
+  differs between browsers), so the page that reads one makes it (hand the
+  bytes over with `postMessage`; an `ArrayBuffer` transfers). A permission
+  (`ui:connect-blob`). filex 0.55 and later.
+- **`ui.print`** - `true` lets the interface hand filex a PDF to print
+  (`ui.print` in the bridge, `fx.print` in the SDK): a sandboxed frame may
+  not open the browser's print dialog, so filex prints the PDF from a page
+  of its own ([Printing a PDF](#printing-a-pdf-uiprint-055)). filex asks
+  every time and prints on the person's click on its Allow, never over
+  64 MiB. Nothing in the interface's policy changes. A permission (`ui:print`), on the review as
+  "can print documents it hands to filex - each time you allow it": the
+  same kind as `ui:download`, since the print dialog can save the PDF too.
+  filex 0.55 and later.
 - **`ui.csp`** - exceptions to the interface's script policy:
   `"unsafe-eval"` (`eval`, `new Function`) and `"wasm-unsafe-eval"`
   (WebAssembly compiled in the page). Each is a permission (below). They open
@@ -2388,6 +2481,9 @@ grant them, an upgrade that adds one answers `permissions_changed`.
 | `ui:wasm-eval` | Its interface may compile WebAssembly in the page (`wasm-unsafe-eval`) |
 | `ui:package-fetch` | Its interface reads its own package - the files of this version, nothing else (`ui.package_fetch`) |
 | `ui:download` | Its interface can save files to your computer - each time you allow it (`ui.download`) |
+| `ui:frame-package` | Its interface opens pages of its own package in frames inside it - this version's pages only, each in the same sandbox and under the same rules as the interface (`ui.frame_package`) |
+| `ui:connect-blob` | Its interface reads `blob:` addresses it created itself in your browser - such an address reaches no server (`ui.connect_blob`) |
+| `ui:print` | Its interface can print documents it hands to filex (a PDF) - each time you allow it; the print dialog can also save the PDF (`ui.print`) |
 | `ui-net:<as>:<url>` | Your browser loads `<as>` from `<url>` while you use it (a live address) |
 | `ui-new:.<ext>` | Adds a new `.<ext>` file to the New menu; it opens in this app's interface (`new_documents`) |
 | `ui-viewer:.<ext>` / `ui-viewer:<type/subtype>` | Opens those files in its own interface, in place of filex's preview - one line per kind a `viewer` view names, so an update that makes the app the viewer of one more kind asks again |
@@ -2419,9 +2515,10 @@ opening. An error is `no-store`.
   ```
   Content-Security-Policy: default-src 'none'; script-src <P> 'sha256-<bootstrap>' [eval];
     style-src <P> 'unsafe-inline' [live style]; img-src <P> data: blob: [live img];
-    font-src <P> [live font]; media-src <P> blob: [live media]; connect-src 'none' | <P>;
-    worker-src blob:; frame-src 'none'; child-src 'none'; object-src 'none';
-    form-action 'none'; base-uri 'none'; frame-ancestors *; sandbox allow-scripts
+    font-src <P> [live font]; media-src <P> blob: [live media];
+    connect-src 'none' | [<P>] [blob:]; worker-src blob:;
+    frame-src 'none' | <P>; child-src 'none' | <P>; object-src 'none';
+    form-action 'none'; base-uri 'none'; sandbox allow-scripts
   Connection-Allowlist: ("<P>*" [live addresses])
   X-DNS-Prefetch-Control: off
   Referrer-Policy: no-referrer
@@ -2441,7 +2538,16 @@ opening. An error is `no-store`.
     navigation away - the only measure that stops WebRTC there. It names the
     package's own path (`<P>*`), not filex's whole origin; live addresses are
     named in it too, or Chrome refuses them as well.
-  - `connect-src` is `'none'`, or `<P>` with `ui:package-fetch`.
+  - `connect-src` is `'none'`; `<P>` with `ui:package-fetch`, `blob:` with
+    `ui:connect-blob`, both with both.
+  - `frame-src` and `child-src` are `'none'`, or `<P>` with
+    `ui:frame-package`. `Connection-Allowlist` already names `<P>*`, and
+    `blob:` is no network address, so neither grant changes it.
+  - **No `frame-ancestors`**, on purpose, and filex's security-headers
+    middleware adds none to these pages: any page may frame an interface,
+    and a page an interface frames from its own package has an opaque origin
+    as its parent, which no source matches - Chromium refuses it even under
+    `frame-ancestors *`. The page holds nothing for whoever frames it.
   - `X-DNS-Prefetch-Control: off`: Firefox resolves `<link rel=dns-prefetch>`
     names despite the CSP.
 - filex puts its **bootstrap** first in every HTML file, before any of the
@@ -2531,9 +2637,9 @@ driver's words.
 
 | Method | Params → result | Needs |
 |---|---|---|
-| `session.get` | → `{v, app: {name, version}, view: {id, placement}, locale, dir, theme: {mode, tokens}, user: {name}, files: [{index, name, ext, size, mime, readOnly}], grants, settings?}` | - |
+| `session.get` | → `{v, app: {name, version}, view: {id, placement}, locale, dir, theme: {mode, tokens}, user: {name}, files: [{index, name, ext, size, mime, readOnly, encrypted?}], grants, settings?}`. `encrypted` (0.55) is `"folder"` for a file in an end-to-end encrypted folder, `"vault"` in a vault and `"file"` for a single encrypted file (`.fxe`), as the server stamps the file's row - in every view the file can be opened from ([Which rows say `encrypted`](#which-rows-say-encrypted)); absent for a file that is not encrypted. ⚠ It is information, not plaintext: filex 0.55 decrypts nothing for an app - such a file's `readOnly` is `true`, `file.read` is refused (`failed`, `encrypted`) and so is a save, and the explorer offers no app an encrypted file at all | - |
 | `file.read` | `{index?, as: stream / bytes / text}` → `{name, size, mime, stream / bytes / text}`. A stream is transferred (`ReadableStream<Uint8Array>`); text is UTF-8 and refused over 32 MiB. | `files:read` |
-| `file.save` | `{index?, data: ReadableStream / ArrayBuffer / string, mime?}` → `{saved: true, size}`. Only over a file the interface was opened with - a new version of it, or the draft it is. | `files:write` |
+| `file.save` | `{index?, data: ReadableStream / ArrayBuffer / string, mime?, through?}` → `{saved: true, size}`. Only over a file the interface was opened with - a new version of it, or the draft it is. `through` (0.55, editing together): the last log entry the saved document holds; ignored outside a session. | `files:write` |
 | `file.saveAs` | `{name, data, mime?}` → `{saved: true, name, size}`. A NEW file, in a folder the person picks in filex's own folder dialog - the one *Move to…* uses, titled with the app's name and the file's. It opens in the folder of the file the interface was opened with (a draft: the folder it will be saved to; no file: the folder the person is in, else the list of storages), never in one of filex's own folders, and only a folder the person may write into can be chosen. A view-only opening (where `file.save` is `read_only`) may still save as: the new file goes elsewhere, and the server checks that folder. The same in every placement and every host (the web app, the desktop app, an embed). `name` is a file name, no folder (`invalid` otherwise); the answer's `name` is the one it was saved under (a taken name gets a free one beside it). `cancelled` when the person closes the dialog, `unavailable` while the frame's previous save-as dialog is still open. The server holds it to the view's kind of file (`invalid` / `not_applicable`) and keeps it out of an encrypted folder (`failed` / `encrypted`) - the `PUT …/save` section below. | `files:write` |
 | `ui.dirty` | `{dirty: bool}` | - |
 | `ui.title` | `{text}` - the frame's title | - |
@@ -2541,6 +2647,8 @@ driver's words.
 | `ui.confirm` | `{text, title?, confirm?, cancel?, danger?}` → `bool` - drawn by filex, its title prefixed with the app's name | - |
 | `ui.close` | - filex asks first when there are unsaved changes | - |
 | `ui.download` | `{name, data: ReadableStream / ArrayBuffer / string, mime?}` → `{saved: true, size}` - a file for the person's own disk. `name` is a file name (no folder). **The person's call** (below). Chromium: File System Access - the person picks where, and a stream is written as it is read, never whole in the page; elsewhere a Blob the browser downloads. At most `LIMITS.maxDownloadBytes` (256 MiB), streamed or not: past it `too_large` and nothing is kept (a picked file is aborted). `cancelled` when the person says no or closes the picker | `ui:download` |
+| `ui.print` | `{name, data: ArrayBuffer / ReadableStream, mime?: "application/pdf"}` → `{printed: true, size}` - filex prints the PDF from its own page ([Printing a PDF](#printing-a-pdf-uiprint-055)). `name` is a file name (no folder); the bytes must start `%PDF-` (`invalid` otherwise - a stream at its first bytes, and the rest is not read). **filex asks every time**, gesture or not, and the print dialog opens on the person's click on its Allow. At most `LIMITS.maxPrintBytes` (64 MiB), streamed or not: past it `too_large`. `cancelled` when the person says no; `unavailable` where the host offers no print page, where its print page may not be shown (a site not in the server's `FILEX_FRAME_ANCESTORS`) or while another print is being asked about; `failed` when the browser could not print it. filex 0.54 and older answer `unknown_method` | `ui:print` |
+| `coedit.join` / `coedit.subscribe` / `coedit.append` / `coedit.lease` / `coedit.cursor` / `coedit.blob.put` / `coedit.blob.get` / `coedit.leave` | editing together ([below](#editing-together-coedit-055-defined-not-offered)). **filex 0.55 answers each `unavailable`**: the methods are defined so an app can be written against them | `files:co-edit` (planned) |
 | `clipboard.write` | `{text}` - the host writes it, the same in every browser (Chrome refuses a sandboxed frame; Firefox and WebKit let it). **The person's call:** on a gesture in the frame, or filex asks (`cancelled` on "no") | - |
 | `engine.call` | `{method, params}` → the module's answer | a module with a `ui_call` export |
 | `job.submit` | `{action, params?}` → `{op}` - one of the app's actions on the opened files, through the ordinary submit checks. **The person's call**, like `clipboard.write` | a module |
@@ -2564,7 +2672,10 @@ those, never the frame's): not the double-click that opened the app, not a
 click on filex's Save. Otherwise filex asks,
 above the frame, naming the app ("Sketch wants to copy text to your
 clipboard", *Allow* / *Don't allow*); "no" answers `cancelled`. An interface
-cannot start a job, fill the clipboard or hand over a download on its own.
+cannot start a job, fill the clipboard, hand over a download or print on its own.
+A print is asked about **every time**, gesture or not
+([Printing a PDF](#printing-a-pdf-uiprint-055)): its *Allow* is a button of
+filex's print page, and only a click there opens the print dialog.
 *Allow* answers only once the question has been on screen a moment (0.6 s; *Don't allow* at once): the app decides when it
 asks, so it could ask right under a click it invited. Where the browser
 refuses filex's page the clipboard on a gesture in the frame (WebKit), the
@@ -2581,7 +2692,9 @@ with the message `busy`.
 **Events** (host → app, `{event, data}`): `theme` (`{mode, tokens}` - the
 SDK paints `--fe-*` onto `<html>` by itself), `locale` (`{locale, dir}`),
 `file.changed`, `close.request`, `app.updated` (an administrator approved a
-new version; reload to use it).
+new version; reload to use it); editing together (0.55: defined, never sent
+yet) `coedit.entry` (the next opened log entry), `coedit.cursor` (another
+member's cursor), `coedit.dropped` (`{from}` - subscribe again from there).
 
 **The host's own requests** (`{hid, request, params}`, answered
 `{hid, result}` or `{hid, error}`): `save` - filex's Save button and a
@@ -2594,6 +2707,159 @@ takes it from there.
 runs the app's own save handler; nothing the frame does can press filex's
 shortcuts.
 
+#### Which rows say `encrypted`
+
+`FileInfo.encrypted` is the file row's own `encrypted`, handed over as the
+server wrote it - filex's pages never work it out from a name, a badge or the
+folder on screen. Since 0.55 every route that answers with file rows stamps
+it, by one rule: `"vault"` for a file inside a vault, `"folder"` for a file
+inside any other end-to-end encrypted folder, `"file"` for a single
+encrypted file (`.fxe`) outside both, nothing for any other file, and never
+anything on a folder's row (a folder says `e2e` / `e2e_vault`). Each value
+means the same thing: the server holds the file only as ciphertext and has
+no key to it.
+
+| Where the file was opened from | Route | Rows |
+|---|---|---|
+| A folder | `GET /api/files/manager?action=index` | `files[]` |
+| The explorer's search box, a bare `tag:` | `GET /api/files/manager?action=search` | `files[]` |
+| Search, content search, the advanced search | `GET`/`POST /api/files/search` | `results[]` |
+| Recent, Home, the recently-opened tray | `GET /api/files/manager/recent` | `nodes[]` |
+| Starred, Home | `GET /api/files/manager/star/list` | `nodes[]` |
+| A tag view | `GET /api/files/manager/tagged` | `nodes[]` |
+| Shared with me | `GET /api/files/manager/shared-with-me` | `files[]` |
+| A file's own stat | `GET /api/files/stat?id=` | the row |
+| The id-based listing | `GET /api/files/manager?storage=&parent=` | `nodes[]` |
+
+The rows outside a folder listing say `e2e_root` beside it (the encrypted
+folder the file sits in). Not on this list, on purpose: the trash (nothing
+in it is opened in an app, and its rows are items to restore), the lists of
+links (`/api/shares`, `/api/files/share`, the administrator's Shares - a
+link's row is the link, and no link can be made into an encrypted folder),
+and the agent API and MCP. ⚠ Their `encrypted` is another field of the same
+name: a `true` / `false` on every entry, folders included (an encrypted
+folder's own entry is `true`), answering "is this ciphertext filex holds no
+key for" for an agent ([MCP.md](MCP.md#encrypted-folders-and-fxe)); the
+`"folder"` / `"vault"` / `"file"` here is a file row's and an app's. The two
+agree on every file. The files a person sees in an
+open vault are rows the explorer builds in the tab from the vault's index
+(the server holds only its packs); they say `"vault"` too.
+
+The explorer reads the same rows to offer an encrypted file no app: no *Open
+with* an app's interface, no app action and no ONLYOFFICE - only filex's own
+viewer, which decrypts it in the tab (a `.fxe` after its password) - in the
+folder and in every view above alike (a row's `encrypted`, `e2e` or
+`e2e_root`; `lib/encryptedRow` in `@brftech/filex`). The server holds an app
+to it as well, at every door, by the same rule: an action's run, a screen's
+event, an interface's call and read
+([`…/read`](#get-apifilespluginsuipluginviewreadpathqualified)) and a save
+over it answer `403 {"error": "encrypted"}`, the reason in the reader's
+language (0.55; before it, a `.fxe` was refused at none of them and an
+encrypted folder's file at all but the read).
+
+### Printing a PDF (`ui.print`, 0.55)
+
+A sandboxed frame without `allow-modals` may not open the browser's print
+dialog - measured 2026-10-08 in the office editor app: Chromium ignores
+`window.print()` there and says so ("Ignored call to 'print()'. The
+document is sandboxed, and the 'allow-modals' keyword is not set"), Firefox
+ignores it silently. So an interface with the `ui:print` grant hands filex
+the PDF (`fx.print(name, pdf)`) and filex prints it:
+
+1. AppFrame checks the grant, the name, that the bytes are a PDF and their
+   size, and holds the PDF **once**, as one `Blob`: a stream is checked at
+   its first bytes (`%PDF-`; otherwise `invalid`, and the rest is not read)
+   and stops at `LIMITS.maxPrintBytes` (64 MiB; `too_large`). 64 MiB, not
+   the download's 256 MiB: a download may stream to the person's disk, a
+   print is held whole in the page until the print dialog has read it.
+2. It asks, **every time**: "Office wants to print “report.pdf”", above the
+   frame, with *Allow* and *Don't allow*. The row's *Allow* is not a button
+   of filex's page: it is a frame of the server's **print page**,
+   `GET <base>/_print/` (`backend/internal/printframe`), which draws that
+   one button itself. AppFrame waits for the page's `filex:print-ready`
+   (the `event.source` decides, then the origin) and posts
+   `{type: "filex:print", pdf, label, look}` to the page's origin with a
+   `MessagePort`: the Blob (it crosses by reference, not copied), the
+   button's words and the look of filex's primary button. The page frames
+   the PDF as a `blob:` address it made itself - always
+   `application/pdf` - and answers with the size of its button; the frame is
+   shown at that size in the row. The button is armed a moment later, so a
+   click the app invited cannot land on it.
+3. On the person's click on it - a trusted click, while the browser reports
+   their activation on that page (`navigator.userActivation`) - the page
+   calls the PDF frame's `print()`: the browser's print dialog. Nothing else
+   calls it: not the PDF loading, not a message, not a script's click. It
+   answers `{ok: true}` (the interface is told `{printed: true, size}`), or
+   `{ok: false}` when `print()` threw or the PDF never loaded (15 s after
+   the click - a browser without a PDF viewer downloads the PDF instead):
+   `failed`. *Don't allow* tells the page to drop it all, and the interface
+   `cancelled`.
+
+⚠ Why the click must land in the print page: a click on a button of filex's
+own page is the person's activation on THAT page, and a browser shares it
+with a frame of the same origin only (not in every engine). The explorer is
+embedded in other sites (the web component) and the desktop app's page has
+an origin of its own: there, an *Allow* of the explorer's would never count
+in the print page. A click on the page's own button always does.
+
+⚠ Why a page of its own and not a frame of the explorer's page: filex's
+pages never frame a `blob:` or `data:` document (their `frame-src` names
+filex's own paths only - it is the wall around an app interface's own
+navigation, `internal/secheaders`). The print page holds no app code and its
+policy is its own: `default-src 'none'`, its one inline script by hash,
+`frame-src` / `child-src` / `object-src blob:`, `connect-src 'none'`, no
+form, no base, and its own `frame-ancestors`: filex itself, the desktop
+app's page (`app://filex`) and the origins of the server's
+`FILEX_FRAME_ANCESTORS`. Never any site: the page frames a PDF it is handed
+under filex's address and opens the print dialog, so a page every site could
+frame would let any site show a PDF of its own as filex's. Where the web
+component runs in another site, list that site there for its apps to print
+([CONFIGURATION.md → Security headers and framing](CONFIGURATION.md#security-headers-and-framing));
+elsewhere the print page is refused, and the interface is told `unavailable`
+soon after. filex's pages list `/_print/` among the paths of filex they may
+frame, beside `/_appui/` and `/z/`. The print question, with the print
+page's frame in it, stays out of sight until the next print or until the
+interface's frame goes away (a browser may still read the PDF after
+`print()` returned, and a frame that moves reloads).
+
+An app that runs on an older filex gets `unknown_method`, and hands the PDF
+over as a download instead (`ui.download`); so does an app told
+`unavailable`.
+
+What the person sees when an app asks to print - **Allow** (the print page's
+own button) is armed a moment after the row appears; **Don’t allow**
+answers the app `cancelled`:
+
+![An app's interface asks to print a PDF: filex asks above the frame, Allow or Don't allow](https://filex.sh/shots/appprint/print-consent-1280.ae34e6af4815.png)
+
+
+### Editing together (`coedit.*`, 0.55: defined, not offered)
+
+The office editor app (task #189) edits a document together the way
+[E2E-OFFICE.md](E2E-OFFICE.md) describes: every member's editor applies the
+same log entries in the same order, filex seals each entry with the
+session's key and orders the sealed entries through its relay, and the app
+never holds a key. The bridge's half is defined in filex 0.55 so the app can
+be written against it; **filex 0.55 has no relay route yet and answers every
+`coedit.*` call `unavailable`** - the app edits alone then. The relay's
+routes, its tables and the `files:co-edit` permission come later.
+
+| Method | Params → result |
+|---|---|
+| `coedit.join` | `{index?}` → `{session, me: {client, user, name, indexUser, canEdit}, head, changesHead, savedThrough}` - join (or start) the session of an opened file. `user` is an opaque id of the person in this session, never an account id; `indexUser` is never given twice in a session |
+| `coedit.subscribe` | `{from}` - the entries after `from` arrive as `coedit.entry` events, then the new ones as they land |
+| `coedit.append` | `{kind: changes / lock / release, body}` → `{seq}` - filex seals it and the relay places it; it comes back as a `coedit.entry` too. A conflict with another member's entry is filex's to retry |
+| `coedit.lease` | `{op: acquire / release, changesSeen}` → `{granted}` - the changes lease: one writer at a time, and only one that has seen every change |
+| `coedit.cursor` | `{cursor}` - passed to the other members, not kept |
+| `coedit.blob.put` / `coedit.blob.get` | `{name, data: ArrayBuffer}` / `{name}` → `{name, bytes}` - the session's sealed blobs (the base document a member who joins late opens, an image added while editing) |
+| `coedit.leave` | - leave the session |
+
+A log entry (`coedit.entry`) is `{seq, at, client, kind, ...}`: `changes` /
+`lock` / `release` with the member's `body`, `join` with the `member`,
+`leave`, and `saved` with `through` (the file now holds the log up to
+there). `at` is the relay's clock, the same for every member. `file.save`
+takes `through` in a session so the session knows what is saved.
+
 ### `PUT /api/files/plugins/ui/{plugin}/{view}/save`
 
 The server half of `file.save` and `file.saveAs`, with the person's session
@@ -2602,7 +2868,8 @@ the app is running, the view is its interface, the app holds `files:write`,
 the file is of a type the view `applies` to, and the person may write it -
 confinement, ACL editor (or the file is the caller's OWN draft, issue #71),
 the write gate (locks, filex's own folders, somebody else's draft refused),
-not a read-only storage, not in an encrypted folder, and the person's quota
+not a read-only storage, not in an encrypted folder and not a single
+encrypted file (`.fxe`, 0.55) - `403 encrypted` - and the person's quota
 (`507 quota_exceeded`, before a byte is written). A NEW file ("save as") is
 held to the same rules: its name must be of a kind the view applies to
 (`422 not_applicable` - a diagram editor never saves an `.html`), and never
@@ -2636,6 +2903,13 @@ bytes the explorer's preview would, under the person's own read permission
 and confinement (ranges included). Before 0.54 the frame checked the grant
 itself and read the preview directly.
 
+A file the server holds only as ciphertext - in an end-to-end encrypted
+folder or a vault, or a single encrypted file (`.fxe`): the files whose row
+says `encrypted` - is never read here: `403 {"error": "encrypted"}`, its
+`message` the server's sentence naming the file (0.55; 0.54 answered the
+ciphertext). Asked only of a file the person may read; anything else gets
+the preview's own answer.
+
 An interface's kept state (`state.get` / `state.set`) lives in the person's
 preference document; one app may keep up to `limits.app_state_max_bytes`
 (16 KiB of JSON) there, which `PUT /api/me/prefs` enforces
@@ -2646,7 +2920,8 @@ preference document; one app may keep up to `limits.app_state_max_bytes`
 `{method, params, paths}` → the module's `ui_call` answer (`200 {result}`).
 The paths are the files the interface was opened with; each is checked for
 the person asking exactly like a view's (confinement, ACL viewer, not in an
-encrypted folder) and handed to the module as `context.inputs` (file refs,
+encrypted folder and not a `.fxe`) and handed to the module as
+`context.inputs` (file refs,
 never paths). A module without `ui_call` answers `404 unsupported`.
 
 ## Interface preferences

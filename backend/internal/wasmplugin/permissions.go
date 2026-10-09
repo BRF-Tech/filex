@@ -51,6 +51,20 @@ const (
 	// PermUIDownload: the interface hands the person files to keep on their
 	// own disk, each time with their say (`ui.download`).
 	PermUIDownload Permission = "ui:download"
+	// PermUIFramePackage: the interface opens pages of its own package in
+	// frames of its own — this version's pages only, each served under the
+	// same policy and sandbox (`ui.frame_package`). An editor that puts its
+	// document in a frame of its own (ONLYOFFICE's frameEditor) needs it.
+	PermUIFramePackage Permission = "ui:frame-package"
+	// PermUIConnectBlob: the interface reads `blob:` addresses it made
+	// itself with fetch/XHR (`ui.connect_blob`) — memory of the page, never
+	// a network address.
+	PermUIConnectBlob Permission = "ui:connect-blob"
+	// PermUIPrint: the interface hands filex a PDF and filex prints it from
+	// its own page, each time with the person's say (`ui.print`): a
+	// sandboxed frame may not open the browser's print dialog. The same
+	// kind of grant as ui:download - the print dialog can save the PDF.
+	PermUIPrint Permission = "ui:print"
 )
 
 // Parameterised prefixes.
@@ -113,6 +127,7 @@ var bare = map[Permission]bool{
 	PermNotifySend: true, PermUsersLookup: true, PermSettings: true, PermState: true,
 	PermPublicPages: true, PermSchedule: true,
 	PermUI: true, PermUIEval: true, PermUIWasmEval: true, PermUIPackageFetch: true, PermUIDownload: true,
+	PermUIFramePackage: true, PermUIConnectBlob: true, PermUIPrint: true,
 }
 
 // ParsePermission validates one manifest entry.
@@ -316,6 +331,12 @@ func (p Permission) Label(lang string) string {
 		return permText(lang, "ui_package_fetch", nil)
 	case p == PermUIDownload:
 		return permText(lang, "ui_download", nil)
+	case p == PermUIFramePackage:
+		return permText(lang, "ui_frame_package", nil)
+	case p == PermUIConnectBlob:
+		return permText(lang, "ui_connect_blob", nil)
+	case p == PermUIPrint:
+		return permText(lang, "ui_print", nil)
 	case strings.HasPrefix(s, permPrefixUINet):
 		as, u, _ := parseUINet(strings.TrimPrefix(s, permPrefixUINet))
 		return permText(lang, "ui_net_"+as, srvtext.Vars{"url": u})

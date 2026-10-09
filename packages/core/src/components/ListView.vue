@@ -928,27 +928,30 @@ const tableGroups = computed(() =>
       <!-- ⚠ Badges OUTSIDE `.fe-list__name`: the shot scripts read that
            element's textContent as the filename, and a row whose name reads
            "nda.pdf Locked" breaks them silently (lesson #29). -->
+      <!-- `tbl-pill` + `tbl-pill__text`: the table's rule for a pill in a
+           cell (base.css) - in a Name column too narrow for it the word ends
+           in an ellipsis inside the chip, after the name has given way. -->
       <span
         v-if="lockTitleOf(row)"
-        class="fe-applock"
+        class="fe-applock tbl-pill"
         role="img"
         :title="lockTitleOf(row)"
         :aria-label="lockTitleOf(row)"
         data-testid="lock-badge"
-      ><span class="fe-applock__glyph" aria-hidden="true">&#128274;</span>{{ t('applock.badge') }}</span>
+      ><span class="fe-applock__glyph" aria-hidden="true">&#128274;</span><span class="tbl-pill__text">{{ t('applock.badge') }}</span></span>
       <!-- issue #34 — a symlink the server will not follow; `aria-label`
            carries the SENTENCE, because "Outside storage" read aloud is a
            second riddle. -->
       <span
         v-if="linkOf(row)"
-        class="fe-symlink"
+        class="fe-symlink tbl-pill"
         :class="'fe-symlink--' + linkOf(row)!.state"
         role="img"
         :title="linkOf(row)!.why"
         :aria-label="linkOf(row)!.why"
         data-testid="symlink-badge"
         :data-link-state="linkOf(row)!.state"
-      ><span class="fe-symlink__glyph" aria-hidden="true">&#128279;</span>{{ linkOf(row)!.badge }}</span>
+      ><span class="fe-symlink__glyph" aria-hidden="true">&#128279;</span><span class="tbl-pill__text">{{ linkOf(row)!.badge }}</span></span>
       <!-- issue #104 - an entry the storage could not answer for. -->
       <span
         v-if="unavailableOf(row)"

@@ -41,12 +41,12 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
 import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
-import { deflateRawSync } from 'node:zlib';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { ADMIN_EMAIL, ADMIN_PASSWORD, apiLogin, dismissInstallBanner, loginAs } from '../helpers/auth';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage, storageRoot } from '../helpers/seed';
+import { zip } from '../helpers/zip';
 
 const GH_DIR = process.env.E2E_FAKE_GITHUB_DIR ?? '';
 
@@ -77,65 +77,6 @@ function newKey(id: string, use: StoreKey['use']): StoreKey {
 function envelope(k: StoreKey, payload: Record<string, unknown>) {
   const sig = sign(null, Buffer.from(sha256hex(Buffer.from(canonical(payload), 'utf8')), 'utf8'), k.priv).toString('hex');
   return { payload, key_id: k.id, signature: sig };
-}
-
-/* ── a zip, by hand (as in 175) ──────────────────────────────────────────── */
-
-const CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    t[n] = c >>> 0;
-  }
-  return t;
-})();
-
-function crc32(b: Buffer): number {
-  let c = 0xffffffff;
-  for (const x of b) c = CRC_TABLE[(c ^ x) & 0xff] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
-
-function zip(files: Record<string, string>): Buffer {
-  const local: Buffer[] = [];
-  const central: Buffer[] = [];
-  let offset = 0;
-  for (const [name, text] of Object.entries(files)) {
-    const data = Buffer.from(text, 'utf8');
-    const packed = deflateRawSync(data);
-    const nameB = Buffer.from(name, 'utf8');
-    const crc = crc32(data);
-    const h = Buffer.alloc(30);
-    h.writeUInt32LE(0x04034b50, 0);
-    h.writeUInt16LE(20, 4);
-    h.writeUInt16LE(8, 8);
-    h.writeUInt32LE(crc, 14);
-    h.writeUInt32LE(packed.length, 18);
-    h.writeUInt32LE(data.length, 22);
-    h.writeUInt16LE(nameB.length, 26);
-    local.push(h, nameB, packed);
-    const c = Buffer.alloc(46);
-    c.writeUInt32LE(0x02014b50, 0);
-    c.writeUInt16LE(20, 4);
-    c.writeUInt16LE(20, 6);
-    c.writeUInt16LE(8, 10);
-    c.writeUInt32LE(crc, 16);
-    c.writeUInt32LE(packed.length, 20);
-    c.writeUInt32LE(data.length, 24);
-    c.writeUInt16LE(nameB.length, 28);
-    c.writeUInt32LE(offset, 42);
-    central.push(c, nameB);
-    offset += h.length + nameB.length + packed.length;
-  }
-  const cd = Buffer.concat(central);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(Object.keys(files).length, 8);
-  end.writeUInt16LE(Object.keys(files).length, 10);
-  end.writeUInt32LE(cd.length, 12);
-  end.writeUInt32LE(offset, 16);
-  return Buffer.concat([...local, cd, end]);
 }
 
 /* ── the paid app: an interface that reads its license over the bridge ──── */

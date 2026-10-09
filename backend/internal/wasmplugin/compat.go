@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/update"
 )
 
@@ -231,6 +232,23 @@ type Compat struct {
 	Requires string `json:"requires"`
 	OK       bool   `json:"ok"`
 	Filex    string `json:"filex"`
+	// Message is the install review's sentence for a range that leaves this
+	// filex out, in the reader's language (Said); empty on a list row and
+	// on a range this filex is in. The wizard prints it as it came.
+	Message string `json:"message,omitempty"`
+}
+
+// Said fills Message for the review of name at version, in lang, when the
+// range leaves this filex out (server.install.review_incompatible), and
+// answers c. ⚠ The sentence is the server's: the wizard used to build it
+// from requires and filex with a copy of its own (0.55).
+func (c *Compat) Said(lang, name, version string) *Compat {
+	if c == nil || c.OK {
+		return c
+	}
+	c.Message = srvtext.Text(srvtext.Pick(lang), "server.install.review_incompatible",
+		srvtext.Vars{"name": name, "version": version, "requires": c.Requires, "filex": c.Filex})
+	return c
 }
 
 // compatOf is the manifest's range judged against the running filex. Nil when

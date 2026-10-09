@@ -65,9 +65,8 @@ func requireSupertenant(w http.ResponseWriter, r *http.Request, what string) boo
 	if scope != nil && scope.IsSupertenant {
 		return true
 	}
-	writeJSON(w, http.StatusForbidden, map[string]string{
-		"error":   "supertenant_only",
-		"message": what,
-	})
+	// The reader's sentence (server.error.supertenant_only); what was
+	// refused stays as English detail.
+	writeError(w, r, http.StatusForbidden, "supertenant_only", nil, "detail", what)
 	return false
 }

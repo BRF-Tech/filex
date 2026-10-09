@@ -161,6 +161,21 @@ export interface AppPluginRuntime {
   update_check: boolean;
   /** RFC 3339 — when the last update check ran; absent: never. */
   updates_checked_at?: string;
+  /**
+   * The tab's header in the reader's language, on their clock (handlers
+   * runtimeSaid, 0.55): the server picks and words each line; absent keys
+   * say nothing.
+   */
+  said: AppPluginRuntimeSaid;
+}
+
+/** The Apps tab's header lines, as the server says them. */
+export interface AppPluginRuntimeSaid {
+  state?: string;
+  arch?: string;
+  signature?: string;
+  dev_build?: string;
+  update_check?: string;
 }
 
 /** An app's `filex` range against the running filex (wasmplugin.Compat). */
@@ -169,6 +184,12 @@ export interface AppPluginCompat {
   ok: boolean;
   /** The running filex it was judged against. */
   filex: string;
+  /**
+   * An install review's sentence for a range that leaves this filex out, in
+   * the reader's language (wasmplugin.Compat.Said, 0.55): shown as it came.
+   * Absent on a list row and when the range holds.
+   */
+  message?: string;
 }
 
 /**
@@ -203,6 +224,8 @@ export interface AppPluginUpdate {
 export interface AppPluginPrevious {
   version: string;
   replaced_at: string;
+  /** Said by the server in the reader's language, on their clock (0.55). */
+  message?: string;
   /** That version has an interface of its own. */
   ui?: boolean;
 }
@@ -324,6 +347,13 @@ export interface AppPlugin {
   update_source?: 'github' | 'url' | string;
   /** What the last update check found; absent before the first. */
   update?: AppPluginUpdate;
+  /**
+   * The line the list shows about its updates, in the reader's language
+   * (handlers sayStatus, 0.55): a newer version that needs another filex,
+   * what an approval adds, an update undone, a source that could not be
+   * read, or no source at all. Absent where the status word says it all.
+   */
+  update_said?: string;
   created_at: string;
   updated_at: string;
 }
@@ -582,8 +612,14 @@ export type AppPluginErrorCode =
 export interface AppPluginInstallRefusal {
   code: string;
   missing: string[];
-  /** The server's own sentence — English, for the log; never shown as is. */
+  /**
+   * The server's sentence for the refusal, in the reader's language
+   * (wasmplugin.InstallRefusal.Said, `server.install.*`): shown as it is.
+   * The panel keeps no sentence of its own for an install refusal (0.55).
+   */
   message: string;
+  /** The server's English detail behind `message`, for a log - never shown. */
+  detail: string;
   /** fetch_failed: why (manifest_not_found, module_not_found, unreachable …). */
   reason: string;
   /** fetch_failed: the repository or the URL it was fetching. */
@@ -615,6 +651,7 @@ export function refusalOf(raw: unknown): AppPluginInstallRefusal | null {
   const data = raw as {
     error?: string;
     message?: string;
+    detail?: string;
     missing?: string[];
     reason?: string;
     where?: string;
@@ -628,6 +665,7 @@ export function refusalOf(raw: unknown): AppPluginInstallRefusal | null {
     code: data.error,
     missing: Array.isArray(data.missing) ? data.missing : [],
     message: data.message ?? '',
+    detail: data.detail ?? '',
     reason: data.reason ?? '',
     where: data.where ?? '',
     refs: Array.isArray(data.refs) ? data.refs : [],
@@ -708,6 +746,7 @@ function listOf(data: Partial<AppPluginList>): AppPluginList {
       compat_enforced: data.runtime?.compat_enforced ?? true,
       update_check: data.runtime?.update_check ?? false,
       updates_checked_at: data.runtime?.updates_checked_at,
+      said: data.runtime?.said ?? {},
     },
     plugins: data.plugins ?? [],
   };

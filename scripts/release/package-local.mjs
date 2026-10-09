@@ -25,7 +25,10 @@
 //   - macOS: a Mac builds the macOS packages. The release goes out without
 //     them and its notes say so; `only=macos` adds them once GitHub has macOS
 //     runners again (docs/CONTRIBUTING.md, Release process).
-//   - the arm64 snap: snapcraft cannot cross-build it (`only=snap-arm64`).
+//   - the snaps: since 0.55 (core24) snapcraft builds both, in LXD, which
+//     this path does not have. The arm64 one comes with `only=snap-arm64`;
+//     the amd64 one is built on a Linux machine with snapcraft and LXD and
+//     attached by hand (the notes say how), before `only=stores`.
 //   - the stores: the amd64 snap to the Snap Store, the desktop app's winget
 //     pull request and the Microsoft Store need tokens GitHub alone holds;
 //     `only=stores` sends what this attached to the Release, building nothing
@@ -70,7 +73,7 @@ export function imageTags(tag) {
 /** The desktop files each part uploads to the Release (release.yml's attach step globs, by platform). */
 export const DESKTOP_FILES = {
   'desktop-windows': ['*.exe', '*.blockmap', 'latest.yml'],
-  'desktop-linux': ['*.AppImage', '*.deb', '*.rpm', '*-amd64.snap', 'latest-linux.yml', 'latest-linux-arm64.yml'],
+  'desktop-linux': ['*.AppImage', '*.deb', '*.rpm', 'latest-linux.yml', 'latest-linux-arm64.yml'],
 };
 
 /**
@@ -174,16 +177,16 @@ export function localPlan({ tag, version, exportDir, workDir, linuxDir, linuxExp
     });
   }
   if (want('desktop-linux')) {
-    // The linux row (x64 AppImage, .deb, .rpm, feed, the amd64 snap from
-    // electron-builder's template) and the linux-arm64 row without its snap,
-    // cross-built here. Copied back for the upload.
+    // The linux row (x64 AppImage, .deb, .rpm, feed) and the linux-arm64 row,
+    // cross-built here, both without their snaps: since 0.55 (core24) a snap
+    // is built by snapcraft in LXD, which WSL does not have. Copied back for
+    // the upload.
     add({
-      id: 'desktop-linux', part: 'desktop-linux', where: 'linux', title: 'Linux x64 + arm64: AppImage, .deb, .rpm, feeds; the amd64 snap',
+      id: 'desktop-linux', part: 'desktop-linux', where: 'linux', title: 'Linux x64 + arm64: AppImage, .deb, .rpm, feeds (no snap)',
       cmd:
         `set -euo pipefail\ncd ${linuxDir}\ncommand -v rpmbuild >/dev/null || { echo "rpmbuild is missing: sudo apt-get install -y rpm" >&2; exit 1; }\n` +
         `(cd desktop && npm version ${version} --no-git-tag-version --allow-same-version)\n` +
         `pnpm --filter ./desktop run dist:linux\n` +
-        `pnpm --filter ./desktop exec electron-builder --linux snap --publish never\n` +
         `(cd desktop && pnpm run build && GOARCH=arm64 node scripts/fetch-cli.mjs --platform linux && pnpm exec electron-builder --linux AppImage deb rpm --arm64 --publish never)\n` +
         `node .github/workflows/scripts/arch-of.mjs desktop/release/linux-unpacked/filex-app-bin desktop/release/linux-unpacked/resources/bin/filex --expect amd64\n` +
         `node .github/workflows/scripts/arch-of.mjs desktop/release/linux-arm64-unpacked/filex-app-bin desktop/release/linux-arm64-unpacked/resources/bin/filex --expect arm64\n` +
@@ -210,8 +213,12 @@ export function localPlan({ tag, version, exportDir, workDir, linuxDir, linuxExp
     `macOS: not built here. The release goes out without the macOS packages: say so in its notes ("The macOS packages follow once GitHub can build them.").`,
     `  Once GitHub has tested ${tag}'s commit (its ci.yml push run and a dry run of release.yml on it, docs/CONTRIBUTING.md, Release process):`,
     `    gh workflow run release.yml ${R} -f tag=${tag} -f only=macos -f publish=true`,
-    `The arm64 snap: snapcraft cannot cross-build it. The same way, after GitHub has tested the commit:`,
+    `The snaps (core24 since 0.55): snapcraft builds them in LXD, which this path does not have.`,
+    `  The arm64 one the same way, after GitHub has tested the commit:`,
     `    gh workflow run release.yml ${R} -f tag=${tag} -f only=snap-arm64 -f publish=true`,
+    `  The amd64 one on a Linux machine with snapcraft (8.x) and LXD, in a tree at ${tag}, attached before only=stores sends it to the Snap Store:`,
+    `    (cd desktop && npm version ${version} --no-git-tag-version --allow-same-version) && pnpm --filter ./desktop run dist:snap`,
+    `    gh release upload ${shq(tag)} desktop/release/filex-desktop-amd64.snap ${R}`,
     `npm (a person, signed in with npm login; trusted publishing is GitHub's alone), in a tree at ${tag}:`,
     `    pnpm -r --filter './packages/*' exec npm version ${version} --no-git-tag-version --allow-same-version`,
     `    pnpm publish --filter './packages/*' --access public --no-git-checks --otp <code>`,

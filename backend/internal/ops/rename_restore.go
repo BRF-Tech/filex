@@ -71,6 +71,14 @@ type Restorer interface {
 	RestoreNode(ctx context.Context, storageID, nodeID int64) error
 }
 
+// RestoreFencer is what a Restorer may also answer: the prefixes a restore of
+// nodeID fences instead of holding the storage's row gate (a folder an object
+// store brings back one object at a time; nil: the gate). handlers.Trash
+// answers it from the trash entry's row.
+type RestoreFencer interface {
+	RestoreFence(ctx context.Context, storageID, nodeID int64) []string
+}
+
 // SetRestorer wires the restore behind an OpRestore row. Without it the row
 // fails rather than claiming to have restored anything.
 func (s *Service) SetRestorer(r Restorer) { s.restorer = r }
@@ -124,7 +132,8 @@ func (s *Service) runFinishingLane(ctx context.Context, stop <-chan struct{}) {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	for {
-		for s.runOneFinishing(ctx, stop) {
+		var held []int64
+		for s.runOneFinishing(ctx, stop, &held) {
 		}
 		select {
 		case <-ctx.Done():
@@ -139,7 +148,10 @@ func (s *Service) runFinishingLane(ctx context.Context, stop <-chan struct{}) {
 
 // runOneFinishing claims and runs the oldest waiting finishing job. It
 // reports whether it ran one.
-func (s *Service) runOneFinishing(ctx context.Context, stop <-chan struct{}) bool {
+//
+// held is the storages whose jobs were put back this round (a judgement held
+// their gate): their jobs are left where they are until the next round.
+func (s *Service) runOneFinishing(ctx context.Context, stop <-chan struct{}, held *[]int64) bool {
 	s.finishMu.Lock()
 	defer s.finishMu.Unlock()
 	select {
@@ -150,13 +162,20 @@ func (s *Service) runOneFinishing(ctx context.Context, stop <-chan struct{}) boo
 	if ctx.Err() != nil {
 		return false
 	}
-	op, ok, err := s.claimWhere(ctx, `kind IN (`+finishingKinds+`)`)
+	op, ok, err := s.claimWhere(ctx, skipping(`kind IN (`+finishingKinds+`)`, *held))
 	if err != nil {
 		slog.Warn("ops: claim next rename, restore or purge", slog.String("err", err.Error()))
 		return false
 	}
 	if !ok {
 		return false
+	}
+	// A storage being judged: the job goes back, and the lane carries on
+	// with the other storages' (gate_lane.go).
+	if waitsForAJudgement(op) {
+		s.putBack(ctx, op)
+		*held = append(*held, op.StorageID)
+		return true
 	}
 	s.execute(ctx, op)
 	return true
@@ -201,9 +220,23 @@ func (s *Service) runRename(ctx context.Context, drv storage.Driver, op *Op, src
 	if err := s.refuseUnsettledEncryption(work, drv, op, src, dst); err != nil {
 		return err
 	}
+	// ⚠ The storage's row gate, from the first byte that moves to the last row
+	// that follows (internal/rowgate, issue #192). Without it a scan running
+	// beside the rename saw the folder half way - listed in its parent before
+	// the bytes moved, listed itself after - judged everything in it gone, and
+	// dropped the rows a moment before SyncRename re-homed them: the renamed
+	// folder opened empty.
+	//
+	// A folder on an object store moves one object at a time, for as long as
+	// it is large: it fences its old and new prefixes instead of holding the
+	// whole storage's scan off (holdFor, rowgate.FenceCtx).
+	release, _ := holdFor(work, drv, op.StorageID, src, dst)
+	defer release()
 	// ⚠ Asked again, although the handler asked when it queued the rename:
 	// other work may have run in between, and every driver's Move replaces
-	// what holds the name.
+	// what holds the name. Asked once the gate is held, so the answer is the
+	// one the move acts on: a name taken while the job waited for the gate is
+	// refused, not replaced (issue #201, sec055).
 	taken, err := rs.NameTaken(work, op.StorageID, src, dst)
 	if err != nil {
 		return fmt.Errorf("could not tell whether the name is free: %w", err)
@@ -211,14 +244,6 @@ func (s *Service) runRename(ctx context.Context, drv storage.Driver, op *Op, src
 	if taken && !op.resumed {
 		return ErrNameTaken
 	}
-	// ⚠ The storage's row gate, from the first byte that moves to the last row
-	// that follows (internal/rowgate, issue #192). Without it a scan running
-	// beside the rename saw the folder half way - listed in its parent before
-	// the bytes moved, listed itself after - judged everything in it gone, and
-	// dropped the rows a moment before SyncRename re-homed them: the renamed
-	// folder opened empty.
-	release := rowgate.Move(op.StorageID)
-	defer release()
 	if taken {
 		// ⚠⚠ Carried on after a restart (op.resumed: this row had begun when
 		// the previous process stopped). The name is held by the rename's own
@@ -255,9 +280,16 @@ func (s *Service) runRestore(ctx context.Context, op *Op, src string) error {
 	// then the rows do. A scan between the two would find the bytes back at
 	// their path with no live row and catalogue them as a new file, which
 	// would then hold the place the restored row is going back to (rowgate).
-	release := rowgate.Move(op.StorageID)
+	// A folder an object store brings back one object at a time fences its
+	// trash key and its original path instead (RestoreFencer, rowgate.HoldCtx).
+	work := context.WithoutCancel(ctx)
+	var fence []string
+	if f, ok := s.restorer.(RestoreFencer); ok {
+		fence = f.RestoreFence(work, op.StorageID, ids[0])
+	}
+	release, _ := rowgate.HoldCtx(context.Background(), op.StorageID, fence...)
 	defer release()
-	return s.restorer.RestoreNode(context.WithoutCancel(ctx), op.StorageID, ids[0])
+	return s.restorer.RestoreNode(work, op.StorageID, ids[0])
 }
 
 func (s *Service) runPurge(ctx context.Context, op *Op, src string) error {
@@ -275,4 +307,29 @@ func (s *Service) runPurge(ctx context.Context, op *Op, src string) error {
 // cancelled, and a running one unless it finishes what it starts.
 func cancellable(op *Op) bool {
 	return op.Status == StatusPending || (op.Status == StatusRunning && !finishesOnceStarted(op.Kind))
+}
+
+// holdFor holds what a job's two-step change of src on storageID needs, for a
+// job (no client to give up: it waits for as long as a judgement holds the
+// gate): a fence on src and the other paths given (the destination) when src
+// is a folder moved or trashed object by object (storage.FenceAt), the
+// storage's row gate otherwise (rowgate.HoldCtx makes the choice; it never
+// takes both). fenced reports which it took.
+func holdFor(ctx context.Context, drv storage.Driver, storageID int64, src string, more ...string) (release func(), fenced bool) {
+	fence := storage.FenceAt(ctx, drv, append([]string{src}, more...)...)
+	release, _ = rowgate.HoldCtx(context.Background(), storageID, fence...)
+	return release, len(fence) > 0
+}
+
+// fenceToo adds dst to a job's fence once it is known (OpMove picks its
+// destination under the hold): a fence on dst when the job fenced its source
+// (fenced, from holdFor), nothing otherwise (the gate the job holds covers
+// dst already). No byte has moved before it, so a judgement that runs between
+// the two fences sees the storage as it was.
+func fenceToo(fenced bool, storageID int64, dst string) (release func()) {
+	if !fenced {
+		return func() {}
+	}
+	release, _ = rowgate.FenceCtx(context.Background(), storageID, dst)
+	return release
 }

@@ -356,6 +356,37 @@ func TestVault_CreateAndState(t *testing.T) {
 	require.Equal(t, "VAULT_BAD_REQUEST", m["error"], "a storage's root is never a vault")
 }
 
+// Every row inside a vault is the vault folder's: the server knows no file in
+// it and the index records no author. `state` - and `create`'s answer, for
+// the tab that opens the vault it has just made - says who owns the folder,
+// in a listing row's keys. Without them the explorer said "System" of a file
+// the person had just uploaded (the 0.54 vault screenshots).
+func TestVault_StateSaysWhoOwnsTheVault(t *testing.T) {
+	f := newVaultFix(t, true)
+	code, made := f.post(t, f.admin, "/api/files/e2e/vault/create", map[string]any{
+		"path":   "depo://Kasa",
+		"marker": json.RawMessage(vaultKeyFileWith(t, nil)),
+		"index":  base64.StdEncoding.EncodeToString(vaultGeneration1(t)),
+	}, nil)
+	require.Equal(t, http.StatusCreated, code, "%v", made)
+	require.EqualValues(t, 1, made["generation"])
+	require.EqualValues(t, f.adminID, made["owner_id"], "create says who owns the new vault")
+	require.Equal(t, true, made["owner_self"])
+
+	code, m := f.do(t, f.admin, http.MethodGet, "/api/files/e2e/vault/state?path=depo://Kasa", nil, nil)
+	require.Equal(t, http.StatusOK, code, "%v", m)
+	require.EqualValues(t, f.adminID, m["owner_id"])
+	require.Equal(t, true, m["owner_self"], "the owner asking is told the vault is theirs")
+	name, _ := m["owner_name"].(string)
+	require.NotEmpty(t, name, "the owner's name, as the Owner column shows it")
+
+	code, m = f.do(t, f.member, http.MethodGet, "/api/files/e2e/vault/state?path=depo://Kasa", nil, nil)
+	require.Equal(t, http.StatusOK, code, "%v", m)
+	require.EqualValues(t, f.adminID, m["owner_id"])
+	require.Equal(t, name, m["owner_name"])
+	require.Nil(t, m["owner_self"], "somebody else asking is not told it is theirs")
+}
+
 func TestVault_OneWriterAtATime(t *testing.T) {
 	f := newVaultFix(t, true)
 	f.create(t, f.admin, "Kasa")
@@ -797,6 +828,48 @@ func TestVault_TenantBoundary(t *testing.T) {
 	codeMissing, bodyMissing := state(otherTenant, "yok://Kasa")
 	require.Equal(t, codeMissing, code)
 	require.Equal(t, strings.Replace(bodyMissing, "yok", "depo", 1), body, "the same answer as a storage that does not exist")
+}
+
+// TestListing_StampsHowEachFileIsEncrypted (#189 P1b): a file row of a
+// listing inside a vault says `encrypted: "vault"`, inside another encrypted
+// folder `"folder"`, anywhere else nothing - the value an app's interface is
+// told (app SDK FileInfo.encrypted). Red before #189 P1b: no row carried it.
+func TestListing_StampsHowEachFileIsEncrypted(t *testing.T) {
+	f := newVaultFix(t, true)
+	f.create(t, f.member, "Kasa")
+	require.NoError(t, os.WriteFile(filepath.Join(f.root, "Kasa", "ek.bin"), []byte("x"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(f.root, "Sifreli"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(f.root, "Sifreli", ".filex-e2e.json"), []byte("{}"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(f.root, "Sifreli", "belge.fxe"), []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(f.root, "acik.txt"), []byte("x"), 0o644))
+
+	rowsOf := func(p string) map[string]map[string]any {
+		code, m := f.do(t, f.member, http.MethodGet, "/api/files/manager?action=index&path="+p, nil, nil)
+		require.Equal(t, http.StatusOK, code, "%s: %v", p, m)
+		rows := map[string]map[string]any{}
+		for _, it := range m["files"].([]any) {
+			row := it.(map[string]any)
+			rows[row["basename"].(string)] = row
+		}
+		return rows
+	}
+
+	kasa := rowsOf("depo://Kasa")
+	require.Contains(t, kasa, "ek.bin")
+	require.Equal(t, "vault", kasa["ek.bin"]["encrypted"], "%v", kasa["ek.bin"])
+
+	sifreli := rowsOf("depo://Sifreli")
+	require.Contains(t, sifreli, "belge.fxe")
+	require.Equal(t, "folder", sifreli["belge.fxe"]["encrypted"], "%v", sifreli["belge.fxe"])
+
+	top := rowsOf("depo://")
+	require.Contains(t, top, "acik.txt")
+	require.Nil(t, top["acik.txt"]["encrypted"], "a file outside every encrypted folder carries no such field")
+	for name, row := range top {
+		if row["type"] == "dir" {
+			require.Nil(t, row["encrypted"], "%s: folders are told by e2e / e2e_vault, never by this field", name)
+		}
+	}
 }
 
 // TestVault_ListingSaysWhichFolderIsAVault: the explorer's listing marks a

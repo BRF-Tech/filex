@@ -3,7 +3,7 @@ import { createPinia } from 'pinia';
 
 import App from './App.vue';
 import router from './router';
-import { dropStoreFragment } from './lib/storeLink';
+import { unauthorizedHandler } from './lib/sessionGone';
 import { i18n, applyStoredLocale } from './i18n';
 import { applyStoredTheme } from './lib/theme';
 import { applyPalette } from './lib/palette';
@@ -20,6 +20,7 @@ import { AppearanceApi } from './api/appearance';
 import { applyInstanceThemes, primeInstanceDefault } from './lib/instanceThemes';
 import { onPublicPageBase } from './router';
 import { useToastStore } from './stores/toast';
+import { useAuthStore } from './stores/auth';
 import { installAxiosInterceptors } from './api/client';
 import { initRuntimeConfig } from './api/runtimeConfig';
 import { captureInstallPrompt } from './composables/useInstallPrompt';
@@ -151,27 +152,20 @@ i18n.global.setPostTranslationHandler((str) =>
 );
 // Wire axios -> router (401 redirect) and toast (network error surfacing)
 // after Pinia + Router are attached so stores resolve.
+//
+// ⚠⚠ A 401 asks the server whether the session is over before it goes to the
+// sign-in page (lib/sessionGone, task #199): pushing at once, while the panel
+// still believed in the session, bounced the reader through the start page
+// and the sign-in came back to Home instead of the page they were on.
+const auth = useAuthStore();
+const onSessionGone = unauthorizedHandler({ router, askSession: () => auth.fetchMe() });
 installAxiosInterceptors({
   router,
   onUnauthorized: () => {
-    // Preserve the interrupted location so login lands the user back where
-    // they were headed. On a cold-load deep link vue-router already carries
-    // the #<folder> hash in fullPath; after in-app navigation the explorer
-    // writes it via replaceState behind the router's back — append it only
-    // in that case or the hash doubles up.
-    const current = router.currentRoute.value;
-    let redirect = current.fullPath;
-    if (!current.hash && window.location.hash) redirect += window.location.hash;
-    // ⚠ Never a store link's token: it waits in this tab (lib/storeLink) and
-    // the store page reads it after the sign-in. In `?redirect=` it would be
-    // in the sign-in address, its history entry and an SSO's return address
-    // (store fe review #2).
-    redirect = dropStoreFragment(redirect);
-    router.push(
-      redirect && redirect !== '/'
-        ? { name: 'login', query: { redirect } }
-        : { name: 'login' },
-    );
+    // A public link has no session to ask about and no sign-in page in its
+    // route table (router/index.ts publicRoutes).
+    if (onPublicPageBase()) return;
+    void onSessionGone().catch(() => undefined);
   },
   onError: (msg) => {
     const toast = useToastStore();

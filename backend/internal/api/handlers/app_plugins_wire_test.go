@@ -158,6 +158,9 @@ func TestAppPluginWireFixtures(t *testing.T) {
 	})
 	t.Cleanup(func() { SetAppLabels(nil) })
 	var reg *wasmplugin.Registry // StatusOf reads only the app it is given
+	// ⚠ Every app row is said as the handlers say it (sayStatus, 0.55): the
+	// update line, a range outside this filex and the kept version are the
+	// server's sentences, in English here.
 	fixtures := map[string]any{
 		// POST /api/admin/app-plugins?dry_run=1 — Install's dry-run answer.
 		"app-plugin-dry-run.json": &wasmplugin.DryRunAnswer{
@@ -187,7 +190,9 @@ func TestAppPluginWireFixtures(t *testing.T) {
 			WasmSHA256:  app.Row.SHA256,
 			WasmBytes:   5242880,
 			Kind:        wasmplugin.KindApp,
-			Compat:      &wasmplugin.Compat{Requires: ">=0.48.0", OK: false, Filex: "0.47.0"},
+			// The review says it in the reader's language (0.55): written in
+			// English here, as the dry run does for an English reader.
+			Compat: (&wasmplugin.Compat{Requires: ">=0.48.0", OK: false, Filex: "0.47.0"}).Said("en", app.Manifest.Name, app.Manifest.Version),
 			Upgrade: &wasmplugin.DryRunUpgrade{
 				From: "1.1.0", Added: []string{"public_pages"}, Removed: []string{"mail:send"},
 				ModuleFrom: "5f1c0de9" + strings.Repeat("0", 56), ModuleTo: "a9950e0d84a62a1b30c952736b097e5f3cde019564724dc3c0432a36f7c0d091",
@@ -198,8 +203,9 @@ func TestAppPluginWireFixtures(t *testing.T) {
 			},
 		},
 		// An install or upgrade refused because the app's range leaves this
-		// filex out.
-		"app-plugin-incompatible.json": installErrorBody(&wasmplugin.InstallError{
+		// filex out - said in English (0.55: `message` is the server's
+		// sentence, Go's words are `detail`).
+		"app-plugin-incompatible.json": installErrorBody("en", &wasmplugin.InstallError{
 			Code: wasmplugin.ErrCodeIncompatible, Requires: ">=0.48.0", Filex: "0.47.0",
 			Message: "sign 1.2.0 works with filex >=0.48.0; this is filex 0.47.0",
 		}),
@@ -211,18 +217,18 @@ func TestAppPluginWireFixtures(t *testing.T) {
 				Updated: []string{}, Available: []string{"lang-es"}, NeedsApproval: []string{"sign"}, Failed: []string{},
 			},
 			"runtime": wireRuntime(),
-			"plugins": []*wasmplugin.Status{reg.StatusOf(app), packStatus(t, reg)},
+			"plugins": []*wasmplugin.Status{sayStatus("en", reg.StatusOf(app)), sayStatus("en", packStatus(t, reg))},
 		},
 		// A repository install that found no manifest: the refusal the
 		// wizard turns into a sentence that says what to check.
-		"app-plugin-fetch-failed.json": installErrorBody(&wasmplugin.InstallError{
+		"app-plugin-fetch-failed.json": installErrorBody("en", &wasmplugin.InstallError{
 			Code: wasmplugin.ErrCodeFetch, Reason: wasmplugin.FetchReasonManifestNotFound,
 			Where: "BRF-Tech/yok-boyle-bir-depo", Refs: []string{"main", "master"}, Status: 404,
 			Message: "filex-app.json not found in BRF-Tech/yok-boyle-bir-depo: http 404 from raw.githubusercontent.com",
 		}),
 		// GET /api/admin/app-plugins/{id} — the envelope.
 		"app-plugin-detail.json": appPluginDetailBody(
-			reg.StatusOf(app), app, "en",
+			sayStatus("en", reg.StatusOf(app)), app, "en",
 			map[string]string{"tsa_url": "https://freetsa.org/tsr"},
 			app.Manifest.Settings,
 			[]wasmplugin.OverrideRow{{ID: "sign", Enabled: true}},
@@ -231,7 +237,7 @@ func TestAppPluginWireFixtures(t *testing.T) {
 		// GET /api/admin/app-plugins — one row of the list.
 		"app-plugin-list.json": map[string]any{
 			"runtime": wireRuntime(),
-			"plugins": []*wasmplugin.Status{reg.StatusOf(app)},
+			"plugins": []*wasmplugin.Status{sayStatus("en", reg.StatusOf(app))},
 		},
 		// A language pack: its list row and its install review. ⚠ The rows
 		// carry coverage as a binary WITH a catalogue reports it (a nil
@@ -239,7 +245,7 @@ func TestAppPluginWireFixtures(t *testing.T) {
 		// server's type either way), and Arabic is there so the client has an
 		// `rtl: true` to read.
 		"app-plugin-language-pack.json": map[string]any{
-			"row":     packStatus(t, reg),
+			"row":     sayStatus("en", packStatus(t, reg)),
 			"dry_run": packDryRun(t),
 		},
 		// The lock a listing row carries (lockView) and the 423 repeats: who
@@ -289,12 +295,15 @@ func TestAppPluginWireFixtures(t *testing.T) {
 // wireRuntime is the list answer's header as runtimeFacts writes it for a
 // running registry (the fixture has none to ask).
 func wireRuntime() map[string]any {
-	return map[string]any{
+	facts := map[string]any{
 		"enabled": true, "arch_ok": true, "disabled_reason": "", "requires_signature": false,
 		"engines": map[string]bool{"ffmpeg": true}, "engine_names": map[string]string{"ffmpeg": "FFmpeg"},
 		"filex_version": "0.47.0", "compat_enforced": true, "update_check": true,
 		"updates_checked_at": time.Date(2026, 9, 26, 3, 0, 0, 0, time.UTC),
 	}
+	// The header in the server's words (0.55), as runtimeFacts adds them.
+	facts["said"] = runtimeSaid("en", utcClock, facts)
+	return facts
 }
 
 // packManifestJSON is a language pack as a translator ships it: languages and

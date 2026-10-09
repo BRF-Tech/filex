@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	crand "crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/rowgate"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -275,6 +277,37 @@ func (a *AntivirusScanner) Handle(ctx context.Context, op Op) error {
 	return a.quarantine(ctx, drv, n, livePath, sig)
 }
 
+// errAVChangedMeanwhile: the row an infected verdict was reached for is not
+// the row the quarantine found under the gate (renamed, moved, trashed or
+// rewritten while it was scanned). The op fails and the queue's retry scans
+// the row as it is now.
+var errAVChangedMeanwhile = errors.New("the file changed while it was being scanned")
+
+// errAVFenced: the infected file is under a prefix a long change fences (its
+// folder being moved or trashed object by object). The op fails and the
+// queue's retry quarantines it once the change has put it where it goes.
+var errAVFenced = errors.New("the file's folder is being moved or trashed; the quarantine waits for it")
+
+// hold holds what the quarantine of rel on storageID needs, the way every
+// two-step change decides it (storage.FenceAt, rowgate.HoldCtx): the gate for
+// a file. It waits for as long as a judgement holds the gate (a queue job has
+// no client to give up).
+func (a *AntivirusScanner) hold(ctx context.Context, drv storage.Driver, storageID int64, rel string) func() {
+	release, _ := rowgate.HoldCtx(context.Background(), storageID, storage.FenceAt(ctx, drv, rel)...)
+	return release
+}
+
+// avSameAsScanned reports whether cur, the row read again under the row gate,
+// is still the row the scan read: at the same path and key, live as it was,
+// with the same size and ETag.
+func avSameAsScanned(scanned, cur *model.Node) bool {
+	return cur.Path == scanned.Path &&
+		cur.StorageKey == scanned.StorageKey &&
+		(cur.DeletedAt == nil) == (scanned.DeletedAt == nil) &&
+		cur.Size == scanned.Size &&
+		cur.Etag == scanned.Etag
+}
+
 // quarantine renames the infected object into `.filex-trash/` (same key
 // scheme as the manager's soft delete, so trash listing/restore/purge all
 // work on it), retags the DB row, drops the node from the search index
@@ -284,10 +317,48 @@ func (a *AntivirusScanner) quarantine(ctx context.Context, drv storage.Driver, n
 	trashRel := fmt.Sprintf("%s/%d-%s__%s", avTrashPrefix, time.Now().Unix(), avRandHex6(), base)
 	quarantined := false
 	if mv, ok := drv.(storage.Mover); ok {
-		if err := mv.Move(ctx, livePath, trashRel); err != nil && !errors.Is(err, storage.ErrNotFound) {
-			// Bytes still live — fail the op so the retry budget re-attempts
-			// the quarantine instead of leaving an infected file in place
-			// with a lying DB row.
+		// The bytes into the trash and the row after them, under the
+		// storage's row gate (internal/rowgate, issue #201): a storage scan
+		// between the two would confirm the row gone and drop it, and the
+		// quarantined file would be left in the trash with no entry to list.
+		// One file is one object, so this is the gate (storage.FenceAt
+		// answers no fence for a file; rowgate.HoldCtx makes the choice the
+		// same way every other change does).
+		release := a.hold(ctx, drv, n.StorageID, livePath)
+		defer release()
+		// ⚠ A file under a prefix a long change fences (its folder being
+		// moved or trashed object by object, rowgate.FenceCtx) is that
+		// change's: the move may not have reached it yet, and taking it out
+		// from under the move would break the move half way, or it may have
+		// left already while the row still names the old path. It is not
+		// quarantined while the fence stands: the op fails and the queue's
+		// retry scans the row where the move put it.
+		if rowgate.Fences(n.StorageID).Covers(livePath) {
+			return fmt.Errorf("antivirus: %w: %q", errAVFenced, livePath)
+		}
+		// ⚠ The row is read again once the gate is held (sec055): the scan
+		// took its time, and the file may have been renamed, moved, deleted
+		// or rewritten meanwhile. Every change filex makes to it holds the
+		// same gate, so what the row says now is where the bytes are. A row
+		// that is no longer the one scanned is not quarantined from where it
+		// was: the scan is run again (the queue's retry), on the row as it is.
+		cur, err := a.store.GetNode(ctx, n.ID)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && cur == nil) {
+			// Gone from the catalogue while it was scanned (deleted for
+			// good): nothing of it is left to quarantine.
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("antivirus: read the row again before the quarantine: %w", err)
+		}
+		if !avSameAsScanned(n, cur) {
+			return fmt.Errorf("antivirus: %w: %q is now %q", errAVChangedMeanwhile, n.Path, cur.Path)
+		}
+		if err := mv.Move(ctx, livePath, trashRel); err != nil {
+			// Bytes still live, or not where the row says (an out-of-band
+			// change the scan has not seen yet): fail the op so the retry
+			// budget re-attempts the quarantine on the row as it will be,
+			// instead of calling the file quarantined while it is not.
 			return fmt.Errorf("antivirus: quarantine move %q: %w", livePath, err)
 		}
 		quarantined = true
@@ -300,6 +371,7 @@ func (a *AntivirusScanner) quarantine(ctx context.Context, drv storage.Driver, n
 		if a.index != nil {
 			_ = a.index.DeleteNode(ctx, n.ID)
 		}
+		release()
 	} else {
 		slog.Warn("antivirus: driver lacks move; infected file NOT quarantined",
 			slog.Int64("node", n.ID), slog.String("path", n.Path))

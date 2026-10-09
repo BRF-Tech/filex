@@ -47,6 +47,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/pluginreq"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/share"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/tenantstore"
@@ -477,6 +478,14 @@ func TestPluginRequests_NeedAReason(t *testing.T) {
 		map[string]any{"kind": "app", "manifest_url": f.src.manifestURL()})
 	assert.Equal(t, http.StatusBadRequest, status, string(raw))
 	assert.Contains(t, string(raw), "reason_required")
+	// The server's sentence in the reader's language (0.55), its English
+	// beside it as detail. RED before: `message` was the English
+	// "say why the plugin is needed (`reason`): ..." for every reader.
+	var refused map[string]any
+	require.NoError(t, json.Unmarshal(raw, &refused), string(raw))
+	assert.Contains(t, []any{srvtext.Text("en", "server.plugin_request.reason_required", nil),
+		srvtext.Text("tr", "server.plugin_request.reason_required", nil)}, refused["message"], "%v", refused)
+	assert.Contains(t, refused["detail"], "reason")
 }
 
 // Approval installs the bytes the request froze, with the permissions it

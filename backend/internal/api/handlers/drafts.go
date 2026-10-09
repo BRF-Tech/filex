@@ -51,6 +51,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/realtime"
+	"github.com/brf-tech/filex/backend/internal/rowgate"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/trash"
@@ -485,7 +486,10 @@ func (h *Manager) SaveDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The move and its bookkeeping finish even if the client leaves half way.
+	// The move and its bookkeeping finish even if the client leaves half way,
+	// once the row gate is held; the gate is waited for on the request
+	// (waitCtx): a client gone by then saves nothing.
+	waitCtx := ctx
 	ctx, cancel := detachedMutation(ctx)
 	defer cancel()
 	src := strings.TrimPrefix(normalizeDBPath(d.Path), "/")
@@ -493,13 +497,41 @@ func (h *Manager) SaveDraft(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, mapDriverErr(err), map[string]string{"error": err.Error()})
 		return
 	}
-	if err := moveOneFile(ctx, drv, src, want); err != nil {
+	// The bytes, then the rows, under the storage's row gate
+	// (internal/rowgate, issue #201): a storage scan between the two would
+	// find the document at its place with no row, catalogue it as a NEW file,
+	// and the draft's own row - its id, its history - would then have to
+	// push that one out to land.
+	// The name, found free above, is asked again once the gate is held: a
+	// file that landed on it while the save waited is never replaced
+	// (sec055).
+	sy := protocolsync.New(h.Store, h.Index, nil, writehook.OriginManager)
+	if err := rowgate.ChangeCtx(waitCtx, st.ID,
+		func() error {
+			again, aerr := destinationTaken(ctx, h.Store, drv, st.ID, "", want)
+			if aerr != nil {
+				return aerr
+			}
+			if again {
+				return storage.ErrTakenMeanwhile
+			}
+			return moveOneFile(ctx, drv, src, want)
+		},
+		func() { sy.MoveRows(ctx, st, src, want) },
+	); err != nil {
+		if errors.Is(err, storage.ErrTakenMeanwhile) {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error":      "a file with that name is already there",
+				"code":       draftTargetTaken,
+				"name":       name,
+				"target_dir": joinAdapterPath(st.Name, targetDir),
+			})
+			return
+		}
 		slog.Warn("draft save failed", slog.Int64("storage", st.ID), slog.String("err", err.Error()))
 		writeJSON(w, mapDriverErr(err), map[string]string{"error": "save: " + clientErrText(err)})
 		return
 	}
-	sy := protocolsync.New(h.Store, h.Index, nil, writehook.OriginManager)
-	sy.MoveRows(ctx, st, src, want)
 	if err := h.Store.DeleteDraft(ctx, d.ID); err != nil {
 		// The bytes are where they belong; a row left behind no longer names a
 		// file in the drafts area, and the listing drops it (visibleDrafts).
@@ -558,22 +590,50 @@ func (h *Manager) DiscardDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rel := strings.TrimPrefix(normalizeDBPath(d.Path), "/")
-	sy := protocolsync.New(h.Store, h.Index, nil, writehook.OriginManager)
+	out, terr := h.discardDraftGated(r.Context(), ctx, st, drv, d, rel)
+	switch {
+	case terr == nil && out.Trashed:
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "trashed": true})
+	case terr == nil && out.Missing, errors.Is(terr, trash.ErrUnsupported):
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "trashed": false})
+	default:
+		writeJSON(w, mapDriverErr(terr), map[string]string{"error": "trash: " + clientErrText(terr)})
+	}
+}
+
+// discardDraftGated is DiscardDraft's change to the storage, the bytes and
+// then the rows, under the storage's row gate (internal/rowgate, issue #201)
+// on every branch, as the explorer's delete holds it (deleteItem):
+//
+//   - the bytes went into the trash: the draft's row is retagged there;
+//   - nothing was left to keep (the bytes were already gone), or no way to
+//     keep them (a driver that can neither move nor copy): the draft ends
+//     here - its bytes deleted for good, its record and its folder's rows
+//     dropped.
+//
+// A storage scan between the bytes and the rows would confirm the draft's
+// row gone by a Stat of its old path and drop it on its own. The gate is
+// released by defer, so nothing that panics in between can leave it held:
+// a held gate keeps every later scan of the storage waiting, and every later
+// change behind that scan. It answers trash.Put's outcome and error. The gate
+// is waited for on wait (the request's context: a client gone by then
+// discards nothing); the draft is changed on ctx.
+func (h *Manager) discardDraftGated(wait, ctx context.Context, st *model.Storage, drv storage.Driver, d *model.Draft, rel string) (trash.Outcome, error) {
+	release, err := rowgate.MoveCtx(wait, st.ID)
+	if err != nil {
+		return trash.Outcome{}, err
+	}
+	defer release()
 	out, terr := trash.Put(ctx, drv, rel)
 	switch {
 	case terr == nil && out.Trashed:
-		sy.Trash(ctx, st, rel, out.Key)
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "trashed": true})
+		protocolsync.New(h.Store, h.Index, nil, writehook.OriginManager).Trash(ctx, st, rel, out.Key)
 	case terr == nil && out.Missing, errors.Is(terr, trash.ErrUnsupported):
-		// Nothing left to keep (the bytes were already gone), or no way to keep
-		// them (a driver that can neither move nor copy): the draft ends here.
 		if del, ok := drv.(storage.Deleter); ok && terr != nil {
 			_ = del.Delete(ctx, rel)
 		}
 		_ = h.Store.DeleteDraft(ctx, d.ID)
 		h.dropDraftFiles(ctx, st, drv, path.Dir(rel))
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "trashed": false})
-	default:
-		writeJSON(w, mapDriverErr(terr), map[string]string{"error": "trash: " + clientErrText(terr)})
 	}
+	return out, terr
 }

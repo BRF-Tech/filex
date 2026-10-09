@@ -15,7 +15,12 @@
 // reads `err.message` and nothing else.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { useFileApi } from '@brftech/filex-core/src/composables/useFileApi';
+import { sayFailure, wordsIn } from '@brftech/filex-core/src/lib/errorWords';
+import { en as coreEn } from '@brftech/filex-core/src/locales/en';
 
 function answer(status: number, body: string) {
   vi.stubGlobal(
@@ -60,5 +65,47 @@ describe('a read-only storage is said in the server’s sentence', () => {
     // RED before 0.54: the English "storage is read-only" was matched.
     answer(403, '{"error":"storage is read-only"}');
     expect((await refusal('en')).message).toBe('You are not allowed to do this');
+  });
+});
+
+// 0.55 (#209 leftovers): an app action refused on a read-only storage (409
+// read_only, handlers/app_plugins.go writeReadOnly) is the server's sentence.
+// The explorer's runPluginAction caught it first and said its own
+// `plugin.read_only` - the server's `message` never reached the person.
+describe('an app action on a read-only storage', () => {
+  it("is said in the server's sentence, through the explorer's failure words", async () => {
+    answer(409, '{"error":"read_only","message":"Bu depo salt okunur."}');
+    const err = await refusal('tr');
+    expect(sayFailure(err, 'failed', { t: wordsIn('tr') }).text).toBe('Bu depo salt okunur.');
+  });
+
+  it('the explorer keeps no sentence of its own for it', () => {
+    const src = readFileSync(resolve(__dirname, '../../../packages/core/src/FileExplorer.vue'), 'utf8');
+    const run = src.slice(src.indexOf('async function runPluginAction'), src.indexOf('function onPluginOpQueued'));
+    expect(run.length).toBeGreaterThan(0);
+    // No branch on the refusal's code that says words of its own.
+    expect(run).not.toContain("includes('read_only')");
+    expect(run).not.toContain("t('plugin.read_only')");
+    expect(Object.keys(coreEn)).not.toContain('plugin.read_only');
+  });
+});
+
+// The same for an action whose rule does not fit the selection (422
+// not_applicable, handlers/app_plugins.go): its sentence was English for
+// every reader, so the explorer said `plugin.not_applicable` itself. The
+// server says it now (server.error.not_applicable).
+describe('an app action that does not apply to the selection', () => {
+  it("is said in the server's sentence", async () => {
+    answer(422, '{"error":"not_applicable","message":"Bu işlem seçime uygulanamaz."}');
+    const err = await refusal('tr');
+    expect(sayFailure(err, 'failed', { t: wordsIn('tr') }).text).toBe('Bu işlem seçime uygulanamaz.');
+  });
+
+  it('the explorer no longer words it from the code', () => {
+    const src = readFileSync(resolve(__dirname, '../../../packages/core/src/FileExplorer.vue'), 'utf8');
+    const run = src.slice(src.indexOf('async function runPluginAction'), src.indexOf('function onPluginOpQueued'));
+    expect(run.length).toBeGreaterThan(0);
+    expect(run).not.toContain("includes('not_applicable')");
+    expect(run).not.toContain("t('plugin.not_applicable')");
   });
 });

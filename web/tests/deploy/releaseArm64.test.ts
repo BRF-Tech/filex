@@ -109,10 +109,28 @@ describe('the release ships arm64', () => {
     const release = code('release.yml');
     expect(release, 'no job follows macos-latest').not.toMatch(/macos-latest/);
     expect(step(release, 'fpm for the arm64 .deb and .rpm')).toMatch(/USE_SYSTEM_FPM=true/);
-    const snap = step(release, 'snapcraft + LXD for the arm64 snap');
+    const snap = step(release, 'snapcraft + LXD for the snap');
     expect(snap).toMatch(/lxd init --auto/);
-    // snapcraft 9 refuses base core20 (dry run 36373259912); 8.x builds it.
+    // snapcraft 9 refused base core20 (dry run 36373259912); 8.x builds
+    // core24, the base since 0.55.
     expect(snap).toMatch(/snap install snapcraft --classic --channel=8\.x\/stable/);
+  });
+
+  // 0.55 (#68): the snap is core24, electron-builder's own core24 build.
+  // There is no prebuilt template any more (that was core20's, x64 only):
+  // the x64 row needs snapcraft and LXD like the arm64 one, or its snap is
+  // not built at all. And electron-builder 26.12+, which has that build,
+  // loads @electron/rebuild 4: ESM only, Node 22.12 or newer.
+  it.runIf(!!DIR)('builds both snaps with snapcraft in LXD, and runs electron-builder on Node 22', () => {
+    const release = code('release.yml');
+    const desktop = job(release, 'desktop');
+    const snap = step(desktop, 'snapcraft + LXD for the snap');
+    expect(cond(snap)).toBe("startsWith(matrix.label, 'linux') && env.PROMOTE != 'true'");
+    expect(cond(step(desktop, 'Build snap'))).toBe("startsWith(matrix.label, 'linux') && env.PROMOTE != 'true'");
+    expect(desktop, 'one snapcraft step for both rows').not.toMatch(/for the arm64 snap\n/);
+    const nodes = [...desktop.matchAll(/node-version:\s*"?(\d+)/g)].map((m) => Number(m[1]));
+    expect(nodes.length, 'the desktop job sets up Node').toBeGreaterThan(0);
+    for (const n of nodes) expect(n, 'electron-builder 26 needs Node 22.12 or newer').toBeGreaterThanOrEqual(22);
   });
 
   it.runIf(!!DIR)('builds Windows arm64 beside x64 and joins the two update feeds, x64 first', () => {

@@ -47,6 +47,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/appstore"
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/pluginreq"
 	"github.com/brf-tech/filex/backend/internal/update"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
@@ -68,6 +69,10 @@ type AppStore struct {
 	// (app_store_view.go). Either nil: that part is off.
 	Requests *pluginreq.Service
 	Groups   StoreGroups
+	// Plugins is the storage plugin manager: a store link for a storage
+	// plugin installs through it (app_store_storage.go). Nil: storage
+	// plugins are off here, and such a link is refused with the reason.
+	Plugins *plugin.Manager
 }
 
 // NewAppStore builds the handler set over the Apps admin handlers it shares
@@ -93,6 +98,11 @@ func (h *AppStore) MountAdmin(r chi.Router) {
 	r.Post("/store-intent/install", h.Install)
 	r.Post("/store-intent/cancel", h.Cancel)
 	r.Get("/licenses", h.Licenses)
+	// A paid storage plugin's license (app_store_storage.go): its row is
+	// "storage:<name>", never an app's.
+	r.Get("/storage/{name}/license", h.StorageLicense)
+	r.Put("/storage/{name}/license", h.PutStorageLicense)
+	r.Post("/storage/{name}/license/verify", h.VerifyStorageLicense)
 	r.Get("/{id}/license", h.License)
 	r.Put("/{id}/license", h.PutLicense)
 	r.Post("/{id}/license/verify", h.VerifyLicense)
@@ -102,31 +112,39 @@ func (h *AppStore) MountAdmin(r chi.Router) {
 func (h *AppStore) gate(w http.ResponseWriter, r *http.Request, what string) bool {
 	if h.Admin == nil || !h.Admin.gate(w, r) {
 		if h.Admin == nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "app_plugins_disabled"})
+			writeError(w, r, http.StatusServiceUnavailable, "app_plugins_disabled", nil)
 		}
 		return false
 	}
 	if h.Svc == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "app_plugins_disabled", "message": h.Admin.disabledMessage()})
+		writeError(w, r, http.StatusServiceUnavailable, "app_plugins_disabled", nil, "detail", h.Admin.disabledMessage())
 		return false
 	}
-	return sessionOnly(w, r, what+" needs an administrator signed in to the admin panel; an API key cannot do it.", nil)
+	if auth.TokenFrom(r.Context()) != nil {
+		writeErrorSaid(w, r, http.StatusForbidden, "session_required", "admin_session_required", nil, "detail", what)
+		return false
+	}
+	return true
 }
 
 // storeFail answers an appstore refusal with its code, its detail and the
-// status that says whose move it is.
-func storeFail(w http.ResponseWriter, err error) {
+// status that says whose move it is - and the server's sentence in the
+// reader's language as `message` (storeSaid, app_store_words.go).
+func storeFail(w http.ResponseWriter, r *http.Request, err error) {
 	e, ok := appstore.AsError(err)
 	if !ok {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", err.Error())
 		return
 	}
 	code := http.StatusBadRequest
 	switch e.Code {
 	case appstore.CodeTrustRequired, appstore.CodeKeyChanged, appstore.CodeIntentUsed,
 		appstore.CodePinMismatch, appstore.CodeVersionRollback, appstore.CodeSourceChanged,
-		appstore.CodeNotConnected, appstore.CodeConnectRefused, appstore.CodeStoreRefusal:
+		appstore.CodeNotConnected, appstore.CodeConnectRefused, appstore.CodeStoreRefusal,
+		appstore.CodeNoBuild, appstore.CodeIncompatible, appstore.CodeSignatureRequired:
 		code = http.StatusConflict
+	case appstore.CodePluginsOff:
+		code = http.StatusServiceUnavailable
 	case appstore.CodeStoreRefused, appstore.CodeKeyNotConfigured:
 		code = http.StatusForbidden
 	case appstore.CodeIntentUnknown, appstore.CodeIntentNotFound, appstore.CodeMediaInvalid:
@@ -136,12 +154,12 @@ func storeFail(w http.ResponseWriter, err error) {
 	case appstore.CodeUnreachable, appstore.CodeBadAnswer, appstore.CodeSignature, appstore.CodeIndexInvalid:
 		code = http.StatusBadGateway
 	}
-	writeJSON(w, code, e)
+	writeJSON(w, code, storeSaid(langOf(r), e))
 }
 
 func decodeSmall(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(v); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		writeError(w, r, http.StatusBadRequest, "bad_json", nil)
 		return false
 	}
 	return true
@@ -193,10 +211,10 @@ func (h *AppStore) instance(r *http.Request) (string, error) {
 	return o, nil
 }
 
-func (h *AppStore) origin(w http.ResponseWriter, raw string) (string, bool) {
+func (h *AppStore) origin(w http.ResponseWriter, r *http.Request, raw string) (string, bool) {
 	o, err := appstore.NormalizeOrigin(raw, h.Svc.Loopback())
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
 		return "", false
 	}
 	return o, true
@@ -210,7 +228,7 @@ func (h *AppStore) ListStores(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := h.Svc.ListTrust(r.Context())
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"stores": list})
@@ -224,7 +242,7 @@ func (h *AppStore) TrustStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.Demo {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": wasmplugin.ErrCodeDemo, "message": "a public demo trusts no store"})
+		writeErrorSaid(w, r, http.StatusForbidden, wasmplugin.ErrCodeDemo, "demo_store", nil)
 		return
 	}
 	var req struct {
@@ -234,19 +252,19 @@ func (h *AppStore) TrustStore(w http.ResponseWriter, r *http.Request) {
 	if !decodeSmall(w, r, &req) {
 		return
 	}
-	origin, ok := h.origin(w, req.Store)
+	origin, ok := h.origin(w, r, req.Store)
 	if !ok {
 		return
 	}
 	if len(req.Fingerprints) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "fingerprints: the keys you were shown are required"})
+		writeErrorSaid(w, r, http.StatusBadRequest, "bad_request", "fingerprints_required", nil)
 		return
 	}
 	auth.SkipAuditRow(r.Context())
 	uid := actorIDOf(r)
 	v, err := h.Svc.Approve(r.Context(), origin, req.Fingerprints, uid, actorName(r))
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
@@ -265,18 +283,18 @@ func (h *AppStore) dropFromStore(w http.ResponseWriter, r *http.Request, what st
 	if !h.gate(w, r, what) {
 		return
 	}
-	origin, ok := h.origin(w, r.URL.Query().Get("store"))
+	origin, ok := h.origin(w, r, r.URL.Query().Get("store"))
 	if !ok {
 		return
 	}
 	auth.SkipAuditRow(r.Context())
 	found, err := drop(r.Context(), origin, actorIDOf(r))
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "store_nothing_to_remove", nil)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -326,7 +344,7 @@ func (h *AppStore) fetchForIntent(ctx context.Context, in *appstore.Intent) (*wa
 	if !bytes.Equal(tagged, input.Manifest) {
 		return nil, nil, &appstore.Error{Code: appstore.CodePinMismatch,
 			Message: "the tag " + in.Ref + " no longer serves the manifest of the commit the store approved; nothing was installed",
-			Detail: map[string]any{"mismatches": []appstore.Mismatch{{Field: "commit", Link: in.Ref + "@" + in.Commit,
+			Detail: map[string]any{"kind": appKindOf(in), "mismatches": []appstore.Mismatch{{Field: "commit", Link: in.Ref + "@" + in.Commit,
 				Source: "the tag's manifest is sha256 " + appstore.SHA256Hex(tagged)}}}}
 	}
 	m, err := wasmplugin.ParseManifest(input.Manifest)
@@ -400,16 +418,40 @@ func (h *AppStore) installedFor(ctx context.Context, origin string, in *appstore
 		}
 		return nil, &src, &appstore.Error{Code: appstore.CodeSourceChanged,
 			Message: msg,
-			Detail:  map[string]any{"installed": src, "link": installedSource{Store: origin, Repo: in.Repo, Version: in.Version}}}
+			Detail:  map[string]any{"kind": appKindOf(in), "installed": src, "link": installedSource{Store: origin, Repo: in.Repo, Version: in.Version}}}
 	}
 	cur, err1 := update.ParseVersion(p.Row.Version)
 	next, err2 := update.ParseVersion(in.Version)
 	if err1 != nil || err2 != nil || next.Compare(cur) <= 0 {
 		return nil, &src, &appstore.Error{Code: appstore.CodeVersionRollback,
 			Message: in.App + " " + p.Row.Version + " is installed; the link is for " + in.Version + ", which is not newer. A store link installs or upgrades, never goes back.",
-			Detail:  map[string]any{"installed": p.Row.Version, "link": in.Version}}
+			Detail:  map[string]any{"kind": appKindOf(in), "installed": p.Row.Version, "link": in.Version}}
 	}
 	return p, &src, nil
+}
+
+// appKindOf is what an app's link installs, as a refusal's detail.kind
+// names it: an app or a language pack (a storage plugin's link answers
+// "storage" from app_store_storage.go).
+func appKindOf(in *appstore.Intent) string {
+	if in != nil && in.Kind != "" {
+		return in.Kind
+	}
+	return appstore.KindApp
+}
+
+// withStoreKind stamps detail.kind on a store refusal that has none, so the
+// reader of any store link's refusal knows what it was about.
+func withStoreKind(err error, kind string) error {
+	if e, ok := appstore.AsError(err); ok {
+		if _, has := e.Detail["kind"]; !has {
+			if e.Detail == nil {
+				e.Detail = map[string]any{}
+			}
+			e.Detail["kind"] = kind
+		}
+	}
+	return err
 }
 
 func describeSource(src installedSource) string {
@@ -443,32 +485,38 @@ func (h *AppStore) Intent(w http.ResponseWriter, r *http.Request) {
 	if !decodeSmall(w, r, &req) {
 		return
 	}
-	origin, ok := h.origin(w, req.Store)
+	origin, ok := h.origin(w, r, req.Store)
 	if !ok {
 		return
 	}
 	self, err := h.instance(r)
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
 		return
 	}
 	in, err := h.Svc.ReadIntent(r.Context(), origin, req.Token, self)
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
+		return
+	}
+	if in.IsStorage() {
+		// A storage plugin: its release's feed and its build, not an app's
+		// repository (app_store_storage.go).
+		h.storageIntent(w, r, origin, req.Token, in)
 		return
 	}
 	input, src, err := h.fetchForIntent(r.Context(), in)
 	if err != nil {
-		h.failInstall(w, err)
+		h.failInstall(w, r, err)
 		return
 	}
 	if err := appstore.ComparePins(in, src); err != nil {
-		storeFail(w, err)
+		storeFail(w, r, withStoreKind(err, appKindOf(in)))
 		return
 	}
 	was, wasFrom, err := h.installedFor(r.Context(), origin, in)
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
 		return
 	}
 	input.DryRun = true
@@ -481,14 +529,14 @@ func (h *AppStore) Intent(w http.ResponseWriter, r *http.Request) {
 		_, dry, err = h.Admin.Registry.Install(r.Context(), input)
 	}
 	if err != nil {
-		h.failInstall(w, err)
+		h.failInstall(w, r, err)
 		return
 	}
 	// The bytes the dry run hashed, against the link (the manifest's hash was
 	// compared above; this is the module filex actually downloaded).
 	if in.WasmSHA256 != "" && dry.WasmSHA256 != "" && dry.WasmSHA256 != in.WasmSHA256 {
-		storeFail(w, &appstore.Error{Code: appstore.CodePinMismatch, Message: "the module downloaded is not the one the store approved",
-			Detail: map[string]any{"mismatches": []appstore.Mismatch{{Field: "wasm_sha256", Link: in.WasmSHA256, Source: dry.WasmSHA256}}}})
+		storeFail(w, r, &appstore.Error{Code: appstore.CodePinMismatch, Message: "the module downloaded is not the one the store approved",
+			Detail: map[string]any{"kind": appKindOf(in), "mismatches": []appstore.Mismatch{{Field: "wasm_sha256", Link: in.WasmSHA256, Source: dry.WasmSHA256}}}})
 		return
 	}
 	h.Admin.fileTypesOf(r, dry, was)
@@ -512,12 +560,12 @@ func (h *AppStore) Intent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
-func (h *AppStore) failInstall(w http.ResponseWriter, err error) {
+func (h *AppStore) failInstall(w http.ResponseWriter, r *http.Request, err error) {
 	if _, ok := appstore.AsError(err); ok {
-		storeFail(w, err)
+		storeFail(w, r, err)
 		return
 	}
-	h.Admin.fail(w, err)
+	h.Admin.fail(w, r, err)
 }
 
 // Install installs (or upgrades) what a reviewed link names: the repository
@@ -544,7 +592,11 @@ func (h *AppStore) Install(w http.ResponseWriter, r *http.Request) {
 	// told the review is not open. A failure below puts it back.
 	p, err := h.Svc.Take(req.Handle, actorUserID(r))
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
+		return
+	}
+	if p.Intent.IsStorage() {
+		h.storageInstall(w, r, p, req.LicenseKey)
 		return
 	}
 	in := p.Intent
@@ -561,16 +613,16 @@ func (h *AppStore) Install(w http.ResponseWriter, r *http.Request) {
 	}()
 	input, src, err := h.fetchForIntent(ctx, in)
 	if err != nil {
-		h.failInstall(w, err)
+		h.failInstall(w, r, err)
 		return
 	}
 	if err := appstore.ComparePins(in, src); err != nil {
-		storeFail(w, err)
+		storeFail(w, r, withStoreKind(err, appKindOf(in)))
 		return
 	}
 	was, _, err := h.installedFor(ctx, p.Origin, in)
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
 		return
 	}
 	key := strings.TrimSpace(req.LicenseKey)
@@ -582,7 +634,7 @@ func (h *AppStore) Install(w http.ResponseWriter, r *http.Request) {
 	if in.Paid {
 		// Held from BEFORE the install: the app never runs unlicensed.
 		if undo, err = h.Svc.RequireUndoable(ctx, in.App, p.Origin, key, actor); err != nil {
-			storeFail(w, err)
+			storeFail(w, r, err)
 			return
 		}
 	}
@@ -601,7 +653,7 @@ func (h *AppStore) Install(w http.ResponseWriter, r *http.Request) {
 		// Only what THIS request did is taken back: the license row it
 		// created, never one another install made (Undo).
 		h.Svc.Undo(context.WithoutCancel(ctx), undo)
-		h.failInstall(w, err)
+		h.failInstall(w, r, err)
 		return
 	}
 	installed = true
@@ -626,7 +678,7 @@ func (h *AppStore) Install(w http.ResponseWriter, r *http.Request) {
 	}
 	h.Svc.Finish(context.WithoutCancel(ctx), p, "installed", actor)
 	if now, ok := h.Admin.Registry.ByName(in.App); ok {
-		st = h.Admin.Registry.StatusOf(now)
+		st = sayStatusFor(r, h.Admin.Registry.StatusOf(now))
 	}
 	body["plugin"] = st
 	if p.RequestID != 0 && h.Requests != nil {
@@ -654,7 +706,7 @@ func (h *AppStore) Cancel(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := h.Svc.Take(req.Handle, actorUserID(r))
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
 		return
 	}
 	h.Svc.Finish(context.WithoutCancel(r.Context()), p, "cancelled", actorIDOf(r))
@@ -680,7 +732,7 @@ func (h *AppStore) License(w http.ResponseWriter, r *http.Request) {
 	}
 	v, err := h.Svc.LicenseOf(r.Context(), p.Row.Name)
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
 		return
 	}
 	if v == nil {
@@ -706,7 +758,7 @@ func (h *AppStore) PutLicense(w http.ResponseWriter, r *http.Request) {
 	auth.SkipAuditRow(r.Context())
 	v, err := h.Svc.SetKey(context.WithoutCancel(r.Context()), p.Row.Name, req.Key, actorIDOf(r))
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
@@ -723,7 +775,7 @@ func (h *AppStore) VerifyLicense(w http.ResponseWriter, r *http.Request) {
 	auth.SkipAuditRow(r.Context())
 	v, err := h.Svc.Check(context.WithoutCancel(r.Context()), p.Row.Name, actorIDOf(r))
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
@@ -735,12 +787,12 @@ func (h *AppStore) VerifyLicense(w http.ResponseWriter, r *http.Request) {
 // A free app answers {"status": "free"}.
 func (h *AppStore) AppLicense(w http.ResponseWriter, r *http.Request) {
 	if h.Admin == nil || h.Admin.Registry == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "app_missing", nil)
 		return
 	}
 	name := chi.URLParam(r, "plugin")
 	if _, ok := h.Admin.Registry.ByName(name); !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "app_missing", nil)
 		return
 	}
 	if h.Svc == nil {

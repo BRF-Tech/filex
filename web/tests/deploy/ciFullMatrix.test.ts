@@ -187,6 +187,25 @@ describe('ci.yml: the full matrix', () => {
     expect(shards).toContain('node scripts/test-shards.mjs e2e-check --shards "$E2E_SHARDS" --browsers "$E2E_ENGINES"');
   });
 
+  // Run 37661356185 (task #199, lesson #1274): two Playwright parts hung for
+  // 44 minutes in `playwright install --with-deps` (apt-get update) and were
+  // cancelled at the job's 45-minute limit; the run took 69.7 minutes. Each
+  // browser install has a limit of its own, so a hang ends early and the part
+  // is re-run.
+  it.runIf(!!DIR)('every browser install step has a time limit of its own, well under the job\'s', () => {
+    const lines = ciCode().split('\n');
+    const installs = lines.flatMap((l, i) => (/\brun: pnpm --dir e2e exec playwright install --with-deps\b/.test(l) ? [i] : []));
+    expect(installs.length, 'the browser installs (Playwright, with a Document Server, the extra lines)').toBeGreaterThanOrEqual(3);
+    for (const at of installs) {
+      let start = at;
+      while (start > 0 && !/^\s+- name:/.test(lines[start])) start--;
+      const step = lines.slice(start, at + 1).join('\n');
+      const limit = /\n\s+timeout-minutes: (\d+)\n/.exec(step);
+      expect(limit, `${lines[start].trim()}: no time limit of its own`).not.toBeNull();
+      expect(Number(limit![1]), lines[start].trim()).toBeLessThanOrEqual(15);
+    }
+  });
+
   // v0.53.0's first full matrix (run 37596680800, lesson #1236): GitHub runs
   // a `run:` block as `bash -e`, and `set -uo pipefail` left -e on. A green
   // shard's grep for failure lines found none and ended the step red (handlers-5:

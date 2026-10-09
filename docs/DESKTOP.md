@@ -163,6 +163,14 @@ app with `--no-sandbox` (electron-builder's default), on every distribution.
 Since 0.50 it does not, so an integrated AppImage on Ubuntu 23.10 and later
 needs the profile above like any other.
 
+**And so does the AppImage built with electron-builder 26** (0.55). The
+image's own entry point, `AppRun`, as electron-builder 26 writes it, adds
+`--no-sandbox` by itself whenever it cannot create a user namespace - which,
+without the profile above, is always on Ubuntu 23.10 and later. The AppImage
+keeps the entry point it had up to 0.54 instead, which passes on exactly the
+arguments it was given, so without the profile the launcher still stops and
+shows the steps above.
+
 > ⚠ Starting the app with `--no-sandbox` yourself also opens it, and is not a
 > fix: it switches the sandbox off, so a page that got the better of the viewer
 > would run with your account's access to your files and to the tokens the app
@@ -202,6 +210,14 @@ with a seccomp filter. Measured on Ubuntu 26.04 (x64) with a snap built this
 way: `browser-support` connected by itself, nothing was left to connect for
 the app to open, and its browser, zygote, renderer, GPU and utility processes
 all ran as `snap.filex-app.filex-app (enforce)` with a seccomp filter.
+
+Since 0.55 the snap is built on `core24`, the Ubuntu 24.04 base, with
+Snapcraft's GNOME extension (it was `core20` before). The first install also
+brings the GNOME 46 runtime (`gnome-46-2404`), the graphics libraries
+(`mesa-2404`) and the GTK themes (`gtk-common-themes`), which other snaps
+share. How the snap is confined and what it may reach do not change, and
+the window still opens through X11 (XWayland on a Wayland desktop), as
+before.
 
 ### On a phone or a tablet: the web app
 
@@ -1107,6 +1123,15 @@ being worked on (or when you quit).
 
 *Settings → Updates* shows what it is doing and offers **Install it now** for
 anyone who would rather not wait. `FILEX_NO_UPDATE=1` turns the whole thing off.
+
+Since 0.55 every release is tested as an update before it ships, not only as a
+fresh install: on real Windows (x64 and arm64) and Ubuntu (x64 and arm64)
+machines the previous release is installed and opened, and the new one is
+installed over it the way the app does it - the Windows installer run silently
+over the old copy, the `.deb` installed over the old one, the AppImage replaced
+in place, the snap refreshed to a new revision. The release fails unless one
+copy is left, of the new version, where the old one was, with the app's own
+data folder (the account list and the settings) as the old one left it.
 
 > On Windows this only works because the app installs **per-user**. An install
 > under `C:\Program Files` needs administrator rights to replace its own files,

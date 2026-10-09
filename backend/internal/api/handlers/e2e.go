@@ -189,7 +189,7 @@ func (h *E2E) resolveDir(w http.ResponseWriter, r *http.Request, wire string) (*
 	// notices, and (cleanup) the hard delete of its versions and trash
 	// entries (GHSA-8gvc-6w52-6c7j).
 	if !rootAllowsIn(r.Context(), st, rel) {
-		refuseOutsideRoot(w)
+		refuseOutsideRoot(w, r)
 		return nil, ""
 	}
 	if !aclAllowID(r.Context(), h.ACL, h.Store, st.ID, rel, acl.LevelViewer) {

@@ -11,7 +11,12 @@
 //     the person's requests, and an app already asked for or installed offers
 //     no second request;
 //   · a store that cannot be reached is said, and the last catalog filex
-//     checked is marked as such.
+//     checked is marked as such;
+//   · what a row is here (installed, asked for, nothing) is the SERVER's
+//     `state` - the page works nothing out of the requests (#215);
+//   · the store's storage plugins are on a tab of their own, with the
+//     server's sentences, and one without a build for this server is offered
+//     no request (#215).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
@@ -42,6 +47,25 @@ function app(name: string, extra: Record<string, unknown> = {}) {
     filex_range: '>=0.52.0',
     permissions: ['files:read'],
     permission_rows: [{ id: 'files:read', label: 'Read your files' }],
+    state: 'none',
+    ...extra,
+  };
+}
+
+/** A storage plugin of the catalog, as the server answers it (#215). */
+function storagePlugin(name: string, forHere = true, extra: Record<string, unknown> = {}) {
+  return {
+    ...app(name),
+    kind: 'storage',
+    permissions: [],
+    permission_rows: [],
+    platforms: ['linux/amd64', 'linux/arm64'],
+    storage: {
+      platform: 'linux/amd64',
+      for_here: forHere,
+      summary: forHere ? '9 checks passed on linux/amd64' : 'No build for this server (linux/riscv64)',
+      capabilities: [{ id: 'write', label: 'writing' }, { id: 'range', label: 'ranged reads' }],
+    },
     ...extra,
   };
 }
@@ -108,8 +132,8 @@ describe('the store screen', () => {
       stale: false,
       apps: [
         app('pdfx', { icon: 'a'.repeat(64) + '.png' }),
-        app('sign', { installed_version: '1.0.0' }),
-        app('drawio'),
+        app('sign', { installed_version: '1.0.0', state: 'installed' }),
+        app('drawio', { state: 'pending' }),
       ],
     };
     mine = [{ id: 1, name: 'drawio', status: 'pending', version: '1.0.0', source: { store: STORE, store_app: 'drawio' }, created_at: '2026-10-05T10:00:00Z' }];
@@ -182,6 +206,51 @@ describe('the store screen', () => {
     const w = mountPage('tr');
     await flushPromises();
     expect(w.find('[data-testid="store-screen-stale"]').text()).toContain('Mağazaya şu anda ulaşılamıyor');
+    w.unmount();
+  });
+
+  it('takes what a row is here from the server, never from the requests', async () => {
+    // The person's requests say nothing about pdfx; the server says it is
+    // asked for. The server is the one answer.
+    catalog = { ...catalog, apps: [app('pdfx', { state: 'pending' })] };
+    mine = [];
+    const w = mountPage();
+    await flushPromises();
+    await openRowMenu(w, 'store-app-actions-pdfx');
+    expect(menuEntries().map((e) => e.label)).toEqual(['Details']);
+    closeRowMenus();
+    expect(w.find('[data-testid="store-app-pdfx"]').text()).toContain('Requested');
+    w.unmount();
+  });
+
+  it('lists the storage plugins on a tab of their own, in the server’s words', async () => {
+    catalog = {
+      ...catalog,
+      storage_note: 'A storage plugin is a program an administrator installs on the server.',
+      apps: [app('pdfx'), storagePlugin('myfs'), storagePlugin('farfs', false)],
+    };
+    const w = mountPage();
+    await flushPromises();
+    expect(w.find('[data-testid="store-app-myfs"]').exists(), 'apps first: no storage plugin on the Apps tab').toBe(false);
+    await w.find('[data-testid="store-screen-kind-storage"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-testid="store-app-pdfx"]').exists()).toBe(false);
+    expect(w.find('[data-testid="store-screen-storage-note"]').text()).toContain('a program an administrator installs');
+    expect(w.find('[data-testid="store-app-checks-myfs"]').text()).toBe('9 checks passed on linux/amd64');
+    expect(w.find('[data-testid="store-app-checks-farfs"]').text()).toContain('No build for this server');
+    await openRowMenu(w, 'store-app-actions-myfs');
+    expect(menuEntries().map((e) => e.label)).toEqual(['Ask for this plugin', 'Details']);
+    closeRowMenus();
+    await openRowMenu(w, 'store-app-actions-farfs');
+    expect(menuEntries().map((e) => e.label), 'no build for this server, nothing to ask for').toEqual(['Details']);
+    closeRowMenus();
+    w.unmount();
+  });
+
+  it('offers no Storage tab when the catalog holds no storage plugin', async () => {
+    const w = mountPage();
+    await flushPromises();
+    expect(w.find('[data-testid="store-screen-kind-storage"]').exists()).toBe(false);
     w.unmount();
   });
 

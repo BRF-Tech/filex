@@ -225,7 +225,7 @@ func TestUIBundle_RefusesALink(t *testing.T) {
 func TestUIPolicy_IsBuiltFromTheGrantAlone(t *testing.T) {
 	pkg := "https://files.example.com/filex/_appui/drawio/0123456789abcdef/"
 	csp, allow := UIPolicy(NewGrants([]Permission{PermUI}), pkg)
-	assert.Equal(t, "default-src 'none'; script-src "+pkg+" "+uiBootstrapHash+"; style-src "+pkg+" 'unsafe-inline'; img-src "+pkg+" data: blob:; font-src "+pkg+" data:; media-src "+pkg+" blob:; connect-src 'none'; worker-src blob:; frame-src 'none'; child-src 'none'; object-src 'none'; manifest-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors *; sandbox allow-scripts", csp)
+	assert.Equal(t, "default-src 'none'; script-src "+pkg+" "+uiBootstrapHash+"; style-src "+pkg+" 'unsafe-inline'; img-src "+pkg+" data: blob:; font-src "+pkg+" data:; media-src "+pkg+" blob:; connect-src 'none'; worker-src blob:; frame-src 'none'; child-src 'none'; object-src 'none'; manifest-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts", csp)
 	assert.Equal(t, `("`+pkg+`*")`, allow)
 	assert.NotContains(t, csp, "'self'", "WebKit reads 'self' as the frame's opaque origin and refuses the app's own scripts (lesson #633)")
 	assert.NotContains(t, csp, "https://files.example.com ", "never the bare filex origin: WebKit sends the session cookie to it (lesson #634)")

@@ -4,6 +4,7 @@
  * Backend `?q=index` (or `GET /api/files/manager?action=index`) returns:
  *   { adapter, storages, dirname, files: FileNode[] }
  */
+import type { EncryptedKind } from '../lib/encryptedRow';
 import type { EditKinds, EventOff, ServerLimits } from '../lib/serverRules';
 import type { AppLock } from './Plugins';
 
@@ -85,6 +86,13 @@ export interface FileNode {
   /* wiring:e2 vault — dir rows: true when the folder IS a vault (level 3,
    * docs/E2E-VAULT-FORMAT.md); the server says so from its key file. */
   e2e_vault?: boolean;
+  /* #189 — file rows: how the file is encrypted, as the SERVER says it on
+   * every row (handlers/e2e_rows.go encryptedKind): `vault` inside a vault,
+   * `folder` inside any other end-to-end encrypted folder, `file` for a
+   * single encrypted file (`.fxe`) outside both; a vault's own rows carry
+   * `vault`. Absent everywhere else. Handed to an app's interface as is
+   * (app SDK FileInfo.encrypted); lib/encryptedRow reads it. */
+  encrypted?: EncryptedKind;
   /* wiring:e2 names — set by the name view (composables/useE2eNames) on a
    * row inside an encrypted folder whose NAMES are encrypted. `basename` is
    * then the plaintext; `e2e_stored` is what the server stores and the only

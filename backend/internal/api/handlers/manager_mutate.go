@@ -419,11 +419,34 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	// The bytes, then the rows, under the storage's row gate (rowgate, issue
 	// #192): a scan never judges the catalogue while the one has moved and the
-	// other has not. The queue's rename does the same (ops.runRename).
-	if err := rowgate.Change(current.ID,
-		func() error { return mv.Move(ctx, srcRel, dstRel) },
+	// other has not. The queue's rename does the same (ops.runRename). The
+	// gate is waited for on the request (a client gone by then renames
+	// nothing), and the name is asked again once it is held: a name taken
+	// while the rename waited is refused, never replaced (sec055). A folder
+	// on an object store fences its old and new prefixes instead of holding
+	// the storage's whole scan off while it moves (storage.FenceAt,
+	// rowgate.FencedChangeCtx).
+	if err := rowgate.FencedChangeCtx(r.Context(), current.ID, storage.FenceAt(ctx, drv, srcRel, dstRel),
+		func() error {
+			again, aerr := destinationTaken(ctx, h.Store, drv, current.ID, srcRel, dstRel)
+			if aerr != nil {
+				return aerr
+			}
+			if again {
+				return storage.ErrTakenMeanwhile
+			}
+			return mv.Move(ctx, srcRel, dstRel)
+		},
 		func() { h.finishRename(ctx, current.ID, srcRel, dstRel, writehook.OriginManager) },
 	); err != nil {
+		if errors.Is(err, storage.ErrTakenMeanwhile) {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": "name_taken",
+				"code":  "NAME_TAKEN",
+				"name":  body.Name,
+			})
+			return
+		}
 		slog.Warn("rename failed",
 			slog.Int64("storage", current.ID),
 			slog.String("from", srcRel),
@@ -514,6 +537,10 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 
 	srcDirs := make(map[string]struct{})
 	moved := make([]string, 0, 1)
+	// The row gate is waited for on the request until the first item holds
+	// it: a client gone before anything moved moves nothing; one that leaves
+	// half way does not leave the batch half done (sec055).
+	wait := r.Context()
 	for _, it := range body.Items {
 		srcAdapter, srcRel := splitAdapterPath(it.Path)
 		if srcAdapter != "" && srcAdapter != current.Name {
@@ -529,21 +556,45 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 		if !h.require(w, r, current, srcRel, perm.FilesMove, "insufficient permission: "+it.Path) {
 			return
 		}
-		dstRel, derr := ops.MoveDest(ctx, drv, srcRel, path.Join(destRel, path.Base(srcRel)),
-			liveRowTaken(ctx, h.Store, current.ID))
-		if derr != nil {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "move: " + clientErrText(derr), "code": "NO_FREE_NAME"})
+		// The bytes, then the rows, under the storage's row gate (rowgate):
+		// see vfRename. The destination is picked once the gate is held, so
+		// a name taken while the move waited is stepped around, not replaced
+		// (sec055). A folder on an object store fences its prefix and its
+		// destination's instead of holding the storage's gate (moveFenced).
+		var dstRel string
+		var noFreeName error
+		err := h.moveFenced(wait, ctx, current.ID, drv, srcRel, path.Join(destRel, path.Base(srcRel)),
+			func(fenceDst func(string) error) error {
+				d, derr := ops.MoveDest(ctx, drv, srcRel, path.Join(destRel, path.Base(srcRel)),
+					liveRowTaken(ctx, h.Store, current.ID))
+				if derr != nil {
+					noFreeName = derr
+					return derr
+				}
+				dstRel = d
+				if dstRel == srcRel {
+					return nil
+				}
+				if err := fenceDst(dstRel); err != nil {
+					return err
+				}
+				return mv.Move(ctx, srcRel, dstRel)
+			},
+			func() {
+				if dstRel != srcRel {
+					h.applyDBMove(ctx, current.ID, srcRel, dstRel)
+				}
+			},
+		)
+		wait = ctx
+		if noFreeName != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "move: " + clientErrText(noFreeName), "code": "NO_FREE_NAME"})
 			return
 		}
-		if dstRel == srcRel {
+		if err == nil && dstRel == srcRel {
 			continue
 		}
-		// The bytes, then the rows, under the storage's row gate (rowgate):
-		// see vfRename.
-		if err := rowgate.Change(current.ID,
-			func() error { return mv.Move(ctx, srcRel, dstRel) },
-			func() { h.applyDBMove(ctx, current.ID, srcRel, dstRel) },
-		); err != nil {
+		if err != nil {
 			slog.Warn("move failed",
 				slog.Int64("storage", current.ID),
 				slog.String("from", srcRel),
@@ -635,6 +686,9 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 	// through a folder in it (detachedMutation).
 	ctx, cancel := detachedMutation(r.Context())
 	defer cancel()
+	// The row gate is waited for on the request until the first item holds
+	// it (see vfMove).
+	wait := r.Context()
 
 	for _, it := range body.Items {
 		srcAdapter, srcRel := splitAdapterPath(it.Path)
@@ -656,73 +710,13 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item base: " + it.Path})
 			return
 		}
-		// trash.Put is the shared implementation every delete surface uses
-		// (WebDAV, AI/REST, the async ops worker, and this one), so the same
-		// item deleted from any of them lands in the trash the same way.
-		out, terr := trash.Put(ctx, drv, srcRel)
-		trashed := terr == nil && out.Trashed
-		switch {
-		case trashed:
-			/* bag:b3 event */
-			writehook.OnFileTrashed(ctx, current.ID, normalizeDBPath(srcRel), base,
-				normalizeDBPath(out.Key), writehook.OriginManager)
-
-		case terr == nil && out.Missing:
-			// Source object already gone (stale index / out-of-band delete):
-			// drop the cache rows and continue so one missing item doesn't
-			// fail the whole delete batch. ⚠ Every row below a folder too, one
-			// by one (dropGoneRows): the folder's row alone took its contents
-			// through the parent_id cascade and released none of their bytes
-			// from the owners' quota (issue #104).
-			h.dropGoneRows(ctx, current.ID, srcRel)
-			continue
-
-		case errors.Is(terr, trash.ErrUnsupported):
-			// Driver can neither move nor copy — fall back to hard delete.
-			if del, ok := drv.(storage.Deleter); ok {
-				if err := del.Delete(ctx, srcRel); err != nil && !errors.Is(err, storage.ErrNotFound) {
-					writeJSON(w, mapDriverErr(err), map[string]string{"error": "delete: " + err.Error()})
-					return
-				}
-			}
-			/* bag:b3 event */
-			writehook.OnFileDeleted(ctx, current.ID, normalizeDBPath(srcRel), base, writehook.OriginManager)
-
-		default:
-			writeJSON(w, mapDriverErr(terr), map[string]string{"error": "trash: " + terr.Error()})
+		// The bytes and the rows, under the storage's row gate
+		// (deleteItem, internal/rowgate, issue #201).
+		verb, err := h.deleteItem(wait, ctx, current, drv, srcRel)
+		wait = ctx
+		if err != nil {
+			writeJSON(w, mapDriverErr(err), map[string]string{"error": verb + ": " + err.Error()})
 			return
-		}
-
-		if !trashed {
-			// Bytes are gone for good: drop the rows instead of parking a
-			// trash entry whose Restore could never find anything - every row
-			// below a folder with it, each file's bytes released from its
-			// owner's quota (dropGoneRows; issue #104).
-			h.dropGoneRows(ctx, current.ID, srcRel)
-			continue
-		}
-
-		// Update DB: store the original path in storage_key so Restore
-		// can find it; flip deleted_at; rewrite path/path_hash to the
-		// trash location so a fresh upload at the original path works.
-		// Directory rows drag their cached subtree into the trash inside
-		// SoftDeleteAndRetag (issue #5) — collect the subtree ids UP
-		// FRONT (children are still live) so the search index forgets
-		// them too.
-		origClean := normalizeDBPath(srcRel)
-		origHash := pathkey.Hash(current.ID, origClean)
-		if existing, err := h.Store.GetNodeByPath(ctx, current.ID, origHash); err == nil && existing != nil {
-			var subtreeIDs []int64
-			if existing.Type == model.NodeTypeDirectory {
-				subtreeIDs = h.collectSubtreeIDs(ctx, current.ID, existing.ID)
-			}
-			newClean := normalizeDBPath(out.Key)
-			newHash := pathkey.Hash(current.ID, newClean)
-			_ = h.Store.SoftDeleteAndRetag(ctx, existing.ID, newClean, newHash, origClean)
-			h.removeFromIndex(ctx, existing.ID)
-			for _, cid := range subtreeIDs {
-				h.removeFromIndex(ctx, cid)
-			}
 		}
 	}
 
@@ -735,6 +729,89 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	emitFolderChange(current.ID, parentRel, delEv)
 	h.vfIndex(w, r, current, parentRel, storageNames, false)
+}
+
+// deleteItem is one item of vfDelete, from its first byte to its last row,
+// under the storage's row gate (internal/rowgate, issue #201): a storage scan
+// between the two would see a live row whose bytes had left for the trash,
+// confirm it gone by a Stat of its old path and drop it - and the trash entry
+// the person could restore from would go with it. The gate is let go before
+// the handler answers. On failure it says which step failed ("trash" or
+// "delete") and the driver's error. The gate is waited for on wait (the
+// request's context for a batch's first item, rowgate.MoveCtx); the item is
+// changed on ctx.
+func (h *Manager) deleteItem(wait, ctx context.Context, current *model.Storage, drv storage.Driver, srcRel string) (string, error) {
+	// A folder on an object store goes to the trash object by object: it
+	// fences its prefix instead of holding the storage's gate (FenceAt).
+	release, err := rowgate.HoldCtx(wait, current.ID, storage.FenceAt(ctx, drv, srcRel)...)
+	if err != nil {
+		return "delete", err
+	}
+	defer release()
+	base := path.Base(srcRel)
+	// trash.Put is the shared implementation every delete surface uses
+	// (WebDAV, AI/REST, the async ops worker, and this one), so the same
+	// item deleted from any of them lands in the trash the same way.
+	out, terr := trash.Put(ctx, drv, srcRel)
+	switch {
+	case terr == nil && out.Trashed:
+		/* bag:b3 event */
+		writehook.OnFileTrashed(ctx, current.ID, normalizeDBPath(srcRel), base,
+			normalizeDBPath(out.Key), writehook.OriginManager)
+
+	case terr == nil && out.Missing:
+		// Source object already gone (stale index / out-of-band delete):
+		// drop the cache rows and continue so one missing item doesn't
+		// fail the whole delete batch. ⚠ Every row below a folder too, one
+		// by one (dropGoneRows): the folder's row alone took its contents
+		// through the parent_id cascade and released none of their bytes
+		// from the owners' quota (issue #104).
+		h.dropGoneRows(ctx, current.ID, srcRel)
+		return "", nil
+
+	case errors.Is(terr, trash.ErrUnsupported):
+		// Driver can neither move nor copy — fall back to hard delete.
+		if del, ok := drv.(storage.Deleter); ok {
+			if err := del.Delete(ctx, srcRel); err != nil && !errors.Is(err, storage.ErrNotFound) {
+				return "delete", err
+			}
+		}
+		/* bag:b3 event */
+		writehook.OnFileDeleted(ctx, current.ID, normalizeDBPath(srcRel), base, writehook.OriginManager)
+		// Bytes are gone for good: drop the rows instead of parking a
+		// trash entry whose Restore could never find anything - every row
+		// below a folder with it, each file's bytes released from its
+		// owner's quota (dropGoneRows; issue #104).
+		h.dropGoneRows(ctx, current.ID, srcRel)
+		return "", nil
+
+	default:
+		return "trash", terr
+	}
+
+	// Update DB: store the original path in storage_key so Restore
+	// can find it; flip deleted_at; rewrite path/path_hash to the
+	// trash location so a fresh upload at the original path works.
+	// Directory rows drag their cached subtree into the trash inside
+	// SoftDeleteAndRetag (issue #5) — collect the subtree ids UP
+	// FRONT (children are still live) so the search index forgets
+	// them too.
+	origClean := normalizeDBPath(srcRel)
+	origHash := pathkey.Hash(current.ID, origClean)
+	if existing, err := h.Store.GetNodeByPath(ctx, current.ID, origHash); err == nil && existing != nil {
+		var subtreeIDs []int64
+		if existing.Type == model.NodeTypeDirectory {
+			subtreeIDs = h.collectSubtreeIDs(ctx, current.ID, existing.ID)
+		}
+		newClean := normalizeDBPath(out.Key)
+		newHash := pathkey.Hash(current.ID, newClean)
+		_ = h.Store.SoftDeleteAndRetag(ctx, existing.ID, newClean, newHash, origClean)
+		h.removeFromIndex(ctx, existing.ID)
+		for _, cid := range subtreeIDs {
+			h.removeFromIndex(ctx, cid)
+		}
+	}
+	return "", nil
 }
 
 // collectSubtreeIDs walks the live cached descendants of a directory node
@@ -1323,6 +1400,12 @@ func mapDriverErr(err error) int {
 	if errors.Is(err, os.ErrExist) {
 		return http.StatusConflict
 	}
+	// The item is not the one the change was checked against any more: it
+	// went, or was replaced, while the change waited for its storage's row
+	// gate (storage.StillAsSeen, sec055).
+	if errors.Is(err, storage.ErrChangedMeanwhile) {
+		return http.StatusPreconditionFailed
+	}
 	// The target exists as the other kind (file vs folder). A conflict, not a
 	// server fault — and not a 4xx the client can fix by retrying.
 	if errors.Is(err, storage.ErrKindConflict) {
@@ -1540,4 +1623,30 @@ func (h *Manager) EnsureDir(ctx context.Context, st *model.Storage, rel string) 
 	h.indexNode(ctx, created)
 	id := created.ID
 	return &id, nil
+}
+
+// moveFenced runs one item of a move under storageID's hold: the row gate, or -
+// for a folder on an object store, which moves one object at a time - a fence
+// on src and on tentative, the destination asked for (storage.FenceAt,
+// rowgate.FencedChangeCtx). The destination is picked inside move, once the
+// hold is taken; move calls fenceDst with the one it picked, which fences it
+// too when it is not tentative (a de-collided name) and does nothing
+// otherwise. Every fence is let go once follow has run, however move ends.
+// The hold is waited for on wait; the extra fence on ctx.
+func (h *Manager) moveFenced(wait, ctx context.Context, storageID int64, drv storage.Driver, src, tentative string, move func(fenceDst func(string) error) error, follow func()) error {
+	fence := storage.FenceAt(ctx, drv, src, tentative)
+	releaseDst := func() {}
+	defer func() { releaseDst() }()
+	fenceDst := func(dst string) error {
+		if len(fence) == 0 || rowgate.Clean(dst) == rowgate.Clean(tentative) {
+			return nil
+		}
+		r, err := rowgate.FenceCtx(ctx, storageID, dst)
+		if err != nil {
+			return err
+		}
+		releaseDst = r
+		return nil
+	}
+	return rowgate.FencedChangeCtx(wait, storageID, fence, func() error { return move(fenceDst) }, follow)
 }

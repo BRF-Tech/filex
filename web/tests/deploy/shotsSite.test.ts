@@ -40,6 +40,7 @@ import {
   diffThresholds,
   environmentNote,
   fileHasher,
+  findPendingShots,
   findReferences,
   isChanged,
   localImports,
@@ -315,6 +316,30 @@ describe('every way a page used to show a picture becomes the current URL', () =
       `<img src="${URL_A}"><meta content="https://filex.sh/assets/social-preview.png"><img src="assets/b.png">`,
     );
     expect(relinkText(page, FIXTURE).text).toBe(page);
+  });
+});
+
+describe('a picture written into a page before it is published', () => {
+  const page = [
+    '## The store screen',
+    '<!-- shot: set/b.png | The Storage plugins tab -->',
+    '<!-- shot: set/new-1280.png | Not taken yet -->',
+  ].join('\n');
+
+  it('is found with its name and the words it will be shown with', () => {
+    expect(findPendingShots(page).map((p: { name: string; alt: string }) => `${p.name}=${p.alt}`)).toEqual([
+      'set/b.png=The Storage plugins tab',
+      'set/new-1280.png=Not taken yet',
+    ]);
+  });
+
+  it('becomes the picture once the manifest holds it, and stays a comment until then - never a broken image', () => {
+    const r = relinkText(page, FIXTURE);
+    expect(r.text).toContain(`![The Storage plugins tab](${URL_B})`);
+    expect(r.text).toContain('<!-- shot: set/new-1280.png | Not taken yet -->');
+    expect(r.changes).toEqual([{ line: 2, from: '<!-- shot: set/b.png | The Storage plugins tab -->', to: `![The Storage plugins tab](${URL_B})` }]);
+    expect(r.unresolved).toEqual([]);
+    expect(relinkText(r.text, FIXTURE).changes).toEqual([]);
   });
 });
 
@@ -688,6 +713,37 @@ describe('this repository shows exactly the published pictures', () => {
     const unresolved = files.flatMap((f: { file: string; unresolved: Array<{ line: number; ref: string }> }) => f.unresolved.map((u) => `${f.file}:${u.line} ${u.ref}`));
     expect(stale, 'run: node scripts/shots-site.mjs relink --write (after the pictures are published)').toEqual([]);
     expect(unresolved, `a page shows a picture ${MANIFEST_REL} does not hold`).toEqual([]);
+  });
+
+  it("every picture a page waits for is in the folder of a scene that takes it", () => {
+    const sets = shotSets(SHOTS_DIR, scripts);
+    const waiting = referenceFiles(REPO).flatMap((f: string) =>
+      findPendingShots(readFileSync(path.join(REPO, f), 'utf8')).map((p: { name: string }) => ({ file: f, name: p.name })),
+    );
+    // The 0.55 store and print pictures are linked from the docs: waited for
+    // before they are published, a published file after `accept` (which turns
+    // the waiting comment into the picture). Asking only for "waited for"
+    // failed the morning they were published.
+    const v055 = ['store/store-screen-storage-tab-1280.png', 'store/storage-store-review-1280.png', 'appprint/print-consent-1280.png'];
+    const linked = v055.filter((n) => manifest.pictures[n] || waiting.some((w: { name: string }) => w.name === n));
+    expect(linked, 'the 0.55 store and print pictures are published or waited for in the docs').toEqual(v055);
+    const lost = waiting.filter((w: { name: string }) => sceneOfName(sets, w.name) === null).map((w: { file: string; name: string }) => `${w.file}: ${w.name}`);
+    expect(lost, 'a page waits for a picture no scene writes - it would stay a comment for ever').toEqual([]);
+    // ...and that scene names such a file: a literal, or a template whose
+    // `${…}` parts stand for anything (`print-consent-${look.suffix}.png`).
+    const written = (src: string) =>
+      [...src.matchAll(/[`'"]([A-Za-z0-9._-]*(?:\$\{[^}]+\}[A-Za-z0-9._-]*)*\.png)[`'"]/g)].map(
+        (m) => new RegExp(`^${m[1].split(/\$\{[^}]+\}/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.+')}$`),
+      );
+    const unnamed = waiting
+      .filter((w: { name: string }) => {
+        const script = sceneOfName(sets, w.name);
+        if (!script) return false;
+        const file = w.name.slice(w.name.indexOf('/') + 1);
+        return !written(readFileSync(path.join(SHOTS_DIR, script), 'utf8')).some((re) => re.test(file));
+      })
+      .map((w: { file: string; name: string }) => `${w.file}: ${w.name}`);
+    expect(unnamed, 'a page waits for a picture its scene never writes under that name').toEqual([]);
   });
 
   it('the README shows its pictures from the site, each one the manifest names', () => {

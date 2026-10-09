@@ -44,6 +44,12 @@ const (
 	CodeStoreRefusal   = "store_refused"              // the store refused what was asked (detail.store_error says why)
 	CodeIndexInvalid   = "store_index_invalid"        // the store's signed index does not verify, has expired or is not one filex reads
 	CodeMediaInvalid   = "store_media_invalid"        // an icon the catalog does not name, or bytes that are not it
+
+	// A storage plugin's link (#215).
+	CodeNoBuild           = "intent_no_build"           // the store pinned no build for this server's platform
+	CodeIncompatible      = "intent_incompatible"       // the feed's filex range leaves this filex out
+	CodeSignatureRequired = "intent_signature_required" // this filex runs only signed plugins and no signature of the build verifies
+	CodePluginsOff        = "plugins_disabled"          // storage plugins are off here (FILEX_PLUGINS_DISABLED)
 )
 
 // Error is a refusal with a code; Detail carries what the panel draws (the

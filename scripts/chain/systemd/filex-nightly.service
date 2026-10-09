@@ -18,7 +18,9 @@ ExecStart=@NODE@ @BIN@/nightly.mjs run --env @ENV@
 SuccessExitStatus=1
 # The run stops itself before a NIGHTLY_QUIET window; this is only the backstop.
 TimeoutStartSec=10h
-# A stop reaches run.mjs, which removes the run's containers before it exits.
+# A stop reaches run.mjs, which removes the run's containers before it exits;
+# then run.sh runs CHAIN_RESUME_CMD, when a pause hook ran (an emulator that
+# boots again takes a minute or two of this).
 KillSignal=SIGTERM
-TimeoutStopSec=5min
+TimeoutStopSec=10min
 Nice=5

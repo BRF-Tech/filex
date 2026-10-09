@@ -11,6 +11,10 @@
  * A license that does not hold keeps the app HELD - installed, its data and
  * settings kept, running nothing - until it holds again (internal/appstore,
  * docs/APP-PLUGINS.md → Paid apps).
+ *
+ * The same section serves a paid STORAGE plugin from a store (#215, Admin →
+ * Plugins → Storage plugins → License…): `storageName` instead of
+ * `pluginId`, read from the plugin's own license row.
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -26,7 +30,7 @@ import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Input from '@/components/ui/Input.vue';
 
-const props = defineProps<{ pluginId: number }>();
+const props = defineProps<{ pluginId?: number; storageName?: string }>();
 const emit = defineEmits<{ (e: 'changed'): void }>();
 
 const { t, locale } = useI18n();
@@ -36,15 +40,34 @@ const lic = ref<AppLicense | null>(null);
 const newKey = ref('');
 const busy = ref(false);
 
+/** The license calls of the entry this section is about: an app (by id) or a
+ *  storage plugin (by name). */
+const calls = computed(() => {
+  const name = props.storageName;
+  if (name) {
+    return {
+      get: () => AppStoreApi.storageLicense(name),
+      setKey: (k: string) => AppStoreApi.setStorageLicenseKey(name, k),
+      verify: () => AppStoreApi.verifyStorageLicense(name),
+    };
+  }
+  const id = props.pluginId ?? 0;
+  return {
+    get: () => AppStoreApi.license(id),
+    setKey: (k: string) => AppStoreApi.setLicenseKey(id, k),
+    verify: () => AppStoreApi.verifyLicense(id),
+  };
+});
+
 async function load() {
   try {
-    lic.value = await AppStoreApi.license(props.pluginId);
+    lic.value = await calls.value.get();
   } catch {
     lic.value = null;
   }
 }
 onMounted(load);
-watch(() => props.pluginId, () => void load());
+watch(() => [props.pluginId, props.storageName], () => void load());
 
 const shown = computed(() => !!lic.value?.required);
 /* Whether the app runs is the server's verdict (`held`, appstore View.Held:
@@ -75,21 +98,21 @@ async function act(fn: () => Promise<AppLicense>, ok: string) {
     if (before !== lic.value.held) emit('changed');
   } catch (e: unknown) {
     const r = storeRefusal(e);
-    toast.error((r && storeSentence(r, t)) || extractError(e, t('errors.generic')));
+    toast.error((r && storeSentence(r)) || extractError(e, t('errors.generic')));
   } finally {
     busy.value = false;
   }
 }
 
 function verify() {
-  void act(() => AppStoreApi.verifyLicense(props.pluginId), t('appStore.license.verified'));
+  void act(() => calls.value.verify(), t('appStore.license.verified'));
 }
 
 function saveKey() {
   const k = newKey.value.trim();
   if (!k) return;
   void act(async () => {
-    const v = await AppStoreApi.setLicenseKey(props.pluginId, k);
+    const v = await calls.value.setKey(k);
     newKey.value = '';
     return v;
   }, t('appStore.license.keySaved'));
@@ -116,7 +139,7 @@ function saveKey() {
       role="alert"
       data-testid="app-plugin-license-held"
     >
-      {{ t('appStore.license.heldNote', { status: statusText(lic.status) }) }}
+      {{ t(props.storageName ? 'appStore.license.heldNoteStorage' : 'appStore.license.heldNote', { status: statusText(lic.status) }) }}
     </p>
     <p
       v-else-if="lic.status === 'grace'"

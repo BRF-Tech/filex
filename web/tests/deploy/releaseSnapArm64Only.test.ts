@@ -110,7 +110,7 @@ describe('a run that adds the Linux arm64 snap to a release (only=snap-arm64)', 
     }
     // In their place: the app and the CLI, LXD for snapcraft, the snap, the
     // architecture check - in that order, and all before anything is sent.
-    const order = [BUILD, 'snapcraft + LXD for the arm64 snap', 'Build snap', 'The binaries inside are the architecture on the label', ATTACH_SNAP, 'Upload to the Snap Store'];
+    const order = [BUILD, 'snapcraft + LXD for the snap', 'Build snap', 'The binaries inside are the architecture on the label', ATTACH_SNAP, 'Upload to the Snap Store'];
     const at = order.map((s) => runs.indexOf(s));
     for (const [i, a] of at.entries()) expect(a, order[i]).toBeGreaterThanOrEqual(0);
     expect([...at].sort((a, b) => a - b)).toEqual(at);

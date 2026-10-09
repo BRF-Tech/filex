@@ -264,3 +264,50 @@ describe('a kind an app makes is not said to be missing', () => {
     expect(w2.get('[data-testid="newdoc-withheld"]').text()).toMatch(/draw\.io/i);
   });
 });
+
+// 0.55 full chain (Firefox, e2e 168): on a slow server the dialog's first
+// suggestion (the dry run for "Untitled.txt") answered after the person had
+// started typing, and replaced the field under them: "Untitled.txtnutes.txt".
+// A suggestion only ever fills a name nobody has typed.
+describe('a late suggestion does not replace what the person typed', () => {
+  it('keeps the typed name when the dry run answers after the first keystroke', async () => {
+    let answer: (v: { dry_run: true; path: string; name: string; taken: boolean }) => void = () => undefined;
+    const newFileCheck = vi.fn(
+      (path: string, name: string) =>
+        new Promise<{ dry_run: true; path: string; name: string; taken: boolean }>((resolve) => {
+          if (name.startsWith('Untitled')) answer = resolve;
+          else resolve({ dry_run: true, path: `${path}${name}`, name, taken: false });
+        }),
+    );
+    const index = vi.fn(async () => ({
+      adapter: 'main',
+      storages: ['main'],
+      dirname: 'main://',
+      read_only: false,
+      perm: 'owner',
+      files: [],
+    }));
+    const w = mount(NewDocumentModal, {
+      attachTo: document.body,
+      props: {
+        open: false,
+        locale: 'en',
+        api: { index, newFile: vi.fn(), newFileCheck } as never,
+        types: TYPES,
+        currentPath: 'main://',
+        storages: ['main'],
+        onlyOfficeReady: true,
+      },
+    });
+    mounted = w;
+    await w.setProps({ open: true });
+    await settle();
+    expect(newFileCheck).toHaveBeenCalledWith('main://', 'Untitled.txt', 'txt');
+
+    const input = w.get<HTMLInputElement>('[data-testid="newdoc-name"]');
+    await input.setValue('minutes.txt');
+    answer({ dry_run: true, path: 'main://Untitled.txt', name: 'Untitled.txt', taken: false });
+    await settle();
+    expect(input.element.value).toBe('minutes.txt');
+  });
+});

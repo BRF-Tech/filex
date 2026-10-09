@@ -393,27 +393,153 @@ Three rules now stand there:
    folder the walk could not list - never an empty one.** Nothing below it is
    a candidate this pass; the next pass sees the storage as it is.
 2. **Each storage has one row gate** (`internal/rowgate`). A two-step change
-   holds it shared from its first byte to its last row - the queue's rename,
-   move, delete into the trash and restore, and the explorer's rename and
-   move made inside the request. The scan holds it alone while it lists one
+   holds it shared from its first byte to its last row, on every surface that
+   makes one (the table below). The scan holds it alone while it lists one
    directory and applies the listing, and while the tombstone pass confirms
    and drops; the lazy catalogue holds it alone for each folder it
    reconciles. A judgement therefore sees such a change either wholly before
    it or wholly after it. Changes do not wait for each other, and a judgement
-   holds the gate for one directory, or one tombstone pass, at a time, so a
-   rename never waits for a whole scan.
+   holds the gate for one directory, one batch of tombstone candidates (64)
+   or one lazy folder at a time, so a rename never waits for a whole scan.
 3. **A candidate is read again before it is judged and again before it is
    dropped**, and kept when it moved or went in between. This covers part of
-   what the gate does not: the protocol servers (WebDAV, SFTP, FTPS, NFS, S3),
-   the AI surface, the explorer's delete inside the request and a second
-   filex process on the same database change a storage without it.
+   what the gate does not: a second filex process on the same database (a
+   replica beside the main instance) does not see this process's gate.
+
+Who holds the gate (since 0.55, issue #201; up to 0.54 only the queue and the
+explorer's rename and move did, and rule 3 alone stood in for the rest):
+
+| Surface | Two-step changes | Where the gate is taken |
+|---|---|---|
+| Operations queue | rename, move, delete into the trash, restore, a cross-storage move's source delete | `ops` (`runRename`, `runOne`, `runRestore`, `crossTransfer`) |
+| Explorer, inside the request | rename, move, delete (to the trash, or for good on a storage without one) | `vfRename`, `vfMove`, `deleteItem` (`rowgate.ChangeCtx` / `rowgate.MoveCtx`, waited for on the request) |
+| WebDAV, SFTP, FTPS, NFS, S3 gateway | rename / MOVE, delete into the trash, delete for good | `protocolsync.Syncer.Relocate`, `Discard`, `Purge`, `PurgeTree` - one shared frame for every protocol server |
+| AI surface and MCP (`file_move`, `file_delete`) | move within a storage, delete, a cross-storage move's source delete | `aiOps.Move`, `aiOps.Delete`, `aiOps.moveAcross` |
+| Drafts | saving a draft to its place, discarding it (into the trash, or for good on a storage without one) | `SaveDraft`, `DiscardDraft` (`discardDraftGated`) |
+| Trash | a restore made inside the request (`POST /api/files/manager/restore` without `queued=1`, one entry or a batch) | `Trash.restoreGated` |
+| Antivirus | moving an infected file into the trash | `AntivirusScanner.quarantine` |
+
+A write is not a two-step change for the catalogue: the row is upserted by its
+path after the bytes land, so a scan in between catalogues the object at that
+same path and the write's upsert lands on the same row. Uploads, saves, copies,
+archive extraction, version restores and the vault's object writes therefore
+take no gate.
+
+⚠ Take the gate at the outermost step of a change (the queue's job, the request
+handler, the protocol verb), never inside the shared helpers it calls, never
+twice for one change, never while holding a judgement, and never inside a
+database transaction (the package comment of `internal/rowgate` says why).
+
+**Changes come first; a judgement steps back** (since 0.55, sec055). Up to the
+first 0.55 cut the gate was a `sync.RWMutex`, which favours the writer: one
+scan waiting behind one long change - a folder moved or deleted object by
+object over WebDAV or SFTP, which can take hours - kept every later change on
+that storage out, and the operations queue's single worker with them (every
+tenant's copies, moves, deletes and upload commits), until the long change
+let go. Now:
+
+- **A judgement never queues ahead of a change.** It takes the gate only while
+  no change holds it; while one does it steps back, without keeping any change
+  out, for at most 30 seconds (`sync.GateWait`, `rowgate.JudgeWithin`), and is
+  then deferred: the walk stops and the run is recorded with the reason, the
+  tombstone pass leaves its remaining candidates to the next pass, a lazy
+  folder is reconciled at its next turn. A long change postpones its storage's
+  scan, never anything else. (A storage under a steady stream of overlapping
+  changes is not judged until the stream pauses: its scan is deferred, never
+  wrong.)
+- **A change waits only while a judgement holds the gate, and on its
+  request's context** (`rowgate.MoveCtx`). A client that gives up while it
+  waits takes nothing and changes nothing. Once the gate is held the change
+  detaches from the client (`storage.DetachMutation`) and runs to its end.
+- **What was checked before the wait is asked again under the gate.** The
+  destination found free (WebDAV `Overwrite: F` and the destination
+  x/net/webdav removed for `Overwrite: T`, SFTP's v3 rename, the explorer's
+  and the queue's `NameTaken`, a move's `MoveDest`, a draft's target) and the
+  source as it was stat'ed (WebDAV MOVE and DELETE) are asked again once the
+  change holds the gate (`storage.StillFree`, `storage.StillAsSeen`,
+  `protocolsync.Check`). A name taken meanwhile is refused (409 `name_taken`
+  in the explorer, 409 `TARGET_TAKEN` for a draft, `os.ErrExist` on SFTP and
+  the AI surface), a source that changed meanwhile is refused too
+  (`storage.ErrChangedMeanwhile`, 412 where an HTTP handler answers it);
+  nothing is replaced and nothing new is trashed. x/net/webdav answers every
+  refused MOVE or DELETE with its own status (403 for a MOVE). The explorer's
+  and the queue's moves pick their de-collided name under the gate.
+- **The operations queue never stands in a judged gate.** Before a job that
+  holds a gate (move, delete, rename, restore) the worker asks whether a
+  judgement holds that storage's gate (`rowgate.Judged`); if so the job goes
+  back to the queue as it was, the storage's later jobs stay where they are
+  for that round (one storage's jobs keep their order), and the other
+  storages' jobs run (`ops/gate_lane.go`, both the main worker and the
+  finishing lane). A move to another storage asks again before each item's
+  copy: with its source storage being judged, the job goes back with the
+  items it has not reached (their count stays on the row). Once an item's
+  bytes are on the far side, the delete of its source waits for the gate on
+  the job's own context, so Cancel ends the wait and keeps the source; it is
+  not put back there, since a second run would copy the item again. The
+  agent's move to another storage (`aiOps.moveAcross`) waits on the caller's
+  context before its copy (`rowgate.Await`) and on the detached one after.
+- **A folder deleted for good object by object holds the gate a batch at a
+  time** (`protocolsync.Syncer.PurgeTree`, WebDAV on an object store without a
+  trash; 100 objects per hold): each batch's bytes and rows go together, and a
+  scan between two batches sees what is true.
+- **A folder *moved* or *trashed* object by object fences its prefixes
+  instead of holding the gate** (since 0.55, `rowgate.FenceCtx`). Between two
+  objects a scan would find part of the folder at its new name with no rows
+  and part of its rows at a path whose objects have left - exactly what the
+  gate hides - but all of that lies under two prefixes: the folder's path and
+  its destination's. So the change fences those (`storage.FenceFor` /
+  `FenceAt` decide: a folder, on a storage that moves one object at a time,
+  `storage.ObjectByObject`), and the scan goes on everywhere else. Under the
+  gate, each judgement reads the fence set once (`rowgate.Fences`: a lock-free
+  load, then one map lookup for the directory's fenced children and one
+  comparison per fenced prefix): the walk does not list a fenced directory and
+  leaves a fenced child out of its parent's listing (both join the unlisted, so
+  nothing below them is a tombstone candidate), the tombstone pass skips a row
+  under a fence, and the lazy catalogue defers a fenced folder and counts a
+  fenced child as seen. Once the rows have followed, the fence opens and counts
+  as a finished change (`rowgate.Moves`), and the next pass sees the folder
+  where the change put it. A fence is set only while no judgement holds the
+  gate, so a judgement either ended before the first object moved or sees it.
+  It is let go by `defer` however the change ends - an error, a Cancel, a
+  panic. A change holds ONE of the two, never both (`rowgate.HoldCtx`); a
+  judgement never waits for a fence, so there is no order between them to get
+  wrong. Who fences: the queue's rename, move, delete and restore (`holdFor`;
+  a move fences its destination once it has picked the name, `fenceToo`; a
+  restore its trash key and its original path, `RestoreFencer`) and a
+  cross-storage move's source delete, the explorer's rename, move and delete
+  and the trash's restore inside the request (`restoreGated`, through the
+  same `Trash.RestoreFence`), the protocol servers' `Relocate` and `Discard`,
+  and the agent's move, delete and cross-storage source delete. The protocol
+  servers ask the catalogue whether the source is a folder and, for a source
+  with no row yet (a lazily catalogued folder nobody has opened, objects
+  another tool wrote), the storage (one `Stat`); a `Stat` that fails leaves
+  the change on the gate. A file, and every change on a storage with real
+  folders (local, SFTP, SMB, WebDAV, FTP: one rename call), holds the gate as
+  before; so does a purge (one call, or `PurgeTree` a batch at a time). The
+  antivirus quarantine moves one file and holds the gate, and leaves a file
+  under a fenced prefix alone: its folder is being moved or trashed, the
+  quarantine fails and the queue's retry finds the file where the change put
+  it.
+- **A long hold is visible.** `filex_rowgate_oldest_change_seconds`,
+  `filex_rowgate_changes`, `filex_rowgate_long_changes_total` and
+  `filex_rowgate_deferred_judgements_total` per storage, and for fences
+  `filex_rowgate_fences` and `filex_rowgate_oldest_fence_seconds`
+  ([METRICS.md](METRICS.md#the-row-gate)), and a warning in the log when a
+  change lets go after holding the gate for a minute or more.
+
+The antivirus quarantine reads the infected file's row again once it holds
+the gate: a file renamed, moved, trashed or rewritten while it was scanned is
+not quarantined from where it was (the move of the old path used to answer
+"not found", which counted as quarantined, and the row was sent to the trash
+while the infected bytes stayed live at the new name); the job fails and the
+queue's retry scans the row as it is now.
 
 An object store's one-pass listing (`storage.TreeWalker`) is a picture of the
 storage taken when the walk starts. The walk reads directories from it only as
 long as no two-step change has finished on the storage since before the
-picture was taken (`rowgate.Moves`); from the first one on, it asks the
-storage for each directory, so a folder renamed during the walk is not
-catalogued again at its old name.
+picture was taken (`rowgate.Moves`, which a fence's release counts too);
+from the first one on, it asks the storage for each directory, so a folder
+renamed during the walk is not catalogued again at its old name.
 
 ### The walk and the trash
 

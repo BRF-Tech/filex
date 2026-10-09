@@ -54,7 +54,7 @@ artifactName: ${productName}-desktop-${arch}.${ext}
 
 linux:
   # The downloads on the GitHub Release. The snap is NOT here: it is built on
-  # its own (`pnpm dist:snap`, see `snap:` below) because it goes to the Snap
+  # its own (`pnpm dist:snap`, see `snapcraft:` below) because it goes to the Snap
   # Store, whose confinement and updates are a different product.
   target:
     - AppImage
@@ -130,15 +130,33 @@ linux:
     # extension-list test skips `x-scheme-handler/*`; test/
     # linux-desktop-entry.test.ts keeps the scheme here and `protocols` out.
     - x-scheme-handler/filex
+  # ⚠ StartupWMClass stays the product name, "filex", as electron-builder 24
+  # wrote it into every Linux desktop entry (.deb, .rpm, AppImage, snap).
+  # 26 writes package.json's `desktopName` instead ("filex-app"). Which of
+  # the two a dock matches against the running window is a change to
+  # measure on its own (X11 WM_CLASS and the Wayland app id are not the same
+  # name), not one to make by upgrading the builder (0.55, #68).
+  desktop:
+    entry:
+      StartupWMClass: filex
 # ── AppImage ─────────────────────────────────────────────────────────
 appImage:
+  # ⚠⚠ The image's AppRun is electron-builder 24's (build/linux/AppRun.sh,
+  # put in place by scripts/appimage-apprun.cjs from afterPack): 26's starts
+  # the app with --no-sandbox whenever it cannot make a user namespace, so on
+  # Ubuntu 23.10 and later without the AppArmor profile the image would open
+  # with the sandbox off instead of refusing (0.55, #68). 26 has no setting
+  # for its AppRun; see the script for how the file reaches the image.
+  #
   # ⚠⚠ The image's own desktop entry (the one AppImageLauncher, Gear Lever or
   # appimaged copy into the menu) gets `Exec=AppRun <these args> %U`, and with
   # NO executableArgs electron-builder 24 writes `--no-sandbox` there
   # (AppImageTarget: `executableArgs.join(" ") || "--no-sandbox"`, so an empty
   # list does it too). Every integrated AppImage then ran with Chromium's
   # sandbox off, on every distribution, without a word (measured on the 0.49.0
-  # image). `desktop.Exec` cannot override it (electron-builder refuses), so the
+  # image). electron-builder 26 does the same with its default (FUSE2)
+  # AppImage runtime, `toolsets.appimage` unset: no executableArgs, then
+  # `--no-sandbox`. `desktop.Exec` cannot override it (electron-builder refuses), so the
   # list carries one argument the app ignores: a switch, which classifyArgv
   # (src/openwith.ts) skips. NOT an `--appimage-` one: the AppImage runtime
   # takes those as its own options. Where the sandbox cannot be built the
@@ -209,7 +227,7 @@ mac:
 #     cannot (an AppImage on Ubuntu 23.10+ with no AppArmor profile), says
 #     what to do and exits. Outside a snap it never starts the app without the
 #     sandbox; in the snap it starts it with --no-sandbox, under the snap's
-#     strict confinement (see `snap:` below).
+#     strict confinement (see `snapcraft:` below).
 #   - adhoc-sign.cjs (macOS): unsigned builds get a deep ad-hoc re-seal (see
 #     the script for why a half-signed bundle reads as MALWARE to macOS 26
 #     while an ad-hoc-sealed one gets the "Open Anyway" path). No-op when a
@@ -322,8 +340,16 @@ appxManifestCreated: scripts/appx-manifest.cjs
 # `update-alternatives --remove` and runs on upgrades too: on Fedora
 # `dnf remove filex-app` failed the scriptlet and left /usr/bin/filex-app
 # dangling (measured). See the file.
+#
+# `afterInstall` — electron-builder 24.13.3's own after-install, kept when the
+# packages moved to 26 (0.55, #68). 26's takes the setuid bit off
+# chrome-sandbox and installs an AppArmor profile for /opt/filex/filex-app,
+# which is build/linux/launcher.sh, not the Electron binary: an update from
+# 0.54 would have swapped the sandbox every .deb has opened with since 0.50
+# for one on the wrong file. See the file.
 deb:
   packageName: filex-app
+  afterInstall: build/linux/after-install.tpl
   afterRemove: build/linux/after-remove.tpl
   fpm:
     - "--conflicts=filex (<< 0.44.0)"
@@ -332,13 +358,18 @@ deb:
     # Depends has no sound library: on a minimal install the app did not open.
     # Added here, not as `depends:`, which would replace the default list.
     - "--depends=libasound2 | libasound2t64"
+    # The AppImage's AppRun (scripts/appimage-apprun.cjs) is in the packed
+    # directory the .deb is made from; it is the AppImage's alone.
+    - "--exclude=opt/filex/AppRun"
 rpm:
   packageName: filex-app
+  afterInstall: build/linux/after-install.tpl
   afterRemove: build/linux/after-remove.tpl
   fpm:
     - "--conflicts=filex < 0.44.0"
     - "--replaces=filex < 0.44.0"
     - "--depends=(alsa-lib or libasound2)"
+    - "--exclude=opt/filex/AppRun"
 
 # ── Snap Store ───────────────────────────────────────────────────────
 # Built on its own, never by `dist:linux`: `pnpm dist:snap` → `--linux snap`.
@@ -359,54 +390,91 @@ rpm:
 #   - No keyring until `password-manager-service` is connected: the app then
 #     refuses to store the sign-in and says which command connects it
 #     (src/keychain.ts).
-snap:
-  # ⚠ core20, explicitly — the base electron-builder's prebuilt snap TEMPLATE
-  # is made for (Electron runtime libraries from the `gnome-3-28-1804` content
-  # snap). It needs no snapcraft on the build machine (the package is
-  # assembled with mksquashfs), which is what lets an ordinary Ubuntu CI
-  # runner and a plain Docker build produce it. core22/core24 need snapcraft
-  # in LXD or multipass, and a proper core24 snap (the `gnome` extension) only
-  # comes with electron-builder 26 — move to `base: core24` together with that
-  # upgrade, not before. Written out so a newer electron-builder with another
-  # default does not change the base silently.
-  base: core20
-  confinement: strict
-  grade: stable
-  summary: Your filex server's files in a window, with folder sync
-  # snapd starts `~/snap/filex-app/current/.config/autostart/filex-app.desktop`
-  # (`<snap name>.desktop`) at sign-in, with the arguments on its Exec line.
-  # Inside the snap HOME is `~/snap/filex-app/<rev>`, so the file "Start when
-  # I sign in" already writes (`$HOME/.config/autostart/filex-app.desktop`,
-  # login-item.ts → LINUX_AUTOSTART_NAME) is exactly that file, `--hidden`
-  # included; test/linux-desktop-entry.test.ts keeps the names equal.
-  autoStart: true
-  plugs:
-    # electron-builder's list: desktop, desktop-legacy, home, x11, wayland,
-    # unity7 (the tray's StatusNotifier), browser-support, network, gsettings,
-    # audio-playback, pulseaudio, opengl. `home` connects by itself on classic
-    # distributions.
-    - default
-    # The keyring (libsecret over D-Bus). Does NOT connect by itself: until it
-    # is (`snap connect filex-app:password-manager-service`, or a store
-    # auto-connect grant) Chromium falls back to `basic_text` and the app
-    # refuses to store the sign-in, saying why.
-    - password-manager-service
-    # Folders under /media, /run/media and /mnt. Also manual until granted.
-    - removable-media
-    # ⚠⚠ NO `browser-support` plug with `allow-sandbox: true` (removed in
-    # 0.52). 0.50 and 0.51 asked for one so Chromium could build its own
-    # sandbox inside the snap. Snapcraft limits allow-sandbox to trusted
-    # publishers, never auto-connects it, and reviews it by hand: those
-    # revisions sat in "Manual review pending" and the stable channel stayed
-    # on 0.49. Without it electron-builder starts the app with --no-sandbox
-    # and leaves chrome-sandbox out of the package (snap.js
-    # isBrowserSandboxAllowed), and build/linux/launcher.sh adds --no-sandbox
-    # in a snap as well: the wall is the snap's strict confinement (AppArmor,
-    # seccomp, namespaces), Snapcraft's advice for Electron apps. The plain
-    # browser-support of `default` stays. test/linux-launcher.test.ts and
-    # test/linux-desktop-entry.test.ts keep these three plugs and no more.
+snapcraft:
+  # ⚠⚠ core24 (#68, 0.55), electron-builder's own core24 build: a
+  # snapcraft.yaml with the `gnome` extension (gnome-46-2404, mesa-2404 and
+  # the theme content snaps), packed by snapcraft. What it took, read in the
+  # sources of 24.13.3 and 26.17.0:
+  #   - The `snapcraft:` key, NOT `snap:` with `base: core24`. electron-builder
+  #     26 reads a `snap:` key through its legacy path, and on x64 that path
+  #     uses the prebuilt core20 template whatever the base says (24.13.3 did
+  #     the same): a package that claims core24 and carries core20's payload.
+  #   - electron-builder 26.12 or later (core24 came in 26.12.0), which
+  #     depends on @electron/rebuild 4 (ESM only, Node 22.12 or newer): every
+  #     job that runs electron-builder is on Node 22.
+  #   - No template, so no package without snapcraft: both architectures are
+  #     built by snapcraft in LXD (`useLXD`, `snapcraft pack --use-lxd`), on a
+  #     Linux machine. A PC packs no snap (scripts/release/package-local.mjs).
+  # Until 0.54 the snap was electron-builder 24's core20 template (Electron's
+  # libraries from the `gnome-3-28-1804` content snap, assembled with
+  # mksquashfs, no snapcraft), and the arm64 one a core20 snapcraft build.
+  base: core24
   # Same fixed-name rule as every other artifact (see artifactName above).
+  # Here, not under core24: the snap target names its file from this level.
   artifactName: ${productName}-desktop-${arch}.${ext}
+  core24:
+    confinement: strict
+    grade: stable
+    summary: Your filex server's files in a window, with folder sync
+    # snapcraft in an LXD container. The release workflow installs and starts
+    # LXD on both Linux rows before "Build snap".
+    useLXD: true
+    # ⚠ X11, as every snap before 0.55. The core20 template started the app
+    # with DISABLE_WAYLAND=1 (its launcher dropped WAYLAND_DISPLAY), so the
+    # snap has always run under XWayland on a Wayland desktop. core24 sets
+    # nothing and Electron 44 would pick native Wayland on its own; this adds
+    # `--ozone-platform=x11` to the snap's command instead, so the move to
+    # core24 does not change how the window, the tray and drag and drop
+    # behave. A switch to native Wayland is its own decision, measured.
+    forceX11: true
+    # The libraries electron-builder's template staged (its "default" list:
+    # libnspr4, libnss3, libxss1, libappindicator3-1, libsecret-1-0), and
+    # ALSA: Electron loads libasound.so.2 at start (see `deb:` above), and
+    # on Ubuntu 24.04 the package is libasound2t64.
+    stagePackages:
+      - default
+      - libasound2t64
+    # chrome-sandbox stays out, as the template left it out: the app runs
+    # with --no-sandbox in the snap (see `plugs`), and the helper would only
+    # be a setuid candidate in a package whose confinement is the wall.
+    appPartStage:
+      - -app/chrome-sandbox
+    # snapd starts `~/snap/filex-app/current/.config/autostart/filex-app.desktop`
+    # (`<snap name>.desktop`) at sign-in, with the arguments on its Exec line.
+    # Inside the snap HOME is `~/snap/filex-app/<rev>`, so the file "Start when
+    # I sign in" already writes (`$HOME/.config/autostart/filex-app.desktop`,
+    # login-item.ts → LINUX_AUTOSTART_NAME) is exactly that file, `--hidden`
+    # included; test/linux-desktop-entry.test.ts keeps the names equal.
+    autoStart: true
+    plugs:
+      # electron-builder's core24 list: desktop, desktop-legacy, home, x11,
+      # wayland, unity7 (the tray's StatusNotifier), network, gsettings,
+      # audio-playback, pulseaudio, opengl. `home` connects by itself on
+      # classic distributions. The gnome extension adds its content plugs.
+      - default
+      # ⚠⚠ Plain browser-support, named: core24's `default` list has none
+      # (the template's had), and Chromium does not start in a strict snap
+      # without it. electron-builder 26 adds one by itself only when `plugs`
+      # is not given at all, and then WITH allow-sandbox (below).
+      - browser-support
+      # The keyring (libsecret over D-Bus). Does NOT connect by itself: until
+      # it is (`snap connect filex-app:password-manager-service`, or a store
+      # auto-connect grant) Chromium falls back to `basic_text` and the app
+      # refuses to store the sign-in, saying why.
+      - password-manager-service
+      # Folders under /media, /run/media and /mnt. Also manual until granted.
+      - removable-media
+      # ⚠⚠ NO `browser-support` plug with `allow-sandbox: true` (removed in
+      # 0.52). 0.50 and 0.51 asked for one so Chromium could build its own
+      # sandbox inside the snap. Snapcraft limits allow-sandbox to trusted
+      # publishers, never auto-connects it, and reviews it by hand: those
+      # revisions sat in "Manual review pending" and the stable channel stayed
+      # on 0.49. Without it electron-builder ends the snap's command with
+      # --no-sandbox (core24.js isBrowserSandboxAllowed), and
+      # build/linux/launcher.sh adds --no-sandbox in a snap as well: the wall
+      # is the snap's strict confinement (AppArmor, seccomp, namespaces),
+      # Snapcraft's advice for Electron apps. test/linux-launcher.test.ts and
+      # test/linux-desktop-entry.test.ts keep these four plugs and no more.
 
 # ── auto-update feed ─────────────────────────────────────────────────
 # Generic (a plain static directory), NOT the GitHub provider: this repo's

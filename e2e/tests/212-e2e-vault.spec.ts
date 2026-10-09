@@ -273,6 +273,10 @@ test.describe.serial('E2E vault (level 3) - what the server keeps, one writer at
       buffer: Buffer.from(FILE_BODY, 'utf8'),
     });
     await expect(row(writer, FILE_NAME)).toBeVisible({ timeout: 60_000 });
+    // 0.55: a row in a vault is the vault folder's, and the server says whose
+    // (`state` / `create`). It read "System" - the word for a file nobody put
+    // here through filex - for the file just uploaded (0.54 screenshots).
+    await expect(row(writer, FILE_NAME).locator('.fe-list__col--owner')).toHaveText(/^(You|Siz)$/);
 
     // On disk: the key file, index files and packs of exactly 4 MiB.
     const files = onDisk();

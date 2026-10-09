@@ -17,6 +17,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
@@ -480,11 +481,15 @@ func (f *fs) rename(r *sftp.Request, overwrite bool) error {
 	if !ok {
 		return sftp.ErrSSHFxOpUnsupported
 	}
+	var checks []protocolsync.Check
 	if !overwrite {
 		if _, serr := drv.Stat(f.ctx, dst.Rel); serr == nil {
 			// v3 RENAME semantics: refuse an existing destination.
 			return os.ErrExist
 		}
+		// Asked again once the row gate is held: a rename that waited for
+		// it refuses a file that landed on the name meanwhile (sec055).
+		checks = append(checks, protocolsync.StillFree(drv, dst.Rel, src.Rel))
 	}
 	// Who may encrypt (internal/e2epolicy): a rename onto a key file's or a
 	// `.fxe`'s name is asked as an upload of the file there would be (a
@@ -499,10 +504,15 @@ func (f *fs) rename(r *sftp.Request, overwrite bool) error {
 	case protoperm.EncryptionUndecided:
 		return protoperm.ErrEncryptionUndecided
 	}
-	if err := mover.Move(f.ctx, src.Rel, dst.Rel); err != nil {
+	// The bytes, then the rows, under the storage's row gate
+	// (Syncer.Relocate, issue #201): a storage scan never sees the folder at
+	// its new name while its rows still sit at the old one. Waited for on the
+	// session; once held, the rename runs to its end (sec055).
+	if err := f.srv.syncer.Relocate(f.ctx, src.Storage, src.Rel, dst.Rel, func(ctx context.Context) error {
+		return mover.Move(ctx, src.Rel, dst.Rel)
+	}, checks...); err != nil {
 		return mapStorageErr(err)
 	}
-	f.srv.syncer.Move(f.ctx, src.Storage, src.Rel, dst.Rel)
 	return nil
 }
 
@@ -526,13 +536,14 @@ func (f *fs) remove(r *sftp.Request) error {
 	if err != nil {
 		return err
 	}
-	out, terr := trash.Put(f.ctx, drv, t.Rel)
+	// The bytes and the rows under the storage's row gate (Syncer.Discard,
+	// Purge; issue #201): a storage scan never judges the catalogue between
+	// the two.
+	out, terr := f.srv.syncer.Discard(f.ctx, t.Storage, drv, t.Rel)
 	switch {
 	case terr == nil && out.Trashed:
-		f.srv.syncer.Trash(f.ctx, t.Storage, t.Rel, out.Key)
 		return nil
 	case terr == nil && out.Missing:
-		f.srv.syncer.Delete(f.ctx, t.Storage, t.Rel)
 		return os.ErrNotExist
 	case errors.Is(terr, trash.ErrUnsupported):
 		if !f.canDo(t, perm.FilesPurge) {
@@ -542,10 +553,14 @@ func (f *fs) remove(r *sftp.Request) error {
 		if !ok {
 			return sftp.ErrSSHFxOpUnsupported
 		}
-		if derr := del.Delete(f.ctx, t.Rel); derr != nil && !errors.Is(derr, storage.ErrNotFound) {
-			return mapStorageErr(derr)
+		if err := f.srv.syncer.Purge(f.ctx, t.Storage, t.Rel, func(ctx context.Context) error {
+			if derr := del.Delete(ctx, t.Rel); derr != nil && !errors.Is(derr, storage.ErrNotFound) {
+				return derr
+			}
+			return nil
+		}); err != nil {
+			return mapStorageErr(err)
 		}
-		f.srv.syncer.Delete(f.ctx, t.Storage, t.Rel)
 		return nil
 	default:
 		return mapStorageErr(terr)

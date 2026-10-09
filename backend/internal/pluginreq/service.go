@@ -141,17 +141,32 @@ type Actor struct {
 	IP         string
 }
 
-// Error is a refusal the HTTP layer answers as it is.
+// Error is a refusal the HTTP layer answers: its code, and the sentence the
+// reader is told - `server.plugin_request.<Say>` (Say empty: the code) filled
+// with Params, in the reader's language (handlers/plugin_requests.go).
+// Message is the English detail, for a log and for a code without a sentence.
 type Error struct {
 	Status  int
 	Code    string
 	Message string
+	// Say names the sentence when one code is refused for several reasons
+	// (not_found: no app, no storage plugin, no request).
+	Say string
+	// Params fill the sentence ({name}, {version}).
+	Params map[string]string
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
 
 func refuse(status int, code, format string, a ...any) *Error {
 	return &Error{Status: status, Code: code, Message: fmt.Sprintf(format, a...)}
+}
+
+// refuseSaid is refuse with the sentence's name and values.
+func refuseSaid(status int, code, say string, params map[string]string, format string, a ...any) *Error {
+	e := refuse(status, code, format, a...)
+	e.Say, e.Params = say, params
+	return e
 }
 
 // Options wire a Service.
@@ -217,7 +232,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput, who Actor) (*model
 		in.Reason = string([]rune(in.Reason)[:maxReason])
 	}
 	if in.Op != model.PluginRequestOpInstall && in.Op != model.PluginRequestOpUpgrade {
-		return nil, false, refuse(http.StatusBadRequest, "bad_request", "op must be install or upgrade")
+		return nil, false, refuseSaid(http.StatusBadRequest, "bad_request", "bad_op", nil, "op must be install or upgrade")
 	}
 	if in.Reason == "" {
 		return nil, false, refuse(http.StatusBadRequest, "reason_required",
@@ -242,7 +257,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput, who Actor) (*model
 		}
 		p, err = s.planStorage(ctx, in)
 	default:
-		return nil, false, refuse(http.StatusBadRequest, "bad_request", "kind must be app or storage")
+		return nil, false, refuseSaid(http.StatusBadRequest, "bad_request", "bad_kind", nil, "kind must be app or storage")
 	}
 	if err != nil {
 		return nil, false, err
@@ -375,7 +390,7 @@ func appSource(src *Source, upgrade bool) (string, error) {
 		src.FromSource = true
 		return SourceFromSource, nil
 	}
-	return "", refuse(http.StatusBadRequest, "bad_request",
+	return "", refuseSaid(http.StatusBadRequest, "bad_request", "app_source_missing", nil,
 		"name the app's source: github_repo (+ ref), or manifest_url (+ url and sha256 for a module)")
 }
 
@@ -389,7 +404,7 @@ func (s *Service) fetchApp(ctx context.Context, kind string, src Source, upgrade
 	case SourceFromSource:
 		return s.o.Apps.FetchUpdate(ctx, upgradeID)
 	}
-	return nil, refuse(http.StatusBadRequest, "bad_request", "unknown source")
+	return nil, refuseSaid(http.StatusBadRequest, "bad_request", "source_unknown", nil, "unknown source")
 }
 
 // installedApp finds the app an upgrade request names.
@@ -403,9 +418,9 @@ func (s *Service) installedApp(in CreateInput) (*wasmplugin.Installed, error) {
 			return p, nil
 		}
 	} else {
-		return nil, refuse(http.StatusBadRequest, "bad_request", "an upgrade names the installed app: plugin_id or name")
+		return nil, refuseSaid(http.StatusBadRequest, "bad_request", "upgrade_names_app", nil, "an upgrade names the installed app: plugin_id or name")
 	}
-	return nil, refuse(http.StatusNotFound, "not_found", "no such app is installed")
+	return nil, refuseSaid(http.StatusNotFound, "not_found", "no_app", nil, "no such app is installed")
 }
 
 // planApp writes an app request's source one way and finds the app an
@@ -451,12 +466,14 @@ func (s *Service) resolveApp(ctx context.Context, p *plan) (*model.PluginRequest
 		return nil, errors.New("pluginreq: the dry run answered no review")
 	}
 	if !upgrade && dry.Installed != nil {
-		return nil, refuse(http.StatusConflict, "already_installed",
+		return nil, refuseSaid(http.StatusConflict, "already_installed", "already_installed_upgrade",
+			map[string]string{"name": dry.Manifest.Name, "version": dry.Installed.Version},
 			"%s is already installed (version %s): request an upgrade instead (op: upgrade, name: %s)",
 			dry.Manifest.Name, dry.Installed.Version, dry.Manifest.Name)
 	}
 	if dry.Compat != nil && !dry.Compat.OK {
-		return nil, refuse(http.StatusConflict, "incompatible",
+		return nil, refuseSaid(http.StatusConflict, "incompatible", "",
+			map[string]string{"name": dry.Manifest.Name, "version": dry.Manifest.Version, "requires": dry.Compat.Requires, "filex": dry.Compat.Filex},
 			"%s %s works with filex %s; this is filex %s", dry.Manifest.Name, dry.Manifest.Version, dry.Compat.Requires, dry.Compat.Filex)
 	}
 	perms := make([]string, 0, len(dry.Permissions))
@@ -525,13 +542,13 @@ func (s *Service) planStorage(ctx context.Context, in CreateInput) (*plan, error
 		case in.Name != "":
 			row, err = s.o.Store.GetPluginByName(ctx, in.Name)
 		default:
-			return nil, refuse(http.StatusBadRequest, "bad_request", "an upgrade names the installed storage plugin: plugin_id or name")
+			return nil, refuseSaid(http.StatusBadRequest, "bad_request", "upgrade_names_plugin", nil, "an upgrade names the installed storage plugin: plugin_id or name")
 		}
 		if err != nil || row == nil {
-			return nil, refuse(http.StatusNotFound, "not_found", "no such storage plugin is installed")
+			return nil, refuseSaid(http.StatusNotFound, "not_found", "no_storage_plugin", nil, "no such storage plugin is installed")
 		}
 		if p.src.Source != "" || p.src.URL != "" {
-			return nil, refuse(http.StatusBadRequest, "bad_request",
+			return nil, refuseSaid(http.StatusBadRequest, "bad_request", "storage_upgrade_from_source", nil,
 				"a storage plugin is upgraded from the source it follows; name it on the plugin, then request the upgrade")
 		}
 		p.plugin, p.pluginID, p.kind = row, row.ID, SourceFromSource
@@ -547,7 +564,7 @@ func (s *Service) planStorage(ctx context.Context, in CreateInput) (*plan, error
 		p.src.FromSource = false
 		p.kind = SourceURL
 	default:
-		return nil, refuse(http.StatusBadRequest, "bad_request",
+		return nil, refuseSaid(http.StatusBadRequest, "bad_request", "storage_source_missing", nil,
 			"name the storage plugin's source: source (owner/name or a filex-storage.json address), or url (+ sha256)")
 	}
 	// The name is not part of the key: one source is one plugin, whatever
@@ -586,10 +603,10 @@ func (s *Service) resolveStorage(ctx context.Context, p *plan) (*model.PluginReq
 		review = storageReview{URL: p.src.URL, SHA256: sum, Bytes: n}
 	}
 	if !plugin.ValidName(name) {
-		return nil, refuse(http.StatusBadRequest, "bad_request", "name the storage plugin: %s", plugin.ErrBadName.Error())
+		return nil, refuseSaid(http.StatusBadRequest, "bad_request", "bad_plugin_name", nil, "name the storage plugin: %s", plugin.ErrBadName.Error())
 	}
 	if _, err := s.o.Store.GetPluginByName(ctx, name); err == nil {
-		return nil, refuse(http.StatusConflict, "already_installed",
+		return nil, refuseSaid(http.StatusConflict, "already_installed", "already_installed_storage", map[string]string{"name": name},
 			"a storage plugin named %s is already installed: request an upgrade instead (op: upgrade, name: %s)", name, name)
 	}
 	manifest := ""
@@ -631,7 +648,7 @@ func (s *Service) List(ctx context.Context, status string) ([]*model.PluginReque
 	case model.PluginRequestPending, model.PluginRequestApproved, model.PluginRequestRejected,
 		model.PluginRequestExpired, model.PluginRequestSuperseded:
 	default:
-		return nil, refuse(http.StatusBadRequest, "bad_request", "status must be pending, approved, rejected, expired, superseded or all")
+		return nil, refuseSaid(http.StatusBadRequest, "bad_request", "bad_status", nil, "status must be pending, approved, rejected, expired, superseded or all")
 	}
 	return s.o.Store.ListPluginRequests(ctx, status, 200)
 }
@@ -641,7 +658,7 @@ func (s *Service) Get(ctx context.Context, id int64) (*model.PluginRequest, erro
 	s.ExpireDue(ctx)
 	r, err := s.o.Store.GetPluginRequest(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, refuse(http.StatusNotFound, "not_found", "no such plugin request")
+		return nil, refuseSaid(http.StatusNotFound, "not_found", "no_request", nil, "no such plugin request")
 	}
 	return r, err
 }
@@ -729,7 +746,7 @@ func (s *Service) ApproveWith(ctx context.Context, id int64, who Actor, lang str
 	case model.PluginRequestKindStorage:
 		result, why, err = s.approveStorage(ctx, r)
 	default:
-		err = refuse(http.StatusInternalServerError, "bad_request", "unknown kind %q", r.Kind)
+		err = refuseSaid(http.StatusInternalServerError, "bad_request", "request_broken", nil, "unknown kind %q", r.Kind)
 	}
 	if why != "" {
 		closed, cerr := s.supersede(ctx, r, who, why)
@@ -788,7 +805,7 @@ func (s *Service) approveApp(ctx context.Context, r *model.PluginRequest, who Ac
 	var upgradeID int64
 	if upgrade {
 		if r.PluginID == nil {
-			return nil, "", refuse(http.StatusInternalServerError, "bad_request", "an upgrade request names no app")
+			return nil, "", refuseSaid(http.StatusInternalServerError, "bad_request", "request_broken", nil, "an upgrade request names no app")
 		}
 		upgradeID = *r.PluginID
 		p, ok := s.o.Apps.ByID(upgradeID)
@@ -844,7 +861,7 @@ func (s *Service) approveStorage(ctx context.Context, r *model.PluginRequest) (a
 	switch {
 	case r.Op == model.PluginRequestOpUpgrade:
 		if r.PluginID == nil {
-			return nil, "", refuse(http.StatusInternalServerError, "bad_request", "an upgrade request names no plugin")
+			return nil, "", refuseSaid(http.StatusInternalServerError, "bad_request", "request_broken", nil, "an upgrade request names no plugin")
 		}
 		row, gerr := s.o.Store.GetPlugin(ctx, *r.PluginID)
 		if gerr != nil {
@@ -883,7 +900,7 @@ func (s *Service) approveStorage(ctx context.Context, r *model.PluginRequest) (a
 	case r.SourceKind == SourceURL:
 		st, err = s.o.Plugins.InstallFromURL(ctx, r.Name, src.URL, r.SHA256, src.Signature)
 	default:
-		return nil, "", refuse(http.StatusInternalServerError, "bad_request", "unknown source %q", r.SourceKind)
+		return nil, "", refuseSaid(http.StatusInternalServerError, "bad_request", "request_broken", nil, "unknown source %q", r.SourceKind)
 	}
 	if err != nil {
 		if errors.Is(err, plugin.ErrSHA256Mismatch) || errors.Is(err, plugin.ErrSourceChanged) {
@@ -952,6 +969,10 @@ func (s *Service) Reject(ctx context.Context, id int64, who Actor, note string) 
 
 // ── Requests from the embedded store ───────────────────────────────────
 
+// KindStorageEntry is a store entry's kind for a storage plugin
+// (appstore.KindStorage, without the import).
+const KindStorageEntry = "storage"
+
 // StoreEntry is what a store's signed catalog said about the app a person
 // asks for (appstore.CatalogApp, without the import).
 type StoreEntry struct {
@@ -967,6 +988,8 @@ type StoreEntry struct {
 	ManifestSHA256 string
 	WasmSHA256     string
 	UISHA256       string
+	// Builds are a storage plugin's pinned builds, platform → sha256 (#215).
+	Builds map[string]string
 }
 
 // storeReview is what a store request keeps for the approval screen: the
@@ -988,7 +1011,11 @@ type storeReview struct {
 // installed is asked for as an upgrade, and only to a newer version.
 func (s *Service) CreateStore(ctx context.Context, e StoreEntry, reason string, who Actor) (*model.PluginRequest, bool, error) {
 	s.ExpireDue(ctx)
-	if s.o.Apps == nil {
+	storage := e.Kind == KindStorageEntry
+	switch {
+	case storage && s.o.Plugins == nil:
+		return nil, false, refuse(http.StatusServiceUnavailable, "plugins_disabled", "storage plugins are disabled on this instance (FILEX_PLUGINS_DISABLED)")
+	case !storage && s.o.Apps == nil:
 		return nil, false, refuse(http.StatusServiceUnavailable, "app_plugins_disabled", "app plugins are disabled on this instance")
 	}
 	reason = strings.TrimSpace(reason)
@@ -1000,19 +1027,30 @@ func (s *Service) CreateStore(ctx context.Context, e StoreEntry, reason string, 
 			"say why you need the app (`reason`): the administrator who decides reads it")
 	}
 	if strings.TrimSpace(e.Store) == "" || strings.TrimSpace(e.App) == "" || strings.TrimSpace(e.Version) == "" {
-		return nil, false, refuse(http.StatusBadRequest, "bad_request", "a store request names the store, the app and its version")
+		return nil, false, refuseSaid(http.StatusBadRequest, "bad_request", "store_request_fields", nil, "a store request names the store, the app and its version")
 	}
 	op := model.PluginRequestOpInstall
+	kind := model.PluginRequestKindApp
 	var pluginID int64
 	var fromVersion string
-	if p, ok := s.o.Apps.ByName(e.App); ok {
+	if storage {
+		// A storage plugin installs under its store name; one of that name
+		// already here is asked for as an upgrade (#215).
+		kind = model.PluginRequestKindStorage
+		if row, err := s.o.Store.GetPluginByName(ctx, e.App); err == nil && row != nil {
+			if row.Version == e.Version {
+				return nil, false, refuseSaid(http.StatusConflict, "already_installed", "", map[string]string{"name": e.App, "version": e.Version}, "%s %s is installed already", e.App, e.Version)
+			}
+			op, pluginID, fromVersion = model.PluginRequestOpUpgrade, row.ID, row.Version
+		}
+	} else if p, ok := s.o.Apps.ByName(e.App); ok {
 		if p.Row.Version == e.Version {
-			return nil, false, refuse(http.StatusConflict, "already_installed", "%s %s is installed already", e.App, e.Version)
+			return nil, false, refuseSaid(http.StatusConflict, "already_installed", "", map[string]string{"name": e.App, "version": e.Version}, "%s %s is installed already", e.App, e.Version)
 		}
 		op, pluginID, fromVersion = model.PluginRequestOpUpgrade, p.Row.ID, p.Row.Version
 	}
 	src := Source{Store: e.Store, StoreApp: e.App, StoreVersion: e.Version}
-	key := sourceKey(model.PluginRequestKindApp, op, pluginID, SourceStore, src)
+	key := sourceKey(kind, op, pluginID, SourceStore, src)
 	if prev, err := s.pending(ctx, key); prev != nil || err != nil {
 		return prev, false, err
 	}
@@ -1042,11 +1080,15 @@ func (s *Service) CreateStore(ctx context.Context, e StoreEntry, reason string, 
 	rv.Manifest.Label = e.Label
 	perms := append([]string{}, e.Permissions...)
 	sum := e.WasmSHA256
+	if storage && s.o.Plugins != nil {
+		// What this server would install: the build for its own platform.
+		sum = e.Builds[s.o.Plugins.Platform()]
+	}
 	if sum == "" {
 		sum = e.ManifestSHA256
 	}
 	row := &model.PluginRequest{
-		Kind: model.PluginRequestKindApp, Op: op, Name: e.App,
+		Kind: kind, Op: op, Name: e.App,
 		SourceKind: SourceStore, SourceJSON: jsonString(src), SourceKey: key,
 		Version: e.Version, FromVersion: fromVersion, ReviewJSON: jsonString(rv),
 		SHA256: sum, ManifestSHA256: e.ManifestSHA256, PermissionsJSON: jsonString(perms),
@@ -1096,7 +1138,7 @@ func (s *Service) CompleteStore(ctx context.Context, id int64, who Actor, result
 		return r, false, nil
 	}
 	if r.SourceKind != SourceStore {
-		return r, false, refuse(http.StatusBadRequest, "bad_request", "not a request from the store")
+		return r, false, refuseSaid(http.StatusBadRequest, "bad_request", "not_store_request", nil, "not a request from the store")
 	}
 	ctx = context.WithoutCancel(ctx)
 	now := s.now()

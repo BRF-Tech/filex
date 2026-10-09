@@ -54,6 +54,7 @@ import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Modal from '@/components/ui/Modal.vue';
 import PluginLogPanel from '@/components/plugins/PluginLogPanel.vue';
+import AppPluginLicense from '@/components/plugins/AppPluginLicense.vue';
 import ReleaseNotes from './ReleaseNotes.vue';
 import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
 
@@ -93,6 +94,7 @@ const formSha = ref('');
 const formAddress = ref('');
 const formToken = ref('');
 const formSignature = ref('');
+const formVersion = ref('');
 const saving = ref(false);
 
 const reportOf = ref<Plugin | null>(null);
@@ -101,6 +103,8 @@ const reportOf = ref<Plugin | null>(null);
    sync's answers it could not make sense of. The app plugins' panel, asking
    this plugin's endpoint. */
 const logsOf = ref<Plugin | null>(null);
+/** "License…": a paid plugin installed from a store (#215). */
+const licenseOf = ref<Plugin | null>(null);
 function fetchLogs(after: number) {
   const p = logsOf.value;
   return p ? PluginsApi.logs(p.id, after) : Promise.resolve({ lines: [], next: after });
@@ -109,6 +113,7 @@ function fetchLogs(after: number) {
 const upgradeOf = ref<Plugin | null>(null);
 const upgradeFile = ref<File | null>(null);
 const upgradeSignature = ref('');
+const upgradeVersion = ref('');
 const upgrading = ref(false);
 const upgradeFailure = ref('');
 /** What the rollback left running, shown next to the failure that caused it. */
@@ -153,6 +158,7 @@ function openCreate() {
   formAddress.value = '';
   formToken.value = '';
   formSignature.value = '';
+  formVersion.value = '';
   formSource.value = '';
   showForm.value = true;
 }
@@ -186,9 +192,9 @@ async function save() {
         toast.error(t('plugins.errFile'));
         return;
       }
-      await PluginsApi.upload(name, formFile.value, formSignature.value.trim(), src);
+      await PluginsApi.upload(name, formFile.value, formSignature.value.trim(), src, formVersion.value.trim());
     } else if (source.value === 'url') {
-      await PluginsApi.fromUrl(name, formUrl.value.trim(), formSha.value.trim(), formSignature.value.trim(), src);
+      await PluginsApi.fromUrl(name, formUrl.value.trim(), formSha.value.trim(), formSignature.value.trim(), src, formVersion.value.trim());
     } else if (source.value === 'feed') {
       await PluginsApi.fromSource(name, src);
     } else {
@@ -255,6 +261,7 @@ function openUpgrade(p: Plugin) {
   upgradeOf.value = p;
   upgradeFile.value = null;
   upgradeSignature.value = '';
+  upgradeVersion.value = '';
   upgradeFailure.value = '';
   upgradeRestored.value = null;
 }
@@ -273,7 +280,7 @@ async function doUpgrade() {
   upgrading.value = true;
   upgradeFailure.value = '';
   try {
-    const updated = await PluginsApi.upgrade(p.id, upgradeFile.value, upgradeSignature.value.trim());
+    const updated = await PluginsApi.upgrade(p.id, upgradeFile.value, upgradeSignature.value.trim(), upgradeVersion.value.trim());
     Object.assign(p, updated);
     toast.success(t('plugins.upgrade.done', { name: p.name }));
     upgradeOf.value = null;
@@ -319,9 +326,10 @@ function updateLine(p: Plugin): { tone: 'sky' | 'zinc' | 'rose'; badge?: string;
     case 'available':
       return { tone: 'sky', badge: t('plugins.update.available'), text: `${p.version || '?'} → ${u.version}` };
     case 'incompatible':
-      return { tone: 'zinc', text: t('plugins.update.incompatible', { version: u.version, requires: u.requires }) };
+      // The server's line, in the reader's language (0.55).
+      return { tone: 'zinc', text: p.update_said ?? '' };
     case 'check_failed':
-      return { tone: 'rose', badge: t('plugins.update.checkFailed'), text: u.error ?? '' };
+      return { tone: 'rose', badge: t('plugins.update.checkFailed'), text: p.update_said ?? '' };
     default:
       return { tone: 'zinc', text: t('plugins.update.upToDate') };
   }
@@ -387,6 +395,7 @@ function stateTone(state: PluginState): 'emerald' | 'amber' | 'rose' | 'zinc' {
       return 'amber';
     case 'failed':
     case 'refused':
+    case 'held':
       return 'rose';
     default:
       return 'zinc';
@@ -420,7 +429,7 @@ const anyRunning = computed(() => items.value.some((p) => p.state === 'running')
  * conformance column sorts by verdict (failed, never probed, verified) and the
  * load column by what is in flight right now — the two orderings an operator
  * chasing a misbehaving plugin actually wants. */
-const STATE_RANK: Record<PluginState, number> = { running: 0, starting: 1, disabled: 2, refused: 3, failed: 4 };
+const STATE_RANK: Record<PluginState, number> = { running: 0, starting: 1, disabled: 2, refused: 3, failed: 4, held: 5 };
 const columns = computed<DataColumn<Plugin>[]>(() => [
   { id: 'name', label: t('common.name'), sortable: true, width: 220 },
   {
@@ -576,6 +585,12 @@ function rowActions(row: Plugin): ContextAction[] {
       hidden: row.kind !== 'binary',
     },
     {
+      key: 'license',
+      label: t('plugins.actions.license'),
+      icon: 'details',
+      hidden: !row.license?.required,
+    },
+    {
       key: 'restart',
       label: t('plugins.restart'),
       icon: 'refresh',
@@ -591,6 +606,7 @@ function onRowAction(key: string, row: Plugin) {
   else if (key === 'upgrade') openUpgrade(row);
   else if (key === 'review') openReview(row);
   else if (key === 'source') openSource(row);
+  else if (key === 'license') licenseOf.value = row;
   else if (key === 'restart') void restart(row);
   else if (key === 'delete') void remove(row);
 }
@@ -703,8 +719,23 @@ function onRowAction(key: string, row: Plugin) {
             <Badge :tone="stateTone(row.state)" :title="row.state_error || ''">
               {{ t(`plugins.state.${row.state}`) }}
             </Badge>
+            <!-- Installed from an app store (#215): which one, the review it
+                 went through, and - paid - the license that may hold it. -->
+            <span v-if="row.from_store" class="tbl-sub tbl-clamp" :title="row.from_store" :data-testid="`plugin-from-store-${row.name}`">
+              {{ t('plugins.fromStore', { store: row.from_store.replace(/^https?:\/\//, '') }) }}
+            </span>
             <span v-if="row.restarts > 0" class="tbl-sub">
               {{ t('plugins.restarts', { count: row.restarts }) }}
+            </span>
+            <!-- The server's sentence (sec055 S5): the build's signature is
+                 the old sha256-only form - taken in 0.55, refused from 0.56. -->
+            <span
+              v-if="row.signature_notice"
+              class="tbl-sub tbl-clamp text-amber-600 dark:text-amber-400"
+              :title="row.signature_notice"
+              :data-testid="`plugin-legacy-signature-${row.name}`"
+            >
+              {{ row.signature_notice }}
             </span>
             <!-- The failure is shown, not hidden behind a tooltip: it is the
                  only thing that tells the operator what to fix. -->
@@ -845,6 +876,8 @@ function onRowAction(key: string, row: Plugin) {
         <template v-if="requiresSignature && (source === 'file' || source === 'url')">
           <Input v-model="formSignature" :label="t('plugins.signature.label')" data-testid="plugin-signature" />
           <p class="-mt-2 text-xs text-zinc-500">{{ t('plugins.signature.required') }}</p>
+          <Input v-model="formVersion" :label="t('plugins.signature.version')" placeholder="1.3.0" data-testid="plugin-signature-version" />
+          <p class="-mt-2 text-xs text-zinc-500">{{ t('plugins.signature.versionHint') }}</p>
         </template>
 
         <p class="rounded-lg bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
@@ -896,6 +929,13 @@ function onRowAction(key: string, row: Plugin) {
             data-testid="plugin-upgrade-signature"
           />
           <p class="-mt-2 text-xs text-zinc-500">{{ t('plugins.signature.required') }}</p>
+          <Input
+            v-model="upgradeVersion"
+            :label="t('plugins.signature.version')"
+            placeholder="1.3.0"
+            data-testid="plugin-upgrade-signature-version"
+          />
+          <p class="-mt-2 text-xs text-zinc-500">{{ t('plugins.signature.versionHint') }}</p>
         </template>
 
         <div
@@ -1053,6 +1093,22 @@ function onRowAction(key: string, row: Plugin) {
         <PluginLogPanel :key="logsOf.id" :fetch="fetchLogs" :active="!!logsOf" testid="storage-plugin-logs" />
         <div class="flex justify-end">
           <Button type="button" size="sm" variant="ghost" @click="logsOf = null">{{ t('common.close') }}</Button>
+        </div>
+      </div>
+    </Modal>
+
+    <!-- A paid storage plugin's license (#215): the same section an app's
+         page shows, read from the plugin's own license row. -->
+    <Modal
+      :model-value="!!licenseOf"
+      :title="licenseOf ? t('plugins.licenseTitle', { name: licenseOf.name }) : ''"
+      size="lg"
+      @update:model-value="licenseOf = null"
+    >
+      <div v-if="licenseOf" class="space-y-3" data-testid="storage-plugin-license">
+        <AppPluginLicense :storage-name="licenseOf.name" @changed="load" />
+        <div class="flex justify-end">
+          <Button type="button" size="sm" variant="ghost" @click="licenseOf = null">{{ t('common.close') }}</Button>
         </div>
       </div>
     </Modal>

@@ -1305,7 +1305,6 @@
     "restore": "Geri yükle",
     "purge": "Kalıcı sil",
     "restored": "{name} geri yüklendi",
-    "restore_taken": "“{name}” geri yüklenmedi: aynı adla bir şey zaten var. Oradakinin adını değiştirip yeniden deneyin.",
     "purged": "{name} kalıcı olarak silindi",
     "purge_confirm": "{name} kalıcı olarak silinecek. Emin misiniz?",
     "restoring": "Geri yükleniyor…",
@@ -2430,7 +2429,8 @@
       "starting": "Başlıyor…",
       "failed": "Başarısız",
       "refused": "Reddedildi",
-      "disabled": "Kapalı"
+      "disabled": "Kapalı",
+      "held": "Bekletiliyor (lisans)"
     },
     "fields": {
       "driver": "Sürücü",
@@ -2502,7 +2502,9 @@
     },
     "signature": {
       "label": "İmza",
-      "required": "Bu kurulum yalnızca imzalı eklenti kabul eder: ikili dosyanın SHA-256 özeti üzerine, işletmecinin güvendiği bir anahtarla üretilmiş ayrık imzayı (hex ya da base64) yapıştırın. İmza olmadan kurulum reddedilir."
+      "required": "Bu kurulum yalnızca imzalı eklenti kabul eder: yapının adı, sürümü, platformu ve SHA-256 özeti üzerine, işletmecinin güvendiği bir anahtarla üretilmiş ayrık imzayı (hex ya da base64) yapıştırın. İmza olmadan kurulum reddedilir.",
+      "version": "İmzalanan sürüm",
+      "versionHint": "İmzanın adını verdiği sürüm, örneğin 1.3.0. Boş bırakılırsa yalnız SHA-256 özeti üzerine atılmış eski biçim imza doğrulanabilir: 0.55'te uyarıyla kabul edilir, 0.56'dan itibaren reddedilir."
     },
     "sourceHint": "Bir GitHub reposu (sahip/ad - filex son sürüme eklenmiş filex-storage.json dosyasını okur) ya da bir filex-storage.json dosyasının https adresi. filex bunu her gün denetler ve yeni bir sürüm olduğunda size söyler; siz onaylamadan hiçbir şey kurulmaz.",
     "checkUpdates": "Güncellemeleri denetle",
@@ -2513,14 +2515,14 @@
     },
     "update": {
       "available": "Güncelleme var",
-      "incompatible": "{version} için filex {requires} gerekiyor",
       "checkFailed": "Denetlenemedi",
       "upToDate": "Güncel"
     },
     "actions": {
       "reviewUpdate": "Güncellemeyi incele",
       "setSource": "Güncelleme kaynağı…",
-      "logs": "Günlük"
+      "logs": "Günlük",
+      "license": "Lisans…"
     },
     "review": {
       "title": "{name} güncellemesi",
@@ -2534,7 +2536,9 @@
       "clear": "Denetimi durdurmak için boş bırakın.",
       "saved": "Kaydedildi: {name}, {source} kaynağını izliyor.",
       "cleared": "{name} için artık güncelleme kaynağı yok."
-    }
+    },
+    "fromStore": "{store} mağazasından",
+    "licenseTitle": "{name}: lisans"
   },
   "appPlugins": {
     "title": "Uygulamalar",
@@ -2563,30 +2567,14 @@
       "needsApproval": "Onay bekliyor",
       "failed": "Güncelleme başarısız",
       "checkFailed": "Denetlenemedi",
-      "failedDetail": "{version} denendi ve geri alındı; {current} çalışmaya devam ediyor",
-      "newPermissions": "yeni: {permissions}",
-      "addsModule": "modül getiriyor",
-      "needsNewerFilex": "{version} için filex {requires} gerekiyor",
       "upToDate": "Güncel",
-      "notChecked": "Henüz denetlenmedi",
-      "noSource": "Dosyadan kuruldu: güncellemelerin denetleneceği bir kaynak yok",
-      "noManifestAddress": "filex'in saklamadığı bir adresten kuruldu: güncellemelerinin denetlenmesi için bir kez URL'sinden yükseltin",
-      "previous": "{version} sürümü geri dönmek için saklanıyor ({when} tarihinde değiştirildi)"
+      "notChecked": "Henüz denetlenmedi"
     },
     "compat": {
-      "bad": "Bu filex ile uyumlu değil",
-      "needs": "filex {requires} ile çalışıyor; bu sunucu {filex}. Çalışmaya devam ediyor."
+      "bad": "Bu filex ile uyumlu değil"
     },
     "runtime": {
-      "on": "Uygulamalar açık",
-      "off": "Bu örnekte uygulamalar kapalı",
-      "archBad": "Bu sunucunun işlemcisi WebAssembly motorunu çalıştıramıyor ve uygulama altyapısı yalnızca bu motorla açılıyor: burada hiçbir uygulama, yalnızca bir arayüz ya da bir dil olanı bile, kurulamaz ve çalıştırılamaz.",
-      "signature": "Bu örnek yalnızca imzalı uygulamaları kabul ediyor.",
-      "engines": "Motorlar",
-      "devBuild": "Bu bir geliştirme derlemesi ({version}): uygulamaların istediği filex sürümleri denetlenmiyor.",
-      "updateCheckOff": "Günlük güncelleme denetimi bu örnekte kapalı (FILEX_APP_PLUGIN_UPDATE_CHECK). “Güncellemeleri denetle” yine de sorar.",
-      "lastCheck": "Uygulamaların kaynakları en son {when} güncelleme için denetlendi.",
-      "neverChecked": "Uygulamaların kaynakları günde bir kez güncelleme için denetlenir."
+      "engines": "Motorlar"
     },
     "fields": {
       "name": "Ad",
@@ -2668,33 +2656,6 @@
       "errRepo": "Repoyu sahip/ad biçiminde yazın.",
       "errFiles": "Manifesti (filex-app.json) seçin - uygulama bir dil paketi değilse modülü (.wasm) de.",
       "errUrl": "Manifest URL'sini girin - modülü olan bir uygulama için modül URL'sini ve 64 karakterlik SHA-256'yı da.",
-      "errors": {
-        "permissions_incomplete": "Manifestteki her izin verilmek zorunda; eksik: {missing}. Listeyi yeniden inceleyip tekrar deneyin.",
-        "permissions_changed": "Yeni sürüm, kurulu sürüme verilmemiş izinler istiyor: {missing}. İnceleyip yeniden onaylayın.",
-        "sha256_mismatch": "Modülün SHA-256'sı verilenle uyuşmuyor. Özeti ve URL'yi denetleyin.",
-        "manifest_invalid": "Manifest geçerli bir filex-app.json değil: {message}",
-        "signature_required": "Bu örnek yalnızca imzalı uygulamaları kabul ediyor. İmzayı ekleyip tekrar deneyin.",
-        "signature_invalid": "İmza güvenilen hiçbir anahtarla doğrulanmıyor.",
-        "name_taken": "Bu adda bir uygulama zaten kurulu. İncelemeye dönüp orada sunulan yükseltmeyi seçin ya da satırındaki Yükselt’i kullanın.",
-        "describe_mismatch": "Modül kendini manifestten farklı tarif ediyor - derleme ile manifest birbirine ait değil.",
-        "sha256_required": "Modül bir SHA-256 ile sabitlenmemiş; indirilen bir modülün sabitlenmesi gerekir. Özeti girin ya da uygulamanın yazarından manifeste eklemesini isteyin.",
-        "too_large": "Modül bu sunucunun kabul ettiğinden büyük.",
-        "demo_refused": "Tanıtım örneğine uygulama kurulamaz.",
-        "not_found": "Bu uygulama artık kurulu değil.",
-        "incompatible": "Bu sürüm filex {requires} ile çalışıyor; bu sunucu filex {filex}, bu yüzden burada kurulamaz.",
-        "up_to_date": "Uygulamanın kaynağında artık kurulu sürümden daha yeni bir sürüm yok.",
-        "fetch": {
-          "bad_repo": "Repoyu sahip/ad biçiminde yazın, örneğin BRF-Tech/filex-convert.",
-          "manifest_not_found": "{where} reposunda filex-app.json bulunamadı (denenen: {refs}). Reponun var ve herkese açık olduğunu, filex-app.json dosyasının kök dizinde durduğunu ve bir ref yazdıysanız o etiketin ya da dalın bulunduğunu kontrol edin.",
-          "module_not_found": "Manifest bulundu ama adını verdiği modül yok: {where}. Sürüme plugin.wasm henüz eklenmemiş olabilir; sürümü kontrol edin ya da başka bir ref yazın.",
-          "unreachable": "Sunucu {where} adresine ulaşamadı. İnternete (ya da o adrese) erişebildiğini kontrol edip yeniden deneyin.",
-          "http_status": "{where} HTTP {status} yanıtı verdi. Biraz sonra yeniden deneyin ya da adresi kontrol edin.",
-          "bad_url": "“{where}” filex’in uygulama indirdiği bir adres değil: herkese açık internette bir https:// adresi olmalı, bu makine ya da özel ağ değil.",
-          "missing_url": "Hem modül URL’sini hem manifest URL’sini girin.",
-          "too_large": "{where} adresinden gelen, bu sunucunun kabul ettiğinden büyük.",
-          "changed": "{where} okunurken farklı bir sürüm verdi. Birazdan yeniden deneyin."
-        }
-      },
       "languagePackNote": "Yalnızca filex'in kendisi için diller - modül yok, hiçbir şey çalışmaz.",
       "alreadyInstalled": "“{name}” burada zaten kurulu (sürüm {version}). İkinci kez kurulamaz; bunun yerine kurulu olanı aynı kaynaktan {next} sürümüne yükseltin.",
       "upgradeInstead": "Bunun yerine {version} sürümüne yükselt",
@@ -2705,7 +2666,6 @@
       "addsModule": "Bu sürüm bir modül getiriyor: şimdiye dek hiçbir kodun çalışmadığı yerde kod çalışacak.",
       "samePermissions": "Kurulu sürümle aynı izinleri istiyor.",
       "newPermission": "Yeni",
-      "incompatible": "{name} {version}, filex {requires} ile çalışıyor; bu sunucu filex {filex}. Burada kurulamaz.",
       "enginesMissing": "Bu sunucuda {engines} yok. Uygulama kurulur, ama bunlarla yaptığı işler bu motorlar kurulup filex yeniden başlatılana kadar çalışmaz.",
       "officeMissing": "Ofis belgeleri {name} ile dönüştürülür ve bu sunucuya bağlı bir {name} yok. Uygulama kurulur; ofis belgeleriyle yaptığı işler, bir yönetici Dış servisler sayfasından {name} bağladığında çalışır. Yeniden başlatma gerekmez.",
       "ui": "Arayüz (ui.zip) - kendi arayüzü olan bir uygulama için",
@@ -3963,7 +3923,8 @@
       "store": "Mağaza",
       "lastError": "Son deneme",
       "changeKey": "Anahtarı değiştir",
-      "enterKey": "Lisans anahtarını girin"
+      "enterKey": "Lisans anahtarını girin",
+      "heldNoteStorage": "Eklenti bekletiliyor: lisansı {status}. Kurulu kalır ve depoları ayarlarını korur; lisans yeniden geçerli olana kadar hiçbir şey çalışmaz ve depolar açılmaz."
     },
     "stores": {
       "title": "Güvenilen mağazalar",
@@ -3977,34 +3938,6 @@
     "band": {
       "heldTitle": "Lisansı geçerli olmadığı için ücretli bir uygulama bekletiliyor",
       "graceTitle": "Ücretli bir uygulamanın lisansı mağazaya sorulamadı; ek süresiyle çalışıyor"
-    },
-    "err": {
-      "store_invalid": "Bu, filex'in konuştuğu bir mağaza adresi değil: bir mağazaya https ile, herkese açık bir adresten ulaşılır.",
-      "store_not_allowed": "Bu sunucu bu mağazaya izin vermiyor: FILEX_APP_STORE_URLS ayarlı, bu yüzden kurulum bağlantıları ve lisanslar yalnız orada listelenen mağazalardan alınır (liste boşsa hiçbirinden) ve başka hiçbir mağazaya ilk kullanımda bile güvenilmez. Mağazayı oraya sunucuyu yöneten ekler.",
-      "store_key_not_configured": "Bu mağaza sunucuda yapılandırılmış (FILEX_APP_STORE_URLS) ama FILEX_APP_STORE_KEYS'te olmayan bir anahtarla imzaladı. Anahtarı sunucuyu yöneten ekler.",
-      "store_unreachable": "Mağazaya ulaşılamadı. Biraz sonra bağlantıyı yeniden deneyin.",
-      "store_bad_answer": "Mağaza, filex'in kabul etmediği bir yanıt verdi: okuyamadığı bir yanıt, bir yönlendirme (mağazanın API'si yönlendirme izlenmeden sorulur) ya da bu sunucunun saatinden bir günden fazla uzak bir zaman. Sunucunun saatini denetleyin.",
-      "store_signature_invalid": "Bağlantının imzası, bu mağazaya güvenilen anahtarlarla doğrulanmıyor. Hiçbir şey kurulmadı.",
-      "intent_unknown": "Mağaza bu kurulum bağlantısını tanımıyor.",
-      "intent_gone": "Bu kurulum bağlantısı zaten kullanılmış ya da süresi dolmuş. Mağazada yeniden Kur'a basın.",
-      "intent_expired": "Bu kurulum bağlantısının süresi doldu. Mağazada yeniden Kur'a basın.",
-      "intent_used": "Bu kurulum bağlantısı bu filex'te zaten kullanıldı.",
-      "intent_invalid": "Bu kurulum bağlantısı filex'in işleyebileceği bir bağlantı değil: bir bağlantının taşıması gereken bir şey eksik ya da bozuk (oluşturulduğu filex, commit, manifestin SHA-256 özeti). Mağazada yeniden Kur'a basın; yine olursa mağazanın bağlantılarının düzeltilmesi gerekir.",
-      "intent_pin_mismatch": "Uygulamanın deposunun sunduğu, mağazanın onayladığı değil ({fields}). Hiçbir şey kurulmadı.",
-      "intent_pin_mismatch_commit": "Sürümün etiketi artık mağazanın onayladığı commit'in sunduğunu sunmuyor: depo etiketi taşımış ({fields}). Hiçbir şey kurulmadı.",
-      "intent_wrong_instance": "Bu kurulum bağlantısı başka bir filex için oluşturuldu ({link}); bu filex {here}. Mağazada yeniden Kur'a basın ve bu filex'in adresini verin.",
-      "intent_wrong_instance_public_url": "Bu filex'in FILEX_PUBLIC_URL ayarı, mağaza bağlantılarının bağlanabileceği bir adres değil (sunucu adı olan bir http ya da https adresi olmalı; kullanıcı adı, sorgu ya da parça içermemeli). Sunucuyu yöneten düzeltene kadar hiçbir mağaza bağlantısı alınmaz.",
-      "store_source_changed": "Kurulu sürüm ({version}) {installed} geldi; bu bağlantı ise {link} geliyor. Bir mağaza bağlantısı bir uygulamayı asla başka bir mağazaya ya da depoya taşımaz, lisans anahtarını da. Önce kurulu uygulamayı kaldırın (bu, ayarlarını ve sakladıklarını siler), sonra bağlantıyı yeniden açın.",
-      "store_source_changed_direct": "Kurulu sürüm ({version}) bir mağazadan değil, doğrudan deposundan ({repo}) kuruldu. {store} mağazasının ücretli bağlantısı kurulu bir uygulamayı kendi lisansına almaz: mağazanın ücretli sürümüne geçmek için önce kurulu uygulamayı kaldırın (bu, ayarlarını ve sakladıklarını siler), sonra bağlantıyı yeniden açın.",
-      "intent_version_rollback": "{installed} kurulu; bağlantı {link} sürümü için ve bu daha yeni değil. Mağaza bağlantısı kurar ya da yükseltir, asla geri götürmez.",
-      "intent_session_unknown": "Bu inceleme artık açık değil: zaten kuruldu ya da kapatıldı veya süresi doldu. Mağazanın kurulum bağlantısını yeniden açın.",
-      "license_key_invalid": "Bu lisans anahtarı kullanılamaz: 4 ile 512 karakter arası, boşluksuz (sunucunun onu saklamak için FILEX_SECRET_KEY'e de ihtiyacı var).",
-      "store_not_connected": "Bu filex mağazaya bağlı değil. Bir yönetici onu Eklentiler, Uygulamalar, Güvenilen mağazalar, Bağla altından, mağazanın \"My instances\" sayfasının ürettiği tek kullanımlık kodla bağlar.",
-      "store_connection_refused": "Mağaza bu filex'in imzalı isteğini reddetti. Mağaza bağlantıyı kestiyse yeni bir kodla yeniden bağlayın.",
-      "store_connect_code_invalid": "Mağaza bu bağlantı kodunu kabul etmedi: kod bilinmiyor, kullanılmış, süresi dolmuş ya da başka bir filex adresi için üretilmiş. Mağazanın \"My instances\" sayfasında bu filex için yeni bir kod üretin.",
-      "store_refused": "Mağaza reddetti: {message}",
-      "store_index_invalid": "Mağazanın kataloğu, mağazaya güvenilen anahtarla doğrulanmıyor, süresi dolmuş ya da bu filex'in okuduğu biçimde değil. Ondan hiçbir şey gösterilmiyor.",
-      "store_media_invalid": "Mağazanın kataloğunda böyle bir simge yok ya da simgenin baytları adının sabitlediği baytlar değil."
     },
     "malformed": "Bu adres, filex'in okuyabildiği bir mağaza kurulum bağlantısı değil. Mağazanın Kur bağlantısını yeniden açın.",
     "framed": "Bir mağazanın kurulum bağlantısı bir çerçevenin içinde kullanılamaz. Kendi tarayıcı sekmesinde açın.",
@@ -4052,6 +3985,30 @@
       "noGroups": "Bu kiracıda henüz grup yok.",
       "saved": "Mağaza ekranı kaydedildi.",
       "updated": "Değiştiren {who}, {when}"
+    },
+    "storage": {
+      "title": "{name} {version} depolama eklentisi",
+      "fromStore": "{store} mağazasından",
+      "kind": "Depolama eklentisi",
+      "paid": "Ücretli",
+      "fields": {
+        "version": "Sürüm",
+        "platform": "Bu sunucu",
+        "sha256": "SHA-256",
+        "size": "Boyut",
+        "source": "GitHub reposu",
+        "platforms": "Yapılar"
+      },
+      "upgrade": "{from} → {to}",
+      "capabilities": "Mağaza denetiminin doğruladıkları",
+      "notes": "Sürüm notları",
+      "licenseFromLink": "Bağlantıdaki anahtarı ({prefix}) kullanmak için boş bırakın",
+      "install": "Kur",
+      "upgradeAction": "Yükselt",
+      "done": "{app} {version} kuruldu.",
+      "doneUpgrade": "{app}, {version} sürümüne yükseltildi.",
+      "doneNext": "filex şimdi eklentiyi başlatıyor ve iddialarını deniyor; durumu ve üzerinde oluşturabileceğiniz depolar Depolama eklentileri sayfasında.",
+      "openList": "Depolama eklentilerini aç"
     }
   },
   "storeScreen": {
@@ -4072,8 +4029,6 @@
     "send": "İsteği gönder",
     "sent": "{name} isteğiniz yöneticilere gönderildi.",
     "alreadySent": "{name} isteğiniz zaten yöneticileri bekliyor.",
-    "tooMany": "Bekleyen birkaç isteğiniz var; yenisini istemeden önce bir karar verilmesini bekleyin.",
-    "alreadyInstalled": "Bu sürüm zaten kurulu.",
     "mine": "İsteklerim",
     "noRequests": "Henüz bir uygulama istemediniz.",
     "verified": "Doğrulanmış",
@@ -4086,12 +4041,21 @@
       "store": "Mağaza",
       "requested": "İstenme",
       "status": "Durum",
-      "note": "Not"
+      "note": "Not",
+      "plugin": "Eklenti",
+      "checks": "Mağaza denetimi"
     },
     "state": {
       "installed": "Kurulu",
       "pending": "İstendi",
       "update": "{version} sürümü kurulu"
-    }
+    },
+    "tabs": {
+      "label": "Mağazanın sunduğu",
+      "apps": "Uygulamalar",
+      "storage": "Depolama eklentileri"
+    },
+    "requestStorage": "Bu eklentiyi iste",
+    "storageEmpty": "Mağazada listelenen depolama eklentisi yok."
   }
 }

@@ -296,7 +296,7 @@ async function approveStore() {
     await router?.push({ name: 'store-install' });
   } catch (e: unknown) {
     const sr = storeRefusal(e);
-    failure.value = (sr && storeSentence(sr, t)) || pluginRequestError(e)?.message || extractError(e, t('errors.generic'));
+    failure.value = (sr && storeSentence(sr)) || pluginRequestError(e)?.message || extractError(e, t('errors.generic'));
   } finally {
     busy.value = false;
   }

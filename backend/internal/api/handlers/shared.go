@@ -38,6 +38,9 @@ type Shared struct {
 	// ThumbRefresh draws in the background what a projected row found missing
 	// or stale (hydrateThumbs).
 	ThumbRefresh ThumbRefresher
+	// ACL carries the vault rule (acl.Resolver.VaultRoot): a row inside a
+	// vault says `encrypted: "vault"`, not "folder". Nil = no vault is known.
+	ACL *acl.Resolver
 }
 
 // NewShared constructs the handler.
@@ -45,6 +48,9 @@ func NewShared(store db.Store) *Shared { return &Shared{Store: store} }
 
 // AttachThumbSigner wires the thumbnail URL stamp.
 func (h *Shared) AttachThumbSigner(s *thumb.Signer) { h.ThumbSigner = s }
+
+// AttachACL wires the resolver whose vault rule the rows' `encrypted` asks.
+func (h *Shared) AttachACL(r *acl.Resolver) { h.ACL = r }
 
 // SharedWithMe lists the items the caller holds a grant on, newest grant
 // first, paginated with ?limit= (default 100, max 500) and ?offset=.
@@ -106,6 +112,10 @@ func (h *Shared) SharedWithMe(w http.ResponseWriter, r *http.Request) {
 	}
 	var rows []row
 	sharedStorages := []string{}
+	// `e2e_root` and `encrypted` on each row, as on every row outside a
+	// folder listing (e2eRoots.stampRow): a file shared with the person from
+	// inside an encrypted folder or a vault says so (task #189).
+	roots := newE2eRoots(h.Store).withVaults(h.ACL)
 
 	for _, st := range storages {
 		// (4) tenant gate — before any read that could reveal the storage.
@@ -180,6 +190,7 @@ func (h *Shared) SharedWithMe(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			entry := h.project(r.Context(), st, g, rel)
+			roots.stampRow(r.Context(), st.ID, st.Name, rel, entry)
 			rows = append(rows, row{entry: entry, at: g.CreatedAt.UnixMilli()})
 		}
 	}

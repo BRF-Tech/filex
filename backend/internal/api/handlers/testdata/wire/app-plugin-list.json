@@ -39,6 +39,7 @@
         "status": "needs_approval",
         "version": "1.3.0"
       },
+      "update_said": "new: mail:send",
       "update_source": "github",
       "updated_at": "2026-09-20T10:00:00Z",
       "version": "1.2.0",
@@ -58,6 +59,10 @@
     },
     "filex_version": "0.47.0",
     "requires_signature": false,
+    "said": {
+      "state": "Apps are on",
+      "update_check": "The apps’ sources were last checked for updates 2026-09-26 03:00 UTC."
+    },
     "update_check": true,
     "updates_checked_at": "2026-09-26T03:00:00Z"
   }

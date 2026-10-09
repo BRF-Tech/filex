@@ -56,7 +56,12 @@ type Answer struct {
 // `license:<app>`): the key sealed, its prefix for the screens, and the
 // store's last signed answers - the evidence a status is judged from.
 type License struct {
-	App       string `json:"app"`
+	// App is the row's id: the app's name, or "storage:<name>" for a storage
+	// plugin (LicenseID).
+	App string `json:"app"`
+	// StoreApp is what the store calls the entry when it is not App (a
+	// storage plugin's name, without the prefix): what a check names.
+	StoreApp  string `json:"store_app,omitempty"`
 	Store     string `json:"store"`
 	KeySealed string `json:"key_sealed,omitempty"`
 	KeyPrefix string `json:"key_prefix,omitempty"`
@@ -75,6 +80,24 @@ type License struct {
 	Status    string    `json:"status,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// storeName is the entry's name at its store: what a check asks about and
+// what the store's answer must name.
+func (l *License) storeName() string {
+	if l.StoreApp != "" {
+		return l.StoreApp
+	}
+	return l.App
+}
+
+// kind is the kind of entry the license is for (KindStorage, or "" for an
+// app).
+func (l *License) kind() string {
+	if strings.HasPrefix(l.App, StoragePrefix) {
+		return KindStorage
+	}
+	return ""
 }
 
 func (l *License) answer(env *Envelope) *Answer {
@@ -122,7 +145,12 @@ func (a *Answer) bound() {
 // View is a license as the administrator's panel shows it. The key itself
 // is never in it - its prefix only.
 type View struct {
+	// App is the license's id (LicenseID): an app's name, or
+	// "storage:<name>"; Name is the entry's own name and Kind "storage" for a
+	// storage plugin ("" for an app), so a screen never reads the id.
 	App           string     `json:"app"`
+	Name          string     `json:"name,omitempty"`
+	Kind          string     `json:"kind,omitempty"`
 	Required      bool       `json:"required"`
 	Status        string     `json:"status"`
 	Held          bool       `json:"held"`
@@ -251,6 +279,13 @@ type Undo struct {
 // RequireUndoable is Require, answering what to Undo when the install it
 // prepared fails.
 func (s *Service) RequireUndoable(ctx context.Context, app, store, key string, actorID *int64) (*Undo, error) {
+	return s.RequireUndoableAs(ctx, app, app, store, key, actorID)
+}
+
+// RequireUndoableAs is RequireUndoable for the license row id (LicenseID)
+// of an entry the store calls storeApp: a storage plugin's row is
+// "storage:<name>", its checks name <name>.
+func (s *Service) RequireUndoableAs(ctx context.Context, app, storeApp, store, key string, actorID *int64) (*Undo, error) {
 	s.licMu.Lock()
 	defer s.licMu.Unlock()
 	l, err := s.license(ctx, app)
@@ -261,6 +296,9 @@ func (s *Service) RequireUndoable(ctx context.Context, app, store, key string, a
 	created := l == nil
 	if created {
 		l = &License{App: app}
+		if storeApp != app {
+			l.StoreApp = storeApp
+		}
 	} else {
 		prev := *l
 		u.prev = &prev
@@ -457,7 +495,7 @@ func (s *Service) checkLocked(ctx context.Context, l *License) {
 		fail(code, redact(err.Error(), key))
 		return
 	}
-	env, err := s.opts.Client.VerifyLicense(ctx, l.Store, LicenseRequest{Key: key, App: l.App, InstanceID: id, FilexVersion: s.opts.FilexVersion})
+	env, err := s.opts.Client.VerifyLicense(ctx, l.Store, LicenseRequest{Key: key, App: l.storeName(), InstanceID: id, FilexVersion: s.opts.FilexVersion})
 	if err != nil {
 		e, _ := AsError(err)
 		code := CodeUnreachable
@@ -511,7 +549,7 @@ func (s *Service) acceptable(l *License, a *Answer, instanceID string) string {
 	if a.InstanceID != instanceID {
 		return "the store's license answer is about another installation"
 	}
-	if a.App != l.App && a.Result != ResultWrongApp {
+	if a.App != l.storeName() && a.Result != ResultWrongApp {
 		return "the store's license answer is about another app (" + a.App + ")"
 	}
 	if a.CheckedAt.IsZero() {
@@ -565,6 +603,32 @@ func (s *Service) applyLocked(ctx context.Context, l *License, actorID *int64) {
 	case !held && prevHeld:
 		s.audit(ctx, actorID, "app_plugin.license_released", "app_plugin", l.App, map[string]any{"app": l.App, "status": status, "store": l.Store, "key_prefix": l.KeyPrefix})
 	}
+}
+
+// HoldReasonStoreOff is why a storage plugin under a store's license is
+// held on a server whose app store is off: nobody can check the license, so
+// the plugin does not run (server.go holds it before any plugin starts).
+const HoldReasonStoreOff = "license: not checked - the app store is off on this server"
+
+// StorageLicensed answers the storage plugins a store's license names - the
+// `license:storage:<name>` rows, whatever their status - read straight from
+// the rows, so it answers with the app store off too.
+func StorageLicensed(ctx context.Context, st StateStore) ([]string, error) {
+	if st == nil {
+		return nil, nil
+	}
+	rows, err := st.ListAppStoreState(ctx, keyLicensePrefix+StoragePrefix)
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for key := range rows {
+		if name := strings.TrimPrefix(key, keyLicensePrefix+StoragePrefix); name != "" {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func heldStatus(status string) bool {
@@ -720,7 +784,7 @@ func (s *Service) AppLicense(ctx context.Context, app string) *AppView {
 
 func (s *Service) viewOf(ctx context.Context, l *License) *View {
 	status, held := judge(l, s.clk.NowFor(l.Store))
-	v := &View{App: l.App, Required: true, Status: status, Held: held, Store: l.Store, KeyPrefix: l.KeyPrefix,
+	v := &View{App: l.App, Name: l.storeName(), Kind: l.kind(), Required: true, Status: status, Held: held, Store: l.Store, KeyPrefix: l.KeyPrefix,
 		LastErrorCode: l.LastErrorCode, LastError: l.LastError, StoreTrusted: s.TrustStatus(ctx, l.Store) != ""}
 	if !l.LastAttemptAt.IsZero() {
 		t := l.LastAttemptAt

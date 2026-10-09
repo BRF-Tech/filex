@@ -42,6 +42,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/pluginreq"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 )
@@ -215,33 +216,58 @@ func (h *PluginRequests) fail(w http.ResponseWriter, err error, req *model.Plugi
 	case errors.As(err, &sup):
 		status = http.StatusConflict
 		body["error"] = "superseded"
-		body["message"] = "the source no longer serves what this request froze; nothing was installed: " + sup.Why
+		body["message"] = srvtext.Text(lang, "server.plugin_request.superseded", nil)
+		body["detail"] = "the source no longer serves what this request froze; nothing was installed: " + sup.Why
 	case errors.As(err, &pe):
 		status = pe.Status
 		body["error"] = pe.Code
 		body["message"] = pe.Message
+		// The reader's sentence (server.plugin_request.*); the English stays
+		// as `detail`, for a log.
+		if said := pluginRequestSaid(lang, pe); said != "" {
+			body["message"] = said
+			body["detail"] = pe.Message
+			if len(pe.Params) > 0 {
+				body["params"] = pe.Params
+			}
+		}
 	case errors.As(err, &ie):
 		// The install review's refusal, in the shape the wizard reads.
-		(&AppPluginsAdmin{}).fail(w, err)
+		writeAppFailure(w, lang, err)
 		return
 	case errors.As(err, &rej):
 		status = http.StatusBadRequest
 		body["error"] = "refused"
-		body["message"] = err.Error()
+		body["message"] = srvtext.Text(lang, "server.plugin_request.plugin_refused", srvtext.Vars{"detail": err.Error()})
+		body["detail"] = err.Error()
 	default:
 		if errors.Is(err, plugin.ErrBadName) {
 			status = http.StatusBadRequest
 			body["error"] = "bad_request"
+			body["message"] = srvtext.Text(lang, "server.plugin_request.bad_plugin_name", nil)
 		} else {
 			status = installStatus(err)
 			body["error"] = "failed"
+			body["message"] = srvtext.Text(lang, "server.plugin_request.install_failed", srvtext.Vars{"detail": err.Error()})
 		}
-		body["message"] = err.Error()
+		body["detail"] = err.Error()
 	}
 	if req != nil {
 		body["request"] = pluginRequestView(req, lang, false)
 	}
 	writeJSON(w, status, body)
+}
+
+// pluginRequestSaid is a request refusal's sentence in lang:
+// `server.plugin_request.<say or code>` filled with its params, "" for a
+// refusal the catalogue has no sentence for.
+func pluginRequestSaid(lang string, pe *pluginreq.Error) string {
+	for _, name := range []string{pe.Say, pe.Code} {
+		if key := "server.plugin_request." + name; name != "" && srvtext.Has(key) {
+			return srvtext.Text(lang, key, srvtext.Vars(pe.Params))
+		}
+	}
+	return ""
 }
 
 // Create leaves a request: POST /api/admin/plugin-requests. 201 with the new
@@ -252,7 +278,7 @@ func (h *PluginRequests) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	var in pluginreq.CreateInput
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "bad json"})
+		writeErrorSaid(w, r, http.StatusBadRequest, "bad_request", "bad_json", nil)
 		return
 	}
 	req, created, err := h.Svc.Create(r.Context(), in, actorOf(r))
@@ -296,7 +322,7 @@ func (h *PluginRequests) List(w http.ResponseWriter, r *http.Request) {
 func requestID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "bad id"})
+		writeErrorSaid(w, r, http.StatusBadRequest, "bad_request", "bad_id", nil)
 		return 0, false
 	}
 	return id, true
@@ -348,7 +374,7 @@ func (h *PluginRequests) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.ContentLength != 0 {
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "bad json"})
+			writeErrorSaid(w, r, http.StatusBadRequest, "bad_request", "bad_json", nil)
 			return
 		}
 	}
@@ -385,7 +411,7 @@ func (h *PluginRequests) Approve(w http.ResponseWriter, r *http.Request) {
 				only = assoc.NewKinds(before, handledBy(now))
 			}
 		}
-		view.AssociationErrors = h.Assoc.PlaceForApp(r.Context(), st.Name, body.Associations, only, actorIDOf(r))
+		view.AssociationErrors = placeFailuresSaid(langOf(r), h.Assoc.PlaceForAppFailures(r.Context(), st.Name, body.Associations, only, actorIDOf(r)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"request": view, "plugin": result})
 }
@@ -398,26 +424,27 @@ func (h *PluginRequests) Approve(w http.ResponseWriter, r *http.Request) {
 // until that install ends it (AppStore.Install → CompleteStore).
 func (h *PluginRequests) approveFromStore(w http.ResponseWriter, r *http.Request, req *model.PluginRequest, licenseKey string) {
 	if h.Store == nil || h.Store.Svc == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "app_store_disabled", "message": "the app store is off on this instance"})
+		writeError(w, r, http.StatusServiceUnavailable, "app_store_disabled", nil)
 		return
 	}
 	if req.Status != model.PluginRequestPending {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "not_pending", "message": "this request is already " + req.Status,
-			"request": pluginRequestView(req, langOf(r), false)})
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "not_pending", "message": srvtext.Text(langOf(r), "server.plugin_request.not_pending", nil),
+			"detail": "this request is already " + req.Status, "request": pluginRequestView(req, langOf(r), false)})
 		return
 	}
 	origin, app, version, ok := pluginreq.StoreSourceOf(req)
 	if !ok {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "bad_request", "message": "the request names no store app"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "bad_request", "message": srvtext.Text(langOf(r), "server.plugin_request.request_broken", nil),
+			"detail": "the request names no store app"})
 		return
 	}
 	got, err := h.Store.Svc.RequestIntent(r.Context(), origin, app, version, licenseKey, actorIDOf(r))
 	if err != nil {
-		storeFail(w, err)
+		storeFail(w, r, err)
 		return
 	}
 	if err := h.Store.Svc.RememberRequest(r.Context(), origin, got.TokenID, req.ID, got.ExpiresAt); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeError(w, r, http.StatusInternalServerError, "internal_error", nil, "detail", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -470,7 +497,7 @@ func (h *PluginRequests) Reject(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.ContentLength != 0 {
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "bad json"})
+			writeErrorSaid(w, r, http.StatusBadRequest, "bad_request", "bad_json", nil)
 			return
 		}
 	}

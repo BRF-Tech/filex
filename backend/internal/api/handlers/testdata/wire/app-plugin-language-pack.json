@@ -61,6 +61,7 @@
     "actions": 0,
     "compat": {
       "filex": "0.47.0",
+      "message": "Works with filex >=0.45.0 <0.47.0; this is 0.47.0. It keeps running.",
       "ok": false,
       "requires": ">=0.45.0 <0.47.0"
     },
@@ -100,6 +101,7 @@
     "name": "lang-es",
     "permissions": [],
     "previous": {
+      "message": "Version 0.9.0 is kept to go back to (replaced 2026-09-24 08:00 UTC)",
       "replaced_at": "2026-09-24T08:00:00Z",
       "version": "0.9.0"
     },

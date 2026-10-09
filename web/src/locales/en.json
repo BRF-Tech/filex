@@ -1305,7 +1305,6 @@
     "restore": "Restore",
     "purge": "Purge",
     "restored": "{name} restored",
-    "restore_taken": "“{name}” was not restored: something already has that name. Rename what is there, then restore again.",
     "purged": "{name} permanently deleted",
     "purge_confirm": "{name} will be permanently deleted. Continue?",
     "restoring": "Restoring…",
@@ -2430,7 +2429,8 @@
       "starting": "Starting…",
       "failed": "Failed",
       "refused": "Refused",
-      "disabled": "Off"
+      "disabled": "Off",
+      "held": "Held (license)"
     },
     "fields": {
       "driver": "Driver",
@@ -2502,7 +2502,9 @@
     },
     "signature": {
       "label": "Signature",
-      "required": "This instance only accepts signed plugins: paste the detached signature over the binary's SHA-256, hex or base64, made with a key the operator trusts. Without it the install is refused."
+      "required": "This instance only accepts signed plugins: paste the detached signature over the build - its name, version, platform and SHA-256 - hex or base64, made with a key the operator trusts. Without it the install is refused.",
+      "version": "Signed version",
+      "versionHint": "The version the signature names, e.g. 1.3.0. Without it only an older signature over the SHA-256 alone can verify: still accepted in 0.55, with a warning, and refused from 0.56."
     },
     "sourceHint": "A GitHub repository (owner/name - filex reads the filex-storage.json attached to its latest release) or the https address of a filex-storage.json. filex checks it daily and tells you when a newer version is there; nothing is installed without you.",
     "checkUpdates": "Check for updates",
@@ -2513,14 +2515,14 @@
     },
     "update": {
       "available": "Update available",
-      "incompatible": "{version} needs filex {requires}",
       "checkFailed": "Could not check",
       "upToDate": "Up to date"
     },
     "actions": {
       "reviewUpdate": "Review update",
       "setSource": "Update source…",
-      "logs": "Log"
+      "logs": "Log",
+      "license": "License…"
     },
     "review": {
       "title": "Update {name}",
@@ -2534,7 +2536,9 @@
       "clear": "Leave it empty to stop checking.",
       "saved": "Saved: {name} follows {source}.",
       "cleared": "{name} has no update source now."
-    }
+    },
+    "fromStore": "From {store}",
+    "licenseTitle": "{name}: license"
   },
   "appPlugins": {
     "title": "Apps",
@@ -2563,30 +2567,14 @@
       "needsApproval": "Needs approval",
       "failed": "Update failed",
       "checkFailed": "Could not check",
-      "failedDetail": "{version} was tried and undone; {current} keeps running",
-      "newPermissions": "new: {permissions}",
-      "addsModule": "brings a module",
-      "needsNewerFilex": "{version} needs filex {requires}",
       "upToDate": "Up to date",
-      "notChecked": "Not checked yet",
-      "noSource": "Installed from a file: there is no source to check for updates",
-      "noManifestAddress": "Installed from an address filex did not keep: upgrade it once from its URL to have it checked for updates",
-      "previous": "Version {version} is kept to go back to (replaced {when})"
+      "notChecked": "Not checked yet"
     },
     "compat": {
-      "bad": "Not compatible with this filex",
-      "needs": "Works with filex {requires}; this is {filex}. It keeps running."
+      "bad": "Not compatible with this filex"
     },
     "runtime": {
-      "on": "Apps are on",
-      "off": "Apps are off on this instance",
-      "archBad": "This server's processor cannot run the WebAssembly engine, and the app platform starts only with it: no app can be installed or run here, not even one that is only an interface or a language.",
-      "signature": "Only signed apps are accepted on this instance.",
-      "engines": "Engines",
-      "devBuild": "This is a development build ({version}): the filex versions apps say they need are not checked.",
-      "updateCheckOff": "The daily update check is off on this instance (FILEX_APP_PLUGIN_UPDATE_CHECK). “Check for updates” still asks.",
-      "lastCheck": "The apps’ sources were last checked for updates {when}.",
-      "neverChecked": "The apps’ sources are checked for updates once a day."
+      "engines": "Engines"
     },
     "fields": {
       "name": "Name",
@@ -2668,33 +2656,6 @@
       "errRepo": "Enter the repository as owner/name.",
       "errFiles": "Choose the manifest (filex-app.json) - and the module (.wasm), unless the app is a language pack.",
       "errUrl": "Enter the manifest URL - and, for an app with a module, the module URL and its 64-character SHA-256.",
-      "errors": {
-        "permissions_incomplete": "Every permission in the manifest has to be granted; missing: {missing}. Review the list again and retry.",
-        "permissions_changed": "The new version asks for permissions the installed one was not granted: {missing}. Review them and confirm again.",
-        "sha256_mismatch": "The module's SHA-256 does not match the one given. Check the hash and the URL.",
-        "manifest_invalid": "The manifest is not a valid filex-app.json: {message}",
-        "signature_required": "This instance only accepts signed apps. Add the signature and try again.",
-        "signature_invalid": "The signature does not verify against any trusted key.",
-        "name_taken": "An app with this name is already installed. Go back to the review and choose the upgrade offered there, or use Upgrade on its row.",
-        "describe_mismatch": "The module describes itself differently from its manifest - the build and the manifest do not belong together.",
-        "sha256_required": "The module is not pinned by a SHA-256, and a downloaded module must be. Enter the hash, or ask the app’s author to put it in the manifest.",
-        "too_large": "The module is larger than this server accepts.",
-        "demo_refused": "Apps cannot be installed on the demo instance.",
-        "not_found": "That app is no longer installed.",
-        "incompatible": "This version works with filex {requires}; this is filex {filex}, so it cannot be installed here.",
-        "up_to_date": "The app’s source has nothing newer than the installed version any more.",
-        "fetch": {
-          "bad_repo": "Write the repository as owner/name, for example BRF-Tech/filex-convert.",
-          "manifest_not_found": "No filex-app.json was found in {where} (tried: {refs}). Check that the repository exists and is public, that filex-app.json is at its root, and - if you entered a ref - that the tag or branch exists.",
-          "module_not_found": "The manifest was found, but the module it names is not there: {where}. The release may not have its plugin.wasm attached yet - check the release, or enter a different ref.",
-          "unreachable": "The server could not reach {where}. Check that it can reach the internet (or that host), then try again.",
-          "http_status": "{where} answered with HTTP {status}. Try again later, or check the address.",
-          "bad_url": "“{where}” is not an address filex downloads apps from: it must be an https:// address on the public internet, not this machine or the private network.",
-          "missing_url": "Enter both the module URL and the manifest URL.",
-          "too_large": "What {where} sent is larger than this server accepts.",
-          "changed": "{where} answered a different version while it was being read. Try again in a moment."
-        }
-      },
       "languagePackNote": "Only languages for filex itself - no module, nothing runs.",
       "alreadyInstalled": "“{name}” is already installed here (version {version}). Installing it a second time is not possible - upgrade the installed one to {next} from this same source instead.",
       "upgradeInstead": "Upgrade it to {version} instead",
@@ -2705,7 +2666,6 @@
       "addsModule": "This version brings a module: code will run where until now nothing did.",
       "samePermissions": "It asks for the same permissions as the installed version.",
       "newPermission": "New",
-      "incompatible": "{name} {version} works with filex {requires}; this is filex {filex}. It cannot be installed here.",
       "enginesMissing": "This server does not have {engines}. The app installs, but what it does with them will not work until they are installed and filex is restarted.",
       "officeMissing": "Office documents are converted by {name}, and none is connected to this server. The app installs; what it does with office documents works once an administrator connects {name} under External services - no restart needed.",
       "ui": "Interface (ui.zip) - for an app with its own interface",
@@ -3963,7 +3923,8 @@
       "store": "Store",
       "lastError": "Last check",
       "changeKey": "Replace the key",
-      "enterKey": "Enter the license key"
+      "enterKey": "Enter the license key",
+      "heldNoteStorage": "The plugin is held: its license is {status}. It stays installed and its storages keep their settings; nothing runs, and they do not open, until the license holds again."
     },
     "stores": {
       "title": "Trusted stores",
@@ -3977,34 +3938,6 @@
     "band": {
       "heldTitle": "A paid app is held because its license does not hold",
       "graceTitle": "The store could not be asked about a paid app's license; it runs on its grace"
-    },
-    "err": {
-      "store_invalid": "That is not a store address filex talks to: a store is reached over https at a public address.",
-      "store_not_allowed": "This server does not allow this store: FILEX_APP_STORE_URLS is set, so install links and licenses are taken only from the stores it lists (none, when it is empty), and no other store is trusted, not even on first use. The operator adds the store there.",
-      "store_key_not_configured": "This store is configured on the server (FILEX_APP_STORE_URLS), but it signed with a key FILEX_APP_STORE_KEYS does not list. The operator adds the key.",
-      "store_unreachable": "The store could not be reached. Try the link again in a moment.",
-      "store_bad_answer": "The store answered something filex does not take: an answer it cannot read, a redirect (a store's API is asked without following one), or a time more than a day away from this server's clock - check the server's clock.",
-      "store_signature_invalid": "The link's signature does not verify against the keys this store was trusted with. Nothing was installed.",
-      "intent_unknown": "The store does not know this install link.",
-      "intent_gone": "This install link was used already, or it has expired. Press Install in the store again.",
-      "intent_expired": "This install link has expired. Press Install in the store again.",
-      "intent_used": "This install link was already used on this filex.",
-      "intent_invalid": "The install link is not one filex can act on: something a link must carry is missing or malformed (the filex it was made for, the commit, the manifest's hash). Press Install in the store again; if it happens again, the store's links need fixing.",
-      "intent_pin_mismatch": "What the app's repository serves is not what the store approved ({fields}). Nothing was installed.",
-      "intent_pin_mismatch_commit": "The release's tag no longer serves what the commit the store approved serves: the repository moved it ({fields}). Nothing was installed.",
-      "intent_wrong_instance": "This install link was made for another filex ({link}); this one is {here}. Press Install in the store again and give it this filex's address.",
-      "intent_wrong_instance_public_url": "This filex's FILEX_PUBLIC_URL is not an address store links can be held to (an http or https address with a host, and no user name, query or fragment), so no store link is taken until the operator fixes it.",
-      "store_source_changed": "The installed version ({version}) came from {installed}; this link comes from {link}. A store link never moves an app to another store or repository, nor its license key. Remove the installed app first (that deletes its settings and what it kept), then open the link again.",
-      "store_source_changed_direct": "The installed version ({version}) was installed straight from its repository ({repo}), not from a store. The paid link of {store} does not take an installed app under its license: to move to the store's paid version, remove the installed app first (that deletes its settings and what it kept), then open the link again.",
-      "intent_version_rollback": "{installed} is installed; the link is for {link}, which is not newer. A store link installs or upgrades, never goes back.",
-      "intent_session_unknown": "This review is no longer open: it was installed or closed already, or it timed out. Open the store's install link again.",
-      "license_key_invalid": "That license key cannot be used: 4 to 512 characters, no spaces (and the server needs FILEX_SECRET_KEY to keep it).",
-      "store_not_connected": "This filex is not connected to the store. An administrator connects it under Plugins, Apps, Trusted stores, Connect, with the one-time code the store's \"My instances\" page makes.",
-      "store_connection_refused": "The store refused this filex's signed request. If the store disconnected it, connect it again with a new code.",
-      "store_connect_code_invalid": "The store did not take this connection code: it is unknown, used, expired or made for another filex address. Make a new one on the store's \"My instances\" page for this filex.",
-      "store_refused": "The store refused: {message}",
-      "store_index_invalid": "The store's catalog does not verify with the key it is trusted with, has expired, or is not one this filex reads. Nothing from it is shown.",
-      "store_media_invalid": "The store's catalog names no such icon, or its bytes are not the ones its name pins."
     },
     "malformed": "This address is not a store's install link filex can read. Open the store's Install link again.",
     "framed": "A store's install link cannot be used inside a frame. Open it in its own browser tab.",
@@ -4052,6 +3985,30 @@
       "noGroups": "There is no group in this tenant yet.",
       "saved": "Store screen saved.",
       "updated": "Changed by {who}, {when}"
+    },
+    "storage": {
+      "title": "Storage plugin {name} {version}",
+      "fromStore": "From store {store}",
+      "kind": "Storage plugin",
+      "paid": "Paid",
+      "fields": {
+        "version": "Version",
+        "platform": "This server",
+        "sha256": "SHA-256",
+        "size": "Size",
+        "source": "GitHub repository",
+        "platforms": "Builds for"
+      },
+      "upgrade": "{from} → {to}",
+      "capabilities": "Proved by the store's checks",
+      "notes": "Release notes",
+      "licenseFromLink": "Leave empty to use the key the link carries ({prefix})",
+      "install": "Install",
+      "upgradeAction": "Upgrade",
+      "done": "{app} {version} is installed.",
+      "doneUpgrade": "{app} is upgraded to {version}.",
+      "doneNext": "filex now starts it and probes its claims; its state, and the storages you can make on it, are on the Storage plugins page.",
+      "openList": "Open the storage plugins page"
     }
   },
   "storeScreen": {
@@ -4072,8 +4029,6 @@
     "send": "Send the request",
     "sent": "Your request for {name} was sent to the administrators.",
     "alreadySent": "Your request for {name} is already waiting for the administrators.",
-    "tooMany": "You have several requests waiting; wait for a decision before asking for more.",
-    "alreadyInstalled": "This version is installed already.",
     "mine": "My requests",
     "noRequests": "You have not asked for an app yet.",
     "verified": "Verified",
@@ -4086,12 +4041,21 @@
       "store": "Store",
       "requested": "Asked",
       "status": "Status",
-      "note": "Note"
+      "note": "Note",
+      "plugin": "Plugin",
+      "checks": "Store checks"
     },
     "state": {
       "installed": "Installed",
       "pending": "Requested",
       "update": "Version {version} installed"
-    }
+    },
+    "tabs": {
+      "label": "What the store offers",
+      "apps": "Apps",
+      "storage": "Storage plugins"
+    },
+    "requestStorage": "Ask for this plugin",
+    "storageEmpty": "The store lists no storage plugin."
   }
 }

@@ -561,7 +561,15 @@ encrypted folder's own row `e2e: true`. A vault (encryption level 3,
 carries `e2e_vault: true`, and a listing of the vault folder or of anything
 in it carries `e2e_vault_root` (the vault folder's wire path) - what is
 listed there is the vault's layout on the storage (`v/`, packs, index
-files), which clients never show as folders.
+files), which clients never show as folders. Every **file** row inside an
+encrypted folder says how it is encrypted - `encrypted: "folder"`, or
+`"vault"` inside a vault; a single encrypted file (`.fxe`) elsewhere says
+`"file"` - and so does each file row of the search answer, Recent, Starred,
+a tag view, Shared with me and `/api/files/stat`; a folder row and a plain
+file never carry it (one rule, `encryptedKind` in
+`internal/api/handlers/e2e_rows.go`). An app's interface is handed it as
+`FileInfo.encrypted`, and an app is refused such a file's bytes
+([APP-PLUGINS-API.md](APP-PLUGINS-API.md#which-rows-say-encrypted)).
 
 **Status codes:** `200` ok · `403` forbidden · `404` path missing.
 
@@ -1116,13 +1124,18 @@ folder, outside every encrypted folder; `files.create` at its parent and the
 [encryption rule](#encryption-policy) there (a `new_folder` approval is spent
 under the `approval` policy, `403 e2e_not_allowed` otherwise). It writes the
 folder, the key file and the index, in that order, and removes what it wrote
-when a step fails. `201 { "generation": 1 }`; audited as `vault.create`.
+when a step fails. `201 { "generation": 1, "owner_id", "owner_name", "owner_self" }`
+(who owns the folder, as `state` says it); audited as `vault.create`.
 
 ### `GET /api/files/e2e/vault/state` ![user](https://img.shields.io/badge/-user-blue)
-`?path=` → `{ "vault_id", "pack_log2", "generation", "lock" }`: `generation` is
-the latest (0 when there is no index file), `lock` is `null` or
+`?path=` → `{ "vault_id", "pack_log2", "generation", "lock", "owner_id",
+"owner_name", "owner_self" }`: `generation` is the latest (0 when there is no
+index file), `lock` is `null` or
 `{ "holder": {name, client, label}, "since", "expires_at", "mine" }` - `mine`
-for the session whose token the request carries. Needs the right to download
+for the session whose token the request carries. The three `owner_*` keys say
+who owns the vault folder, as a listing row does (each omitted when there is
+nothing to say): every row inside the vault is drawn as the folder's, since
+the index records no author. Needs the right to download
 from the folder.
 
 ### `GET /api/files/e2e/vault/list` ![user](https://img.shields.io/badge/-user-blue)
@@ -2267,13 +2280,27 @@ the state is what the manager sees right now.
   "updates_checked_at": "2026-09-27T03:00:00Z"
 }
 ```
-`state` is one of `running` · `starting` · `failed` · `refused` · `disabled`;
-`state_error` carries the reason for the last two. `in_use` counts storages on
-this plugin's driver. `source` is where newer versions are published and
-`update` what the last check of it found - `status` `current` · `available` ·
-`incompatible` (`requires`) · `check_failed` (`error`); both absent without a
-source ([PLUGINS.md → Updates from a source](PLUGINS.md#updates-from-a-source)).
-Nothing updates itself.
+`state` is one of `running` · `starting` · `failed` · `refused` · `disabled` ·
+`held`; `state_error` carries the reason for `failed`, `refused` and `held`
+(`held`: installed from an app store, and its license does not hold - nothing
+runs, its storages do not open, nothing is removed; 0.55). `in_use` counts
+storages on this plugin's driver. `source` is where newer versions are
+published and `update` what the last check of it found - `status` `current` ·
+`available` · `incompatible` (`requires`) · `check_failed` (`error`); both
+absent without a source ([PLUGINS.md → Updates from a source](PLUGINS.md#updates-from-a-source)).
+**`update_said`** (0.55) is the line the panel shows for `incompatible` and
+`check_failed`, in the reader's language.
+Nothing updates itself. A plugin installed from an app store (0.55) also
+carries **`from_store`** (the store's origin) and, when it is paid,
+**`license`** - the same license view an app's License section reads (never
+the key) ([PLUGINS.md → Installing from a store](PLUGINS.md#installing-from-a-store)).
+On an instance that requires signatures, **`legacy_signature: true`** marks a
+build whose signature verified only in the old sha256-only form (taken in 0.55,
+refused from 0.56) and **`signature_notice`** is the server's sentence for it,
+in the reader's language ([PLUGINS.md → What is signed](PLUGINS.md#what-is-signed)).
+A store-licensed plugin is held before any plugin starts, and with the app
+store off it starts held (`state_error` `license: not checked - the app store is
+off on this server`).
 
 Top level: **`requires_signature`** says this instance refuses unsigned binaries
 (trusted keys are configured), and **`conformance`** is the *mode* -
@@ -2303,16 +2330,25 @@ download may also carry `source`, kept for the daily check):
 
 | Shape | Body |
 |---|---|
-| upload | `multipart/form-data` with `name`, `file` and optionally `signature` |
-| download | `{"name":"…","url":"https://…","sha256":"…","signature":"…"}` - the hash is **required** |
+| upload | `multipart/form-data` with `name`, `file` and optionally `signature` and `version` |
+| download | `{"name":"…","url":"https://…","sha256":"…","signature":"…","version":"…"}` - the hash is **required** |
 | from its source | `{"name":"…","source":"owner/name"}` (or the https address of a `filex-storage.json`) - the build for this platform, held to the feed's SHA-256; the source is kept |
 | remote | `{"name":"…","kind":"remote","address":"http(s)://…","token":"…"}` |
 
 **201** with the same object as above. `409` when the name is taken, `400` for
 a bad name (`[a-z0-9][a-z0-9_-]{0,31}`), a missing hash, a remote plugin
 with no `FILEX_SECRET_KEY` configured to seal its token, or - when
-`requires_signature` is true - a missing or unverifiable `signature` (a detached
-ed25519 signature over the binary's lower-case hex sha256).
+`requires_signature` is true - a missing or unverifiable `signature`: a detached
+ed25519 signature over the build's text - `filex-storage-build:v1`, the name it
+is installed under, `version` (the version it was signed as), this server's
+platform and the lower-case hex sha256 ([PLUGINS.md → What is signed](PLUGINS.md#what-is-signed)).
+The old form, over the sha256 alone, is still taken in 0.55: the answer then
+carries `legacy_signature: true` (and the list's `signature_notice`, the
+server's sentence), and the request's audit row `legacy_signature: true`. A
+build a store's `artifact` key signed is refused here unless that store still
+lists that version ([PLUGINS.md → A build a store signed](PLUGINS.md#a-build-a-store-signed));
+`message` is then the server's own sentence for it (`server.error.store_signed_build`)
+and `detail` says which store, plugin and version.
 
 > ⚠ **201 does not mean usable.** Installing writes the row and starts the
 > plugin; describe and the conformance probes happen after that, asynchronously.
@@ -2322,8 +2358,8 @@ ed25519 signature over the binary's lower-case hex sha256).
 > for the state rather than treating the 201 as the answer.
 
 ### `POST /api/admin/plugins/{id}/upgrade` ![admin](https://img.shields.io/badge/-admin-red)
-`multipart/form-data` with `file` (and `signature` when required). Replaces a
-**binary** plugin's file while keeping the row, the name, the driver and every
+`multipart/form-data` with `file` (and `signature` and `version` when required,
+as for an install). Replaces a **binary** plugin's file while keeping the row, the name, the driver and every
 storage built on it - remove+install would take the registration with it, and a
 storage whose driver has gone cannot open.
 
@@ -2575,7 +2611,11 @@ install review's dry run - and freezes what it answered on the request.
 **200** with `"created": false` and the pending request when one is already
 waiting for the same source. `409 already_installed` (request an upgrade
 instead), `409 incompatible`, and the install review's own refusals
-(`fetch_failed`, `manifest_invalid`, …) with their codes.
+(`fetch_failed`, `manifest_invalid`, …) with their codes. A request's
+refusal carries the server's sentence in the reader's language in `message`
+(`server.plugin_request.*`, 0.55), its values in `params` and the English
+detail in `detail`; a `bad_request` says which field it wants
+([API-ERRORS.md](API-ERRORS.md)).
 
 A request on the wire:
 ```json
@@ -3056,16 +3096,18 @@ admin-scoped key where its page says so.
 | `GET` · `POST /api/admin/tools/thumbnails/repair`, `GET …/problems`, `GET …/generators`, `GET` · `PATCH …/settings` | Admin → Tools → Thumbnail repair, the files without a thumbnail, who drew what, folder previews and the SVG limits | [thumbnails.md](thumbnails.md#admin--tools--thumbnail-repair) |
 | `GET /api/admin/plugins/{id}/logs`, `GET /api/admin/app-plugins/{id}/logs` | a storage plugin's log, an app's log | [PLUGINS.md](PLUGINS.md#plugin-log), [APP-PLUGINS.md](APP-PLUGINS.md) |
 | `GET` · `POST /api/admin/app-plugins/stores`, `DELETE …/stores?store=` | the app stores this filex trusts (trust on first use names the key fingerprints shown, or `FILEX_APP_STORE_URLS`); a signed-in platform administrator only, an API key of any kind `403 session_required` | [APP-PLUGINS.md](APP-PLUGINS.md#trusted-stores), [APP-PLUGINS-API.md](APP-PLUGINS-API.md#filexs-side-apiadminapp-plugins) |
-| `POST /api/admin/app-plugins/store-intent`, `POST …/store-intent/install`, `POST …/store-intent/cancel` | a store's install link: its review (or the trust question), the install of what it names, its cancellation; the same gate | [APP-PLUGINS.md](APP-PLUGINS.md#installing-from-a-store), [APP-PLUGINS-API.md](APP-PLUGINS-API.md#the-store-contract-0520) |
+| `POST /api/admin/app-plugins/store-intent`, `POST …/store-intent/install`, `POST …/store-intent/cancel` | a store's install link: its review (or the trust question), the install of what it names, its cancellation; the same gate. A storage plugin's link (0.55) answers `storage_review` in place of `review` - the build for this server, where its signature stands, what the store's plugin validator measured, the sentences to read before Install, `can_install` - and its install takes `{handle, license_key?}` | [APP-PLUGINS.md](APP-PLUGINS.md#installing-from-a-store), [PLUGINS.md](PLUGINS.md#installing-from-a-store), [APP-PLUGINS-API.md](APP-PLUGINS-API.md#the-store-contract-0520) |
 | `GET` · `POST /api/admin/app-plugins/stores/connection`, `DELETE …/stores/connection?store=` | the connection to a trusted store a one-time code makes (0.53): its state, connecting, disconnecting; the same gate | [APP-PLUGINS.md](APP-PLUGINS.md#connecting-a-store), [APP-PLUGINS-API.md](APP-PLUGINS-API.md#the-embedded-store-053-162) |
 | `GET` · `PUT /api/admin/app-plugins/store-view` | who sees the store screen, per tenant (0.53); the same gate | [APP-PLUGINS.md](APP-PLUGINS.md#the-store-screen) |
 | `GET /api/app-store`, `GET /api/app-store/catalog`, `GET /api/app-store/media`, `GET` · `POST /api/app-store/requests` | a person's store screen: whether it is shown, a trusted store's catalog as filex verified it, its icons, the requests this person left; a browser session or the desktop app's pairing (any other API key `403 session_required`; `GET /api/app-store` answers it `{visible: false}`) | [APP-PLUGINS.md](APP-PLUGINS.md#the-store-screen), [APP-PLUGINS-API.md](APP-PLUGINS-API.md#the-embedded-store-053-162) |
-| `GET /api/admin/app-plugins/licenses`, `GET` · `PUT /api/admin/app-plugins/{id}/license`, `POST …/{id}/license/verify` | paid apps' licenses: the status and the facts (never the key), a new key, a check now; the same gate | [APP-PLUGINS.md](APP-PLUGINS.md#paid-apps) |
+| `GET /api/admin/app-plugins/licenses`, `GET` · `PUT /api/admin/app-plugins/{id}/license`, `POST …/{id}/license/verify` | paid apps' licenses: the status and the facts (never the key), a new key, a check now; the same gate. `licenses` lists a paid storage plugin's too (`app` `storage:<name>`, `name`, `kind` `storage`) | [APP-PLUGINS.md](APP-PLUGINS.md#paid-apps) |
+| `GET` · `PUT /api/admin/app-plugins/storage/{name}/license`, `POST …/storage/{name}/license/verify` | a paid storage plugin's license from a store (0.55): the same view, a new key, a check now; the same gate | [PLUGINS.md](PLUGINS.md#a-paid-storage-plugin) |
 | `GET` · `PATCH /api/admin/archives`, `POST /api/admin/archives/test` | **Settings → Archives**: the live archive policy, the providers' status, an encrypted round trip (platform operator only) | [ARCHIVES.md](ARCHIVES.md#process-configuration) |
 | `GET /api/files/onlyoffice/diagnose?path=` (or `?id=`) | what filex last answered the document server for a document, and when its editor was last opened - this process only | [ONLYOFFICE.md](ONLYOFFICE.md#failure-editor-shows-download-failed) |
 | `POST /api/files/onlyoffice/session` `{path, key, action, token}` | whether an open editing session is still on the document's current version (`state`), and the person's answer when it is not (`mine`, `theirs`); answers need `files.modify` and, since 0.54, to be one of that session's own editors - `token` is the editor configuration's signed token, which any instance can check (else `403 not_your_session`); each answer is audited (`file.office_session_answered`). A key that is not the document's is answered `{"stale": false, "known": false}`. Kept in the database (`office_sessions`), so every instance sees it | [ONLYOFFICE.md](ONLYOFFICE.md#when-the-document-changes-while-it-is-open) |
 | `GET` · `HEAD /filex-frame/editor` | only with `FILEX_ONLYOFFICE_FRAME_ORIGIN`, and only on that host (normally the Document Server's, whose proxy sends `/filex-frame/*` here), at its root whatever the base path; every other path there is a `404`, and `/filex-frame/` is a `404` on every other host: the page the ONLYOFFICE editor's `api.js` runs in, credential-free and `no-store`, under a policy naming the Document Server in force (`404` while there is none) | [ONLYOFFICE.md](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own) |
 | `GET` · `HEAD /_appui/_onlyoffice/editor` | the same page on `FILEX_APP_UI_ORIGIN`, only on that host, when there is no frame origin. The editor config (`POST /api/files/onlyoffice/config`) names the one in use in `frame` | [ONLYOFFICE.md](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own) |
+| `GET` · `HEAD /_print/` | the page filex prints an app's PDF from (`ui.print`, 0.55): the same for everybody, credential-free, reading nothing on the server; its policy frames only the `blob:` PDF it made from the bytes its parent posted (`frame-src blob:`), and only filex, the desktop app (`app://filex`) and the origins of `FILEX_FRAME_ANCESTORS` may frame it (a page any site could frame would let any site open the print dialog on a PDF of its own under filex's address). It prints only on the person's click on its own button (a trusted click while the browser reports their activation on the page), never by itself. filex's pages may frame it by path | [APP-PLUGINS-API.md](APP-PLUGINS-API.md#printing-a-pdf-uiprint-055) |
 | `GET /api/admin/panel-search?q=&kinds=&limit=`, `GET` · `POST` · `DELETE /api/admin/panel-search/recent`, `DELETE …/recent/{id}` | the admin panel's search: the people, groups, API keys (by name), apps and their actions, storages and shares that match, each read through the list its page reads and behind that page's permission - a kind the caller may not open is left out of `searched`; the caller's own recent searches (the newest 20, never in the audit log). An administrator, or a signed-in session holding a delegated `admin.*` permission | [ADMIN-PANEL.md](ADMIN-PANEL.md#search) |
 
 ---

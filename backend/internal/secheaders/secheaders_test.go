@@ -193,3 +193,34 @@ func TestSplit(t *testing.T) {
 	assert.Equal(t, []string{"https://a.example", "https://b.example", "https://c.example"},
 		Split(" https://a.example, https://b.example  https://c.example,"))
 }
+
+// An app interface's page names no frame-ancestors on purpose: the interface
+// (a sandboxed, opaque origin) frames pages of its own package, and no source
+// expression matches an opaque origin - Chromium refused such a page under
+// `frame-ancestors *`. OpenFraming keeps the handler's policy as it wrote
+// it; without it, or on a page with no policy of its own, the middleware
+// still adds filex's own.
+func TestOpenFraming_KeepsAPagesPolicyWithoutFrameAncestors(t *testing.T) {
+	const own = "default-src 'none'; frame-src https://files.example.com/_appui/app/0123456789abcdef/; sandbox allow-scripts"
+	page := func(open bool, policy string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if policy != "" {
+				w.Header().Set("Content-Security-Policy", policy)
+			}
+			if open {
+				OpenFraming(r)
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte("<!doctype html><p>app"))
+		}
+	}
+	assert.Equal(t, own, serve(t, nil, page(true, own)).Header.Get("Content-Security-Policy"), "opened: no frame-ancestors added")
+	assert.Equal(t, own+"; frame-ancestors 'self'", serve(t, nil, page(false, own)).Header.Get("Content-Security-Policy"), "not opened: filex's own is added")
+	assert.Equal(t, "frame-ancestors 'self'; frame-src 'self'", serve(t, nil, page(true, "")).Header.Get("Content-Security-Policy"),
+		"a page without a policy of its own is filex's page: it gets filex's policy whatever it says")
+
+	// Outside the middleware it is a no-op, never a panic.
+	rec := httptest.NewRecorder()
+	page(true, own).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, own, rec.Result().Header.Get("Content-Security-Policy"))
+}

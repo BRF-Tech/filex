@@ -11,7 +11,8 @@
 //   - the image's own desktop entry said `Exec=AppRun --no-sandbox %U`, so an
 //     AppImage added to the menu by an integrator ran with no sandbox at all;
 //   - the snap's command.sh ended in `--no-sandbox`, and chrome-sandbox was not
-//     in the package.
+//     in the package (since 0.55 the core24 snap's command ends in it, and
+//     `appPartStage` keeps chrome-sandbox out).
 // The launcher (build/linux/launcher.sh) checks for the sandbox first and, when
 // it cannot be built, says what to do and exits 78; outside a snap it never
 // adds --no-sandbox. The AppImage entry carries a harmless switch instead.
@@ -88,12 +89,16 @@ test("the AppImage's own desktop entry no longer turns the sandbox off", () => {
 test('the snap asks for no allow-sandbox, and the launcher asks snapd nothing', () => {
   // ⚠ allow-sandbox is for trusted publishers only and is reviewed by hand:
   // with it the 0.50 and 0.51 revisions never left "Manual review pending".
-  const snap = code(yamlBlock('snap'));
+  // 0.55 (#68): the snap is electron-builder's core24 build, `snapcraft:`.
+  const snap = code(yamlBlock('snapcraft'));
   assert.doesNotMatch(snap, /allow-sandbox/);
   assert.doesNotMatch(snap, /browser-sandbox/);
-  // A browser-support plug of our own would be the same request under
-  // another name; electron-builder's `default` already carries the plain one.
+  // A browser-support plug described by us would be the same request under
+  // another name. core24's `default` list has no browser-support, so the
+  // plain one is named as a string (linux-desktop-entry.test.ts), never as
+  // an `interface:` with options.
   assert.doesNotMatch(snap, /interface: browser-support/);
+  assert.match(snap, /^ {6}- browser-support$/m);
   assert.doesNotMatch(code(LAUNCHER), /snapctl|browser-sandbox|snap connect/);
   assert.equal(STORE_IDS.snap, LINUX_APP_NAME);
 });
@@ -116,7 +121,7 @@ test('the launcher adds --no-sandbox in a snap and nowhere else', () => {
   const own = execs.filter((l) => !/exec "\$bin" "\$@"$/.test(l));
   assert.deepEqual(own.map((l) => l.trim()), ['[ "$kind" = snap ] && exec "$bin" --no-sandbox "$@"']);
   // --no-sandbox appears twice: the person's own switch (or the one the
-  // snap's command.sh appends), compared; and the snap's start.
+  // snap's command appends), compared; and the snap's start.
   const mentions = lines.filter((l) => l.includes('--no-sandbox'));
   assert.deepEqual(mentions.map((l) => l.trim()), [
     '[ "$a" = "--no-sandbox" ] && exec "$bin" "$@"',

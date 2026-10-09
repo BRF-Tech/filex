@@ -18,7 +18,11 @@ downloaded end-to-end encrypted folder - or a single encrypted `.fxe` file, or
 a vault straight from the server - back into plain files,
 [`filex encrypt`](#filex-encrypt---make-a-folder-an-encrypted-folder), and
 [`filex vault`](#filex-vault---a-vault-on-a-server), which opens a vault (the
-third encryption level) as a drive on this machine.
+third encryption level) as a drive on this machine. One is for an app store,
+not for a filex server or its users:
+[`filex plugin-validator`](#filex-plugin-validator---an-app-stores-conformance-runner)
+(0.55), the conformance run a store puts a storage plugin build through
+before it lists it.
 
 The commands that run on the server machine against its own database
 (`filex serve`, `filex migrate`, `filex admin`, `filex storage`) are not
@@ -371,8 +375,8 @@ VERSION  ID  SIZE     RECORDED
 
 - The trash lists the entries you may see: your own deletes, and on storages
   you can edit, other people's. `trash restore` puts an entry back where it
-  was deleted from; a place that is taken again is refused (`409 EXISTS`) and
-  the entry stays in the trash.
+  was deleted from; a place that is taken again is refused (`409 name_taken`,
+  the server's sentence printed as it came) and the entry stays in the trash.
 - A file's versions are addressed by the server's id for the file, which the
   CLI reads off its folder's listing - name the file. A file that is on the
   storage but not catalogued yet has no versions; `--id` takes the id when you
@@ -527,6 +531,30 @@ The request is waiting for an administrator's approval in the admin panel (Plugi
 
 `--reason` is required. Asking again for the same source answers the waiting
 request (`Already requested #7`). There is no command to approve or reject.
+
+## `filex plugin-validator` - an app store's conformance runner
+
+For an **app store** that lists storage plugins (0.55), not for a filex
+server: the store leaves a build in a spool directory, and this command runs
+filex's own handshake, describe and conformance probes on it and writes the
+result beside it. It belongs in a container with no network.
+
+```bash
+filex plugin-validator --spool /spool --work-dir /work --store-uid 65532 --plugin-uid 65534 --plugin-gid 65534
+```
+
+`--spool` (required) is the directory it shares with the store;
+`--plugin-uid`/`--plugin-gid` (required on Linux) the unprivileged user a
+plugin under test runs as - never 0, never the validator's own user or the
+store's, and used by nothing else, since every process of it is killed
+between two runs; `--work-dir` (required on Linux) a directory of the
+validator's own for the runs, never a shared one such as `/tmp`;
+`--store-uid` the store's user, who gets `in/` and whose job files are the
+only ones run; `--job-timeout` (3 minutes) and `--max-binary-mb` (512) cap a
+run; `--once` runs the jobs waiting and exits. Outside Linux it starts only
+with `--insecure-dev` (developing a plugin; the plugin then runs as your own
+user). The files, what it refuses and the container's hardening:
+[PLUGINS.md → The store's plugin validator](PLUGINS.md#the-stores-plugin-validator).
 
 ## `filex mount` - the server as a folder
 

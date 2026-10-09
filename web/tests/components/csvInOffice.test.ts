@@ -210,13 +210,17 @@ describe('the explorer’s wiring', () => {
   it('ONLYOFFICE is a handler while the explorer’s own probe says it is there', () => {
     expect(src).toMatch(/const openOpts = computed<OpenHandlerOptions>\(\(\) => \(\{ onlyOffice: !!effectiveOnlyOfficeBase\.value \}\)\);/);
     const of = src.slice(src.indexOf('function openHandlersOf'), src.indexOf('function personalOpenChoice'));
-    expect(of).toMatch(/openHandlersFor\(pluginViewList\.value, n, pluginOpenRules\.value, openOpts\.value\)/);
+    // 0.55: through openOptsFor, which adds whether the file is end-to-end
+    // encrypted to the same ONLYOFFICE answer.
+    expect(of).toMatch(/openHandlersFor\(pluginViewList\.value, n, pluginOpenRules\.value, openOptsFor\(n\)\)/);
+    const optsFor = src.slice(src.indexOf('function openOptsFor'), src.indexOf('function openHandlersOf'));
+    expect(optsFor).toMatch(/\.\.\.openOpts\.value/);
     expect(src).toMatch(/:in-office="previewInOffice/);
   });
 
   it('missing, it is greyed with where to set it up for an administrator and not offered to anybody else (lib/serviceGate)', () => {
     const rows = src.slice(src.indexOf('function openWithRows'), src.indexOf('/* ── "Choose an app…"'));
-    expect(rows).toMatch(/officeOpensKind\(openKindOf\(sel\[0\]\)\) && !openOpts\.value\.onlyOffice/);
+    expect(rows).toMatch(/officeOpensKind\(openKindOf\(sel\[0\]\)\) &&\s*!openOpts\.value\.onlyOffice/);
     expect(rows).toMatch(/gateOnService\(false, callerAdmin\.value, t\('ctx\.needs_onlyoffice'\)\)/);
     expect(rows).toMatch(/\.filter\(\(r\) => !r\.hidden\)/);
   });

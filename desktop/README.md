@@ -111,7 +111,7 @@ pnpm run dist:win        # installer + PORTABLE single .exe
 pnpm run dist:linux      # .deb + .rpm + AppImage (the .rpm needs rpmbuild: `apt install rpm`)
 pnpm run dist:mac        # .dmg + .zip - host arch (arm64 on Apple Silicon), ad-hoc sealed
 pnpm run dist:store      # Microsoft Store package (.appx) - Windows only; see "Microsoft Store"
-pnpm run dist:snap       # Snap Store .snap (strict, core20 template; no snapcraft needed)
+pnpm run dist:snap       # Snap Store .snap (strict, core24; Linux with snapcraft 8.x + LXD)
 
 # Windows on Arm, cross-built on an x64 machine (the CLI inside is arm64 too)
 pnpm run dist:win:arm64    # filex-desktop-arm64.exe + filex-desktop-portable-arm64.exe
@@ -124,9 +124,10 @@ and so does `scripts/fetch-cli.mjs` for the CLI it embeds (the sync engine):
 `FILEX_CLI_BIN` it only checks the given binary is that architecture. An arm64
 installer with an x64 CLI inside installs, opens and fails at the first sync.
 Linux arm64 is built **on** arm64 (the release uses GitHub's `ubuntu-24.04-arm`):
-electron-builder 24 has no prebuilt arm64 snap template, so the arm64 snap is
-built by real snapcraft (in LXD), and its bundled fpm is x86-64 only
-(`USE_SYSTEM_FPM=true` + `gem install fpm` for the .deb and .rpm).
+the snap is built by real snapcraft (in LXD), which cannot cross-build - since
+0.55 (core24) on both architectures, there is no prebuilt template any more -
+and the .deb and .rpm use the runner's own fpm (`USE_SYSTEM_FPM=true` + `gem
+install fpm`).
 
 ⚠ Each `dist:win*` run writes `release/latest.yml` naming only the installer it
 built, and electron-updater reads **one** `latest.yml` on Windows whatever the
@@ -154,8 +155,9 @@ lists each major's end of life; only the latest three are patched.
   `node node_modules/electron/install.js` does it up front. (The package
   declares `engines.node >= 22.12`; the download itself also ran on Node 20.20
   when measured.) Packaging never touches it: electron-builder downloads its
-  own copy of the runtime, so `dist:*` builds on the Node 20 the release
-  workflow uses.
+  own copy of the runtime, so `dist:*` builds on the Node the release
+  workflow uses - Node 22 since 0.55, which electron-builder 26 needs (up to
+  0.54 it was Node 20 and electron-builder 24).
 - ⚠ To run the suites against the SOURCE tree on another Electron (an A/B
   against the previous major, say), set `ELECTRON_OVERRIDE_DIST_PATH=<that
   runtime's dist folder>`. Do not hand Playwright an `executablePath` for it:
@@ -260,8 +262,12 @@ file of that name is left alone), and "make filex the default" choices in
 `mimeapps.list` (`filex.desktop` → `filex-app.desktop`, once no
 `filex.desktop` is installed anywhere).
 
-**Snap** `filex-app` (strict confinement, `base: core20` - electron-builder's
-template; core24 arrives with electron-builder 26):
+**Snap** `filex-app` (strict confinement, `base: core24` since 0.55 -
+electron-builder's own core24 build: a snapcraft.yaml with the `gnome`
+extension, packed by snapcraft in LXD on both architectures. It takes
+electron-builder 26.12 or later, the `snapcraft:` key (a `snap:` key with
+`base: core24` still builds the old core20 template on x64) and Node 22 - see
+the `snapcraft:` block of `electron-builder.yml`):
 
 - `HOME` inside a snap is `~/snap/filex-app/<revision>`. The default filex
   folder is built from the real home (`SNAP_REAL_HOME`), so it is
@@ -285,9 +291,12 @@ template; core24 arrives with electron-builder 26):
   file snapd's `autostart:` launches, `--hidden` included.
 - Chromium's own sandbox is OFF in the snap, on purpose (since 0.52, as in
   0.49): the app runs with `--no-sandbox` under the snap's strict confinement
-  (AppArmor, seccomp, its own mount namespace). Electron-builder adds the
-  switch to `command.sh` and leaves chrome-sandbox out when no plug has
-  `allow-sandbox: true`, and the launcher adds it in a snap as well. 0.50 and
+  (AppArmor, seccomp, its own mount namespace). Electron-builder ends the
+  snap's command with the switch when no plug has `allow-sandbox: true`
+  (`appPartStage` leaves chrome-sandbox out of the core24 snap), and the
+  launcher adds it in a snap as well. Since 0.55 that command also carries
+  `--ozone-platform=x11` (`forceX11`): the core20 template ran the app under
+  X11 (XWayland on a Wayland desktop), and the core24 snap keeps it so. 0.50 and
   0.51 asked for that permission (`browser-sandbox`: `browser-support` with
   `allow-sandbox: true`); Snapcraft limits it to trusted publishers, never
   auto-connects it and reviews it by hand, so those revisions sat in "Manual
@@ -302,7 +311,7 @@ template; core24 arrives with electron-builder 26):
 `build/linux/launcher.sh`, and the Electron binary is `filex-app-bin` beside
 it: `scripts/linux-launcher.cjs` swaps them in `afterPack` (through
 `scripts/after-pack.cjs`), so the .deb's `/usr/bin/filex-app` and menu entry,
-the AppImage's AppRun and the snap's command.sh all start the launcher. It
+the AppImage's AppRun and the snap's command all start the launcher. It
 checks that Chromium's sandbox can be built (the setuid `chrome-sandbox` is in
 place, or `unshare -Ur true` works) and otherwise shows what to do and exits
 78; outside a snap it never adds `--no-sandbox`. In a snap (its own file
@@ -606,6 +615,15 @@ macOS specifics, because the failure mode there is not a warning but a wall:
   electron-builder 24 appends a protocol's scheme to the mimeTypes list once
   per target: `x-scheme-handler/filex` came out twice in the .deb, three times
   in the .rpm.
+- **The after-install script and the AppImage's AppRun are electron-builder
+  24's** (`build/linux/after-install.tpl`, `build/linux/AppRun.sh`, since
+  0.55). electron-builder 26's after-install takes the setuid bit off
+  `chrome-sandbox` and installs an AppArmor profile for the launcher script,
+  not the Electron binary; its AppRun adds `--no-sandbox` by itself where no
+  user namespace can be made. The .deb would have lost the sandbox it has
+  opened with since 0.50 (and the launcher refuses to start without one), and
+  the AppImage would have opened with the sandbox off. Tests:
+  `test/linux-desktop-entry.test.ts`, `test/appimage-apprun.test.ts`.
 - **The after-remove script is ours** (`build/linux/after-remove.tpl`).
   electron-builder's gives `update-alternatives --remove` the link instead of
   the target and runs on upgrades too: on Fedora `dnf remove` failed the

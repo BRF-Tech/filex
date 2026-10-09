@@ -103,6 +103,7 @@ const appFiles = computed(() =>
         size: props.node.size,
         mime: props.node.mime_type,
         readOnly: props.writable === false || !!props.node.read_only,
+        ...(props.node.encrypted ? { encrypted: props.node.encrypted } : {}),
       }]
     : [],
 );

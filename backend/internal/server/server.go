@@ -597,14 +597,8 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		if err != nil {
 			return nil, fmt.Errorf("server: plugins: %w", err)
 		}
-		if err := pluginMgr.Load(ctx); err != nil {
-			// A broken plugin must not stop the server: the whole point of
-			// running them out of process is that they cannot take filex
-			// down. The failure is logged and visible in the admin list.
-			slog.Warn("plugins: load failed; continuing without them", slog.Any("err", err))
-		} else {
-			pluginMgr.WaitReady(10 * time.Second)
-		}
+		// Started below, once the app store has put every license hold in
+		// place (startStoragePlugins) - still before the pre-warm.
 	}
 
 	// App plugins — in-process wasm modules (internal/wasmplugin). Loaded
@@ -695,12 +689,18 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			ConfigStoresSet: cfg.AppStoreURLsSet,
 			ConfigKeys:      cfg.AppStoreKeys,
 			FilexVersion:    version.String(),
-			Holder:          appPlugins,
-			Log:             slog.Default(),
+			// A license holds an app, or a storage plugin installed from a
+			// store (#215: its license row is "storage:<name>").
+			Holder: newLicenseHolder(appPlugins, pluginMgr),
+			Log:    slog.Default(),
 		})
 		appStore.Start(ctx)
 		go appStore.Run(ctx)
 	}
+	// The storage plugins start now: after every hold a license puts on one
+	// (appStore.Start above, or - the store off - every plugin under a
+	// store's license held), never before (plugin_start.go).
+	startStoragePlugins(ctx, pluginMgr, store, appStore)
 
 	// Default apps (internal/assoc): which handler opens a kind of file and
 	// which draws its thumbnails. Only with app plugins: without them filex

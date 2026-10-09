@@ -24,6 +24,17 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code string,
 	writeJSON(w, status, errorBody(r, code, params, extra...))
 }
 
+// writeErrorSaid is writeError with the sentence of another code: one code a
+// program branches on (`permission_denied`, `encrypted`, `not_found`, as the
+// route always answered), the sentence that says WHY in the reader's
+// language (`server.error.outside_root`, `server.error.app_encrypted_read`).
+// said must have a sentence in the catalogue; params fill it.
+func writeErrorSaid(w http.ResponseWriter, r *http.Request, status int, code, said string, params apierr.Params, extra ...any) {
+	body := errorBody(r, code, params, extra...)
+	body["message"] = apierr.Text(langOf(r), said, params)
+	writeJSON(w, status, body)
+}
+
 // errorBody is writeError's body, for a caller that hands it on (a helper
 // that answers through its own writer).
 func errorBody(r *http.Request, code string, params apierr.Params, extra ...any) map[string]any {

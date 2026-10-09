@@ -27,7 +27,7 @@ hero:
 features:
   - icon: ✍️
     title: Apps - things to do with a file
-    details: A second kind of plugin - a sandboxed WebAssembly module, an interface of its own that filex runs in a sandboxed frame, or both - adding actions to the file menu, screens and public pages for people with no account. Installed from a GitHub address or a trusted store's link through a review of every permission it asks for, with exactly that grant, and the people of your filex can browse a store's catalog on filex's own App store screen and ask for an app; the review also says plainly what a browser cannot promise about an interface. Apps say when their source has a newer version, nothing is installed until an administrator has reviewed what it changes, and the previous version is one click away. Four ship alongside filex as public repositories - e-Signature, which sends a document round for signature and seals the finished file with the installation's own seal, Convert, filextext (an end-to-end encrypted text workspace) and draw.io. Write your own in stock Go, against a test kit.
+    details: A second kind of plugin - a sandboxed WebAssembly module, an interface of its own that filex runs in a sandboxed frame, or both - adding actions to the file menu, screens and public pages for people with no account. Installed from a GitHub address or a trusted store's link through a review of every permission it asks for, with exactly that grant, and the people of your filex can browse a store's catalog on filex's own App store screen and ask for an app; the review also says plainly what a browser cannot promise about an interface. An interface prints through filex, on the person's Allow, and an end-to-end encrypted file is offered to no app. Apps say when their source has a newer version, nothing is installed until an administrator has reviewed what it changes, and the previous version is one click away. Four ship alongside filex as public repositories - e-Signature, which sends a document round for signature and seals the finished file with the installation's own seal, Convert, filextext (an end-to-end encrypted text workspace) and draw.io. Write your own in stock Go, against a test kit.
     link: /APP-PLUGINS
     linkText: Apps docs
   - icon: 🌍
@@ -72,7 +72,7 @@ features:
     linkText: Protocol docs
   - icon: 🧩
     title: Teach it a new storage
-    details: A backend filex has never heard of is a separate program you install from the admin panel - it describes its own config form, and its driver then behaves like any built-in one. Any language; a Go SDK makes it three methods. Every capability it claims is probed before anyone can build a storage on it.
+    details: A backend filex has never heard of is a separate program you install from the admin panel or from an app store's link - it describes its own config form, and its driver then behaves like any built-in one. Any language; a Go SDK makes it three methods. Every capability it claims is probed before anyone can build a storage on it, and a store lists only a plugin its own validator checked, with every build pinned and signed.
     link: /PLUGINS
     linkText: Plugin docs
   - icon: 📊

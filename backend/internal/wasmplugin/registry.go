@@ -898,6 +898,12 @@ type Status struct {
 	UpdateSource string `json:"update_source,omitempty"`
 	// Update is what the last check found; absent before the first one.
 	Update *UpdateInfo `json:"update,omitempty"`
+	// UpdateSaid is the line the Apps list shows about the app's updates,
+	// in the reader's language (handlers sayStatus, 0.55): a newer version
+	// that needs another filex, what an approval adds, an automatic update
+	// undone, a source that could not be read, or no source to check. Empty
+	// where a status word says it all (up to date, available).
+	UpdateSaid string `json:"update_said,omitempty"`
 	// Engine: the app runs a WebAssembly module. False for a language pack
 	// and for an app that is only an interface.
 	Engine bool `json:"engine"`
@@ -1294,7 +1300,7 @@ func (r *Registry) dryRun(ctx context.Context, st *staged, lang string, upgradin
 	installing := upgrading == nil
 	ans := &DryRunAnswer{
 		Manifest: &st.m.Manifest, Permissions: PermissionRows(st.m, lang), Signed: st.signd,
-		Kind: kindOf(st.m), Languages: r.LanguageRows(st.m), Compat: compatOf(st.m),
+		Kind: kindOf(st.m), Languages: r.LanguageRows(st.m), Compat: compatOf(st.m).Said(lang, st.m.Name, st.m.Version),
 	}
 	if upgrading != nil {
 		ans.Upgrade = upgradeOf(upgrading, st.m)

@@ -388,24 +388,14 @@ function onRowAction(key: string, row: AppPlugin) {
       >
         <component :is="runtime.enabled && runtime.arch_ok ? Info : TriangleAlert" class="mt-0.5 h-4 w-4 shrink-0" />
         <div class="min-w-0 flex-1 space-y-1">
-          <p class="font-medium">
-            {{ runtime.enabled ? t('appPlugins.runtime.on') : t('appPlugins.runtime.off') }}
-          </p>
-          <p v-if="!runtime.arch_ok">{{ t('appPlugins.runtime.archBad') }}</p>
+          <!-- Every line is the server's (runtime.said, 0.55): it picks and
+               words them; the tab lays them out. -->
+          <p class="font-medium">{{ runtime.said.state }}</p>
+          <p v-if="runtime.said.arch">{{ runtime.said.arch }}</p>
           <p v-if="runtime.disabled_reason" class="break-words">{{ runtime.disabled_reason }}</p>
-          <p v-if="runtime.requires_signature">{{ t('appPlugins.runtime.signature') }}</p>
-          <p v-if="runtime.enabled && !runtime.compat_enforced" data-testid="app-plugins-dev-build">
-            {{ t('appPlugins.runtime.devBuild', { version: runtime.filex_version }) }}
-          </p>
-          <p v-if="runtime.enabled" data-testid="app-plugins-update-check">
-            {{
-              !runtime.update_check
-                ? t('appPlugins.runtime.updateCheckOff')
-                : runtime.updates_checked_at
-                  ? t('appPlugins.runtime.lastCheck', { when: formatDate(runtime.updates_checked_at, locale) })
-                  : t('appPlugins.runtime.neverChecked')
-            }}
-          </p>
+          <p v-if="runtime.said.signature">{{ runtime.said.signature }}</p>
+          <p v-if="runtime.said.dev_build" data-testid="app-plugins-dev-build">{{ runtime.said.dev_build }}</p>
+          <p v-if="runtime.said.update_check" data-testid="app-plugins-update-check">{{ runtime.said.update_check }}</p>
           <div v-if="engines.length" class="flex flex-wrap items-center gap-1 pt-1">
             <span class="text-xs">{{ t('appPlugins.runtime.engines') }}:</span>
             <Badge

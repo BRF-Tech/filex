@@ -136,8 +136,23 @@ function escapeRe(s: string): string {
 
 async function openFolder(page: Page, name: string) {
   const target = await settled(row(page, name));
+  // The explorer is IN the folder once its listing has answered (currentPath
+  // follows the listing): an upload before that goes to the folder still on
+  // screen. 700 ms was the whole wait, and the 0.55 full chain's listing of
+  // Eski/alt took 1.2 s - üç.txt went into Eski (Chromium).
+  const wire = ((await target.getAttribute('data-fe-path')) ?? '').replace(/\/+$/, '');
+  const listed = page
+    .waitForResponse(
+      (r) => {
+        const u = new URL(r.url());
+        return u.searchParams.get('action') === 'index' && (u.searchParams.get('path') ?? '').replace(/\/+$/, '') === wire;
+      },
+      { timeout: 20_000 },
+    )
+    .catch(() => undefined);
   await target.dblclick();
   await target.dispose();
+  if (wire) await listed;
   // FilePane ignores a second open within 500 ms (lesson #502).
   await page.waitForTimeout(700);
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/rowgate"
 	"github.com/brf-tech/filex/backend/internal/scanrule"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -403,6 +404,14 @@ func (s *storageSyncer) noteRun(err error) {
 		// The tick found the previous run still walking. Not a failure, and
 		// not a reason to wait: the next tick asks again.
 		slog.Info("sync: tick skipped, the previous run is still in progress",
+			slog.String("storage", s.storage.Name))
+		return
+	}
+	if errors.Is(err, rowgate.ErrBusy) {
+		// Deferred, not failed: a change held the storage's row gate for all
+		// of a judgement's wait (a folder moved or deleted object by object).
+		// The next tick walks the storage again.
+		slog.Info("sync: run deferred, a change to the storage holds its row gate",
 			slog.String("storage", s.storage.Name))
 		return
 	}

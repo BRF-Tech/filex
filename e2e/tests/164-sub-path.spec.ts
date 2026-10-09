@@ -145,28 +145,34 @@ test.describe.serial('Sub-path deployment — every journey stays under the base
     await stranger.close();
   });
 
-  test('the installable app: manifest and service worker under the base', async ({ page }) => {
-    await loginAs(page);
-    const res = await page.request.get(`${BASE}/admin/manifest.webmanifest`);
-    expect(res.ok()).toBeTruthy();
-    const m = (await res.json()) as { id: string; start_url: string; scope: string };
-    expect(m.id).toBe(`${BASE}/admin/`);
-    expect(m.start_url).toBe(`${BASE}/admin/`);
-    expect(m.scope).toBe(`${BASE}/`);
+  // The worker is this test's subject: WebKit's line runs without it
+  // (e2e/playwright.config.ts, task #199), so it is let back in here.
+  test.describe('the installable app', () => {
+    test.use({ serviceWorkers: 'allow' });
 
-    /* ⚠ The REGISTRATION is the claim, not its activation. `serviceWorker.ready`
-       waits until the worker has precached every asset, and Firefox under load
-       was still writing that cache when the test's 30 s ran out (0.50 run 3,
-       on a disk with seconds of write latency). Where the worker was
-       registered, and from which script, is known the moment it registers. */
-    const reg = () =>
-      page.evaluate(async () => {
-        const r = await navigator.serviceWorker.getRegistration();
-        const w = r && (r.active ?? r.waiting ?? r.installing);
-        return r && w ? { scope: new URL(r.scope).pathname, script: new URL(w.scriptURL).pathname } : null;
-      });
-    await expect
-      .poll(reg, { timeout: 20_000 })
-      .toEqual({ scope: `${BASE}/admin/`, script: `${BASE}/admin/sw.js` });
+    test('the installable app: manifest and service worker under the base', async ({ page }) => {
+      await loginAs(page);
+      const res = await page.request.get(`${BASE}/admin/manifest.webmanifest`);
+      expect(res.ok()).toBeTruthy();
+      const m = (await res.json()) as { id: string; start_url: string; scope: string };
+      expect(m.id).toBe(`${BASE}/admin/`);
+      expect(m.start_url).toBe(`${BASE}/admin/`);
+      expect(m.scope).toBe(`${BASE}/`);
+
+      /* ⚠ The REGISTRATION is the claim, not its activation. `serviceWorker.ready`
+         waits until the worker has precached every asset, and Firefox under load
+         was still writing that cache when the test's 30 s ran out (0.50 run 3,
+         on a disk with seconds of write latency). Where the worker was
+         registered, and from which script, is known the moment it registers. */
+      const reg = () =>
+        page.evaluate(async () => {
+          const r = await navigator.serviceWorker.getRegistration();
+          const w = r && (r.active ?? r.waiting ?? r.installing);
+          return r && w ? { scope: new URL(r.scope).pathname, script: new URL(w.scriptURL).pathname } : null;
+        });
+      await expect
+        .poll(reg, { timeout: 20_000 })
+        .toEqual({ scope: `${BASE}/admin/`, script: `${BASE}/admin/sw.js` });
+    });
   });
 });

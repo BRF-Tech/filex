@@ -65,6 +65,7 @@ import {
   type VaultApi,
   type VaultClientKind,
   type VaultLockGrant,
+  type VaultOwner,
 } from '../lib/e2evault/api';
 import {
   VAULT_COMMIT_EVERY_MS,
@@ -86,6 +87,9 @@ interface Session {
   kids: Map<string, VaultNode[]> | null;
   /** The level the server gave this account at the vault folder. */
   perm: string | undefined;
+  /** Who owns the vault folder, as the server says it (`state`, `create`):
+   *  every row in the vault carries it. */
+  owner: VaultOwner;
   lock: VaultWriteLock | null;
   idle: VaultIdleLock;
   /** Packs uploaded since the lock was taken: never orphans. */
@@ -110,6 +114,22 @@ export function vaultLockLabel(kind: VaultClientKind, ua = typeof navigator === 
 
 /** A name search in a vault shows at most this many rows. */
 const SEARCH_MAX = 500;
+
+/**
+ * The owner keys of a server answer (`state`, `create`), checked: a listing
+ * row's `owner_id`, `owner_name` and `owner_self`, each only when it is
+ * there. ⚠ The server's answer, never a guess: a vault this tab made is not
+ * assumed to be the person's (a vault can be made in a folder somebody
+ * else owns).
+ */
+export function vaultOwnerOf(answer: VaultOwner | null | undefined): VaultOwner {
+  const out: VaultOwner = {};
+  if (!answer) return out;
+  if (typeof answer.owner_id === 'number' && answer.owner_id > 0) out.owner_id = answer.owner_id;
+  if (typeof answer.owner_name === 'string' && answer.owner_name) out.owner_name = answer.owner_name;
+  if (answer.owner_self === true) out.owner_self = true;
+  return out;
+}
 
 function stripWire(p: string): string {
   const i = p.indexOf('://');
@@ -137,6 +157,8 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
   const clock = host.clock ?? realClock;
   const random = host.random ?? cryptoRandom;
   const sessions = new Map<string, Session>();
+  /** Who owns a vault this tab has just made, until `open` takes it. */
+  const madeOwners = new Map<string, VaultOwner>();
   /** The shell's state (useE2eVault): the strips it hands the explorer, and
    *  the counter its listings watch. */
   const { strips, version } = shared;
@@ -187,7 +209,13 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
       ...(dir && count !== undefined ? { count } : {}),
       e2e_root: s.root,
       vault_root: s.root,
+      // A file of a vault the server named (e2e_vault_root): what the
+      // folder listing stamps on a vault's rows (#189).
+      ...(dir ? {} : { encrypted: 'vault' as const }),
       ...(s.perm ? { perm: s.perm as FileNode['perm'] } : {}),
+      // The vault folder's owner, said by the server: without it the Owner
+      // column read "System" for a file the person had just uploaded.
+      ...s.owner,
     };
   }
 
@@ -307,6 +335,7 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
       state: emptyIndexState(0),
       kids: null,
       perm: opts.perm,
+      owner: {},
       lock: null,
       idle: new VaultIdleLock(() => void lockIdle(root), clock),
       uploaded: new Set(),
@@ -322,10 +351,14 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
     shared.remember(root);
     try {
       if (initial) {
+        // The tab that made the vault: the owner `create` answered.
+        s.owner = madeOwners.get(root) ?? {};
+        madeOwners.delete(root);
         setState(s, initial);
       } else {
         const st = await api.state(root);
         s.lastState = clock.now();
+        s.owner = vaultOwnerOf(st);
         noteHolder(s, st.lock);
         if (st.generation < vaultRollbackGuard.highest(s.idHex)) s.strip.readOnly = 'rollback';
         const loaded = await loadLatestGeneration(s.keys, st.generation, indexSource(s));
@@ -449,6 +482,7 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
       const st = await api.state(s.root, undefined, s.lock?.tokenValue);
       s.lastState = clock.now();
       if (s.closed) return;
+      s.owner = vaultOwnerOf(st);
       noteHolder(s, st.lock);
       if (st.generation < vaultRollbackGuard.highest(s.idHex)) {
         s.strip.readOnly = 'rollback';
@@ -1149,7 +1183,8 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
 
   /** Make a vault on the server (`POST /create`); the caller made it in memory. */
   async function create(path: string, marker: E2eMarker, index: Uint8Array): Promise<void> {
-    await api.create(path, marker, index);
+    const made = await api.create(path, marker, index);
+    madeOwners.set(path, vaultOwnerOf(made));
   }
 
   /** The level the server gave this account at the vault folder. */

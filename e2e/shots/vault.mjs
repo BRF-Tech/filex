@@ -24,12 +24,44 @@
 //
 // Environment: FILEX_BIN, SHOTS_OUT, SHOTS_KEEP (see apps.mjs).
 
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium } from '@playwright/test';
+import { fixtureTime } from './clock.mjs';
 import { addLocalStorage, bootInstance, client, dismissToasts, layoutProblems, log, mustSay, newContext, setLanguage, shot, shootWhole, signIn, sleep } from './scene.mjs';
 
 const SET = 'vault';
 const ADMIN = { email: 'demo@demo.com', password: 'demo-shots' };
 const VAULT_PW = 'correct horse battery staple';
+
+/**
+ * The files the scene uploads into the vault, written to `dir` with fixed
+ * times; their paths, for setInputFiles.
+ *
+ * ⚠ Inside a vault a file's Modified time is the one its File says
+ * (`lastModified`; docs/E2E-VAULT-FORMAT.md, an entry's `mtime`: "what the
+ * uploader said"), kept in the encrypted index. No answer of the server
+ * carries it, so the scene clock's route (clock.mjs) cannot move it. A buffer
+ * handed to setInputFiles became a File stamped with the REAL now - the
+ * browser's File constructor does not read the page's clock - and the 0.54
+ * pictures showed the day the scene ran beside the scene's September 15. A
+ * path carries its file's mtime (Playwright reads it), pinned here to the
+ * fixtures' fixed times (clock.mjs fixtureTime), the same in every run.
+ */
+function vaultUploads(dir) {
+  const files = [
+    ['Board minutes 2026-09.md', '# Board minutes\n\nOnly in the vault.\n'],
+    ['Salaries 2026.csv', 'name;salary\nDeniz Kaya;4200\n'],
+  ];
+  return files.map(([name, body]) => {
+    const full = join(dir, name);
+    writeFileSync(full, body);
+    const at = new Date(fixtureTime(`vault/${name}`));
+    utimesSync(full, at, at);
+    return full;
+  });
+}
 
 async function openTeam(page, url) {
   await page.goto(`${url}/drive/explore#${encodeURIComponent('Team')}`);
@@ -75,6 +107,7 @@ async function unlock(page) {
 async function main() {
   const inst = await bootInstance({ name: SET, admin: ADMIN, env: { FILEX_UPDATE_CHECK: '0', FILEX_E2E_VAULT: '1' } });
   const browser = await chromium.launch();
+  const uploads = mkdtempSync(join(tmpdir(), 'filex-shots-vault-'));
   try {
     const admin = client(inst.url);
     await admin.login(ADMIN.email, ADMIN.password);
@@ -124,10 +157,7 @@ async function main() {
     await nf.getByRole('textbox').fill('Contracts');
     await nf.getByRole('button', { name: 'Create', exact: true }).click();
     await row(page, 'Contracts').waitFor({ state: 'visible', timeout: 30_000 });
-    await page.locator('input[type="file"]').first().setInputFiles([
-      { name: 'Board minutes 2026-09.md', mimeType: 'text/markdown', buffer: Buffer.from('# Board minutes\n\nOnly in the vault.\n') },
-      { name: 'Salaries 2026.csv', mimeType: 'text/csv', buffer: Buffer.from('name;salary\nDeniz Kaya;4200\n') },
-    ]);
+    await page.locator('input[type="file"]').first().setInputFiles(vaultUploads(uploads));
     await row(page, 'Salaries 2026.csv').waitFor({ state: 'visible', timeout: 60_000 });
     await mustSay(page.getByTestId('e2e-vault-strip'), 'the writing strip', ['You are writing to this vault']);
     await dismissToasts(page);
@@ -199,6 +229,7 @@ async function main() {
   } finally {
     await browser.close();
     await inst.stop();
+    rmSync(uploads, { recursive: true, force: true });
   }
 }
 

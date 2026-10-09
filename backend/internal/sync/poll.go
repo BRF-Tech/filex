@@ -173,6 +173,11 @@ func (s *storageSyncer) finishRun(ctx context.Context, runID int64, seen, added,
 	switch {
 	case ctx.Err() != nil:
 		status, msg = "aborted", interruptedMessage(ctx.Err())
+	case errors.Is(runErr, rowgate.ErrBusy):
+		// Not a failure: a change held the storage's row gate for all of a
+		// judgement's wait, and the walk left the storage to the next pass
+		// (listDir).
+		status, msg = "aborted", "deferred: a change to the storage (a folder moved or deleted object by object) held its row gate; the next pass walks it"
 	case runErr != nil:
 		status, msg = "failed", runErr.Error()
 	}
@@ -331,6 +336,47 @@ func (s *storageSyncer) prefetchTree(ctx context.Context, root string) (treeInde
 // (storage.ErrNotFound from its listing).
 var errDirGone = errors.New("sync: the directory is not on the storage any more")
 
+// errFenced: a directory the walk was about to list is at or below a prefix a
+// long change fences (rowgate.FenceCtx); it is left to the next pass.
+var errFenced = errors.New("sync: the directory is being moved or trashed object by object; the next pass lists it")
+
+// fencedOut drops from objs, the listing of dir, the children a long change
+// fences (rowgate.FenceSet.Kids: a folder being moved or trashed object by
+// object, or its destination filling up), and puts them with the walk's
+// unlisted (c may be nil): neither their objects nor their rows are judged
+// this pass. Half way, the source has lost objects its rows still name, and
+// the destination holds objects its rows have not reached yet; either, judged,
+// would be read as a change made outside filex.
+func fencedOut(fences *rowgate.FenceSet, dir string, objs []storage.Object, c *walkCounts) []storage.Object {
+	kids := fences.Kids(dir)
+	if len(kids) == 0 {
+		return objs
+	}
+	if c != nil {
+		c.partial = true
+		c.unlisted = append(c.unlisted, kids...)
+	}
+	kept := objs[:0:0]
+	for _, o := range objs {
+		if fencedKid(kids, o.Path) {
+			continue
+		}
+		kept = append(kept, o)
+	}
+	return kept
+}
+
+// fencedKid reports whether p is one of kids (cleaned paths).
+func fencedKid(kids []string, p string) bool {
+	c := rowgate.Clean(p)
+	for _, k := range kids {
+		if k == c {
+			return true
+		}
+	}
+	return false
+}
+
 // walk recursively lists the storage from `path` downwards. parent is the
 // DB id of the parent node (nil at root). list answers each directory —
 // the driver, or a tree fetched up front (see lister).
@@ -370,7 +416,7 @@ func (s *storageSyncer) walkFrom(ctx context.Context, p string, parent *int64, c
 	if errors.Is(err, errDirGone) {
 		return 0, err
 	}
-	if errors.Is(err, errAbandoned) {
+	if errors.Is(err, errAbandoned) || errors.Is(err, errFenced) {
 		c.partial = true
 		c.unlisted = append(c.unlisted, p)
 		return 0, nil
@@ -396,6 +442,11 @@ func (s *storageSyncer) walkFrom(ctx context.Context, p string, parent *int64, c
 			count += cn
 			continue
 		}
+		if errors.Is(err, rowgate.ErrBusy) {
+			// A change has held the storage's gate for all of GateWait: the
+			// next directory would wait as long. The pass is deferred.
+			return count + cn, err
+		}
 		if errors.Is(err, errDirGone) {
 			slog.Info("sync: a folder its parent's listing showed was gone when the walk reached it; nothing below it is judged this pass",
 				slog.Int64("node", e.node.ID),
@@ -416,9 +467,28 @@ func (s *storageSyncer) walkFrom(ctx context.Context, p string, parent *int64, c
 // walk goes down into the subfolders, which take it again one at a time.
 //
 // errDirGone: the directory is not on the storage.
+//
+// rowgate.ErrBusy: a change held the gate for all of GateWait; the judgement
+// stepped back without keeping any change out, and the walk stops here
+// (walkFrom) - the next pass walks the storage again.
+//
+// errFenced: p is at or below a prefix a long change fences (a folder moved or
+// trashed object by object, rowgate.FenceCtx): it is not listed this pass, and
+// nothing below it is judged (walkFrom puts it with the unlisted). A fenced
+// child of p is left out of p's listing the same way (fencedOut). The fence
+// set is read once the gate is held - one load and one map lookup per
+// directory - so a fence the walk does not see here was not set before this
+// directory's judgement, and is not set until it ends.
 func (s *storageSyncer) listDir(ctx context.Context, p string, parent *int64, c *walkCounts, list dirLister) ([]listedEntry, error) {
-	release := rowgate.Judge(s.storage.ID)
+	release, err := rowgate.JudgeWithin(ctx, s.storage.ID, GateWait)
+	if err != nil {
+		return nil, err
+	}
 	defer release()
+	fences := rowgate.Fences(s.storage.ID)
+	if fences.Covers(p) {
+		return nil, errFenced
+	}
 	objs, err := list(ctx, p)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -426,6 +496,7 @@ func (s *storageSyncer) listDir(ctx context.Context, p string, parent *int64, c 
 		}
 		return nil, err
 	}
+	objs = fencedOut(fences, p, objs, c)
 	markerFirst(objs)
 	return s.applyListing(ctx, p, parent, objs, c, func(ctx context.Context, _ []listedEntry, _ *entryBatch) error {
 		s.dirListed(ctx, p, len(objs))
@@ -1123,30 +1194,67 @@ func (s *storageSyncer) settleTransfer(ctx context.Context, n *model.Node, obj s
 // that path, it was dropped - shares, versions, comments - a moment before
 // the rename would have re-homed it. With the gate, every change filex makes
 // is either finished before the judgement or starts after it.
+//
+// The gate is held for one batch of candidates at a time (tombstoneBatch):
+// each candidate may cost a Stat over the network, and a judgement holding
+// the gate is what a change waits for. A batch whose gate stays held by a
+// change for all of GateWait ends the pass there; the candidates left are
+// judged by the next one.
 func (s *storageSyncer) tombstone(ctx context.Context, stale []*model.Node) int {
 	b := &entryBatch{}
-	deleted := func() int {
-		release := rowgate.Judge(s.storage.ID)
-		defer release()
-		return s.tombstoneRows(ctx, stale, b)
-	}()
+	deleted := 0
+	for start := 0; start < len(stale); start += tombstoneBatch {
+		end := min(start+tombstoneBatch, len(stale))
+		n, err := func() (int, error) {
+			release, err := rowgate.JudgeWithin(ctx, s.storage.ID, GateWait)
+			if err != nil {
+				return 0, err
+			}
+			defer release()
+			return s.tombstoneRows(ctx, stale[start:end], b), nil
+		}()
+		if err != nil {
+			slog.Info("sync: the tombstone pass stopped before its last candidates; the next pass judges them",
+				slog.Int("left", len(stale)-start),
+				slog.String("storage", s.storage.Name),
+				slog.String("why", err.Error()))
+			break
+		}
+		deleted += n
+	}
 	s.handOff(ctx, b)
 	return deleted
 }
+
+// tombstoneBatch is how many tombstone candidates one hold of the row gate
+// judges (tombstone).
+var tombstoneBatch = 64
+
+// GateWait is how long a judgement of the storage sync (a directory of the
+// walk, a batch of the tombstone pass, a folder of the lazy catalogue) steps
+// back for a change holding the storage's row gate before it is deferred to
+// the next pass (rowgate.JudgeWithin). A change is never kept waiting by it.
+var GateWait = 30 * time.Second
 
 // tombstoneRows is tombstone with the search-index deletions and the cache
 // releases left in b, for a caller running inside a transaction (the lazy
 // delete pass): they happen only once the drops have committed.
 //
 // ⚠ It takes no gate itself (the lazy delete pass runs inside a transaction,
-// and its caller holds the gate already: see rowgate). Each candidate is read
+// and its caller holds the gate already: see rowgate), and leaves alone every
+// row a long change fences (rowgate.Fences). Each candidate is read
 // again first: the list it was given may be older than the gate its caller now
 // holds (RunOnce lists the stale rows before tombstone takes it), and a row
 // that moved or went in between is not the row that list described.
 func (s *storageSyncer) tombstoneRows(ctx context.Context, stale []*model.Node, b *entryBatch) int {
 	var gone []*model.Node
+	// Read under the gate its caller holds: a row at or below a prefix a long
+	// change fences (rowgate.FenceCtx) is that change's, half way - its object
+	// may have moved already while the row still names the old path - and is
+	// judged by a pass after the fence opens.
+	fences := rowgate.Fences(s.storage.ID)
 	for _, n := range stale {
-		if s.rule.Skips(n.Path) {
+		if s.rule.Skips(n.Path) || fences.Covers(n.Path) {
 			continue
 		}
 		cur := s.stillAsListed(ctx, n)

@@ -579,7 +579,7 @@ func (h *PublicAPI) Event(w http.ResponseWriter, r *http.Request) {
 		gin.Context = wire.CallContext{Locale: locale}
 		return h.Apps.Registry.PageEvent(r.Context(), sh, p, gin, clientIP(r))
 	}); gerr != nil {
-		h.Apps.callFail(w, gerr)
+		h.Apps.callFail(w, r, gerr)
 		return
 	} else if verdict.refused() {
 		writeSurfaceRefused(w, locale, verdict)
@@ -592,7 +592,7 @@ func (h *PublicAPI) Event(w http.ResponseWriter, r *http.Request) {
 	// the job it queues.
 	s, err := h.Apps.Registry.PageEvent(r.Context(), sh, p, in, clientIP(r))
 	if err != nil {
-		h.Apps.callFail(w, err)
+		h.Apps.callFail(w, r, err)
 		return
 	}
 	if s.Job != nil {

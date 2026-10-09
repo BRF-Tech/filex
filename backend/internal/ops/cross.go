@@ -38,6 +38,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/brf-tech/filex/backend/internal/rowgate"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 )
@@ -260,10 +261,21 @@ func (s *Service) isCross(op *Op) bool {
 
 // crossTransfer runs one queued source through Transfer, mirrors the result
 // into the DB cache, and — when `move` is set — removes the source afterwards.
+//
+// A move ends by deleting the source under the source storage's row gate. It
+// does not start while a judgement of the source storage holds that gate
+// (errSourceJudged, before a byte travels: execute puts the row back, as a
+// lane does at the claim, gate_lane.go); once the bytes are on the far side,
+// it waits for the gate on the job's own context (rowgate.ChangeCtx), so a
+// Cancel while it waits keeps the source and ends the job. It is not put back
+// there: a second run would copy the item again, beside the first copy.
 func (s *Service) crossTransfer(ctx context.Context, srcDrv, dstDrv storage.Driver, op *Op, src string, move bool) error {
 	dst, err := UniqueDest(ctx, dstDrv, joinIntoDir(op.Dest, src))
 	if err != nil {
 		return err
+	}
+	if move && rowgate.Judged(op.StorageID) {
+		return errSourceJudged
 	}
 	hooks := TransferHooks{}
 	if s.dbsync != nil {
@@ -298,11 +310,22 @@ func (s *Service) crossTransfer(ctx context.Context, srcDrv, dstDrv storage.Driv
 	if !ok {
 		return fmt.Errorf("copied to destination, but the source storage cannot delete %q - remove it by hand", src)
 	}
-	if err := del.Delete(ctx, src); err != nil {
+	// The bytes, then the rows, under the source storage's row gate
+	// (internal/rowgate, issue #201): a scan between the two would drop the
+	// rows on its own, and the hard delete's bookkeeping would find nothing.
+	// Waited for on the job's context: a Cancel while a judgement holds the
+	// gate keeps the source (sec055). A folder on an object store is deleted
+	// object by object: it fences its prefix instead of holding the source
+	// storage's whole scan off (storage.FenceAt, rowgate.FencedChangeCtx).
+	if err := rowgate.FencedChangeCtx(ctx, op.StorageID, storage.FenceAt(ctx, srcDrv, src),
+		func() error { return del.Delete(ctx, src) },
+		func() {
+			if s.dbsync != nil {
+				s.dbsync.SyncHardDelete(ctx, op.StorageID, src)
+			}
+		},
+	); err != nil {
 		return fmt.Errorf("copied to destination, but deleting the source failed: %w", err)
-	}
-	if s.dbsync != nil {
-		s.dbsync.SyncHardDelete(ctx, op.StorageID, src)
 	}
 	return nil
 }

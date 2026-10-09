@@ -32,79 +32,13 @@
  */
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
-import { deflateRawSync } from 'node:zlib';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { loginAs } from '../helpers/auth';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage, storageRoot } from '../helpers/seed';
-
-/* ── a zip, by hand (deflate, no dependency) ───────────────────────────── */
-
-const CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    t[n] = c >>> 0;
-  }
-  return t;
-})();
-
-function crc32(b: Buffer): number {
-  let c = 0xffffffff;
-  for (const x of b) c = CRC_TABLE[(c ^ x) & 0xff] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
-
-function zip(files: Record<string, string>): Buffer {
-  const local: Buffer[] = [];
-  const central: Buffer[] = [];
-  let offset = 0;
-  for (const [name, text] of Object.entries(files)) {
-    const data = Buffer.from(text, 'utf8');
-    const packed = deflateRawSync(data);
-    const nameB = Buffer.from(name, 'utf8');
-    const crc = crc32(data);
-    const h = Buffer.alloc(30);
-    h.writeUInt32LE(0x04034b50, 0);
-    h.writeUInt16LE(20, 4);
-    h.writeUInt16LE(0, 6);
-    h.writeUInt16LE(8, 8);
-    h.writeUInt32LE(0, 10);
-    h.writeUInt32LE(crc, 14);
-    h.writeUInt32LE(packed.length, 18);
-    h.writeUInt32LE(data.length, 22);
-    h.writeUInt16LE(nameB.length, 26);
-    h.writeUInt16LE(0, 28);
-    local.push(h, nameB, packed);
-    const c = Buffer.alloc(46);
-    c.writeUInt32LE(0x02014b50, 0);
-    c.writeUInt16LE(20, 4);
-    c.writeUInt16LE(20, 6);
-    c.writeUInt16LE(0, 8);
-    c.writeUInt16LE(8, 10);
-    c.writeUInt32LE(0, 12);
-    c.writeUInt32LE(crc, 16);
-    c.writeUInt32LE(packed.length, 20);
-    c.writeUInt32LE(data.length, 24);
-    c.writeUInt16LE(nameB.length, 28);
-    c.writeUInt32LE(0, 30);
-    c.writeUInt32LE(0, 34);
-    c.writeUInt32LE(0, 38);
-    c.writeUInt32LE(offset, 42);
-    central.push(c, nameB);
-    offset += h.length + nameB.length + packed.length;
-  }
-  const cd = Buffer.concat(central);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(Object.keys(files).length, 8);
-  end.writeUInt16LE(Object.keys(files).length, 10);
-  end.writeUInt32LE(cd.length, 12);
-  end.writeUInt32LE(offset, 16);
-  return Buffer.concat([...local, cd, end]);
-}
+import { installInterfaceApp, openAppInterface, removeAppByName } from '../helpers/appInterface';
+import { zip } from '../helpers/zip';
 
 /* ── the app ────────────────────────────────────────────────────────────── */
 
@@ -157,27 +91,6 @@ function manifest(name: string, ext: string, ui: Record<string, unknown>) {
   };
 }
 
-async function install(api: APIRequestContext, m: Record<string, unknown>) {
-  const files = {
-    manifest: { name: 'filex-app.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(m)) },
-    ui: { name: 'ui.zip', mimeType: 'application/zip', buffer: UI },
-  };
-  const dry = await api.post('/api/admin/app-plugins?dry_run=1', { multipart: { ...files, grant: JSON.stringify({ permissions: [] }) } });
-  expect(dry.ok(), `dry run: ${dry.status()} ${await dry.text()}`).toBe(true);
-  const perms = ((await dry.json()) as { permissions: Array<{ id: string }> }).permissions.map((p) => p.id);
-  const inst = await api.post('/api/admin/app-plugins', { multipart: { ...files, grant: JSON.stringify({ permissions: perms }) } });
-  expect(inst.ok(), `install: ${inst.status()} ${await inst.text()}`).toBe(true);
-  return perms;
-}
-
-async function removeApp(api: APIRequestContext, name: string) {
-  const list = await api.get('/api/admin/app-plugins');
-  if (!list.ok()) return;
-  for (const p of ((await list.json()) as { plugins?: Array<{ id: number; name: string }> }).plugins ?? []) {
-    if (p.name === name) await api.delete(`/api/admin/app-plugins/${p.id}`);
-  }
-}
-
 /* ── the spec ───────────────────────────────────────────────────────────── */
 
 test.describe.serial('An app’s own interface — the sandbox, in every engine', () => {
@@ -207,8 +120,8 @@ test.describe.serial('An app’s own interface — the sandbox, in every engine'
     await new Promise<void>((ok) => outside.listen(0, '127.0.0.1', ok));
     outsideURL = `http://127.0.0.1:${(outside.address() as AddressInfo).port}`;
     api = await newAuthedRequest(playwright, baseURL ?? '');
-    await removeApp(api, app);
-    await removeApp(api, other);
+    await removeAppByName(api, app);
+    await removeAppByName(api, other);
     const mount = `/tmp/filex-${store}`;
     root = storageRoot(mount);
     mkdirSync(root, { recursive: true });
@@ -216,37 +129,20 @@ test.describe.serial('An app’s own interface — the sandbox, in every engine'
     // A second file of the kind: the viewer draws its previous/next chevrons.
     writeFileSync(join(root, `note2.${ext}`), 'the second file');
     await seedLocalStorage(api, store, mount);
-    const perms = await install(api, manifest(app, ext, { package_fetch: true }));
+    const perms = (await installInterfaceApp(api, manifest(app, ext, { package_fetch: true }), UI)).map((p) => p.id);
     expect(perms, 'the review says it reads its own package').toContain('ui:package-fetch');
-    await install(api, manifest(other, `${ext}o`, {}));
+    await installInterfaceApp(api, manifest(other, `${ext}o`, {}), UI);
   });
 
   test.afterAll(async () => {
-    await removeApp(api, app);
-    await removeApp(api, other);
+    await removeAppByName(api, app);
+    await removeAppByName(api, other);
     await dropStorageByName(api, store);
     await api.dispose();
     await new Promise<void>((ok) => outside.close(() => ok()));
   });
 
-  async function openInterface(page: Page) {
-    await page.addInitScript(() => {
-      localStorage.setItem('filex.tourDone', '1');
-      localStorage.setItem('filex.installPrompt.dismissed', '1');
-    });
-    await loginAs(page);
-    await page.goto(`/admin/explore?storage=${encodeURIComponent(store)}`);
-    const row = page.locator(`[data-fe-path="${store}://note.${ext}"]`);
-    await row.first().waitFor();
-    await row.getByText(`note.${ext}`, { exact: true }).dblclick();
-    const el = page.locator('iframe[data-testid="app-frame"]');
-    await expect(el).toHaveAttribute('sandbox', 'allow-scripts');
-    await expect(page.locator('.fe-appframe[data-connected="true"]')).toBeVisible({ timeout: 20_000 });
-    const frame = (await (await el.elementHandle())!.contentFrame())!;
-    await frame.waitForFunction(() => document.body.dataset.ready === '1' || !!document.body.dataset.error);
-    expect(await frame.evaluate(() => document.body.dataset.error ?? null), 'the interface started').toBeNull();
-    return frame;
-  }
+  const openInterface = (page: Page) => openAppInterface(page, store, `note.${ext}`);
 
   test('a viewer opens its file, reads it and saves it over the bridge', async ({ page }) => {
     const frame = await openInterface(page);

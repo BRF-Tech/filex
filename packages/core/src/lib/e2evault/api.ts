@@ -32,7 +32,20 @@ export interface VaultLockInfo {
   mine: boolean;
 }
 
-export interface VaultState {
+/**
+ * Who owns the vault folder, in a listing row's keys (each absent when the
+ * server has nothing to say). Every row inside a vault is the folder's: the
+ * server knows no file in it and the index records no author, so the
+ * explorer draws them with these (e2eVaultEngine toRow) - without them a row
+ * reads "System".
+ */
+export interface VaultOwner {
+  owner_id?: number;
+  owner_name?: string;
+  owner_self?: boolean;
+}
+
+export interface VaultState extends VaultOwner {
   vault_id: string;
   pack_log2: number;
   generation: number;
@@ -183,7 +196,7 @@ export function createVaultApi(http: VaultHttp) {
   return {
     base,
     /** `POST /create` — a new, empty vault: its key file and generation 1. */
-    create(path: string, marker: object, index: Uint8Array): Promise<{ generation: number }> {
+    create(path: string, marker: object, index: Uint8Array): Promise<{ generation: number } & VaultOwner> {
       return call('POST', '/create', { path, marker, index: bytesToB64(index) });
     },
     /** `GET /state`. With the lock token, when this session holds the lock,

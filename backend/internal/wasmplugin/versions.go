@@ -48,6 +48,9 @@ func (r *Registry) versionsRoot(name string) string {
 type PreviousVersion struct {
 	Version    string    `json:"version"`
 	ReplacedAt time.Time `json:"replaced_at"`
+	// Message says it in the reader's language, on the reader's clock
+	// (handlers sayStatus, 0.55).
+	Message string `json:"message,omitempty"`
 	// UI: the kept version has an interface of its own.
 	UI bool `json:"ui,omitempty"`
 }

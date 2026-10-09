@@ -52,7 +52,12 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   SDK, presigned URLs and multipart) - plus **conformance**, the probes that
   refuse a plugin which cannot do what it claims, and
   [updates from a source](PLUGINS.md#updates-from-a-source) that wait for your
-  review, each plugin's [log](PLUGINS.md#plugin-log), and
+  review, [installing one from an app store](PLUGINS.md#installing-from-a-store)
+  (0.55: pinned, signed and checked by the store's
+  [plugin validator](PLUGINS.md#the-stores-plugin-validator), a paid one's
+  license), [what a signature covers](PLUGINS.md#what-is-signed) (0.55: the
+  plugin, its version, its platform and its SHA-256; the old SHA-256-only
+  form taken with a warning until 0.56), each plugin's [log](PLUGINS.md#plugin-log), and
   [an entry the storage could not answer for](PLUGINS.md#an-entry-your-stat-cannot-answer-for)
   (kept, marked, and left alone until the storage answers)
 - [Apps (app plugins)](APP-PLUGINS.md) - sandboxed WebAssembly apps that add
@@ -71,7 +76,10 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   person, [updates](APP-PLUGINS.md#updates) that each wait for an
   administrator and [going back](APP-PLUGINS.md#going-back) to the previous
   version, [an app's own interface](APP-PLUGINS.md#an-apps-own-interface) (a
-  viewer for a file type, in a sandboxed frame), apps that wake up on their own,
+  viewer for a file type, in a sandboxed frame; 0.55: frames of its own
+  package, `blob:` reads and printing through filex, each asked for and shown
+  in the review; an end-to-end encrypted file offered to no app and refused at
+  every app door), apps that wake up on their own,
   [signing documents end to end](APP-PLUGINS.md#signing-documents-end-to-end)
   (inside and outside signers, PINs, deadlines, the audit trail, verifying, your
   own certificate authority), [converting files](APP-PLUGINS.md#converting-files),
@@ -89,7 +97,11 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   that runs before the wasm build, and a signing walk-through with stock Go
 - [App plugin wire contract](APP-PLUGINS-API.md) - the exact routes, JSON
   shapes and frontend conventions the explorer, admin panel and public shell
-  are built against
+  are built against; [printing a PDF](APP-PLUGINS-API.md#printing-a-pdf-uiprint-055)
+  (`ui.print`: filex's print page, asked every time, printed on the person's
+  *Allow*), [which rows say `encrypted`](APP-PLUGINS-API.md#which-rows-say-encrypted)
+  and [editing together](APP-PLUGINS-API.md#editing-together-coedit-055-defined-not-offered)
+  (`coedit.*`, defined, not offered yet) (0.55)
 
 ## Language & direction
 
@@ -123,7 +135,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   [`filex encrypt`](CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)
   and [`filex vault`](CLI.md#filex-vault---a-vault-on-a-server)
   from the command line, a refusal printed as the server's own sentence; a saved session goes only to the address it was saved
-  with ([connecting](CLI.md#connecting))
+  with ([connecting](CLI.md#connecting)); and
+  [`filex plugin-validator`](CLI.md#filex-plugin-validator---an-app-stores-conformance-runner),
+  the conformance runner an app store runs storage plugin builds through (0.55)
 
 ## Authentication & access
 
@@ -146,6 +160,10 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   why a change sent from another site with a visitor's session is refused
   (`403 cross_origin_refused`), what passes with no setting, and
   `FILEX_CORS_ALLOWED_ORIGINS` for a page of yours that needs it
+- [Security headers and framing](CONFIGURATION.md#security-headers-and-framing) -
+  who may show filex's pages in a frame (`FILEX_FRAME_ANCESTORS`: a home
+  dashboard, and since 0.55 the sites the web component runs on when its apps
+  print, since filex's print page is framed there)
 - [RBAC, folder access & API tokens](RBAC.md) - account roles, per-storage RBAC, per-item grants
   (**Admin → Folder access**), what an API token's verbs allow on every surface,
   [comments, a permission with a level](RBAC.md#permissions-with-a-level-comments)
@@ -192,7 +210,10 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   [the web app installed on a phone or a tablet](DESKTOP.md#on-a-phone-or-a-tablet-the-web-app),
   and on Linux [Chromium's sandbox](DESKTOP.md#appimage-on-recent-ubuntu)
   (the one-time AppArmor profile an AppImage needs on recent Ubuntu; the snap
-  relies on [its strict confinement instead](DESKTOP.md#the-snap-and-the-sandbox))
+  relies on [its strict confinement instead](DESKTOP.md#the-snap-and-the-sandbox),
+  and is built on `core24` since 0.55);
+  [updates](DESKTOP.md#updates), each release first installed over the previous
+  one on Windows and Ubuntu, x64 and arm64 (0.55)
 - [Folder sync](SYNC.md) - how a folder on your PC is kept in step with the server;
   [the engine's event stream](SYNC.md#the-event-stream---json) a program (the desktop
   app) reads instead of its lines, and [`filex sync window`](SYNC.md#filex-sync-window)
@@ -264,8 +285,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   alone or with others, without a server reading it (the editor's Document
   Server answered in the browser, a relay that orders sealed entries), and
   its protocol prototype; the editor's side is an AGPL app of its own
-  (`filex-office-editor`), and filex provides the platform it runs on; not
-  offered anywhere yet
+  (`filex-office-editor`), and filex provides the platform it runs on; how
+  the app prints (filex's `ui.print`) and [what it does on a phone](E2E-OFFICE.md#on-a-phone)
+  (it reads, **Edit** opens the folded desktop editor); not offered anywhere yet
 - [Multi-tenancy](MULTI-TENANCY.md) - provider/tenant mode and its switch on
   Admin → Multi-tenant mode, per-tenant isolation on one instance, and [realms](MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for):
   the tenant's sign-in name - the Realm field, `realm/name` over SFTP, the
@@ -280,27 +302,36 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Deployment](DEPLOYMENT.md) - reverse proxy, HTTPS, serving under a sub-path (`/filex/`), scaling, backup
 - [Docker](DOCKER.md) - images, compose details, and which user the container runs as
 - [Metrics](METRICS.md) - the Prometheus surface, how to scrape it, and
-  the handful of alerts worth having
+  the handful of alerts worth having; [the row gate's](METRICS.md#the-row-gate)
+  changes, fences and deferred scan judgements (0.55)
 - Packaging in the repo: [`deploy/compose/`](../deploy/compose/) (minimal + full)
   and [`deploy/helm/filex/`](../deploy/helm/filex/) (Kubernetes)
 
 ## Develop & integrate
 
-- [Architecture](ARCHITECTURE.md) - how the pieces fit
+- [Architecture](ARCHITECTURE.md) - how the pieces fit, and
+  [the row gate](ARCHITECTURE.md#the-row-gate): why a rename, move or delete on
+  any surface and the storage scan never cross, and how a long one fences only
+  its own paths (0.55: every surface)
 - [Backend](BACKEND.md) - internals; the routes under `/api/files` and `/api/ai`
   are also an [OpenAPI 3.1 description](../backend/internal/api/openapi.json),
   held to the router by a test
 - [HTTP / component API](API.md)
 - [API errors](API-ERRORS.md) - the one shape of a refusal (`error` code,
   `message` written by the server in the reader's language), the codes, a
-  failed queue operation's `error_text`, app locks and sign-in refusals
+  failed queue operation's `error_text`, app locks and sign-in refusals;
+  [app store](API-ERRORS.md#app-store-refusals),
+  [plugin request](API-ERRORS.md#plugin-request-refusals) and
+  [app install](API-ERRORS.md#app-install-refusals) refusals (0.55)
 - [Themes & appearance](INTEGRATION.md#themes) - the shipped palettes, an
   operator's own themes and instance default (Admin → **Appearance**), and the
   custom stylesheet that is off until you switch it on
 - [Embedding the explorer](INTEGRATION.md) - Vue / React / Web Component, and the
   two options every wrapper shares: the **navigation panel** (`sideNav`) and how
   much of the explorer to show (`uiProfile`: `standard` · `simple` - two values,
-  and the third one, `drive`, was **removed** after v0.40.0; pass `simple`)
+  and the third one, `drive`, was **removed** after v0.40.0; pass `simple`);
+  an app that prints from an embed on another site needs that site in
+  `FILEX_FRAME_ANCESTORS` (0.55)
 - [AI & MCP](MCP.md) - API tokens (including the `user` / `app` token kinds), the permissions a token names - at least one, and never a blank list meaning all of them, and holding on every surface the token reaches - the ceiling that stops a narrow token issuing a wider credential (`403 token_ceiling`), the MCP endpoint for agents, the [plugin tools](MCP.md#plugin-tools) that read plugins and leave install requests, and credential-free upload tickets for large local files
 
 ## Repo only - not published to docs.filex.sh

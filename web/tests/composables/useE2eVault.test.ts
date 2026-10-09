@@ -55,6 +55,19 @@ async function settle() {
   await new Promise((r) => setTimeout(r, 0));
 }
 
+/**
+ * The host's HTTP as setup() gives it. ⚠ `downloadUrl` must be the manager's
+ * download: the vault reads its index through it, and a stub that returned
+ * the bare path read nothing - the vault opened unreadable and every write
+ * was refused.
+ */
+const HTTP: VaultHost['http'] = {
+  endpoints: { manager: '/api/files/manager' },
+  authHeaders: async (extra = {}) => ({ ...extra }),
+  credentialsMode: () => 'same-origin',
+  downloadUrl: (p) => `/api/files/manager?action=download&path=${encodeURIComponent(p)}`,
+};
+
 /** The vault API and the download, in memory. */
 function fakeServer(made: Awaited<ReturnType<typeof createVault>>) {
   const files = new Map<string, Uint8Array>();
@@ -67,6 +80,8 @@ function fakeServer(made: Awaited<ReturnType<typeof createVault>>) {
     ended: '' as string,
     failIndexWith: '' as string,
     seen: [] as string[],
+    /** Who owns the vault folder, as `state` and `create` answer it. */
+    owner: { owner_id: 7, owner_name: 'Dana Reyes', owner_self: true } as Record<string, unknown>,
   };
   const json = (status: number, body?: unknown) =>
     new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -94,8 +109,11 @@ function fakeServer(made: Awaited<ReturnType<typeof createVault>>) {
     const sub = u.pathname.replace('/api/files/e2e/vault', '');
     const body = typeof init.body === 'string' ? JSON.parse(init.body) : null;
     switch (sub) {
+      case '/create':
+        return json(201, { generation: 1, ...srv.owner });
       case '/state':
         return json(200, {
+          ...srv.owner,
           vault_id: 'x',
           pack_log2: made.marker.vault!.pack,
           generation: srv.generation,
@@ -393,13 +411,75 @@ describe('useE2eVault', () => {
     expect(calls.locked).toEqual([[ROOT, 'manual']]);
   });
 
+  // 0.55: every row inside a vault is the vault folder's, and the server says
+  // whose (`state`, `create`). The rows carried no owner, and the Owner column
+  // read "System" for a file the person had just uploaded (0.54 screenshots).
+  it("every row carries the vault folder's owner, as the server said it", async () => {
+    const { vault } = await setup();
+    expect(await vault.mkdir(ROOT, 'Belgeler')).toBe(true);
+    const file = new File([new TextEncoder().encode('gizli not')], 'not.txt', { lastModified: 1_791_277_200_000 });
+    expect(await vault.upload(`${ROOT}/Belgeler`, [file])).toBe(true);
+    const rows = [...vault.rows(ROOT)!, ...vault.rows(`${ROOT}/Belgeler`)!];
+    expect(rows.map((r) => r.basename)).toEqual(['Belgeler', 'not.txt']);
+    for (const r of rows) {
+      expect(r).toMatchObject({ owner_id: 7, owner_name: 'Dana Reyes', owner_self: true });
+    }
+  });
+
+  it('somebody else asking is not told the vault is theirs', async () => {
+    const made = await createVault('correct horse battery', { packLog2: 22 });
+    const { srv, handler } = fakeServer(made);
+    srv.owner = { owner_id: 9, owner_name: 'Ayşe' };
+    vi.stubGlobal('fetch', vi.fn(handler));
+    const v = useE2eVault({
+      http: HTTP,
+      headersNow: () => ({}),
+      t: (k) => k,
+      toast: () => undefined,
+      clientKind: () => 'web',
+      dropKeys: () => undefined,
+      onLocked: () => undefined,
+      onChanged: () => undefined,
+      clock: fakeClock(),
+    });
+    live.push({ vault: v, srv });
+    await v.open(ROOT, made.marker, made.fmk, { perm: 'editor' });
+    expect(await v.mkdir(ROOT, 'Ortak')).toBe(true);
+    const [row] = v.rows(ROOT)!;
+    expect(row).toMatchObject({ basename: 'Ortak', owner_id: 9, owner_name: 'Ayşe' });
+    expect((row as Record<string, unknown>).owner_self).toBeUndefined();
+  });
+
+  it("a vault this tab made takes its owner from create's answer", async () => {
+    const made = await createVault('correct horse battery', { packLog2: 22 });
+    const { srv, handler } = fakeServer(made);
+    vi.stubGlobal('fetch', vi.fn(handler));
+    const v = useE2eVault({
+      http: HTTP,
+      headersNow: () => ({}),
+      t: (k) => k,
+      toast: () => undefined,
+      clientKind: () => 'web',
+      dropKeys: () => undefined,
+      onLocked: () => undefined,
+      onChanged: () => undefined,
+      clock: fakeClock(),
+    });
+    live.push({ vault: v, srv });
+    await v.create(ROOT, made.marker, made.index);
+    await v.open(ROOT, made.marker, made.fmk, { justMade: true, perm: 'owner' });
+    expect(srv.seen.some((x) => x.startsWith('/api/files/e2e/vault/state')), 'no state asked').toBe(false);
+    expect(await v.mkdir(ROOT, 'Belgeler')).toBe(true);
+    expect(v.rows(ROOT)![0]).toMatchObject({ basename: 'Belgeler', owner_id: 7, owner_name: 'Dana Reyes', owner_self: true });
+  });
+
   it('a vault this tab made starts at generation 1 without asking', async () => {
     const made = await createVault('correct horse battery');
     const { handler } = fakeServer(made);
     const spy = vi.fn(handler);
     vi.stubGlobal('fetch', spy);
     const v = useE2eVault({
-      http: { endpoints: { manager: '/api/files/manager' }, authHeaders: async () => ({}), credentialsMode: () => 'same-origin', downloadUrl: (p) => p },
+      http: HTTP,
       headersNow: () => ({}),
       t: (k) => k,
       toast: () => undefined,

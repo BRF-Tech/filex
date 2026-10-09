@@ -109,6 +109,28 @@ The throughput gauge is rendered at scrape time straight from
 decide whether a storage is slow enough to be worth caching. One measurement,
 two consumers - so the graph and the cache can never disagree.
 
+### The row gate
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `filex_rowgate_oldest_change_seconds` | gauge | `storage` | how long the oldest two-step change (rename, move, delete, restore) holding the storage's row gate has held it; 0 with none |
+| `filex_rowgate_changes` | gauge | `storage` | two-step changes holding the gate now |
+| `filex_rowgate_long_changes_total` | counter | `storage` | changes that held the gate for a minute or more (each also logs a warning when it lets go) |
+| `filex_rowgate_deferred_judgements_total` | counter | `storage` | storage scan judgements (a directory of the walk, a batch of the tombstone pass, a folder of the lazy catalogue) deferred because the gate stayed held - by a change, or by another judgement - for all of their 30-second wait |
+| `filex_rowgate_fences` | gauge | `storage` | prefixes fenced now by long changes - a folder moved or trashed object by object on an object store fences its path and its destination's; the scan leaves them alone and goes on everywhere else |
+| `filex_rowgate_oldest_fence_seconds` | gauge | `storage` | how long the oldest fence on the storage has stood; 0 with none. Its prefixes have not been scanned for that long |
+
+A change never waits for a scan that is only waiting, so a long change does not
+hold up the other changes or the operations queue; what it holds up is the
+storage's scan (docs/ARCHITECTURE.md, "The row gate"). Since 0.55 a folder
+moved or trashed object by object on an object store does not hold the gate at
+all: it fences its prefixes, and `filex_rowgate_oldest_fence_seconds` climbs
+instead of `filex_rowgate_oldest_change_seconds` while the rest of the storage
+is scanned as usual. An oldest-change gauge that keeps climbing on one storage
+is a long change on a storage with real folders (a recursive delete over
+WebDAV, say), and the scan of that storage resumes when it ends.
+Rendered at scrape time from `internal/rowgate`, like the throughput gauge.
+
 ### Download cache
 
 | Metric | Type | Meaning |

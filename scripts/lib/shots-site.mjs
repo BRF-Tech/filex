@@ -254,10 +254,52 @@ export function findReferences(text, { base = SHOTS_SITE_BASE, siteAssets = fals
 const lineOf = (text, index) => text.slice(0, index).split('\n').length;
 
 /**
- * Points every reference in `text` at the manifest's current URL.
+ * A picture a page shows once it is published:
+ * `<!-- shot: <name> | <alt text> -->`, one line.
+ *
+ * ⚠ Why a comment and not the picture. A new scene is written with the docs
+ * of its feature, but its pictures exist only after a run on the build host
+ * and an `accept` - and a page that links a picture the manifest does not
+ * hold is a broken image (shotsSite.test.ts holds every page to the
+ * manifest). Until 0.55 such pictures were simply never linked: the 0.53
+ * store screen's four pictures (#162) were taken and no page ever showed
+ * them. The comment says where the picture goes and what it shows; the
+ * relink that `accept` runs turns it into the picture once the manifest
+ * holds the name, and leaves it alone until then.
+ */
+export const PENDING_SHOT_RE = /<!--\s*shot:\s*([A-Za-z0-9._/-]+?\.png)\s*\|\s*([^\n]*?)\s*-->/g;
+
+/** Every pending picture in a text: `[{ index, raw, name, alt }]`. */
+export function findPendingShots(text) {
+  return [...text.matchAll(PENDING_SHOT_RE)].map((m) => ({ index: m.index, raw: m[0], name: m[1], alt: m[2] }));
+}
+
+/**
+ * Points every reference in `text` at the manifest's current URL, and turns
+ * every pending picture the manifest now holds into the picture.
  * `{ text, changes: [{ line, from, to }], unresolved: [{ line, ref, why }] }`.
  */
 export function relinkText(text, manifest, { siteAssets = false } = {}) {
+  const pending = relinkPending(text, manifest);
+  const linked = relinkPublished(pending.text, manifest, { siteAssets });
+  return { text: linked.text, changes: [...pending.changes, ...linked.changes], unresolved: linked.unresolved };
+}
+
+/** relinkText's first half: the pending pictures the manifest holds. */
+function relinkPending(text, manifest) {
+  const changes = [];
+  const out = text.replace(PENDING_SHOT_RE, (raw, name, alt, offset) => {
+    const url = urlOf(manifest, name);
+    if (!url) return raw;
+    const picture = `![${alt}](${url})`;
+    changes.push({ line: lineOf(text, offset), from: raw, to: picture });
+    return picture;
+  });
+  return { text: out, changes };
+}
+
+/** relinkText's second half: every reference, pointed at the current URL. */
+function relinkPublished(text, manifest, { siteAssets = false } = {}) {
   const rootNames = new Set(Object.keys(manifest.pictures).filter((n) => !n.includes('/')));
   const refs = findReferences(text, { base: manifest.base, siteAssets, names: rootNames });
   const changes = [];

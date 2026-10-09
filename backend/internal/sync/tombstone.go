@@ -85,8 +85,8 @@ type droppedHistory struct {
 // was made about a PATH - its Stat said "not found" - and the drop is made by
 // ID: a row a move re-homed in between is a row whose object is fine at its
 // new path. The storage's gate (rowgate) keeps filex's own moves out of the
-// pass; this keeps out the ones it does not cover (a second filex process on
-// the same database, a protocol surface that moves without the gate).
+// pass (every surface holds it since 0.55, issue #201); this keeps out the
+// ones it cannot cover: a second filex process on the same database.
 //
 // Every row dropped is said at INFO (droppedLogMax of them per call, then a
 // count): this used to be silent, and a row that vanished left nothing in the

@@ -130,7 +130,9 @@ func (s *KeySet) Validate() error {
 // TrustedKeys is the part of a keys.json filex pins when a store is trusted:
 // the keys that sign what filex reads (install links, license answers) and
 // may sign now or soon. A retired key is not pinned; an artifact key is a
-// module's business (FILEX_PLUGIN_TRUSTED_KEYS), not this package's.
+// module's business (FILEX_PLUGIN_TRUSTED_KEYS), not this package's - it is
+// only remembered as the store's, to narrow what a storage build it signed
+// may install by (buildkeys.go).
 func (s *KeySet) TrustedKeys() []Key {
 	out := []Key{}
 	for _, k := range s.Keys {

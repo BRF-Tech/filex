@@ -2,6 +2,9 @@ package handlers
 
 import (
 	"net/http"
+
+	"github.com/brf-tech/filex/backend/internal/apierr"
+	"github.com/brf-tech/filex/backend/internal/auth"
 )
 
 // PluginRequestsPath is where somebody who may not install a plugin leaves a
@@ -34,10 +37,14 @@ const PluginRequestsPath = "/api/admin/plugin-requests"
 // (ai_admin.go invoke), and a route-level check would guard only one door —
 // the reasoning of supertenant.go.
 func requireSession(w http.ResponseWriter, r *http.Request, what string) bool {
-	return sessionOnly(w, r,
-		what+" needs an administrator signed in to the admin panel; an API key cannot do it. "+
-			"Leave a request instead (POST "+PluginRequestsPath+"): an administrator approves or rejects it on the Plugins page.",
-		map[string]any{"request_endpoint": PluginRequestsPath})
+	if auth.TokenFrom(r.Context()) == nil {
+		return true
+	}
+	// The reader's sentence (server.error.plugin_session_required), naming
+	// where to leave a request; what was refused stays as English detail.
+	writeErrorSaid(w, r, http.StatusForbidden, "session_required", "plugin_session_required",
+		apierr.Params{"endpoint": PluginRequestsPath}, "request_endpoint", PluginRequestsPath, "detail", what)
+	return false
 }
 
 // isDryRun reports whether an install or upgrade asks only for its review.

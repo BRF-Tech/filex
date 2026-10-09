@@ -53,11 +53,16 @@ type CatalogApp struct {
 	FilexRange        string            `json:"filex_range"`
 	Permissions       []string          `json:"permissions"`
 	Icon              string            `json:"icon,omitempty"`
+	// A storage plugin (Kind == KindStorage, #215): the platforms the store
+	// pinned a build for, and its plugin validator's run.
+	Platforms   []string     `json:"platforms,omitempty"`
+	Conformance *Conformance `json:"conformance,omitempty"`
 	// The pins of that version, frozen with a request made from it (never
-	// sent to the browser).
-	ManifestSHA256 string `json:"-"`
-	WasmSHA256     string `json:"-"`
-	UISHA256       string `json:"-"`
+	// sent to the browser). Builds: a storage plugin's, platform → sha256.
+	ManifestSHA256 string            `json:"-"`
+	WasmSHA256     string            `json:"-"`
+	UISHA256       string            `json:"-"`
+	Builds         map[string]string `json:"-"`
 }
 
 // Catalog is a store's catalog at one serial.
@@ -68,6 +73,9 @@ type Catalog struct {
 	Stale     bool         `json:"stale"`
 	Apps      []CatalogApp `json:"apps"`
 	icons     map[string]bool
+	// storage is every storage plugin the index names - revoked ones and
+	// yanked versions too: what the build gate asks (buildkeys.go).
+	storage map[string]storageVersions
 }
 
 // App answers the catalog's entry for name.
@@ -124,6 +132,11 @@ type indexDoc struct {
 			} `json:"ui"`
 			Permissions []string        `json:"permissions"`
 			Yanked      json.RawMessage `json:"yanked"`
+			// A storage plugin's builds and run (#215); absent for an app.
+			Binaries map[string]struct {
+				SHA256 string `json:"sha256"`
+			} `json:"binaries"`
+			Conformance *Conformance `json:"conformance"`
 		} `json:"versions"`
 	} `json:"apps"`
 }
@@ -168,9 +181,17 @@ func project(origin string, doc *indexDoc, now time.Time) *Catalog {
 	for i, p := range doc.Publishers {
 		pubs[p.ID] = i
 	}
-	c := &Catalog{Store: origin, Serial: doc.Serial, FetchedAt: now.UTC(), Apps: []CatalogApp{}, icons: map[string]bool{}}
+	c := &Catalog{Store: origin, Serial: doc.Serial, FetchedAt: now.UTC(), Apps: []CatalogApp{}, icons: map[string]bool{},
+		storage: map[string]storageVersions{}}
 	for _, a := range doc.Apps {
-		if withdrawn(a.Revoked) || (a.Kind != KindApp && a.Kind != KindLanguagePack) {
+		if a.Kind == KindStorage {
+			sv := storageVersions{revoked: withdrawn(a.Revoked), versions: map[string]bool{}}
+			for _, v := range a.Versions {
+				sv.versions[normalVersion(v.Version)] = withdrawn(v.Yanked)
+			}
+			c.storage[a.Name] = sv
+		}
+		if withdrawn(a.Revoked) || (a.Kind != KindApp && a.Kind != KindLanguagePack && a.Kind != KindStorage) {
 			continue
 		}
 		pick := -1
@@ -205,6 +226,26 @@ func project(origin string, doc *indexDoc, now time.Time) *Catalog {
 		}
 		if v.UI != nil {
 			app.UISHA256 = strings.ToLower(v.UI.SHA256)
+		}
+		if a.Kind == KindStorage {
+			// A storage plugin without a pinned build is nothing to install.
+			if len(v.Binaries) == 0 {
+				continue
+			}
+			app.Builds = map[string]string{}
+			for plat, b := range v.Binaries {
+				app.Builds[plat] = strings.ToLower(b.SHA256)
+				app.Platforms = append(app.Platforms, plat)
+			}
+			sort.Strings(app.Platforms)
+			if v.Conformance != nil {
+				c := *v.Conformance
+				if c.Capabilities == nil {
+					c.Capabilities = []string{}
+				}
+				app.Conformance = &c
+			}
+			app.Permissions = []string{}
 		}
 		if a.Icon != nil {
 			if name := iconName(origin, a.Icon.URL, a.Icon.SHA256); name != "" {

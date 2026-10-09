@@ -36,14 +36,18 @@ const plan = (over: Record<string, unknown> = {}) =>
   });
 
 describe('packaging off GitHub Actions', () => {
-  it('builds no macOS package and no arm64 snap, and says how to add both once GitHub can', () => {
+  it('builds no macOS package and no snap, and says how to add them once GitHub can', () => {
     for (const publish of [false, true]) {
       const { steps, notes } = plan({ publish });
       const all = steps.map((s: { cmd: string }) => s.cmd).join('\n');
-      expect(all).not.toMatch(/dist:mac|--mac\b|\.dmg|only=macos|--linux snap --arm64|arm64\.snap/);
+      // 0.55 (#68): both snaps are core24, built by snapcraft in LXD, which
+      // the PC path (WSL) does not have; the amd64 one is no longer built here.
+      expect(all).not.toMatch(/dist:mac|--mac\b|\.dmg|only=macos|--linux snap|dist:snap|\.snap\b/);
       const text = notes.join('\n');
       expect(text).toContain('gh workflow run release.yml -R BRF-Tech/filex -f tag=v1.2.3 -f only=macos -f publish=true');
       expect(text).toContain('gh workflow run release.yml -R BRF-Tech/filex -f tag=v1.2.3 -f only=snap-arm64 -f publish=true');
+      expect(text, 'the amd64 snap: built with snapcraft and attached by hand').toContain('pnpm --filter ./desktop run dist:snap');
+      expect(text).toContain("gh release upload 'v1.2.3' desktop/release/filex-desktop-amd64.snap -R BRF-Tech/filex");
       expect(text, 'the stores, with the tokens GitHub holds').toContain('gh workflow run release.yml -R BRF-Tech/filex -f tag=v1.2.3 -f only=stores -f publish=true');
       expect(text, 'the release notes say macOS follows').toMatch(/goes out without the macOS packages: say so in its notes/);
       expect(text).toContain('pnpm release 1.2.3 --resume --only deploy');
@@ -104,10 +108,11 @@ describe('packaging off GitHub Actions', () => {
     expect(Object.fromEntries(joins)).toEqual(imageTags('v1.2.3'));
   });
 
-  it('attaches every file a release must carry but the macOS packages and the arm64 snap', () => {
+  it('attaches every file a release must carry but the macOS packages and the snaps', () => {
     const shipped = [...DESKTOP_FILES['desktop-windows'], ...DESKTOP_FILES['desktop-linux']];
     const goreleaser = (f: string) => /^filex[_-]/.test(f) && !f.startsWith('filex-desktop') || f === 'checksums.txt';
-    const offGitHub = (f: string) => /arm64\.dmg$|^latest-mac\.yml$|arm64\.snap$/.test(f);
+    // Both snaps since 0.55 (core24: snapcraft in LXD, not on this path).
+    const offGitHub = (f: string) => /arm64\.dmg$|^latest-mac\.yml$|\.snap$/.test(f);
     for (const f of releaseAssets('1.2.3')) {
       if (goreleaser(f) || offGitHub(f)) continue;
       expect(shipped.some((g) => globMatch(g, f)), `${f} is attached by no step`).toBe(true);

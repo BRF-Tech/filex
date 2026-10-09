@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/brf-tech/filex/backend/internal/secheaders"
 )
 
 // ── Serving an interface: GET <base>/_appui/<app>/<sha16>/<path> ─────────
@@ -164,6 +166,9 @@ func (r *Registry) serveUIFile(w http.ResponseWriter, req *http.Request, grants 
 	doc = uiInjectBootstrap(doc)
 	csp, allow := UIPolicy(grants, pkg)
 	h.Set("Content-Security-Policy", csp)
+	// The policy names no frame-ancestors on purpose (uipolicy.go): the
+	// middleware must not add filex's own.
+	secheaders.OpenFraming(req)
 	h.Set("Connection-Allowlist", allow)
 	h.Set("Permissions-Policy", uiPermissionsPolicy)
 	// ⚠ UI-4 · UI-12: the policy is the GRANT's and names the host it was

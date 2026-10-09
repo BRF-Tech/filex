@@ -30,12 +30,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/auth"
-	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
@@ -48,16 +49,16 @@ import (
 func (h *AppPlugins) uiView(w http.ResponseWriter, r *http.Request) (*wasmplugin.Installed, *wire.View, bool) {
 	p, ok := h.Registry.ByName(chi.URLParam(r, "plugin"))
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "app_missing", nil)
 		return nil, nil, false
 	}
 	if state, _ := p.State(); state != wasmplugin.StateRunning {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unsupported", "message": "the app is not running"})
+		writeErrorSaid(w, r, http.StatusNotFound, "unsupported", "app_not_running", nil)
 		return nil, nil, false
 	}
 	v, ok := p.Manifest.View(chi.URLParam(r, "view"))
 	if !ok || v.UI == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "no such interface"})
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "app_screen_missing", nil)
 		return nil, nil, false
 	}
 	if !h.appUserPermOK(w, r, p, v.Requires) {
@@ -68,7 +69,7 @@ func (h *AppPlugins) uiView(w http.ResponseWriter, r *http.Request) (*wasmplugin
 
 // UISave writes what an app's interface saved.
 func (h *AppPlugins) UISave(w http.ResponseWriter, r *http.Request) {
-	if h.off(w) {
+	if h.off(w, r) {
 		return
 	}
 	p, v, ok := h.uiView(w, r)
@@ -76,17 +77,17 @@ func (h *AppPlugins) UISave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !p.Grants.Has(wasmplugin.PermFilesWrite) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not_granted", "message": "this app was not granted files:write"})
+		writeError(w, r, http.StatusForbidden, "not_granted", apierr.Params{"permission": string(wasmplugin.PermFilesWrite)})
 		return
 	}
 	u := auth.UserFrom(r.Context())
 	if u == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+		writeError(w, r, http.StatusUnauthorized, "unauthenticated", nil)
 		return
 	}
 	limit := h.Registry.MaxOutputBytes()
 	if r.ContentLength > limit {
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too_large"})
+		writeError(w, r, http.StatusRequestEntityTooLarge, "too_large", apierr.Params{"max": srvtext.Bytes(langOf(r), limit)})
 		return
 	}
 	q := r.URL.Query()
@@ -108,10 +109,10 @@ func (h *AppPlugins) UISave(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
-			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too_large"})
+			writeError(w, r, http.StatusRequestEntityTooLarge, "too_large", apierr.Params{"max": srvtext.Bytes(langOf(r), limit)})
 			return
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unreadable body"})
+		writeError(w, r, http.StatusBadRequest, "bad_body", nil)
 		return
 	}
 	defer cleanup()
@@ -129,11 +130,11 @@ func (h *AppPlugins) UISave(w http.ResponseWriter, r *http.Request) {
 func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmplugin.Installed, v *wire.View, target string, body io.Reader, size int64, uid int64) {
 	storageID, rels, err := h.resolvePaths(r.Context(), 0, []string{target})
 	if errors.Is(err, errOutsideRoot) || errors.Is(err, errSealedPath) {
-		writePathsRefused(w, err)
+		writePathsRefused(w, r, err)
 		return
 	}
 	if err != nil || len(rels) != 1 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
+		writeError(w, r, http.StatusBadRequest, "bad_path", nil)
 		return
 	}
 	rel := rels[0]
@@ -150,7 +151,7 @@ func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmp
 		return
 	}
 	if !rootAllows(r.Context(), h.Store, storageID, rel) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "outside this token's root"})
+		refuseOutsideRoot(w, r)
 		return
 	}
 	// A draft of the caller's own is theirs to write (making it took
@@ -159,18 +160,17 @@ func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmp
 	if !syspath.IsDraftOf(rel, uid) {
 		if v := aclCanID(r.Context(), h.ACL, h.Store, storageID, rel, perm.FilesModify); !v.ok {
 			if !v.WritePerm(w, r) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "insufficient permission"})
+				writeErrorSaid(w, r, http.StatusForbidden, "permission_denied", "app_save_denied", nil)
 			}
 			return
 		}
 	}
-	if lk, ok := h.Store.(e2e.NodeByPathLookup); ok && e2e.UnderEncrypted(r.Context(), lk, storageID, "/"+rel) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "encrypted", "message": "an app cannot write into an encrypted folder"})
+	if refuseEncryptedAtDoor(w, r, encryptedAtDoor(r.Context(), h.Store, storageID, rel), rel, true) {
 		return
 	}
 	drv, err := h.StorageResolver(storageID)
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "storage unavailable"})
+		writeError(w, r, http.StatusServiceUnavailable, "storage_unavailable", nil)
 		return
 	}
 	obj, err := drv.Stat(r.Context(), rel)
@@ -178,7 +178,7 @@ func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmp
 		notFound(w, "file")
 		return
 	}
-	if !viewSaves(w, v, rel, obj.Mime) {
+	if !viewSaves(w, r, v, rel, obj.Mime) {
 		return
 	}
 	if !h.roomFor(w, r, size) {
@@ -197,7 +197,7 @@ func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmp
 // dialog ("save as"), under a free name beside anything already there.
 func (h *AppPlugins) uiSaveNew(w http.ResponseWriter, r *http.Request, p *wasmplugin.Installed, v *wire.View, dir, name string, body io.Reader, size int64, uid int64) {
 	if dir == "" || name == "" || strings.ContainsAny(name, "/\\\x00") || name == "." || name == ".." || len(name) > 255 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad name", "message": "give path, or dir and a file name"})
+		writeError(w, r, http.StatusBadRequest, "bad_name", nil)
 		return
 	}
 	folder, ok := h.checkOutputFolder(w, r, dir, p.Row.ID)
@@ -211,14 +211,14 @@ func (h *AppPlugins) uiSaveNew(w http.ResponseWriter, r *http.Request, p *wasmpl
 	// a role's blocked file types and folder exceptions to it.
 	if v := aclCanID(r.Context(), h.ACL, h.Store, folder.storage.ID, strings.Trim(path.Join(folder.rel, name), "/"), perm.FilesCreate); !v.ok {
 		if !v.WritePerm(w, r) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "insufficient permission"})
+			writeErrorSaid(w, r, http.StatusForbidden, "permission_denied", "app_save_denied", nil)
 		}
 		return
 	}
 	// "Save as" is held to what a save over a file is held to (security
 	// review UI-9): the kind of file the view opens — a diagram editor never
 	// saves an .html beside the diagram — and the person's quota.
-	if !viewSaves(w, v, name, mime.TypeByExtension(path.Ext(name))) {
+	if !viewSaves(w, r, v, name, mime.TypeByExtension(path.Ext(name))) {
 		return
 	}
 	if !h.roomFor(w, r, size) {
@@ -240,7 +240,7 @@ func (h *AppPlugins) uiSaveNew(w http.ResponseWriter, r *http.Request, p *wasmpl
 // viewSaves holds a save to the kind of file its view opens — a diagram
 // editor writes diagrams, never the spreadsheet beside them. On refusal the
 // answer is written.
-func viewSaves(w http.ResponseWriter, v *wire.View, name, mimeType string) bool {
+func viewSaves(w http.ResponseWriter, r *http.Request, v *wire.View, name, mimeType string) bool {
 	if len(v.Applies.Ext) == 0 && len(v.Applies.Mime) == 0 {
 		return true
 	}
@@ -251,7 +251,7 @@ func viewSaves(w http.ResponseWriter, v *wire.View, name, mimeType string) bool 
 	a.Multi = true
 	it := wasmplugin.Item{Kind: "file", Mime: mimeType, Ext: strings.TrimPrefix(strings.ToLower(path.Ext(name)), ".")}
 	if !wasmplugin.Matches(a, []wasmplugin.Item{it}) {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "not_applicable", "message": "this app does not save this kind of file"})
+		writeErrorSaid(w, r, http.StatusUnprocessableEntity, "not_applicable", "app_kind_unsaved", nil)
 		return false
 	}
 	return true
@@ -270,7 +270,7 @@ func (h *AppPlugins) roomFor(w http.ResponseWriter, r *http.Request, size int64)
 			return false
 		}
 		slog.Warn("app ui save: quota check failed", slog.String("err", err.Error()))
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save_failed", "message": "filex could not save the file"})
+		writeError(w, r, http.StatusInternalServerError, "save_failed", nil)
 		return false
 	}
 	return true
@@ -298,7 +298,7 @@ func writeSaveFailure(w http.ResponseWriter, r *http.Request, err error) {
 	if !isE2EUndecided(err) { // logged where the rule was asked
 		slog.Warn("app ui save failed", slog.String("err", err.Error()))
 	}
-	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save_failed", "message": "filex could not save the file"})
+	writeError(w, r, http.StatusInternalServerError, "save_failed", nil)
 }
 
 func (h *AppPlugins) auditUISave(r *http.Request, p *wasmplugin.Installed, storageID int64, rel string, size int64, how string) {

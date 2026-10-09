@@ -106,7 +106,9 @@ func TestFileTypes_AnUpgradeAsksOnlyAboutTheKindsItAdds(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, done)
 	errs, _ := done["association_errors"].([]any)
 	require.Len(t, errs, 1, "%v", done)
-	assert.Contains(t, errs[0], "open .sketch:")
+	// The server's sentence (0.55: association errors are said, not Go's
+	// "open .sketch: ..."), naming the kind.
+	assert.Contains(t, errs[0], ".sketch files")
 	assert.Contains(t, errs[0], "not a kind this version adds")
 
 	_, body := f.jsonReq(t, http.MethodGet, "/api/admin/file-types", nil)

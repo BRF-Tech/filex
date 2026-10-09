@@ -97,6 +97,7 @@ func uiNetOf(p Permission) (as, u string, ok bool) {
 // isUIPerm reports whether p is one of the interface's derived permissions.
 func isUIPerm(p Permission) bool {
 	return p == PermUI || p == PermUIEval || p == PermUIWasmEval || p == PermUIPackageFetch || p == PermUIDownload ||
+		p == PermUIFramePackage || p == PermUIConnectBlob || p == PermUIPrint ||
 		strings.HasPrefix(string(p), permPrefixUINet) || strings.HasPrefix(string(p), permPrefixUIViewer) ||
 		strings.HasPrefix(string(p), permPrefixUINew)
 }
@@ -324,6 +325,15 @@ func (r *Registry) checkDescribedUI(m *Manifest, got *wire.Manifest) error {
 	if want.Download != have.Download {
 		return fmt.Errorf("the module describes download %v, the manifest %v", have.Download, want.Download)
 	}
+	if want.FramePackage != have.FramePackage {
+		return fmt.Errorf("the module describes frame_package %v, the manifest %v", have.FramePackage, want.FramePackage)
+	}
+	if want.ConnectBlob != have.ConnectBlob {
+		return fmt.Errorf("the module describes connect_blob %v, the manifest %v", have.ConnectBlob, want.ConnectBlob)
+	}
+	if want.Print != have.Print {
+		return fmt.Errorf("the module describes print %v, the manifest %v", have.Print, want.Print)
+	}
 	ext := func(list []wire.UIExternal) []string {
 		out := make([]string, 0, len(list))
 		for _, e := range list {
@@ -402,6 +412,15 @@ func (m *Manifest) checkUI() error {
 	}
 	if ui.Download {
 		perms = append(perms, PermUIDownload)
+	}
+	if ui.FramePackage {
+		perms = append(perms, PermUIFramePackage)
+	}
+	if ui.ConnectBlob {
+		perms = append(perms, PermUIConnectBlob)
+	}
+	if ui.Print {
+		perms = append(perms, PermUIPrint)
 	}
 	if len(ui.External) > maxUIExternal {
 		return fmt.Errorf("manifest: ui.external: at most %d addresses", maxUIExternal)

@@ -57,6 +57,7 @@ import {
 } from '../lib/tableColumns';
 import { setTableSort, tableColumnBacking, tableSort } from '../lib/tablePrefs';
 import { useTableEnv } from '../lib/tableEnv';
+import { syncCutTitle } from '../lib/cutTitle';
 import { clampAlongInline, dirOfElement, inlineKeyStep, inlineSign, inlineStartX } from '../lib/direction';
 import ItemCheck from './ItemCheck.vue';
 import RowActions from './RowActions.vue';
@@ -309,6 +310,26 @@ let widthFrame = 0;
  *  a permanent divider would claim a column floats when it simply fits. */
 const scrolledX = ref(false);
 
+/**
+ * Is there more of the table past its END edge - columns sliding under the
+ * frozen ⋮? Draws the ⋮'s edge on that side.
+ *
+ * ⚠ `scrolledX` alone left it off on a table that had not been scrolled yet:
+ * at 390px the explorer's Modified column ran on under the frozen ⋮ and its
+ * header read "Mo" against a cell with no edge (the 0.55 vault shots), which
+ * looks like a word cut short rather than a column that continues. The label
+ * is not overflowing its own box there, so no ellipsis can say it; the edge
+ * does.
+ */
+const moreEnd = ref(false);
+
+function measureEnd(el: HTMLElement | null) {
+  if (!el) return;
+  /* RTL: the same distance-from-the-start reading as `onListScroll`. */
+  const on = el.scrollWidth - el.clientWidth - Math.abs(el.scrollLeft) > 1;
+  if (on !== moreEnd.value) moreEnd.value = on;
+}
+
 function onListScroll(ev: Event) {
   const el = ev.currentTarget as HTMLElement | null;
   /* ⚠⚠ RTL: `scrollLeft` is 0 at the start edge and goes NEGATIVE as a
@@ -317,6 +338,7 @@ function onListScroll(ev: Event) {
      never drew their edges. Distance from the start, either way. */
   const on = Math.abs(el?.scrollLeft ?? 0) > 0;
   if (on !== scrolledX.value) scrolledX.value = on;
+  measureEnd(el);
 }
 
 /* ⚠ The observer is (re)attached whenever the element appears, not only at
@@ -359,6 +381,20 @@ watch(
 
 const layout = computed(() => store.value.layout(listWidth.value, candidateCols.value, metrics.value));
 const visibleCols = computed<string[]>(() => layout.value.visible);
+
+/* The table's width or its pane's changed: whether anything runs on past the
+   end edge is read again once the new widths are drawn. */
+watch(
+  [() => layout.value.total, listWidth],
+  () => measureEnd(listEl.value),
+  { flush: 'post' },
+);
+
+/** A pill in a cell that is cut short gives its whole text as its title
+ *  (lib/cutTitle) - read when the pointer reaches it. */
+function onBodyPointerOver(ev: PointerEvent) {
+  syncCutTitle(ev.target, listEl.value);
+}
 
 /** ONE object, bound to the header and to every row, so the two cannot drift
  *  out of line with each other when the table is scrolled sideways. */
@@ -523,7 +559,19 @@ function ariaSort(id: string): 'ascending' | 'descending' | 'none' | undefined {
   return s.dir === 'asc' ? 'ascending' : 'descending';
 }
 
-const sortTitle = computed(() => closedWhy.value ?? t('col.sort'));
+/**
+ * A sortable header's hover text: what a click does, NAMING the column.
+ *
+ * ⚠ It names the column because the label itself may be cut: at a column's
+ * minimum on a phone "Mağaza denetimi" draws as "Mağaza d…", and the title is
+ * where the whole name is (fix/055-narrow-table). It was a bare "Sort" on
+ * every header. A closed header keeps saying WHY it is closed, word for word -
+ * its whole name is still the button's own text, which is what a screen reader
+ * reads.
+ */
+function sortTitleOf(id: string): string {
+  return closedWhy.value ?? t('cols.sort_by', { col: label(id) });
+}
 
 function valueOf(row: any, id: string): unknown {
   const c = colById.value.get(id);
@@ -1100,6 +1148,7 @@ defineExpose({ store, layout, pinLead });
       :class="{
         'is-loading': loading,
         'is-scrolled-x': scrolledX,
+        'is-more-end': moreEnd,
         'is-pin-lead': pinLead,
         'is-pin-menu': pinMenu,
         'fe-list--nocheck': !selectable,
@@ -1135,13 +1184,13 @@ defineExpose({ store, layout, pinLead });
             type="button"
             class="fe-list__sort"
             :disabled="!!closedWhy"
-            :title="sortTitle"
+            :title="sortTitleOf(store.lead)"
             @click="toggleSort(store.lead)"
           >
-            {{ label(store.lead) }}
+            <span class="fe-list__sort-label">{{ label(store.lead) }}</span>
             <span v-if="sortArrow(store.lead)" class="fe-list__sort-arrow" aria-hidden="true">{{ sortArrow(store.lead) }}</span>
           </button>
-          <span v-else class="fe-list__head-label">{{ label(store.lead) }}</span>
+          <span v-else class="fe-list__head-label" :title="label(store.lead)">{{ label(store.lead) }}</span>
           <span
             v-if="isResizable(store.lead)"
             class="fe-list__resize"
@@ -1183,13 +1232,17 @@ defineExpose({ store, layout, pinLead });
             type="button"
             class="fe-list__sort"
             :disabled="!!closedWhy"
-            :title="sortTitle"
+            :title="sortTitleOf(id)"
             @click="toggleSort(id)"
           >
-            {{ label(id) }}
+            <!-- ⚠ The words in a box of their own: the button is a flex row
+                 (label + arrow), and `text-overflow` cuts only a block box's
+                 text, so a header narrower than its name was clipped
+                 mid-letter with no ellipsis ("Mağaza d", 0.55 shots). -->
+            <span class="fe-list__sort-label">{{ label(id) }}</span>
             <span v-if="sortArrow(id)" class="fe-list__sort-arrow" aria-hidden="true">{{ sortArrow(id) }}</span>
           </button>
-          <span v-else-if="colById.get(id)?.headerLabel !== false" class="fe-list__head-label">{{ label(id) }}</span>
+          <span v-else-if="colById.get(id)?.headerLabel !== false" class="fe-list__head-label" :title="label(id)">{{ label(id) }}</span>
           <span
             v-if="isResizable(id)"
             class="fe-list__resize"
@@ -1223,7 +1276,7 @@ defineExpose({ store, layout, pinLead });
           ><span aria-hidden="true">&#8942;</span></button>
         </div>
       </div>
-      <div class="fe-list__body" :role="bodyHasContent ? 'rowgroup' : 'presentation'">
+      <div class="fe-list__body" :role="bodyHasContent ? 'rowgroup' : 'presentation'" @pointerover="onBodyPointerOver">
         <template v-for="seg in segments" :key="seg.id">
           <div v-if="seg.label" class="fe-list__group" role="presentation">{{ seg.label }}</div>
           <div

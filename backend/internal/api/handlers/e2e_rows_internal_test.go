@@ -51,7 +51,7 @@ func TestAnnotateRowsE2e_OnlyRowsInsideAnEncryptedFolder(t *testing.T) {
 		{"path": "alpha://kasa/ugkmCcOceKUyA7tsdZxzltk"},
 		{"path": "alpha://acik/plain.txt"},
 	}
-	annotateRowsE2e(context.Background(), fakeMarkers{"kasa/.filex-e2e.json": true}, 7, "alpha", rows)
+	annotateRowsE2e(context.Background(), newE2eRoots(fakeMarkers{"kasa/.filex-e2e.json": true}), 7, "alpha", rows)
 	if rows[0]["e2e_root"] != "alpha://kasa" {
 		t.Errorf("row inside: e2e_root = %v", rows[0]["e2e_root"])
 	}

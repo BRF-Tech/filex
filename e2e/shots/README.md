@@ -225,6 +225,17 @@ own; `accept` refuses such a run.
   storage with `pinTimes(root)` before it is synced.
 - Wait for what the picture claims, never a fixed time, then look at the
   picture: "passed" does not check what is in it.
+- Put the picture where the docs need it in the same change, as a line of
+  its own: `<!-- shot: <set>/<name>.png | <what it shows> -->`. A page may
+  not link a picture the manifest does not hold (a broken image in the shop
+  window), so until the first `accept` the line is a comment; `accept` (and
+  `relink --write`) turns it into `![<what it shows>](<its URL>)` once the
+  manifest holds the name (`scripts/lib/shots-site.mjs`, `PENDING_SHOT_RE`).
+  `web/tests/deploy/shotsSite.test.ts` holds every such line to the folder
+  of a scene that takes it. ⚠ Without it a scene's pictures are taken and
+  never shown: the four pictures store.mjs gained in 0.53 (#162, the store
+  screen, a request, its review, a connected store) were in no page and so
+  never published, until 0.55 gave each its line.
 - A scene that shows a narrow part of the product can declare what it reads,
   so that it is skipped when nothing of that changed:
 

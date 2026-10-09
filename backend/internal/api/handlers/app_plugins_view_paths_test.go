@@ -178,5 +178,5 @@ func TestAppPlugins_ViewEvent_RefusesAnOversizedSelection(t *testing.T) {
 		head = head[:200]
 	}
 	assert.Equal(t, http.StatusBadRequest, status, head)
-	assert.Contains(t, head, "too many paths")
+	assert.Contains(t, head, "too_many_paths")
 }

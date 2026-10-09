@@ -410,6 +410,32 @@ type UISpec struct {
 	// person's gesture or their yes, never over the limit. A permission
 	// (`ui:download`), derived like the rest of this block.
 	Download bool `json:"download,omitempty"`
+	// FramePackage lets the interface open pages of its OWN package in
+	// frames of its own (an editor that puts the document in a frame, as
+	// ONLYOFFICE's DocsAPI does). Only this version's pages: frame-src and
+	// child-src name the package's own path and nothing else, and every
+	// such page is served under the same policy and sandbox - an opaque
+	// origin of its own, no storage, no connection the interface itself is
+	// not granted. The bridge stays with
+	// the frame filex drew; an inner frame talks to it with postMessage. A
+	// permission (`ui:frame-package`), derived like the rest of this block.
+	// filex 0.55 and later; an older filex refuses the field.
+	FramePackage bool `json:"frame_package,omitempty"`
+	// ConnectBlob lets the interface read `blob:` addresses it made itself
+	// with fetch/XHR (a document it unpacked in memory, loaded by an editor
+	// that only reads from an address): `blob:` in connect-src. A `blob:`
+	// address is the page's own memory and reaches no server. A permission
+	// (`ui:connect-blob`), derived like the rest of this block. filex 0.55
+	// and later; an older filex refuses the field.
+	ConnectBlob bool `json:"connect_blob,omitempty"`
+	// Print lets the interface hand filex a PDF to print (`ui.print`): a
+	// sandboxed frame may not open the browser's print dialog, so filex
+	// prints the PDF from its own page, on the person's gesture in the
+	// interface or their yes. A permission (`ui:print`), derived like the
+	// rest of this block - the same kind as Download, since the print
+	// dialog can save the PDF too. filex 0.55 and later; an older filex
+	// refuses the field.
+	Print bool `json:"print,omitempty"`
 }
 
 // NewDocument is one row of the "New" menu an app adds. Ext is the kind

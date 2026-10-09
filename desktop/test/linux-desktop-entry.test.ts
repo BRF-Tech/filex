@@ -25,7 +25,12 @@ import { LINUX_AUTOSTART_NAME } from '../src/login-item.ts';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel: string) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const YML = read('electron-builder.yml');
-const PKG = JSON.parse(read('package.json')) as { version: string; desktopName?: string; scripts: Record<string, string> };
+const PKG = JSON.parse(read('package.json')) as {
+  version: string;
+  desktopName?: string;
+  scripts: Record<string, string>;
+  devDependencies: Record<string, string>;
+};
 const MAIN = read('src/main.ts');
 
 /** The lines of one top-level YAML block (`linux:`, `snap:` …). */
@@ -33,6 +38,15 @@ function yamlBlock(key: string): string {
   const m = new RegExp(`^${key}:\\n((?:[ \\t].*\\n|\\s*\\n)*)`, 'm').exec(YML);
   assert.ok(m, `electron-builder.yml has no top-level "${key}:" block`);
   return m[1];
+}
+/**
+ * The snap's options: `core24:` under the top-level `snapcraft:` block, one
+ * level up (their keys at two spaces), so scalar() and list() read them.
+ */
+function snapCore24(): string {
+  const m = /^ {2}core24:\n((?: {4}.*\n|[ \t]*\n)*)/m.exec(yamlBlock('snapcraft'));
+  assert.ok(m, 'electron-builder.yml has no snapcraft.core24 block');
+  return m[1].replace(/^ {2}/gm, '');
 }
 /** A `  key: value` scalar inside a block, comments ignored. */
 function scalar(block: string, key: string): string | undefined {
@@ -135,7 +149,7 @@ test('every Linux package declares the scheme the sign-in hands back on', () => 
 });
 
 test("the snap's autostart entry is the file the login item writes", () => {
-  const snap = yamlBlock('snap');
+  const snap = snapCore24();
   assert.equal(scalar(snap, 'autoStart'), 'true');
   // electron-builder writes `autostart: <snap name>.desktop`; snapd starts the
   // file of that name under the snap's $HOME/.config/autostart.
@@ -145,20 +159,48 @@ test("the snap's autostart entry is the file the login item writes", () => {
 });
 
 test('the snap is strict, keeps its plugs, and never publishes by itself', () => {
-  const snap = yamlBlock('snap');
+  const snap = snapCore24();
   assert.equal(scalar(snap, 'confinement'), 'strict');
   const plugs = list(snap, 'plugs');
-  // `default` keeps electron-builder's list (home, network, desktop, plain
-  // browser-support, …). Exactly these three, as in 0.49: a plug added here
-  // is a Store decision (0.50's browser-sandbox, `allow-sandbox: true`, held
-  // every revision in manual review), so it changes this line too.
-  assert.deepEqual(plugs, ['default', 'password-manager-service', 'removable-media']);
+  // `default` keeps electron-builder's core24 list (home, network, desktop,
+  // x11, wayland, …), which has NO browser-support: Chromium does not start
+  // in a strict snap without it, so the plain one is named (0.55). Exactly
+  // these four: a plug added here is a Store decision (0.50's
+  // browser-sandbox, `allow-sandbox: true`, held every revision in manual
+  // review), so it changes this line too.
+  assert.deepEqual(plugs, ['default', 'browser-support', 'password-manager-service', 'removable-media']);
   // Not a GitHub download target: `dist:snap` builds it on its own.
   assert.ok(!list(yamlBlock('linux'), 'target').includes('snap'));
   assert.ok(list(yamlBlock('linux'), 'target').includes('rpm'));
   // ⚠ On a tagged CI run electron-builder publishes by itself, and a snap's
   // default publisher is the Snap Store — the upload is CI's explicit step.
   assert.match(PKG.scripts['dist:snap'], /--linux snap --publish never$/);
+});
+
+test("the snap is core24, through electron-builder's own core24 build", () => {
+  // ⚠⚠ The `snapcraft:` key. A `snap:` key with `base: core24` goes through
+  // electron-builder's legacy path, whose x64 build is the prebuilt core20
+  // template whatever the base says: a package that claims core24 and
+  // carries core20's payload (read in 24.13.3 and 26.17.0, #68).
+  assert.doesNotMatch(YML, /^snap:/m, 'a top-level `snap:` key is the legacy path');
+  assert.equal(scalar(yamlBlock('snapcraft'), 'base'), 'core24');
+  // core24 came in electron-builder 26.12.0.
+  const eb = /^\^?(\d+)\.(\d+)\./.exec(PKG.devDependencies['electron-builder'] ?? '');
+  assert.ok(eb, 'electron-builder is a devDependency with a plain version');
+  const [major, minor] = [Number(eb[1]), Number(eb[2])];
+  assert.ok(major > 26 || (major === 26 && minor >= 12), `electron-builder ${eb[0]} has no core24 build (26.12.0 and later)`);
+  const snap = snapCore24();
+  // No template: snapcraft builds it, in LXD (the release installs it on
+  // both Linux rows).
+  assert.equal(scalar(snap, 'useLXD'), 'true');
+  // X11, as the core20 template ran it (DISABLE_WAYLAND=1).
+  assert.equal(scalar(snap, 'forceX11'), 'true');
+  // chrome-sandbox stays out, as the template left it out.
+  assert.deepEqual(list(snap, 'appPartStage'), ['-app/chrome-sandbox']);
+  assert.ok(list(snap, 'stagePackages').includes('default'));
+  // The same fixed artifact name as every other package, at the level the
+  // snap target reads it from.
+  assert.equal(scalar(yamlBlock('snapcraft'), 'artifactName'), '${productName}-desktop-${arch}.${ext}');
 });
 
 test('removing the .deb/.rpm removes its command — and upgrading does not', () => {
@@ -175,6 +217,31 @@ test('removing the .deb/.rpm removes its command — and upgrading does not', ()
   assert.match(tpl, /case "\$1" in\n\s+0\|remove\|purge\|disappear\) ;;\n\s+\*\) exit 0 ;;/);
   // electron-builder expands every dollar-brace name at build time and throws
   // on one it does not define: only its own two may appear.
+  const macros = new Set([...tpl.matchAll(/\$\{([a-zA-Z]+)\}/g)].map((m) => m[1]));
+  assert.deepEqual([...macros].sort(), ['executable', 'sanitizedProductName']);
+});
+
+// 0.55 (#68): electron-builder 26's own after-install takes the setuid bit off
+// chrome-sandbox whenever root can make a user namespace (always) and installs
+// an AppArmor profile for /opt/filex/filex-app, which here is the launcher
+// script, not the Electron binary. An update from 0.54 would have run it.
+test('installing or updating the .deb/.rpm keeps the setuid sandbox helper, as up to 0.54', () => {
+  const rel = scalar(yamlBlock('deb'), 'afterInstall');
+  assert.equal(rel, 'build/linux/after-install.tpl');
+  assert.equal(scalar(yamlBlock('rpm'), 'afterInstall'), rel);
+  const tpl = read(rel!);
+  const code = tpl
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n');
+  // Setuid root, unconditionally, as electron-builder 24.13.3 wrote it.
+  assert.match(code, /^chmod 4755 '\/opt\/\$\{sanitizedProductName\}\/chrome-sandbox' \|\| true$/m);
+  assert.doesNotMatch(code, /chmod 0755/);
+  assert.doesNotMatch(code, /unshare/);
+  // No AppArmor profile is installed (after-remove.tpl would never remove it).
+  assert.doesNotMatch(code, /apparmor/i);
+  // The command on PATH, as before.
+  assert.match(code, /update-alternatives --install '\/usr\/bin\/\$\{executable\}' '\$\{executable\}' '\/opt\/\$\{sanitizedProductName\}\/\$\{executable\}' 100/);
   const macros = new Set([...tpl.matchAll(/\$\{([a-zA-Z]+)\}/g)].map((m) => m[1]));
   assert.deepEqual([...macros].sort(), ['executable', 'sanitizedProductName']);
 });

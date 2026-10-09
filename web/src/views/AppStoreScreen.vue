@@ -21,6 +21,13 @@
  * panel is admin-only, and this screen is for whoever the administrator chose.
  * Both lists are the explorer's table (DataTable); the row's verbs live behind
  * its one pinned Actions control.
+ *
+ * Two tabs (#215): Apps, and Storage - the store's storage plugins, shown
+ * only where this server runs storage plugins (the server leaves them out
+ * otherwise). What each row is here (installed, an older version installed,
+ * asked for, nothing) is the server's `state`, and a storage plugin's
+ * sentences (whether there is a build for this server, what the store's
+ * checks proved, what a storage plugin is) are the server's too.
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -83,7 +90,7 @@ async function loadCatalog() {
   } catch (e: unknown) {
     catalog.value = null;
     const r = storeRefusal(e);
-    failure.value = (r && storeSentence(r, t)) || extractError(e, t('errors.loadFailed'));
+    failure.value = (r && storeSentence(r)) || extractError(e, t('errors.loadFailed'));
   } finally {
     loading.value = false;
   }
@@ -110,20 +117,22 @@ function summaryOf(a: CatalogApp): string {
   return pluginLabelOf(a.summary ?? undefined, locale.value);
 }
 
-/** The request this person has for an app of this store, newest first. */
-function requestOf(a: CatalogApp): PluginRequest | undefined {
-  return requests.value.find((r) => r.source?.store === store.value && (r.source?.store_app || r.name) === a.name);
+/** What the row is here: the server's answer (installed, update, pending,
+ *  none) - never worked out again in the page. */
+function stateOf(a: CatalogApp): CatalogApp['state'] {
+  return a.state ?? 'none';
 }
 
-type State = 'installed' | 'pending' | 'none';
-function stateOf(a: CatalogApp): State {
-  if (a.installed_version && a.installed_version === a.version) return 'installed';
-  if (requestOf(a)?.status === 'pending') return 'pending';
-  return 'none';
+/** Whether this person may ask for it: nothing of it here or asked for, and
+ *  - a storage plugin - a build the store pinned for this server. */
+function askable(a: CatalogApp): boolean {
+  const st = stateOf(a);
+  if (st !== 'none' && st !== 'update') return false;
+  return !isStorage(a) || a.storage?.for_here === true;
 }
 
 const shown = computed<CatalogRow[]>(() => {
-  const all = (catalog.value?.apps ?? []) as CatalogRow[];
+  const all = ((catalog.value?.apps ?? []) as CatalogRow[]).filter((a) => (kindTab.value === 'storage') === isStorage(a));
   const q = query.value.trim().toLocaleLowerCase(locale.value);
   if (!q) return all;
   return all.filter((a) =>
@@ -132,23 +141,38 @@ const shown = computed<CatalogRow[]>(() => {
 });
 
 const columns = computed<DataColumn<CatalogRow>[]>(() => [
-  { id: 'app', label: t('storeScreen.fields.app'), sortable: true, width: 320, sortValue: (r) => labelOf(r) },
+  { id: 'app', label: t(kindTab.value === 'storage' ? 'storeScreen.fields.plugin' : 'storeScreen.fields.app'), sortable: true, width: 320, sortValue: (r) => labelOf(r) },
   { id: 'version', label: t('storeScreen.fields.version'), sortable: true, width: 110, format: (r) => r.version },
-  {
-    id: 'permissions',
-    label: t('storeScreen.fields.permissions'),
-    sortable: true,
-    width: 140,
-    sortValue: (r) => r.permissions.length,
-  },
+  kindTab.value === 'storage'
+    ? { id: 'checks', label: t('storeScreen.fields.checks'), sortable: true, width: 220, sortValue: (r) => r.conformance?.passed ?? -1 }
+    : { id: 'permissions', label: t('storeScreen.fields.permissions'), sortable: true, width: 140, sortValue: (r) => r.permissions.length },
   { id: 'state', label: t('storeScreen.fields.state'), sortable: true, width: 150, sortValue: (r) => stateOf(r) },
 ]);
 
+function requestLabel(r: CatalogApp): string {
+  return t(isStorage(r) ? 'storeScreen.requestStorage' : 'storeScreen.request');
+}
+
 function rowActions(r: CatalogRow): ContextAction[] {
   const out: ContextAction[] = [{ key: 'details', label: t('storeScreen.details'), icon: 'details' }];
-  if (stateOf(r) === 'none') out.unshift({ key: 'request', label: t('storeScreen.request') });
+  if (askable(r)) out.unshift({ key: 'request', label: requestLabel(r) });
   return out;
 }
+
+// ── Apps / Storage (#215) ──────────────────────────────────────────────
+
+type KindTab = 'apps' | 'storage';
+const kindTab = ref<KindTab>('apps');
+const isStorage = (a: CatalogApp) => a.kind === 'storage';
+/** The Storage tab is offered when the catalog holds a storage plugin. */
+const hasStorage = computed(() => (catalog.value?.apps ?? []).some(isStorage));
+const kindChoices = computed<ChoiceOption[]>(() => [
+  { value: 'apps', label: t('storeScreen.tabs.apps') },
+  { value: 'storage', label: t('storeScreen.tabs.storage') },
+]);
+watch(hasStorage, (has) => {
+  if (!has) kindTab.value = 'apps';
+});
 
 const iconFailed = ref<Record<string, boolean>>({});
 function iconUrl(a: CatalogApp): string {
@@ -196,15 +220,13 @@ async function send() {
     const got = await StoreScreenApi.request(store.value, a.name, reason.value.trim());
     toast.success(got.created ? t('storeScreen.sent', { name: labelOf(a) }) : t('storeScreen.alreadySent', { name: labelOf(a) }));
     open.value = null;
-    await loadRequests();
+    // The row's state is the server's: read again, with the request.
+    await Promise.all([loadRequests(), loadCatalog()]);
   } catch (e: unknown) {
-    const err = (e as { response?: { data?: { error?: string; message?: string } } })?.response?.data;
+    // The server's sentence for every refusal (a request too many, a
+    // version installed already: server.plugin_request.*), as it came.
     const r = storeRefusal(e);
-    sendError.value =
-      (err?.error === 'too_many_requests' && t('storeScreen.tooMany')) ||
-      (err?.error === 'already_installed' && t('storeScreen.alreadyInstalled')) ||
-      (r && storeSentence(r, t)) ||
-      extractError(e, t('errors.generic'));
+    sendError.value = (r && storeSentence(r)) || extractError(e, t('errors.generic'));
   } finally {
     sending.value = false;
   }
@@ -266,6 +288,15 @@ const requestColumns = computed<DataColumn<PluginRequest>[]>(() => [
     </p>
 
     <template v-else-if="visible">
+      <ChoiceButtons
+        v-if="hasStorage"
+        :model-value="kindTab"
+        :options="kindChoices"
+        segmented
+        :aria-label="t('storeScreen.tabs.label')"
+        testid-prefix="store-screen-kind"
+        @update:model-value="(v: string | string[]) => (kindTab = (Array.isArray(v) ? v[0] : v) as KindTab)"
+      />
       <div class="flex flex-wrap items-end gap-3">
         <div v-if="stores.length > 1" class="min-w-0">
           <ChoiceButtons
@@ -303,13 +334,23 @@ const requestColumns = computed<DataColumn<PluginRequest>[]>(() => [
         {{ failure }}
       </p>
 
+      <p
+        v-if="kindTab === 'storage' && catalog?.storage_note"
+        class="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+        data-testid="store-screen-storage-note"
+      >
+        <TriangleAlert class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        {{ catalog.storage_note }}
+      </p>
+
       <DataTable
-        table-id="app.store.catalog"
+        :key="kindTab"
+        :table-id="kindTab === 'storage' ? 'app.store.storage' : 'app.store.catalog'"
         :columns="columns"
         :rows="shown"
         row-key="name"
         :loading="loading"
-        :empty="query ? t('storeScreen.noMatch') : t('storeScreen.empty')"
+        :empty="query ? t('storeScreen.noMatch') : t(kindTab === 'storage' ? 'storeScreen.storageEmpty' : 'storeScreen.empty')"
         :row-attrs="(r: CatalogRow) => ({ 'data-testid': `store-app-${r.name}` })"
         :row-actions="(r: CatalogRow) => rowActions(r)"
         :row-actions-test-id="(r: CatalogRow) => `store-app-actions-${r.name}`"
@@ -343,6 +384,14 @@ const requestColumns = computed<DataColumn<PluginRequest>[]>(() => [
           <span :title="row.permissions.join(', ')">
             {{ t('appPlugins.permissionsCount', { count: row.permissions.length }, row.permissions.length) }}
           </span>
+        </template>
+        <template #cell-checks="{ row }">
+          <span
+            class="tbl-clamp"
+            :class="row.storage?.for_here === false ? 'text-rose-600 dark:text-rose-400' : ''"
+            :title="row.storage?.summary || ''"
+            :data-testid="`store-app-checks-${row.name}`"
+          >{{ row.storage?.summary || '-' }}</span>
         </template>
         <template #cell-state="{ row }">
           <Badge v-if="stateOf(row) === 'installed'" tone="emerald" size="xs" dot>{{ t('storeScreen.state.installed') }}</Badge>
@@ -397,7 +446,21 @@ const requestColumns = computed<DataColumn<PluginRequest>[]>(() => [
           <dt class="text-zinc-500">{{ t('storeScreen.fields.store') }}</dt>
           <dd class="break-all font-mono text-xs">{{ store }}</dd>
         </dl>
-        <AppPluginPermissionList :permissions="open.permission_rows ?? open.permissions.map((id) => ({ id, label: id }))" />
+        <template v-if="isStorage(open)">
+          <p class="text-sm" data-testid="store-app-checks">{{ open.storage?.summary }}</p>
+          <ul v-if="open.storage?.capabilities?.length" class="flex flex-wrap gap-1" data-testid="store-app-capabilities">
+            <li v-for="c in open.storage.capabilities" :key="c.id">
+              <Badge tone="zinc" size="xs">{{ c.label }}</Badge>
+            </li>
+          </ul>
+          <p
+            v-if="catalog?.storage_note"
+            class="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+          >
+            {{ catalog.storage_note }}
+          </p>
+        </template>
+        <AppPluginPermissionList v-else :permissions="open.permission_rows ?? open.permissions.map((id) => ({ id, label: id }))" />
         <template v-if="asking">
           <p class="rounded-lg border border-zinc-200 bg-zinc-50 p-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
             {{ t('storeScreen.requestIntro') }}
@@ -428,12 +491,12 @@ const requestColumns = computed<DataColumn<PluginRequest>[]>(() => [
           {{ t('storeScreen.send') }}
         </Button>
         <Button
-          v-else-if="open && stateOf(open) === 'none'"
+          v-else-if="open && askable(open)"
           variant="primary"
           data-testid="store-request-open"
           @click="asking = true"
         >
-          {{ t('storeScreen.request') }}
+          {{ requestLabel(open) }}
         </Button>
       </template>
     </Modal>

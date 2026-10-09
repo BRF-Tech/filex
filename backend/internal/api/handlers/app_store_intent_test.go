@@ -114,6 +114,14 @@ func newAsFix(t *testing.T) *asFix {
 // is built (mut nil: as newAsFix).
 func newAsFixWith(t *testing.T, mut func(cfg *config.Config)) *asFix {
 	t.Helper()
+	return newAsFixDeps(t, mut, nil)
+}
+
+// newAsFixDeps is newAsFixWith with the router's dependencies changed too,
+// over the fixture's store (withDeps nil: as newAsFixWith) - a storage plugin
+// manager for the storage plugins' store links (#215).
+func newAsFixDeps(t *testing.T, mut func(cfg *config.Config), withDeps func(d *api.Deps, store db.Store)) *asFix {
+	t.Helper()
 	ctx := context.Background()
 	_, raw := testutil.NewTestDB(t)
 	accounting := quotastore.New(raw)
@@ -151,11 +159,15 @@ func newAsFixWith(t *testing.T, mut func(cfg *config.Config)) *asFix {
 	})
 	svc.Start(ctx)
 
-	srv := httptest.NewServer(api.BuildRouter(&api.Deps{
+	deps := &api.Deps{
 		Cfg: cfg, Store: tenantstore.New(store), Quota: accounting.Quota(),
 		Worker: syncpkg.New(store), Caps: capability.New(store), Share: share.NewService(store),
 		StorageResolver: resolver, AppPlugins: reg, AppStore: svc, LocalAuth: localDrv,
-	}))
+	}
+	if withDeps != nil {
+		withDeps(deps, store)
+	}
+	srv := httptest.NewServer(api.BuildRouter(deps))
 	t.Cleanup(srv.Close)
 
 	client := freshClient(t)

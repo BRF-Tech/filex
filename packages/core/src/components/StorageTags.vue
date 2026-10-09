@@ -51,11 +51,11 @@ const driverName = computed(() => {
 
 <template>
   <span class="fe-stags" data-testid="storage-tags">
-    <span v-if="driver" class="fe-stag" :title="driver" data-testid="storage-tag-driver">{{ driverName }}</span>
-    <span v-if="readOnly" class="fe-stag fe-stag--warn" data-testid="storage-tag-readonly">{{
+    <span v-if="driver" class="fe-stag tbl-pill" :title="driver" data-testid="storage-tag-driver">{{ driverName }}</span>
+    <span v-if="readOnly" class="fe-stag fe-stag--warn tbl-pill" data-testid="storage-tag-readonly">{{
       t('sidenav.storage.readOnly')
     }}</span>
-    <span v-if="enabled === false" class="fe-stag" data-testid="storage-tag-disabled">{{
+    <span v-if="enabled === false" class="fe-stag tbl-pill" data-testid="storage-tag-disabled">{{
       t('conn.list.disabled')
     }}</span>
   </span>

@@ -151,6 +151,19 @@ const WORKFLOW_GUARDS = [
   'bundles both Store packages and submits the bundle',
   'checks every binary inside a package is the architecture on its label',
   "uploads each Linux architecture's snap to the Snap Store",
+  // 0.55 (#68): the snap is core24, with no prebuilt template: snapcraft in
+  // LXD on both Linux rows, and electron-builder 26 on Node 22.
+  'builds both snaps with snapcraft in LXD, and runs electron-builder on Node 22',
+  // 0.55 (#68): an installed copy of the previous release updates to this
+  // one on the check machines, Windows x64 and arm64, .deb, AppImage and
+  // snap (packaging/ci/release-desktop-upgrade.patch,
+  // web/tests/deploy/releaseDesktopUpgrade.test.ts).
+  'updates from the previous release on every check machine, before the fresh installs',
+  "fetches the newest release below this build's version, with the packages of the machine's row",
+  'updates the x64 and the arm64 Windows copy, and the check machine gets the x64 installer',
+  "runs this build's installer over the old copy as the app's updater does, and wants one copy of this version with the user's data",
+  'updates the .deb as the updater does and keeps its setuid sandbox, replaces the AppImage in place, refreshes the snap with its data',
+  'previous-release.mjs picks the newest published release below a version',
   'runs the arm64 CLI, server and images on arm64 machines',
   'installs and opens the arm64 desktop packages on arm64 machines',
   'names the arm64 installer in the winget manifest',
@@ -811,6 +824,7 @@ export default function plan({ repo, version, tag }) {
             'tests/deploy/releasePromote.test.ts',
             'tests/deploy/releaseVerifyCircleci.test.ts',
             'tests/deploy/releaseStoresOnly.test.ts',
+            'tests/deploy/releaseDesktopUpgrade.test.ts',
           ],
           env: (c) => ({ FILEX_WORKFLOWS_DIR: workflowsOf(c.exportTarget) }),
           mustPass: WORKFLOW_GUARDS,

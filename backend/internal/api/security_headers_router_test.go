@@ -19,6 +19,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/api"
 	"github.com/brf-tech/filex/backend/internal/config"
+	"github.com/brf-tech/filex/backend/internal/printframe"
 	"github.com/brf-tech/filex/backend/internal/testutil"
 )
 
@@ -34,13 +35,14 @@ func newHeadersServer(t *testing.T, ancestors []string) *httptest.Server {
 }
 
 // ownFrames is what a page served at srv may frame of filex itself (security
-// review UI-11): the app interfaces and the download frame, by path.
+// review UI-11): the app interfaces, the download frame and the print page
+// (`ui.print`, #189), by path.
 func ownFrames(srv *httptest.Server, interfaces bool) string {
 	host := strings.TrimPrefix(srv.URL, "http://")
 	if !interfaces {
-		return host + "/z/"
+		return host + "/z/ " + host + "/_print/"
 	}
-	return host + "/_appui/ " + host + "/z/"
+	return host + "/_appui/ " + host + "/z/ " + host + "/_print/"
 }
 
 func headersOf(t *testing.T, url string) http.Header {
@@ -51,6 +53,27 @@ func headersOf(t *testing.T, url string) http.Header {
 	res.Body.Close()
 	require.Less(t, res.StatusCode, 500, url)
 	return res.Header
+}
+
+// The print page (`ui.print`, #189) keeps its own policy - frames of the
+// blob: PDF it made, nothing of filex - and says who may frame it: filex,
+// the pages the operator allows to frame filex (an embed's site) and the
+// desktop app, once, never any site (security review sec055 S9). Red before:
+// the page carried no frame-ancestors, so every site could frame it.
+func TestSecurityHeaders_ThePrintPageFramesOnlyItsOwnBlob(t *testing.T) {
+	srv := newHeadersServer(t, []string{"https://home.example.com"})
+	h := headersOf(t, srv.URL+"/_print/")
+	csp := h.Get("Content-Security-Policy")
+	assert.Contains(t, h.Get("Content-Type"), "text/html")
+	assert.Equal(t, printframe.CSP+"; frame-ancestors 'self' https://home.example.com app://filex", csp)
+	assert.Equal(t, 1, strings.Count(csp, "frame-ancestors"), "the middleware adds no second one")
+	assert.NotContains(t, csp, "/_appui/")
+	assert.Equal(t, "nosniff", h.Get("X-Content-Type-Options"))
+	assert.Equal(t, "no-referrer", h.Get("Referrer-Policy"))
+
+	// With no list: filex and the desktop app only.
+	srv = newHeadersServer(t, nil)
+	assert.Equal(t, printframe.CSP+"; frame-ancestors 'self' app://filex", headersOf(t, srv.URL+"/_print/").Get("Content-Security-Policy"))
 }
 
 func TestSecurityHeaders_TheAppsPagesAreNotFramedByOtherSites(t *testing.T) {
@@ -112,7 +135,7 @@ func TestSecurityHeaders_OwnFramesNameThePublicHostToo(t *testing.T) {
 	})
 	testutil.SeedAdmin(t, store)
 	h := headersOf(t, srv.URL+"/admin/")
-	assert.Equal(t, "frame-ancestors 'self'; frame-src "+ownFrames(srv, true)+" files.example.com/_appui/ files.example.com/z/", h.Get("Content-Security-Policy"))
+	assert.Equal(t, "frame-ancestors 'self'; frame-src "+ownFrames(srv, true)+" files.example.com/_appui/ files.example.com/z/ files.example.com/_print/", h.Get("Content-Security-Policy"))
 }
 
 // FILEX_APP_UI_ORIGIN: filex's pages may frame the interface origin, and

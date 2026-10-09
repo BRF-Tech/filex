@@ -44,6 +44,11 @@ type Process struct {
 	// verify now will not verify in a minute. Nil runs Binary as it is - for
 	// tests of the supervisor alone.
 	Prepare func() (exe string, done func(), err error)
+	// Tune adjusts the command before every start, after filex's own process
+	// attributes (applyLimits): the store's plugin validator runs the plugin
+	// as an unprivileged user here (check.go, `filex plugin-validator`). Nil
+	// for every plugin a Manager starts.
+	Tune func(cmd *exec.Cmd)
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -352,6 +357,9 @@ func (p *Process) spawn(exe string) (*exec.Cmd, io.ReadCloser, io.ReadCloser, er
 		// Its own process group and resource ceilings - see limits_unix.go for
 		// what these are and, more importantly, what they are not.
 		applyLimits(cmd)
+		if p.Tune != nil {
+			p.Tune(cmd)
+		}
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			return nil, nil, nil, err

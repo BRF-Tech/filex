@@ -185,7 +185,7 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 	// (GHSA-8gvc-6w52-6c7j). Asked before anything about the storage or the
 	// entry is told.
 	if !rootAllowsIn(r.Context(), stRow, rel) {
-		refuseOutsideRoot(w)
+		refuseOutsideRoot(w, r)
 		return
 	}
 	if readOnly {

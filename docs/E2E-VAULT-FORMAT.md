@@ -637,8 +637,8 @@ rules of the files API. `path` is the vault folder's wire path
 
 | Request | Answer |
 |---|---|
-| `POST /create` `{path, marker, index}` | `201 {generation: 1}` |
-| `GET /state?path=` | `200 {vault_id, pack_log2, generation, lock}` |
+| `POST /create` `{path, marker, index}` | `201 {generation: 1, owner_id, owner_name, owner_self}` |
+| `GET /state?path=` | `200 {vault_id, pack_log2, generation, lock, owner_id, owner_name, owner_self}` |
 | `GET /list?path=&kind=&after=&limit=` | `200 {items, next}` |
 | `POST /lock` `{path, client, label}` | `200 {token, generation, lease_seconds, idle_seconds, expires_at}` · `409 VAULT_LOCKED` |
 | `POST /lock/renew` `{path, active}` + token | `200 {expires_at, idle_until}` · `409 VAULT_LOCK_LOST` |
@@ -668,7 +668,12 @@ is measured against - never the client's.
   it). It writes the folder, the key file and the index, in that order, and
   removes what it wrote when a step fails.
 - **`state`**: `generation` is the latest (0 when there is no index); `lock` is
-  `null` or `{holder: {name, client, label}, since, expires_at, mine}`. The
+  `null` or `{holder: {name, client, label}, since, expires_at, mine}`.
+  `owner_id`, `owner_name` and `owner_self` say who owns the vault folder, in
+  the keys a listing row carries (each absent when there is nothing to say;
+  `create` answers them too, for the tab that opens the vault it has just
+  made). The index records no author and the server knows no file in the
+  vault, so every row inside it is shown as the vault folder's. The
   server keeps the latest generation of each vault cached and lists
   `v/idx/` when it does not have it.
 - **`list`**: `kind=index` answers `{generation, size, mtime}` per file,

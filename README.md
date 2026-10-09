@@ -324,7 +324,7 @@ under it.
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.1c420dacc12e.png)
+![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.3a7aa7199497.png)
 
 <sub>…and the sign-in page, before anybody has signed in</sub>
 
@@ -370,12 +370,13 @@ under it.
   the web UI's.
 - `filex mount` attaches a remote server over ordinary HTTPS: a folder on Linux, a drive
   letter on Windows (macOS is not supported).
-- For a storage filex does not ship, install a plugin from the admin panel.
+- For a storage filex does not ship, install a plugin from the admin panel or from an app
+  store's link.
 
 <p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.7327ccaf3ae3.png" alt="How to connect" width="860"></p>
 
 <details>
-<summary><b>More about storage and protocols</b> - the protocols both ways, and screenshots of the connection guides, API keys and a storage plugin</summary>
+<summary><b>More about storage and protocols</b> - the protocols both ways, moves beside a scan, storage plugins from a store, and screenshots of the connection guides, API keys and a storage plugin</summary>
 
 - **Speaks the protocols both ways** - filex can *connect to* local disks, S3, FTP, SFTP,
   WebDAV and SMB/NAS shares, and it can *be reached as* **S3**, **SFTP**, **FTPS**,
@@ -385,6 +386,20 @@ under it.
   quota as the web UI. Off-LAN there is also **`filex mount`**, which attaches a remote
   server over ordinary HTTPS - a folder on Linux, a drive letter on Windows
   ([docs/PROTOCOLS.md](docs/PROTOCOLS.md)).
+- **A move is safe beside a scan, on every door** - a rename, move or delete made over
+  WebDAV, SFTP, FTPS, NFS, the S3 gateway, an agent or the explorer runs in two steps,
+  the bytes and then the rows, and the scan that catches changes made outside filex
+  never judges the tree between them: a moved file keeps its shares, versions and
+  comments, and a trashed one its way back. A long change holds up nothing but its own
+  storage's scan - a folder moved object by object on an object store fences only its
+  own two paths - and a change that waited checks again before it acts
+  ([docs/ARCHITECTURE.md → The row gate](docs/ARCHITECTURE.md#the-row-gate)).
+- **Storage plugins from a store** - an app store such as [filex Apps](https://apps.filex.sh)
+  lists storage plugins beside apps: the same install link and review, the build held
+  to the store's pin and signature and run by the store's plugin validator before it
+  was listed, and a paid one held - nothing removed - while its license does not hold.
+  filex still probes it itself before anyone can build a storage on it
+  ([Installing from a store](docs/PLUGINS.md#installing-from-a-store)).
 
 <table>
 <tr>
@@ -397,7 +412,7 @@ under it.
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.bae083a0679a.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.328d7d7adac4.png)
 
 <sub>API keys - mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry)</sub>
 
@@ -435,8 +450,8 @@ under it.
   storage needs **Per-item access control (RBAC)** switched on, which it is not by default.
 - Deletes are reversible within a retention window and writes keep snapshots, both inside the
   storage you already mounted.
-- End-to-end encrypted folders: encrypted in the browser, and the server never receives a
-  key. Optional ClamAV scanning of every file written.
+- End-to-end encrypted folders: encrypted in the browser, the server never receives a key,
+  and no app is handed an encrypted file. Optional ClamAV scanning of every file written.
 
 <p align="center"><img src="https://filex.sh/shots/public-share.0e3ba07f7c88.png" alt="A public share link, as its recipient sees it" width="860"></p>
 
@@ -447,7 +462,7 @@ under it.
 <tr>
 <td width="50%" valign="top">
 
-![Share modal](https://filex.sh/shots/share-modal.c8a399c36424.png)
+![Share modal](https://filex.sh/shots/share-modal.e296e9b6ceea.png)
 
 <sub>Sharing - PIN, expiry, download limit, one-line `curl`</sub>
 
@@ -479,7 +494,7 @@ under it.
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.ad8c2e623c72.png)
+![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.7e448107c5b9.png)
 
 <sub>Every admin table - one pinned **Actions** menu per row, the same menu the explorer's ⋮ opens</sub>
 
@@ -615,7 +630,7 @@ under it.
 </td>
 <td width="50%" valign="top">
 
-![Admin → Sign-in security](https://filex.sh/shots/loginsecurity/login-security-1440.5a98c09e6f76.png)
+![Admin → Sign-in security](https://filex.sh/shots/loginsecurity/login-security-1440.fa0a391a5c19.png)
 
 <sub>Sign-in security - the attempt limit, allowed addresses, trusted proxies, the locks and the sign-in trail ([sign-in attempt limits](docs/CONFIGURATION.md#sign-in-attempt-limits))</sub>
 
@@ -624,7 +639,7 @@ under it.
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.386b07b4543a.png)
+![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.fafb1136af30.png)
 
 <sub>…and what a locked account's sign-in form says, counting the lock down on its button</sub>
 
@@ -752,6 +767,9 @@ the web UI and the embeds render, not a separate half-copy:
   ([docs/DESKTOP.md](docs/DESKTOP.md#language)).
 - **Signs in through your browser**, so SSO and MFA behave exactly as they do on the web.
 - **Updates itself** - downloads quietly, installs on quit; `FILEX_NO_UPDATE=1` opts out.
+  Every release is installed over the previous one on real Windows and Ubuntu machines,
+  x64 and arm64, before it ships, and must leave one copy of the new version where the
+  old one was, with your accounts and settings ([Updates](docs/DESKTOP.md#updates)).
 - **On a phone, the web app instead** - there is no desktop app for a phone, and a phone is
   never offered one: a band at the bottom of the sign-in page and the file list offers to
   install the web app, which then opens in a window of its own
@@ -777,7 +795,10 @@ On Linux the `.deb`, `.rpm` and AppImage never run without Chromium's sandbox. T
 AppArmor profile, and the app says so and shows the step
 ([docs/DESKTOP.md](docs/DESKTOP.md#appimage-on-recent-ubuntu)). The Snap runs without
 Chromium's sandbox, inside the snap's strict confinement, and needs nothing either
-([docs/DESKTOP.md](docs/DESKTOP.md#the-snap-and-the-sandbox)).
+([docs/DESKTOP.md](docs/DESKTOP.md#the-snap-and-the-sandbox)). Since 0.55 it is built on
+`core24` (Ubuntu 24.04) with Snapcraft's GNOME extension, on x64 and arm64: its first
+install also brings the GNOME runtime, the graphics libraries and the GTK themes as
+shared snaps.
 
 **ARM (arm64)** - what ships for it (every release builds these and runs them on
 arm64 machines before publishing):
@@ -902,10 +923,15 @@ change it sends is refused (`403 cross_origin_refused`) until that origin is in
 that proxies with a key, the desktop app and the installed web app need nothing
 ([docs/CONFIGURATION.md](docs/CONFIGURATION.md#requests-from-other-origins)).
 
-⚠ Keep the packages and the server on one version: **`@brftech/filex` 0.54 needs a filex
-0.54 server**. Which files open for editing, the input limits and the version line come
-from the server's capabilities, and the packages keep no copy to fall back on
-([docs/API.md](docs/API.md)).
+⚠ Keep the packages and the server on one version: **`@brftech/filex` 0.55 needs a filex
+0.55 server**. Which files open for editing, the input limits and the version line come
+from the server's capabilities, whether a file is end-to-end encrypted comes from its
+row, and the packages keep no copy to fall back on ([docs/API.md](docs/API.md)).
+
+⚠ An app that prints (`ui.print`, 0.55) prints from a page of filex's own, in a frame.
+Where the web component runs on another site, list that site in `FILEX_FRAME_ANCESTORS`,
+or the app is told printing is unavailable
+([Security headers and framing](docs/CONFIGURATION.md#security-headers-and-framing)).
 
 <table>
 <tr>
@@ -937,7 +963,7 @@ from the server's capabilities, and the packages keep no copy to fall back on
 An app is a WebAssembly module that runs inside filex in a sandbox, an interface of its own
 in a sandboxed frame, or both. You install it from a store link or its GitHub address, read
 every permission it asks for, and nothing updates itself. The people of your filex can browse a
-trusted store on its **App store** screen and ask you for an app. Four ship as public repositories:
+trusted store on its **App store** screen and ask you for an app or a storage plugin. Four ship as public repositories:
 
 | App | What it adds |
 |---|---|
@@ -990,6 +1016,24 @@ Chrome lets filex close it, in Firefox filex can only take it out of the page -
 a seat belt, not a wall), so the install review says so plainly: **trust an
 app with an interface as far as you trust its author with the files you open
 in it.**
+
+An editor that runs in the browser may ask for two narrow exceptions, each a
+line of the review: frames of **its own package's** pages (`ui:frame-package`)
+and reading the `blob:` addresses it made (`ui:connect-blob`) - never another
+site, another app or a page of filex. A sandboxed frame cannot open the print
+dialog either, so an interface with `ui:print` hands filex a PDF and **filex
+prints it** from a page of its own: it asks every time, and the print dialog
+opens only on the person's click on *Allow*
+([Printing a PDF](docs/APP-PLUGINS-API.md#printing-a-pdf-uiprint-055)). An
+**end-to-end encrypted file is offered to no app** - no *Open with*, no action,
+no ONLYOFFICE - and every app door refuses it: filex decrypts nothing for an
+app, and tells an interface that a file is encrypted rather than pretending
+otherwise ([Which rows say `encrypted`](docs/APP-PLUGINS-API.md#which-rows-say-encrypted)).
+The office editor app, [`filex-office-editor`](https://github.com/BRF-Tech/filex-office-editor)
+(ONLYOFFICE's editor in the browser, with no Document Server; no release yet),
+is built on exactly these: it prints through filex, and on a phone it opens a
+document to read, with **Edit** opening the folded desktop editor
+([On a phone](docs/E2E-OFFICE.md#on-a-phone)).
 
 What an app adds lives where everything else does: rows in the file menu, screens
 filex draws for it or its own interface, jobs in the same
@@ -1047,12 +1091,18 @@ first link from a store asks you to **trust** it and shows the fingerprints of t
 it signs with; compare them with what the store publishes. A link is made for one filex
 and works once, and the store is told how it ended. `FILEX_APP_STORE_URLS` /
 `FILEX_APP_STORE_KEYS` trust stores by configuration instead, and then no other
-([Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store)).
+([Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store)). From 0.55 a
+store lists **storage plugins** too, through the same link and the same review: the
+build is held to the store's pin, its signature names the plugin, the version and the
+platform ([What is signed](docs/PLUGINS.md#what-is-signed)), and the store's plugin
+validator ran its Linux build in a container with no network before it was listed
+([Installing a storage plugin from a store](docs/PLUGINS.md#installing-from-a-store)).
 
 **Let people ask for one** - the navigation panel's **Apps → App store** opens filex's own
 screen over a trusted store's catalog, in the web app and the desktop app alike: read and
 verified on the server from the store's signed index, never a frame of the store. A person
-asks for an app with a reason and follows it under **My requests**; the request waits on
+asks for an app - or, on the **Storage plugins** tab, a storage plugin - with a reason and
+follows it under **My requests**; the request waits on
 **Plugins → Install requests**, and approving it asks the store for a fresh install link and
 opens the same review. **Admin → Plugins → Apps → Store screen** turns the screen on, picks
 the stores and who sees it, and **Trusted stores → Connect** binds this filex to a store with
@@ -1065,7 +1115,7 @@ question shows the first 32 characters of each fingerprint, in groups of four):
 |---|---|---|
 | `index-2026-10` | install links | `205cd1302b9a5025776636b189b6ef80c5a72f4128acb802b917434380bc4c88` |
 | `license-2026-10` | license answers | `2807b0749a94944285c293ee82ae46600877925a0815cbc0484a93789e0371b4` |
-| `artifact-2026-10` | app modules (not asked about on the trust question; `FILEX_PLUGIN_TRUSTED_KEYS` checks a module's signature) | `94974dbae4cc3106406cbf812a4f33b530030ac244b57b73a8989bb23d4df62e` |
+| `artifact-2026-10` | app modules and storage plugin builds (not asked about on the trust question; `FILEX_PLUGIN_TRUSTED_KEYS` checks a module's or a build's signature) | `94974dbae4cc3106406cbf812a4f33b530030ac244b57b73a8989bb23d4df62e` |
 
 **Paid apps.** A store may sell an app, and its license is the store's: filex keeps the
 key encrypted and shows only its first characters, asks the store at install and every
@@ -1141,7 +1191,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.b5bfdbd379c3.png)
+![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.9642990b704d.png)
 
 <sub>While it is out - the document frozen for everybody, who has signed in its details</sub>
 
@@ -1173,7 +1223,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The install review of an app with its own interface](https://filex.sh/shots/apps/app-interface-review-1440.5e0e3009d2ba.png)
+![The install review of an app with its own interface](https://filex.sh/shots/apps/app-interface-review-1440.51df0aa460ad.png)
 
 <sub>An app that brings its own interface - the review shows the package's fingerprint, every address outside it (a live one is a permission, in yellow) and what a browser cannot promise</sub>
 
@@ -1189,7 +1239,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The Apps list, a language pack among the apps](https://filex.sh/shots/langpack/apps-list-1440.50e11eedf3d4.png)
+![The Apps list, a language pack among the apps](https://filex.sh/shots/langpack/apps-list-1440.004f0c819981.png)
 
 <sub>Every app on the instance, and a **language pack** among them - a manifest with nothing that runs, which says how much of this filex it translates and leaves with it</sub>
 
@@ -1212,7 +1262,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 </td>
 <td width="50%" valign="top">
 
-![The install review opened from a store's link](https://filex.sh/shots/store/store-review-1440.b863df3efed9.png)
+![The install review opened from a store's link](https://filex.sh/shots/store/store-review-1440.01ab061907d0.png)
 
 <sub>Installing from a store - the same review, marked **From store**, the paid app's license key shown by its first characters ([Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 
@@ -1312,7 +1362,8 @@ credentials**, so even an agent with no filex token can finish the transfer with
 `curl -T bigfile <url>`. Details: [docs/MCP.md](docs/MCP.md).
 
 When filex says no, it says it the same way on every door: a stable `error` code to branch
-on and the server's sentence in `message`, in the reader's language, to pass on as it is
+on and the server's sentence in `message`, in the reader's language, to pass on as it is -
+an app's run, an app store link, a plugin request and an install refusal included
 ([docs/API-ERRORS.md](docs/API-ERRORS.md)). And a link an agent makes comes back with its
 own download command, the `curl` and PowerShell lines written by the server
 ([docs/SHARING.md](docs/SHARING.md)).
@@ -1410,6 +1461,8 @@ The guides are published as a site at [docs.filex.sh](https://docs.filex.sh), an
 [Demo mode](docs/DEMO.md)
 
 **Clients** - [Desktop app](docs/DESKTOP.md) · [Folder sync](docs/SYNC.md) ·
+[The snap (core24)](docs/DESKTOP.md#the-snap-and-the-sandbox) ·
+[Desktop updates](docs/DESKTOP.md#updates) ·
 [On a phone (the web app)](docs/DESKTOP.md#on-a-phone-or-a-tablet-the-web-app) ·
 [CLI](docs/CLI.md) · [Sync's event stream](docs/SYNC.md#the-event-stream---json) ·
 [Integration / embedding](docs/INTEGRATION.md) · [AI & MCP](docs/MCP.md)
@@ -1424,6 +1477,9 @@ The guides are published as a site at [docs.filex.sh](https://docs.filex.sh), an
 [Install requests](docs/APP-PLUGINS.md#install-requests) ·
 [App permissions](docs/APP-PLUGINS.md#app-permissions) ·
 [Default apps](docs/APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail) ·
+[An app's own interface](docs/APP-PLUGINS.md#an-apps-own-interface) ·
+[Printing from an app](docs/APP-PLUGINS-API.md#printing-a-pdf-uiprint-055) ·
+[Encrypted files and apps](docs/APP-PLUGINS-API.md#which-rows-say-encrypted) ·
 [Write an app](docs/PLUGIN-KIT.md) · [App wire contract](docs/APP-PLUGINS-API.md)
 
 **Language & layout** -
@@ -1431,6 +1487,9 @@ The guides are published as a site at [docs.filex.sh](https://docs.filex.sh), an
 [Right-to-left languages](docs/RTL.md)
 
 **Storage & access** - [Storage](docs/STORAGE.md) · [Storage plugins](docs/PLUGINS.md) ·
+[Storage plugins from a store](docs/PLUGINS.md#installing-from-a-store) ·
+[The store's plugin validator](docs/PLUGINS.md#the-stores-plugin-validator) ·
+[What a plugin signature covers](docs/PLUGINS.md#what-is-signed) ·
 [Usage & cost](docs/USAGE.md) · [Uploads & resume](docs/UPLOADS.md) ·
 [Quotas](docs/QUOTAS.md) · [SSO (OIDC)](docs/SSO.md) ·
 [LDAP & proxy auth](docs/LDAP.md) · [Directory sync](docs/LDAP.md#directory-sync) ·
@@ -1447,7 +1506,8 @@ The guides are published as a site at [docs.filex.sh](https://docs.filex.sh), an
 [E2E encryption](docs/E2E-ENCRYPTION.md) ·
 [Who may encrypt](docs/E2E-ENCRYPTION.md#who-may-encrypt) ·
 [The vault (level 3)](docs/E2E-VAULT-FORMAT.md) ·
-[Editing encrypted office documents (design)](docs/E2E-OFFICE.md) · [Search](docs/SEARCH.md) ·
+[Editing encrypted office documents (design)](docs/E2E-OFFICE.md) ·
+[The office editor on a phone](docs/E2E-OFFICE.md#on-a-phone) · [Search](docs/SEARCH.md) ·
 [Realtime & presence](docs/REALTIME.md) ·
 [Notifications](docs/NOTIFICATIONS.md) · [Notification digest](docs/NOTIFICATIONS.md#the-digest) ·
 [Web Push](docs/NOTIFICATIONS.md#web-push) ·
@@ -1456,12 +1516,15 @@ The guides are published as a site at [docs.filex.sh](https://docs.filex.sh), an
 
 **Operate & extend** - [Deployment](docs/DEPLOYMENT.md) · [Docker](docs/DOCKER.md) ·
 [Metrics](docs/METRICS.md) · [Architecture](docs/ARCHITECTURE.md) ·
+[The row gate](docs/ARCHITECTURE.md#the-row-gate) ·
 [Backend API spec](docs/BACKEND.md) · [API errors](docs/API-ERRORS.md) ·
+[App store refusals](docs/API-ERRORS.md#app-store-refusals) ·
 [OpenAPI 3.1 (`/api/files`, `/api/ai`)](backend/internal/api/openapi.json) ·
 [Component API](docs/API.md) · [OnlyOffice](docs/ONLYOFFICE.md) ·
 [The editor's language](docs/ONLYOFFICE.md#the-editors-language) ·
 [CSV in ONLYOFFICE](docs/ONLYOFFICE.md#csv-files) ·
-[Requests from other origins](docs/CONFIGURATION.md#requests-from-other-origins)
+[Requests from other origins](docs/CONFIGURATION.md#requests-from-other-origins) ·
+[Security headers and framing](docs/CONFIGURATION.md#security-headers-and-framing)
 
 </details>
 
@@ -1472,8 +1535,8 @@ The guides are published as a site at [docs.filex.sh](https://docs.filex.sh), an
 | Area | What you get |
 |---|---|
 | **The explorer** | One layout in the admin app, the desktop app and every embed: a navigation panel, list, grid and gallery views, tabs, personal and team tags, a ⌘K command palette, remappable keyboard shortcuts, new documents from the **+ New** menu and themes an operator composes ([Integration](docs/INTEGRATION.md), [Themes](docs/INTEGRATION.md#themes)) |
-| **Storage** | Local disks, S3, FTP, SFTP, WebDAV and SMB/NAS mounted side by side, copy and move across them, and a plugin for anything else ([Storage](docs/STORAGE.md), [Storage plugins](docs/PLUGINS.md)) |
-| **Without a browser** | The same tree served as S3, SFTP, FTPS, NFSv3 and WebDAV, plus `filex mount` over HTTPS ([Protocols](docs/PROTOCOLS.md)) |
+| **Storage** | Local disks, S3, FTP, SFTP, WebDAV and SMB/NAS mounted side by side, copy and move across them, and a plugin for anything else, from the admin panel or an app store ([Storage](docs/STORAGE.md), [Storage plugins](docs/PLUGINS.md)) |
+| **Without a browser** | The same tree served as S3, SFTP, FTPS, NFSv3 and WebDAV - a move or delete there is as safe beside a storage scan as one in the web UI - plus `filex mount` over HTTPS ([Protocols](docs/PROTOCOLS.md)) |
 | **Sign-in** | OIDC, LDAP / Active Directory, Windows and Linux accounts, and sign-in attempt limits ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [OS accounts](docs/OS-LOGIN.md)) |
 | **People and access** | Roles and per-person permissions, groups, per-folder access and native multi-tenancy ([Permissions](docs/PERMISSIONS.md), [Groups](docs/GROUPS.md), [Multi-tenancy](docs/MULTI-TENANCY.md)) |
 | **Sharing** | Public links with a PIN, an expiry and a download limit, file requests and share invites by email ([Sharing](docs/SHARING.md)) |
@@ -1482,7 +1545,7 @@ The guides are published as a site at [docs.filex.sh](https://docs.filex.sh), an
 | **Search and thumbnails** | Embedded full-text search that respects permissions, and thumbnails for images, video, PDF, folders and, with ONLYOFFICE connected, Office documents ([Search](docs/SEARCH.md), [Thumbnails](docs/thumbnails.md)) |
 | **Real-time** | Presence and live file updates over WebSocket ([Realtime](docs/REALTIME.md)) |
 | **Clients** | A desktop app with folder sync, a web app a phone installs, a CLI, Vue / React / web component embeds, a REST API and an MCP server ([Desktop](docs/DESKTOP.md), [Sync](docs/SYNC.md), [CLI](docs/CLI.md), [Integration](docs/INTEGRATION.md), [MCP](docs/MCP.md)) |
-| **Apps and languages** | Sandboxed apps (e-Signature, Convert, filextext, draw.io), language packs and a right-to-left layout ([Apps](docs/APP-PLUGINS.md), [RTL](docs/RTL.md)) |
+| **Apps and languages** | Sandboxed apps (e-Signature, Convert, filextext, draw.io) that print through filex and are never handed an encrypted file, language packs and a right-to-left layout ([Apps](docs/APP-PLUGINS.md), [RTL](docs/RTL.md)) |
 | **Running it** | One binary or one container; SQLite, PostgreSQL or MySQL; an admin panel with one search for every page, setting and record; webhooks, an in-app bell and Web Push to phones and browsers, with an optional digest; a usage and cost view (Backblaze B2 today); update checks, with patch releases that install themselves once you allow it ([Databases](docs/DATABASES.md), [Admin panel](docs/ADMIN-PANEL.md), [Notifications](docs/NOTIFICATIONS.md), [Usage](docs/USAGE.md), [Updates](docs/UPDATES.md)) |
 
 <details>
@@ -1490,11 +1553,11 @@ The guides are published as a site at [docs.filex.sh](https://docs.filex.sh), an
 
 - **Multi-storage** - mount many storages at once (local, S3, FTP, SFTP, WebDAV, SMB/NAS); each appears as a top-level folder. Each also carries an address that never moves: the storage's name is the first path segment on WebDAV, SFTP, NFS and the S3 API, so renaming one would re-address it - a mount written against its **uid** survives every rename. **Copy or cut in one and paste in another**: filex streams the tree between the two drivers, keeps each file's timestamp, and only removes the original once the copy is verified. A store that is down is reported within seconds, and only silence is timed out, never a transfer that keeps moving (S3, WebDAV, FTP, SFTP and SMB: [docs/STORAGE.md](docs/STORAGE.md#when-the-store-is-down)). An entry the storage could not answer for (neither "here" nor "not found") is kept, marked with a **!** and the storage's own answer, and nothing is done with it - in the explorer, the REST and agent APIs, sharing and the editors (the file protocols do not read the mark) - until the storage answers again ([PLUGINS.md](docs/PLUGINS.md#an-entry-your-stat-cannot-answer-for)). A storage's credentials are never shown back, to administrators either: they read as `***`, and a save that sends the mask keeps the saved one only while the address stays the same.
 - **Drag files out to your desktop** - in the desktop app, drag a selection into Explorer/Finder or another program and it lands as separate real files and folders, not an archive; in a browser, a single file drags out the same way - in the admin app too, through a one-file link that lasts a minute and works once ([docs/DESKTOP.md](docs/DESKTOP.md#dragging-files-out)).
-- **Storage plugins** - a storage filex has never heard of is a **separate program** you install from the admin panel: it describes its own config form, filex speaks a small HTTP/JSON protocol to it, and its driver then behaves like any built-in one. Any language; a Go SDK makes it three methods. filex **probes every capability a plugin claims** - at install, and again against the configuration you type when you save a storage on it - and refuses one that cannot do what it says, because a half-working driver produces failures that look like filex being broken. Upgrades replace the binary in place and roll back if the new one does not come up; every start checks the binary's hash and signature again, and each plugin keeps a **log** of its starts, failures and the entries it could not answer for (*Actions → Log*) ([docs/PLUGINS.md](docs/PLUGINS.md)).
-- **Apps** - a second kind of plugin: a **sandboxed WebAssembly** module, an **interface of its own in a sandboxed frame** (no connection, no access to filex's session; see [Apps](#apps) for what a browser cannot promise), or both - adding actions to the file menu (*Request signatures…*, *Convert…*), screens filex draws for it, a section in a file's details, a home screen under **Apps** in the navigation, and links an outside participant opens without an account. Installed from a GitHub repository, or from a store's install link held to the store's pins ([Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store); a paid app's license is the store's, and an app whose license does not hold is held, not removed - [Paid apps](docs/APP-PLUGINS.md#paid-apps)) - one a person asked for on the in-app **App store** screen included ([The store screen](docs/APP-PLUGINS.md#the-store-screen)) - through a **permission review** - the app gets exactly what you approved and nothing else: no filesystem, no network, no program on your server; the heavy engines (ffmpeg, ImageMagick, …) are the server's own and office documents go through the ONLYOFFICE you connect, offered one permission at a time. The screens filex draws obey filex's rules whoever wrote them - every choice visible rather than hidden in a dropdown, nothing folded behind "advanced", one question per step. The link an app sends to an outside signer is an ordinary **share**, so you see and revoke it in the same list as everything else, and it is never worth more than its creator: a job started from it passes the same checks as one started inside filex (an action you switched off stays off, the creator's access to the document is read again), and it stops working when the creator's account is switched off - until it is switched back on. An app may also bring **its own interface** - HTML and JavaScript filex serves from the app's approved package into a sandboxed frame whose policy allows no connection, no storage and no cookie, talking to filex over one checked channel; an editor that needs nothing on the server (draw.io, filextext) is an app with no module at all ([an app's own interface](docs/APP-PLUGINS.md#an-apps-own-interface), SDK `@brftech/filex-app-ui`). An app you grant `schedule` is woken once an hour to do its own work at the minute it chose, as an ordinary job in the queue. Nothing updates itself: filex checks each app's source daily and says when a newer version is there, an administrator reviews what it changes and approves it, everybody uses the version approved - and **Back to *version*** undoes an approval. Apps say which filex versions they work with. An API key never installs one - it leaves an **install request** an administrator approves - and an app can declare **permissions of its own** that you hand out per role and per person ([App permissions](docs/APP-PLUGINS.md#app-permissions)). An app can **draw thumbnails** of kinds filex does not (handed one file's bytes and nothing else), and **Default apps** decides, per kind of file, which app opens it and which draws its thumbnail, in which order; each person picks among the openers left on, with *Always use this app* kept on their account - one choice for the browser, the desktop app and an embed ([Default apps](docs/APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)). Four ship as public repositories: **e-Signature**, **Convert**, **filextext** and **draw.io** ([Apps](#apps), [docs/APP-PLUGINS.md](docs/APP-PLUGINS.md#the-apps-that-ship-alongside-filex), [write one](docs/PLUGIN-KIT.md)).
+- **Storage plugins** - a storage filex has never heard of is a **separate program** you install from the admin panel: it describes its own config form, filex speaks a small HTTP/JSON protocol to it, and its driver then behaves like any built-in one. Any language; a Go SDK makes it three methods. filex **probes every capability a plugin claims** - at install, and again against the configuration you type when you save a storage on it - and refuses one that cannot do what it says, because a half-working driver produces failures that look like filex being broken. Upgrades replace the binary in place and roll back if the new one does not come up; every start checks the binary's hash and signature again, and each plugin keeps a **log** of its starts, failures and the entries it could not answer for (*Actions → Log*) ([docs/PLUGINS.md](docs/PLUGINS.md)). A signature names the build - the plugin, its version, its platform and its SHA-256 - so it vouches for nothing else; one over the SHA-256 alone is still taken in 0.55, with a warning on the plugin's row, and refused from 0.56 ([What is signed](docs/PLUGINS.md#what-is-signed)). From 0.55 an **app store** lists storage plugins too: installed through its link and the same review, held to its pin, signed by it and checked by its plugin validator before it was listed, a paid one **held** - nothing runs, nothing is removed - while its license does not hold ([Installing from a store](docs/PLUGINS.md#installing-from-a-store)).
+- **Apps** - a second kind of plugin: a **sandboxed WebAssembly** module, an **interface of its own in a sandboxed frame** (no connection, no access to filex's session; see [Apps](#apps) for what a browser cannot promise), or both - adding actions to the file menu (*Request signatures…*, *Convert…*), screens filex draws for it, a section in a file's details, a home screen under **Apps** in the navigation, and links an outside participant opens without an account. Installed from a GitHub repository, or from a store's install link held to the store's pins ([Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store); a paid app's license is the store's, and an app whose license does not hold is held, not removed - [Paid apps](docs/APP-PLUGINS.md#paid-apps)) - one a person asked for on the in-app **App store** screen included ([The store screen](docs/APP-PLUGINS.md#the-store-screen)) - through a **permission review** - the app gets exactly what you approved and nothing else: no filesystem, no network, no program on your server; the heavy engines (ffmpeg, ImageMagick, …) are the server's own and office documents go through the ONLYOFFICE you connect, offered one permission at a time. The screens filex draws obey filex's rules whoever wrote them - every choice visible rather than hidden in a dropdown, nothing folded behind "advanced", one question per step. The link an app sends to an outside signer is an ordinary **share**, so you see and revoke it in the same list as everything else, and it is never worth more than its creator: a job started from it passes the same checks as one started inside filex (an action you switched off stays off, the creator's access to the document is read again), and it stops working when the creator's account is switched off - until it is switched back on. An app may also bring **its own interface** - HTML and JavaScript filex serves from the app's approved package into a sandboxed frame whose policy allows no connection, no storage and no cookie, talking to filex over one checked channel; an editor that needs nothing on the server (draw.io, filextext) is an app with no module at all ([an app's own interface](docs/APP-PLUGINS.md#an-apps-own-interface), SDK `@brftech/filex-app-ui`). An editor that runs in the browser may ask for frames of its own package and for `blob:` reads, and an interface with `ui:print` hands filex a PDF that filex prints from a page of its own, asking every time ([Printing a PDF](docs/APP-PLUGINS-API.md#printing-a-pdf-uiprint-055)). An end-to-end encrypted file is offered to no app and refused at every app door; an interface is told it is encrypted, never handed its plaintext ([Which rows say `encrypted`](docs/APP-PLUGINS-API.md#which-rows-say-encrypted)). An app you grant `schedule` is woken once an hour to do its own work at the minute it chose, as an ordinary job in the queue. Nothing updates itself: filex checks each app's source daily and says when a newer version is there, an administrator reviews what it changes and approves it, everybody uses the version approved - and **Back to *version*** undoes an approval. Apps say which filex versions they work with. An API key never installs one - it leaves an **install request** an administrator approves - and an app can declare **permissions of its own** that you hand out per role and per person ([App permissions](docs/APP-PLUGINS.md#app-permissions)). An app can **draw thumbnails** of kinds filex does not (handed one file's bytes and nothing else), and **Default apps** decides, per kind of file, which app opens it and which draws its thumbnail, in which order; each person picks among the openers left on, with *Always use this app* kept on their account - one choice for the browser, the desktop app and an embed ([Default apps](docs/APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)). Four ship as public repositories: **e-Signature**, **Convert**, **filextext** and **draw.io** ([Apps](#apps), [docs/APP-PLUGINS.md](docs/APP-PLUGINS.md#the-apps-that-ship-alongside-filex), [write one](docs/PLUGIN-KIT.md)).
 - **e-Signature** ([`BRF-Tech/filex-sign`](https://github.com/BRF-Tech/filex-sign), an app) - sign a PDF yourself, or ask others to: people on this filex sign inside it, from a notification that opens the right screen; anybody else gets a private link, behind a PIN by default - one filex keeps for you (see *Sharing*). The boxes are **defined first** - a name, whose it is, required or not, a date's layout - and **placed on the page after**, two questions on two screens. The document can be **frozen** for everybody, administrators included, while it is out; reminders and the deadline run on their own; the requester follows every signer in the file's details and on the app's home screen; and the result is a PAdES-signed PDF that is **certified** by its first signature and **sealed by filex** after its last, so a reader reports any change made afterwards as not permitted - with the **SHA-256 of the sealed bytes** and the seal's fingerprint sent to the requester and every signer, an **audit trail PDF** when you ask for one, a receipt for every signer, and an option to keep the finished file locked until an administrator lifts it. **Verify** reports any signed PDF: every signature, the certification, the seal, and whether this is the file whose hash was sent. Signing keys never leave the server: the instance's own certificate authority, or one you import, issues each signer a certificate, and the key that made a signature is destroyed seconds later ([docs/APP-PLUGINS.md](docs/APP-PLUGINS.md#signing-documents-end-to-end)).
 - **Convert, as an app** ([`BRF-Tech/filex-convert`](https://github.com/BRF-Tech/filex-convert)) - *Convert…* on any file or selection: images, video, audio, documents, e-books, archives, data, subtitles and fonts. The target is a button under its category, then only the settings that matter for it, then a review; most routes run in pure Go inside the sandbox, the rest through the server's engines, and a target that needs a missing engine is listed as such rather than silently absent ([docs/APP-PLUGINS.md](docs/APP-PLUGINS.md#converting-files)). (The older iframe converter side-car was removed in 0.48.)
-- **Protocol gateway** - the same tree is reachable as **S3** (SigV4; aws-cli, rclone, restic, mc, s3fs), **SFTP** (OpenSSH, WinSCP, FileZilla, sshfs), **FTPS** (explicit TLS, for the equipment that only learned FTP; hand it your reverse proxy's auto-renewing certificate - it is re-read on change), **NFSv3** (LAN NAS clients, media players) and **WebDAV** - each with its own credential you can revoke on its own, and all of them behind the same permissions, trash and quota as the UI ([docs/PROTOCOLS.md](docs/PROTOCOLS.md)).
+- **Protocol gateway** - the same tree is reachable as **S3** (SigV4; aws-cli, rclone, restic, mc, s3fs), **SFTP** (OpenSSH, WinSCP, FileZilla, sshfs), **FTPS** (explicit TLS, for the equipment that only learned FTP; hand it your reverse proxy's auto-renewing certificate - it is re-read on change), **NFSv3** (LAN NAS clients, media players) and **WebDAV** - each with its own credential you can revoke on its own, and all of them behind the same permissions, trash and quota as the UI ([docs/PROTOCOLS.md](docs/PROTOCOLS.md)). A rename, move or delete made there goes through the same row gate as the explorer's, so a storage scan running beside it never drops the moved row with its shares, versions and comments, or a trashed one with its trash entry ([The row gate](docs/ARCHITECTURE.md#the-row-gate)).
 - **`filex mount`** - attach a remote filex server to a folder over ordinary HTTPS: a folder on Linux, a **drive letter on Windows** (`filex mount Z:`, needs the free [WinFsp](https://winfsp.dev)). Not a sync: nothing is copied but a bounded read cache, so it opens one file out of a hundred thousand without downloading the rest.
 - **Real-time collaboration** - presence bar with live avatars + focus, instant file-change updates over WebSocket, polling fallback. One write is announced the moment it lands; a burst (a zip extraction, a folder upload, an NFS client writing chunk after chunk) is merged into one frame per window so the folder stays live without flooding the page ([docs/REALTIME.md](docs/REALTIME.md)).
 - **A listing that behaves like a table** - resize a column, hide one, drag one to a new place; the table scrolls sideways rather than dropping a column when it runs out of room, and the actions column stays pinned to the right. Sort by name, type, date or size, in either direction, and **the grid and the list obey the same sort** - until this release "sorted by size" was a fact about one view, and switching views reordered the rows under you. Sorted by date, all three views group the rows under **Today · Yesterday · This week · This month** and then month by month, in **your** time zone rather than the browser's.
@@ -1512,18 +1575,18 @@ The guides are published as a site at [docs.filex.sh](https://docs.filex.sh), an
 - **Home, inside the shell** - the landing view for everybody, admins included: your storages, what you opened last and what you starred, as cards in the content area with the same navigation panel and the same header as the files. Moving between Home and a folder changes the content and nothing else. An operator who would rather land on the admin dashboard chooses it in their profile settings.
 - **Navigation panel** - the **+ New** menu as the primary action, the destinations Home / My files / Shared with me / **My shares** / Recent / Starred / **Drafts** / Trash, the storages you can see - **in your own order** (drag a row, or Move up / Move down / Sort by name from its menu; kept on your account), else in the order the administrator set on the Storages page ([docs/STORAGE.md](docs/STORAGE.md#ordering-storages)) - an **Apps** section when an installed app has a home screen, and **How to connect** + **API keys**: the per-protocol guides and the self-service token manager, opened from inside the explorer so an embedded copy's users can mint the credential WebDAV/FTPS/`filex mount` ask for instead of asking an administrator. Collapsible to an icon rail (remembered per browser) from the top bar, a drawer instead of a column under 560px. On by default in the web app, the desktop app and every embed; `uiProfile: 'simple'` additionally turns off the tab strip, the split pane, the gallery view mode and the "How to connect" surface without removing any of them from the build ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
 - **Sharing** - public links with PIN, expiry and max-downloads, under an admin-set **maximum link life** (default 7 days - the dialog only offers what the server will keep); folder links stream as ZIP (cached, pre-warmed up to a size ceiling, swept after a week); **file-request** upload links for inbound drops; ShareX-compatible upload endpoint. **My shares** lists the links you created - for everybody, not only administrators - with *Copy link*, *Copy PIN* and *Revoke*: a link's PIN is kept sealed beside the hash that guards it, so its creator or an administrator can read it back when somebody needs it again, and every read is written to the audit log. Five wrong PINs shut any public link for ten minutes. A download link, a file request and an app's page are **one branded public screen** - your instance's name, logo and colours, one PIN gate, one expiry story and a language picker ([docs/SHARING.md](docs/SHARING.md)). Every listed link says where it stands - active, expired, used up or revoked - and a new link comes with its own `curl` and PowerShell download command. A link mailed from the Share dialog is written by the server from the link itself, in each recipient's language, and never carries its PIN ([Emailing a link](docs/SHARING.md#emailing-a-link)).
-- **Desktop app + folder sync** - Windows/Linux/macOS app: tray-resident two-way sync, **selective sync** (right-click → *Keep on this computer*, one root folder per account, the rest online-only), several accounts at once, **opens Office documents from your own disk** in the server's editor, self-updating (macOS: unsigned build, updates by re-download until it is signed), in the language of the account on screen. Each document opens in **its own window** (titled with the file's name), the windows are **frameless** with the app's own controls (native traffic lights on macOS), and **Settings → Open files with** chooses single- or double-click to open ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
+- **Desktop app + folder sync** - Windows/Linux/macOS app: tray-resident two-way sync, **selective sync** (right-click → *Keep on this computer*, one root folder per account, the rest online-only), several accounts at once, **opens Office documents from your own disk** in the server's editor, self-updating (macOS: unsigned build, updates by re-download until it is signed; every release is first installed over the previous one on Windows and Ubuntu, x64 and arm64 - [Updates](docs/DESKTOP.md#updates)), in the language of the account on screen. The snap is built on `core24` since 0.55 ([The snap and the sandbox](docs/DESKTOP.md#the-snap-and-the-sandbox)). Each document opens in **its own window** (titled with the file's name), the windows are **frameless** with the app's own controls (native traffic lights on macOS), and **Settings → Open files with** chooses single- or double-click to open ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
 - **On a phone, the web app installs like an app** - an icon on the home screen and a window of its own. A band at the bottom of the sign-in page and of the file list offers it from the first visit: Android's **Install**, the browser menu's way until the browser offers one, or the iPhone and iPad's **Share → Add to Home Screen**; a phone is never offered the desktop app, and once installed nothing is offered. Notifications reach the phone while filex is open, and with it closed through Web Push once you turn it on for the device ([On a phone or a tablet](docs/DESKTOP.md#on-a-phone-or-a-tablet-the-web-app), [Web Push](docs/NOTIFICATIONS.md#web-push)).
 - **Trash & version history** - deletes are reversible within a retention window, writes keep snapshots; both live in the storage you already mounted ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)). The Trash pages through everything it holds, and *Empty trash* first shows the server's count and size of exactly what it will delete.
 - **Write protection** - optional ClamAV scanning of every file written - the built-in editor included, and files the storage sync finds on the backend rather than through filex - reached through a local binary or a clamd container over the network; plus trash/version retention behind one admin surface. The switch, the scanner mode and address, the size ceiling and the editor save-scan window live on **Settings → Protection**; the `FILEX_CLAMAV*` variables seed them on a first boot and then step aside (the scanner's binary path stays environment-only, deliberately - it is a command this server executes) ([docs/PROTECTION.md](docs/PROTECTION.md)).
-- **E2E encrypted folders** - client-side WebCrypto; the server stores ciphertext and never receives a key. A folder has a **level**: contents only (the default - WebDAV, the CLI and desktop sync keep working with its names) or **contents and names** (AES-SIV, so the server keeps no readable name), and it can be raised later, resumably, from its **Encryption settings**, where its password is changed too. A third level, the **vault**, hides the shape of the tree as well - the server stores only packs of one size and an encrypted index, and one person writes at a time under a lock it keeps; it is built and off by default (`FILEX_E2E_VAULT`), and the web and desktop apps, `filex decrypt` and `filex vault mount` open it ([the vault's format](docs/E2E-VAULT-FORMAT.md)). A folder you already have is **encrypted in place**, files over 200 MB included; **any single file can be encrypted on its own** (a self-contained `.fxe` with its own password and recovery key); files of any size are encrypted as a stream; an unlocked folder downloads as a **decrypted zip** made in the browser; `filex decrypt` opens a downloaded folder or `.fxe` on your own machine, and **`filex encrypt`** makes an encrypted folder from one on disk, or encrypts a folder on the server where it is - for folders too large for a tab, resumable, the keys made on your machine ([docs/CLI.md](docs/CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)). Each folder gets a **recovery key**, shown once, so a forgotten password is not automatically lost data; an operator can optionally enable **key escrow** - at install, or adopted later on a running installation; it never reaches existing folders on its own, but their owners are offered the choice at unlock - and its use notifies the folder's owner ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)). **Who may encrypt** is the organisation's call: a platform operator's switch per tenant, a tenant policy (off, administrators only, everyone whose role allows it, or **after an administrator's approval** - a request with a reason, approved for one person, one folder and one kind of encryption, once), and the `files.encrypt` permission, asked at every door that could make something new encrypted, copies included ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md#who-may-encrypt)).
+- **E2E encrypted folders** - client-side WebCrypto; the server stores ciphertext and never receives a key. A folder has a **level**: contents only (the default - WebDAV, the CLI and desktop sync keep working with its names) or **contents and names** (AES-SIV, so the server keeps no readable name), and it can be raised later, resumably, from its **Encryption settings**, where its password is changed too. A third level, the **vault**, hides the shape of the tree as well - the server stores only packs of one size and an encrypted index, and one person writes at a time under a lock it keeps; it is built and off by default (`FILEX_E2E_VAULT`), and the web and desktop apps, `filex decrypt` and `filex vault mount` open it ([the vault's format](docs/E2E-VAULT-FORMAT.md)). A folder you already have is **encrypted in place**, files over 200 MB included; **any single file can be encrypted on its own** (a self-contained `.fxe` with its own password and recovery key); files of any size are encrypted as a stream; an unlocked folder downloads as a **decrypted zip** made in the browser; `filex decrypt` opens a downloaded folder or `.fxe` on your own machine, and **`filex encrypt`** makes an encrypted folder from one on disk, or encrypts a folder on the server where it is - for folders too large for a tab, resumable, the keys made on your machine ([docs/CLI.md](docs/CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)). Each folder gets a **recovery key**, shown once, so a forgotten password is not automatically lost data; an operator can optionally enable **key escrow** - at install, or adopted later on a running installation; it never reaches existing folders on its own, but their owners are offered the choice at unlock - and its use notifies the folder's owner ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)). Every file row the server answers with says whether the file is encrypted - in a folder, in a vault or as a single `.fxe` - in every view, so the explorer offers such a file no app and no ONLYOFFICE, and every app door refuses it ([Which rows say `encrypted`](docs/APP-PLUGINS-API.md#which-rows-say-encrypted)). **Who may encrypt** is the organisation's call: a platform operator's switch per tenant, a tenant policy (off, administrators only, everyone whose role allows it, or **after an administrator's approval** - a request with a reason, approved for one person, one folder and one kind of encryption, once), and the `files.encrypt` permission, asked at every door that could make something new encrypted, copies included ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md#who-may-encrypt)).
 - **Native multi-tenancy** - provider/tenant mode with per-tenant isolation on one instance, turned on and off with one switch (**Admin → Multi-tenant mode**, the platform operator's; off, nothing about tenants or realms is shown, and turning it off deletes no tenant). Each tenant has a **realm** - its sign-in name, given at creation and never changed - so a sign-in names its tenant by the tenant's own address (the web page, the WebDAV `Host`, the FTPS certificate name) or by the realm: a **Realm** field on the sign-in form, `realm/name` over SFTP. The account lookup never leaves the tenant, and a realm typed on the platform's page for a tenant with an address of its own is **handed over** there with a one-use, 60-second ticket ([docs/MULTI-TENANCY.md](docs/MULTI-TENANCY.md), [realms](docs/MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for)). Tenants run themselves on **Admin → Tenants** and **My tenant**: sign-in providers bound to one tenant or several, a tenant's own OIDC and LDAP, a platform subdomain for every tenant and own domains proven by a CNAME, certified by the proxy, by filex itself (ACME) or with the tenant's own certificate ([docs/TENANT-ADMIN.md](docs/TENANT-ADMIN.md)).
 - **Driver-pluggable everything** - storage / auth / DB / queue drivers opt-in via env (`FILEX_AUTH_DRIVERS=local,oidc`, `FILEX_QUEUE_DRIVER=postgres`, …); the operating-system sign-in (`windows`, `pam`) is the exception, switched on from the admin panel once its test has passed.
 - **OIDC SSO-first** - optional auto-redirect to your IdP with break-glass local login (`?local=1`), and the admin role follows an IdP group at every sign-in.
 - **LDAP / Active Directory** - **directory sync** (*Sync now*, or on a schedule) opens an account for everyone in the directory before their first sign-in, keeps group memberships in step, brings the directory's groups in as filex groups, and disables in filex whoever the directory disables (sessions, API keys and SSH keys with them); people are known by their permanent directory id, so a changed e-mail keeps its account and a reused one does not inherit it; several directories each manage only their own people and groups ([directory sync](docs/LDAP.md#directory-sync), [several directories](docs/LDAP.md#several-directories)). Directory accounts sign in on the same password form as local ones, and with the same password on WebDAV, SFTP and FTPS (S3 and NFS take the keys and exports they mint); private-CA support, and `local` stays first so `admin@local` works while the directory is down. An account's e-mail is always an address: the entry's mail attribute, else a name typed as `name@domain`, else `name@local` (`name@<realm>.local` in a tenant's realm; the one rule the operating-system providers use too); an account an older filex opened under the bare name is **adopted** at its next sign-in, files, shares and role unchanged ([docs/LDAP.md](docs/LDAP.md)).
 - **Replica + reconciliation** - a storage linked to a replication target copies every write to it (mirror / append-only / skip per path-glob rule), each storage into a folder of its own there and filex's own folders (trash, versions, thumbnails, drafts) never; the files it already held go over in a resumable **initial copy** whose progress the Replication page shows; read fallback while the primary is down, a scheduled status report, and failures kept per storage and replayed with one-click "Fix all". Until 0.53 a linked storage replicated nothing; it does now ([docs/REPLICATION.md](docs/REPLICATION.md)).
 - **Persistent op queue** - restart-safe queue in your own database (SQLite / Postgres / MySQL) or in Redis, worker pool with retries + cancel + admin dashboard. Every driver orders by priority, so the antivirus scan for a file somebody just uploaded is served ahead of the twenty thousand a first import queued. Unset, the driver follows the database rather than defaulting to SQLite - pointing SQLite statements at a Postgres server is a syntax error on every poll and no job ever runs.
-- **DB-backed file tree** - listings come from the DB cache (1-5 ms), not the storage backend (~100 ms); a periodic sync catches out-of-band changes, by etag where the backend reports one and by size + modification time where it does not. A storage's **Paths to exclude from scanning** (`.*`, `downloads/incomplete/**`, `*.tmp`) keeps the parts of an existing tree filex has no use for out of the walk, the catalogue, the search index and the virus scanner - a cost control, not an access control ([docs/STORAGE.md](docs/STORAGE.md#scan-exclusions)).
+- **DB-backed file tree** - listings come from the DB cache (1-5 ms), not the storage backend (~100 ms); a periodic sync catches out-of-band changes, by etag where the backend reports one and by size + modification time where it does not. That sync never judges a change filex is making: every rename, move, delete and restore - the explorer's, the queue's, the protocols', an agent's, a draft's, the antivirus quarantine's - holds the storage's **row gate** from its first byte to its last row, a long one holds up nothing but its own storage's scan (a folder moved object by object on an object store fences only its own two paths), and the queue runs the other storages' jobs meanwhile ([The row gate](docs/ARCHITECTURE.md#the-row-gate), [metrics](docs/METRICS.md#the-row-gate)). A storage's **Paths to exclude from scanning** (`.*`, `downloads/incomplete/**`, `*.tmp`) keeps the parts of an existing tree filex has no use for out of the walk, the catalogue, the search index and the virus scanner - a cost control, not an access control ([docs/STORAGE.md](docs/STORAGE.md#scan-exclusions)).
 - **Lazy catalogue for big local trees** - `sync_mode: lazy` skips the walk up front: the folder you open is listed straight from disk at once and catalogued first, and the rest is catalogued by a slow background pass that yields to people (or only as folders are opened). Opened folders are watched within a budget, a folder nobody visited is never treated as deleted, and search, folder sizes and usage say plainly when they do not cover everything yet ([docs/STORAGE.md](docs/STORAGE.md#lazy-catalogue), [design](docs/LAZY-CATALOGUE.md)). Idea by Alex ([#45](https://github.com/BRF-Tech/filex/issues/45)).
 - **Viewers & editors** - image/video/audio, PDF, Markdown (split editor + preview), CSV (ONLYOFFICE's spreadsheet when it is configured, where a save keeps the cells nobody changed as they were written ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#cells-nobody-changed-keep-their-text)); a read-only table otherwise), code (Monaco), Office via OnlyOffice, Drawio + Mermaid diagrams, 3D models. A document ONLYOFFICE can only save in a newer format (a `.doc` edited, saved as DOCX) is kept **beside** the original under the right extension, never written over it, and the people who edited it are told ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#a-save-in-another-format)). A document that changes while it is open in the editor - on the server or, in the desktop app, on disk - is never saved over: with nothing unsaved the editor loads the new version, with edits it asks *Keep the outside version* / *Write mine* / *Keep both* ([When the document changes while it is open](docs/ONLYOFFICE.md#when-the-document-changes-while-it-is-open)). The editor's script can run on the Document Server's own origin instead of filex's pages (`FILEX_ONLYOFFICE_FRAME_ORIGIN`), out of reach of the signed-in session ([The editor in a frame of its own](docs/ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)). OnlyOffice's **Test now** fetches through the same door a document uses and warns when the document server does not enforce JWT, and after *Download failed* the editor says which of the two failures behind that message it was ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#failure-editor-shows-download-failed)). The editor opens in each person's own language, or in one the administrator picks for everybody on **External services → ONLYOFFICE** (`FILEX_ONLYOFFICE_LANG`) ([The editor's language](docs/ONLYOFFICE.md#the-editors-language)). With more than one app or viewer for a kind of file, **Open with** and **Choose an app…** pick one, and *Always use this app* is kept on your account.
 - **Notifications** - generic JSON webhooks (Slack/Discord-agnostic): any number of targets, each with its own signing secret and its own per-event subscription, plus an in-app bell with read/unread and a per-user mute matrix. The unread count is a **badge on the bell** - exact to 99, `99+` above, and on the desktop app's dock icon where the system has one - a row is clickable exactly when it has somewhere to go (a signature request opens the signing screen, not a notifications page), and **View all** opens every one of your notifications over the explorer, for everybody rather than only administrators. A write that **creates** a file and a write that **replaces** one are different events (`file.uploaded` / `file.updated`), and the ones an operator most wants on their own - an infected upload quarantined, a failed upload, an encrypted folder opened with its recovery key - are subscribable individually ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)). An optional **digest** - off out of the box - holds the kinds an administrator or a person turns off for a window of 1-15 minutes and tells them in one notification that says folder by folder what changed (*Reports: 30 files added*), so a busy folder is one badge step instead of thirty; every event still keeps its own row and reaches every webhook at once ([The digest](docs/NOTIFICATIONS.md#the-digest)). **The server says every notification**: the bell, the desktop app's toast, a push and an email show the same sentence, in the reader's account language; a webhook is told in the language set for it and also gets the message untranslated for a receiver that translates for itself ([What a notification says](docs/NOTIFICATIONS.md#what-a-notification-says)). **Web Push** (*Push notifications on this device*, in user settings) brings them to a phone or a browser with filex closed (on an iPhone or iPad, the web app added to the Home Screen, iOS 16.4 or later): the same kinds, mutes and digest as the bell ([Web Push](docs/NOTIFICATIONS.md#web-push)).
@@ -1623,7 +1686,11 @@ The guides are published as a site at [docs.filex.sh](https://docs.filex.sh), an
 - **The server's words, one shape for every refusal** - a refusal answers a stable
   `error` code and the server's sentence in the reader's language (`message`), and the
   explorer, the admin panel, the desktop app, the CLI and an agent show the same words
-  ([docs/API-ERRORS.md](docs/API-ERRORS.md)). The rules a client used to keep copies of -
+  ([docs/API-ERRORS.md](docs/API-ERRORS.md)) - an app's refusals, every app store and
+  plugin request refusal, an install's refusal and the install review's filex range
+  among them. The status lines are the server's too: what an update of an app or a
+  storage plugin needs, an update undone, the version kept to go back to, and the Apps
+  tab's own header. The rules a client used to keep copies of -
   which files open for editing, the input limits, the notification events that cannot
   happen on this install - are published by the server, so no screen judges them
   differently ([Rules the server publishes](docs/BACKEND.md#rules-the-server-publishes)).

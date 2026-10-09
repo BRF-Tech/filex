@@ -57,6 +57,25 @@ describe('hitItem — the address the download and the drag-out hand over', () =
   });
 });
 
+describe('hitToNode — what an app opened from a search result is told (#189)', () => {
+  it('keeps how the server says the hit is encrypted, and invents nothing', () => {
+    // ⚠ Dropped here, an app's interface opened from a search result was told
+    // a file in a vault or an encrypted folder is not encrypted
+    // (FileInfo.encrypted), while the same file opened from its folder said so.
+    const vault = hitToNode({ storage: 'docs', path: 'Kasa/ek.bin', type: 'file', encrypted: 'vault' }, 'docs');
+    expect(vault.encrypted).toBe('vault');
+    const folder = hitToNode({ storage: 'docs', path: 'Sifreli/rapor.docx', type: 'file', encrypted: 'folder' }, 'docs');
+    expect(folder.encrypted).toBe('folder');
+    const plain = hitToNode({ storage: 'docs', path: 'acik.txt', type: 'file' }, 'docs');
+    expect('encrypted' in plain).toBe(false);
+    const odd = hitToNode({ storage: 'docs', path: 'x.txt', type: 'file', encrypted: 'yes' } as unknown as GlobalSearchHit, 'docs');
+    expect('encrypted' in odd).toBe(false);
+    // sec055 S16: a single encrypted file (.fxe) says `file`.
+    const single = hitToNode({ storage: 'docs', path: 'rapor.docx.fxe', type: 'file', encrypted: 'file' }, 'docs');
+    expect(single.encrypted).toBe('file');
+  });
+});
+
 describe('groupHitsByAccount — one group per signed-in account', () => {
   const a = { id: 'a', label: 'fm.example.com' };
   const b = { id: 'b', label: 'files.other.org' };

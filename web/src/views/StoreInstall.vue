@@ -25,6 +25,12 @@
  *
  * A link only ever opens a review: the install is the administrator's
  * decision, exactly as for a repository they typed.
+ *
+ * A link for a STORAGE plugin (#215) opens its own review
+ * (StorageStoreReview: the build for this server, the server's sentences
+ * about what installing a native program means, the signature rule) in place
+ * of the app wizard; everything else - the trust question, the cancel, a
+ * second link arriving - is this page's, the same for both.
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -43,6 +49,8 @@ import Badge from '@/components/ui/Badge.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import AppPluginInstallWizard from '@/components/plugins/AppPluginInstallWizard.vue';
+import StorageStoreReview from '@/components/plugins/StorageStoreReview.vue';
+import type { Plugin } from '@/api/plugins';
 
 type State = 'loading' | 'none' | 'malformed' | 'framed' | 'trust' | 'review' | 'done' | 'cancelled' | 'declined' | 'error';
 
@@ -60,6 +68,11 @@ const wizardOpen = ref(false);
 /** Install was pressed and the server has not answered yet (the wizard says). */
 const installing = ref(false);
 const installed = ref<AppPlugin | null>(null);
+/** A storage plugin the review installed (#215). */
+const installedStorage = ref<Plugin | null>(null);
+/** The review is a storage plugin's: its own dialog, not the app wizard. */
+const isStorage = computed(() => !!review.value?.storage_review);
+const appReview = computed(() => (review.value && !review.value.storage_review ? review.value : null));
 const failure = ref('');
 /** The storeLinkArrivals count this page last read a link at. */
 let readArrival = 0;
@@ -75,6 +88,7 @@ function start() {
   trust.value = null;
   review.value = null;
   installed.value = null;
+  installedStorage.value = null;
   failure.value = '';
   compared.value = false;
   // ⚠ The server already refuses to be framed by another site
@@ -139,7 +153,7 @@ async function read() {
       state.value = 'trust';
       return;
     }
-    failure.value = (r && storeSentence(r, t)) || extractError(e, t('errors.generic'));
+    failure.value = (r && storeSentence(r)) || extractError(e, t('errors.generic'));
     state.value = 'error';
   }
 }
@@ -177,7 +191,7 @@ async function approve() {
       compared.value = false;
       return;
     }
-    failure.value = (r && storeSentence(r, t)) || extractError(e, t('errors.generic'));
+    failure.value = (r && storeSentence(r)) || extractError(e, t('errors.generic'));
     state.value = 'error';
   } finally {
     trusting.value = false;
@@ -186,6 +200,10 @@ async function approve() {
 
 function onInstalled(p: AppPlugin) {
   installed.value = p;
+}
+
+function onStorageInstalled(p: Plugin) {
+  installedStorage.value = p;
 }
 
 /**
@@ -202,7 +220,7 @@ async function onWizard(open: boolean) {
   if (!open && installing.value) return;
   wizardOpen.value = open;
   if (open) return;
-  if (installed.value) {
+  if (installed.value || installedStorage.value) {
     state.value = 'done';
   } else {
     const h = review.value?.handle;
@@ -324,6 +342,21 @@ function useLabel(use: string): string {
       {{ t('appStore.reviewing', { app: review?.intent.app ?? '', store: review?.store ?? '' }) }}
     </div>
 
+    <div v-else-if="state === 'done' && installedStorage" class="card card-body space-y-3 text-sm" data-testid="store-install-done-storage">
+      <p class="flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
+        <Check class="h-4 w-4" />
+        {{ t(review?.upgrade_of ? 'appStore.storage.doneUpgrade' : 'appStore.storage.done', { app: installedStorage.name, version: review?.intent.version ?? '' }) }}
+      </p>
+      <p class="text-zinc-600 dark:text-zinc-400">{{ t('appStore.storage.doneNext') }}</p>
+      <RouterLink
+        :to="{ name: 'plugins', query: { tab: 'storage' } }"
+        class="text-brand-600 underline dark:text-brand-400"
+        data-testid="store-install-open-storage"
+      >
+        {{ t('appStore.storage.openList') }}
+      </RouterLink>
+    </div>
+
     <div v-else-if="state === 'done'" class="card card-body space-y-3 text-sm" data-testid="store-install-done">
       <p class="flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
         <Check class="h-4 w-4" />
@@ -362,13 +395,20 @@ function useLabel(use: string): string {
     </div>
 
     <AppPluginInstallWizard
-      :model-value="wizardOpen"
+      :model-value="wizardOpen && !isStorage"
       :requires-signature="false"
-      :store="review"
+      :store="appReview"
       @update:model-value="onWizard"
       @installing="(v: boolean) => (installing = v)"
       @installed="onInstalled"
       @upgraded="onInstalled"
+    />
+    <StorageStoreReview
+      :model-value="wizardOpen && isStorage"
+      :review="review"
+      @update:model-value="onWizard"
+      @installing="(v: boolean) => (installing = v)"
+      @installed="onStorageInstalled"
     />
   </div>
 </template>

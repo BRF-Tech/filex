@@ -141,7 +141,10 @@ async function relink() {
   }
   if (!has('write')) throw new Refusal(`${changed.length} file(s) would change - run with --write`);
   if (!has('offline')) {
-    const targets = [...new Set(changed.flatMap((f) => f.changes.map((c) => c.to)))].map((url) => {
+    // A pending picture's change is the whole `![alt](url)` (relinkPending),
+    // a relinked one's the address alone: the address is what is checked.
+    const addressOf = (to) => /^!\[[^\]]*\]\(([^)\s]+)\)$/.exec(to)?.[1] ?? to;
+    const targets = [...new Set(changed.flatMap((f) => f.changes.map((c) => addressOf(c.to))))].map((url) => {
       const name = Object.keys(m.pictures).find((n) => publishedUrl(m.base, n, m.pictures[n].sha256) === url);
       return { url, sha256: m.pictures[name].sha256 };
     });
