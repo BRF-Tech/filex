@@ -98,11 +98,21 @@ test('every Linux pack runs it, no other does, and the .deb and the .rpm leave i
   }
 });
 
-test("electron-builder writes its AppRun first and copies the packed app over the image's directory after", () => {
+// The one test here that reads node_modules: ci.yml's "Desktop unit tests"
+// installs nothing (desktop/test imports nothing from node_modules), so there
+// it is skipped, saying why; the release's pretag ("desktop: typecheck + unit")
+// runs it on an installed desktop/.
+let EB: string | null = null;
+try {
+  EB = require.resolve('electron-builder/package.json');
+} catch {
+  EB = null;
+}
+
+test("electron-builder writes its AppRun first and copies the packed app over the image's directory after", { skip: EB ? false : 'electron-builder is not installed here (ci.yml Desktop unit tests installs nothing); the release pretag runs this on an installed desktop/' }, () => {
   // This order is what puts our AppRun in the image: an electron-builder that
   // changes it would ship its own AppRun again without a word.
-  const eb = require.resolve('electron-builder/package.json');
-  const lib = path.dirname(createRequire(eb).resolve('app-builder-lib/package.json'));
+  const lib = path.dirname(createRequire(EB as string).resolve('app-builder-lib/package.json'));
   const dir = path.join(lib, 'out', 'targets', 'appimage');
   const util = fs.readFileSync(path.join(dir, 'appImageUtil.js'), 'utf8');
   for (const fn of ['buildLegacyFuse2AppImage', 'buildStaticRuntimeAppImage']) {
