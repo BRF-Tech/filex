@@ -613,6 +613,10 @@ jobs:
       - name: The apps the suite installs
         run: bash .github/workflows/scripts/ci-apps.sh "$RUNNER_TEMP/apps"
       - name: The browser, with its system libraries
+        # The runner's apt-get update hung here for 44 minutes once (run
+        # 37661356185) and the part was cancelled at the job's 45-minute
+        # limit: a hang ends after 10, and the part is re-run.
+        timeout-minutes: 10
         run: pnpm --dir e2e exec playwright install --with-deps "$E2E_BROWSERS"
       - name: Latin fonts for the layout checks
         run: bash .github/workflows/scripts/ci-fonts.sh
@@ -676,6 +680,7 @@ jobs:
       - name: A Document Server, and its way back to filex
         run: bash .github/workflows/scripts/ci-docserver.sh "$E2E_PORT" 18080
       - name: The browser, with its system libraries
+        timeout-minutes: 10
         run: pnpm --dir e2e exec playwright install --with-deps "$E2E_BROWSERS"
       - name: Latin fonts for the layout checks
         run: bash .github/workflows/scripts/ci-fonts.sh
@@ -750,6 +755,7 @@ jobs:
         if: matrix.kind == 's3'
         run: bash .github/workflows/scripts/ci-s3.sh
       - name: The browsers, with their system libraries
+        timeout-minutes: 10
         run: pnpm --dir e2e exec playwright install --with-deps ${E2E_BROWSERS//,/ }
       - name: Latin fonts for the layout checks
         run: bash .github/workflows/scripts/ci-fonts.sh
