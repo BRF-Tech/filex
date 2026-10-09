@@ -1696,6 +1696,9 @@ jobs:
           esac
       # The arm64 packages, for desktop-arm64-check to install and open on a
       # real arm64 machine (and for a person to try from a dry run).
+      # The Windows row adds its x64 installer: desktop-arm64-check updates an
+      # installed x64 copy of the previous release with it too (under the
+      # x64 emulation of Windows on Arm), the copy most Windows users have.
       - name: Keep the arm64 packages for the check on arm64 machines
         if: matrix.label == 'windows' || matrix.label == 'linux-arm64'
         uses: actions/upload-artifact@v4
@@ -1703,6 +1706,7 @@ jobs:
           name: desktop-arm64-${{ matrix.label }}
           path: |
             desktop/release/*arm64*.exe
+            desktop/release/filex-desktop-x64.exe
             desktop/release/*arm64*.AppImage
             desktop/release/*arm64*.deb
             desktop/release/*aarch64*.rpm
@@ -2016,6 +2020,21 @@ jobs:
   # enforce mode with a seccomp filter (--expect-snap-confinement). The same
   # on an x64 machine (linux-x64), since the launcher is in every Linux package.
   #
+  # ⚠⚠ Since 0.55 (#68), before any of that: an UPDATE. The previous
+  # release's packages are installed and opened first, and this build's are
+  # installed over them the way an installed copy updates itself
+  # (desktop-upgrade-windows.ps1: the NSIS installer with `--updated /S
+  # --force-run`, x64 and arm64; desktop-upgrade-linux.sh: `dpkg -i` over the
+  # .deb, the AppImage replaced in place, the snap refreshed to a new
+  # revision). Each must leave ONE copy, of this version, where the old one
+  # was, with the user's data. 0.55 moved the packages from electron-builder
+  # 24 to 26 and the snap from core20 to core24, and a fresh install never
+  # runs what an update runs: the uninstall key the old version wrote, its
+  # uninstaller, the new package's scripts over the old files, snapd's copy
+  # of the user's data. previous-release.mjs picks the newest release below
+  # this build's version, so a dry run of a branch still on the last
+  # release's version updates from the one before.
+  #
   # Not in a run that adds only the macOS packages (only=macos) or only the
   # arm64 snap (only=snap-arm64), or sends to the stores alone (only=stores):
   # none builds the .deb, the AppImage or the Windows installers checked
@@ -2046,6 +2065,63 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: pkg
+      - name: The previous release's desktop packages
+        shell: bash
+        env:
+          LABEL: ${{ matrix.label }}
+          VER: ${{ needs.plan.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "$LABEL" in
+            linux-arm64) assets=(filex-desktop-arm64.deb filex-desktop-arm64.AppImage filex-desktop-arm64.snap) ;;
+            linux-x64) assets=(filex-desktop-amd64.deb filex-desktop-x86_64.AppImage filex-desktop-amd64.snap) ;;
+            windows) assets=(filex-desktop-x64.exe filex-desktop-arm64.exe) ;;
+            *) echo "::error::no previous packages for $LABEL"; exit 1 ;;
+          esac
+          args=()
+          for a in "${assets[@]}"; do args+=(--asset "$a"); done
+          node "$CI_SCRIPTS"/previous-release.mjs --repo "$GITHUB_REPOSITORY" --below "$VER" --out prev "${args[@]}"
+          ls -la prev
+      - name: Update from the previous release on Linux
+        if: startsWith(matrix.label, 'linux')
+        shell: bash
+        timeout-minutes: 30
+        env:
+          LABEL: ${{ matrix.label }}
+        run: |
+          set -euo pipefail
+          case "$LABEL" in
+            linux-arm64) DEB=arm64; IMG=arm64; SNAP=arm64 ;;
+            *) DEB=amd64; IMG=x86_64; SNAP=amd64 ;;
+          esac
+          bash "$CI_SCRIPTS"/desktop-upgrade-linux.sh --old prev --new pkg --label "$LABEL" --shots shots \
+            --deb "$DEB" --img "$IMG" --snap "$SNAP"
+      - name: Update from the previous release on Windows, x64 and arm64
+        if: matrix.label == 'windows'
+        shell: pwsh
+        timeout-minutes: 30
+        env:
+          FULL: ${{ needs.plan.outputs.full }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force shots | Out-Null
+          foreach ($arch in @('x64', 'arm64')) {
+            $old = "prev/filex-desktop-$arch.exe"
+            $new = "pkg/filex-desktop-$arch.exe"
+            if (-not (Test-Path $new)) {
+              if ($env:FULL -eq 'true') { throw "this build has no $new" }
+              Write-Host "::warning title=desktop upgrade (windows-$arch)::this run built no filex-desktop-$arch.exe: no $arch update checked"
+              continue
+            }
+            if (-not (Test-Path $old)) {
+              Write-Host "::warning title=desktop upgrade (windows-$arch)::the previous release has no filex-desktop-$arch.exe: no $arch update checked"
+              continue
+            }
+            & pwsh -NoProfile -File "$env:CI_SCRIPTS/desktop-upgrade-windows.ps1" -Old (Resolve-Path $old).Path -New (Resolve-Path $new).Path -Label "windows-$arch" -Shots (Resolve-Path shots).Path -Scripts $env:CI_SCRIPTS
+            if ($LASTEXITCODE -ne 0) { throw "the $arch update failed" }
+          }
+          exit 0
       - name: .deb, AppImage and snap on Linux, sandboxed or confined
         if: startsWith(matrix.label, 'linux')
         shell: bash
