@@ -319,9 +319,9 @@ jobs:
           # image bump must not silently change what users download. It was
           # macos-14, whose images GitHub retires on 2026-11-02; cli-smoke pins
           # the same image.
-          # ⚠ Linux arm64 builds NATIVELY on ubuntu-24.04-arm: its snap has no
-          # prebuilt electron-builder template (x64 and armv7l only) and is
-          # built by real snapcraft, which cannot cross-build. Windows arm64
+          # ⚠ Linux arm64 builds NATIVELY on ubuntu-24.04-arm: its snap is
+          # built by real snapcraft (core24, both architectures since 0.55),
+          # which cannot cross-build. Windows arm64
           # cross-builds on the x64 runner (no native modules; the embedded
           # CLI is GOARCH=arm64) and is then installed and opened on a real
           # windows-11-arm machine by desktop-arm64-check.
@@ -1406,9 +1406,11 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: "9.12.0"
+      # ⚠ 22: electron-builder 26.12 and later (the core24 snap, 0.55) load
+      # @electron/rebuild 4, which is ESM only and needs Node 22.12 or newer.
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: pnpm
       - uses: actions/setup-go@v5
         if: env.PROMOTE != 'true'
@@ -1520,20 +1522,22 @@ jobs:
           cat desktop/release/latest.yml
       # The snap is its own target (never part of `dist:linux`), packed from
       # the app the step above just built — no second web/main build, no second
-      # CLI. On x64, electron-builder's prebuilt snap template needs no
-      # snapcraft. On arm64 there is no template (electron-builder 24 has x64
-      # and armv7l only): it writes a snapcraft.yaml for the same base (core20)
-      # and runs snapcraft, which builds inside an LXD container.
+      # CLI. Since 0.55 it is a core24 snap on both architectures
+      # (desktop/electron-builder.yml, `snapcraft:`): electron-builder writes a
+      # snapcraft.yaml with the `gnome` extension and runs `snapcraft pack
+      # --use-lxd`, which builds inside an LXD container. There is no
+      # prebuilt template any more (that was core20's, x64 only), so the x64
+      # row needs snapcraft and LXD as much as the arm64 one.
       # ⚠ `--publish never`: on a tag electron-builder publishes by itself, and
       # a snap's default publisher is the Snap Store — the upload is the
       # explicit step further down, which says so when it cannot run.
-      - name: snapcraft + LXD for the arm64 snap
-        if: matrix.label == 'linux-arm64' && env.PROMOTE != 'true'
+      - name: snapcraft + LXD for the snap
+        if: startsWith(matrix.label, 'linux') && env.PROMOTE != 'true'
         run: |
           set -euo pipefail
-          # ⚠ 8.x: snapcraft 9 refuses base core20 outright ("Base 'core20'
-          # is not supported by this version of Snapcraft", dry run
-          # 36373259912), and core20 is the base the x64 template snap has.
+          # ⚠ 8.x: the snapcraft every snap of this workflow was built with
+          # (9 refused the core20 base, dry run 36373259912). 8.x builds
+          # core24, the base since 0.55.
           sudo snap install snapcraft --classic --channel=8.x/stable
           sudo snap install lxd 2>/dev/null || sudo snap refresh lxd
           sudo lxd waitready
