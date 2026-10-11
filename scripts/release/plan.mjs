@@ -27,8 +27,6 @@ import { desktopFeeds, docsSite, readmePictures, runningRelease, snapChannel, st
 // Store build stamps into the package.
 const { storeVersion } = createRequire(import.meta.url)('../../desktop/scripts/appx-manifest.cjs');
 
-const IS_WIN = process.platform === 'win32';
-
 /**
  * A Go gate in `dirOf(ctx)`. Under WSL, GOFLAGS=-buildvcs=false: a worktree's
  * `.git` file names a Windows path WSL's git cannot follow, and `go build`
@@ -133,6 +131,40 @@ export function dockerInputs(repo, dockerfile) {
 const BUILD_UI = 'build: packages, admin (vue-tsc + vite), embed';
 const BUILD_BIN = 'build: server binary';
 const ECHO = 'go: echo.wasm fixture';
+
+// What those two builds and the Store copy's check run: one string each, so
+// the steps a deferred Store check lists for a Windows machine are the
+// gates' own commands, not a copy that drifts.
+const BUILD_UI_SH = "pnpm -r --filter './packages/*' build && pnpm --filter ./web build && node scripts/sync-embed.mjs";
+const STORE_COPY = 'desktop: the Store package works as a Store copy';
+const STORE_COPY_SH = 'cd desktop && pnpm run build && node scripts/fetch-cli.mjs --platform win32 && node scripts/store-e2e.mjs';
+
+/**
+ * #248 (the bridge until a Windows machine runs it for the release tool): on
+ * a machine without Windows the Store copy's check is deferred, never
+ * skipped. The pretag waits for `--ack store-deferred` (bound to the release
+ * commit), the record keeps the deferral, and the deploy stage and the ship
+ * list these steps until `--ack store-checked` says they ran green. The
+ * Store still gets its bundle: release.yml's Store job builds it (or takes
+ * the dry run's), checks the package statically and submits it.
+ */
+function storeCopyDeferred(winBin) {
+  return {
+    ack: 'store-deferred',
+    checkedAck: 'store-checked',
+    why: "the Store package's activation is checked on a Windows machine (Developer Mode), not here",
+    command: `(${STORE_COPY_SH})`,
+    artifact: 'release-files-store',
+    later: (c) => [
+      `on Windows with Developer Mode, in a clean checkout of ${c.tag} (${c.releaseCommit ? c.releaseCommit.slice(0, 10) : 'the release commit'}), in Git Bash:`,
+      '  pnpm install --frozen-lockfile',
+      `  ${BUILD_UI_SH}`,
+      `  node scripts/build-backend.mjs --out ${winBin}`,
+      `  FILEX_CLI_BIN="$PWD/${winBin}" bash -c ${shq(STORE_COPY_SH)}`,
+      'green: it ends "ALL PASSED" and the Store copy\'s own checks (updates belong to the Microsoft Store, the login item, the version, the toasts) printed PASS - they are not run when the app never opened',
+    ],
+  };
+}
 
 // The workflow guards read the PUBLIC workflows, which exist only in the
 // export checkout; without them they SKIP and the file still reads green.
@@ -484,9 +516,11 @@ export function npmPackages(repo) {
     .sort();
 }
 
-export default function plan({ repo, version, tag }) {
+// `platform`: the machine the release runs on (a test asks for both).
+export default function plan({ repo, version, tag, platform = process.platform }) {
   const exportDir = path.resolve(process.env.FILEX_EXPORT_DIR ?? path.join(repo, '..', 'filex-export'));
-  const bin = `bin/filex-release-e2e${IS_WIN ? '.exe' : ''}`;
+  const win = platform === 'win32';
+  const bin = `bin/filex-release-e2e${win ? '.exe' : ''}`;
   const img = (kind) => `filex-release:${kind}-${version}`;
   // ⚠⚠ #165: from the release COMMIT, streamed as `git archive` into
   // `docker build -` (scripts/release/gates/docker-build.mjs), never `.`: on
@@ -591,7 +625,7 @@ export default function plan({ repo, version, tag }) {
     // because 0.43.0 and 0.44.0/0.44.1 died building, not testing (#76).
     jobs: 3,
     pretag: [
-      { name: BUILD_UI, lane: 'build', always: true, sh: "pnpm -r --filter './packages/*' build && pnpm --filter ./web build && node scripts/sync-embed.mjs" },
+      { name: BUILD_UI, lane: 'build', always: true, sh: BUILD_UI_SH },
       // v0.43.0: npm and the Release went out, the images never built —
       // nothing local had ever built one. #165: built from the release
       // commit's own tree (git archive), so they read nothing the local builds
@@ -628,21 +662,28 @@ export default function plan({ repo, version, tag }) {
       // first, on a desktop, strictly: a protocol launch, the app answering
       // from inside the package, its toast filed under the package, the
       // startup task (desktop/scripts/store-e2e.mjs, needs Developer Mode).
-      IS_WIN
+      // ⚠ On Windows it is required, as it always was. Anywhere else (#248:
+      // the release cut from a Linux workspace) it is DEFERRED to a Windows
+      // machine, and only once a person says so (storeCopyDeferred above):
+      // the pretag waits for --ack store-deferred, and the record carries the
+      // check until --ack store-checked. `check` is red if anything ever runs
+      // the deferred gate itself.
+      win
         ? {
-            name: 'desktop: the Store package works as a Store copy',
+            name: STORE_COPY,
             lane: 'desktop',
             always: true,
             after: [BUILD_BIN],
             inputs: ALL,
-            sh: 'cd desktop && pnpm run build && node scripts/fetch-cli.mjs --platform win32 && node scripts/store-e2e.mjs',
+            sh: STORE_COPY_SH,
             env: (c) => ({ FILEX_CLI_BIN: path.resolve(c.repo, bin) }),
           }
         : {
-            name: 'desktop: the Store package works as a Store copy',
+            name: STORE_COPY,
             lane: 'desktop',
             always: true,
-            cmd: ['node', '-e', 'console.error("store-e2e installs an MSIX: run the release on Windows with Developer Mode"); process.exit(1)'],
+            deferred: storeCopyDeferred('bin/filex-release-e2e.exe'),
+            check: () => ({ ok: false, detail: 'store-e2e installs an MSIX: it runs on Windows with Developer Mode, or the pretag defers it (--ack store-deferred)' }),
           },
       // CONTRIBUTING step 12, "before the tag": demo mode refuses writes,
       // anonymous capabilities name no host. Exit 2 (could not check) is red.

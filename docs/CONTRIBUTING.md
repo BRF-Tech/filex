@@ -1069,7 +1069,30 @@ What every table gets, whoever draws it:
   in the details panel is ~265px) it would cover the very columns it was
   frozen to keep company. Below that nothing is pinned, the row scrolls as
   one piece, and the lead falls to its own minimum instead of taking the
-  whole pane - still without hiding anything.
+  whole pane - still without hiding anything;
+- **stacked rows where it cannot be a table** (0.56.1) - in a pane narrower
+  than the lead and the first three columns side by side at their own
+  minimums (`TableLayout.stackBelow`, `lib/tableColumns`; a phone, the
+  details panel), every row is its tick, its lead and its actions on one
+  line and every other cell after them, COMPACT: on one line under the lead
+  that wraps only when it must, each value with its column's name small in
+  front of it and " · " between them - "Type Plain text · Owner You ·
+  Size 10 B", whole, the way a phone's file manager draws a row. The table
+  decides from its OWN width (its scrollport, watched), not the window's,
+  and goes back to being a table when the pane widens. The rows are the
+  same rows - the same cells in the same order with the same roles; the
+  label (from `data-label`) and the " · " are CSS with empty alternative
+  text, so neither is part of a cell's text nor read out, and a value is
+  still named by its column header - so selection, the right-click menu,
+  the Actions control, the keyboard and a test that reads a cell keep
+  working; the header keeps sorting and the column menu, and drops the
+  resize handles and header dragging, which mean nothing without columns. A
+  column with no header label (the explorer's star) stays on the first
+  line as a control. Nothing for a page to do: a `DataTable` stacks by
+  itself. Owner, 2026-10-11, after the e-Signature panel cut its signers'
+  State and When to "Invited ..." and "until S...": the one table lays its
+  cells out under the lead in a narrow place, compact, every narrow table
+  at once.
 
 How to use it:
 
@@ -2412,7 +2435,9 @@ what the servers, the update feeds and docs.filex.sh actually serve. The one
 thing it starts on GitHub is a dry run of `release.yml`, which publishes nothing
 (step 7). The two judgements no script can make are a person's to confirm: the
 README, screenshot and documentation audit (steps 1-3, `--ack audit`) and the
-parts of the deploy nothing can read back (`--ack deploy`).
+parts of the deploy nothing can read back (`--ack deploy`). Off Windows there
+is a third: leaving the Store copy's check for a Windows machine
+(`--ack store-deferred`, step 6).
 
 **The tag comes last.** Both `main` branches are pushed without a tag, GitHub
 tests that very commit, and only a commit that passed is tagged (steps 7-8). A
@@ -2436,6 +2461,9 @@ pnpm release 0.45.0 --resume --chain result.json   # a green scripts/chain run
                                 # on this tree stands in for the heavy gates
 pnpm release 0.45.0 --resume --gate circleci   # GitHub Actions is down: the
                                 # gate reads CircleCI (see the last section)
+pnpm release 0.45.0 --resume --ack store-deferred   # off Windows: the Store
+                                # copy's check is left for a Windows machine (step 6)
+pnpm release 0.45.0 --resume --ack store-checked    # it ran green there since
 ```
 
 > ⚠ The gates live in `scripts/release/plan.mjs` (this repository's list,
@@ -2726,6 +2754,24 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    git archive HEAD | docker build --platform linux/amd64 -f docker/Dockerfile.slim -t filex:release-check-slim -
    (cd desktop && pnpm run build && node scripts/fetch-cli.mjs --platform win32 && pnpm e2e:store)  # Windows, Developer Mode: the Store package as a Store copy; no window comes on screen (--keep-windows-hidden), only a test toast
    ```
+
+   **Off Windows the Store copy's check is deferred, never skipped** (#248).
+   `store-e2e` installs and activates an MSIX, which only Windows can do (the
+   GitHub runner never could). A release cut on Linux or macOS names the gate
+   as `deferred` in its pretag and waits - before the other gates run - for a
+   person to say so: `pnpm release X.Y.Z --resume --ack store-deferred`. The
+   ack is bound to the release commit, like the audit's; on Windows it is
+   refused, because there the gate runs. The Store still gets its bundle:
+   `release.yml`'s Store job builds it (or takes the dry run's
+   `release-files-store`), checks the package statically and submits it. The
+   check stays owed in the run's record: `--status`, the deploy stage and the
+   ship list the steps - on Windows with Developer Mode, in a clean checkout
+   of the tag, the UI and the Windows binary built, then the gate's own
+   command - until it ran green there and a person records it where the
+   release was cut: `pnpm release X.Y.Z --resume --ack store-checked` (a
+   complete release takes it too). Green means the Store copy's own checks
+   printed PASS, not only "ALL PASSED": they do not run when the packaged app
+   never opened. It does not hold the deploy.
 
    The heavy suites run before the tag too, but not all here and not all
    first. Where each runs is the **profile** (`--profile`, task #172):
@@ -3793,7 +3839,8 @@ publishing command is not set is not run: it is listed at the end with what to
 do by hand. What no step can do is listed at the end too - the language packs
 (step 13, `node scripts/langpacks.mjs release X.Y.Z`), the replies on the
 issues and pull requests the
-release answers, the push of the `docs(releases)` commit - and then
+release answers, the push of the `docs(releases)` commit, a check the release
+deferred to another machine (the Store copy, when it was cut off Windows) - and then
 `pnpm release X.Y.Z --resume --ack deploy`. The aim is 20 minutes from the
 deploy to everything read back; the ship says when it took longer.
 

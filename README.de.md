@@ -327,8 +327,10 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 - Binden Sie lokale Datenträger, S3, FTP, SFTP, WebDAV und SMB/NAS-Freigaben nebeneinander
   ein, und kopieren oder schneiden Sie in einem aus und fügen Sie in einem anderen ein.
 - Erreichen Sie denselben Baum als **S3**, **SFTP**, **FTPS**, **NFSv3** und **WebDAV**:
-  Lassen Sie `rclone`, `restic`, `aws s3`, WinSCP oder FileZilla darauf zeigen. Die
-  Berechtigungen, der Papierkorb und das Kontingent sind die der Weboberfläche.
+  Lassen Sie `rclone`, `restic`, `aws s3`, WinSCP oder FileZilla darauf zeigen. Es gelten
+  dieselben filex-Berechtigungen (pro Person, Gruppe und Ordner), derselbe Papierkorb und
+  dasselbe Kontingent wie in der Weboberfläche; die POSIX-Bits und ACLs auf dem Datenträger
+  werden keinen filex-Benutzern zugeordnet.
 - `filex mount` bindet einen entfernten Server über gewöhnliches HTTPS ein: als Ordner unter
   Linux, als Laufwerksbuchstabe unter Windows (macOS wird nicht unterstützt).
 - Für einen Speicher, den filex nicht mitliefert, installieren Sie ein Plug-in aus dem
@@ -352,7 +354,7 @@ Alle Funktionen zu Speicher und Protokollen im Detail: [docs/FEATURES.md → Sto
 </td>
 <td width="50%" valign="top">
 
-![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.0ac3d81aa9f5.png)
+![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.cfc100f30069.png)
 
 <sub>API-Schlüssel - erstellen Sie Ihre eigenen, im Explorer oder in einer Einbettung (Sitzung oder Schlüssel einer Person; eine Einbettung, die über einen Proxy mit einem gemeinsamen *App*-Schlüssel läuft, bekommt diesen Eintrag nicht)</sub>
 
@@ -440,7 +442,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.7e448107c5b9.png)
+![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.330fcc5fda73.png)
 
 <sub>Jede Tabelle im Adminbereich - ein angeheftetes Menü **Aktionen** pro Zeile, dasselbe Menü, das sich über das ⋮ des Explorers öffnet</sub>
 
@@ -776,7 +778,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 <tr>
 <td width="50%" valign="top">
 
-![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.9642990b704d.png)
+![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.9f93226381ed.png)
 
 <sub>Solange es im Umlauf ist - das Dokument ist für alle eingefroren, in seinen Details steht, wer unterschrieben hat</sub>
 
@@ -863,7 +865,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 </td>
 <td width="50%" valign="top">
 
-![Die Installationsprüfung, geöffnet über den Link eines Stores](https://filex.sh/shots/store/store-review-1440.01ab061907d0.png)
+![Die Installationsprüfung, geöffnet über den Link eines Stores](https://filex.sh/shots/store/store-review-1440.d93b2b571d93.png)
 
 <sub>Installation aus einem Store - dieselbe Prüfung, markiert mit **Aus dem Store …**; der Lizenzschlüssel der kostenpflichtigen App ist nur an seinen ersten Zeichen zu sehen ([Installation aus einem Store](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 

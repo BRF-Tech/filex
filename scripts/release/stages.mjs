@@ -29,6 +29,7 @@ import {
   classifyDeletions,
   closingKeywords,
   dateChangelog,
+  deferredWork,
   dryRunTitle,
   execBitDrift,
   globMatch,
@@ -70,7 +71,12 @@ export const STAGES = [
   },
   {
     id: 'pretag', title: 'pretag', what: 'the fast gates (the profile says which), on the release commit',
-    builtin: ['gates side by side, in lanes (`jobs`)', 'a gate green on exactly these inputs before is not run again (--no-cache)', '(after the plan) the chain left the tree as it found it'],
+    builtin: [
+      'gates side by side, in lanes (`jobs`)',
+      'a gate green on exactly these inputs before is not run again (--no-cache)',
+      'a gate this machine cannot run (the plan says `deferred`) waits for: --ack <its ack> (bound to the release commit), and stays in the record until it ran elsewhere',
+      '(after the plan) the chain left the tree as it found it',
+    ],
   },
   {
     id: 'export', title: 'export', what: 'the public tree, and what must not be in it',
@@ -99,11 +105,35 @@ export const STAGES = [
   },
   { id: 'push', title: 'push', what: 'the tags, one ref at a time — a person', builtin: ['private remote: the tag is the release commit', 'public remote: the tag is the export commit — a tag naming the private commit is the lesson #55 leak'] },
   { id: 'ci', title: 'ci', what: 'what the release workflow published', builtin: ["(with the plan's tagRunWait) waits for the tag's run to finish, then reads"] },
-  { id: 'deploy', title: 'deploy', what: 'servers, feeds, embeds, docs — a person, then verified', builtin: ['waits for: --ack deploy'] },
+  { id: 'deploy', title: 'deploy', what: 'servers, feeds, embeds, docs — a person, then verified', builtin: ['waits for: --ack deploy', 'lists what the pretag deferred to another machine, until it is recorded as done'] },
 ];
 
-/** The acknowledgements a person may give, one per human-only judgement. */
+/**
+ * The acknowledgements a person may give, one per human-only judgement. A
+ * plan's deferred gates add two each (checks.mjs → deferredSpecs): their
+ * `ack` and their `checkedAck`.
+ */
 export const ACKS = ['audit', 'export-withheld', 'deploy'];
+
+/**
+ * #248: records `--ack <checkedAck>` - a check the pretag deferred, since run
+ * green on the machine it needs - in the run's record, on any resume, a
+ * release already complete included. `specs` are the plan's
+ * (deferredSpecs). Returns { closed: [the deferrals], problem: why an ack
+ * cannot be taken, or null }.
+ */
+export function closeDeferred(state, acks, specs) {
+  const closed = [];
+  for (const spec of specs) {
+    if (!acks.has(spec.checkedAck)) continue;
+    const d = state.deferred?.[spec.ack];
+    if (!d) return { closed, problem: `--ack ${spec.checkedAck}: the record of ${state.tag} defers no "${spec.gate}" - the pretag defers it (--ack ${spec.ack}) before anything can be recorded as done` };
+    if (d.checked) continue;
+    d.checked = { at: new Date().toISOString(), by: 'a person (--ack)' };
+    closed.push(d);
+  }
+  return { closed, problem: null };
+}
 
 const short = (sha) => (sha ? sha.slice(0, 10) : '(none)');
 const done = (extra = {}) => ({ status: 'done', ...extra });
@@ -656,10 +686,18 @@ export async function pretag(R) {
   R.changed = profile === 'patch' ? changedSince(R, S.prev) : null;
   const sel = selectGates(R.plan, profile, R.changed, { source: R.gateSource ?? 'github' });
   describeProfile(R, profile, sel, 'pretag');
+  // #248: a gate this machine cannot run is never run and never skipped in
+  // silence. It is named here, and the pretag waits for a person to defer it
+  // to a machine that can (--ack, bound to this commit) - BEFORE the other
+  // gates, so the builds are not run twice for an answer (a resume rebuilds:
+  // builds are never cached). A dry run runs the gates and says it would wait.
+  const deferred = sel.pretag.filter((g) => g.deferred);
+  const pending = deferPretag(R, deferred, h);
+  if (pending.length && !R.dry) return waiting(deferInstructions(R, pending, h), { profile });
   // ⚠ #172: a red gate no longer sends the next run back to the start. The
   // gates that passed on exactly these inputs pass from the cache
   // (engine.mjs), so a fix in e2e/ re-runs what reads e2e/ and the builds.
-  const ok = await R.gates.all('pretag', sel.pretag, R.ctx(), { jobs: R.plan.jobs ?? 1 });
+  const ok = await R.gates.all('pretag', sel.pretag.filter((g) => !g.deferred), R.ctx(), { jobs: R.plan.jobs ?? 1 });
   // A build that rewrites a tracked file is a commit nobody made. Last, and
   // whatever the gates said.
   const tree = await R.gates.one('pretag', {
@@ -671,7 +709,67 @@ export async function pretag(R) {
       return st.length ? { ok: false, detail: st.slice(0, 25).join('\n') } : { ok: true };
     },
   }, R.ctx());
-  return ok && tree.ok ? done({ head: h, profile }) : red({ profile });
+  if (!(ok && tree.ok)) return red({ profile });
+  if (pending.length) return waiting(deferInstructions(R, pending, h), { profile, dry: true });
+  return done({ head: h, profile, ...(deferred.length ? { deferred: deferred.map((g) => g.name) } : {}) });
+}
+
+/**
+ * Says which pretag gates are deferred, takes a person's `--ack` for them on
+ * this commit, and records each deferral that holds in the run's record
+ * (`deferred`, by ack: the gate, why, the steps the other machine takes, what
+ * shipped instead). Returns the gates still waiting for their ack.
+ */
+function deferPretag(R, deferred, h) {
+  const S = R.state;
+  const pending = [];
+  for (const g of deferred) {
+    const d = g.deferred;
+    console.log(`  ${yellow('deferred')}  ${g.name} ${dim(`- ${d.why}: ${d.command}`)}`);
+    if (R.acks.has(d.ack)) S.acks[d.ack] = { head: h, at: new Date().toISOString() };
+    if (S.acks[d.ack]?.head !== h) {
+      pending.push(g);
+      continue;
+    }
+    const before = S.deferred?.[d.ack];
+    S.deferred = {
+      ...S.deferred,
+      [d.ack]: {
+        gate: g.name,
+        ack: d.ack,
+        checkedAck: d.checkedAck,
+        why: d.why,
+        command: d.command,
+        head: h,
+        at: S.acks[d.ack].at,
+        later: d.later(R.ctx()),
+        artifact: d.artifact ?? null,
+        // A check recorded on this very commit stays recorded.
+        checked: before?.head === h ? (before.checked ?? null) : null,
+      },
+    };
+    console.log(`  ${dim('        ')}  ${dim(`deferred by a person at ${S.acks[d.ack].at} (--ack ${d.ack}); the deploy lists it until --ack ${d.checkedAck}`)}`);
+  }
+  return pending;
+}
+
+/** What the pretag asks of a person for the deferred gates still waiting. */
+function deferInstructions(R, pending, h) {
+  const S = R.state;
+  const lines = [];
+  for (const g of pending) {
+    const d = g.deferred;
+    if (S.acks[d.ack] && S.acks[d.ack].head !== h) lines.push(`(It was deferred at ${short(S.acks[d.ack].head)}; the release commit has moved since, so it is asked again.)`, '');
+    lines.push(
+      `This machine cannot run "${g.name}": ${d.why}.`,
+      `  ${d.command}`,
+      'To leave it for that machine - the release goes on, and the record, the deploy stage and the ship',
+      `list it as left to do until it is recorded as done (--ack ${d.checkedAck}):`,
+      '',
+    );
+  }
+  lines.push(`    pnpm release ${R.version} --resume ${pending.map((g) => `--ack ${g.deferred.ack}`).join(' ')}`);
+  return lines;
 }
 
 // ── 6. export ───────────────────────────────────────────────────────────────
@@ -1795,11 +1893,14 @@ export async function ci(R) {
 export async function deploy(R) {
   const S = R.state;
   const list = R.plan.deployChecklist.map((l) => l.replaceAll('{tag}', R.tag).replaceAll('{version}', R.version).replaceAll('{export}', slash(R.exp)));
+  // #248: what the pretag deferred - left to do, never in the way of the deploy.
+  const later = deferredWork(S, R.version);
   const instructions = [
     'Deploy and publish (none of it is done by this script):',
     '',
     ...list.map((l) => `  ${l}`),
     '',
+    ...(later.length ? ['Left for another machine (deferred at the pretag; it does not hold the deploy):', ...later.map((l) => `  ${l}`), ''] : []),
     `The automatic checks below must be green; what they cannot see (embeds, replies) is yours to confirm:`,
     `    pnpm release ${R.version} --resume --ack deploy`,
   ];

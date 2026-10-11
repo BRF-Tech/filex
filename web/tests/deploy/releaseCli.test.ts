@@ -564,6 +564,109 @@ describe.concurrent('pnpm release --dry-run', () => {
   });
 });
 
+// #248: a pretag gate this machine cannot run (the real plan's Store copy off
+// Windows; the fixture's FIXTURE_DEFER gate here) is deferred by a person,
+// never run and never skipped in silence, and the record owes it until a
+// person records that it ran on the machine it needs.
+describe.concurrent('pnpm release — a gate this machine cannot run (#248)', () => {
+  const D = { FIXTURE_DEFER: '1' };
+
+  it('waits at the pretag for a person to defer it, records the deferral on the release commit, and records it as done later', { timeout: TIMEOUT }, async ({ expect }) => {
+    const fx = fixture();
+    let r = await release(fx, [VERSION], D);
+    expect(r.code, r.out).toBe(3);
+    r = await release(fx, [VERSION, '--resume', '--ack', 'audit'], D);
+    expect(r.code, r.out).toBe(3);
+    expect(r.out).toContain('WAITING at pretag');
+    expect(r.out).toContain('deferred  the fixture Windows check - the fixture package is checked on a Windows machine, not here: node scripts/windows-check.mjs');
+    expect(r.out).toContain(`pnpm release ${VERSION} --resume --ack store-deferred`);
+    // asked BEFORE the gates: a resume would build everything again
+    let rec = recordOf(fx);
+    expect(rec.ledger.filter((l: { stage: string }) => l.stage === 'pretag')).toEqual([]);
+    expect(rec.deferred).toBeUndefined();
+
+    // nothing deferred yet: nothing to record as done
+    r = await release(fx, [VERSION, '--resume', '--ack', 'store-checked'], D);
+    expect(r.code, r.out).toBe(2);
+    expect(r.out).toContain('defers no "the fixture Windows check"');
+
+    r = await release(fx, [VERSION, '--resume', '--ack', 'store-deferred'], D);
+    expect(r.code, r.out).toBe(3);
+    expect(r.out).toContain('WAITING at land');
+    rec = recordOf(fx);
+    expect(rec.acks['store-deferred'].head).toBe(rec.releaseCommit);
+    expect(rec.stages.pretag).toMatchObject({ status: 'done', head: rec.releaseCommit, deferred: ['the fixture Windows check'] });
+    expect(rec.deferred['store-deferred']).toMatchObject({ gate: 'the fixture Windows check', head: rec.releaseCommit, checked: null, artifact: 'release-files-store', checkedAck: 'store-checked' });
+    expect(rec.deferred['store-deferred'].later.join('\n')).toContain(`clean checkout of ${TAG} (${rec.releaseCommit.slice(0, 10)})`);
+    // never run: the other gates ran, it did not
+    expect(rec.ledger.some((l: { name: string }) => l.name === 'the fixture test suite')).toBe(true);
+    expect(rec.ledger.some((l: { name: string }) => l.name === 'the fixture Windows check')).toBe(false);
+
+    r = await release(fx, [VERSION, '--status'], D);
+    expect(r.out).toContain('left for another machine');
+    expect(r.out).toContain('node scripts/windows-check.mjs');
+    expect(r.out).toContain(`pnpm release ${VERSION} --resume --ack store-checked`);
+
+    // run on Windows since: recorded, and the release carries on where it was
+    r = await release(fx, [VERSION, '--resume', '--ack', 'store-checked'], D);
+    expect(r.code, r.out).toBe(3);
+    expect(r.out).toContain('recorded  the fixture Windows check');
+    expect(r.out).toContain('WAITING at land');
+    expect(recordOf(fx).deferred['store-deferred'].checked.at).toBeTruthy();
+    r = await release(fx, [VERSION, '--status'], D);
+    expect(r.out).not.toContain('left for another machine');
+    expect(r.out).toContain('checked  the fixture Windows check');
+
+    // after the release is complete, it can still be recorded
+    const file = path.join(fx.src, '.git', 'filex-release', `${TAG}.json`);
+    const done = { ...recordOf(fx), complete: true };
+    done.deferred['store-deferred'].checked = null;
+    fs.writeFileSync(file, JSON.stringify(done, null, 2));
+    r = await release(fx, [VERSION, '--resume'], D);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('Still left for another machine');
+    r = await release(fx, [VERSION, '--resume', '--ack', 'store-checked'], D);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('recorded  the fixture Windows check');
+    expect(r.out).not.toContain('Still left for another machine');
+    expect(recordOf(fx).deferred['store-deferred'].checked.at).toBeTruthy();
+  });
+
+  it('given at the start, the ack holds for the release commit the stamp makes', { timeout: TIMEOUT }, async ({ expect }) => {
+    const fx = fixture();
+    let r = await release(fx, [VERSION, '--ack', 'store-deferred'], D);
+    expect(r.code, r.out).toBe(3);
+    expect(r.out).toContain('WAITING at audit');
+    r = await release(fx, [VERSION, '--resume', '--ack', 'audit', '--ack', 'store-deferred'], D);
+    expect(r.code, r.out).toBe(3);
+    expect(r.out).toContain('WAITING at land');
+    const rec = recordOf(fx);
+    expect(rec.deferred['store-deferred'].head).toBe(rec.releaseCommit);
+  });
+
+  it('a dry run runs every other gate and says a real run would wait for the ack', { timeout: TIMEOUT }, async ({ expect }) => {
+    const fx = fixture();
+    const before = footprint(fx);
+    const r = await release(fx, [VERSION, '--dry-run'], D);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('DRY RUN GREEN');
+    const pretag = r.out.slice(r.out.indexOf(banner('pretag')), r.out.indexOf(banner('export')));
+    expect(pretag).toContain('ok      the fixture test suite');
+    expect(pretag).toContain('deferred  the fixture Windows check');
+    expect(pretag).toContain(`--resume --ack store-deferred`);
+    expect(footprint(fx)).toEqual(before);
+  });
+
+  it('a machine that defers nothing refuses both acks: there the gate runs', { timeout: TIMEOUT }, async ({ expect }) => {
+    const fx = fixture();
+    for (const ack of ['store-deferred', 'store-checked']) {
+      const r = await release(fx, [VERSION, '--ack', ack]);
+      expect(r.code, r.out).toBe(2);
+      expect(r.out).toContain(`--ack ${ack}: a person can confirm only audit, export-withheld, deploy (this machine defers no gate: it runs them all)`);
+    }
+  });
+});
+
 describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing the person\'s steps', () => {
   // v0.45.0: a red export gate left the public checkout holding that export,
   // and every --resume after the fix stopped on "nothing else pending",

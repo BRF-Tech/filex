@@ -325,8 +325,9 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 - Yerel diskleri, S3'ü, FTP'yi, SFTP'yi, WebDAV'ı ve SMB/NAS paylaşımlarını yan yana bağlayın;
   birinde kopyalayın ya da kesin, ötekinde yapıştırın.
 - Aynı ağaca **S3**, **SFTP**, **FTPS**, **NFSv3** ve **WebDAV** olarak erişin: `rclone`,
-  `restic`, `aws s3`, WinSCP ya da FileZilla'yı ona yöneltin. İzinler, çöp kutusu ve kota
-  web arayüzününkilerdir.
+  `restic`, `aws s3`, WinSCP ya da FileZilla'yı ona yöneltin. Aynı filex izinleri (kişi, grup
+  ve klasör bazında), çöp kutusu ve kota web arayüzündeki gibi geçerlidir; diskteki POSIX izin
+  bitleri ve ACL'ler filex kullanıcılarına eşlenmez.
 - `filex mount` uzak bir sunucuyu sıradan HTTPS üzerinden bağlar: Linux'ta bir klasör,
   Windows'ta bir sürücü harfi olarak (macOS desteklenmez).
 - filex'le birlikte gelmeyen bir depo için yönetim panelinden ya da bir uygulama mağazasının
@@ -350,7 +351,7 @@ Depolama ve protokollerin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 </td>
 <td width="50%" valign="top">
 
-![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.0ac3d81aa9f5.png)
+![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.cfc100f30069.png)
 
 <sub>API anahtarları - kendinizinkini oluşturun, gezginde ya da gömülü bir gezginde (bir kişinin oturumuyla ya da API anahtarıyla; tek bir ortak *uygulama* API anahtarıyla vekil sunucu üzerinden çalışan gömülü bir gezginde bu öğe yer almaz)</sub>
 
@@ -438,7 +439,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.7e448107c5b9.png)
+![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.330fcc5fda73.png)
 
 <sub>Her yönetim tablosu - satır başına sabitlenmiş tek bir **Aksiyon** menüsü, gezgindeki ⋮ ile açılan menünün aynısı</sub>
 
@@ -771,7 +772,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 <tr>
 <td width="50%" valign="top">
 
-![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.9642990b704d.png)
+![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.9f93226381ed.png)
 
 <sub>Belge imzadayken - herkes için dondurulmuş, kimin imzaladığı ayrıntılarında</sub>
 
@@ -858,7 +859,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 </td>
 <td width="50%" valign="top">
 
-![Bir mağazanın bağlantısıyla açılan kurulum incelemesi](https://filex.sh/shots/store/store-review-1440.01ab061907d0.png)
+![Bir mağazanın bağlantısıyla açılan kurulum incelemesi](https://filex.sh/shots/store/store-review-1440.d93b2b571d93.png)
 
 <sub>Mağazadan kurmak - aynı inceleme, *… mağazasından* diye işaretli; ücretli uygulamanın lisans anahtarı yalnızca ilk karakterleriyle görünür ([Mağazadan kurmak](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 

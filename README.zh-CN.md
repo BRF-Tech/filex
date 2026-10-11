@@ -300,7 +300,7 @@ docker run -p 5212:5212 \
 **所有存储都在一棵文件树里，这棵树用什么都能访问。**
 
 - 把本地磁盘、S3、FTP、SFTP、WebDAV 和 SMB/NAS 共享并排挂载，在一个中复制或剪切，在另一个中粘贴。
-- 把同一棵文件树当作 **S3**、**SFTP**、**FTPS**、**NFSv3** 和 **WebDAV** 来访问：把 `rclone`、`restic`、`aws s3`、WinSCP 或 FileZilla 指向它。权限、回收站和配额都与 Web 界面相同。
+- 把同一棵文件树当作 **S3**、**SFTP**、**FTPS**、**NFSv3** 和 **WebDAV** 来访问：把 `rclone`、`restic`、`aws s3`、WinSCP 或 FileZilla 指向它。同样的 filex 权限（按人、组和文件夹）、回收站和配额与 Web 界面中一样生效；磁盘上的 POSIX 权限位和 ACL 不会映射到 filex 用户。
 - `filex mount` 通过普通的 HTTPS 挂载远程服务器：在 Linux 上是一个文件夹，在 Windows 上是一个盘符（不支持 macOS）。
 - 对于 filex 没有内置的存储，从管理面板或应用商店的链接安装一个插件。
 
@@ -322,7 +322,7 @@ docker run -p 5212:5212 \
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.0ac3d81aa9f5.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.cfc100f30069.png)
 
 <sub>API keys（API 密钥）：在资源管理器或嵌入端里签发你自己的密钥（凭某个人的会话或令牌；用一个共享的*应用*令牌做代理的嵌入端没有这个条目）</sub>
 
@@ -402,7 +402,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.7e448107c5b9.png)
+![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.330fcc5fda73.png)
 
 <sub>管理面板里的每张表格：每行一个固定的 **Actions**（操作）菜单，与资源管理器的 ⋮ 打开的是同一个菜单</sub>
 
@@ -692,7 +692,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 <tr>
 <td width="50%" valign="top">
 
-![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.9642990b704d.png)
+![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.9f93226381ed.png)
 
 <sub>等待签署期间：文档对每个人都是冻结的，谁已签署，在文档的详细信息里可以看到</sub>
 
@@ -779,7 +779,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 </td>
 <td width="50%" valign="top">
 
-![从商店链接打开的安装审核](https://filex.sh/shots/store/store-review-1440.01ab061907d0.png)
+![从商店链接打开的安装审核](https://filex.sh/shots/store/store-review-1440.d93b2b571d93.png)
 
 <sub>从商店安装：同样的审核，标为 **From store**（来自商店），付费应用的许可证密钥只显示开头几个字符（[Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store)）</sub>
 

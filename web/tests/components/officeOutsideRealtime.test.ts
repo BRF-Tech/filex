@@ -169,8 +169,10 @@ describe.each(OFFICE_MODES)('the document changed on the server while it was ope
     staleAnswer = true;
     changed(s);
     await afterDebounce();
+    // The reload is a destroy and then an awaited create: on a loaded machine the new editor
+    // comes after the fixed wait (0.56.1 release, 20-core workspace: created was still ['v1']).
+    await vi.waitFor(() => expect(editors.created, 'a new editor on the new version').toEqual(['v1', 'v2']), { timeout: 3000 });
     expect(editors.destroyed()).toBe(1);
-    expect(editors.created, 'a new editor on the new version').toEqual(['v1', 'v2']);
     expect(note()).toMatch(/updated outside filex/i);
     expect(w.emitted('outside-resolved')?.[0]?.[0]).toMatchObject({ choice: 'reloaded', origin: 'server', key: 'v1' });
   });
@@ -210,7 +212,7 @@ describe.each(OFFICE_MODES)('the document changed on the server while it was ope
     changed(s);
     await afterDebounce();
     await click('outside-keep-theirs');
-    await settle();
+    await vi.waitFor(() => expect(editors.created).toEqual(['v1', 'v2']), { timeout: 3000 });
     expect(sessionCalls).toContainEqual({ path: PATH, key: 'v1', action: 'theirs' });
     expect(sessionTokens[sessionCalls.findIndex((c) => c.action === 'theirs')]).toBe('signed-v1');
     expect(editors.created).toEqual(['v1', 'v2']);

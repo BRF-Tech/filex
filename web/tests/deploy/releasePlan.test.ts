@@ -176,6 +176,20 @@ describe("this repository's release plan", () => {
   // 0.52; the heavy suites ran there and again in the export, on GitHub and
   // on the build host. The fast pretag is the builds and what only this
   // machine can do.
+  // #248: the release may be cut off Windows, where an MSIX cannot be
+  // installed. The Store copy stays a gate there, deferred - never skipped -
+  // by a person's ack (releaseStoreDeferred.test.ts, and the whole run in
+  // releaseCli.test.ts).
+  it('the Store copy is required on Windows, and deferred anywhere else only by a person, bound to the release commit', () => {
+    const on = (platform: string) => (plan({ repo: REPO, version: '9.9.9', tag: 'v9.9.9', platform }).pretag as Array<Gate & { deferred?: { ack: string; checkedAck: string } }>).find((g) => g.name === 'desktop: the Store package works as a Store copy')!;
+    expect(on('win32').deferred).toBeUndefined();
+    expect(on('win32').sh).toContain('node scripts/store-e2e.mjs');
+    expect(on('linux').deferred).toMatchObject({ ack: 'store-deferred', checkedAck: 'store-checked' });
+    expect(on('linux').sh).toBeUndefined();
+    const audit = STAGES.find((s: { id: string }) => s.id === 'pretag') as { builtin: string[] };
+    expect(audit.builtin.join('\n')).toContain('bound to the release commit');
+  });
+
   it('the minor pretag is the fast one: the builds, vue-tsc, the unit suites in UTC, the desktop, the Store copy, the images', () => {
     const minor = selectGates(p, 'minor', null);
     expect(names(minor.pretag)).toEqual(names(pretag));

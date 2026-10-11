@@ -682,6 +682,8 @@ export const GATE_SOURCES = ['github', 'circleci'];
  *   patch       (heavy) 'changed': a patch runs it here when touched
  *   patchOnly   (heavy) only a patch runs it (the targeted Go suite)
  *   patchSkip   (heavy) why a patch does not run it here
+ *   deferred    (pretag) this machine cannot run it: the pretag leaves it to
+ *               one that can, once a person says so (deferredSpecs below)
  */
 export function selectGates({ pretag = [], heavy = [] }, profile, changed = null, { source = 'github' } = {}) {
   if (!GATE_SOURCES.includes(source)) throw new Error(`gate source ${source}: the sources are ${GATE_SOURCES.join(', ')}`);
@@ -1160,4 +1162,46 @@ export function rerunDecision({ run, failed, record = null, now = Date.now(), ma
   if (run?.status !== 'completed') return out('wait', `${retry.length} part(s) red on the runner, not in the code: re-run once the run has finished`);
   if ((record?.requests ?? 0) >= maxRequests) return out('red', `GitHub was asked ${record.requests} time(s) to re-run it already`);
   return out('rerun', `${retry.length} part(s) red on the runner, not in the code`);
+}
+
+// ── a gate deferred to another machine (#248) ───────────────────────────────
+//
+// A pretag gate this machine cannot run at all - the Store copy needs Windows
+// to install and activate an MSIX - carries `deferred` in the plan:
+//
+//   ack         the person's confirmation that it is left for later, bound
+//               to the release commit like the audit's (--ack <ack>)
+//   checkedAck  the person's confirmation, later, that it ran green there
+//   why         one line: where it is checked instead
+//   command     the check itself, as that machine runs it
+//   later(c)    every step that machine takes, from a clean checkout of the tag
+//   artifact    what the release shipped instead of what it checks (a dry-run
+//               artifact's name), so the record says which files went out
+//
+// Never a silent skip: without the ack the pretag waits for a person, and the
+// deferral stays in the run's record (`deferred`) - in --status, in the deploy
+// stage's instructions and in the ship's list of what is left to a person -
+// until `--ack <checkedAck>` records that it ran.
+
+/** The deferrable gates of a plan's pretag: [{ gate, ack, checkedAck, ... }]. */
+export function deferredSpecs(plan) {
+  return (plan?.pretag ?? []).filter((g) => g.deferred).map((g) => ({ gate: g.name, ...g.deferred }));
+}
+
+/**
+ * What a run's record still owes another machine: one block per deferred gate
+ * nobody has recorded as done - the gate, why, every step, what shipped
+ * instead, and the confirmation that closes it. [] when nothing is owed.
+ */
+export function deferredWork(state, version) {
+  const out = [];
+  for (const d of Object.values(state?.deferred ?? {})) {
+    if (d.checked) continue;
+    out.push(`${d.gate}: ${d.why} (deferred at the pretag, ${d.at})`);
+    for (const l of d.later ?? []) out.push(`  ${l}`);
+    const dry = state?.stages?.gate?.dryRun;
+    if (d.artifact) out.push(`  what went out instead: the dry run's ${d.artifact}${dry ? ` (${dry})` : ''}, built from the same commit`);
+    out.push(`  then, where the release was cut:  pnpm release ${version} --resume --ack ${d.checkedAck}`);
+  }
+  return out;
 }

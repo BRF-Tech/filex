@@ -326,8 +326,9 @@ Todas las funciones del explorador, en detalle: [docs/FEATURES.md → The explor
 - Monte lado a lado discos locales, S3, FTP, SFTP, WebDAV y recursos compartidos SMB/NAS, y copie o
   corte en uno y pegue en otro.
 - Acceda al mismo árbol como **S3**, **SFTP**, **FTPS**, **NFSv3** y **WebDAV**: apunte a él `rclone`,
-  `restic`, `aws s3`, WinSCP o FileZilla. Los permisos, la papelera y la cuota son los de la
-  interfaz web.
+  `restic`, `aws s3`, WinSCP o FileZilla. Se aplican los mismos permisos de filex (por persona,
+  grupo y carpeta), la misma papelera y la misma cuota que en la interfaz web; los bits POSIX y
+  las ACL del disco no se asignan a usuarios de filex.
 - `filex mount` conecta un servidor remoto por HTTPS corriente: una carpeta en Linux, una letra de
   unidad en Windows (macOS no es compatible).
 - Para un almacenamiento que filex no incluye, instale un complemento desde el panel de
@@ -351,7 +352,7 @@ Todas las funciones de almacenamiento y protocolos, en detalle: [docs/FEATURES.m
 </td>
 <td width="50%" valign="top">
 
-![Claves de API](https://filex.sh/shots/sidenav/apikeys-minted-1440.0ac3d81aa9f5.png)
+![Claves de API](https://filex.sh/shots/sidenav/apikeys-minted-1440.cfc100f30069.png)
 
 <sub>Claves de API - cree las suyas, en el explorador o en una integración (la sesión o el token de una persona; una integración servida a través de un proxy con un único token compartido de tipo *app* no recibe esta entrada)</sub>
 
@@ -438,7 +439,7 @@ Todas las funciones de uso compartido y protección, en detalle: [docs/FEATURES.
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Enlaces compartidos, con el menú Acciones de una fila abierto](https://filex.sh/shots/signing/admin-table-actions-1440.7e448107c5b9.png)
+![Admin → Enlaces compartidos, con el menú Acciones de una fila abierto](https://filex.sh/shots/signing/admin-table-actions-1440.330fcc5fda73.png)
 
 <sub>Cada tabla de administración - un único menú **Acciones** fijado por fila, el mismo menú que abre el ⋮ del explorador</sub>
 
@@ -774,7 +775,7 @@ la genera filex, y el enlace que recibe el socio es un enlace compartido corrien
 <tr>
 <td width="50%" valign="top">
 
-![El documento bloqueado, con su panel Firmas abierto](https://filex.sh/shots/signing/sign-status-1440.9642990b704d.png)
+![El documento bloqueado, con su panel Firmas abierto](https://filex.sh/shots/signing/sign-status-1440.9f93226381ed.png)
 
 <sub>Mientras está en curso - el documento congelado para todos y, en sus detalles, quién ha firmado</sub>
 
@@ -861,7 +862,7 @@ la genera filex, y el enlace que recibe el socio es un enlace compartido corrien
 </td>
 <td width="50%" valign="top">
 
-![La revisión de instalación abierta desde el enlace de una tienda](https://filex.sh/shots/store/store-review-1440.01ab061907d0.png)
+![La revisión de instalación abierta desde el enlace de una tienda](https://filex.sh/shots/store/store-review-1440.d93b2b571d93.png)
 
 <sub>Instalar desde una tienda - la misma revisión, marcada **De la tienda**, con la clave de licencia de la aplicación de pago mostrada por sus primeros caracteres ([Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 

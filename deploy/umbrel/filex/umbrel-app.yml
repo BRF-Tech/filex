@@ -2,14 +2,12 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.56.0"
+version: "0.56.1"
 releaseNotes: |-
-  filex v0.56.0 - 2026-10-11
-  • An app edits a file of an end-to-end encrypted folder
-  • In a folder whose names are encrypted too, the browser picks the app
-  • What an app keeps while it edits an encrypted file is sealed
-  • An app edits a file of a vault
-  • Editing a file together, through filex's relay
+  filex v0.56.1 - 2026-10-11
+  • A release can be cut off Windows: the Store copy's check waits for a Windows machine, on a person's word.
+  • The docs say which permissions the protocols share.
+  • A table in a narrow place lays each row out under its name instead of cutting it.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-
@@ -21,8 +19,9 @@ description: >-
 
   It also works the other way round: the same tree is reachable AS S3, SFTP,
   FTPS, NFS and WebDAV, so rclone, restic, aws s3, WinSCP, a backup job or a
-  media player can point straight at it - with the same permissions, trash and
-  quota as the web UI. `filex mount` attaches it as a folder on Linux or a
+  media player can point straight at it - with the same filex permissions, trash
+  and quota as the web UI; the POSIX bits and ACLs on the disk are not mapped to
+  filex users. `filex mount` attaches it as a folder on Linux or a
   drive letter on Windows.
 
 

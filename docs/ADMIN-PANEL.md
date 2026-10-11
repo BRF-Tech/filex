@@ -30,7 +30,7 @@ line under every page saying what it is for:
 
 | | |
 |---|---|
-| ![The People & security panel open over Admin → Users](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png) | ![The System panel in Turkish, in the dark theme](https://filex.sh/shots/megamenu/system-dark-tr-1440.f88f30cfa4f6.png) |
+| ![The People & security panel open over Admin → Users](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png) | ![The System panel in Turkish, in the dark theme](https://filex.sh/shots/megamenu/system-dark-tr-1440.7593af7dd72b.png) |
 | *People & security* open over *Users*: two sections, a line under every page, the page you are on marked. | The same menu in Turkish and in the dark theme: *System*, three sections. |
 
 Every page is two clicks away: the panel's button, then the page. The
@@ -118,7 +118,7 @@ per section, and every section open - so a page is two taps away: *Menu*,
 then the page. The drawer opens scrolled to the page you are on, and closes
 when you choose one, tap outside it or press its close button.
 
-![The admin menu's drawer on a 390-pixel phone](https://filex.sh/shots/megamenu/drawer-390.507bf798ed16.png)
+![The admin menu's drawer on a 390-pixel phone](https://filex.sh/shots/megamenu/drawer-390.f8df63fbbbe6.png)
 
 ## Search
 

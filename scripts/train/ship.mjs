@@ -33,8 +33,9 @@
 //              own read-back, the same checks, nothing second
 //
 // Exit: 0 every step green and read back (what is left to a person - the
-// replies, the language packs, `--ack deploy` - is printed at the end); 1 a
-// step is red; 2 it could not start.
+// replies, the language packs, a check the release deferred to another
+// machine, `--ack deploy` - is printed at the end); 1 a step is red; 2 it
+// could not start.
 //
 // ⚠ Why this exists (#178, measured in #165): after 0.51's tag the deploy and
 // everything after it - a backup by hand, the gateway measured by hand, the
@@ -57,7 +58,7 @@ import { fileURLToPath } from 'node:url';
 import { neutralize, exportRules } from '../../docs-site/scripts/neutralize.mjs';
 import { announce } from '../lib/notify.mjs';
 import { listSetting, loadSettings } from '../lib/settings.mjs';
-import { SEMVER } from '../release/checks.mjs';
+import { SEMVER, deferredWork } from '../release/checks.mjs';
 import {
   Gates,
   banner,
@@ -384,9 +385,15 @@ export function buildSteps(cfg, ctx) {
   return steps;
 }
 
-/** The person's part, always: what no step here can do or read back. */
-export function personLines(cfg, { tag, version, releasesCommit = null }) {
+/**
+ * The person's part, always: what no step here can do or read back.
+ * `release` is the release tool's record of the run (its `deferred` checks,
+ * #248: the Store copy's, when the release was cut off Windows).
+ */
+export function personLines(cfg, { tag, version, releasesCommit = null, release = null }) {
   const out = [];
+  const owed = deferredWork(release, version);
+  if (owed.length) out.push('  left for another machine - the release deferred it at the pretag:', ...owed.map((l) => `    ${l}`), '');
   // The language packs' release-day step is a tool of its own (#177;
   // CONTRIBUTING, Release process, step 13): it commits locally, prints the
   // signed tags and the pushes, and holds back a pack still missing a
@@ -627,7 +634,7 @@ async function main(argv) {
       console.log(`  ${s.id.padEnd(14)} ${s.title}\n  ${''.padEnd(14)} ${what}${AFTER[s.id]?.length ? dim(`  after ${AFTER[s.id].join(', ')}`) : ''}`);
       if (s.person) for (const l of s.person) console.log(`  ${''.padEnd(14)} ${dim(l)}`);
     }
-    console.log(`\n${bold('then a person:')}\n${personLines(cfg, { tag, version }).join('\n')}`);
+    console.log(`\n${bold('then a person:')}\n${personLines(cfg, { tag, version, release: loadState(stateFile(gitDir, tag)) }).join('\n')}`);
     return 0;
   }
 
@@ -679,7 +686,7 @@ async function main(argv) {
   const lines = [];
   for (const s of persons) lines.push(...s.person.map((l) => `  ${s.id}: ${l}`));
   if (lines.length) lines.push('');
-  lines.push(...personLines(cfg, { tag, version, releasesCommit: releases.commit }));
+  lines.push(...personLines(cfg, { tag, version, releasesCommit: releases.commit, release: loadState(stateFile(gitDir, tag)) }));
   if (ok && wall > 20 * 60) console.log(`  ${yellow('note  ')}  ${duration(wall)} - the aim is 20 minutes from deploy to everything read back (#178)`);
   if (ok) {
     console.log(`\n${green(bold(`${tag} is deployed and every check read it back.`))} ${bold('What is left is a person\'s:')}\n${lines.join('\n')}`);

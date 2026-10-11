@@ -712,6 +712,8 @@ export interface TableLayout {
   widths: Record<ColumnId, number>;
   total: number;
   auto: boolean;
+  /** The pane width below which the rows stack (lib/tableColumns). */
+  stackBelow: number;
 }
 
 /** The explorer's table arithmetic over the DEFAULT layout. A folder's own

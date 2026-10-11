@@ -35,7 +35,14 @@
  *     `lib/tablePrefs`), or per folder for the explorer (its own store);
  *   · the lead column frozen on the left and ONE actions control frozen on
  *     the right while the rest scrolls sideways — the table is as wide as its
- *     columns and scrolls, it never sheds a column for want of room.
+ *     columns and scrolls, it never sheds a column for want of room;
+ *   · and where it cannot be a table at all, STACKED ROWS: in a pane that
+ *     cannot hold the lead and the first three columns side by side even at
+ *     their minimums (`TableLayout.stackBelow` — a phone, the details panel),
+ *     each row is its tick, its lead and its actions on one line and every
+ *     other cell after them on a line of its own that wraps, "Type Plain
+ *     text · Owner You · Size 10 B". Same rows, same cells, same roles;
+ *     sorting and the column menu stay in the header.
  *
  * ⚠ The markup and every class name are the explorer's (`fe-list__*`), on
  * purpose: its stylesheet in `styles/base.css` is this table's stylesheet,
@@ -43,8 +50,8 @@
  * them. Nothing here carries a colour of its own — every value is a `--fe-*`
  * token, so every table follows the palette the person picked.
  */
-import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, useSlots, watch } from 'vue';
-import type { Slots } from 'vue';
+import { computed, getCurrentInstance, h, nextTick, onBeforeUnmount, ref, useSlots, watch } from 'vue';
+import type { FunctionalComponent, Slots } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { useSystemDark } from '../composables/useSystemDark';
@@ -382,13 +389,76 @@ watch(
 const layout = computed(() => store.value.layout(listWidth.value, candidateCols.value, metrics.value));
 const visibleCols = computed<string[]>(() => layout.value.visible);
 
+/**
+ * STACKED ROWS — where the table cannot be a table.
+ *
+ * The owner, 2026-10-11, on the e-Signature details panel: the signer table's
+ * State and When were cut to "Invited …" and "until S…" in a 300px panel,
+ * and his decision was that the ONE table lays its cells out one under the
+ * other in a narrow place, every narrow table at once. Scrolling sideways is
+ * the answer while the pane can show the row's lead and a few columns beside
+ * it; below `TableLayout.stackBelow` (the lead and the first `STACK_SPAN`
+ * columns at their own minimums, lib/tableColumns) it shows a slit — two
+ * columns of 56px with an ellipsis in each — and every row is drawn instead
+ * as its tick, its lead and its actions on one line, and every other cell
+ * after it, COMPACT (the owner, the same day): one line under the lead that
+ * wraps only when it must, "Type Plain text · Owner You · Size 10 B" - each
+ * value with its column's name small in front of it, whole.
+ *
+ * ⚠⚠ Read from THIS table's own scrollport (`listWidth`, the observer
+ * above), never the window: the details panel is 300px on a 1440px screen.
+ * ⚠ The rows are the same rows: the same cells in the same order with the
+ * same roles, so a grid cell still answers to its column header, a test
+ * that reads a cell's text reads the same text (the label is drawn by CSS
+ * from `data-label` and is not part of the cell's text), and every click,
+ * right-click, tick and touch the row had it still has. What goes is what
+ * has no meaning without columns: the widths, the resize handles and
+ * dragging a header to move a column (the column menu still moves them).
+ * ⚠ Unmeasured (0) is never stacked: the first paint keeps the table, as
+ * it keeps the shipped widths, and the observer decides one frame later.
+ */
+const stacked = computed(() => listWidth.value > 0 && listWidth.value < layout.value.stackBelow);
+
 /* The table's width or its pane's changed: whether anything runs on past the
    end edge is read again once the new widths are drawn. */
 watch(
-  [() => layout.value.total, listWidth],
+  [() => layout.value.total, listWidth, stacked],
   () => measureEnd(listEl.value),
   { flush: 'post' },
 );
+
+/* Stacked rows do not scroll sideways, so a table that was scrolled when it
+   stacked is not scrolled any more — whether or not the browser's clamp of
+   `scrollLeft` fired a scroll event to say so. */
+watch(stacked, (on) => {
+  if (on) scrolledX.value = false;
+});
+
+/**
+ * A stacked cell's VALUE, in one box between its label and its " · " (both
+ * CSS, base.css). ⚠ One box, so whatever the cell slot draws - one root or
+ * several, a pill, a line with a `.tbl-sub` under it - lays out inside it the
+ * way it does in the table's cell, and the label and separator stay outside
+ * it. Off the stacked rows it is no box at all: the slot renders exactly as
+ * it always did.
+ */
+const StackValue: FunctionalComponent<{ on: boolean }> = (p, { slots }) =>
+  p.on ? h('div', { class: 'fe-list__stack-value' }, slots.default?.()) : slots.default?.();
+StackValue.props = ['on'];
+
+/** Is this cell one of a stacked row's facts ("label value" after the lead)? A
+ *  column whose header draws no label (the explorer's star) is a control, not
+ *  a fact: it stays on the first line, beside the actions. */
+function stackFact(id: string): boolean {
+  return stacked.value && colById.value.get(id)?.headerLabel !== false;
+}
+
+/** The last fact of a stacked row: the one with no " · " after it. */
+const stackLast = computed<string | null>(() => {
+  if (!stacked.value) return null;
+  const facts = visibleCols.value.filter((id) => colById.value.get(id)?.headerLabel !== false);
+  return facts.length ? facts[facts.length - 1] : null;
+});
 
 /** A pill in a cell that is cut short gives its whole text as its title
  *  (lib/cutTitle) - read when the pointer reaches it. */
@@ -397,8 +467,9 @@ function onBodyPointerOver(ev: PointerEvent) {
 }
 
 /** ONE object, bound to the header and to every row, so the two cannot drift
- *  out of line with each other when the table is scrolled sideways. */
-const tableStyle = computed(() => ({ width: `${layout.value.total}px` }));
+ *  out of line with each other when the table is scrolled sideways. Stacked
+ *  rows are as wide as the pane, so they carry none. */
+const tableStyle = computed(() => (stacked.value ? undefined : { width: `${layout.value.total}px` }));
 
 /**
  * THE FROZEN LEAD — only while it leaves room to scroll.
@@ -417,7 +488,7 @@ const leadWidth = computed(
 );
 
 const pinLead = computed(
-  () => listWidth.value > 0 && listWidth.value - leadWidth.value >= PIN_LEAD_ROOM,
+  () => !stacked.value && listWidth.value > 0 && listWidth.value - leadWidth.value >= PIN_LEAD_ROOM,
 );
 
 /** The trailing control's own track: its content plus the row padding. */
@@ -445,8 +516,8 @@ const PIN_MENU_ROOM = 160;
 
 const pinMenu = computed(
   () =>
-    listWidth.value <= 0 ||
-    listWidth.value - leadWidth.value - menuWidth.value >= PIN_MENU_ROOM,
+    !stacked.value &&
+    (listWidth.value <= 0 || listWidth.value - leadWidth.value - menuWidth.value >= PIN_MENU_ROOM),
 );
 
 /** The lead's sticky offset: after the tick when there is one, the edge when
@@ -459,6 +530,8 @@ const rootStyle = computed(() => ({
  *  not a grid track: a sticky GRID item is confined to its own grid area and
  *  cannot move at all. */
 function colStyle(id: string) {
+  /* A stacked row is a grid that sizes its own tracks (base.css). */
+  if (stacked.value) return undefined;
   let w = layout.value.widths[id] ?? store.value.width(id);
   /* Frozen with no tick in front of it, the lead takes the row's leading
      padding INTO itself — `left: 0` pulls it to the glass, and a 12px inset
@@ -469,7 +542,7 @@ function colStyle(id: string) {
 
 /** The trailing cell's track: content plus the 12px of row padding it absorbs. */
 const menuStyle = computed(() =>
-  menuContent.value === 28 ? undefined : { flex: `0 0 ${menuContent.value + ROW_PAD}px` },
+  stacked.value || menuContent.value === 28 ? undefined : { flex: `0 0 ${menuContent.value + ROW_PAD}px` },
 );
 
 function colClass(id: string): string[] {
@@ -789,7 +862,10 @@ function isMovable(id: string): boolean {
 }
 
 function onHeadPointerDown(id: string, ev: PointerEvent) {
-  if (ev.button !== 0 || !isMovable(id)) return;
+  /* Stacked, the header is a row of sort buttons that wraps, not a row of
+     columns: there is no gap between two columns to drop into. The column
+     menu's ← → still move them. */
+  if (ev.button !== 0 || !isMovable(id) || stacked.value) return;
   dragState = { id, startX: ev.clientX, armed: false };
   window.addEventListener('pointermove', onHeadPointerMove);
   window.addEventListener('pointerup', onHeadPointerUp);
@@ -1120,7 +1196,7 @@ function onRowAction(key: string, row: any, action: ContextAction) {
   emit('row-action', key, row, action);
 }
 
-defineExpose({ store, layout, pinLead });
+defineExpose({ store, layout, pinLead, stacked });
 </script>
 
 <template>
@@ -1151,6 +1227,7 @@ defineExpose({ store, layout, pinLead });
         'is-more-end': moreEnd,
         'is-pin-lead': pinLead,
         'is-pin-menu': pinMenu,
+        'is-stacked': stacked,
         'fe-list--nocheck': !selectable,
       }"
       :style="rootStyle"
@@ -1192,7 +1269,7 @@ defineExpose({ store, layout, pinLead });
           </button>
           <span v-else class="fe-list__head-label" :title="label(store.lead)">{{ label(store.lead) }}</span>
           <span
-            v-if="isResizable(store.lead)"
+            v-if="isResizable(store.lead) && !stacked"
             class="fe-list__resize"
             role="separator"
             aria-orientation="vertical"
@@ -1216,7 +1293,7 @@ defineExpose({ store, layout, pinLead });
               'is-col-dragging': dragCol === id,
               'is-drop-before': dropAt === ci,
               'is-drop-after': dropAt === visibleCols.length && ci === visibleCols.length - 1,
-              'is-movable': isMovable(id),
+              'is-movable': isMovable(id) && !stacked,
             },
           ]"
           role="columnheader"
@@ -1244,7 +1321,7 @@ defineExpose({ store, layout, pinLead });
           </button>
           <span v-else-if="colById.get(id)?.headerLabel !== false" class="fe-list__head-label" :title="label(id)">{{ label(id) }}</span>
           <span
-            v-if="isResizable(id)"
+            v-if="isResizable(id) && !stacked"
             class="fe-list__resize"
             role="separator"
             aria-orientation="vertical"
@@ -1316,18 +1393,32 @@ defineExpose({ store, layout, pinLead });
                 <span class="fe-list__cell-text"><bdi>{{ cellText(row, store.lead) }}</bdi></span>
               </slot>
             </div>
+            <!-- Stacked (`is-stacked`), a cell is one fact on the line after
+                 the lead: its column's name drawn from `data-label` by the
+                 stylesheet, its value in one box, and a " · " after it unless
+                 it is the last (`is-stack-last`). Label and separator are CSS
+                 with empty alternative text, so neither is part of the cell's
+                 text nor read out: a screen reader names the value by its
+                 column header. A column with no header label (the explorer's
+                 star) stays on the first line instead. -->
             <div
               v-for="id in visibleCols"
               :key="id"
-              :class="colClass(id)"
+              :class="[
+                colClass(id),
+                { 'is-stack-fact': stackFact(id), 'is-stack-last': stackLast === id, 'is-stack-tail': stacked && !stackFact(id) },
+              ]"
               role="gridcell"
               :style="colStyle(id)"
               :data-col="id"
+              :data-label="stackFact(id) ? label(id) : undefined"
               :title="$slots[`cell-${id}`] ? undefined : cellTitle(row, id)"
             >
-              <slot :name="`cell-${id}`" :row="row" :value="cellValue(row, id)">
-                <span class="fe-list__cell-text"><bdi>{{ cellText(row, id) }}</bdi></span>
-              </slot>
+              <StackValue :on="stackFact(id)">
+                <slot :name="`cell-${id}`" :row="row" :value="cellValue(row, id)">
+                  <span class="fe-list__cell-text"><bdi>{{ cellText(row, id) }}</bdi></span>
+                </slot>
+              </StackValue>
             </div>
             <div
               class="fe-list__col fe-list__col--menu"

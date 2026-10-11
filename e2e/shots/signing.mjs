@@ -313,7 +313,12 @@ async function main() {
        only while it leaves room to scroll), and this measures the RESULT:
        how much of each cell a person can actually see, after the scrollport
        and after any cell that is pinned over it. A cell that is present,
-       sized and invisible is exactly what shipped. */
+       sized and invisible is exactly what shipped.
+       ⚠ And WHOLE (2026-10-11): the 0.56 picture showed both columns, at
+       their 56px minimums, as "Invited ..." and "until S...". In a panel
+       that narrow the table now stacks its rows (DataTable `is-stacked`:
+       each signer's name, then "State ... · When ..." under it), and a
+       value that still ends in an ellipsis refuses the shot. */
     const cells = await page.evaluate(() => {
       const list = document.querySelector('[data-testid="surface-list"] .fe-list');
       if (!list) return null;
@@ -327,22 +332,37 @@ async function main() {
         const r = el.getBoundingClientRect();
         return Math.round(Math.max(0, Math.min(r.right, edge) - Math.max(r.left, port.left)));
       };
+      /* Every row's State and When, as the words are drawn: cut when the
+         text is wider than the box that paints it. */
+      const cut = [];
+      for (const row of list.querySelectorAll('.fe-list__row')) {
+        for (const id of ['state', 'when']) {
+          const cell = row.querySelector(`[data-col="${id}"]`);
+          const words = cell?.querySelector('.fe-list__cell-text') ?? cell;
+          if (words && words.scrollWidth > words.clientWidth + 1) cut.push(`${id}: "${(cell.textContent ?? '').trim()}"`);
+        }
+      }
       return {
         pane: Math.round(port.width),
         pinned,
+        stacked: list.classList.contains('is-stacked'),
+        cut,
         who: seen('.fe-list__row .fe-list__col--lead'),
         state: seen('.fe-list__row [data-col="state"]'),
         when: seen('.fe-list__row [data-col="when"]'),
       };
     });
     if (!cells) throw new Error('the Signatures section drew no list at all');
-    if (cells.state < 24 || cells.when < 24) {
+    if (cells.state < 24 || cells.when < 24 || cells.cut.length) {
       throw new Error(
         `the signer table hides what its caption promises: ${JSON.stringify(cells)} ` +
-          '(state/when must be readable, not merely present)',
+          '(state/when must be readable and whole, not merely present)',
       );
     }
-    log(`sign-status signer table: pane ${cells.pane}px, visible who=${cells.who} state=${cells.state} when=${cells.when} (menu pinned: ${cells.pinned})`);
+    log(
+      `sign-status signer table: pane ${cells.pane}px, stacked: ${cells.stacked}, visible who=${cells.who} ` +
+        `state=${cells.state} when=${cells.when} (menu pinned: ${cells.pinned})`,
+    );
     await shot(page, SET, 'sign-status-1440.png');
     await page.setViewportSize(view900);
 

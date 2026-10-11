@@ -44,6 +44,10 @@
 //   FIXTURE_CC_ERROR  CircleCI cannot be asked: every answer is an error
 // Every question either CI is asked is counted in FIXTURE_GH/asked.json
 // ({ github: n, circleci: n }), so a test shows which one the gate read.
+//
+// FIXTURE_DEFER set adds a pretag gate this machine cannot run, as the real
+// plan's Store copy off Windows (#248): `deferred`, with the real acks'
+// names, and a `check` that is red if anything ever runs it.
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -225,6 +229,20 @@ function matrix(redWhenName) {
   };
 }
 
+/** A pretag gate the release defers to another machine, as the Store copy off Windows. */
+const DEFERRED = {
+  name: 'the fixture Windows check',
+  deferred: {
+    ack: 'store-deferred',
+    checkedAck: 'store-checked',
+    why: 'the fixture package is checked on a Windows machine, not here',
+    command: 'node scripts/windows-check.mjs',
+    artifact: 'release-files-store',
+    later: (c) => [`on Windows, in a clean checkout of ${c.tag} (${c.releaseCommit.slice(0, 10)}):`, '  node scripts/windows-check.mjs'],
+  },
+  check: () => ({ ok: false, detail: 'a deferred gate was run' }),
+};
+
 export default function plan({ version, tag }) {
   return {
     exportDir: env.FIXTURE_EXPORT,
@@ -236,7 +254,7 @@ export default function plan({ version, tag }) {
     docSurfaces: ['README.md', 'docs/*.md'],
     audit: [readmePictures()],
     docs: [{ name: 'the fixture docs gate', cmd: redWhen('FIXTURE_DOCS_FAIL') }],
-    pretag: [{ name: 'the fixture test suite', cmd: redWhen('FIXTURE_PRETAG_FAIL') }],
+    pretag: [{ name: 'the fixture test suite', cmd: redWhen('FIXTURE_PRETAG_FAIL') }, ...(env.FIXTURE_DEFER ? [DEFERRED] : [])],
     exportGates: [{ name: 'the fixture export gate', cmd: redWhen('FIXTURE_EXPORT_FAIL') }],
     github: github(),
     ...matrix(redWhen),

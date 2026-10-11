@@ -7,6 +7,10 @@
 //   pnpm release 0.45.0 --resume           carry on from where it stopped
 //   pnpm release 0.45.0 --resume --ack audit     a person confirms a step only a
 //                                          person can do (audit | export-withheld | deploy)
+//   pnpm release 0.45.0 --resume --ack store-deferred
+//                                          off Windows: the Store copy's check is left
+//                                          for a Windows machine (#248); the record and
+//                                          the deploy list it until --ack store-checked
 //   pnpm release 0.45.0 --dry-run          every gate, nothing written: the stamp
 //                                          goes to a scratch copy, the export to a
 //                                          throwaway clone, no state is kept
@@ -88,9 +92,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { GATE_SOURCES, PROFILES, newestTag, selectGates, versionProblems } from './release/checks.mjs';
+import { GATE_SOURCES, PROFILES, deferredSpecs, deferredWork, newestTag, selectGates, versionProblems } from './release/checks.mjs';
 import { Gates, banner, bold, dim, findBash, gitOut, green, loadState, lsRemote, red, revParse, saveState, slash, stateFile, takeLock, yellow } from './release/engine.mjs';
-import { ACKS, RUNNERS, STAGES, forgetRemotes } from './release/stages.mjs';
+import { ACKS, RUNNERS, STAGES, closeDeferred, forgetRemotes } from './release/stages.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -135,11 +139,8 @@ for (let i = 0; i < argv.length; i++) {
     opts.gate = v;
   } else if (a === '--no-cache') opts.noCache = true;
   else if (a === '--chain') opts.chain = path.resolve(next());
-  else if (a === '--ack') {
-    const v = next();
-    if (!ACKS.includes(v)) usage(`--ack ${v}: a person can confirm only ${ACKS.join(', ')}`);
-    opts.acks.add(v);
-  } else if (a === '-h' || a === '--help') usage();
+  else if (a === '--ack') opts.acks.add(next());
+  else if (a === '-h' || a === '--help') usage();
   else if (a.startsWith('-')) usage(`unknown option ${a} — there is no option to skip or force a gate`);
   else positional.push(a);
 }
@@ -193,6 +194,15 @@ const plan = {
 };
 const exp = path.resolve(opts.exportDir ?? plan.exportDir ?? path.join(REPO, '..', 'filex-export'));
 
+// What a person can confirm: the fixed steps, and the two acks of each gate
+// the plan defers on this machine (#248). Checked once the plan is read: on
+// Windows nothing is deferred, so `--ack store-deferred` is refused there.
+const deferrable = deferredSpecs(plan);
+const ackable = [...ACKS, ...deferrable.flatMap((d) => [d.ack, d.checkedAck])];
+for (const a of opts.acks) {
+  if (!ackable.includes(a)) usage(`--ack ${a}: a person can confirm only ${ackable.join(', ')}${deferrable.length ? '' : ' (this machine defers no gate: it runs them all)'}`);
+}
+
 if (opts.plan) {
   const profile = opts.profile ?? 'minor';
   // A patch's choice depends on what changed since the newest release tag.
@@ -214,7 +224,10 @@ if (opts.plan) {
   STAGES.forEach((s, i) => {
     console.log(`${String(i + 1).padStart(2)}. ${bold(s.title.padEnd(10))} ${s.what}`);
     for (const g of s.builtin ?? []) console.log(`      ${dim('·')} ${dim(g)}`);
-    for (const g of byStage[s.id] ?? []) console.log(`      - ${g.name}${s.id === 'gate' ? dim(`  (here, while ${ci} tests)`) : ''}`);
+    for (const g of byStage[s.id] ?? []) {
+      const where = g.deferred ? `  (deferred: ${g.deferred.why}; --ack ${g.deferred.ack})` : s.id === 'gate' ? `  (here, while ${ci} tests)` : '';
+      console.log(`      - ${g.name}${dim(where)}`);
+    }
     if (s.id === 'gate') for (const g of sel.remote) console.log(`      - ${g.name}${dim(`  (read from ${source === 'circleci' ? `CircleCI ${g.circleci}` : g.github})`)}`);
   });
   if (sel.skipped.length) {
@@ -242,6 +255,11 @@ if (opts.status) {
   }
   const reds = recorded.ledger.filter((l) => !l.ok).slice(-5);
   for (const l of reds) console.log(`  ${red('last red')}  ${l.stage}: ${l.name}  ${dim(l.log)}`);
+  for (const d of Object.values(recorded.deferred ?? {})) {
+    if (d.checked) console.log(`  ${green('checked'.padEnd(8))} ${d.gate}  ${dim(`deferred at ${d.at}, recorded as done at ${d.checked.at}`)}`);
+  }
+  const owed = deferredWork(recorded, version);
+  if (owed.length) console.log(`  ${yellow('deferred')} left for another machine:\n${owed.map((l) => `            ${l}`).join('\n')}`);
   process.exit(0);
 }
 
@@ -265,8 +283,17 @@ if (!opts.dry) {
 const state = opts.dry || !recorded
   ? { version, tag, started: new Date().toISOString(), stages: {}, acks: {}, ledger: [], complete: false }
   : recorded;
+// #248: a check the pretag deferred to another machine, run green there
+// since (--ack store-checked) - recorded on any resume, after the release is
+// complete too: the check is owed until it is.
+const closing = closeDeferred(state, opts.acks, deferrable);
+if (closing.problem) usage(closing.problem);
+for (const d of closing.closed) console.log(`${green('recorded')}  ${d.gate}: done on the machine it needs, confirmed by a person (deferred at ${d.at})`);
+if (closing.closed.length && !opts.dry) saveState(stFile, state);
 if (state.complete) {
   console.log(`${tag} has already been released through this tool (${slash(stFile)}).`);
+  const owed = deferredWork(state, version);
+  if (owed.length) console.log(`\n${yellow('Still left for another machine:')}\n${owed.map((l) => `  ${l}`).join('\n')}`);
   process.exit(0);
 }
 // The profile a run started with holds for its resumes unless one names
@@ -465,6 +492,8 @@ for (let i = 0; i < STAGES.length; i++) {
     state.finished = new Date().toISOString();
     save();
     console.log(`\n${green(bold(`${tag} is released, and everything it published was read back.`))}`);
+    const owed = deferredWork(state, version);
+    if (owed.length) console.log(`\n${yellow(bold('Still left for another machine (deferred at the pretag):'))}\n${owed.map((l) => `  ${l}`).join('\n')}`);
   } else if (opts.until === s.id) {
     console.log(`\nstopped after ${s.id}, as asked (--until). Carry on with: pnpm release ${version}${opts.dry ? ' --dry-run' : ' --resume'}`);
     break;

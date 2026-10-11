@@ -151,10 +151,26 @@ export function installFramed(frameUrl: string = FRAME_URL): OfficeEditors {
     );
   }
 
+  const isOfficeFrame = (n: unknown): n is HTMLIFrameElement =>
+    n instanceof HTMLIFrameElement && n.dataset.testid === 'office-frame';
+
+  // ⚠ The frame is taken as the viewer puts it in (appendChild, once the
+  // insert is done - a microtask later, as a real frame would say hello),
+  // not only from a MutationObserver: jsdom at times delivered no record for
+  // the frame a reload in place put in, though it was in the document, so
+  // the reload tests failed 2-3 runs in 8 with the new editor never opened
+  // (0.56.1 release, measured on the release workspace).
+  const append = Node.prototype.appendChild;
+  Node.prototype.appendChild = function <T extends Node>(this: Node, child: T): T {
+    const added = append.call(this, child) as T;
+    if (isOfficeFrame(child)) queueMicrotask(() => child.isConnected && adopt(child));
+    return added;
+  };
+
   const observer = new MutationObserver((records) => {
     for (const r of records) {
       for (const n of Array.from(r.addedNodes)) {
-        if (n instanceof HTMLIFrameElement && n.dataset.testid === 'office-frame') adopt(n);
+        if (isOfficeFrame(n)) adopt(n);
       }
     }
   });
@@ -180,6 +196,7 @@ export function installFramed(frameUrl: string = FRAME_URL): OfficeEditors {
       await tick();
     },
     uninstall() {
+      Node.prototype.appendChild = append;
       observer.disconnect();
     },
   };

@@ -14,13 +14,15 @@
  *   8. a required signature wears the `*`;
  *   9. the outside signer's page is the product's share page: no line frozen
  *      in the requester's language, the document offered as a shared file
- *      is, and the approve step shows the WHOLE page.
+ *      is, and the approve step shows the WHOLE page;
+ *  10. the document's details panel, Signatures (2026-10-11): one row per
+ *      signer with its state and when, WHOLE, in the 300px panel.
  *
  * The module is the real `filex-sign` build (e2e/helpers/app-locations.mjs);
  * without it the spec skips, unless FILEX_REQUIRE_WASM_FIXTURE=1.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { loginAs, apiLogin } from '../helpers/auth';
+import { ADMIN_EMAIL, ADMIN_PASSWORD, apiLogin, dismissInstallBanner, loginAs } from '../helpers/auth';
 import { seedLocalStorage, dropStorageByName } from '../helpers/seed';
 import { guardFixture, installThroughWizard, minimalPDF, resolveApp } from '../helpers/appPlugin';
 import { removeApp } from '../helpers/surface';
@@ -201,6 +203,94 @@ test.describe('App plugin: sign — the owner’s second pass', () => {
     await expect(page.getByText(/Unassigned boxes|Atanmamış kutu/)).toHaveCount(0);
     await press(page, SEND);
     await expect(page.getByTestId('plugin-page-queued')).toBeVisible({ timeout: 20_000 });
+  });
+
+  test('the details panel’s Signatures: every signer’s state and when, whole — item 10', async ({ page }) => {
+    /* The owner, 2026-10-11, on the README's sign-status picture: in the 300px
+       details panel the signer table's State and When read "Invited ..." and
+       "until S..." - two columns at their 56px minimums beside the names. The
+       one table (DataTable) now stacks its rows where it cannot be a table:
+       each signer's name on one line, and under it "State Waiting · When
+       until ...", each value whole with its column's name before it.
+       Measured here, in the panel itself, after the request above.
+
+       Signed in through the page's own cookie jar and the explorer opened as
+       the tab's first page (filex lesson #1541: WebKit drops its network
+       process when a filex page is left with requests in flight). */
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await dismissInstallBanner(page);
+    await page.addInitScript(() => localStorage.setItem('filex.tourDone', '1'));
+    const signedIn = await page.request.post('/api/auth/login', { data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } });
+    expect(signedIn.ok(), `sign-in: ${signedIn.status()}`).toBeTruthy();
+    // The request is a job: the panel has nothing to list until it is done.
+    await expect
+      .poll(
+        async () => {
+          const body = (await (await page.request.get('/api/files/ops')).json()) as {
+            ops?: { kind?: string; action?: string; status?: string }[];
+          };
+          return (body.ops ?? []).find((o) => o?.kind === 'plugin-action' && o.action === 'request')?.status ?? 'none';
+        },
+        { timeout: 60_000, message: 'the request job' },
+      )
+      .toBe('ok');
+
+    await page.goto(`/admin/explore?storage=${encodeURIComponent(STORAGE)}`);
+    const row = page.locator(`[data-fe-path="${QUALIFIED}"]`).first();
+    await row.waitFor({ timeout: 25_000 });
+    await row.locator('.fe-list__check').first().click();
+    // The ⓘ TOGGLES the details panel, whose state the account remembers.
+    const toggle = page.getByTestId('tabs-inspector');
+    if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
+    const section = page.getByTestId('inspector-plugin-sign-status');
+    await section.waitFor({ timeout: 20_000 });
+    await page.getByTestId('inspector-plugin-toggle-sign-status').click();
+    const list = section.locator('[data-testid="surface-list"] .fe-list');
+    await expect(list.locator('.fe-list__row')).toHaveCount(2, { timeout: 20_000 });
+    // The table decides one frame after its ResizeObserver's first answer.
+    await expect(list).toHaveClass(/is-stacked/);
+
+    const seen = await list.evaluate((el) => {
+      const port = el.getBoundingClientRect();
+      return [...el.querySelectorAll<HTMLElement>('.fe-list__row')].map((r) => {
+        const lead = r.querySelector('.fe-list__col--lead')!.getBoundingClientRect();
+        const cell = (id: string) => {
+          const c = r.querySelector<HTMLElement>(`[data-col="${id}"]`);
+          if (!c) return null;
+          const box = c.getBoundingClientRect();
+          const value = c.querySelector<HTMLElement>('.fe-list__stack-value');
+          const v = value?.getBoundingClientRect();
+          const words = c.querySelector<HTMLElement>('.fe-list__cell-text') ?? value;
+          return {
+            text: (c.textContent ?? '').trim(),
+            label: c.dataset.label ?? '',
+            labelRoom: v ? Math.round(v.left - box.left) : -1,
+            cut: !!words && words.scrollWidth > words.clientWidth + 1,
+            inside: box.left >= port.left - 1 && box.right <= port.right + 1,
+            under: box.top >= lead.bottom - 1,
+            sep: getComputedStyle(c, '::after').content.includes('\u00b7'),
+            last: c.classList.contains('is-stack-last'),
+          };
+        };
+        return { pane: Math.round(port.width), state: cell('state'), when: cell('when') };
+      });
+    });
+    console.log(`99 signer table: ${JSON.stringify(seen)}`);
+    for (const [i, r] of seen.entries()) {
+      for (const [id, c] of [['state', r.state], ['when', r.when]] as const) {
+        expect(c, `row ${i}: no ${id} cell`).not.toBeNull();
+        expect(c!.text, `row ${i} ${id}: empty`).not.toBe('');
+        expect(c!.cut, `row ${i} ${id} is cut: "${c!.text}"`).toBe(false);
+        expect(c!.inside, `row ${i} ${id} runs out of the panel`).toBe(true);
+        expect(c!.under, `row ${i} ${id} is not under the signer`).toBe(true);
+        expect(c!.label, `row ${i} ${id}: no label`).not.toBe('');
+        expect(c!.labelRoom, `row ${i} ${id}: the label is not drawn before the value`).toBeGreaterThanOrEqual(12);
+        expect(c!.text.includes('\u00b7'), `row ${i} ${id}: the separator is in the text`).toBe(false);
+      }
+      // "State ... · When ...": a " · " after State, none after the last.
+      expect(r.state!.sep && !r.state!.last, `row ${i}: no " · " after State`).toBe(true);
+      expect(r.when!.last && !r.when!.sep, `row ${i}: When is not the last fact`).toBe(true);
+    }
   });
 
   test('the inside signer — items 8 and 2', async ({ page }) => {

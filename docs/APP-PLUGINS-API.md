@@ -2042,8 +2042,14 @@ Every node may carry `id`; a node with `id` that holds a value contributes
   app's list in the details panel is ~265px) nothing is pinned and the row
   scrolls as one piece, and the lead gives way to its own minimum rather than
   taking the whole pane. Nothing is ever hidden for want of room: a table
-  narrower than its columns scrolls. `plugintest` flags an out-of-range
-  width, an unknown `align` and a `sort` key with no column.
+  narrower than its columns scrolls, and in a pane that cannot hold the lead
+  and the first three columns side by side even at their minimums (the
+  details panel, a phone) each row is drawn stacked - the lead and the
+  Actions control on one line, the other cells on a line under it that
+  wraps when it must, each value with its column's name before it and " · "
+  between them (filex 0.56.1). Nothing to declare for it. `plugintest`
+  flags an out-of-range width, an unknown `align` and a `sort` key with no
+  column.
 - `progress` - `{value: 0..100 | null, label?: Text}` (null = indeterminate).
 - `people-picker` - `{id, value: [{email, user_id?, name?}], multi?: bool,
   allow_external?: bool}`. Internal users are searched through

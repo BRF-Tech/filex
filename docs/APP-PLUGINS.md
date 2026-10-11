@@ -175,7 +175,7 @@ license.
 4. **Install**, or close the dialog. Either way the store is told how the link
    ended (`installed` or `cancelled`), and the link is used up on this filex.
 
-![The install review opened from a store's link, marked From store](https://filex.sh/shots/store/store-review-1440.01ab061907d0.png)
+![The install review opened from a store's link, marked From store](https://filex.sh/shots/store/store-review-1440.d93b2b571d93.png)
 
 The rest of the store side is reference, under [Stores in detail](#stores-in-detail):
 what filex checks before the review opens, what a store link is held to,
@@ -1138,7 +1138,7 @@ and when it is next, the store, the key's prefix and the last failed check;
 there you enter a new key and press **Verify now**. An app reads its own
 status with [`fx.license.get()`](APP-PLUGINS-API.md#the-app-reads-its-license).
 
-![An app's License section: valid, licensed to, seats, dates, the key's prefix](https://filex.sh/shots/store/store-license-1440.403ea4de46ec.png)
+![An app's License section: valid, licensed to, seats, dates, the key's prefix](https://filex.sh/shots/store/store-license-1440.3d8a74fb5c85.png)
 
 ![The same app held after the store revoked its license, the band on an admin page](https://filex.sh/shots/store/store-license-held-1440.2dd9518d7e87.png)
 
@@ -1212,7 +1212,7 @@ Installing closes the request as approved; cancelling leaves it waiting. A
 paid app's license key may be given with the approval (the store takes it
 only for a license with a seat for this filex) or in the review.
 
-![A request from the store screen on Install requests: from the store, Approve opens the store review](https://filex.sh/shots/store/store-request-review-1440.eed84fbd9997.png)
+![A request from the store screen on Install requests: from the store, Approve opens the store review](https://filex.sh/shots/store/store-request-review-1440.e1250043359d.png)
 
 Nothing here opens a door that was closed: reading a link, trusting a store,
 connecting to one and installing stay the platform operator's, signed in to
@@ -1248,7 +1248,7 @@ replaces the key; **Disconnect** forgets it and tells the store to forget it
 too. A store the screen shows but this filex is not connected to still takes
 requests; they wait until it is connected.
 
-![Trusted stores with the store connected, its key's fingerprint, and the Store screen settings under it](https://filex.sh/shots/store/store-connected-1440.d04928e3f7ff.png)
+![Trusted stores with the store connected, its key's fingerprint, and the Store screen settings under it](https://filex.sh/shots/store/store-connected-1440.edf7052b6ba0.png)
 
 ## Install requests
 
@@ -1519,7 +1519,7 @@ files to keep.
   audit trail saved - by anybody who may edit the document, not only the
   requester.
 
-  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.9642990b704d.png)
+  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.9f93226381ed.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* - and,

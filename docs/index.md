@@ -67,7 +67,7 @@ features:
     linkText: Search docs
   - icon: 🔌
     title: Speaks your tools' protocols
-    details: Point rclone, restic, aws s3, WinSCP, FileZilla, a scanner that only learned FTP or a media player that only learned NFS straight at filex - S3, SFTP, FTPS, NFS and WebDAV, all on the same tree with the same permissions and trash as the web UI.
+    details: Point rclone, restic, aws s3, WinSCP, FileZilla, a scanner that only learned FTP or a media player that only learned NFS straight at filex - S3, SFTP, FTPS, NFS and WebDAV, all on the same tree with the same filex permissions and trash as the web UI (the POSIX bits and ACLs on the disk are not mapped to filex users).
     link: /PROTOCOLS
     linkText: Protocol docs
   - icon: 🧩

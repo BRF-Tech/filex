@@ -15570,3 +15570,180 @@ filex-explorer {
   box-shadow: calc(-1px * var(--filex-dir-x, 1)) 0 0 0 var(--fe-border);
 }
 /* === /fix/055-narrow-table === */
+
+/* === fix/narrow-table-stack — STACKED ROWS where the table cannot be a table ===
+   (DataTable `is-stacked`; the threshold is lib/tableColumns `stackBelow`)
+
+   Appended at the END, like every wave's block.
+
+   The owner, 2026-10-11, on the e-Signature details panel (the README's
+   sign-status picture): the signer table's State and When were cut to
+   "Invited ..." and "until S..." in the 300px panel, two columns at their
+   56px minimums beside a 120px lead. His decision: the ONE table lays its
+   cells out under the lead in a narrow place, and every narrow table gets it
+   at once - the details panel, a phone, an admin page on a phone, the
+   explorer's own listing in a narrow pane. And, the same day, how: COMPACT.
+   Not a line per column (a phone's file row was five lines tall) but the way
+   a phone's file manager draws a row: the name on its line, the other
+   values after it on ONE line that wraps only when it must, each with its
+   column's name small and grey in front of it and " · " between them -
+   "Type Plain text · Owner You · Modified ... · Size 10 B".
+
+   Where it applies is the table's own measurement, not a media query: the
+   pane (its own scrollport, DataTable's observer) is narrower than the lead
+   and the first three columns side by side at their minimums. A wide table
+   in a wide pane (a forty-column CSV in a 1200px viewer) still scrolls.
+
+   What a stacked row is:
+     · ONE FLEX ROW THAT WRAPS. The tick, the lead and the actions on the
+       first line, as in the table; then a zero-height break the full width
+       of the row; then every other cell, in the person's column order,
+       flowing along the lines under the lead. The facts start under the
+       lead, not under the tick: the tick hangs in the row's leading inset;
+     · the same rows and the same cells in the same order with the same
+       roles: a grid cell still answers to its column header, so the label
+       is drawn from `data-label` and the " · " after it are CSS with empty
+       alternative text - neither is read out, neither is part of the cell's
+       text, and a screen reader reads each value under its own column;
+     · a column whose header draws no label (the explorer's star) is a
+       control, not a fact: it stays on the first line beside the actions;
+     · values are WHOLE: a fact moves to the next line rather than being cut,
+       and one longer than the line wraps inside itself;
+     · the header keeps what it can still do without columns: it is a row of
+       sort buttons that wraps, with the column menu (show, hide, move,
+       reset) at the end of its first line. The resize handles and dragging
+       a header go - a width means nothing here - and come back with the
+       table.
+
+   ⚠ Logical properties only (inset-inline, margin-inline, flex): in a
+   right-to-left table the line runs from the right, with nothing mirrored by
+   hand. */
+
+/* 1. The row: a flex row that wraps. The first line is the tick, the lead,
+   any label-less control and the actions; everything else comes after the
+   break (`order`). */
+.fe-list.is-stacked .fe-list__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--fe-gap-sm);
+  row-gap: 0;
+  padding-block: var(--fe-gap-sm);
+}
+/* The tick hangs in the row's leading inset, so the line under the lead
+   starts where the lead does. The inset grows by the tick's track and its
+   gap, and the tick takes the same back with a negative margin: on the
+   first line nothing moves, on the lines after it the facts start under the
+   name, not under the tick. */
+.fe-list.is-stacked:not(.fe-list--nocheck) .fe-list__row {
+  padding-inline-start: calc(var(--fe-gap) + var(--fe-h-sm) + var(--fe-gap-sm));
+}
+.fe-list.is-stacked .fe-list__row > .fe-list__col--check {
+  flex: 0 0 var(--fe-h-sm);
+  margin-inline-start: calc(-1 * (var(--fe-h-sm) + var(--fe-gap-sm)));
+}
+.fe-list.is-stacked .fe-list__row > .fe-list__col--lead {
+  flex: 1 1 0%;
+  min-width: 0;
+}
+.fe-list.is-stacked .fe-list__row > .fe-list__col.is-stack-tail,
+.fe-list.is-stacked .fe-list__row > .fe-list__col--menu {
+  flex: 0 0 auto;
+}
+/* The break: a full-width, zero-height flex item between the first line and
+   the facts. ⚠ On `::after`, and on `::before` for a row that is the admin
+   Storages page's `drop-after` target: that row's `::after` is the drop
+   marker's line (absolutely positioned), and a row carries a drop marker on
+   one side at a time. */
+.fe-list.is-stacked .fe-list__row:not(.fe-list__row--drop-after)::after,
+.fe-list.is-stacked .fe-list__row.fe-list__row--drop-after::before {
+  content: '';
+  flex: 0 0 100%;
+  order: 1;
+  height: 0;
+}
+
+/* 2. A fact: "label value", then " · " unless it is the last one. ⚠ The
+   doubled class outweighs the explorer's own per-column rules
+   (`.fe-list__row .fe-list__col.fe-list__col--type`, and the `.fe--narrow`
+   ones), which ask for one line cut with an ellipsis. */
+.fe-list.is-stacked .fe-list__row > .fe-list__col.is-stack-fact {
+  order: 2;
+  flex: 0 1 auto;
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  max-width: 100%;
+  justify-content: flex-start;
+  text-align: start;
+  white-space: normal;
+  font-size: var(--fe-text-sm);
+  line-height: 1.45;
+}
+.fe-list.is-stacked .fe-list__row > .fe-list__col.is-stack-fact::before {
+  content: attr(data-label);
+  /* Empty alternative text: the column header already names this cell to a
+     screen reader. A browser that does not know the syntax keeps the line
+     above. */
+  content: attr(data-label) / '';
+  flex: 0 0 auto;
+  margin-inline-end: var(--fe-gap-xs);
+  font-size: var(--fe-text-xs);
+  font-weight: 400;
+  color: var(--fe-text-muted);
+  white-space: nowrap;
+}
+.fe-list.is-stacked .fe-list__row > .fe-list__col.is-stack-fact:not(.is-stack-last)::after {
+  content: '\00b7';
+  content: '\00b7' / '';
+  flex: 0 0 auto;
+  /* The row's column gap is the space AFTER the dot; this is the same space
+     before it, so the dot stands in the middle. */
+  margin-inline: var(--fe-gap-sm) 0;
+  color: var(--fe-text-muted);
+}
+.fe-list__stack-value {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  min-width: 0;
+}
+/* The same two rules the table's own cells carry (above), for the box that
+   now holds what the cell held. */
+:where(.fe-list__stack-value) > * {
+  min-width: 0;
+}
+.fe-list__stack-value:has(> .tbl-sub) {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.fe-list.is-stacked .fe-list__stack-value .fe-list__cell-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* 3. The header: the sort buttons in a row that wraps, the column menu at
+   the end of its FIRST line. The tick's empty header keeps its 28px, so the
+   lead's name still stands over the lead.
+   ⚠ The menu is taken out of the flow and its room kept free on the header:
+   as the last item of a wrapping row it was the first thing to wrap, and an
+   admin table on a phone drew its six names on one line and the ⋮ alone on
+   a second (e2e 117's picture of the Users table at 390px). It is not
+   frozen over anything here, so it carries no ground of its own: the opaque
+   one a pinned cell needs painted over the header's bottom border. */
+.fe-list.is-stacked .fe-list__head {
+  flex-wrap: wrap;
+  row-gap: 0;
+  padding-inline-end: calc(var(--fe-h-sm) + var(--fe-gap));
+}
+.fe-list.is-stacked .fe-list__head > .fe-list__col:not(.fe-list__col--check) {
+  flex: 0 1 auto;
+}
+.fe-list.is-stacked .fe-list__head > .fe-list__col--menu {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  block-size: var(--fe-h-md);
+  background: none;
+}
+/* === /fix/narrow-table-stack === */

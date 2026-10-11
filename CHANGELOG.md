@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.56.1] - 2026-10-11
+
+### Changed
+
+- **A release can be cut off Windows: the Store copy's check waits for a
+  Windows machine, on a person's word.** `pnpm release` on Linux or macOS
+  stopped red at the pretag's Store gate, which installs and activates an
+  MSIX and so needs Windows. It now names the gate as deferred and waits for
+  `--ack store-deferred`, bound to the release commit; the run's record,
+  `--status`, the deploy stage and the ship list the steps a Windows machine
+  takes until `--ack store-checked` records that they ran green. The Store
+  still gets the bundle the release workflow checks and submits, and on
+  Windows the gate runs as before
+  ([CONTRIBUTING.md](docs/CONTRIBUTING.md), Release process, step 6).
+- **The docs say which permissions the protocols share.** They are filex's own, per
+  person, group and folder; the POSIX bits and ACLs on the disk are not mapped to filex
+  users ([PROTOCOLS.md](docs/PROTOCOLS.md)).
+
+### Fixed
+
+- **A table in a narrow place lays each row out under its name instead of
+  cutting it.** In the 300px details panel the e-Signature signer table
+  showed State and When at their 56px minimums, as "Invited ..." and
+  "until S...". Every table in the product (the one table, `DataTable`) now
+  measures its own pane: narrower than the lead and the first three columns
+  side by side at their minimums (`TableLayout.stackBelow`), each row is its
+  tick, its lead and its Actions on one line and every other value after
+  them on one line under the lead that wraps only when it must, each with
+  its column's name small in front of it and " · " between them ("Type
+  Plain text · Owner You · Size 10 B"), whole - the details panel, the
+  explorer's listing on a phone or in a narrow pane, an admin page on a
+  phone. Selection, the right-click menu, the Actions control, sorting and
+  the column menu work as before, the cells keep their roles and their
+  column headers, and a pane that holds the lead and three columns is still
+  a table that scrolls sideways to the rest (a wide spreadsheet preview
+  stays a table).
+
 ## [0.56.0] - 2026-10-11
 
 ### Added

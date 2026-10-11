@@ -166,9 +166,11 @@ those surfaces answer an **error**, never an empty listing: a mirroring client
 that saw an empty success would delete the user's local copy.
 
 Everything lands in the **same tree**, with the same RBAC grants, the same trash,
-the same quota, the same search index and the same audit trail as the web UI. A file
-uploaded over FTPS is thumbnailed, indexed and counted exactly like one dropped in the
-browser, because every protocol writes through the same funnel, and it
+the same quota, the same search index and the same audit trail as the web UI. Those
+grants are filex's own (per person, group and folder): filex talks to each storage as a
+single service account and does not map the disk's POSIX bits or ACLs to filex users.
+A file uploaded over FTPS is thumbnailed, indexed and counted exactly like one dropped
+in the browser, because every protocol writes through the same funnel, and it
 **announces itself** on the realtime socket, so a browser with that folder open
 sees it appear rather than finding out on its next navigation
 ([REALTIME.md](REALTIME.md)). ⚠ A write over any of these protocols that **replaces**
@@ -266,7 +268,7 @@ both use it, while 2222 means "SSH in a container"), not a route.
 - `exit-status` is sent on the subsystem channel, so **`scp` reports success correctly**
   (OpenSSH 9+ speaks SFTP for `scp`).
 - posix-rename, `statvfs` (your quota is what `df` shows), permission bits synthesised
-  from your ACL level, resumable reads and writes.
+  from your filex ACL level, resumable reads and writes.
 - Tested with **OpenSSH, sshfs, WinSCP, FileZilla, rclone**.
 
 > ⚠ Only the `sftp` subsystem is served. `exec` and `shell` are refused: filex has no
@@ -315,7 +317,7 @@ client asserting *"I am uid 1000"* with nothing to check it against.
 So **the identity is bound to the export, not to the request**. Each export gets a path
 with 32 bytes of entropy in it, and *the path is the credential*. The mount is pinned to
 one account for its whole lifetime; the uid and gid on each request are discarded rather
-than trusted, and the permissions you see are synthesised from your ACL.
+than trusted, and the permissions you see are synthesised from your filex ACL.
 
 > ⚠⚠ NFSv3 is **unencrypted**. Anyone who can read the traffic sees your files, and
 > anyone who learns the path can mount them. LAN or VPN only - for anything off-LAN the

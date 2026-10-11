@@ -83,10 +83,24 @@ const LONG = longLabelManifest();
 /** A DOM rectangle, as Playwright hands it back. */
 type Box = { x: number; y: number; width: number; height: number };
 
-/** Do two drawn boxes cover any of the same pixels? */
+/**
+ * Do two drawn boxes cover any of the same pixels - by more than a pixel?
+ *
+ * ⚠ 0.56.0's release gate (2026-10-11): one GitHub WebKit runner reported the
+ * coverage line "over" the label at 1280px twice in a row, the same code green
+ * on the next runner, on the build host every night and in 0.55. The boxes are
+ * fractional; a sub-pixel touch between two lines of a wrapped cell is not the
+ * smear this file exists for (that one was a whole line drawn over another).
+ * The shape checks below already allow the same 1px.
+ */
+const OVERLAP_SLACK = 1;
 function overlaps(a: Box, b: Box): boolean {
+  const s = OVERLAP_SLACK;
   return (
-    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+    a.x + s < b.x + b.width &&
+    b.x + s < a.x + a.width &&
+    a.y + s < b.y + b.height &&
+    b.y + s < a.y + a.height
   );
 }
 

@@ -164,10 +164,25 @@ export interface ColumnBacking<Id extends string = string> {
   customised?(): boolean;
 }
 
+/**
+ * How many columns after the lead a pane has to hold side by side, each at its
+ * own minimum, for the table to be worth scrolling sideways
+ * (`TableLayout.stackBelow`).
+ *
+ * ⚠ A count of the table's own columns, not a pixel width: the explorer's
+ * listing needs ~470px for its Name and the first three facts beside it, an
+ * app's three-column signer list ~310px, a spreadsheet preview ~300px however
+ * many columns the file has. A pane that cannot show the row's name and the
+ * first three things a person reads beside it is not showing a table, it is
+ * showing a slit of one; a pane that can is a table that scrolls to the rest
+ * (a CSV of forty columns in a 1200px viewer).
+ */
+export const STACK_SPAN = 3;
+
 /** What one table looks like right now. */
 export interface TableLayout<Id extends string = string> {
   /** The columns drawn after the lead, in the person's order. Never shortened
-   *  for width — a table wider than its pane scrolls. */
+   *  for width — a table wider than its pane scrolls, or stacks. */
   visible: Id[];
   /** Every drawn track's width in px, the lead's included. */
   widths: Record<Id, number>;
@@ -175,6 +190,20 @@ export interface TableLayout<Id extends string = string> {
   total: number;
   /** True while the widths are derived from the pane rather than stored. */
   auto: boolean;
+  /**
+   * THE PANE WIDTH BELOW WHICH THE ROWS STACK (DataTable `is-stacked`): the
+   * narrowest pane that still holds the lead and the first `STACK_SPAN`
+   * drawn columns side by side, each at its own minimum, with the tick, the
+   * actions, the gaps and the paddings. A table with fewer columns than that
+   * needs all of them, so for it this is simply its narrowest width.
+   *
+   * ⚠ Derived from the MINIMUMS, never from the widths drawn or stored: it
+   * answers "can this be a table here at all", which a person who widened a
+   * column has not changed. It does not depend on the pane either, so the
+   * stacked rows, which are narrower than the table, cannot feed back into
+   * the measurement that chose them.
+   */
+  stackBelow: number;
 }
 
 export interface LayoutMetrics {
@@ -380,7 +409,12 @@ export function createColumnStore<Id extends string>(
    *     nobody has configured opens sensibly at 1440 and at 390 alike: the lead
    *     asks for `leadAuto`, the others give up room toward their minimums to
    *     pay for it, and the lead takes any slack that is left. The instant one
-   *     width is stored the pane stops having an opinion.
+   *     width is stored the pane stops having an opinion;
+   *   · and `stackBelow` says where scrolling stops being the answer: in a
+   *     pane narrower than that, DataTable draws each row as its lead with
+   *     the other cells on a line under it, each with its column's name,
+   *     instead of a table that shows a slit of itself. Still nothing is
+   *     dropped.
    *
    * ⚠ `candidates` is what the CALLER is willing to draw at all — the
    * explorer's Location only where rows come from more than one folder, its
@@ -406,15 +440,26 @@ export function createColumnStore<Id extends string>(
 
     /* Cells: [tick] + lead + the others + the actions column, so one gap
        fewer than that. */
-    const cells = (check > 0 ? 1 : 0) + 1 + visible.length + 1;
-    const chrome = check + menu + padding + gap * (cells - 1);
+    const chromeFor = (n: number) => {
+      const cells = (check > 0 ? 1 : 0) + 1 + n + 1;
+      return check + menu + padding + gap * (cells - 1);
+    };
+    const chrome = chromeFor(visible.length);
     const auto = widthsAreAuto();
+
+    /* The lead's own floor - what it gives way to in a pane with no room
+       (below). */
+    const leadAuto = metrics.leadAuto ?? leadSpec?.width ?? widths[lead];
+    const leadFloor = leadSpec ? Math.min(leadAuto, leadSpec.min) : widths[lead];
+
+    const first = visible.slice(0, STACK_SPAN);
+    const stackBelow =
+      chromeFor(first.length) + leadFloor + first.reduce((s, id) => s + (specOf(id)?.min ?? widths[id]), 0);
 
     /* A container we cannot measure yet (0 on the first tick, or a test with
        no layout) keeps the shipped widths — the observer corrects it one frame
        later, and a table that guessed would flash. */
     if (auto && available > 0 && leadSpec) {
-      const leadAuto = metrics.leadAuto ?? leadSpec.width;
       const room = available - chrome;
       let rest = visible.reduce((s, id) => s + widths[id], 0);
       const target = room - leadAuto;
@@ -447,12 +492,11 @@ export function createColumnStore<Id extends string>(
          is shown FIRST, and one wide column plus nothing is the worse
          answer. Nothing is ever dropped here; the lead simply stops taking
          the whole pane. */
-      const leadFloor = Math.min(leadAuto, leadSpec.min);
       widths[lead] = Math.round(Math.max(leadFloor, Math.min(leadSpec.max, room - rest)));
     }
 
     const total = chrome + widths[lead] + visible.reduce((s, id) => s + widths[id], 0);
-    return { visible, widths, total, auto };
+    return { visible, widths, total, auto, stackBelow };
   }
 
   return {

@@ -546,8 +546,11 @@ and hands each device the highest version it can run.
   appears (on CI, where nobody's screen is at stake, those two window checks
   only warn); the test toast is the one thing it shows. ⚠ The GitHub runner
   cannot activate a package, so those checks only warn there; the local
-  release run is where they are strict (`scripts/release/plan.mjs`,
-  "desktop: the Store package works as a Store copy").
+  release run on Windows is where they are strict (`scripts/release/plan.mjs`,
+  "desktop: the Store package works as a Store copy"). A release cut
+  elsewhere defers them to a Windows machine on a person's
+  `--ack store-deferred`, and keeps them owed until `--ack store-checked`
+  (docs/CONTRIBUTING.md, Release process, step 6).
 
 ## Security posture (do not loosen)
 

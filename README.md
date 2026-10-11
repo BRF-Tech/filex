@@ -317,8 +317,9 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 - Mount local disks, S3, FTP, SFTP, WebDAV and SMB/NAS shares side by side, and copy or cut
   in one and paste in another.
 - Reach the same tree as **S3**, **SFTP**, **FTPS**, **NFSv3** and **WebDAV**: point `rclone`,
-  `restic`, `aws s3`, WinSCP or FileZilla at it. The permissions, the trash and the quota are
-  the web UI's.
+  `restic`, `aws s3`, WinSCP or FileZilla at it. The same filex permissions (per person, group
+  and folder), trash and quota apply as in the web UI; the POSIX bits and ACLs on the disk are
+  not mapped to filex users.
 - `filex mount` attaches a remote server over ordinary HTTPS: a folder on Linux, a drive
   letter on Windows (macOS is not supported).
 - For a storage filex does not ship, install a plugin from the admin panel or from an app
@@ -342,7 +343,7 @@ Every storage and protocol feature in full: [docs/FEATURES.md → Storage and pr
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.0ac3d81aa9f5.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.cfc100f30069.png)
 
 <sub>API keys - mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry)</sub>
 
@@ -427,7 +428,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.7e448107c5b9.png)
+![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.330fcc5fda73.png)
 
 <sub>Every admin table - one pinned **Actions** menu per row, the same menu the explorer's ⋮ opens</sub>
 
@@ -755,7 +756,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.9642990b704d.png)
+![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.9f93226381ed.png)
 
 <sub>While it is out - the document frozen for everybody, who has signed in its details</sub>
 
@@ -842,7 +843,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 </td>
 <td width="50%" valign="top">
 
-![The install review opened from a store's link](https://filex.sh/shots/store/store-review-1440.01ab061907d0.png)
+![The install review opened from a store's link](https://filex.sh/shots/store/store-review-1440.d93b2b571d93.png)
 
 <sub>Installing from a store - the same review, marked **From store**, the paid app's license key shown by its first characters ([Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 

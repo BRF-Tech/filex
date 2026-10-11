@@ -328,8 +328,10 @@ Toutes les fonctionnalités de l’explorateur en détail : [docs/FEATURES.md �
 - Montez côte à côte des disques locaux, S3, FTP, SFTP, WebDAV et des partages SMB/NAS, et
   copiez ou coupez dans l’un pour coller dans un autre.
 - Accédez à la même arborescence en **S3**, **SFTP**, **FTPS**, **NFSv3** et **WebDAV** :
-  pointez `rclone`, `restic`, `aws s3`, WinSCP ou FileZilla vers elle. Les autorisations, la
-  corbeille et le quota sont ceux de l’interface web.
+  pointez `rclone`, `restic`, `aws s3`, WinSCP ou FileZilla vers elle. Les mêmes autorisations
+  filex (par personne, groupe et dossier), la même corbeille et le même quota s’appliquent
+  comme dans l’interface web ; les bits POSIX et les ACL du disque ne sont pas associés
+  aux utilisateurs filex.
 - `filex mount` attache un serveur distant en HTTPS ordinaire : un dossier sous Linux, une
   lettre de lecteur sous Windows (macOS n’est pas pris en charge).
 - Pour un stockage que filex ne livre pas, installez une extension depuis le panneau
@@ -353,7 +355,7 @@ Toutes les fonctionnalités de stockage et de protocoles en détail : [docs/FEA
 </td>
 <td width="50%" valign="top">
 
-![Clés d’API](https://filex.sh/shots/sidenav/apikeys-minted-1440.0ac3d81aa9f5.png)
+![Clés d’API](https://filex.sh/shots/sidenav/apikeys-minted-1440.cfc100f30069.png)
 
 <sub>Clés d’API - créez les vôtres, dans l’explorateur ou dans une intégration (la session ou la clé d’une personne ; une intégration relayée par un proxy avec une seule clé partagée de type *app* n’a pas cette entrée)</sub>
 
@@ -441,7 +443,7 @@ Toutes les fonctionnalités de partage et de protection en détail : [docs/FEAT
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/admin-table-actions-1440.7e448107c5b9.png)
+![Admin → Partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/admin-table-actions-1440.330fcc5fda73.png)
 
 <sub>Chaque tableau d’administration - un menu **Actions** épinglé par ligne, le même menu qu’ouvre le ⋮ de l’explorateur</sub>
 
@@ -784,7 +786,7 @@ partage ordinaire.
 <tr>
 <td width="50%" valign="top">
 
-![Le document verrouillé, son panneau Signatures ouvert](https://filex.sh/shots/signing/sign-status-1440.9642990b704d.png)
+![Le document verrouillé, son panneau Signatures ouvert](https://filex.sh/shots/signing/sign-status-1440.9f93226381ed.png)
 
 <sub>Tant que la demande est en cours - le document gelé pour tout le monde et, dans ses détails, qui a signé</sub>
 
@@ -871,7 +873,7 @@ partage ordinaire.
 </td>
 <td width="50%" valign="top">
 
-![La vérification à l’installation ouverte depuis le lien d’une boutique](https://filex.sh/shots/store/store-review-1440.01ab061907d0.png)
+![La vérification à l’installation ouverte depuis le lien d’une boutique](https://filex.sh/shots/store/store-review-1440.d93b2b571d93.png)
 
 <sub>Installation depuis une boutique - la même vérification, marquée **De la boutique**, la clé de licence de l’application payante montrée par ses premiers caractères ([Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 

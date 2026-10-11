@@ -94,6 +94,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
 import { packBoardApp } from './board-app/pack.mjs';
+import { endBelow } from './frame.mjs';
 import {
   PUBLIC_URL,
   bootInstance,
@@ -661,7 +662,16 @@ async function main() {
         await dismissToasts(vpage);
         await vpage.mouse.move(2, 2);
         await sleep(500);
-        await shot(vpage, SET, `store-screen-storage-tab-${look.suffix}.png`);
+        // ⚠ Framed on the screen, not the window: since 0.56.1 a 390-px phone
+        // draws each row stacked under its name, the screen grows past 844 px,
+        // and the window's picture ended in the middle of "My requests" (its
+        // row's name with every fact below the fold, or in Turkish only the
+        // header). Grown only when the screen is taller than the window, so a
+        // screen that fits keeps its picture.
+        const name = `store-screen-storage-tab-${look.suffix}.png`;
+        const bottom = await vpage.getByTestId('store-screen').evaluate((el) => el.getBoundingClientRect().bottom);
+        if (bottom > look.height) await endBelow(vpage, '[data-testid="store-screen"]', { pad: 8, what: name });
+        await shot(vpage, SET, name);
       }
       await setLanguage(admin, vpage, 'en');
       await vctx.close();
