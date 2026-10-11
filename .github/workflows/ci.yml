@@ -577,6 +577,12 @@ jobs:
   # one run again below, with one. The apps the suite installs come from
   # their public releases, and a missing one is a failure, not a skip
   # (FILEX_REQUIRE_WASM_FIXTURE).
+  #
+  # ⚠ Every browser part is prepared by scripts/ci/browser-prep.mjs, the
+  # script CircleCI's Playwright job calls too (.circleci/config.yml): the
+  # apps are e2e/helpers/app-locations.mjs's, the font map is the build
+  # host's (scripts/chain/run.mjs, FONTS_CONF). It needs no token: the app
+  # repositories are public.
   playwright:
     name: ${{ matrix.name }}
     needs: [plan, build]
@@ -589,7 +595,6 @@ jobs:
       E2E_BROWSERS: ${{ matrix.engine }}
       SHARD: ${{ matrix.shard }}
       FILEX_REQUIRE_WASM_FIXTURE: "1"
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -611,7 +616,7 @@ jobs:
           chmod +x bin/filex
           touch backend/internal/wasmplugin/testdata/echo/echo.wasm
       - name: The apps the suite installs
-        run: bash .github/workflows/scripts/ci-apps.sh "$RUNNER_TEMP/apps"
+        run: node scripts/ci/browser-prep.mjs apps "$RUNNER_TEMP/apps"
       - name: The browser, with its system libraries
         # The runner's apt-get update hung here for 44 minutes once (run
         # 37661356185) and the part was cancelled at the job's 45-minute
@@ -619,7 +624,7 @@ jobs:
         timeout-minutes: 10
         run: pnpm --dir e2e exec playwright install --with-deps "$E2E_BROWSERS"
       - name: Latin fonts for the layout checks
-        run: bash .github/workflows/scripts/ci-fonts.sh
+        run: node scripts/ci/browser-prep.mjs fonts "$RUNNER_TEMP/fc"
       - name: The part
         run: node e2e/run.mjs local --binary bin/filex --shard "$SHARD"
       - name: Keep what failed
@@ -652,7 +657,6 @@ jobs:
       E2E_PORT: "5212"
       DS_GREP: ${{ needs.plan.outputs.ds_grep }}
       FILEX_REQUIRE_WASM_FIXTURE: "1"
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -676,14 +680,14 @@ jobs:
           chmod +x bin/filex
           touch backend/internal/wasmplugin/testdata/echo/echo.wasm
       - name: The apps the suite installs
-        run: bash .github/workflows/scripts/ci-apps.sh "$RUNNER_TEMP/apps"
+        run: node scripts/ci/browser-prep.mjs apps "$RUNNER_TEMP/apps"
       - name: A Document Server, and its way back to filex
         run: bash .github/workflows/scripts/ci-docserver.sh "$E2E_PORT" 18080
       - name: The browser, with its system libraries
         timeout-minutes: 10
         run: pnpm --dir e2e exec playwright install --with-deps "$E2E_BROWSERS"
       - name: Latin fonts for the layout checks
-        run: bash .github/workflows/scripts/ci-fonts.sh
+        run: node scripts/ci/browser-prep.mjs fonts "$RUNNER_TEMP/fc"
       - name: The specs whose path differs with a Document Server
         run: node e2e/run.mjs local --binary bin/filex --port "$E2E_PORT" --grep "$DS_GREP"
       - name: Embed placeholders
@@ -730,7 +734,6 @@ jobs:
       GREP: ${{ matrix.grep }}
       FLAG: ${{ matrix.flag }}
       FILEX_REQUIRE_WASM_FIXTURE: "1"
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -750,7 +753,7 @@ jobs:
           chmod +x bin/filex
           touch backend/internal/wasmplugin/testdata/echo/echo.wasm
       - name: The apps the suite installs
-        run: bash .github/workflows/scripts/ci-apps.sh "$RUNNER_TEMP/apps"
+        run: node scripts/ci/browser-prep.mjs apps "$RUNNER_TEMP/apps"
       - name: An S3 gateway for the multi-storage spec
         if: matrix.kind == 's3'
         run: bash .github/workflows/scripts/ci-s3.sh
@@ -758,7 +761,7 @@ jobs:
         timeout-minutes: 10
         run: pnpm --dir e2e exec playwright install --with-deps ${E2E_BROWSERS//,/ }
       - name: Latin fonts for the layout checks
-        run: bash .github/workflows/scripts/ci-fonts.sh
+        run: node scripts/ci/browser-prep.mjs fonts "$RUNNER_TEMP/fc"
       - name: The line
         run: node e2e/run.mjs local --binary bin/filex "$FLAG" --grep "$GREP"
       - name: Keep what failed

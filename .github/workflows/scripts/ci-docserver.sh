@@ -12,8 +12,9 @@
 #
 # Appends to $GITHUB_ENV what e2e/run.mjs passes to filex and the specs read
 # (FILEX_ONLYOFFICE_URL, _JWT, _CALLBACK_URL) and what the office engine's Go
-# test reads (FILEX_TEST_OO_*, FILEX_TEST_CONVERT: the Convert app ci-apps.sh
-# fetched, which must run first). The secret is masked in the log.
+# test reads (FILEX_TEST_OO_*, FILEX_TEST_CONVERT: the Convert app that
+# `node scripts/ci/browser-prep.mjs apps` fetched, which must run first). The
+# secret is masked in the log.
 set -euo pipefail
 port="${1:?usage: ci-docserver.sh <filex port> <go test port>}"
 goport="${2:?usage: ci-docserver.sh <filex port> <go test port>}"
@@ -46,5 +47,5 @@ echo "Document Server up: $image, filex is $gw:$port to it"
   echo "FILEX_TEST_OO_LISTEN=:$goport"
   echo "FILEX_TEST_OO_CALLBACK=http://filex:$goport"
   echo "FILEX_TEST_OO_FIXTURES=$PWD/e2e/fixtures/file-types"
-  echo "FILEX_TEST_CONVERT=${FILEX_CONVERT_APP_DIR:?run ci-apps.sh first}"
+  echo "FILEX_TEST_CONVERT=${FILEX_CONVERT_APP_DIR:?run node scripts/ci/browser-prep.mjs apps first}"
 } >> "${GITHUB_ENV:?not in a GitHub job}"
