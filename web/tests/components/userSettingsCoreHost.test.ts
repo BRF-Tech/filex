@@ -437,6 +437,45 @@ describe('the web app’s install row, when the host has one', () => {
       },
     );
     await w.find('[data-testid="user-settings-tab-notifications"]').trigger('click');
-    expect(w.find('[data-testid="user-settings-browser-ios"]').text()).toBe(coreEn['notifications.prefs.iosHomeScreen']);
+    expect(w.find('[data-testid="user-settings-browser-ios"]').text()).toBe(
+      'On an iPhone or iPad, notifications work in filex added to the Home Screen (iOS 16.4 or later), not in a browser tab.',
+    );
+  });
+
+  // #219: the installed app wears the installation's name (spa_brand.go writes
+  // it into the manifest), so the row that offers it says that name. It said
+  // "Put filex on this device's home screen" on an instance whose home screen
+  // icon was going to read "BRF Teknoloji".
+  it('names the app the installation is called, and filex where it is called nothing', async () => {
+    const lead = (w: Awaited<ReturnType<typeof preferences>>) => w.find('[data-testid="user-settings-install-app"] .fx-us__readout').text();
+
+    let w = await preferences({ state: 'prompt', install: vi.fn() }, { brandName: 'BRF Teknoloji' });
+    expect(lead(w)).toBe("Put BRF Teknoloji on this device's home screen: it opens in a window of its own, like an app.");
+    w.unmount();
+
+    w = await preferences({ state: 'prompt', install: vi.fn() });
+    expect(lead(w)).toBe("Put filex on this device's home screen: it opens in a window of its own, like an app.");
+    w.unmount();
+
+    w = await preferences({ state: 'ios', install: vi.fn() }, { brandName: 'BRF Teknoloji' }, 'tr');
+    expect(lead(w)).toBe('Bu cihazın ana ekranına ekleyin: BRF Teknoloji bir uygulama gibi kendi penceresinde açılır.');
+    w.unmount();
+
+    w = await preferences(
+      { state: 'ios', install: vi.fn() },
+      {
+        brandName: 'BRF Teknoloji',
+        browserNotifications: {
+          desktopShell: false,
+          permission: () => 'unsupported',
+          enabled: () => false,
+          setEnabled: vi.fn(),
+          ask: vi.fn(async () => 'unsupported' as const),
+        },
+      },
+    );
+    await w.find('[data-testid="user-settings-tab-notifications"]').trigger('click');
+    expect(w.find('[data-testid="user-settings-browser-ios"]').text()).toContain('work in BRF Teknoloji added to the Home Screen');
+    w.unmount();
   });
 });

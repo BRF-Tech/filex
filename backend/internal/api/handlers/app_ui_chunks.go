@@ -44,11 +44,14 @@ const (
 type uiChunkSession struct {
 	// mu is held while one chunk is written: chunks of one save go in
 	// order, chunks of different saves side by side.
-	mu       sync.Mutex
-	user     int64
-	plugin   string
-	view     string
-	target   string // "path:<q>" or "new:<dir>\x00<name>"
+	mu     sync.Mutex
+	user   int64
+	plugin string
+	view   string
+	target string // "path:<q>" or "new:<dir>\x00<name>"
+	// e2e: started for an encrypted folder's door (`e2e=1`, app_ui_e2e.go);
+	// every chunk names the same door, and the last one decides with it.
+	e2e      bool
 	file     *os.File
 	received int64
 	touched  time.Time
@@ -105,13 +108,13 @@ func (h *AppPlugins) uiSaveChunk(w http.ResponseWriter, r *http.Request, p *wasm
 		b := make([]byte, 16)
 		_, _ = rand.Read(b)
 		id = hex.EncodeToString(b)
-		s = &uiChunkSession{user: uid, plugin: p.Row.Name, view: v.ID, target: target, file: f, touched: now}
+		s = &uiChunkSession{user: uid, plugin: p.Row.Name, view: v.ID, target: target, e2e: wantsE2E(r), file: f, touched: now}
 		uiChunks.m[id] = s
 	} else {
 		s = uiChunks.m[id]
 		// Another person's session, another app's, another file: it does
 		// not exist for this caller.
-		if s == nil || s.user != uid || s.plugin != p.Row.Name || s.view != v.ID || s.target != target {
+		if s == nil || s.user != uid || s.plugin != p.Row.Name || s.view != v.ID || s.target != target || s.e2e != wantsE2E(r) {
 			uiChunks.Unlock()
 			writeErrorSaid(w, r, http.StatusNotFound, "not_found", "save_gone", nil)
 			return

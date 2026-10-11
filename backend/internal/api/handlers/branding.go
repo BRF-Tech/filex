@@ -170,6 +170,46 @@ func (b *BrandingSource) For(ctx context.Context, host string) BrandingConfig {
 	return cfg
 }
 
+// ForProvider resolves the effective branding for the people of one tenant
+// where there is no request to read a host from - a Web Push sent in the
+// background (#219: its icon is the installed app's). The same overlay For
+// gives that tenant's host: global branding.* keys, then, on a multi-tenant
+// install, tenant.<id>.branding.* of a tenant that is not the supertenant.
+// A nil id or a single-tenant install: the global branding.
+func (b *BrandingSource) ForProvider(ctx context.Context, providerID *int64) BrandingConfig {
+	if b == nil || b.Store == nil {
+		return BrandingConfig{}
+	}
+	var id int64
+	if b.MultiTenant && providerID != nil && *providerID > 0 {
+		id = *providerID
+	}
+	cacheKey := fmt.Sprintf("\x00provider:%d", id)
+
+	b.mu.Lock()
+	if e, ok := b.cache[cacheKey]; ok && time.Now().Before(e.exp) {
+		b.mu.Unlock()
+		return e.cfg
+	}
+	b.mu.Unlock()
+
+	m, err := b.Store.ListSettings(ctx)
+	if err != nil {
+		return BrandingConfig{}
+	}
+	cfg := brandingFromMap(m, "branding.")
+	if id > 0 {
+		if p, perr := b.Store.GetProvider(ctx, id); perr == nil && p != nil && !p.IsSupertenant {
+			overlayBrandingFromMap(&cfg, m, fmt.Sprintf("tenant.%d.branding.", p.ID))
+		}
+	}
+
+	b.mu.Lock()
+	b.cache[cacheKey] = brandingCacheEntry{cfg: cfg, exp: time.Now().Add(brandingCacheTTL)}
+	b.mu.Unlock()
+	return cfg
+}
+
 // normalizeBrandingHost lowercases and strips any :port from a request Host.
 func normalizeBrandingHost(host string) string {
 	host = strings.ToLower(strings.TrimSpace(host))

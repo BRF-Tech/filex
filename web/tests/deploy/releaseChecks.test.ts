@@ -13,12 +13,17 @@ import {
   closingKeywords,
   compareVersions,
   dateChangelog,
+  dockerfileSources,
+  dockerignoreExcludes,
+  dockerignoreLeavesOut,
+  dockerignoreRules,
   docsPageUrl,
   dryRunTitle,
   globMatch,
   hasContent,
   headingsOf,
   htmlText,
+  infraFailure,
   manifestNewest,
   newestTag,
   newHeadings,
@@ -28,8 +33,10 @@ import {
   privateHostLines,
   promotionVerdict,
   readmeImages,
+  rerunDecision,
   runVerdict,
   setPackageVersion,
+  transientGithubError,
   unreleasedBody,
   versionProblems,
   vitestVerdict,
@@ -114,13 +121,21 @@ describe('the public export', () => {
     expect(k).toEqual({ deletedInSource: ['a.md'], withheld: ['private.md'], unexplained: ['mystery.md'] });
   });
 
-  it('finds a private host but lets the contact addresses through', () => {
+  it('finds a private host but lets the contact addresses and the Helm repository through', () => {
     // Hosts built from parts: this file is itself exported (lesson #95).
     const host = ['brf', 'sh'].join('.');
     const module = ['gitlab', 'com/brftech/filemanager'].join('.');
-    const lines = [`SECURITY.md:3:mail security@${host}`, `docs/X.md:9:see https://fm.${host}/admin`, `go.mod:1:module ${module}`];
-    const hits = privateHostLines(lines, { allow: [`security@${host}`, `hello@${host}`], forbid: [/brf\.sh/, /gitlab\.com[/:]brftech/] });
-    expect(hits).toEqual(lines.slice(1));
+    const lines = [
+      `SECURITY.md:3:mail security@${host}`,
+      `docs/INSTALLATION.md:5:helm repo add brf-tech https://helm.${host}`,
+      `docs/X.md:9:see https://fm.${host}/admin`,
+      `go.mod:1:module ${module}`,
+    ];
+    const hits = privateHostLines(lines, {
+      allow: [`security@${host}`, `hello@${host}`, `helm.${host}`],
+      forbid: [/brf\.sh/, /gitlab\.com[/:]brftech/],
+    });
+    expect(hits).toEqual(lines.slice(2));
   });
 
   it('spots a GitHub closing keyword in a commit message (lesson #163)', () => {
@@ -390,5 +405,182 @@ describe('the parts of a GitHub run', () => {
     expect(promotionVerdict(required, { required, optional })).toEqual({ ok: true, lacking: [], without: ['release-files-macos'] });
     expect(promotionVerdict(['digests-amd64', 'release-files-macos'], { required, optional })).toEqual({ ok: false, lacking: ['digests-arm64', 'release-files-linux'], without: [] });
     expect(promotionVerdict(undefined, { required })).toMatchObject({ ok: false, lacking: required });
+  });
+});
+
+// #165: the pretag's images are built from `git archive` of the release
+// commit, streamed to `docker build -`, never from the working tree: BuildKit
+// walked the checkout through WSL's 9P bridge for 30-52 minutes per image at
+// 0.54.0 and 0.55.0. A tar on stdin gets no .dockerignore (measured), so the
+// image gate checks that .dockerignore leaves out no tracked file the
+// Dockerfile copies - with a reader that must read .dockerignore as docker does.
+describe('.dockerignore, read as docker reads it', () => {
+  const REPO = path.resolve(__dirname, '..', '..', '..');
+  const real = fs.readFileSync(path.join(REPO, '.dockerignore'), 'utf8');
+
+  // Measured 2026-10-10 with docker 29.7 (BuildKit): this repository's
+  // .dockerignore, a context holding exactly these files, `COPY . /x` and
+  // `find /x -type f`. The reader must agree with every line.
+  it("leaves out exactly what docker left out of a real build's context", () => {
+    const { rules, unsupported } = dockerignoreRules(real);
+    expect(unsupported).toEqual([]);
+    const keptByDocker = ['a/x.log', 'backend/embed/admin/.keep', 'backend/embed/web/.keep', 'backend/filex', 'Dockerfile', 'docker/Dockerfile', 'docker/entrypoint.sh', 'entrypoint.sh', 'entrypoint.sh.bak', 'keep/ok.txt'];
+    const leftOutByDocker = [
+      'node_modules/x', 'web/node_modules/a/b', 'web/dist/a.js', 'packages/core/dist/i.js', 'backend/embed/admin/index.html', 'backend/embed/web/x.js',
+      'filex', 'filex-test', 'x.log', 'e2e/test-results/a', 'e2e/playwright-report/i.html', 'e2e/.playwright-mcp/z', '.idea/w', '.vscode/s',
+      'sweep-2026-05-09/bugs.md', 'web/.vite/c', 'web/.turbo/t',
+    ];
+    for (const f of keptByDocker) expect(dockerignoreExcludes(rules, f), f).toBe(false);
+    for (const f of leftOutByDocker) expect(dockerignoreExcludes(rules, f), f).toBe(true);
+  });
+
+  it('the last pattern that matches a path or a directory above it decides; `!` takes it back', () => {
+    const { rules } = dockerignoreRules('# a comment\n\n/build/\n!build/keep\nlogs\n**/tmp\n*.bak\ndocs/*.md\n!docs/README.md\n');
+    expect(rules.map((r) => r.pattern)).toEqual(['build', 'build/keep', 'logs', '**/tmp', '*.bak', 'docs/*.md', 'docs/README.md']);
+    expect(dockerignoreExcludes(rules, 'build/out.js')).toBe(true);
+    expect(dockerignoreExcludes(rules, 'build/keep')).toBe(false);
+    expect(dockerignoreExcludes(rules, 'logs/a/b.txt')).toBe(true);
+    expect(dockerignoreExcludes(rules, 'src/logs')).toBe(false);
+    expect(dockerignoreExcludes(rules, 'a/b/tmp/c')).toBe(true);
+    expect(dockerignoreExcludes(rules, 'tmp')).toBe(true);
+    expect(dockerignoreExcludes(rules, 'x.bak')).toBe(true);
+    expect(dockerignoreExcludes(rules, 'a/x.bak')).toBe(false);
+    expect(dockerignoreExcludes(rules, 'docs/GUIDE.md')).toBe(true);
+    expect(dockerignoreExcludes(rules, 'docs/README.md')).toBe(false);
+    expect(dockerignoreExcludes(rules, 'docs/sub/GUIDE.md')).toBe(false);
+  });
+
+  it('refuses to guess: a class, an escape or a ** inside a segment is unsupported, and then proves nothing', () => {
+    for (const p of ['[ab].txt', 'a\\*b', 'x**', '**y', 'a/b**/c']) {
+      const r = dockerignoreLeavesOut(`${p}\n`, ['a.txt']);
+      expect(r.unsupported, p).toEqual([p]);
+      expect(r.excluded).toEqual([]);
+    }
+    expect(dockerignoreRules('**/x\nx/**\nx/**/y\n**\n').unsupported).toEqual([]);
+  });
+
+  it('counts only the tracked files the Dockerfile copies: two tracked notes it leaves out are copied by no image', () => {
+    const files = ['sweep-2026-05-09/bugs.md', 'web/src/main.ts', 'backend/embed/admin/.keep', 'backend/embed/admin/stale.js'];
+    const sources = ['web/**', 'backend/**'];
+    expect(dockerignoreLeavesOut(real, files, sources).excluded).toEqual(['backend/embed/admin/stale.js']);
+    expect(dockerignoreLeavesOut(real, files, null).excluded).toEqual(['sweep-2026-05-09/bugs.md', 'backend/embed/admin/stale.js']);
+  });
+});
+
+describe("a Dockerfile's sources: what its build reads from the context", () => {
+  const REPO = path.resolve(__dirname, '..', '..', '..');
+
+  it('reads every COPY and ADD from the context; another stage, an image or a URL is no source', () => {
+    const text = [
+      'FROM node:20 AS a',
+      'COPY package.json pnpm-workspace.yaml ./',
+      'COPY --chown=1:1 web/ ./web/',
+      'COPY ["scripts/x.mjs", "./scripts/"]',
+      'COPY --from=a /out /out',
+      'COPY --from=alpine:3 /etc/x /x',
+      'ADD https://example.invalid/f.tgz /f',
+      'RUN --mount=type=cache,target=/root/.cache echo \\',
+      '    still the RUN',
+      'COPY docker/entrypoint.sh \\',
+      '     /usr/local/bin/',
+    ].join('\n');
+    expect(dockerfileSources(text)).toEqual(
+      ['docker/entrypoint.sh', 'docker/entrypoint.sh/**', 'package.json', 'package.json/**', 'pnpm-workspace.yaml', 'pnpm-workspace.yaml/**', 'scripts/x.mjs', 'scripts/x.mjs/**', 'web/**'].sort(),
+    );
+  });
+
+  it('cannot tell, and says so (null), for the whole context, a pattern, a variable, a heredoc or a bind mount', () => {
+    expect(dockerfileSources('FROM a\nCOPY . /src\n')).toEqual(['**']);
+    for (const t of ['COPY src/?.ts /x', 'COPY ${DIR} /x', 'COPY <<EOF /x\nhi\nEOF', 'RUN --mount=target=/src make', 'RUN --mount=type=bind,source=web,target=/w ls']) {
+      expect(dockerfileSources(`FROM a\n${t}\n`), t).toBeNull();
+    }
+    expect(dockerfileSources('FROM a\nRUN --mount=type=bind,from=b,target=/w ls\n')).toEqual([]);
+  });
+
+  it("reads this repository's two Dockerfiles: the packages, web, backend and the scripts their builds import", () => {
+    for (const df of ['docker/Dockerfile', 'docker/Dockerfile.slim']) {
+      const s = dockerfileSources(fs.readFileSync(path.join(REPO, df), 'utf8'));
+      expect(s, df).not.toBeNull();
+      for (const want of ['packages/**', 'web/**', 'backend/**', 'pnpm-lock.yaml*', 'docker/entrypoint.sh', 'scripts/vite-fonts-as-files.mjs', 'scripts/lib/i18n-catalogue.mjs']) expect(s, `${df}: ${want}`).toContain(want);
+      expect(s!.some((x) => x.startsWith('desktop/') || x.startsWith('e2e/') || x.startsWith('docs/')), `${df} copies no desktop/, e2e/ or docs/`).toBe(false);
+    }
+  });
+});
+
+// #165: GitHub not answering is not GitHub answering "no".
+describe('GitHub, failing to answer', () => {
+  it('a 5xx, a timeout or a dropped connection is asked again; a 4xx or the primary rate limit is an answer', () => {
+    for (const t of [
+      'gh: Server Error (HTTP 502)',
+      'HTTP 503: Service Unavailable',
+      'Post "https://api.github.com/graphql": net/http: TLS handshake timeout',
+      'read tcp 10.0.0.5:51234->140.82.112.6:443: read: connection reset by peer',
+      'dial tcp: lookup api.github.com: no such host',
+      'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.',
+      'context deadline exceeded',
+    ]) {
+      expect(transientGithubError(t), t).toBe(true);
+    }
+    for (const t of ['gh: HTTP 404: Not Found', 'HTTP 401: Bad credentials', 'HTTP 403: API rate limit exceeded for user ID 1', 'gh run list did not answer JSON: <html>', '']) {
+      expect(transientGithubError(t), t).toBe(false);
+    }
+  });
+});
+
+// #165: a part red on the runner is re-run once by the gate; a red test never.
+// The steps are the real ones of 0.55.0's runs (GitHub API, 2026-10-10).
+describe('which red parts the gate re-runs', () => {
+  const browser = 'The browser, with its system libraries';
+  const part = (name: string, id: number, failedSteps: string[]) => ({ name, id, failedSteps, conclusion: 'failure' });
+  const done = { status: 'completed', attempt: 1 };
+  const at = '2026-10-09T15:53:00Z';
+  const now = Date.parse('2026-10-09T15:55:00Z');
+
+  it("knows the runner's steps from the code's", () => {
+    // 37952392755 attempt 1: two Playwright parts, red installing the browser.
+    expect(infraFailure([browser])).toBe(true);
+    expect(infraFailure(['The browsers, with their system libraries'])).toBe(true);
+    for (const s of ['Set up job', 'Initialize containers', 'Run actions/checkout@v4', 'Run pnpm/action-setup@v4', 'Run actions/download-artifact@v4', 'Post Run actions/setup-go@v5', 'Run docker/setup-buildx-action@v3']) {
+      expect(infraFailure([s]), s).toBe(true);
+    }
+    // 37945948715: the Istanbul unit suite and the nopub line, cancelled in their own steps;
+    // the dry run 37945996492: the desktop update from the previous release.
+    for (const s of ['Unit tests', 'The line', 'The part', 'Update from the previous release on Linux', 'Every part of the matrix passed', 'The shard, under -race']) {
+      expect(infraFailure([s]), s).toBe(false);
+    }
+    expect(infraFailure([browser, 'The part'])).toBe(false);
+    expect(infraFailure([])).toBe(false);
+    expect(infraFailure(null)).toBe(false);
+  });
+
+  it('waits while the run goes on, asks once it has finished, and only for the runner', () => {
+    const failed = [part('Playwright + Document Server (webkit)', 11, [browser]), part('Playwright (webkit 3/4)', 12, [browser])];
+    expect(rerunDecision({ run: { status: 'in_progress', attempt: 1 }, failed, now }).action).toBe('wait');
+    const d = rerunDecision({ run: done, failed, now });
+    expect(d.action).toBe('rerun');
+    expect(d.retry.map((p) => p.name)).toEqual(['Playwright + Document Server (webkit)', 'Playwright (webkit 3/4)']);
+    // a red test beside them: red, nothing re-run
+    const mixed = rerunDecision({ run: done, failed: [...failed, part('Frontend (pnpm, TZ=Europe/Istanbul)', 13, ['Unit tests'])], now });
+    expect(mixed.action).toBe('red');
+    expect(mixed.code.map((p) => p.name)).toEqual(['Frontend (pnpm, TZ=Europe/Istanbul)']);
+    // no failed step at all is the code's too
+    expect(rerunDecision({ run: done, failed: [part('Go (a)', 14, [])], now }).action).toBe('red');
+  });
+
+  it("gives a part one re-run: red again is red; copied into the new attempt without running (lesson #1275) is asked again, twice at most", () => {
+    const record = { attempt: 1, at, requests: 1, parts: { 'Playwright (webkit 3/4)': 12 } };
+    // the re-run has not started yet: wait, and red once it never does
+    expect(rerunDecision({ run: done, failed: [part('Playwright (webkit 3/4)', 12, [browser])], record, now }).action).toBe('wait');
+    expect(rerunDecision({ run: done, failed: [part('Playwright (webkit 3/4)', 12, [browser])], record, now: now + 60 * 60_000 }).action).toBe('red');
+    const second = { status: 'completed', attempt: 2 };
+    // it ran again (a new job id) and is red again
+    const again = rerunDecision({ run: second, failed: [part('Playwright (webkit 3/4)', 22, [browser])], record, now });
+    expect(again.action).toBe('red');
+    expect(again.spent.map((p) => p.name)).toEqual(['Playwright (webkit 3/4)']);
+    // GitHub copied the old result (the same job id): asked again
+    expect(rerunDecision({ run: second, failed: [part('Playwright (webkit 3/4)', 12, [browser])], record, now }).action).toBe('rerun');
+    expect(rerunDecision({ run: { status: 'completed', attempt: 3 }, failed: [part('Playwright (webkit 3/4)', 12, [browser])], record: { ...record, attempt: 2, requests: 2 }, now }).action).toBe('red');
+    // a part red on the runner for the first time in the new attempt has its own re-run
+    expect(rerunDecision({ run: second, failed: [part('Go (b)', 30, ['Set up job'])], record, now }).action).toBe('rerun');
   });
 });

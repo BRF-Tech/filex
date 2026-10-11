@@ -26,6 +26,7 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 
 import { configurePrefs } from '@brftech/filex-core';
 import { NOTIFY_POLL_MS, useNotificationWatcher } from '@/composables/useNotificationWatcher';
+import { __resetBrand } from '@/lib/brand';
 import { i18n, setStoredLocale } from '@/i18n';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationsStore } from '@/stores/notifications';
@@ -94,6 +95,7 @@ function said(r: NotificationItem, lang: string): NotificationItem {
 }
 
 const toasts: string[] = [];
+const toastIcons: string[] = [];
 
 async function mountWatcher() {
   const pinia = createPinia();
@@ -156,14 +158,27 @@ beforeEach(() => {
   // `lib/browserNotify.brandedNotification`.
   const ctor = function (this: Record<string, unknown>, title: string, options?: NotificationOptions) {
     toasts.push(String(options?.body ?? title));
+    toastIcons.push(String(options?.icon ?? ''));
     this.close = () => {};
   } as unknown as { permission: string };
   ctor.permission = 'granted';
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).Notification = ctor;
+  // #219 - the toast's icon is the installed app's, read off the manifest
+  // the server writes for this branding (lib/brand).
+  toastIcons.length = 0;
+  __resetBrand();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ icons: [{ src: 'brand-icons/0e11a9b8c7d6e5f4-192.png', type: 'image/png', purpose: 'any' }] }),
+    })),
+  );
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.useRealTimers();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   delete (window as any).Notification;
@@ -199,6 +214,7 @@ describe('the one notification feed', () => {
     expect(listCalls).toHaveBeenCalledTimes(1);
     // The server's words, as the list brought them: the toast composes none.
     expect(toasts).toEqual(['New file: arrived.txt - /arrived.txt']);
+    expect(toastIcons).toEqual([new URL('/admin/brand-icons/0e11a9b8c7d6e5f4-192.png', window.location.href).href]);
 
     // The next quiet tick is quiet again.
     listCalls.mockClear();

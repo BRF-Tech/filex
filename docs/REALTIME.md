@@ -110,6 +110,22 @@ socket that missed it (it was down, or connected to another filex process on
 the same database) asks again when it reconnects, and an answer ages out after
 30 seconds in any case.
 
+
+## Editing together's socket
+
+An app's interface with `files:co-edit` (0.56) edits a file together through
+filex's relay, and each member's page has a socket of its own for it:
+`GET /api/coedit/ws?ticket=…`, opened with the single-use ticket the join
+answered (`…/coedit/{sid}/ticket` mints another after a drop). It is not this
+socket: no rooms, no presence, nothing coalesced - every sealed entry of the
+session, in order, each once, and the other members' sealed cursors. A
+cursor reaches the members of its own filex process at once and those of the
+other processes through the database (each member's last cursor is a row,
+written at most twice a second, read with the log every 2 s): several
+processes on one database need nothing else between them. Its frames and
+rules are in
+[APP-PLUGINS-API.md → Editing together](APP-PLUGINS-API.md#editing-together-coedit-056).
+
 ## Coalescing: what a burst looks like on the wire
 
 A folder can change far more often than a listing is worth re-fetching, and two

@@ -4,10 +4,14 @@
  * log entries, and the check that the log the server hands back is the one
  * the editors wrote. Design: docs/E2E-OFFICE.md.
  *
- * ⚠ Prototype: no surface uses this yet. The relay it talks to is
- * backend/internal/e2eoffice; the editor's side (the bridge that answers the
- * editor's Document Server protocol) is the filex-office-editor app, a
- * repository of its own (AGPL-3.0-or-later).
+ * Used by lib/coeditSession, the filex page's half of editing together
+ * (filex 0.56): the relay it talks to is backend/internal/coedit; the
+ * editor's side (the bridge that answers the editor's Document Server
+ * protocol) is the filex-office-editor app, a repository of its own
+ * (AGPL-3.0-or-later). In an ordinary folder the session key is the
+ * server's (sealed with its secret key) and handed to this page when it
+ * joins; the folder-key half below (wrapSessionKey / unwrapSessionKey) is the
+ * encrypted folder's, which waits for files:e2e-plaintext.
  *
  * Keys. A session has its own random 32-byte key (SK). The folder key (FMK)
  * seals it for the server to keep, exactly the way a file's DEK is sealed in

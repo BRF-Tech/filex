@@ -77,7 +77,10 @@ services:
       # losing it stops every existing access key verifying, so back it up with
       # the database. Web Push needs it too: the key pushes are signed with
       # is stored sealed with it, and without it push stays off
-      # (docs/NOTIFICATIONS.md, Web Push).
+      # (docs/NOTIFICATIONS.md, Web Push). So does editing a file of an
+      # ordinary folder together (an app granted files:co-edit, such as the
+      # office editor): each session's key is sealed with it, and without it
+      # the app edits alone (docs/CONFIGURATION.md, Editing together).
       FILEX_SECRET_KEY: ${FILEX_SECRET_KEY:-}
       # Optional operator key escrow for end-to-end encrypted folders, and
       # the one decision on this list that a fresh deployment cannot defer

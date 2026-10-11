@@ -244,3 +244,28 @@ func itoa64(v int64) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+// ForProvider is a tenant's branding where there is no host to read (a push
+// sent in the background, #219): the same overlay For gives the tenant's
+// host, and the global branding for no tenant or a single-tenant install.
+func TestBrandingSource_ForProviderOverlaysTheTenant(t *testing.T) {
+	ctx := context.Background()
+	_, store := testutil.NewTestDB(t)
+	p, err := store.CreateProvider(ctx, &model.Provider{
+		Slug: "acme", Name: "Acme", Host: "files.acme.test", AuthType: "local", Enabled: true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.UpsertSetting(ctx, "branding.name", "Filex Global"))
+	require.NoError(t, store.UpsertSetting(ctx, "branding.logo_url", "https://cdn.example/global.png"))
+	require.NoError(t, store.UpsertSetting(ctx, "tenant."+itoa64(p.ID)+".branding.logo_url", "https://cdn.example/acme.png"))
+
+	multi := handlers.NewBrandingSource(store, true)
+	got := multi.ForProvider(ctx, &p.ID)
+	require.Equal(t, "https://cdn.example/acme.png", got.LogoURL, "the tenant's own logo")
+	require.Equal(t, "Filex Global", got.Name, "unset tenant fields fall back to global")
+	require.Equal(t, multi.For(ctx, "files.acme.test"), got, "the same branding the tenant's host gets")
+	require.Equal(t, "https://cdn.example/global.png", multi.ForProvider(ctx, nil).LogoURL)
+
+	single := handlers.NewBrandingSource(store, false)
+	require.Equal(t, "https://cdn.example/global.png", single.ForProvider(ctx, &p.ID).LogoURL, "single-tenant: one branding")
+}

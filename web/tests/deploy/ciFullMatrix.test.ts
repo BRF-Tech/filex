@@ -22,7 +22,8 @@
 // FILEX_WORKFLOWS_DIR, and the release tool names these titles in its
 // workflow guards (scripts/release/plan.mjs, WORKFLOW_GUARDS), so a skip there
 // is red. The workflow reaches the public checkout as its own commit, landed
-// with the export that brings these guards (packaging/ci/ci-full-matrix.patch).
+// with the export that brings these guards (packaging/ci/ci-full-matrix.patch;
+// the browser parts' preparation, packaging/ci/ci-browser-prep.patch).
 // The tests of scripts/ci-parts.mjs alone run everywhere.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -31,7 +32,21 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { APP_LOCATIONS } from '../../../e2e/helpers/app-locations.mjs';
-import { DS_GREP, DS_SPECS, E2E_ENGINES, E2E_SHARDS, EXTRA, FIXED, ciMatrix, ciParts, completeName, githubOutput, runsIn } from '../../../scripts/ci-parts.mjs';
+import {
+  BROWSER_BUILD,
+  DS_GREP,
+  DS_SPECS,
+  E2E_ENGINES,
+  E2E_SHARDS,
+  EXTRA,
+  FIXED,
+  GO_SERVICES,
+  ciMatrix,
+  ciParts,
+  completeName,
+  githubOutput,
+  runsIn,
+} from '../../../scripts/ci-parts.mjs';
 import { findBash, slash } from '../../../scripts/release/engine.mjs';
 
 const REPO = path.resolve(__dirname, '../../..');
@@ -166,8 +181,11 @@ describe('ci.yml: the full matrix', () => {
     const go = job(ci, 'go');
     expect(go).toContain('node scripts/test-shards.mjs go --profile go --shard "$SHARD" --format args');
     expect(go).toMatch(/go test -count=1 -timeout 30m "\$\{A\[@\]\}"/);
-    for (const svc of ['postgres', 'mysql', 'redis', 'samba']) expect(go, `the Go parts run beside ${svc}`).toMatch(new RegExp(`\\n {6}${svc}:\\n`));
-    for (const v of ['FILEX_TEST_PG_DSN', 'FILEX_TEST_MYSQL_DSN', 'FILEX_TEST_REDIS_URL', 'FILEX_SMB_TEST']) expect(go, v).toMatch(new RegExp(`\\n {6}${v}: \\S`));
+    // GO_SERVICES: the list CircleCI's Go job is held to as well.
+    for (const [v, svc] of Object.entries(GO_SERVICES)) {
+      expect(go, `the Go parts run beside ${svc}`).toMatch(new RegExp(`\\n {6}${svc}:\\n`));
+      expect(go, v).toMatch(new RegExp(`\\n {6}${v}: \\S`));
+    }
     const race = job(ci, 'race');
     expect(race).toContain('node scripts/test-shards.mjs go --profile race --shard "$SHARD" --format args');
     expect(race).toMatch(/go test -race -count=1 -timeout 60m -v "\$\{A\[@\]\}"/);
@@ -269,8 +287,10 @@ describe('ci.yml: the full matrix', () => {
     expect(ds).toContain('DS_GREP: ${{ needs.plan.outputs.ds_grep }}');
     expect(ds).toContain('bash .github/workflows/scripts/ci-docserver.sh "$E2E_PORT" 18080');
     expect(ds).toContain('node e2e/run.mjs local --binary bin/filex --port "$E2E_PORT" --grep "$DS_GREP"');
-    // The Go test of the office engine reads the Convert app ci-apps.sh fetched.
-    expect(ds.indexOf('ci-apps.sh')).toBeLessThan(ds.indexOf('ci-docserver.sh'));
+    // The Go test of the office engine reads the Convert app browser-prep fetched.
+    const apps = ds.indexOf('node scripts/ci/browser-prep.mjs apps ');
+    expect(apps).toBeGreaterThan(0);
+    expect(apps).toBeLessThan(ds.indexOf('ci-docserver.sh'));
     expect(ds).toMatch(/go test -count=1 -v -run '\^TestOfficeEngine_TheConvertAppOnARealDocumentServer\$' \.\/internal\/server\//);
     const docserver = fs.readFileSync(path.join(DIR!, 'scripts', 'ci-docserver.sh'), 'utf8');
     expect(docserver).toContain('--add-host filex:host-gateway');
@@ -421,12 +441,17 @@ describe('ci.yml: the full matrix', () => {
     }
   });
 
-  it.runIf(!!DIR)('every browser part fetches the apps, maps the fonts as the build host does, and runs e2e/run.mjs', () => {
+  // ⚠⚠ The preparation is scripts/ci/browser-prep.mjs, the script CircleCI's
+  // Playwright job calls too (task #181): its first run had no app at all and
+  // every app spec failed to load, while GitHub fetched them in a script and
+  // a list of its own. One script, its list app-locations.mjs, its font map
+  // the chain's (ciBrowserPrep.test.ts holds both).
+  it.runIf(!!DIR)('every browser part is prepared by the script CircleCI calls too, and runs e2e/run.mjs', () => {
     const ci = ciCode();
     for (const key of ['playwright', 'playwright-ds', 'playwright-extra']) {
       const b = job(ci, key);
-      const apps = b.indexOf('bash .github/workflows/scripts/ci-apps.sh "$RUNNER_TEMP/apps"');
-      const fonts = b.indexOf('bash .github/workflows/scripts/ci-fonts.sh');
+      const apps = b.indexOf('node scripts/ci/browser-prep.mjs apps "$RUNNER_TEMP/apps"');
+      const fonts = b.indexOf('node scripts/ci/browser-prep.mjs fonts "$RUNNER_TEMP/fc"');
       const run = b.indexOf('node e2e/run.mjs local --binary bin/filex');
       expect(apps, `${key} fetches the apps`).toBeGreaterThan(0);
       expect(fonts, `${key} maps the fonts`).toBeGreaterThan(0);
@@ -443,21 +468,20 @@ describe('ci.yml: the full matrix', () => {
     expect(build).toContain('pnpm run build:all');
     expect(build).toContain('bash scripts/build-wasm-fixture.sh');
     expect(build).toContain('node scripts/check-embed.mjs --binary bin/filex');
-    // packages/core/dist rides along: 173 builds a real .fxe with the
+    // BROWSER_BUILD, the list CircleCI's workspace is held to as well:
+    // packages/core/dist rides along, 173 builds a real .fxe with the
     // product's own library (v0.53.0's first full matrix: "Cannot find module
     // packages/core/dist/filex-core.js" in Playwright chromium 2/4).
-    expect(build).toMatch(/name: e2e-build\n\s+path: \|\n\s+bin\/filex\n\s+backend\/internal\/wasmplugin\/testdata\/echo\/echo\.wasm\n\s+packages\/core\/dist\n/);
-    // The font map is the build host's, family for family.
-    const aliases = (t: string) => [...t.matchAll(/<alias binding="strong"><family>([^<]+)<\/family><prefer><family>([^<]+)<\/family><\/prefer><\/alias>/g)].map((m) => `${m[1]}=${m[2]}`);
-    const chain = aliases(fs.readFileSync(path.join(REPO, 'scripts', 'chain', 'run.mjs'), 'utf8'));
-    expect(chain).toHaveLength(4);
-    expect(aliases(fs.readFileSync(path.join(DIR!, 'scripts', 'ci-fonts.sh'), 'utf8'))).toEqual(chain);
-    // The apps: every variable the specs look an app up by (app-locations.mjs).
-    const appsSh = fs.readFileSync(path.join(DIR!, 'scripts', 'ci-apps.sh'), 'utf8');
-    expect(Object.keys(APP_LOCATIONS).sort()).toEqual(['convert', 'lang-de', 'lang-es', 'lang-fr', 'sign']);
-    for (const spot of Object.values(APP_LOCATIONS) as Array<{ env: string }>) expect(appsSh, spot.env).toContain(`echo "${spot.env}=`);
-    expect(appsSh).toContain('for app in sign convert; do');
-    expect(appsSh).toContain('gh release download -R "BRF-Tech/filex-$app" -p filex-app.json -p plugin.wasm');
-    expect(appsSh).toContain('for lang in es de fr; do');
+    const carried = /name: e2e-build\n\s+path: \|\n((?:\s+\S+\n)+?)\s+if-no-files-found:/.exec(build)?.[1];
+    expect(carried, 'the build uploads e2e-build').toBeTruthy();
+    expect(carried!.trim().split(/\n/).map((l) => l.trim())).toEqual(BROWSER_BUILD);
+    // No second copy of the preparation: the GitHub-only scripts are gone, and
+    // the workflow names no app of its own.
+    for (const gone of ['ci-apps.sh', 'ci-fonts.sh']) expect(fs.existsSync(path.join(DIR!, 'scripts', gone)), gone).toBe(false);
+    expect(Object.keys(APP_LOCATIONS).length).toBeGreaterThan(0);
+    for (const spot of Object.values(APP_LOCATIONS) as Array<{ env: string; repo: string }>) {
+      expect(ci, `ci.yml names ${spot.env}`).not.toContain(spot.env);
+      expect(ci, `ci.yml names ${spot.repo}`).not.toContain(spot.repo);
+    }
   });
 });

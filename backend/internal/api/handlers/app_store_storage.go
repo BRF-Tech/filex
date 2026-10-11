@@ -403,7 +403,8 @@ func (h *AppStore) storageInstall(w http.ResponseWriter, r *http.Request, p *app
 	}
 	installed = true
 	// A build whose signature verified only in the old sha256-only form is
-	// accepted during 0.55: the plugin's row says so, and so does the audit.
+	// accepted during its compatibility window (plugin.LegacySignatureWindow):
+	// the plugin's row says so, and so does the audit.
 	p.LegacySignature = st != nil && st.LegacySignature
 	body := map[string]any{"kind": appstore.KindStorage}
 	if in.Paid && key != "" {

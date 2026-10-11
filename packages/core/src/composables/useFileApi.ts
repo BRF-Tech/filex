@@ -406,6 +406,8 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     pluginUISave: derive(config.pluginUISave, '/api/files/plugins/ui/{plugin}/{view}/save'),
     /* 0.54 - what an interface reads of its file, checked by the server (#211). */
     pluginUIRead: derive(config.pluginUIRead, '/api/files/plugins/ui/{plugin}/{view}/read'),
+    /* 0.56 - editing together (files:co-edit): the relay's routes (#189). */
+    pluginUICoEdit: derive(config.pluginUICoEdit, '/api/files/plugins/ui/{plugin}/{view}/coedit'),
     /* 0.52.0 - a paid app's license, as the app itself reads it (fx.license.get()). */
     pluginLicense: derive(config.pluginLicense, '/api/files/plugins/license/{plugin}'),
   };
@@ -1393,13 +1395,26 @@ export function useFileApi(config: ExplorerConfig) {
     view: string,
     target: { path: string } | { dir: string; name: string },
     body: Blob | ReadableStream<Uint8Array>,
-  ): Promise<{ saved: boolean; path: string; name: string; size: number }> {
+    /**
+     * filex 0.56 (task #189, backend app_ui_e2e.go): `e2e` - the body is a
+     * file of an encrypted folder, encrypted in this tab with the folder's
+     * key (the door refuses anything else); `expect` - write only over the
+     * file as it was opened, "<size>:<ms>" as its listing said it; `extra` -
+     * more of the query: editing together's `coedit`, `client`, `token`,
+     * `through` (which part of the session's log the save holds).
+     */
+    opts?: { e2e?: boolean; expect?: string; extra?: Record<string, string> },
+  ): Promise<{ saved: boolean; path: string; name: string; size: number; modified?: number }> {
     if (!endpoints.pluginUISave) throw new Error('pluginUISave endpoint not configured');
-    const q = 'path' in target
+    const more = opts?.extra
+      ? Object.entries(opts.extra).map(([k, v]) => `&${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('')
+      : '';
+    const q = ('path' in target
       ? `path=${encodeURIComponent(target.path)}`
-      : `dir=${encodeURIComponent(target.dir)}&name=${encodeURIComponent(target.name)}`;
+      : `dir=${encodeURIComponent(target.dir)}&name=${encodeURIComponent(target.name)}`) + more;
+    const door = `${opts?.e2e ? '&e2e=1' : ''}${opts?.expect ? `&expect=${encodeURIComponent(opts.expect)}` : ''}`;
     const url = fillTemplate(endpoints.pluginUISave, { plugin, view });
-    const base = `${url}${url.includes('?') ? '&' : '?'}${q}`;
+    const base = `${url}${url.includes('?') ? '&' : '?'}${q}${door}`;
     // The server's chunk size when it says one (`limits`, #211).
     const CHUNK = serverLimit('app_ui_save_chunk_bytes') ?? UI_SAVE_CHUNK;
     const put = <T>(u: string, part: Blob) =>
@@ -1480,11 +1495,23 @@ export function useFileApi(config: ExplorerConfig) {
    * answers the same bytes the preview does. The frame's own check of the
    * grant is no longer the only one.
    */
-  async function pluginUIRead(plugin: string, view: string, path: string): Promise<Response> {
-    if (!endpoints.pluginUIRead) return fetchResponse(path);
+  async function pluginUIRead(
+    plugin: string,
+    view: string,
+    path: string,
+    /** filex 0.56: `e2e` - a file of an encrypted folder, which the server
+     *  answers as the ciphertext it holds, for this tab to decrypt
+     *  (backend app_ui_e2e.go). Only through the door: never the preview. */
+    opts?: { e2e?: boolean },
+  ): Promise<Response> {
+    if (!endpoints.pluginUIRead) {
+      if (opts?.e2e) throw new Error('pluginUIRead endpoint not configured');
+      return fetchResponse(path);
+    }
     const url = fillTemplate(endpoints.pluginUIRead, { plugin, view });
     const headers = await authHeaders();
-    const res = await fetch(`${url}${url.includes('?') ? '&' : '?'}path=${encodeURIComponent(path)}`, {
+    const door = opts?.e2e ? '&e2e=1' : '';
+    const res = await fetch(`${url}${url.includes('?') ? '&' : '?'}path=${encodeURIComponent(path)}${door}`, {
       headers,
       credentials: credentialsMode(),
       cache: 'no-store',
@@ -1494,6 +1521,101 @@ export function useFileApi(config: ExplorerConfig) {
       throw requestFailure(res.status, text, lang());
     }
     return res;
+  }
+
+  /**
+   * Editing together (0.56, task #189): the relay's routes under an
+   * interface. The session's entries come over its own socket
+   * (lib/coeditSession); these are the requests around it.
+   *
+   *   coeditJoin  POST …/coedit/join {path}
+   *   coeditCall  POST …/coedit/{sid}/{append|lease|ticket|leave}
+   *   coeditBlob* PUT/GET …/coedit/{sid}/blob/{name}?client=&token=
+   */
+  function coeditBase(plugin: string, view: string): string {
+    if (!endpoints.pluginUICoEdit) throw new Error('pluginUICoEdit endpoint not configured');
+    return fillTemplate(endpoints.pluginUICoEdit, { plugin, view });
+  }
+
+  async function coeditJoin(
+    plugin: string,
+    view: string,
+    path: string,
+    /** `e2e`: this page holds the encrypted folder's key; `unsent`: what this
+     *  browser kept of an earlier opening (the answer carries the words). */
+    extra: { e2e?: boolean; unsent?: { count: number } } = {},
+  ): Promise<Record<string, unknown>> {
+    return jsonFetch(`${coeditBase(plugin, view)}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, ...extra }),
+    });
+  }
+
+  async function coeditCall(
+    plugin: string,
+    view: string,
+    sid: string,
+    op: 'append' | 'lease' | 'ticket' | 'leave' | 'key',
+    body: Record<string, unknown>,
+    opts: { keepalive?: boolean } = {},
+  ): Promise<Record<string, unknown>> {
+    const url = `${coeditBase(plugin, view)}/${encodeURIComponent(sid)}/${op}`;
+    // ⚠ A call for a page that is going away (a member leaving on
+    // `pagehide`) goes as a beacon when it can: a `keepalive` fetch sent
+    // there left Firefox only now and then and WebKit never (measured
+    // 2026-10-10), and the member stayed listed as editing until the relay
+    // timed it out (~45-60 s). The answer is not read, so none is returned.
+    if (opts.keepalive === true && sendBeacon(url, JSON.stringify(body))) return {};
+    return jsonFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      keepalive: opts.keepalive === true,
+    });
+  }
+
+  /**
+   * Send `body` to `url` with `navigator.sendBeacon` - the one request a
+   * browser promises to deliver after the page is gone - and answer whether
+   * it was queued. Only when the session cookie alone authenticates the
+   * request (`auth: none`, filex's own pages): a beacon carries no header,
+   * so a bearer token or a host's CSRF header cannot ride along, and those
+   * callers keep their `keepalive` fetch. The body travels as text/plain,
+   * the type a beacon may send anywhere without a preflight; the server
+   * reads it as JSON whatever its type.
+   */
+  function sendBeacon(url: string, body: string): boolean {
+    if (authConf.kind !== 'none') return false;
+    const nav = typeof navigator === 'undefined' ? undefined : navigator;
+    if (typeof nav?.sendBeacon !== 'function') return false;
+    try {
+      return nav.sendBeacon(url, body);
+    } catch {
+      return false;
+    }
+  }
+
+  function coeditBlobUrl(plugin: string, view: string, sid: string, name: string, member: { client: string; token: string }): string {
+    return `${coeditBase(plugin, view)}/${encodeURIComponent(sid)}/blob/${encodeURIComponent(name)}` +
+      `?client=${encodeURIComponent(member.client)}&token=${encodeURIComponent(member.token)}`;
+  }
+
+  async function coeditBlobPut(plugin: string, view: string, sid: string, name: string, member: { client: string; token: string }, bytes: Uint8Array): Promise<void> {
+    await jsonFetch(coeditBlobUrl(plugin, view, sid, name, member), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: new Blob([bytes as BlobPart]),
+    });
+  }
+
+  async function coeditBlobGet(plugin: string, view: string, sid: string, name: string, member: { client: string; token: string }): Promise<ArrayBuffer> {
+    const res = await rawRequest(coeditBlobUrl(plugin, view, sid, name, member), { cache: 'no-store' });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw requestFailure(res.status, text, lang());
+    }
+    return res.arrayBuffer();
   }
 
   /** `GET /api/files/plugins/actions` — what applies to the caller, and the
@@ -1979,6 +2101,10 @@ export function useFileApi(config: ExplorerConfig) {
     pluginUISave,
     pluginUIRead,
     pluginLicense,
+    coeditJoin,
+    coeditCall,
+    coeditBlobPut,
+    coeditBlobGet,
     fetchResponse,
     createShare,
     listShares,

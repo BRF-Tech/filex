@@ -13,18 +13,24 @@
 // the list every runner takes its Go parts from: these tests hold the chain
 // to that list, so a second list of the chain's own cannot come back.
 
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
   DS_EXTRAS,
+  IO_HEAVY_JOBS,
   JOB_WEIGHTS,
   NIGHTLY_EXTRAS,
   SHARD_LISTS,
+  SHARD_TIMING,
   WEIGHTS,
+  argsEnv,
+  argsShown,
   buildPlan,
   expectedMinutes,
+  ioOf,
   loadLists,
   nightlyExtras,
   parseE2eList,
@@ -34,7 +40,8 @@ import {
   trackWeight,
 } from '../../../scripts/chain/plan.mjs';
 import { KIND, hostJobEnv, jobImages, jobWarnings, parseArgs, parseEnvFile } from '../../../scripts/chain/run.mjs';
-import { pickJobs, poolBudget, poolCeiling, readyJobs, simulate } from '../../../scripts/chain/schedule.mjs';
+import { ioWaits, pickJobs, poolBudget, poolCeiling, readyJobs, simulate } from '../../../scripts/chain/schedule.mjs';
+import { findBash } from '../../../scripts/release/engine.mjs';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
 const CHAIN = path.join(REPO, 'scripts', 'chain');
@@ -44,11 +51,13 @@ const names = (jobs: Array<{ name: string }>) => jobs.map((j) => j.name);
 const shardList = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'test-shards.json'), 'utf8'));
 const shardJobs = (profile: string) => shardList.profiles[profile].map((s: { name: string }) => s.name);
 
-type Job = { name: string; weight: number; prio: number; needs: string[]; kind: string };
+type Job = { name: string; weight: number; prio: number; needs: string[]; kind: string; io?: string };
 const job = (name: string, weight: number, prio = 1, needs: string[] = []): Job => ({ name, weight, prio, needs, kind: 'race' });
+const heavy = (name: string, weight: number, prio = 1): Job => ({ ...job(name, weight, prio), io: 'heavy' });
 
-function budgetOf(plan: ReturnType<typeof buildPlan>, memGb = 8, poolMax = 3) {
-  return { memGb, trackGb: trackWeight(plan.track), dbGb: plan.pool.some((j: { db: boolean }) => j.db) ? WEIGHTS.db : 0, poolMax };
+// ioMax: CHAIN_IO_HEAVY_MAX, 1 on the build host (#194).
+function budgetOf(plan: ReturnType<typeof buildPlan>, memGb = 8, poolMax = 3, ioMax = 1) {
+  return { memGb, trackGb: trackWeight(plan.track), dbGb: plan.pool.some((j: { db: boolean }) => j.db) ? WEIGHTS.db : 0, poolMax, ioMax };
 }
 
 describe('the default lists', () => {
@@ -81,6 +90,19 @@ describe('the default lists', () => {
     }
   });
 
+  it('queue a package -race shard that writes little with the cut shards, not before the -race builds (#174)', () => {
+    const cut = full.pool.filter((j: Job & { env: Record<string, string> }) => j.kind === 'race' && j.env.BIN);
+    const whole = full.pool.filter((j: Job & { env: Record<string, string> }) => j.kind === 'race' && !j.env.BIN);
+    const builds = full.pool.filter((j: Job) => j.kind === 'race-build');
+    for (const j of whole.filter((x: Job) => x.io === 'heavy')) expect(j.prio, j.name).toBe(40);
+    const light = whole.filter((x: Job) => x.io !== 'heavy');
+    expect(names(light)).toEqual(['race-auth']);
+    for (const j of light) {
+      expect(j.prio, j.name).toBeGreaterThan(Math.max(...builds.map((b: Job) => b.prio)));
+      expect(j.prio, j.name).toBeGreaterThan(Math.min(...cut.map((c: Job) => c.prio)));
+    }
+  });
+
   it('run the packages the -run shards cut nowhere else in the -race round', () => {
     const sharded = [...new Set(lists.race.filter((r: { run: string }) => r.run).map((r: { pkgs: string[] }) => r.pkgs[0]))];
     expect(sharded.sort()).toEqual(Object.keys(shardList.units).sort());
@@ -96,7 +118,8 @@ describe('the default lists', () => {
       expect(j.expect, j.name).toBe(table[j.name]);
     }
     const unit = (name: string) => [...Object.values(shardList.units).flat(), ...shardList.packages].find((u: { name: string }) => u.name === name) as { weight_s: number };
-    expect(table['race-handlers-1']).toBe(Math.round((unit('handlers-1').weight_s / 60) * 10) / 10);
+    // The weights are GitHub's runner's seconds (scripts/test-times.json); this host takes HOST_SPEED of them.
+    expect(table['race-handlers-1']).toBe(Math.round((unit('handlers-1').weight_s / 60) * SHARD_TIMING.HOST_SPEED * 10) / 10);
   });
 
   it('name a job kind run.mjs knows and a job script that exists, for every job', () => {
@@ -304,6 +327,87 @@ describe('the profiles', () => {
   });
 });
 
+describe("a browser line's arguments reach Playwright as they were (#244)", () => {
+  // ⚠ 2026-10-10: the arguments went to job/e2e.sh joined with spaces and
+  // e2e.sh split them into words. A targeted run's CHAIN_E2E_GREP="Two people
+  // edit one file together|Editing together: watchers" gave Playwright
+  // `--grep Two` and eight file filters: the spec asked for never ran, the
+  // halves of serial describes in seven others did and went red for being
+  // cut. Another ran most of the suite on three engines.
+  const e2eSh = fs.readFileSync(path.join(CHAIN, 'job', 'e2e.sh'), 'utf8');
+  const runMjs = fs.readFileSync(path.join(CHAIN, 'run.mjs'), 'utf8');
+  // What e2e.sh does with ARGS, from its own text: everything between its
+  // `cd` into the tree and the line that starts reading the shard label.
+  const decode = e2eSh.slice(e2eSh.indexOf('cd /w/src || exit 1\n') + 'cd /w/src || exit 1\n'.length, e2eSh.indexOf('\nLABEL=""'));
+  // Git Bash on Windows, never whatever `bash` the PATH finds first (WSL's
+  // System32 copy): scripts/release/engine.mjs.
+  const bash = findBash();
+  const PATTERNS = [
+    '01-smoke 02-',
+    'Two people edit one file together|Editing together: watchers',
+    '(98|116)-[a-z-]+\\.spec',
+    `a "quoted" title (it's) | the other one`,
+    'two  spaces\tand a tab',
+    '236-app-* ?',
+    ' leading and trailing ',
+  ];
+
+  // The array e2e.sh hands to e2e/run.mjs for this ARGS (NUL after each, on
+  // stdout), and its args= line (on stderr). common.sh sets -u and -f.
+  function e2eArgs(value: string) {
+    const script = `set -u\nset -f\n${decode}\necho "args=\${EXTRA[*]@Q}" >&2\n[ \${#EXTRA[@]} -eq 0 ] || printf '%s\\0' "\${EXTRA[@]}"\n`;
+    const r = spawnSync(bash!, ['-c', script], { encoding: 'utf8', env: { ...process.env, ARGS: value }, windowsHide: true });
+    expect(r.status, r.stderr).toBe(0);
+    const args = r.stdout === '' ? [] : r.stdout.split('\0').slice(0, -1);
+    return { args, line: r.stderr.replace(/\r\n/g, '\n').split('\n').find((l) => l.startsWith('args=')) };
+  }
+
+  it('carries them one a line, and refuses one that holds a line break', () => {
+    expect(argsEnv(['--grep', '01-smoke 02-'])).toBe('--grep\n01-smoke 02-');
+    expect(argsEnv(['--shard', '2/4', '--grep', 'a b'])).toBe('--shard\n2/4\n--grep\na b');
+    expect(argsEnv([])).toBe('');
+    expect(() => argsEnv(['--grep', 'a\nb'], 'e2e-targeted')).toThrow(/e2e-targeted: .*line break/);
+    expect(runMjs).toContain('ARGS: argsEnv(job.args, job.name),');
+    expect(runMjs).not.toMatch(/ARGS: job\.args\.join\(' '\)/);
+    expect(e2eSh).not.toMatch(/read -r -a EXTRA/);
+  });
+
+  it('keeps a targeted run\'s CHAIN_E2E_GREP one argument, and refuses one with a line break before the run starts', () => {
+    for (const p of PATTERNS) {
+      const plan = buildPlan({ profile: 'targeted', lists, env: { CHAIN_E2E_GREP: p } });
+      expect(plan.track[0].args).toEqual(['--grep', p]);
+      expect(argsEnv(plan.track[0].args).split('\n')).toEqual(['--grep', p]);
+    }
+    expect(() => buildPlan({ profile: 'targeted', lists, env: { CHAIN_E2E_GREP: 'a\nb' } })).toThrow(/e2e-targeted: .*line break/);
+    expect(() => buildPlan({ profile: 'targeted', lists, env: { CHAIN_CY_SPECS: 'a.cy.ts\nb.cy.ts' } })).toThrow(/e2e-cypress: .*line break/);
+  });
+
+  it.skipIf(!bash)('e2e.sh hands e2e/run.mjs each argument whole: spaces, |, parentheses, quotes, a tab, a glob', () => {
+    for (const p of PATTERNS) {
+      const { args, line } = e2eArgs(argsEnv(['--grep', p]));
+      expect(args, p).toEqual(['--grep', p]);
+      // Quoted whole ($'...' when it holds a tab).
+      expect(line).toMatch(/^args='--grep' \$?'/);
+    }
+    // The two-part pattern of a run that checks this on the build host.
+    expect(e2eArgs(argsEnv(['--grep', '01-smoke 02-'])).line).toBe("args='--grep' '01-smoke 02-'");
+    // A line of the list: its words, as before; a part's label still found.
+    expect(e2eArgs(argsEnv(['--shard', '2/4', '--grep', 'x'])).args).toEqual(['--shard', '2/4', '--grep', 'x']);
+    expect(e2eArgs('').args).toEqual([]);
+    expect(e2eArgs('').line).toBe('args=');
+    // And it hands them on as they are.
+    expect(e2eSh).toContain('node e2e/run.mjs local --binary "$BIN" "${PORTARG[@]}" "${EXTRA[@]}"');
+    expect(e2eSh).toContain('echo "kind=$KIND engines=${ENGINES:--} ds=${DS:-0} args=${EXTRA[*]@Q}"');
+  });
+
+  it('shows them in --plan as a shell would take them', () => {
+    expect(argsShown(['--grep', '01-smoke 02-'])).toBe("--grep '01-smoke 02-'");
+    expect(argsShown(['--shard', '2/4', '--grep', '236-app-vault-edit'])).toBe('--shard 2/4 --grep 236-app-vault-edit');
+    expect(argsShown(['--grep', "it's (a|b)"])).toBe("--grep 'it'\\''s (a|b)'");
+    expect(runMjs).toContain('${t.args.length ? `  ${argsShown(t.args)}` : \'\'}');
+  });
+});
+
 describe('the scheduler', () => {
   it('reserves memory for a job that does not fit, so lighter jobs behind it cannot take it', () => {
     const big = job('big', 3, 1);
@@ -380,9 +484,11 @@ describe('a full run, replayed with the minutes the build host measured', () => 
   const sim = simulate(full, { ...b, minutes: expectedMinutes });
   const at = (name: string) => sim.timeline.find((e: { name: string }) => e.name === name);
 
-  it('never holds more than the 8 GiB budget, and runs at most three pool jobs at once', () => {
+  it('never holds more than the 8 GiB budget, and runs at most three pool jobs at once, and the one heavy writer', () => {
     expect(sim.peakGb).toBeLessThanOrEqual(8 + 1e-9);
-    expect(sim.maxRunning).toBeLessThanOrEqual(3);
+    // The heavy writer runs in its own lane, in the place the round's heavy line held (#194).
+    expect(sim.maxRunning).toBeLessThanOrEqual(3 + 1);
+    expect(sim.maxHeavy).toBe(1);
   });
 
   it('runs -race next to Chromium: two or three race jobs while it runs', () => {
@@ -406,9 +512,12 @@ describe('a full run, replayed with the minutes the build host measured', () => 
     expect(s.wall).toBeLessThanOrEqual(180);
   });
 
-  it('starts the web gates once the databases have let go, not beside the round and the databases (#194)', () => {
+  it('starts the web gates once the databases or the round have let go, not beside the round and the databases (#194)', () => {
     const lastDb = Math.max(...sim.timeline.filter((e: { name: string }) => full.pool.find((j: Job & { db: boolean }) => j.name === e.name)?.db).map((e: { end: number }) => e.end));
-    expect(at('web').start).toBeGreaterThanOrEqual(lastDb);
+    const roundEnd = Math.max(...full.track.map((t: Job) => at(t.name).end));
+    // go-io-rest, a Go job beside the databases, writes heavily: it waits for
+    // the round's heavy lines, and the databases stay up until it ends.
+    expect(at('web').start >= lastDb || at('web').start >= roundEnd, `web at ${at('web').start}, databases until ${lastDb}, round until ${roundEnd}`).toBe(true);
   });
 });
 
@@ -430,6 +539,101 @@ describe('a run on a host with less to give (#194)', () => {
   });
 });
 
+describe('the disk: one heavy writer at a time (#194)', () => {
+  // ⚠ The two full runs of 2026-10-09 kept their memory under the budget and
+  // still stalled the build host's disk (writes of 2.0 and 4.7 s, the host
+  // stalled 65 and 90 s): every stall had a Playwright line beside race-db-io
+  // and race-rest, or go-io-rest beside Chromium, and the tests that wait a
+  // fixed time went red in those minutes (168, 172, 213). result.json
+  // `load.written_gb`: Firefox 11.4, Chromium 3.4-4.5, WebKit 2.7, race-rest
+  // 1.3-2.1, go-io-rest 1.0-1.7, race-db-io 0.6-1.4; every other job of the
+  // full run 0.8 at most. race-auth (#174: cut from race-rest and race-db-io)
+  // is light until a night measures it (plan.mjs IO_HEAVY_JOBS says why).
+  const HEAVY = ['e2e-chromium', 'e2e-firefox', 'e2e-webkit', 'go-io-rest', 'race-db-io', 'race-rest'];
+  const heavyOf = (plan: ReturnType<typeof buildPlan>) =>
+    [...plan.pool, ...plan.track].filter((j: Job) => j.io === 'heavy').map((j: Job) => j.name).sort();
+
+  it('marks the writers it measured heavy, and every other job of the full run light', () => {
+    expect(heavyOf(full)).toEqual(HEAVY);
+    for (const j of [...full.pool, ...full.track]) expect(['heavy', 'light'], j.name).toContain(j.io);
+  });
+
+  it('names a job of the full plan in IO_HEAVY_JOBS: a renamed shard cannot silently lose its mark', () => {
+    for (const name of IO_HEAVY_JOBS) {
+      const j = full.pool.find((x: Job) => x.name === name);
+      expect(j, `${name} is no job of the full plan: rename it in IO_HEAVY_JOBS`).toBeTruthy();
+      expect(j.io, name).toBe('heavy');
+    }
+  });
+
+  it('takes a Playwright line that runs the suite, or a part of it, for heavy, and one a --grep narrows for light', () => {
+    const [whole, part, grep, cy] = parseE2eList(
+      ['chromium local chromium 1', 'chromium-2 local chromium 1 --shard 2/4', 'nods local chromium 0 --grep 90-deployment-smoke', 'cypress cypress - 0'].join('\n'),
+    );
+    expect([whole, part, grep, cy].map((t) => ioOf(t))).toEqual(['heavy', 'heavy', 'light', 'light']);
+    expect(ioOf({ name: 'shots', kind: 'shots' })).toBe('heavy');
+    expect(ioOf({ name: 'race-handlers-1', kind: 'race' })).toBe('light');
+  });
+
+  it('starts no heavy pool job beside the round\'s heavy line, and lets the light jobs behind it go on', () => {
+    const io = heavy('race-db-io', 1.5, 40);
+    const shard = job('race-handlers-1', 1, 50);
+    // ioHeld: the round's heavy line runs, or is about to start.
+    expect(pickJobs({ ready: [io, shard], running: [], budget: 2, maxJobs: 3, ioMax: 1, ioHeld: 1 })).toEqual([shard]);
+    expect(pickJobs({ ready: [io, shard], running: [], budget: 3, maxJobs: 3, ioMax: 1, ioHeld: 0 })).toEqual([io, shard]);
+    // No limit (CHAIN_IO_HEAVY_MAX=0): as before.
+    expect(pickJobs({ ready: [io, shard], running: [], budget: 3, maxJobs: 3, ioMax: 0, ioHeld: 1 })).toEqual([io, shard]);
+  });
+
+  it('runs one heavy pool job at a time', () => {
+    const a = heavy('race-db-io', 1.5, 40);
+    const b = heavy('race-rest', 1.5, 40);
+    expect(pickJobs({ ready: [a, b], running: [], budget: 7, maxJobs: 3, ioMax: 1 })).toEqual([a]);
+    expect(pickJobs({ ready: [b], running: [a], budget: 7, maxJobs: 3, ioMax: 1 })).toEqual([]);
+    expect(pickJobs({ ready: [a, b], running: [], budget: 7, maxJobs: 3, ioMax: 2 })).toEqual([a, b]);
+  });
+
+  it('gives the heavy writer a lane of its own: the light jobs that filled the pool through the round do not hold it back', () => {
+    const io = heavy('go-io-rest', 1.25, 26);
+    const light = [1, 2, 3].map((i) => job(`race-handlers-${i}`, 1, 50 + i));
+    expect(pickJobs({ ready: [io], running: light, budget: 7, maxJobs: 3, ioMax: 1 })).toEqual([io]);
+    expect(pickJobs({ ready: [job('race-handlers-4', 1, 54)], running: [...light.slice(0, 2), io], budget: 7, maxJobs: 3, ioMax: 1 })).toEqual([
+      job('race-handlers-4', 1, 54),
+    ]);
+    // Without the limit a heavy job is one of the pool's maxJobs, as before.
+    expect(pickJobs({ ready: [io], running: light, budget: 7, maxJobs: 3, ioMax: 0 })).toEqual([]);
+  });
+
+  it("holds the round's heavy line while a heavy pool job runs, never a light one", () => {
+    const line = { name: 'e2e-firefox', io: 'heavy' };
+    expect(ioWaits(line, [heavy('race-rest', 1.5)], 1)).toBe(true);
+    expect(ioWaits(line, [job('race-handlers-1', 1)], 1)).toBe(false);
+    expect(ioWaits({ name: 'e2e-nods', io: 'light' }, [heavy('race-rest', 1.5)], 1)).toBe(false);
+    expect(ioWaits(line, [heavy('race-rest', 1.5)], 0)).toBe(false);
+  });
+
+  for (const profile of ['full', 'nightly'] as const) {
+    it(`never runs two heavy writers at once in a ${profile} run, the round's lines included`, () => {
+      const plan = profile === 'full' ? full : buildPlan({ profile, lists, src: REPO });
+      for (const memGb of [8, 6.75]) {
+        const s = simulate(plan, { ...budgetOf(plan, memGb), minutes: expectedMinutes });
+        expect(s.maxHeavy, `${profile} ${memGb}`).toBe(1);
+        const heavyRuns = s.timeline.filter((e: { name: string }) => [...plan.pool, ...plan.track].find((j: Job) => j.name === e.name)?.io === 'heavy');
+        for (const x of heavyRuns) {
+          for (const y of heavyRuns) {
+            if (x !== y) expect(x.start >= y.end || y.start >= x.end, `${x.name} beside ${y.name} (${profile} ${memGb})`).toBe(true);
+          }
+        }
+      }
+    });
+  }
+
+  it('ran them together before: Chromium beside race-db-io and race-rest, the minutes the disk stalled', () => {
+    const s = simulate(full, { ...budgetOf(full, 8, 3, 0), minutes: expectedMinutes });
+    expect(s.maxHeavy).toBeGreaterThanOrEqual(3);
+  });
+});
+
 describe('what run.mjs does with the host (#194)', () => {
   const runMjs = fs.readFileSync(path.join(CHAIN, 'run.mjs'), 'utf8');
   const webSh = fs.readFileSync(path.join(CHAIN, 'job', 'web.sh'), 'utf8');
@@ -446,7 +650,7 @@ describe('what run.mjs does with the host (#194)', () => {
   it("gives a Go test job a tmpfs /tmp that may run what is written there, and keeps the Go build directory on the disk", () => {
     for (const k of ['go', 'race', 'ds-go', 's3-live']) expect(KIND[k].tmp, k).toBe(true);
     for (const k of ['build', 'web', 'docs', 'e2etsc', 'shards-check', 'race-build', 'migrate', 'realenv']) expect(KIND[k].tmp, k).toBeFalsy();
-    // Not a browser line: spec 173 writes a 1.1 GB file and a 207 MB one under /tmp.
+    // Not a browser line's: that one is `browserTmp`, of its own size (below).
     for (const k of ['cypress', 'local', 'nopub', 's3', 'shots']) expect(KIND[k].tmp, k).toBeFalsy();
     expect(runMjs).toContain("tmp.push('--tmpfs', `/tmp:rw,exec,nosuid,nodev,size=${c.tmpfsGb}g,mode=1777`)");
     expect(runMjs).toMatch(/if \(k\.tmp && k\.image === 'go' && c\.tmpfsGb > 0\) env\.GOTMPDIR = '\/w\/run\/tmp';/);
@@ -466,12 +670,67 @@ describe('what run.mjs does with the host (#194)', () => {
     expect(pw).toMatch(/video: 'retain-on-failure'/);
   });
 
+  it("gives a Playwright line a tmpfs /tmp of its own size: the browser's profile, the server's data directory, Chromium's shared memory", () => {
+    // ⚠ The build host's night of 2026-10-09: everything the Firefox line
+    // wrote (11.8 GB) went under /tmp - its contexts' Cache API storage, its
+    // profile, the server's index and database, the specs' storages - with 74
+    // fsyncs a second; the Chromium line wrote its shared memory files
+    // (Playwright's --disable-dev-shm-usage) and the server's. The same 125
+    // Firefox tests wrote 2.11 GiB with /tmp on the disk and nothing on this
+    // tmpfs, in 4 min 19 s against 7 min 51 s.
+    for (const k of ['local', 'nopub', 's3']) expect(KIND[k].browserTmp, k).toBe(true);
+    for (const k of ['cypress', 'realenv', 'go', 'race', 'ds-go', 's3-live', 'web', 'build', 'docs', 'e2etsc']) {
+      expect(KIND[k].browserTmp, k).toBeFalsy();
+    }
+    // One /tmp mount a container: docker refuses a second at the same point.
+    for (const [name, k] of Object.entries(KIND)) expect(Boolean(k.tmp && k.browserTmp), name).toBe(false);
+    expect(runMjs).toMatch(/browserTmpGb: num\('CHAIN_BROWSER_TMPFS_GB', 6\)/);
+    expect(runMjs).toContain(
+      "if (k.browserTmp && c.browserTmpGb > 0) tmp.push('--tmpfs', `/tmp:rw,exec,nosuid,nodev,size=${c.browserTmpGb}g,mode=1777`);",
+    );
+    // The mounts go before the image: everything after it is the job's command.
+    const args = runMjs.slice(runMjs.indexOf('  containerArgs(job) {'));
+    expect(args.indexOf('...tmp, ...user, ...mounts')).toBeLessThan(args.indexOf("c.images[k.image], 'bash'"));
+    const example = fs.readFileSync(path.join(CHAIN, 'chain.env.example'), 'utf8');
+    expect(example).toMatch(/^# CHAIN_BROWSER_TMPFS_GB=6$/m);
+  });
+
+  it('gives the shots job the same tmpfs /tmp: the same harness, and it runs the binary it builds from there', () => {
+    // Two nights before 2026-10-10: the shots job wrote 1.3 and 1.43 GiB
+    // (Chromium, a filex server a scene). What it writes besides its pictures
+    // is under /tmp: its run directory - the stamped binary, each scene's
+    // server data - the browser's profile and Chromium's shared memory.
+    expect(KIND.shots.browserTmp).toBe(true);
+    expect(KIND.shots.tmp).toBeFalsy();
+    const shotsMjs = fs.readFileSync(path.join(REPO, 'scripts', 'shots.mjs'), 'utf8');
+    expect(shotsMjs).toContain('runDir = fs.mkdtempSync(path.join(os.tmpdir(), RUN_PREFIX));');
+    expect(shotsMjs).toContain("runBin = path.join(runDir, IS_WIN ? 'filex.exe' : 'filex');");
+    // So the tmpfs must let it run what is there (exec), as the disk did.
+    expect(runMjs).toContain('`/tmp:rw,exec,nosuid,nodev,size=${c.browserTmpGb}g,mode=1777`');
+    // The pictures stay in the tree and are copied to the run, as before.
+    const shotsSh = fs.readFileSync(path.join(CHAIN, 'job', 'shots.sh'), 'utf8');
+    expect(shotsSh).toContain('[ -d "$REL" ] && cp -a "$REL/." "$OUT/screenshots/"');
+    // Still a heavy writer to the scheduler until a night measures it again.
+    expect(ioOf({ name: 'shots', kind: 'shots', args: [] })).toBe('heavy');
+  });
+
   it('starts one pool job per CHAIN_START_GAP_S, and none while the host is stalled (for at most CHAIN_PSI_WAIT_MIN)', () => {
-    expect(runMjs).toMatch(/const picks = this\.trackWaiting \? \[\] : pickJobs\(\{ ready, running: runningPool, budget, ceiling, maxJobs: this\.cfg\.poolMax \}\);/);
+    expect(runMjs).toMatch(/const picks = this\.trackWaiting \? \[\] : pickJobs\(\{ ready, running: runningPool, budget, ceiling, maxJobs: this\.cfg\.poolMax, ioMax: this\.cfg\.ioHeavyMax, ioHeld \}\);/);
     expect(runMjs).toMatch(/if \(picks\.length && this\.admit\(\)\) \{/);
     expect(runMjs).toMatch(/if \(this\.cfg\.startGapS > 0\) break;/);
     expect(runMjs).toMatch(/memMax: num\('CHAIN_PSI_MEM_MAX', 0\.1\)/);
     expect(runMjs).toMatch(/if \(held < waitMin \* 60_000\) return false;/);
+  });
+
+  it('runs one heavy writer at a time unless CHAIN_IO_HEAVY_MAX says otherwise, and records how long the round waited for the disk', () => {
+    expect(runMjs).toMatch(/ioHeavyMax: num\('CHAIN_IO_HEAVY_MAX', 1\)/);
+    expect(runMjs).toMatch(/ioWaitMin: num\('CHAIN_IO_WAIT_MIN', 45\)/);
+    // The round's line holds the pool's heavy jobs back from the moment the
+    // round turns to it, and waits for the heavy ones running before it starts.
+    expect(runMjs).toMatch(/this\.trackIo = job\.io === 'heavy';\n[^\n]*await this\.cool\(job\);\n\s*await this\.trackMemory\(job\);\n\s*await this\.trackDisk\(job\);\n\s*await this\.startJob\(job, 'e2e'\);\n\s*this\.trackIo = false;/);
+    expect(runMjs).toMatch(/const ioHeld = this\.trackIo \? 1 : 0;/);
+    expect(runMjs).toMatch(/io_wait_secs: Math\.round\(h\.ioWaitMs \/ 1000\)/);
+    expect(runMjs).toMatch(/return \{ memGb, trackGb, dbGb, poolMax: cfg\.poolMax, ioMax: cfg\.ioHeavyMax \};/);
   });
 
   it('waits for a cool disk at most CHAIN_TEMP_WAIT_TOTAL_MIN in a whole run', () => {

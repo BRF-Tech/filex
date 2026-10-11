@@ -190,6 +190,23 @@ describe('viewer overlay chrome', () => {
     expect(coreStyles).toMatch(/\.fe-viewer__chev--next\s*\{\s*inset-inline-end:\s*var\(--fe-viewer-chev-inset\)/);
   });
 
+  // #217 (filex-office-editor 0.1.0 on a 390 px phone): the gutter a filled
+  // stage keeps for the chevrons took 84 px of the screen and squeezed the
+  // app's interface to 306 px. On a narrow screen there is no gutter: the
+  // chevrons lie over the surface's edges. (jsdom draws no layout: the rule
+  // is read; e2e 175 measures the frame on a phone.)
+  it('keeps no gutter on a phone: the chevrons lie over the surface (#217)', () => {
+    // The viewer's narrow-screen block: the one that resizes the chevrons.
+    const sizes = coreStyles.indexOf('--fe-viewer-chev-size: var(--fe-h-md);');
+    expect(sizes, 'the viewer’s narrow-screen block').toBeGreaterThanOrEqual(0);
+    const open = coreStyles.lastIndexOf('@media (max-width: 640px) {', sizes);
+    const close = coreStyles.indexOf('/* === /gorunum:v1-viewer === */', sizes);
+    expect(open).toBeGreaterThanOrEqual(0);
+    expect(close).toBeGreaterThan(sizes);
+    const narrow = coreStyles.slice(open, close);
+    expect(narrow).toMatch(/\.fe-viewer__stage--gutter\s*\{\s*padding-inline:\s*0;?\s*\}/);
+  });
+
   // #110: after a save made in the viewer the header still said the size and
   // date the file had when it was opened (filextext re-keyed its workspace
   // after a password reset: a new version on the storage, "1.92 KB" on top).

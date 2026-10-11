@@ -22,19 +22,22 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { parseEnvFile } from '../../../scripts/lib/settings.mjs';
-import { findBash } from '../../../scripts/release/engine.mjs';
+import { Gates, findBash } from '../../../scripts/release/engine.mjs';
 import { releaseAssets } from '../../../scripts/release/plan.mjs';
 import {
   AFTER,
   DESKTOP_ASSETS,
+  HELM_POLL_SECS,
   SAFE,
   STEPS,
   bashArray,
   buildSteps,
+  indexAppVersions,
   newestMigration,
   parseArgs,
   personLines,
   posixPath,
+  publishHelm,
   remoteRunner,
   shipSettings,
   unpublishable,
@@ -71,9 +74,11 @@ const ENV: Record<string, string> = {
   SHIP_DOCS_REFRESH: 'bash /srv/docs-refresh.sh --force',
   SHIP_REVENDOR_CMD: 'bash /x/revendor.sh --apply --force',
   SHIP_EMBEDS_DEPLOY_CMD: 'bash /x/deploy-embeds.sh',
+  SHIP_HELM_CMD: 'gh workflow run publish.yml -R example-org/helm-charts',
+  SHIP_HELM_INDEX: 'https://charts.example.com/index.yaml',
 };
 
-type Step = { id: string; title: string; person?: string[]; gate?: { sh?: string | (() => string); cmd?: string[]; check?: unknown; cwd?: string } };
+type Step = { id: string; title: string; plan?: string; person?: string[]; gate?: { sh?: string | (() => string); cmd?: string[]; check?: unknown; cwd?: string } };
 
 function steps(env: Record<string, string> = ENV, extra: Record<string, unknown> = {}) {
   const { cfg, problems } = shipSettings(env);
@@ -89,6 +94,7 @@ function steps(env: Record<string, string> = ENV, extra: Record<string, unknown>
     preflight: () => ({ ok: true }),
     releases: () => ({ ok: true }),
     npm: () => ({ ok: true }),
+    helm: () => ({ ok: true }),
     ...extra,
   };
   return { cfg, problems, runDir, list: buildSteps(cfg, ctx) as Step[] };
@@ -123,9 +129,21 @@ describe('the settings', () => {
     expect(shipSettings({ SHIP_HOST: 'h' }).problems.join('\n')).toContain('SHIP_INSTANCES');
   });
 
+  it('take the helm step its command, an index URL and minutes, 15 by default', () => {
+    const { cfg } = shipSettings(ENV);
+    expect(cfg.helmCmd).toBe('gh workflow run publish.yml -R example-org/helm-charts');
+    expect(cfg.helmIndex).toBe('https://charts.example.com/index.yaml');
+    expect(cfg.helmWait).toBe(15);
+    expect(shipSettings({ ...ENV, SHIP_HELM_WAIT: '5' }).cfg.helmWait).toBe(5);
+    const bad = shipSettings({ ...ENV, SHIP_HELM_INDEX: 'charts.example.com/index.yaml', SHIP_HELM_WAIT: 'soon' }).problems.join('\n');
+    expect(bad).toContain('SHIP_HELM_INDEX');
+    expect(bad).toContain('SHIP_HELM_WAIT');
+  });
+
   it('the example in the repository is valid as it is, and names no real host or name', () => {
     const text = fs.readFileSync(path.join(TRAIN, 'train.env.example'), 'utf8');
     expect(shipSettings(parseEnvFile(text)).problems).toEqual([]);
+    for (const k of ['SHIP_HELM_CMD=', 'SHIP_HELM_INDEX=', 'SHIP_HELM_WAIT=']) expect(text).toContain(k);
     expect(text).not.toMatch(/brf\.sh/);
     if (fs.existsSync(EXPORTER)) {
       for (const n of bashArray(fs.readFileSync(EXPORTER, 'utf8'), 'private_names')) expect(text.toLowerCase()).not.toContain(n.toLowerCase());
@@ -217,6 +235,169 @@ describe('the steps', () => {
     expect(lines).toContain('node scripts/langpacks.mjs release 0.53.0');
     expect(lines).not.toContain('pack.mjs sync');
     expect(personLines(cfg, { tag: 'v0.53.0', version: '0.53.0', releasesCommit: 'abcdef0123456789' }).join('\n')).toContain('abcdef0123 "docs(releases): v0.53.0"');
+  });
+});
+
+// ── the helm step: start the charts repository's publishing, read the index ──
+//
+// ⚠ Why (#247): the charts repository publishes every release on a ten-minute
+// schedule, and on a new repository GitHub did not start that schedule for
+// hours - a released filex had no chart and nobody noticed. The ship now
+// starts the publishing itself and does not stop reading the index until the
+// release is in it.
+
+const helmIndex = (filex: string[], other: string[] = ['v0.56.0']) =>
+  [
+    'apiVersion: v1',
+    'entries:',
+    '  filex:',
+    ...filex.flatMap((a, i) => ['  - apiVersion: v2', `    appVersion: ${a}`, '    name: filex', `    version: 0.2.${60 - i}`]),
+    '  other-chart:',
+    ...other.flatMap((a) => ['  - apiVersion: v2', `    appVersion: "${a}"`, '    name: other-chart', '    version: 1.0.0']),
+    'generated: "2026-10-10T18:24:18Z"',
+    '',
+  ].join('\n');
+
+function helmWorld(reads: Array<string | Error>, { status = 0 } = {}) {
+  let t = 1_000_000;
+  const calls = { run: [] as string[], sleeps: [] as number[], reads: 0, said: [] as string[] };
+  return {
+    calls,
+    deps: {
+      cmd: ENV.SHIP_HELM_CMD,
+      index: ENV.SHIP_HELM_INDEX,
+      appVersion: 'v0.56.0',
+      now: () => t,
+      sleep: async (ms: number) => {
+        calls.sleeps.push(ms);
+        t += ms;
+      },
+      fetchText: async (url: string) => {
+        expect(url).toBe(ENV.SHIP_HELM_INDEX);
+        const r = reads[Math.min(calls.reads++, reads.length - 1)];
+        if (r instanceof Error) throw r;
+        return r;
+      },
+      runCmd: (cmd: string) => {
+        calls.run.push(cmd);
+        return status === 0 ? { status, stdout: 'https://github.com/example-org/helm-charts/actions/runs/1\n', stderr: '' } : { status, stdout: '', stderr: 'HTTP 403: Must have admin rights to Repository.' };
+      },
+      progress: (m: string) => calls.said.push(m),
+    },
+  };
+}
+
+describe('the helm step', () => {
+  it('is listed after the Releases page, waits only for the preflight, and is the check the run gives it', () => {
+    expect(STEPS.indexOf('helm')).toBe(STEPS.indexOf('releases') + 1);
+    expect(AFTER.helm).toEqual(['preflight']);
+    const helm = () => ({ ok: true, detail: 'here' });
+    const { list } = steps(ENV, { helm });
+    const s = byId(list, 'helm');
+    expect(s.person).toBeUndefined();
+    expect(s.gate!.check).toBe(helm);
+    expect(s.plan).toContain('gh workflow run publish.yml -R example-org/helm-charts');
+    expect(s.plan).toContain(`https://charts.example.com/index.yaml every ${HELM_POLL_SECS} s until it lists filex v0.53.0 (at most 15 min)`);
+    expect(list.map((x) => x.id).slice(STEPS.indexOf('releases'), STEPS.indexOf('releases') + 3)).toEqual(['releases', 'helm', 'docs']);
+    expect(parseArgs(['0.53.0', '--only', 'helm']).only).toEqual(['helm']);
+  });
+
+  it('still runs when the Releases page is red (a summary not written yet does not hold the chart back)', async () => {
+    const ran: string[] = [];
+    const { list } = steps(ENV, {
+      preflight: () => (ran.push('preflight'), { ok: true }),
+      releases: () => (ran.push('releases'), { ok: false, detail: 'no "v0.53.0" summary' }),
+      helm: () => (ran.push('helm'), { ok: true, detail: 'listed' }),
+    });
+    const pick = ['preflight', 'releases', 'helm', 'docs'];
+    const names = Object.fromEntries(pick.map((id) => [id, `${id}: ${byId(list, id).title}`]));
+    const specs = pick.map((id) => ({
+      ...(id === 'docs' ? { check: () => (ran.push('docs'), { ok: true }) } : byId(list, id).gate),
+      name: names[id],
+      after: (AFTER[id] as string[]).filter((d) => names[d]).map((d) => names[d]),
+    }));
+    const runner = new Gates({ logsDir: path.join(tmp(), 'logs'), bash: BASH, repo: REPO });
+    const ok = await runner.all('ship', specs, {}, { jobs: 4 });
+    expect(ok).toBe(false);
+    const verdict = Object.fromEntries(runner.results.map((r: { name: string; ok: boolean; detail: string }) => [r.name.split(':')[0], r]));
+    expect(verdict.releases.ok).toBe(false);
+    expect(verdict.helm.ok, verdict.helm.detail).toBe(true);
+    expect(ran).toContain('helm');
+    expect(verdict.docs.ok).toBe(false);
+    expect(verdict.docs.detail).toContain('not run');
+    expect(ran).not.toContain('docs');
+  });
+
+  it('is left to a person, naming the setting that is missing, when it is not set up', () => {
+    for (const [drop, keep] of [
+      ['SHIP_HELM_CMD', 'SHIP_HELM_INDEX'],
+      ['SHIP_HELM_INDEX', 'SHIP_HELM_CMD'],
+    ]) {
+      const env = { ...ENV };
+      delete env[drop];
+      const s = byId(steps(env).list, 'helm');
+      expect(s.gate).toBeUndefined();
+      const text = s.person!.join(' ');
+      expect(text).toContain(drop);
+      expect(text).not.toContain(keep);
+      expect(text).toContain('filex v0.53.0');
+    }
+  });
+
+  it('reads the appVersions of one chart from an index, quoted or not', () => {
+    expect(indexAppVersions(helmIndex(['v0.55.0', 'v0.54.0']), 'filex')).toEqual(['v0.55.0', 'v0.54.0']);
+    expect(indexAppVersions(helmIndex(['v0.55.0']), 'other-chart')).toEqual(['v0.56.0']);
+    expect(indexAppVersions(helmIndex([]), 'filex')).toEqual([]);
+    expect(indexAppVersions('apiVersion: v1\nentries:\n  "filex":\n    - appVersion: "v0.56.0"  # quoted\n      name: filex\n', 'filex')).toEqual(['v0.56.0']);
+    expect(indexAppVersions('apiVersion: v1\nentries: {}\n', 'filex')).toEqual([]);
+    expect(indexAppVersions('<html>not an index</html>', 'filex')).toEqual([]);
+  });
+
+  it('starts nothing when the index already lists the release', async () => {
+    const w = helmWorld([helmIndex(['v0.56.0', 'v0.55.0'])]);
+    const r = await publishHelm({ ...w.deps, minutes: 15 });
+    expect(r.ok).toBe(true);
+    expect(r.detail).toContain('already lists filex v0.56.0');
+    expect(w.calls.run).toEqual([]);
+    expect(w.calls.sleeps).toEqual([]);
+  });
+
+  it("runs the command once, then reads the index every 30 seconds until the release is in it - another chart's appVersion does not count", async () => {
+    const w = helmWorld([helmIndex(['v0.55.0']), helmIndex(['v0.55.0']), new Error('HTTP 502'), helmIndex(['v0.56.0', 'v0.55.0'])]);
+    const r = await publishHelm({ ...w.deps, minutes: 15 });
+    expect(r.ok, r.detail).toBe(true);
+    expect(r.detail).toBe('https://charts.example.com/index.yaml lists filex v0.56.0');
+    expect(w.calls.run).toEqual(['gh workflow run publish.yml -R example-org/helm-charts']);
+    expect(w.calls.sleeps).toEqual([30_000, 30_000, 30_000]);
+    expect(w.calls.said.join('\n')).toContain('could not be read (HTTP 502)');
+    expect(r.log).toContain('actions/runs/1');
+  });
+
+  it('is red at once, with what the command said, when the command fails', async () => {
+    const w = helmWorld([helmIndex(['v0.55.0'])], { status: 1 });
+    const r = await publishHelm({ ...w.deps, minutes: 15 });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('SHIP_HELM_CMD exited 1');
+    expect(r.detail).toContain('Must have admin rights');
+    expect(w.calls.sleeps).toEqual([]);
+  });
+
+  it('is red after the minutes it is given, saying what it saw and what to look at', async () => {
+    const w = helmWorld([helmIndex(['v0.55.0', 'v0.54.0'])]);
+    const r = await publishHelm({ ...w.deps, minutes: 2 });
+    expect(r.ok).toBe(false);
+    expect(w.calls.run).toHaveLength(1);
+    expect(w.calls.sleeps).toEqual([30_000, 30_000, 30_000, 30_000]);
+    expect(r.detail).toContain('after 2 min https://charts.example.com/index.yaml still does not list filex v0.56.0 (it lists filex v0.55.0, v0.54.0)');
+    expect(r.detail).toContain('deploy/helm/filex/Chart.yaml');
+    expect(r.detail).toContain('bash scripts/train/filex-ship.sh 0.56.0 --only helm');
+  });
+
+  it('reads the index once more after starting, even with no minutes to wait', async () => {
+    const w = helmWorld([helmIndex(['v0.55.0']), helmIndex(['v0.56.0'])]);
+    const r = await publishHelm({ ...w.deps, minutes: 0 });
+    expect(r.ok, r.detail).toBe(true);
+    expect(w.calls.sleeps).toEqual([30_000]);
   });
 });
 

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createI18n } from 'vue-i18n';
 import { createMemoryHistory, createRouter } from 'vue-router';
+import { createPinia } from 'pinia';
 
 import en from '@/locales/en.json';
 import Editor from '@/views/Editor.vue';
@@ -62,7 +63,7 @@ async function openEditor(query: string) {
   await router.push(`/files/edit?${query}`);
   await router.isReady();
   const i18n = createI18n({ legacy: false, locale: 'en', messages: { en } });
-  const w = mount({ template: '<router-view />' }, { global: { plugins: [router, i18n] }, attachTo: document.body });
+  const w = mount({ template: '<router-view />' }, { global: { plugins: [router, i18n, createPinia()] }, attachTo: document.body });
   await settle();
   return w;
 }

@@ -5,14 +5,18 @@
 //
 // Writes e2e/.artifacts/shots/capture/loginsecurity/ (or SHOTS_OUT):
 //
-//   login-security-1440.png   Admin → Sign-in security, whole page: the limit
-//                             numbers, the allowed addresses with "add my
+//   login-security-page-1440.png  Admin → Sign-in security, whole page: the
+//                             limit numbers, the allowed addresses with "add my
 //                             address", the trusted proxies (the automatic
 //                             switch and what it resolved to and why, the
 //                             loopback, private and link-local switches, the
 //                             addresses, where the list in force came from),
 //                             the locks and the trail
-//   login-security-958.png    the same page at the narrowest desktop width
+//   login-security-1440.png   the same page's first screen, ending under the
+//                             allowed addresses: the picture the README's
+//                             half-width cell can show (the whole page is
+//                             5684px tall there, and reads as a grey strip)
+//   login-security-958.png    the whole page at the narrowest desktop width
 //   login-locked-1440.png     the sign-in form after the account was locked:
 //                             the sentence and the button, counting down
 //   login-remaining-1440.png  the sign-in form after a wrong password with
@@ -35,6 +39,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
+import { endBelow } from './frame.mjs';
 import { REPO, bootInstance, client, layoutProblems, log, mustSay, newContext, setLanguage, shot, signIn, sleep } from './scene.mjs';
 
 /**
@@ -208,7 +213,16 @@ async function main() {
       }
       await mustSay(page.getByTestId('login-locks'), 'the locks table', ['Locked for', 'Counting', 'Account', 'Address']);
       await mustSay(page.getByTestId('login-attempts'), 'the trail', ['Wrong attempt', 'Locked', 'Web form', 'Wrong password']);
-      await shot(page, SET, `login-security-${width}.png`);
+      await shot(page, SET, width === 1440 ? 'login-security-page-1440.png' : `login-security-${width}.png`);
+      if (width === 1440) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.evaluate(() => (document.scrollingElement ?? document.documentElement).scrollTo(0, 0));
+        await endBelow(page, '[data-testid="login-allowlist-form"]', { pad: 12, what: 'login-security-1440.png' });
+        await page.mouse.move(4, 4);
+        await sleep(400);
+        await mustSay(page.getByTestId('login-allowlist-form'), 'the allowed addresses', ['Allowed addresses', 'Add my address', '192.0.2.0/24']);
+        await shot(page, SET, 'login-security-1440.png');
+      }
     }
 
     // ── the sign-in form, signed out ────────────────────────────────────────

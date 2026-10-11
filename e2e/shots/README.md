@@ -42,8 +42,10 @@ published, and no page links one, that nobody looked at
    (`scripts/lib/shots-site.mjs`, `sceneDigest`) from:
    - the script and every module it imports by a relative path (not
      `release.mjs`, whose one variable is the release number);
-   - the fixtures the scenes upload (`e2e/fixtures`) and the board app
-     (`board-app/`);
+   - the fixtures the scenes upload (`e2e/fixtures`) and the example apps
+     the scenes pack, the board app (`board-app/`) and the office app
+     (`office-app/`, 0.56: New document's office rows, editing together, an
+     encrypted folder's and a vault's file in an app);
    - the whole product (`backend`, `web/src`, `web/public`, every
      `packages/*/src`, the lockfile), tests and prose left out - or, for a
      script that declares `export const INPUTS = [...]`, those paths plus the
@@ -225,6 +227,14 @@ own; `accept` refuses such a run.
   storage with `pinTimes(root)` before it is synced.
 - Wait for what the picture claims, never a fixed time, then look at the
   picture: "passed" does not check what is in it.
+- Frame the picture on what it shows, top and bottom. A page, a panel or a
+  dialog taller than the window ends mid-line at the picture's foot, and a
+  scrolled panel can end on a heading whose entries are below the fold:
+  `growUntilShown(page, ['document' | '<scroller>'])` (`frame.mjs`) grows
+  the window until nothing named is hidden, `endBelow(page, '<selector>')`
+  ends the picture just under one element. A whole page that runs to
+  thousands of pixels is unreadable in a README cell: give the README its
+  first screen and the guide the whole page (`loginsecurity.mjs`).
 - Put the picture where the docs need it in the same change, as a line of
   its own: `<!-- shot: <set>/<name>.png | <what it shows> -->`. A page may
   not link a picture the manifest does not hold (a broken image in the shop
@@ -236,6 +246,13 @@ own; `accept` refuses such a run.
   never shown: the four pictures store.mjs gained in 0.53 (#162, the store
   screen, a request, its review, a connected store) were in no page and so
   never published, until 0.55 gave each its line.
+- A scene whose page needs a WebSocket to its own filex - editing together
+  (`coedit.*`), anything the realtime feed draws - boots it with
+  `FILEX_PUBLIC_URL: ''` (officeapp.mjs, e2eapp.mjs). Every scene's filex
+  advertises `https://files.example.com` (scene.mjs `PUBLIC_URL`, the address
+  the links in a picture show), a socket ticket names that host, and the
+  socket never connects: the co-editing relay's members are never "in" the
+  document. Unset, the server takes the socket's address from the request.
 - A scene that shows a narrow part of the product can declare what it reads,
   so that it is skipped when nothing of that changed:
 

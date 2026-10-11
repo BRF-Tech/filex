@@ -33,6 +33,7 @@ body) for larger ones; single encrypted file (`.fxe`) **v1**. See
 - [Who may encrypt](#who-may-encrypt) - [what counts as encrypting](#what-counts-as-encrypting) · [approvals](#approvals) · [where it is asked](#where-it-is-asked) · [when the rule cannot be decided](#when-the-rule-cannot-be-decided) · [audit and notifications](#audit-and-notifications)
 - [Recovery](#recovery) - [user recovery key](#the-user-recovery-key) · [key escrow](#key-escrow-optional-operator-recovery) · [adopting escrow later](#adopting-escrow-on-an-installation-that-already-exists) · [offering an existing folder a slot](#offering-an-existing-folder-an-escrow-slot) · [what escrow cannot do](#what-escrow-can-and-cannot-do) · [before v0.31](#folders-created-before-v031)
 - [Feature trade-offs](#feature-trade-offs)
+- [Editing in an app](#editing-in-an-app) - [the kind is the browser's](#the-kind-is-the-browsers) · [the app's own store, sealed](#the-apps-own-store-sealed)
 - [Ways plaintext still reaches the server](#ways-plaintext-still-reaches-the-server)
 - [Using it](#using-it) - [taking a folder out: `filex decrypt`](#taking-a-folder-out-filex-decrypt)
 - [What the server knows](#what-the-server-knows)
@@ -1183,7 +1184,7 @@ kept), and the tenant's administrators answer under Admin → Encryption.
 |---|---|
 | ![Admin → Encryption: the approval policy and three requests waiting](https://filex.sh/shots/encryption/admin-encryption-1440.b74163acb93c.png) | ![Approving a new-folder request](https://filex.sh/shots/encryption/approve-new-folder.2d58b972f592.png) |
 | Admin → Encryption under `approval`: the requests waiting, each with its kind, who asked and why. | The answer to a new-folder request says what it opens: one new encrypted folder there, once. |
-| ![Requesting an encrypted folder from the New folder dialog](https://filex.sh/shots/encryption/request-new-folder.e74894fba30f.png) | |
+| ![The request for an encrypted folder New folder opens, with its reason](https://filex.sh/shots/encryption/request-new-folder.e74894fba30f.png) | |
 | The person's side: *Request an encrypted folder…* in the New folder dialog, a reason written. | |
 
 - **Three kinds, each its own.** A request is for one of three things, and its
@@ -1664,11 +1665,11 @@ read content is **off or limited** inside an encrypted folder:
 | **Content search** | **Does not work** - the indexer skips extraction under a marked subtree and for anything starting with the magic, and indexes empty content instead. Nothing is indexed, so nothing can match |
 | **Thumbnails** | **Not generated** - the thumbnail pipeline marks files under a marked subtree `skipped`; grid, list and gallery all show a generic icon |
 | **Preview** (text, images, media, PDF) | **Works while unlocked** - the client downloads the ciphertext, decrypts it in memory and hands a blob URL to the normal viewers |
-| **Text editing / saving** | **Off** - preview is read-only. Saving would write plaintext through the server, so the save-text endpoint is not wired up inside an encrypted folder |
+| **Text editing / saving** | **Off** in filex's own viewer - preview is read-only. Saving would write plaintext through the server, so the save-text endpoint is not wired up inside an encrypted folder. An app that asks for encrypted folders edits there (0.56): [Editing in an app](#editing-in-an-app) |
 | **Open in a new tab** | **Off** - the standalone viewer route fetches raw bytes from the server, which would show ciphertext |
 | **OnlyOffice** | **Off** - the document server would have to read the file. The backend's config endpoint sniffs the magic and returns **415 `file is e2e-encrypted`**, and the UI does not offer OnlyOffice at all |
 | **Convert** | **Off** - the action is hidden; ciphertext is meaningless to the converter |
-| **Apps** (an action, *Open with* an app's interface, a screen) | **Off** (0.55) - the explorer offers an encrypted file no app, in its folder and in Recent, Starred, a tag, a search or Shared with me alike, because the server stamps every file row with `encrypted`; and every app door - an action's run, a screen's event, an interface's read, call and save - answers `403 encrypted`. filex decrypts nothing for an app: an interface opened on such a file anyway is told so (`FileInfo.encrypted`) and gets it read-only, its bytes refused ([APP-PLUGINS-API.md → Which rows say `encrypted`](APP-PLUGINS-API.md#which-rows-say-encrypted)) |
+| **Apps** (an action, *Open with* an app's interface, a screen) | **Off** for every app but one you allowed to edit in the browser (the end of this row) - the explorer offers an encrypted file no other app, in its folder and in Recent, Starred, a tag, a search or Shared with me alike, because the server stamps every file row with `encrypted`; and every app door - an action's run, a screen's event, an interface's read, call and save - answers `403 encrypted`. The server decrypts nothing for an app: an interface opened on such a file anyway is told so (`FileInfo.encrypted`) and gets it read-only, its bytes refused ([APP-PLUGINS-API.md → Which rows say `encrypted`](APP-PLUGINS-API.md#which-rows-say-encrypted)). **0.56:** one exception, the browser's - an app whose manifest asks for `encrypted_folders` (grant `files:e2e-plaintext`) is offered a file of a folder you have unlocked and edits it in the clear in its own frame, while the server carries only ciphertext ([Editing in an app](#editing-in-an-app)) |
 | **Share links / file requests** | **Off** - the whole **Share** entry is hidden, inside the folder and on the folder's own row in its parent (since v0.50), and so is the details panel's **Create link**, because a recipient would download ciphertext with no way to decrypt it and a file request would store a visitor's upload in the folder unencrypted. The server refuses such a link on every door with `409 E2E_ENCRYPTED` - the explorer's Share, `POST /api/ai/share` and the MCP `file_share` tool, and a file request through the MCP `file_request_create` tool (until v0.50 the API minted it anyway). Note this also hides per-item permissions for that folder |
 | **Password change** | **Works** - **Encryption settings… → Change password…**, with the current password or the recovery key. A folder with its own key rewrites only its key file; a folder from before v0.31 re-wraps every file's key, resumably. See [Changing the password](#changing-the-password) |
 | **Desktop "keep local" / folder sync pinning** | **Off** - not offered for encrypted folders or their contents |
@@ -1681,10 +1682,210 @@ read content is **off or limited** inside an encrypted folder:
 | **ClamAV** | Scans ciphertext, so it finds nothing. Harmless, but do not mistake a clean scan for a scanned file |
 | **Copy / move** | **Refused across an encryption boundary** (HTTP 409). Inside one encrypted folder it works normally - at level 2 an item moved or copied to another folder gets its name re-sealed for that folder in the same step ([folder ids](#folder-ids)) - and the encrypted folder itself can be moved. See [below](#ways-plaintext-still-reaches-the-server). ⚠ With encrypted names, a copy or move onto a name that is **already taken** is refused (409) instead of getting a `-copy` suffix: a name the server made up could never be decrypted. Rename one of the two first |
 | **New document / Request files** | **Off** - the server would write the template (or a visitor's upload) in the clear, and name it itself |
-| **Drag out to the desktop** | **Off** for rows inside an encrypted folder - the operating system would save the ciphertext under the plaintext name. Download instead (decrypted), or drag within filex |
+| **Drag out to the desktop** | **Off** for a file of an encrypted folder or a vault and for the encrypted folder itself, wherever it is listed - its folder, a ⌘K result, Recent, Starred, a tag or a search (0.56; before, a ⌘K result or a row outside its folder went out while a plain folder was open) - in the browser and the desktop app alike: the operating system would save the ciphertext under the plaintext name. A ⌘K result of one is not draggable. Download instead (decrypted), or drag within filex |
 | **Download a folder** | **Decrypted**, while the folder is unlocked: a zip made in the browser with the plaintext names ([Downloading a decrypted copy](#downloading-a-decrypted-copy)). **Download encrypted copy** is the server's zip of the ciphertext; zip the encrypted folder itself from its parent and the key file comes with it, for [`filex decrypt`](#taking-a-folder-out-filex-decrypt) |
 | **Upload size** | No limit of its own. Up to 200 MB a file is encrypted in one shot (`0x01`); above, as a [STREAM](#streaming-content-stream) (`0x02`), encrypted as it is uploaded. A server without the staged upload path cannot take a file over 200 MB into an encrypted folder, and says so |
 | **Single encrypted files (`.fxe`)** | No thumbnail, no content index, OnlyOffice `415`, no Convert and no other app (0.55) - the same as a file in an encrypted folder. Preview and download decrypt in the browser; share links and WebDAV hand out the `.fxe` as it is (the AI surface's share answer says `encrypted: true`, so an agent tells the recipient a password is needed); the AI surface's `file_read` refuses it (`E2E_ENCRYPTED`) |
+
+---
+
+## Editing in an app
+
+> **filex 0.56.** An app whose manifest says `encrypted_folders: {"open":
+> true}`, installed with the `files:e2e-plaintext` grant, edits a file of an
+> unlocked encrypted folder in its own interface. The office editor app
+> edits Word, Excel and PowerPoint documents this way
+> ([E2E-OFFICE.md](E2E-OFFICE.md)).
+
+The server still never holds the plaintext. The model is CryptPad's: the
+browser that holds the folder key does the decrypting and the encrypting, and
+hands the plaintext to the app's sandboxed frame only.
+
+1. You open the file (double-click, **Open with**) while the folder is
+   unlocked. The explorer offers the apps granted `files:e2e-plaintext`
+   beside its own viewer, in the order the administrator's Default apps rule
+   gives the kind - never ONLYOFFICE, never an app without the grant. **The
+   browser decides the kind**, from the file's name as it reads it: in a
+   folder whose names are encrypted (level 2) the name it decrypted (see
+   [The kind is the browser's](#the-kind-is-the-browsers)).
+2. The app asks for the file (`file.read`). The explorer fetches it through
+   the app's own read door with `e2e=1`: the server checks the grant, the
+   administrator's switch and the folder, records the handover
+   (`app_plugin.e2e_read`) and answers the **ciphertext** it holds. The
+   explorer decrypts it with the folder key and transfers the plaintext to
+   the frame over the frame's own port - its page keeps no copy, and no
+   `blob:` address is made of it.
+3. The app saves (`file.save`). The explorer encrypts what it hands over with
+   the same folder key - a file of an encrypted folder as its own upload
+   writes it (`filexe2e`) - and sends only the ciphertext to the app's save
+   door with `e2e=1` and the file's listing signature (`expect`). The server
+   refuses a body that does not start like an encrypted file (`422
+   not_encrypted`) and a save over a version written meanwhile (`412
+   changed`), writes a new version and records `app_plugin.e2e_save`.
+
+*Choose an app…* on a file of a folder whose names are encrypted - the name
+the browser decrypted, the app beside filex's own viewer, no "Always use this
+app" - and the file open in the app (an example app, written for these
+pictures):
+
+![Choose an app… on a file of a folder whose names are encrypted: the app beside filex's viewer, no "Always use this app"](https://filex.sh/shots/e2eapp/open-with-encrypted-1280.aa5c86c8c9bb.png)
+
+![A file of an encrypted folder open in an app, decrypted by the browser](https://filex.sh/shots/e2eapp/app-encrypted-folder-1280.856d3586a9e2.png)
+
+**Editing together.** An app also granted `files:co-edit` (the office
+editor) edits such a file with the others who open it, as it does in an
+ordinary folder, through filex's relay
+([APP-PLUGINS-API.md → Editing together](APP-PLUGINS-API.md#editing-together-coedit-056)).
+Only the session's key is different: the browser that starts the session
+makes it and gives the server only that key **sealed with the folder key**;
+each member's browser opens it with the folder key it holds. Every change,
+cursor and image of the session is sealed with it, so the relay places them
+in one order without being able to open one - and a person who cannot
+unlock the folder cannot join. A change not yet placed when the connection
+goes is kept in your browser sealed with the folder key, never in the
+clear, and sent when you open the file again.
+
+What the server decides without the key:
+
+| | |
+|---|---|
+| **The grant** | `files:e2e-plaintext`, derived from `encrypted_folders`. The install review says what it means - *the app sees every such file opened with it* - and an update that starts asking is a new grant ([APP-PLUGINS.md](APP-PLUGINS.md#what-the-review-shows)). |
+| **The administrator's switch** | `apps.e2e_plaintext`, on by default (the grant is already the administrator's yes, app by app), seeded once from `FILEX_APPS_E2E_PLAINTEXT`. Off: both doors refuse every app (`403 encrypted`), and the explorer offers no app there (`capabilities.apps_e2e_plaintext`). |
+| **Where** | A file of an encrypted folder, at level 1 (contents) or level 2 (contents and names). Not a vault's (`403 encrypted`), not a single `.fxe`. |
+| **The kind** | At level 1 the server holds the app to the kinds its view opens and to the administrator's rule for the kind, by the file's name. At level 2 the stored name is ciphertext and tells it no kind: it holds the app to the grant, the folder, the person's rights (to save: their write right on the file), `expect` and ciphertext only, and **the browser decides the kind** ([below](#the-kind-is-the-browsers)). |
+| **What is written** | Ciphertext only (`filexe2e`, version 1 or 2), over the file as the app opened it. |
+| **The record** | `app_plugin.e2e_read` and `app_plugin.e2e_save`: who, which app and view, which file - never a byte of it. |
+
+What it means for the plaintext:
+
+- It is in the app's frame, which runs in the sandbox every app interface
+  runs in: no connection of its own, no storage, no cookie. ⚠ The same honest
+  note as for every interface: a page's policy does not cover WebRTC (Chrome's
+  Connection-Allowlist closes it, Firefox the bootstrap -
+  [APP-PLUGINS.md → An app's own interface](APP-PLUGINS.md#an-apps-own-interface)).
+  **The grant trusts the app's code with the document.**
+- While the frame holds such a file, filex lets nothing else leave toward the
+  server: a save-as (a copy elsewhere would leave the folder decrypted) and
+  the app's server-side module (`engine.call`, `job.submit`) answer
+  `unavailable`, and the server refuses the module the file anyway.
+- **Download as** and **Print** still hand you a copy, on your click or yes -
+  as the explorer's own decrypted download does.
+- What the app keeps for itself while it holds the file (`state.set`: a
+  recent search, a zoom level) is **sealed in the browser** - see [The app's
+  own store, sealed](#the-apps-own-store-sealed). It cannot reach the server
+  in the clear as a "setting".
+- **Lock** closes the app with the folder: its frame, and the plaintext in
+  it, go - unsaved changes too, so save first. (Editing together, the
+  changes the relay placed stay in the session, sealed, for the next
+  opening or the others' save.)
+- At most 200 MiB a file: it is decrypted and encrypted whole in the page.
+
+### The kind is the browser's
+
+Which app opens a file is decided by its kind - its extension, against the
+`applies` of each app's view and the administrator's Default apps rule for
+that kind. In a folder whose names are encrypted (level 2) the server stores
+each name as ciphertext (`S`, or `<H>.fxl`), so it cannot tell a `.docx` from
+a `.png`. The kind is therefore decided **in the browser**, which holds the
+name key while the folder is unlocked:
+
+- the explorer decrypts the name (as it does for the listing), and picks the
+  apps by its extension - and the MIME type that implies - exactly as for any
+  other file: the views granted `files:e2e-plaintext` that apply to it, the
+  administrator's rule for the kind, the person's own choice, filex's own
+  viewer last (`plaintextOpenOf` in `packages/core/src/lib/appViewer.ts`, the
+  one rule every surface uses, a vault's included);
+- **neither the name nor its extension is ever sent.** The app door's read
+  and save name the file by its stored path; *Choose an app…* does not offer
+  "Always use this app for .ext files" for such a file, because that choice
+  is kept on the account and would tell the server the kind;
+- a file whose name the tab could not decrypt (an unreadable name) opens in
+  filex's own viewer: its kind would be a guess;
+- the server, which cannot read the kind, does not ask it there: the read
+  door does not ask the administrator's rule for the kind of a stored name
+  that is ciphertext, and the save door does not hold such a save to the
+  kinds the view opens. What it holds them to is the grant, the
+  administrator's switch, an encrypted folder that is not a vault, the
+  person's read right (and, for a save, their write right on the file), the
+  write gates, `expect` and ciphertext only. A name in such a folder that the
+  server CAN read (written in the clear over WebDAV, or not reached yet by a
+  [level change](#changing-the-level)) is held to its kind as at level 1.
+
+⚠ What this means: at level 2, "this app opens only these kinds" is the
+browser's promise, not the server's. A person's own browser could hand a
+granted app any file of the folder - which it can read anyway; the grant is
+already the administrator's yes to that app seeing such files.
+
+### The app's own store, sealed
+
+An app's interface keeps small things for the person with `state.set` (its
+own store: 8 KiB a value, 16 KiB an app), in the account's preferences on the
+server. In an encrypted session - while the frame holds a file of an
+encrypted folder in the clear - that would be a way for plaintext to reach
+the server as a "setting". So there the app gets **another store**:
+
+| | |
+|---|---|
+| **Where** | The account's preference document, `appStateE2e`: one ledger per account, app and encrypted folder. Apart from the app's ordinary store (`appState`): what it keeps in an encrypted session is not there in an ordinary one, nor the other way round. |
+| **The key** | Derived in the browser from the folder key, one per account and app: `HKDF-SHA256` over the folder key (for levels 1 and 2 first through AES-256 under it, as a pseudorandom function: the 32-byte GCM output of a fixed, labelled block - the key cannot be exported; a vault's folder key is an HKDF key already), salt `filex-app-state`, context `filex-app-state-v1-key`, the account and the app's name. The account is the one the session is signed in as (`/api/auth/me`, asked with the credential that reads and writes the preferences): a folder key is shared by everybody who may open the folder, and without it the server could copy one member's ledger into another member's preferences and it would open there. The ledger's id comes from the same root and the same account (context `filex-app-state-v1-id`), so the server cannot tell which folder a ledger belongs to. |
+| **A ledger** | `base64url(0x01 ‖ IV ‖ AES-256-GCM(JSON))`, the account, the app's name and the ledger's id as associated data: one moved to another account's, app's or folder's place does not open - it reads as empty. |
+| **Size** | The ordinary rules: 8 KiB a value as JSON, and the app's 16 KiB measured on what is **stored** - encrypted and base64, so about 12 KiB of JSON (`too_large` before anything is written). The server enforces the same number on the sealed store (`413 APP_STATE_TOO_LARGE`). |
+| **Locked** | A folder locked while the app is open, or a session whose account cannot be learned: `state.get` answers an empty store - not an error, the app starts afresh - and `state.set` answers `unavailable` (the second with its own sentence, *"…this page could not tell which account that is, so nothing was kept"* - not the locked folder's). A ledger that does not open (damage, the key of a finished re-key) reads as empty. Mid re-key the previous key's ledger is read, and the first write moves it to the new key. |
+
+### In a vault
+
+> **filex 0.56.** The same app, granted the same `files:e2e-plaintext`,
+> edits a file of a [vault](E2E-VAULT-FORMAT.md) (level 3) you have opened -
+> by the vault's own way, which never touches the server's app doors.
+
+A vault keeps no file the server could hand anybody: its tree is an encrypted
+index and the contents are packs of one size. So the browser does all of it:
+
+1. **Offered.** The explorer applies the kind rule (each app's `applies`, the
+   administrator's Default apps order) to the name it read from the vault's
+   index - the server never learns a vault's names, so it could not choose
+   the app. Never ONLYOFFICE, never an app without the grant.
+2. **`file.read`.** The explorer's vault engine reads the file from its packs
+   and decrypts it, then transfers the plaintext to the app's frame - the
+   same way it opens the file in its own viewer, minus the `blob:` copy.
+3. **`file.save`.** The engine writes what the app hands over as the vault's
+   **next generation**, a change like any other in the vault: it takes the
+   vault's [write lock](E2E-VAULT-FORMAT.md#the-write-lock), uploads packs,
+   commits the index. The save is written only over the version the app read
+   (its content id); a file another writer changed or removed meanwhile is
+   not overwritten or made again.
+
+One writer at a time still holds:
+
+- **Somebody else writes the vault.** The save is refused and you are told in
+  the server's words (*"Ayşe is writing this vault…"*); the app hears
+  `failed` / `vault_locked`. Save again when they are done.
+- **The write lock ends before the commit** (taken over, broken, the
+  connection lost): nothing is written - no half-saved file is ever visible -
+  you are told why and what was not saved, and the app hears `failed` /
+  `vault_lock_lost`.
+- **The vault is about to lock itself.** A minute before the vault's own
+  lock ([15 minutes without activity](E2E-VAULT-FORMAT.md#the-idle-lock)),
+  while the app holds changes it has not saved, filex says so above the app -
+  in the server's words, which the vault's `state` answer carries (only your
+  browser knows the moment) - with **Keep it open**, which counts as activity.
+
+  ![An app holds unsaved changes to a vault's file a minute before the vault locks itself: filex's warning and Keep it open](https://filex.sh/shots/e2eapp/vault-lock-soon-1280.df4684a99783.png)
+- **The vault locks** - **Lock**, or the vault's own lock: the app closes
+  with it and its plaintext goes. Changes it had not saved cannot be
+  encrypted any more; you are told which file lost them. An app's read, its
+  save and its saying it holds unsaved changes (`ui.dirty`) count as activity.
+
+What the server learns: packs and an index file for each save, under the
+vault's write lock - as for any change in the vault. Not the file's name, its
+path, its size or that an app opened it; there is no `app_plugin.e2e_*` row
+for a vault (the vault's own `vault.lock` / `vault.unlock` rows stay). The
+server's app doors still refuse a vault's file (`403 encrypted`): nothing of
+a vault goes through them. Everything else above - the sandbox, nothing else
+leaving while the frame holds the file, 200 MiB, the administrator's switch -
+is the same, and so is [the app's own store](#the-apps-own-store-sealed): in
+a vault its ledger is sealed with a key derived from the vault's own key (and
+the account, as for a folder).
 
 ---
 
@@ -1979,8 +2180,14 @@ stop doing pointless - and potentially leaky - work:
     rule writegate uses, read from the vault's key file), or `"file"` for a
     `.fxe` outside both - what an app's interface is told
     (`FileInfo.encrypted`), and what an app is refused the bytes of (its
-    interface's read answers `403 encrypted`). The same marker-path lookup
-    as above; the root's own name is already public.
+    interface's read answers `403 encrypted`) unless it holds
+    `files:e2e-plaintext` and the browser asks with `e2e=1` - then it is
+    answered the ciphertext, for the browser to decrypt ([Editing in an
+    app](#editing-in-an-app), 0.56). The same marker-path lookup as above;
+    the root's own name is already public. For such a door, the server reads
+    the folder's key file only to learn whether its names are encrypted
+    (`e2e.NamesEncrypted`): if so, a stored name shaped like ciphertext is
+    not held to a kind ([The kind is the browser's](#the-kind-is-the-browsers)).
 11. **No invented names** (`internal/ops/service.go` → `uniqueCopyDest`,
     `internal/e2e` → `LooksEncryptedName`) - a colliding copy or move of a
     name *shaped* like an encrypted one, into a folder with a marker above it,
@@ -2087,10 +2294,12 @@ limitation you can hit today:
   another.
 - **Detecting offline escrow use.** The notification covers the supported path
   only. See [what escrow can and cannot do](#what-escrow-can-and-cannot-do).
-- **Editing files in place.** Preview is read-only inside an encrypted folder.
-  Editing office documents there with ONLYOFFICE, in the browser and without
-  the server reading them, is designed and has a protocol prototype
-  ([E2E-OFFICE.md](E2E-OFFICE.md)); nothing offers it yet.
+- **Editing files in place with filex's own viewer.** Preview is read-only
+  inside an encrypted folder. An app that asks for encrypted folders edits
+  there since 0.56 ([Editing in an app](#editing-in-an-app)) - the office
+  editor app among them ([E2E-OFFICE.md](E2E-OFFICE.md)), in a folder whose
+  names are encrypted too and in a vault ([In a vault](#in-a-vault)) - but
+  not a `.fxe`, and editing together there is not built yet.
 - **A server-side guard against plaintext writes over DAV / CLI.** Copy and
   move are guarded, and so (since v0.50) are the AI surface and ShareX; a
   direct *write* over WebDAV or the CLI is not - see [Ways plaintext still

@@ -137,76 +137,7 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 	// "Ada (work)". (Honored only on a SHARED PROXY token — one with a
 	// username allow-list; proxies strip these from client requests, so end
 	// users can't spoof them. A personal token's stamp is not read.)
-	name := wsDisplayName(user)
-	// ⭐ The picture follows the ACCOUNT, not the client: a session, the
-	// desktop app and every API key minted under the same user all resolve to
-	// the same avatar, so setting it once in the profile puts the same face on
-	// every filex surface that account opens.
-	avatar := user.AvatarURL
-	presenceKey := ""
-	if tok := auth.TokenFrom(r.Context()); tok != nil {
-		uname := auth.TokenUserFrom(r.Context())
-		if uname == "" {
-			uname = tok.DefaultUsername()
-		}
-		// The parenthesised half of a presence entry: WHICH consumer of the token
-		// this connection is.
-		qualifier := uname
-		// ⚠ A token with NO username allow-list is not a shared proxy — it is one
-		// person's own client (the desktop app, a CLI, a personal script), and
-		// that person is the account owner, so their real name is neither
-		// misleading nor unavailable. DefaultUsername() falls back to the token's
-		// LABEL for such tokens, so replacing the name with it put
-		// "filex desktop — Win32" in the presence bar of the owner's OWN folder.
-		// Their name leads and the client goes in parentheses instead —
-		// "Ada (filex desktop)", the same shape the proxy branch produces.
-		//
-		// sharedProxy: the token is a host proxy's, serving many end users
-		// under one account (a username allow-list) — the one identity type
-		// that has somebody else to name. Only its X-Filex-Presence-* stamp is
-		// read: a personal token (the desktop app, a CLI, a script) IS its
-		// owner, and a stamp from it would put another person's name and face
-		// on the owner's own connection.
-		sharedProxy := len(tok.UsernameList()) > 0
-		if !sharedProxy {
-			qualifier = wsClientLabel(tok.Label)
-			if qualifier != "" {
-				name += " (" + qualifier + ")"
-			}
-		} else if uname != "" {
-			// A shared proxy token is not a person: the entry says "work", so
-			// the account owner's face would be a lie on somebody else's row.
-			name = uname
-			avatar = ""
-		}
-		if v := sanitizePresenceName(r.Header.Get("X-Filex-Presence-Name")); sharedProxy && v != "" {
-			if qualifier != "" {
-				name = v + " (" + qualifier + ")"
-			} else {
-				name = v
-			}
-			// ⚠ A trusted proxy just told us this connection is a DIFFERENT
-			// human from the account holder. Their own picture is the only one
-			// that may be drawn here — the header below, when the host sends
-			// one — never the token owner's.
-			avatar = sanitizePresenceAvatar(r.Header.Get("X-Filex-Presence-Avatar"))
-		}
-		if sharedProxy {
-			presenceKey = sanitizePresenceKey(r.Header.Get("X-Filex-Presence-Key"))
-		}
-		if presenceKey == "" {
-			// Default token connections to their own (token, username) identity:
-			// without this a keyless token viewer collides with the token
-			// OWNER's cookie session (same user id) — self-exclusion would hide
-			// it and the merged entry's name would be nondeterministic. The
-			// username is part of the key so "work" and "fishapp" viewers of one
-			// token stay distinct people.
-			presenceKey = "tok-" + strconv.FormatInt(tok.ID, 10)
-			if uname != "" {
-				presenceKey += "-" + uname
-			}
-		}
-	}
+	name, avatar, presenceKey := presenceOf(r, user)
 	t := realtime.Ticket{UserID: user.ID, Name: name, Avatar: avatar, PresenceKey: presenceKey}
 	if hasRoot {
 		t.ConfineAdapter = root.Adapter
@@ -235,7 +166,12 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 // the sender about its own socket. A share link is different — it is mailed to
 // a third party — which is why those still go through the configured origin
 // and are NOT changed by this.
-func (h *WS) wsURL(r *http.Request) string {
+func (h *WS) wsURL(r *http.Request) string { return h.socketURL(r, "/api/ws") }
+
+// socketURL is the address of a socket under this server at path - the
+// realtime one, or the co-editing relay's (/api/coedit/ws) - worked out the
+// way wsURL says.
+func (h *WS) socketURL(r *http.Request, socketPath string) string {
 	base := h.Tenants.FromRequest(r)
 	if !h.PublicURLSet && r != nil {
 		if host := r.Host; host != "" {
@@ -251,11 +187,11 @@ func (h *WS) wsURL(r *http.Request) string {
 	}
 	switch {
 	case strings.HasPrefix(base, "https://"):
-		return "wss://" + strings.TrimPrefix(base, "https://") + "/api/ws"
+		return "wss://" + strings.TrimPrefix(base, "https://") + socketPath
 	case strings.HasPrefix(base, "http://"):
-		return "ws://" + strings.TrimPrefix(base, "http://") + "/api/ws"
+		return "ws://" + strings.TrimPrefix(base, "http://") + socketPath
 	default:
-		return base + "/api/ws"
+		return base + socketPath
 	}
 }
 
@@ -712,4 +648,83 @@ func wsDisplayName(u *model.User) string {
 		return n
 	}
 	return "user"
+}
+
+// presenceOf is who a request's connection is, as presence and editing
+// together show it: the display name, the picture, and the key that tells
+// apart two end users behind one shared proxy token (empty for a native
+// session). ONE function for the realtime ticket and the co-editing relay
+// (handlers/coedit.go), so the two never disagree on who somebody is.
+func presenceOf(r *http.Request, user *model.User) (name, avatar, presenceKey string) {
+	name = wsDisplayName(user)
+	// ⭐ The picture follows the ACCOUNT, not the client: a session, the
+	// desktop app and every API key minted under the same user all resolve to
+	// the same avatar, so setting it once in the profile puts the same face on
+	// every filex surface that account opens.
+	avatar = user.AvatarURL
+	presenceKey = ""
+	if tok := auth.TokenFrom(r.Context()); tok != nil {
+		uname := auth.TokenUserFrom(r.Context())
+		if uname == "" {
+			uname = tok.DefaultUsername()
+		}
+		// The parenthesised half of a presence entry: WHICH consumer of the token
+		// this connection is.
+		qualifier := uname
+		// ⚠ A token with NO username allow-list is not a shared proxy — it is one
+		// person's own client (the desktop app, a CLI, a personal script), and
+		// that person is the account owner, so their real name is neither
+		// misleading nor unavailable. DefaultUsername() falls back to the token's
+		// LABEL for such tokens, so replacing the name with it put
+		// "filex desktop — Win32" in the presence bar of the owner's OWN folder.
+		// Their name leads and the client goes in parentheses instead —
+		// "Ada (filex desktop)", the same shape the proxy branch produces.
+		//
+		// sharedProxy: the token is a host proxy's, serving many end users
+		// under one account (a username allow-list) — the one identity type
+		// that has somebody else to name. Only its X-Filex-Presence-* stamp is
+		// read: a personal token (the desktop app, a CLI, a script) IS its
+		// owner, and a stamp from it would put another person's name and face
+		// on the owner's own connection.
+		sharedProxy := len(tok.UsernameList()) > 0
+		if !sharedProxy {
+			qualifier = wsClientLabel(tok.Label)
+			if qualifier != "" {
+				name += " (" + qualifier + ")"
+			}
+		} else if uname != "" {
+			// A shared proxy token is not a person: the entry says "work", so
+			// the account owner's face would be a lie on somebody else's row.
+			name = uname
+			avatar = ""
+		}
+		if v := sanitizePresenceName(r.Header.Get("X-Filex-Presence-Name")); sharedProxy && v != "" {
+			if qualifier != "" {
+				name = v + " (" + qualifier + ")"
+			} else {
+				name = v
+			}
+			// ⚠ A trusted proxy just told us this connection is a DIFFERENT
+			// human from the account holder. Their own picture is the only one
+			// that may be drawn here — the header below, when the host sends
+			// one — never the token owner's.
+			avatar = sanitizePresenceAvatar(r.Header.Get("X-Filex-Presence-Avatar"))
+		}
+		if sharedProxy {
+			presenceKey = sanitizePresenceKey(r.Header.Get("X-Filex-Presence-Key"))
+		}
+		if presenceKey == "" {
+			// Default token connections to their own (token, username) identity:
+			// without this a keyless token viewer collides with the token
+			// OWNER's cookie session (same user id) — self-exclusion would hide
+			// it and the merged entry's name would be nondeterministic. The
+			// username is part of the key so "work" and "fishapp" viewers of one
+			// token stay distinct people.
+			presenceKey = "tok-" + strconv.FormatInt(tok.ID, 10)
+			if uname != "" {
+				presenceKey += "-" + uname
+			}
+		}
+	}
+	return name, avatar, presenceKey
 }

@@ -52,7 +52,7 @@ const UserSettingsModal = defineAsyncComponent(
   () => import('@/components/UserSettingsModal.vue'),
 );
 import { liveTheme } from '@/lib/theme';
-import { explorerAuth, openTriggerPref } from '@/lib/explorerConfig';
+import { appUserName, explorerAuth, openTriggerPref } from '@/lib/explorerConfig';
 import { currentMountBase } from '@/router';
 import { getServerRoot } from '@/api/runtimeConfig';
 import { fetchVisibleStorages, type VisibleStorage } from '@/lib/visibleStorages';
@@ -704,6 +704,10 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     pluginPageBase: currentMountBase(),
     saveText: `${getServerRoot()}/api/files/save-text`,
     onlyOfficeConfig: `${getServerRoot()}/api/files/onlyoffice/config`,
+    // Who is looking, for an app's own interface (`session.user.name`):
+    // its viewer, its dialogs and its inspector section (lib/explorerConfig
+    // appUserName - never the e-mail address).
+    userName: appUserName(auth.user),
   };
 });
 

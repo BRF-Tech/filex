@@ -269,6 +269,27 @@ test.describe.serial('An app’s own interface — the sandbox, in every engine'
     await expect(meta, 'the header says the size the save wrote').toContainText('1.5 KB');
   });
 
+  // #217 (filex-office-editor 0.1.0 on a 390 px phone): the gutter beside the
+  // frame for the chevrons squeezed the interface to ~306 px. On a narrow
+  // screen there is no gutter: the frame takes the stage's whole width and the
+  // chevrons lie over its edges. Opened wide, then narrowed, so the listing's
+  // own phone layout plays no part.
+  test('the viewer on a phone: the chevrons do not narrow the frame', async ({ page }) => {
+    await openInterface(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator('.fe-viewer__chev--next'), 'two files in the folder').toBeVisible();
+    const stage = page.getByTestId('viewer-stage');
+    const appFrame = page.locator('iframe[data-testid="app-frame"]');
+    await expect
+      .poll(async () => {
+        const s = await stage.boundingBox();
+        const f = await appFrame.boundingBox();
+        return s && f ? Math.round(s.width - f.width) : 999;
+      }, { message: 'the frame is as wide as the stage' })
+      .toBeLessThanOrEqual(2);
+    expect((await appFrame.boundingBox())!.width).toBeGreaterThan(360);
+  });
+
   test('save as: filex asks for the folder in its own dialog, and the new file lands there', async ({ page }) => {
     // Through filex, not the disk: the dialog lists what filex knows.
     const mk = await api.post('/api/files/manager?action=newfolder', { data: { path: `${store}://`, name: 'exports' } });

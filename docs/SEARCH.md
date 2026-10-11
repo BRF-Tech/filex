@@ -363,7 +363,7 @@ a tag cannot be used to learn that a file exists.
 opening one lists every file carrying it - from every folder and every storage
 the person can reach:
 
-![Personal and team tags, with a team tag opened](https://filex.sh/shots/tags/tags-kinds-1440.a9f9fff4d4fd.png)
+![Personal and team tags, with a team tag opened](https://filex.sh/shots/tags/tags-kinds-1440.64e4d6a5ccbc.png)
 
 Rules that follow from it:
 

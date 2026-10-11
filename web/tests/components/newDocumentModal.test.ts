@@ -39,7 +39,15 @@ afterEach(() => {
   mounted = null;
 });
 
-async function open(existing: string[] = [], types: NewDocType[] = TYPES) {
+/** The server's sentences (`capabilities.newdoc_withheld`, #217), as an
+ *  administrator's capabilities carry them. */
+const WORDS = {
+  onlyoffice: 'Office documents need a document server (ONLYOFFICE), which is not set up here.',
+  drawio: 'Diagrams need draw.io, which is not set up here.',
+  admin: 'Set them up in the admin panel under External services.',
+};
+
+async function open(existing: string[] = [], types: NewDocType[] = TYPES, extra: Record<string, unknown> = {}) {
   const index = vi.fn(async () => ({
     adapter: 'main',
     storages: ['main'],
@@ -80,6 +88,8 @@ async function open(existing: string[] = [], types: NewDocType[] = TYPES) {
       currentPath: 'main://',
       storages: ['main'],
       onlyOfficeReady: true,
+      withheldWords: WORDS,
+      ...extra,
     },
   });
   mounted = w;
@@ -262,6 +272,65 @@ describe('a kind an app makes is not said to be missing', () => {
     mounted = null;
     const { w: w2 } = await open([], withApp.slice(0, -1));
     expect(w2.get('[data-testid="newdoc-withheld"]').text()).toMatch(/draw\.io/i);
+  });
+});
+
+// #217 (filex-office-editor 0.1.0 measured in filex 0.55): an office editor
+// app offers .docx, .xlsx and .pptx rows on an install with no document
+// server. The built-in .odt/.ods/.odp rows stayed held back, so the dialog
+// said "Office documents need a document server (ONLYOFFICE)" right above the
+// app's own .docx row. The line is said only when NOTHING here makes the
+// family - and its words are the server's.
+describe('office documents an app makes are not said to need a document server (#217)', () => {
+  const office = (ext: string, mime: string): NewDocType => ({ ext, group: 'document', mime, requires: 'onlyoffice', ext_required: true });
+  const appRow = (ext: string, mime: string): NewDocType => ({
+    ext,
+    key: `app:office-editor:${ext}`,
+    group: 'app',
+    mime,
+    requires: 'app',
+    ext_required: true,
+    app: { plugin: 'office-editor', view: 'editor', label: { en: `Office (${ext})` } },
+  });
+  const BUILT_IN: NewDocType[] = [
+    { ext: 'txt', group: 'text', mime: 'text/plain; charset=utf-8', ext_required: false },
+    office('docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+    office('xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+    office('pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'),
+    office('odt', 'application/vnd.oasis.opendocument.text'),
+    office('ods', 'application/vnd.oasis.opendocument.spreadsheet'),
+    office('odp', 'application/vnd.oasis.opendocument.presentation'),
+  ];
+  const APP_ROWS: NewDocType[] = [
+    appRow('docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+    appRow('xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+    appRow('pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'),
+  ];
+  const line = (w: VueWrapper) => {
+    const el = w.find('[data-testid="newdoc-withheld"]');
+    return el.exists() ? el.text() : '';
+  };
+
+  it('says nothing about ONLYOFFICE while an app offers office rows', async () => {
+    const { w } = await open([], [...BUILT_IN, ...APP_ROWS], { onlyOfficeReady: false, canConfigure: true });
+    expect(w.find('[data-testid="newdoc-type-app:office-editor:docx"]').exists()).toBe(true);
+    expect(w.find('[data-testid="newdoc-type-odt"]').exists(), 'the built-in rows stay held back').toBe(false);
+    expect(line(w)).not.toMatch(/ONLYOFFICE|document server/i);
+    expect(line(w)).not.toContain(WORDS.admin);
+  });
+
+  it('still says it - in the server’s words - when nothing makes them', async () => {
+    const { w } = await open([], BUILT_IN, { onlyOfficeReady: false, canConfigure: true });
+    expect(line(w)).toBe(`${WORDS.onlyoffice} ${WORDS.admin}`);
+  });
+
+  it('the line is the server’s: a sentence it did not send is not made up here', async () => {
+    const { w } = await open([], BUILT_IN, { onlyOfficeReady: false, withheldWords: { onlyoffice: 'Bu sunucunun cümlesi.' } });
+    expect(line(w)).toBe('Bu sunucunun cümlesi.');
+    mounted?.unmount();
+    mounted = null;
+    const { w: older } = await open([], BUILT_IN, { onlyOfficeReady: false, withheldWords: null });
+    expect(older.find('[data-testid="newdoc-withheld"]').exists()).toBe(false);
   });
 });
 

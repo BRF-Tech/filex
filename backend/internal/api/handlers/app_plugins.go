@@ -31,6 +31,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/coedit"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
@@ -76,6 +77,10 @@ type AppPlugins struct {
 	// (GET /api/files/manager?action=preview) - the read UIRead hands an
 	// interface once the app's own checks pass. Nil: UIRead answers 404.
 	Preview http.HandlerFunc
+	// CoEditRelay is the editing-together relay (internal/coedit,
+	// handlers/coedit.go): a save made in a session records what it holds.
+	// Nil: editing together is off.
+	CoEditRelay *coedit.Relay
 }
 
 // NewAppPlugins constructs the handler and wires it as the registry's sink.

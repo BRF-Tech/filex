@@ -1,0 +1,15 @@
+{
+  "rule": {
+    "minors": 6,
+    "months": 12
+  },
+  "windows": [
+    {
+      "id": "storage-build-signature-sha256",
+      "form": "A storage plugin build signature over the build's SHA-256 alone, the form before filex-storage-build:v1",
+      "since": "0.55",
+      "since_date": "2026-10-09",
+      "docs": "docs/PLUGINS.md#what-is-signed"
+    }
+  ]
+}

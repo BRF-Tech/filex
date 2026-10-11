@@ -635,11 +635,77 @@ describe('the 0.55 screens have their scenes', () => {
 
   it('the print scene asks for ui:print in its app, shoots the question and answers no', () => {
     expect(print).toContain('print: true');
-    expect(print).toContain("rows.includes('ui:print')");
+    expect(print).toContain("installInterfaceApp(admin, reports, { expect: ['ui:print'] })");
     expect(print).toContain('`print-consent-${look.suffix}.png`');
     // The print row's own "Don't allow" (sec055 S9: the print question is a
     // row of its own, its Allow the print page's button).
     expect(print).toContain("getByTestId('appframe-print-deny').click()");
     expect(print).toContain("answer?.error?.code !== 'cancelled'");
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// The 0.56 screens (#216, #217, #189): the print question over the app's
+// frame, New document with an office app and no document server, an app's
+// interface on a phone, editing together with a watcher, an app on a file of
+// an encrypted folder and of a vault, and Edit on a Mermaid diagram. Read off
+// the scripts - they need a browser and a server to run.
+
+describe('the 0.56 screens have their scenes', () => {
+  const read = (name: string) => readFileSync(path.join(SHOTS, name), 'utf8');
+  const print = read('appprint.mjs');
+  const office = read('officeapp.mjs');
+  const e2e = read('e2eapp.mjs');
+  const mermaid = read('mermaid.mjs');
+  const manifest = JSON.parse(read('office-app/filex-app.json'));
+
+  it('the print scene measures the row over the frame: the frame keeps its place and size (#217)', () => {
+    expect(print).toContain('for (const x of await overTheFrame(consent, appIframe, before))');
+    // The app's own frame by its id: once asked, the print page is an iframe too.
+    expect(print).toContain(`appframe.locator('iframe[data-testid="app-frame"]')`);
+  });
+
+  it('the office app asks for both 0.56 grants and makes every office kind in New document', () => {
+    expect(manifest.encrypted_folders).toEqual({ open: true });
+    expect(manifest.co_edit).toEqual({ open: true });
+    expect(manifest.new_documents.map((d: { ext: string }) => d.ext)).toEqual(['docx', 'xlsx', 'pptx']);
+    expect(e2e).toContain("installInterfaceApp(admin, office, { expect: ['files:e2e-plaintext', 'files:co-edit'] })");
+  });
+
+  it('the office scene shoots the review, New document in two languages, the phone and two people in one file', () => {
+    for (const id of ['files:e2e-plaintext', 'files:co-edit']) expect(office).toContain(`'${id}'`);
+    for (const f of ['office-app-review-1440.png', 'newdoc-office-app-1280.png', 'newdoc-office-app-dark-tr-1280.png', 'office-app-phone-390.png', 'coedit-editor-1280.png', 'coedit-watcher-1280.png']) {
+      expect(office).toContain(`'${f}'`);
+    }
+    // No document server named beside the app's office rows, in the server's words.
+    expect(office).toContain("if (/ONLYOFFICE/i.test(text))");
+    expect(office).toContain('caps.newdoc_withheld');
+    // The phone: the frame as wide as the stage.
+    expect(office).toContain('stage.width - box.width > 2 || box.width < 360');
+    // The second person may only read: a watcher.
+    expect(office).toContain("level: 'viewer'");
+    expect(office).toContain("if (samSays !== 'watching')");
+  });
+
+  it('a scene that edits together reaches its own filex over the socket: no FILEX_PUBLIC_URL to a host nobody resolves', () => {
+    // scene.mjs advertises https://files.example.com; a WebSocket ticket names
+    // that host and the co-editing relay never connects (0.56, shots056).
+    for (const src of [office, e2e]) expect(src).toContain("FILEX_PUBLIC_URL: ''");
+  });
+
+  it('the encrypted scene takes Choose an app… without "Always use", the app in the clear and the vault minute', () => {
+    for (const f of ['open-with-encrypted-1280.png', 'app-encrypted-folder-1280.png', 'vault-lock-soon-1280.png']) expect(e2e).toContain(`'${f}'`);
+    expect(e2e).toContain("getByTestId('open-with-always').count()) !== 0");
+    expect(e2e).toContain("FILEX_E2E_VAULT: '1'");
+    expect(e2e).toContain("await vpage.clock.fastForward('14:10');");
+    expect(e2e).toContain("name: 'Keep it open'");
+  });
+
+  it('the Mermaid scene shoots the diagram and its text after Edit, and saves it (#216)', () => {
+    for (const f of ['mermaid-view-1280.png', 'mermaid-edit-1280.png']) expect(mermaid).toContain(`'${f}'`);
+    expect(mermaid).toContain("throw new Error('Edit opened the diagram viewer again, which has no save (#216)')");
+    expect(mermaid).toContain("r.url().includes('/api/files/save-text')");
+    // The badge over the source says mermaid, not PLAINTEXT.
+    expect(mermaid).toContain("tab.getByTestId('code-lang').innerText()");
   });
 });

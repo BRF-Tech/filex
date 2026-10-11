@@ -14,9 +14,18 @@
 //     suite by construction (e2e/lib/shard.mjs);
 //   - the Go job proves PostgreSQL and MySQL ran (scripts/ci/engines-ran.mjs):
 //     the engine suites skip without a DSN, and a skip is a pass;
-//   - every script it calls is in this tree AND in the export: the config is
-//     exported with the code (it is not one of the public checkout's own
-//     workflows), and a call to a withheld file fails only on CircleCI;
+//   - the Go job runs beside every service of scripts/ci-parts.mjs's
+//     GO_SERVICES, as GitHub's does: the first run had no Samba, and the 11
+//     live SMB tests passed by skipping;
+//   - the Playwright job is prepared by scripts/ci/browser-prep.mjs, the
+//     script GitHub's browser parts call, and names no app itself: the first
+//     run fetched no app, and every app spec failed to load ("the sign app's
+//     plugin.wasm is not built"); it gets BROWSER_BUILD from the build, as
+//     GitHub's parts do;
+//   - every script it calls, and every file those import, is in this tree AND
+//     in the export: the config is exported with the code (it is not one of
+//     the public checkout's own workflows), and a call to a withheld file
+//     fails only on CircleCI;
 //   - the images are the versions the tree pins (backend/go.mod,
 //     pnpm-lock.yaml), so CircleCI tests the toolchain the release builds with;
 //   - the workflow is the one the release gate reads (plan.circleciWorkflow),
@@ -32,7 +41,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { APP_LOCATIONS } from '../../../e2e/helpers/app-locations.mjs';
 import { MAX_SHARDS } from '../../../e2e/lib/shard.mjs';
+import { BROWSER_BUILD, GO_SERVICES } from '../../../scripts/ci-parts.mjs';
 import { planProfile, shardAtNode } from '../../../scripts/lib/test-shards.mjs';
 import plan from '../../../scripts/release/plan.mjs';
 import { bashArray } from '../helpers/exporterArrays';
@@ -107,9 +118,29 @@ describe('.circleci/config.yml: the parts are the shard list\'s', () => {
     expect(e2e).toContain('attach_workspace');
     const build = job('build').join('\n');
     expect(build).toContain('pnpm run build:all');
-    expect(build).toMatch(/^\s+- bin\/filex$/m);
-    expect(build).toMatch(/^\s+- backend\/internal\/wasmplugin\/testdata\/echo\/echo\.wasm$/m);
+    expect(build).toContain('node scripts/check-embed.mjs --binary bin/filex');
+    // BROWSER_BUILD, the list GitHub's build artifact is held to as well.
+    const persisted = /persist_to_workspace:\n\s+root: \.\n\s+paths:\n((?:\s+- \S+\n?)+)/.exec(build)?.[1];
+    expect(persisted, 'the build persists a workspace').toBeTruthy();
+    expect(persisted!.trim().split(/\n/).map((l) => l.trim().replace(/^- /, ''))).toEqual(BROWSER_BUILD);
     expect(section('workflows').join('\n')).toMatch(/- e2e:\n\s+requires:\n\s+- build/);
+  });
+
+  it('the Playwright job is prepared by the script GitHub\'s browser parts call, and names no app of its own', () => {
+    const e2e = job('e2e').join('\n');
+    const apps = e2e.indexOf('node scripts/ci/browser-prep.mjs apps ');
+    const fonts = e2e.indexOf('node scripts/ci/browser-prep.mjs fonts ');
+    const run = e2e.indexOf('node e2e/run.mjs local');
+    expect(apps, 'the apps are fetched').toBeGreaterThan(0);
+    expect(fonts, 'the font map is set').toBeGreaterThan(0);
+    expect(run, 'the suite runs after both').toBeGreaterThan(Math.max(apps, fonts));
+    // Which apps, and where the specs find them, is app-locations.mjs: a name
+    // or a variable of it here would be a second list.
+    expect(Object.keys(APP_LOCATIONS).length).toBeGreaterThan(0);
+    for (const spot of Object.values(APP_LOCATIONS) as Array<{ env: string; repo: string }>) {
+      expect(TEXT, `the config names ${spot.env}`).not.toContain(spot.env);
+      expect(TEXT, `the config names ${spot.repo}`).not.toContain(spot.repo);
+    }
   });
 });
 
@@ -123,10 +154,23 @@ describe('.circleci/config.yml: a green run means what a green GitHub run means'
     expect(go).toContain('--jsonfile ../test-results/go/go-test.json');
     expect(go).toContain('node scripts/ci/engines-ran.mjs test-results/go/go-test.json');
     expect(go.indexOf('engines-ran.mjs')).toBeGreaterThan(go.indexOf('gotestsum'));
-    // a server that is not up is waited for, not skipped
-    expect(go).toMatch(/for port in 5432 3306 6379/);
     expect(go).toMatch(/^\s+FILEX_REQUIRE_WASM_FIXTURE: "1"$/m);
     expect(go).toContain('bash scripts/build-wasm-fixture.sh');
+  });
+
+  it('the Go job runs beside every service of GO_SERVICES, sets its variable, and waits for it', () => {
+    const go = job('go').join('\n');
+    const waited = /for port in ([\d ]+); do/.exec(go)?.[1]?.trim().split(/\s+/) ?? [];
+    expect(waited.length, 'one port waited for per service').toBe(Object.keys(GO_SERVICES).length);
+    for (const [v, svc] of Object.entries(GO_SERVICES)) {
+      // GitHub names the service; here it is the image's name.
+      expect(go, `the Go job runs beside ${svc}`).toMatch(new RegExp(`^\\s+- image: \\S*${svc}\\S*$`, 'm'));
+      const value = new RegExp(`^\\s+${v}: "([^"]+)"$`, 'm').exec(go)?.[1];
+      expect(value, `the Go job sets ${v}`).toBeTruthy();
+      // A server that is not up is waited for, not skipped.
+      const port = /127\.0\.0\.1:(\d+)/.exec(value!)?.[1];
+      expect(waited, `${v}: its port is waited for`).toContain(port);
+    }
   });
 
   it('vet, the unit suites in UTC and the desktop tests run, as in GitHub\'s ci.yml', () => {
@@ -137,13 +181,35 @@ describe('.circleci/config.yml: a green run means what a green GitHub run means'
     expect(web).toContain('node --experimental-strip-types --test test/*.test.ts');
   });
 
-  it('every script and file it calls is in this tree, and in the export', () => {
+  it('every script and file it calls, and every file those import, is in this tree, and in the export', () => {
     const calls = new Set<string>();
     for (const m of CODE.join('\n').matchAll(/\b(?:node|bash)\s+((?:scripts|e2e)\/[A-Za-z0-9._/-]+\.(?:mjs|sh))/g)) calls.add(m[1]!);
     expect([...calls].sort()).toEqual(
-      expect.arrayContaining(['e2e/run.mjs', 'scripts/build-wasm-fixture.sh', 'scripts/ci/engines-ran.mjs', 'scripts/test-shards.mjs']),
+      expect.arrayContaining([
+        'e2e/run.mjs',
+        'scripts/build-wasm-fixture.sh',
+        'scripts/check-embed.mjs',
+        'scripts/ci/browser-prep.mjs',
+        'scripts/ci/engines-ran.mjs',
+        'scripts/test-shards.mjs',
+      ]),
     );
     for (const f of calls) expect(fs.existsSync(path.join(REPO, f)), `${f} is not in the tree`).toBe(true);
+    // What a called module imports runs on CircleCI too: a withheld one fails
+    // there alone. Relative imports, followed to the end.
+    const queue = [...calls].filter((f) => f.endsWith('.mjs'));
+    while (queue.length) {
+      const f = queue.shift()!;
+      for (const m of read(f).matchAll(/^\s*(?:import|export)\b[^'"]*?\bfrom\s+'(\.{1,2}\/[^']+)'/gm)) {
+        const dep = path.posix.normalize(path.posix.join(path.posix.dirname(f), m[1]!));
+        if (calls.has(dep)) continue;
+        expect(fs.existsSync(path.join(REPO, dep)), `${dep} (imported by ${f}) is not in the tree`).toBe(true);
+        calls.add(dep);
+        if (dep.endsWith('.mjs')) queue.push(dep);
+      }
+    }
+    expect(calls.has('e2e/helpers/app-locations.mjs'), 'the imports were followed').toBe(true);
+    expect(calls.has('scripts/chain/run.mjs'), 'the imports were followed').toBe(true);
     if (!exporter) return; // the public tree has no exporter: it IS the export
     const files = new Set(bashArray(exporter, 'private_files', EXPORTER));
     const dirs = bashArray(exporter, 'private_dirs', EXPORTER);

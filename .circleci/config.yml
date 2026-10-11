@@ -2,10 +2,10 @@
 # stand-in when GitHub Actions is down (task #181).
 #
 # What it runs, on every push of main and on a pipeline started by hand on
-# main: the Go suite (PostgreSQL, MySQL and Redis beside it), the web and
-# package unit suites in UTC, the desktop unit tests, and the Playwright suite
-# in Chromium. `pnpm release X.Y.Z --gate circleci` reads the workflow `ci`
-# below, by that name, instead of GitHub (docs/CONTRIBUTING.md, Release
+# main: the Go suite (PostgreSQL, MySQL, Redis and Samba beside it), the web
+# and package unit suites in UTC, the desktop unit tests, and the Playwright
+# suite in Chromium. `pnpm release X.Y.Z --gate circleci` reads the workflow
+# `ci` below, by that name, instead of GitHub (docs/CONTRIBUTING.md, Release
 # process, "When GitHub Actions is down").
 #
 # ⚠⚠ The parts are the ones every runner uses, never a list of this file's:
@@ -14,8 +14,17 @@
 #     `node scripts/test-shards.mjs go --profile go --node i/N` for its own.
 #     A parallelism that is not the profile's shard count is refused there,
 #     and web/tests/deploy/circleciConfig.test.ts is red on it before a push;
+#   - the Go job's services are scripts/ci-parts.mjs's GO_SERVICES, GitHub's
+#     too: a test whose service is missing skips, and a skip is a pass;
 #   - the Playwright job runs `node e2e/run.mjs local --shard i/N`: Playwright
-#     splits the suite itself, so the copies add up to the whole run.
+#     splits the suite itself, so the copies add up to the whole run;
+#   - it is prepared by scripts/ci/browser-prep.mjs, the script GitHub's
+#     browser parts call: the apps the suite installs (every entry of
+#     e2e/helpers/app-locations.mjs, from their public releases) and the build
+#     host's font map. The first run here had neither, and every app spec
+#     failed to load;
+#   - the build hands on scripts/ci-parts.mjs's BROWSER_BUILD, as GitHub's
+#     build job does.
 #
 # ⚠⚠ Why this file lives in the private repository, when .github/workflows
 # does not. The export (scripts/export-public.sh) keeps the public checkout's
@@ -102,9 +111,10 @@ commands:
             - ~/go/pkg/mod
 
 jobs:
-  # Packages, admin UI (vue-tsc + vite), embed, the server binary; go vet on
-  # the module with the real UI embedded. The binary and the echo app
-  # fixture go to the Playwright job.
+  # Packages, admin UI (vue-tsc + vite), embed, the server binary, checked to
+  # serve that UI byte for byte; go vet on the module with the real UI
+  # embedded. The binary, the echo app fixture and packages/core/dist go to
+  # the Playwright job (BROWSER_BUILD).
   build:
     executor: go-node
     environment:
@@ -127,6 +137,9 @@ jobs:
             NODE_OPTIONS: --max-old-space-size=4096
           command: pnpm run build:all
       - run:
+          name: the binary serves the UI that was built
+          command: node scripts/check-embed.mjs --binary bin/filex
+      - run:
           name: go vet
           working_directory: backend
           command: go vet ./...
@@ -135,6 +148,7 @@ jobs:
           paths:
             - bin/filex
             - backend/internal/wasmplugin/testdata/echo/echo.wasm
+            - packages/core/dist
 
   # Copy i of N runs shard i of the `go` profile: scripts/test-shards.json is
   # the list, this job holds only how many copies there are.
@@ -152,12 +166,20 @@ jobs:
           MYSQL_ROOT_PASSWORD: filex
           MYSQL_DATABASE: filex
       - image: redis:7-alpine
+      # The live SMB tests' server. GitHub gives its share a tmpfs of mode
+      # 1777; a CircleCI service takes no mount, and the image's own /share is
+      # root's 755, where every write is refused. /tmp is 1777 already.
+      - image: dperson/samba
+        environment:
+          USER: "filex;filexpass"
+          SHARE: "data;/tmp;;no;no;filex;;;"
     resource_class: large
     parallelism: 8
     environment:
       FILEX_TEST_PG_DSN: "postgres://filex:filex@127.0.0.1:5432/postgres?sslmode=disable"
       FILEX_TEST_MYSQL_DSN: "root:filex@tcp(127.0.0.1:3306)/mysql?parseTime=true&loc=UTC&charset=utf8mb4"
       FILEX_TEST_REDIS_URL: "redis://127.0.0.1:6379/0"
+      FILEX_SMB_TEST: "127.0.0.1:445"
       # The fixture is built below: a test that cannot find it is red here.
       FILEX_REQUIRE_WASM_FIXTURE: "1"
       TZ: UTC
@@ -177,9 +199,9 @@ jobs:
       # A server that is not up turns its engine's tests into skips, and a
       # skip is a pass: wait for each, and stop when one never comes.
       - run:
-          name: PostgreSQL, MySQL and Redis are up
+          name: PostgreSQL, MySQL, Redis and Samba are up
           command: |
-            for port in 5432 3306 6379; do
+            for port in 5432 3306 6379 445; do
               n=0
               until (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; do
                 n=$((n + 1))
@@ -256,6 +278,16 @@ jobs:
       - run:
           name: the echo module of this pipeline
           command: touch backend/internal/wasmplugin/testdata/echo/echo.wasm
+      # The same script GitHub's browser parts call: the apps from their public
+      # releases, each one's FILEX_*_APP_DIR into $BASH_ENV for the steps
+      # below. FILEX_REQUIRE_WASM_FIXTURE makes a missing one a red spec, and
+      # a red here says which.
+      - run:
+          name: the apps the suite installs
+          command: node scripts/ci/browser-prep.mjs apps /tmp/filex-ci/apps
+      - run:
+          name: the build host's font map (Liberation Sans for sans-serif)
+          command: node scripts/ci/browser-prep.mjs fonts /tmp/filex-ci/fc
       - run:
           name: this copy's part of the Playwright suite
           command: node e2e/run.mjs local --binary bin/filex --shard "$((CIRCLE_NODE_INDEX + 1))/$CIRCLE_NODE_TOTAL"

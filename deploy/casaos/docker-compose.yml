@@ -7,7 +7,7 @@
 name: filex
 services:
   filex:
-    image: ghcr.io/brf-tech/filex:v0.55.0
+    image: ghcr.io/brf-tech/filex:v0.56.0
     container_name: filex
     network_mode: bridge
     restart: unless-stopped
@@ -74,8 +74,10 @@ x-casaos:
       storages, what you opened last, what you starred - and + New
       makes a folder or a document: Markdown, text, CSV or code straight
       away, and Word, Excel, PowerPoint or OpenDocument once you connect
-      an ONLYOFFICE server. The templates are real documents compiled into
-      the binary, so no LibreOffice is installed anywhere. A multi-file
+      an ONLYOFFICE server or install the office editor app, which edits
+      them in the browser with no document server. The
+      ONLYOFFICE templates are real documents compiled into the binary, so
+      no LibreOffice is installed anywhere. A multi-file
       selection downloads as one streamed ZIP. Public share links with PIN
       and expiry, file-drop upload links, resumable uploads, full-text
       search, thumbnails of the file itself (a PDF's first page, a video's
@@ -87,7 +89,7 @@ x-casaos:
       who may create them (an administrator's approval when you want
       one), RBAC with groups,
       TOTP 2FA, a sign-in attempt limit on the web form, WebDAV, FTPS and
-      SFTP, optional SSO (OIDC/LDAP), apps - sandboxed WebAssembly add-ons installed through a review of every permission they ask for, with e-Signature, Convert, filextext and draw.io shipping alongside; language packs that add a language with no code and no release, right-to-left layouts included; instance themes on the Appearance screen; personal and team tags; and My shares, where anybody can see and revoke the links they made; a desktop app with live folder sync and an
+      SFTP, optional SSO (OIDC/LDAP), apps - sandboxed WebAssembly add-ons installed through a review of every permission they ask for, with e-Signature, Convert, an office editor, filextext and draw.io shipping alongside, and an app you allow can edit a file of an encrypted folder, decrypted in your browser; language packs that add a language with no code and no release, right-to-left layouts included; instance themes on the Appearance screen; personal and team tags; and My shares, where anybody can see and revoke the links they made; a desktop app with live folder sync and an
       AI/MCP API for agents. An open folder keeps itself up to date over a
       WebSocket, so a file somebody else uploads appears without a
       refresh. Antivirus is optional and needs no fatter image: point
@@ -109,9 +111,9 @@ x-casaos:
   # Published screenshots: e2e/shots/manifest.json names the current file of
   # each, and `node scripts/shots-site.mjs relink` keeps these three on it.
   screenshot_link:
-    - https://filex.sh/shots/explorer-grid-light.484fb070ca19.png
+    - https://filex.sh/shots/explorer-grid-light.de398671d43b.png
     - https://filex.sh/shots/admin-dashboard.d94a065baab6.png
-    - https://filex.sh/shots/share-modal.e296e9b6ceea.png
+    - https://filex.sh/shots/share-modal.d6f6572228ea.png
   tips:
     before_install:
       en_US: >-
@@ -125,7 +127,7 @@ x-casaos:
   port_map: "5212"
   scheme: http
   store_app_id: filex
-  version: "0.55.0"
+  version: "0.56.0"
   website: https://filex.sh
   repo: https://github.com/BRF-Tech/filex
   support: https://github.com/BRF-Tech/filex/issues

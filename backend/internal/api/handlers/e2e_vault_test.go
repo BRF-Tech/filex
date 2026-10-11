@@ -904,3 +904,38 @@ func TestVault_ListingSaysWhichFolderIsAVault(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, "%v", m)
 	require.Nil(t, m["e2e_vault_root"])
 }
+
+// filex 0.56 (#189): state says the sentences the browser shows on its own
+// clock - a minute before the vault locks itself while an app holds unsaved
+// changes in it, its action, and the word once kept - in the reader's
+// language and with the vault folder's own name. Only the browser knows the
+// moment; the server says the words (no screen composes them). Red before
+// 0.56: state had no words.
+func TestVault_StateSaysTheLockWarningsWords(t *testing.T) {
+	f := newVaultFix(t, true)
+	f.create(t, f.admin, "Kasa")
+
+	code, m := f.do(t, f.admin, http.MethodGet, "/api/files/e2e/vault/state?path=depo://Kasa", nil, map[string]string{"Accept-Language": "en"})
+	require.Equal(t, http.StatusOK, code, "%v", m)
+	words, _ := m["words"].(map[string]any)
+	require.NotNil(t, words, "state carries the words: %v", m)
+	soon, _ := words["app_lock_soon"].(string)
+	require.Contains(t, soon, "“Kasa”", "the vault folder's own name")
+	require.Contains(t, soon, "in a minute")
+	require.Equal(t, "Keep it open", words["app_lock_soon_keep"])
+	kept, _ := words["app_lock_kept"].(string)
+	require.Contains(t, kept, "“Kasa” stays open")
+
+	code, m = f.do(t, f.member, http.MethodGet, "/api/files/e2e/vault/state?path=depo://Kasa", nil, map[string]string{"Accept-Language": "tr"})
+	require.Equal(t, http.StatusOK, code, "%v", m)
+	words, _ = m["words"].(map[string]any)
+	soon, _ = words["app_lock_soon"].(string)
+	require.Contains(t, soon, "“Kasa” kasasına")
+	require.Contains(t, soon, "bir dakika içinde")
+	require.Equal(t, "Açık tut", words["app_lock_soon_keep"])
+	for k, v := range words {
+		s, _ := v.(string)
+		require.NotContains(t, s, "{name}", k)
+		require.NotContains(t, s, "server.e2e.vault.", k)
+	}
+}

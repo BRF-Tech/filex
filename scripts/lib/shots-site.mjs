@@ -347,10 +347,12 @@ export function publishedReferences(repo, manifest) {
 
 /**
  * What every scene's pictures depend on besides the product: the fixture
- * files the scenes upload and the board app apps.mjs packs. Read by path, not
- * imported, so the import walk below cannot see them.
+ * files the scenes upload and the example apps the scenes pack - the board
+ * app (apps.mjs, defaultapps.mjs, store.mjs) and the office app
+ * (officeapp.mjs, e2eapp.mjs; 0.56). Their interface files are read by path,
+ * not imported, so the import walk below cannot see them.
  */
-export const SCENE_DATA = ['e2e/fixtures', 'e2e/shots/board-app'];
+export const SCENE_DATA = ['e2e/fixtures', 'e2e/shots/board-app', 'e2e/shots/office-app'];
 
 /**
  * What a scene that declares its INPUTS reads besides them: the shell every

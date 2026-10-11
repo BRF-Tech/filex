@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Office</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <span class="mark" aria-hidden="true">W</span>
+      <span class="name" id="name"></span>
+      <span class="lock" id="lock" hidden></span>
+      <span class="grow"></span>
+      <ul class="people" id="people" aria-label="In this document"></ul>
+    </header>
+    <div class="tools" role="toolbar" aria-label="Format">
+      <button type="button" data-cmd="bold" aria-label="Bold"><b>B</b></button>
+      <button type="button" data-cmd="italic" aria-label="Italic"><i>I</i></button>
+      <button type="button" data-cmd="underline" aria-label="Underline"><u>U</u></button>
+      <span class="sep" aria-hidden="true"></span>
+      <button type="button" data-cmd="h1">Heading</button>
+      <button type="button" data-cmd="p">Text</button>
+      <span class="grow"></span>
+      <span class="state" id="state"></span>
+    </div>
+    <p class="watching" id="watching" hidden></p>
+    <main class="desk">
+      <article class="page" id="page" aria-live="polite"><p class="status">Opening…</p></article>
+    </main>
+    <script src="filex-app-ui.iife.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

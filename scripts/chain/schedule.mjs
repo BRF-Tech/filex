@@ -20,6 +20,13 @@
 //     them is settled.
 //   - The budget itself is the host's: run.mjs takes CHAIN_MEM_GB, or less
 //     when the host has less available at the start (hostBudget).
+//   - The disk: at most `ioMax` (CHAIN_IO_HEAVY_MAX) jobs that write heavily
+//     (plan.mjs ioOf: the Playwright lines, race-db-io, race-rest,
+//     go-io-rest) run at once, the round's line included. A heavy line of
+//     the round waits for the heavy pool jobs running (ioWaits), and from
+//     the moment the round turns to it the pool starts no heavy job (`ioHeld`
+//     in pickJobs): the round goes first, the pool's heavy jobs run beside
+//     its light lines and after it.
 
 /** Memory left for pool jobs, in GiB. */
 export function poolBudget({ memGb, trackActive, trackGb, dbUp, dbGb }) {
@@ -44,6 +51,16 @@ export function hostBudget({ memGb, availGb, reserveGb = 0 }) {
   if (!Number.isFinite(availGb)) return { gb: memGb, cut: false };
   const room = Math.floor(Math.max(0, availGb - reserveGb) * 4) / 4;
   return room < memGb ? { gb: room, cut: true } : { gb: memGb, cut: false };
+}
+
+/**
+ * Whether a job that writes heavily must wait for the disk: `running` are the
+ * jobs running beside it (the pool's, for a line of the browser round), and
+ * at most `ioMax` heavy ones run at once (0: no limit).
+ */
+export function ioWaits(job, running, ioMax) {
+  if (!(ioMax > 0) || job.io !== 'heavy') return false;
+  return running.filter((j) => j.io === 'heavy').length >= ioMax;
 }
 
 /** What the pool will have once the browser round ends: pickJobs' `ceiling`. */
@@ -88,14 +105,28 @@ export function readyJobs(pool, status) {
  *   - When the round holds nothing (budget = ceiling), a job heavier than the
  *     pool has starts when nothing else in the pool runs, and the pool drains
  *     for it: refusing it would stop the chain for good.
+ *   - A job that writes heavily (`io: 'heavy'`) waits while `ioMax` heavy
+ *     jobs run - the pool's, and `ioHeld` outside it (the browser round's
+ *     heavy line, running or about to start) - reserving nothing, so the
+ *     light jobs behind it go on. ⚠ #194: a Playwright line beside race-db-io
+ *     and race-rest stalled the build host's disk for seconds at a time.
+ *   - With `ioMax` set, the heavy jobs run in a lane of their own beside the
+ *     `maxJobs` light ones: they wait through the round's heavy lines while
+ *     the light jobs fill the pool, and would otherwise wait again for a
+ *     light job to end once the disk is theirs. They take the place the
+ *     round's heavy line held, so the host runs no more at once than before.
  */
-export function pickJobs({ ready, running, budget, maxJobs, ceiling = budget }) {
+export function pickJobs({ ready, running, budget, maxJobs, ceiling = budget, ioMax = 0, ioHeld = 0 }) {
   const EPS = 1e-9;
   let free = budget - running.reduce((sum, j) => sum + j.weight, 0);
-  let slots = maxJobs - running.length;
+  const lane = (j) => ioMax > 0 && j.io === 'heavy';
+  let slots = maxJobs - running.filter((j) => !lane(j)).length;
+  let heavy = ioHeld + running.filter((j) => j.io === 'heavy').length;
   const start = [];
   for (const job of ready) {
-    if (slots <= 0) break;
+    const writes = lane(job);
+    if (writes && heavy >= ioMax) continue;
+    if (!writes && slots <= 0) continue;
     if (job.weight > budget + EPS) {
       // More than the pool has now. While the round holds its share, wait
       // for it to end, reserving nothing.
@@ -104,7 +135,8 @@ export function pickJobs({ ready, running, budget, maxJobs, ceiling = budget }) 
       // alone, and the pool drains for it.
       if (running.length === 0 && start.length === 0) {
         start.push(job);
-        slots -= 1;
+        if (writes) heavy += 1;
+        else slots -= 1;
       }
       free -= job.weight;
       if (free <= 0) break;
@@ -114,7 +146,8 @@ export function pickJobs({ ready, running, budget, maxJobs, ceiling = budget }) 
     if (job.weight <= free + EPS) {
       start.push(job);
       free -= job.weight;
-      slots -= 1;
+      if (writes) heavy += 1;
+      else slots -= 1;
     } else {
       free -= job.weight;
     }
@@ -125,9 +158,13 @@ export function pickJobs({ ready, running, budget, maxJobs, ceiling = budget }) 
 /**
  * Replay a plan through `pickJobs` with expected durations (minutes, from
  * `minutes(job)`), every job passing. Returns the wall time, when each job
- * ran, and the most memory the pool and the track held at once.
+ * ran, the most memory the pool and the track held at once, the most heavy
+ * writers that ran at once (`maxHeavy`), and the minutes the round waited
+ * for the disk (`ioWait`). The round takes the disk as run.mjs runTrack does:
+ * a heavy line waits for the heavy pool jobs running, and holds the pool's
+ * heavy jobs back while it waits.
  */
-export function simulate(plan, { memGb, trackGb, dbGb, poolMax, minutes, dsStart = 2 }) {
+export function simulate(plan, { memGb, trackGb, dbGb, poolMax, minutes, dsStart = 2, ioMax = 0 }) {
   const status = Object.fromEntries(plan.pool.map((j) => [j.name, 'pending']));
   const dbJobs = plan.pool.filter((j) => j.db).map((j) => j.name);
   const timeline = [];
@@ -137,15 +174,27 @@ export function simulate(plan, { memGb, trackGb, dbGb, poolMax, minutes, dsStart
   let trackJob = null;
   let trackDone = plan.track.length === 0;
   let dsUp = false;
+  let trackIoWait = null;
+  let ioWait = 0;
   let peak = 0;
   let maxRunning = 0;
+  let maxHeavy = 0;
   const settled = (n) => ['passed', 'failed', 'skipped'].includes(status[n]);
 
   for (let guard = 0; guard < 100000; guard += 1) {
     const buildPassed = plan.pool.filter((j) => j.kind === 'build').every((j) => status[j.name] === 'passed');
     if (buildPassed && !trackJob && !trackDone) {
-      trackIndex += 1;
-      if (trackIndex >= plan.track.length) {
+      const nextLine = plan.track[trackIndex + 1];
+      if (nextLine && ioWaits(nextLine, running.map((r) => r.job), ioMax)) {
+        trackIoWait ??= t;
+      } else {
+        if (trackIoWait !== null) ioWait += t - trackIoWait;
+        trackIoWait = null;
+        trackIndex += 1;
+      }
+      if (trackIoWait !== null) {
+        // The line waits for the disk; the pool starts no heavy job meanwhile.
+      } else if (trackIndex >= plan.track.length) {
         trackDone = true;
       } else {
         const job = plan.track[trackIndex];
@@ -163,7 +212,8 @@ export function simulate(plan, { memGb, trackGb, dbGb, poolMax, minutes, dsStart
     const budget = poolBudget({ memGb, trackActive, trackGb, dbUp, dbGb });
     const ceiling = poolCeiling({ memGb, dbUp, dbGb });
     const { ready } = readyJobs(plan.pool, status);
-    for (const job of pickJobs({ ready, running: running.map((r) => r.job), budget, ceiling, maxJobs: poolMax })) {
+    const ioHeld = trackIoWait !== null || trackJob?.job.io === 'heavy' ? 1 : 0;
+    for (const job of pickJobs({ ready, running: running.map((r) => r.job), budget, ceiling, maxJobs: poolMax, ioMax, ioHeld })) {
       status[job.name] = 'running';
       const r = { job, start: t, end: t + minutes(job) };
       running.push(r);
@@ -172,6 +222,8 @@ export function simulate(plan, { memGb, trackGb, dbGb, poolMax, minutes, dsStart
     const held = running.reduce((s, r) => s + r.job.weight, 0) + (trackActive ? trackGb : 0) + (dbUp ? dbGb : 0);
     peak = Math.max(peak, held);
     maxRunning = Math.max(maxRunning, running.length);
+    const heavyNow = running.filter((r) => r.job.io === 'heavy').length + (trackJob?.job.io === 'heavy' && trackJob.start <= t ? 1 : 0);
+    maxHeavy = Math.max(maxHeavy, heavyNow);
 
     const next = [...running.map((r) => r.end), ...(trackJob ? [trackJob.end] : [])];
     if (next.length === 0) {
@@ -191,5 +243,5 @@ export function simulate(plan, { memGb, trackGb, dbGb, poolMax, minutes, dsStart
       if (plan.track.slice(trackIndex + 1).every((j) => !j.ds)) dsUp = false;
     }
   }
-  return { wall: t, timeline, peakGb: peak, maxRunning };
+  return { wall: t, timeline, peakGb: peak, maxRunning, maxHeavy, ioWait };
 }

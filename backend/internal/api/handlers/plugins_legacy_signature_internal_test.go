@@ -12,21 +12,38 @@ import (
 )
 
 // sec055 S5: a build whose signature verified only in the old sha256-only
-// form is still taken during 0.55 - and the plugin's row on the
-// administrator's screen says so, in the reader's language, from the server.
+// form is still taken during its compatibility window - and the plugin's row
+// on the administrator's screen says so, in the reader's language, from the
+// server, naming the window's end from the one place it is written
+// (internal/compat windows.json), never a literal release.
 func TestPluginWire_AnOldFormSignatureIsSaidOnTheRow(t *testing.T) {
 	h := &Plugins{}
 	r := httptest.NewRequest("GET", "/api/admin/plugins", nil)
+	version, date := plugin.LegacySignatureWindow.Until()
 
 	old := h.wire(r, &plugin.Status{Plugin: &model.Plugin{Name: "oldfs"}, LegacySignature: true})
-	if !strings.Contains(old.SignatureNotice, "0.56") || !strings.Contains(old.SignatureNotice, "SHA-256") {
+	if !strings.Contains(old.SignatureNotice, "SHA-256") {
 		t.Fatalf("the row does not say the signature is the old form: %q", old.SignatureNotice)
+	}
+	for _, want := range []string{"filex " + version, date} {
+		if !strings.Contains(old.SignatureNotice, want) {
+			t.Fatalf("the row does not name the window's end (%s): %q", want, old.SignatureNotice)
+		}
+	}
+	if strings.ContainsAny(old.SignatureNotice, "{}") {
+		t.Fatalf("a placeholder was left unfilled: %q", old.SignatureNotice)
 	}
 
 	tr := httptest.NewRequest("GET", "/api/admin/plugins", nil)
 	tr.Header.Set("Accept-Language", "tr")
-	if got := h.wire(tr, &plugin.Status{Plugin: &model.Plugin{Name: "oldfs"}, LegacySignature: true}).SignatureNotice; !strings.Contains(got, "eski biçim") {
+	got := h.wire(tr, &plugin.Status{Plugin: &model.Plugin{Name: "oldfs"}, LegacySignature: true}).SignatureNotice
+	if !strings.Contains(got, "eski biçim") {
 		t.Fatalf("the sentence is not in the reader's language: %q", got)
+	}
+	for _, want := range []string{"filex " + version, date} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the Turkish row does not name the window's end (%s): %q", want, got)
+		}
 	}
 
 	if got := h.wire(r, &plugin.Status{Plugin: &model.Plugin{Name: "newfs"}}).SignatureNotice; got != "" {

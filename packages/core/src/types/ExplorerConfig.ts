@@ -116,6 +116,8 @@ export interface EndpointMap {
   pluginUISave: string | null;
   /** 0.54 - what an interface reads of the file it was opened with (`{plugin}`/`{view}`). */
   pluginUIRead: string | null;
+  /** Editing together's routes under an interface (0.56, files:co-edit). */
+  pluginUICoEdit: string | null;
   /** 0.52.0 - what an app reads about its own license (`{plugin}`), fx.license.get(). */
   pluginLicense: string | null;
   /** `POST` cancel of a queued/running ops row — `{id}` placeholder. */
@@ -195,6 +197,9 @@ export interface ExplorerConfig {
   pluginUISave?: string;
   /** What an interface reads of its file, checked by the server (0.54). */
   pluginUIRead?: string;
+  /** Editing together (0.56, files:co-edit): the relay's routes under an
+   *  interface (`{plugin}`/`{view}`): `/join`, `/{sid}/append`… */
+  pluginUICoEdit?: string;
   /** What an app reads about its own license (`{plugin}`), fx.license.get(). */
   pluginLicense?: string;
 

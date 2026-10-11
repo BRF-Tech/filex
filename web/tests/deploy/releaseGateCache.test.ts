@@ -180,6 +180,41 @@ describe('the gate cache: a gate green on exactly these inputs is not run again'
     expect(s.runs()).toBe(2);
   });
 
+  // #165: an image build is cached on what the image is made of. Its command
+  // carries the commit and the date it stamps into a throwaway image, so the
+  // key takes its `cacheRecipe` instead; and the image it made has to be the
+  // one under its tag still (`cacheProof`), since the gates after it run that.
+  it('keys a gate with a cacheRecipe on the recipe: a value that only labels the output does not split it', { timeout: TIMEOUT }, async () => {
+    const s = scratch();
+    const counter = path.join(s.root, 'runs.txt');
+    const image = (commit: string, tag = 'filex-release:full') =>
+      s.spec({ name: 'docker: an image', env: { COUNT_FILE: counter, COMMIT: commit }, cacheRecipe: () => ({ dockerfile: 'docker/Dockerfile', tag }) });
+    await s.one(image('c1'));
+    expect((await s.one(image('c2'))).cached).toBe(true);
+    expect(s.runs()).toBe(1);
+    await s.one(image('c2', 'filex-release:slim'));
+    expect(s.runs()).toBe(2);
+  });
+
+  it('holds a hit only while what the green run left behind is the same; one it cannot read back is not kept', { timeout: TIMEOUT }, async () => {
+    const s = scratch();
+    let id: string | null = 'sha256:aaa';
+    const image = () => s.spec({ name: 'docker: an image', cacheRecipe: () => 'image', cacheProof: () => id });
+    await s.one(image());
+    expect((await s.one(image())).cached).toBe(true);
+    // another image under the tag: built again, and that one is kept
+    id = 'sha256:bbb';
+    expect((await s.one(image())).cached).toBeFalsy();
+    expect((await s.one(image())).cached).toBe(true);
+    // gone: built again, twice - a green run whose image cannot be read is not kept
+    id = null;
+    expect((await s.one(image())).cached).toBeFalsy();
+    expect((await s.one(image())).cached).toBeFalsy();
+    expect(s.runs()).toBe(4);
+    const entry = JSON.parse(fs.readFileSync(path.join(s.cacheDir, fs.readdirSync(s.cacheDir).find((f) => f.endsWith('.json'))!), 'utf8'));
+    expect(entry.proof).toBe('sha256:bbb');
+  });
+
   it('--no-cache (read off) runs every gate; a dry run (write off) records nothing', { timeout: TIMEOUT }, async () => {
     const s = scratch({ read: false });
     await s.one(s.spec());

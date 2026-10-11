@@ -31,6 +31,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	cloudpkg "github.com/brf-tech/filex/backend/internal/cloud" /* kimlik:e3 cloud */
+	"github.com/brf-tech/filex/backend/internal/coedit"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/dav"
@@ -181,6 +182,11 @@ type Deps struct {
 	// decides them. Constructed in BuildRouter from E2EPolicy and Notify when
 	// nil; internal/server runs its hourly expiry after BuildRouter.
 	E2ERequests *e2epolicy.Requests
+	// CoEdit is the editing-together relay (internal/coedit, task #189):
+	// the app interfaces' coedit.* calls (handlers/coedit.go). Nil = off:
+	// they answer 503 coedit_off and an app edits alone. internal/server
+	// builds it and runs its sweep.
+	CoEdit *coedit.Relay
 	// ProtocolAuth is the one door every non-HTTP protocol resolves its caller
 	// through (WebDAV today; S3, SFTP, FTPS, NFS and FUSE next). ONE instance is
 	// shared on purpose: a resolver per protocol would mean a credential cache
@@ -630,6 +636,7 @@ func BuildRouter(d *Deps) http.Handler {
 	apH.Preview = mh.List
 	apH.Quota = d.Quota
 	apH.E2EPolicy = d.E2EPolicy
+	apH.CoEditRelay = d.CoEdit
 	// Plugin install requests (internal/pluginreq): ONE service behind the
 	// panel's /api/admin/plugin-requests and the admin MCP tools.
 	pluginRequests := d.PluginRequests
@@ -664,7 +671,29 @@ func BuildRouter(d *Deps) http.Handler {
 	pubAPI.AttachACL(d.ACL)
 	// The SPA shell for /s/ and /d/ when a JavaScript browser asks for HTML;
 	// the Go pages below stay as the no-JS answer. See handlers.PublicShell.
-	publicShell := publicShellHandler(d.Embed, d.Cfg.BasePath)
+	//
+	// ⚠ The branding source is made here, before the first thing that serves
+	// the app shell: index.html, the manifest and the worker wear the brand
+	// (spa_brand.go), and the public shell is the same index.html.
+	brandingSrc := handlers.NewBrandingSource(d.Store, d.Cfg.MultiTenant)
+	brander := newShellBrander(brandingSrc, d.Cfg.BasePath)
+	// A Web Push shows the installed app's icon (#219): the PNG the manifest
+	// names for the person's tenant branding, read off the manifest the build
+	// ships as this branding dresses it (spa_brand.go pushIcon).
+	if pi, ok := d.Notify.(notify.PushIcons); ok && brander != nil {
+		var builtManifest []byte
+		if d.Embed != nil {
+			builtManifest, _ = fs.ReadFile(d.Embed, "admin/manifest.webmanifest")
+		}
+		pi.SetPushIcon(func(ctx context.Context, u *model.User) string {
+			var tenantID *int64
+			if u != nil {
+				tenantID = u.ProviderID
+			}
+			return brander.pushIcon(builtManifest, brandingSrc.ForProvider(ctx, tenantID))
+		})
+	}
+	publicShell := publicShellHandler(d.Embed, d.Cfg.BasePath, brander)
 	sh.AttachShell(publicShell)
 	dh.AttachShell(publicShell)
 	// …and the no-JS body of an app link: the copies the app exposed, as
@@ -1185,7 +1214,7 @@ func BuildRouter(d *Deps) http.Handler {
 	   admin SPA login. One shared source: the Settings handler invalidates
 	   it on branding.* writes; Share/Drop render through it; GET
 	   /api/branding is public (the login page fetches it pre-session). */
-	brandingSrc := handlers.NewBrandingSource(d.Store, d.Cfg.MultiTenant)
+	// brandingSrc itself is made above, beside the public shell.
 	sh.AttachBranding(brandingSrc)
 	dh.AttachBranding(brandingSrc)
 	seth.AttachBranding(brandingSrc)
@@ -1338,6 +1367,9 @@ func BuildRouter(d *Deps) http.Handler {
 		d.AppPlugins.SetUpgradeListener(hub.AppUpdated)
 	}
 	wsh.AttachPublicURLConfigured(d.Cfg.PublicURLSet)
+	// Editing together (handlers/coedit.go): the relay's routes under the
+	// app interfaces' own, and its socket beside the realtime one.
+	coH := handlers.NewCoEdit(apH, d.CoEdit, wsh)
 	wsh.AttachTenants(tenants)
 	// A ticketed upgrade authenticates after every middleware has run, so the
 	// handler has to attach the tenant scope itself — and only when
@@ -1360,6 +1392,9 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Use(auth.RequireVerb(auth.VerbRead))
 		r.Use(tenantScope)
 		r.Get("/api/ws", wsh.Handle)
+		// A co-editing member's socket (handlers/coedit.go): authenticated
+		// by the single-use ticket its join or …/ticket minted.
+		r.Get("/api/coedit/ws", coH.Socket)
 	})
 
 	// ────── authenticated user routes ──────
@@ -1636,6 +1671,21 @@ func BuildRouter(d *Deps) http.Handler {
 				// files:read and the kind checked here, then the preview
 				// read (handlers/app_ui_read.go).
 				r.With(handlers.RequirePermission(d.ACL, perm.PluginsRun)).Get("/ui/{plugin}/{view}/read", apH.UIRead)
+				// Editing together (handlers/coedit.go, files:co-edit): a
+				// member's writes ask `write` of a token; joining, reading
+				// along and leaving are the person running an app.
+				r.With(handlers.RequirePermission(d.ACL, perm.PluginsRun)).Route("/ui/{plugin}/{view}/coedit", func(r chi.Router) {
+					r.Post("/join", coH.Join)
+					r.With(write).Post("/{sid}/append", coH.Append)
+					r.With(write).Post("/{sid}/lease", coH.Lease)
+					// An encrypted folder's session: the key its starter
+					// sealed with the folder key, kept as it is (0.56).
+					r.With(write).Post("/{sid}/key", coH.Key)
+					r.Post("/{sid}/ticket", coH.Ticket)
+					r.Post("/{sid}/leave", coH.Leave)
+					r.With(write).Put("/{sid}/blob/{name}", coH.PutBlob)
+					r.Get("/{sid}/blob/{name}", coH.GetBlob)
+				})
 				// What an app reads about its own license, fx.license.get()
 				// (handlers/app_store_intent.go).
 				r.With(handlers.RequirePermission(d.ACL, perm.PluginsRun)).Get("/license/{plugin}", handlers.NewAppStore(d.AppStore, handlers.NewAppPluginsAdmin(d.AppPlugins, d.AppPluginsDisabledReason), d.Cfg.Demo.Mode).AppLicense)
@@ -2678,7 +2728,7 @@ func BuildRouter(d *Deps) http.Handler {
 	})
 
 	// ────── embedded static ──────
-	wireStatic(r, d.Embed, d.Cfg.BasePath)
+	wireStatic(r, d.Embed, d.Cfg.BasePath, brander)
 
 	return r
 }
@@ -2706,8 +2756,9 @@ const UserUIPrefix = "/drive"
 // Under a base path (internal/basepath) the two documents that name their own
 // address — index.html and the PWA manifest — are served rewritten for it
 // (spa_shell.go); every other file is served byte for byte, which is what lets
-// one build run at the root and under any prefix.
-func wireStatic(r chi.Router, fsys fs.FS, base string) {
+// one build run at the root and under any prefix. The same documents, and the
+// worker that precaches them, wear the operator's brand (spa_brand.go).
+func wireStatic(r chi.Router, fsys fs.FS, base string, brand *shellBrander) {
 	adminFS, err := stripPrefix(fsys, "admin")
 	if err != nil {
 		// embed/admin missing entirely (likely local dev where the
@@ -2718,7 +2769,7 @@ func wireStatic(r chi.Router, fsys fs.FS, base string) {
 		})
 	} else {
 		shell := newShellDocs(adminFS, base)
-		spa := spaHandler{root: adminFS, urlPrefix: "/admin", shell: shell}
+		spa := spaHandler{root: adminFS, urlPrefix: "/admin", shell: shell, brand: brand}
 		// The translator's catalogue context names THIS binary's version
 		// (catalogue_version.go), not the one the web build guessed.
 		r.Get("/admin/"+catalogueContextPath, catalogueContext(adminFS.ReadFile))
@@ -2730,7 +2781,7 @@ func wireStatic(r chi.Router, fsys fs.FS, base string) {
 		// (FileExplorer's `openPageBase` config). These need the same
 		// SPA fallback so a fresh browser tab loads index.html and
 		// vue-router takes over.
-		filesSPA := spaHandler{root: adminFS, urlPrefix: "", shell: shell}
+		filesSPA := spaHandler{root: adminFS, urlPrefix: "", shell: shell, brand: brand}
 		r.Handle("/files/edit", filesSPA)
 		r.Handle("/files/edit/*", filesSPA)
 
@@ -2747,7 +2798,7 @@ func wireStatic(r chi.Router, fsys fs.FS, base string) {
 		// ⚠ /drive, not /files: `files` is already a route INSIDE the SPA
 		// (the admin file-lookup page, and /files/edit above), so a top-level
 		// /files would collide with both.
-		userSPA := spaHandler{root: adminFS, urlPrefix: UserUIPrefix, shell: shell}
+		userSPA := spaHandler{root: adminFS, urlPrefix: UserUIPrefix, shell: shell, brand: brand}
 		r.Handle(UserUIPrefix, redirectUnderBase(UserUIPrefix+"/"))
 		r.Handle(UserUIPrefix+"/", userSPA)
 		r.Handle(UserUIPrefix+"/*", userSPA)
@@ -2839,7 +2890,7 @@ func wireStatic(r chi.Router, fsys fs.FS, base string) {
 // nil when the frontend is not bundled — a development build, or a binary
 // built without `pnpm build:web`. The Go pages below then answer every
 // visitor, which is exactly the no-JS fallback, so nothing is unreachable.
-func publicShellHandler(fsys fs.FS, base string) http.Handler {
+func publicShellHandler(fsys fs.FS, base string, brand *shellBrander) http.Handler {
 	adminFS, err := stripPrefix(fsys, "admin")
 	if err != nil {
 		return nil
@@ -2854,6 +2905,7 @@ func publicShellHandler(fsys fs.FS, base string) http.Handler {
 		if shell != nil && shell.index != nil {
 			data = shell.index
 		}
+		data = brand.index(data, r)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		// ⚠ no-store, not no-cache: this document is served at a public link,
 		// and a shared or intermediate cache holding it would hand the next
@@ -2871,6 +2923,10 @@ type spaHandler struct {
 	// shell is the index.html and manifest rewritten for a base path; nil at
 	// the root, where every file is served as built.
 	shell *shellDocs
+	// brand dresses index.html, the manifest and the worker in the
+	// request's branding, and serves the icons rendered from its logo
+	// (spa_brand.go). Nil, or nothing branded: served as above.
+	brand *shellBrander
 }
 
 func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -2879,6 +2935,12 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rel = strings.TrimPrefix(rel, "/")
 	if rel == "" {
 		rel = "index.html"
+	}
+
+	// The icons drawn from the operator's logo exist in no build.
+	if h.brand != nil && strings.HasPrefix(rel, brandIconDir+"/") {
+		h.brand.serveIcon(w, r, strings.TrimPrefix(rel, brandIconDir+"/"))
+		return
 	}
 
 	// Try the requested file; fall through to index.html for SPA routes.
@@ -2904,6 +2966,14 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case rel == "manifest.webmanifest" && h.shell.manifest != nil:
 			data = h.shell.manifest
 		}
+	}
+	switch rel {
+	case "index.html":
+		data = h.brand.index(data, r)
+	case "manifest.webmanifest":
+		data = h.brand.manifest(data, r)
+	case "sw.js":
+		data = h.brand.serviceWorker(data, r)
 	}
 
 	ct := contentTypeForName(rel)

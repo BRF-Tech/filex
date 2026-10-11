@@ -66,6 +66,6 @@ describe('the toast timer', () => {
 describe('the drag-out import', () => {
   it('is one name per line, like its neighbours', () => {
     expect(explorer).not.toMatch(/type DragItem, sayDragProgress \}/);
-    expect(explorer).toMatch(/\n {2}sayDragProgress,\n {2}type DragItem,\n\} from '\.\/lib\/dragOut';/);
+    expect(explorer).toMatch(/\n {2}sayDragProgress,\n {2}type DragItem,\n {2}type DragOutRow,\n\} from '\.\/lib\/dragOut';/);
   });
 });

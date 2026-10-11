@@ -61,6 +61,14 @@ export interface UiPrefs {
    */
   appState?: string;
   /**
+   * filex 0.56 (task #189) — what apps' interfaces keep while they hold a
+   * file of an encrypted folder in the clear (lib/appStateE2e): a JSON object
+   * `{app: {ledger id: sealed}}`, each ledger sealed in the browser with a key
+   * derived from that folder's key. The server stores it and cannot read it;
+   * apart from `appState`, never mixed with it.
+   */
+  appStateE2e?: string;
+  /**
    * v4 — the app versions this person has been told about (lib/appState): a
    * JSON object `{app: version}`. An administrator approved a new version →
    * the next time the person opens that app, the "updated" note shows once.
@@ -85,7 +93,7 @@ export interface UiPrefs {
 export type PrefKey = keyof UiPrefs;
 
 /** The keys that paint the window — each has a first-paint mirror (below). */
-export type LookKey = Exclude<PrefKey, 'tour' | 'appState' | 'appsSeen' | 'openWith'>;
+export type LookKey = Exclude<PrefKey, 'tour' | 'appState' | 'appStateE2e' | 'appsSeen' | 'openWith'>;
 
 /**
  * Every key the account document carries.
@@ -95,7 +103,18 @@ export type LookKey = Exclude<PrefKey, 'tour' | 'appState' | 'appsSeen' | 'openW
  * preference that is not a look (the tour) still has to be named here, or the
  * first palette change after it was stored would erase it.
  */
-export const PREF_KEYS: readonly PrefKey[] = ['theme', 'palette', 'density', 'locale', 'storageOrder', 'tour', 'appState', 'appsSeen', 'openWith'];
+export const PREF_KEYS: readonly PrefKey[] = [
+  'theme',
+  'palette',
+  'density',
+  'locale',
+  'storageOrder',
+  'tour',
+  'appState',
+  'appStateE2e',
+  'appsSeen',
+  'openWith',
+];
 
 /**
  * The keys that belong to the ACCOUNT, not to this surface: read with the

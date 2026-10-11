@@ -334,6 +334,15 @@ func (r *Registry) checkDescribedUI(m *Manifest, got *wire.Manifest) error {
 	if want.Print != have.Print {
 		return fmt.Errorf("the module describes print %v, the manifest %v", have.Print, want.Print)
 	}
+	// The plaintext of encrypted folders goes to this interface (e2eplain.go):
+	// the signature must have seen that too.
+	if wantE2E, haveE2E := encryptedFoldersOpen(m), got.EncryptedFolders != nil && got.EncryptedFolders.Open; wantE2E != haveE2E {
+		return fmt.Errorf("the module describes encrypted_folders.open %v, the manifest %v", haveE2E, wantE2E)
+	}
+	// And whether its views edit together (permissions_coedit.go).
+	if wantCo, haveCo := coEditOpen(m), got.CoEdit != nil && got.CoEdit.Open; wantCo != haveCo {
+		return fmt.Errorf("the module describes co_edit.open %v, the manifest %v", haveCo, wantCo)
+	}
 	ext := func(list []wire.UIExternal) []string {
 		out := make([]string, 0, len(list))
 		for _, e := range list {
@@ -504,11 +513,16 @@ func (m *Manifest) checkUI() error {
 }
 
 // uiOnlyPerm: the permissions an app without a module may hold — what the
-// bridge answers to (files:read, files:write, settings) and the interface's
+// bridge answers to (files:read, files:write, files:co-edit, files:e2e-plaintext, settings) and the interface's
 // own. Everything else is used by a module's host functions.
 func uiOnlyPerm(p Permission) bool {
 	switch p {
 	case PermFilesRead, PermFilesWrite, PermSettings:
+		return true
+	case PermFilesCoEdit, PermFilesE2EPlaintext:
+		// Editing together (coedit.*) and the plaintext of an encrypted
+		// folder's file (file.read / file.save) are the bridge's too: the
+		// office editor, which asks for both, is only an interface.
 		return true
 	}
 	return isUIPerm(p)

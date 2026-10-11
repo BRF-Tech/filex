@@ -534,23 +534,26 @@ export function binPack(items, k) {
 }
 
 /**
- * New file lists for the units of `pkg`, from a weight per test: every test
- * file on disk is placed (stale names dropped), the units keep their names
- * and their order, the rest stays the rest. A test with no weight (it did not
- * run where the timings came from: skipped, another OS) counts as the median
- * of those that have one. Returns { units, totals } - `totals` the weight
- * each unit got, in unit order.
+ * New file lists for the units of `pkg`: every test file on disk is placed
+ * (stale names dropped), the units keep their names and their order, the
+ * rest stays the rest. The weights are either `weights`, seconds per test
+ * from one log (a test with no weight - it did not run where the timings came
+ * from: skipped, another OS - counts as the median of those that have one),
+ * or `fileWeight`, seconds per test file (fileWeigher: the measured times
+ * of scripts/test-times.json). Returns { units, totals } - `totals` the
+ * weight each unit got, in unit order.
  */
-export function rebalanceUnits(cfg, pkg, { backendDir, weights }) {
+export function rebalanceUnits(cfg, pkg, { backendDir, weights, fileWeight }) {
   const units = cfg.units?.[pkg];
   if (!units) throw new Error(`${pkg} is not a sharded package (known: ${Object.keys(cfg.units ?? {}).join(', ')})`);
   const onDisk = packageTests(backendDir, pkg);
-  const known = [...weights.values()].sort((a, b) => a - b);
-  const median = known.length ? known[Math.floor(known.length / 2)] : 1;
-  const items = [...onDisk.entries()].map(([file, names]) => ({
-    key: file,
-    weight: names.reduce((sum, n) => sum + (weights.has(n) ? weights.get(n) : median), 0),
-  }));
+  let weigh = fileWeight;
+  if (!weigh) {
+    const known = [...weights.values()].sort((a, b) => a - b);
+    const median = known.length ? known[Math.floor(known.length / 2)] : 1;
+    weigh = (file) => onDisk.get(file).reduce((sum, n) => sum + (weights.has(n) ? weights.get(n) : median), 0);
+  }
+  const items = [...onDisk.keys()].map((file) => ({ key: file, weight: weigh(file) }));
   const bins = binPack(items, units.length);
   // The heaviest bin goes to the first unit, and so on: the order is only a
   // name, but a stable one keeps a diff of the list readable.
@@ -559,4 +562,229 @@ export function rebalanceUnits(cfg, pkg, { backendDir, weights }) {
     units: units.map((u, i) => ({ ...u, files: bins[i].keys })),
     totals: bins.map((b) => b.total),
   };
+}
+
+// ── measured times: scripts/test-times.json (task #174) ─────────────────────
+//
+// ⚠ The -race shards are the longest jobs of ci.yml's full run, and that run
+// is the release's land → green gate (≤ 50 minutes). 0.53's split was an
+// estimate and nobody re-cut it: by 0.55 the rest unit of the handlers had
+// taken every new test file (244 → 437 tests) and ran 57 minutes, the run
+// 58-75. So the times a real run measured are kept in a file of their own,
+// `rebalance` cuts the units from that file, and `estimate` (and
+// web/tests/deploy/testShards.test.ts) holds every -race shard to
+// RACE_BUDGET_MIN with the tree as it is - a test file added since the
+// measurement counts at its package's mean, so the rest unit's growth shows
+// up before a release waits on it.
+
+/**
+ * Minutes a -race shard may be estimated at on the runner the times were
+ * measured on. ci.yml's full run must be green within 50 minutes of the push;
+ * a -race job also waits up to ~8 minutes for one of the organisation's 20
+ * runners, and a slow runner takes up to 30% longer than the median one
+ * (60 cut -race jobs of 0.53-0.55: 0.62-1.29 of their tests' medians, 1.14
+ * at the 90th percentile). The estimate is the median runner's.
+ */
+export const RACE_BUDGET_MIN = 35;
+
+/** The median of a list of numbers; NaN for none. */
+export function median(values) {
+  const s = [...values].sort((a, b) => a - b);
+  if (s.length === 0) return Number.NaN;
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+/**
+ * Seconds per package, from the package lines of `go test` output
+ * (`ok  <import path>  12.3s`, `FAIL <import path> 12.3s`, and `?  <import
+ * path>  [no test files]` as 0) or from `go test -json` (a pass or fail event
+ * without a Test). Keys are ./paths of `module`; a path outside it is left out.
+ *
+ * ⚠ The public repository's module path is not this one's (the export renames
+ * it), and its CI runs are where the times come from: a path outside `module`
+ * that has the module's last element in it (`…/backend/internal/x`) is read
+ * as `./internal/x`.
+ */
+export function parseGoPackageTimes(text, module) {
+  const out = new Map();
+  const last = module.split('/').pop();
+  const rel = (importPath) => {
+    if (importPath === module || importPath.startsWith(`${module}/`)) return relPackage(importPath, module);
+    if (importPath.endsWith(`/${last}`)) return '.';
+    const at = importPath.indexOf(`/${last}/`);
+    return at < 0 ? null : `./${importPath.slice(at + last.length + 2)}`;
+  };
+  const put = (importPath, secs) => {
+    const p = rel(importPath);
+    if (p && Number.isFinite(secs)) out.set(p, secs);
+  };
+  for (const line of String(text).split(/\r?\n/)) {
+    if (line.startsWith('{')) {
+      let ev;
+      try {
+        ev = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (['pass', 'fail'].includes(ev.Action) && !ev.Test && ev.Package) put(ev.Package, Number(ev.Elapsed));
+      continue;
+    }
+    const done = /^(?:ok|FAIL)\s+(\S+)\s+([0-9.]+)s(?:\s|$)/.exec(line);
+    if (done) {
+      put(done[1], Number(done[2]));
+      continue;
+    }
+    const none = /^\?\s+(\S+)\s+\[no test files\]/.exec(line);
+    if (none) put(none[1], 0);
+  }
+  return out;
+}
+
+/**
+ * What scripts/test-times.json holds, from the logs of one or more runs
+ * (`go test -race -v`, one shard a log: GitHub keeps each -race job's as the
+ * artifact race-<shard>, the chain as out/race-<shard>/race.out).
+ *
+ *   files     per cut package, per test file on disk: [seconds, tests] - the
+ *             seconds its measured tests took, and how many were measured
+ *   packages  every other package a log ran: its seconds
+ *
+ * `logs`: [{ name, text }]. A log's test lines belong to a cut package only
+ * when that package is the one package the log ran (a cut shard's log): a
+ * test name is unique within a package, not across them. The chain runs a cut
+ * shard's binary directly and prints no package line: such a log counts for
+ * `pkg` when one is given, and is reported in `skipped` otherwise. Every time
+ * is the median over the logs it appears in, so one slow runner does not move
+ * the split.
+ */
+export function measureTimes(cfg, { backendDir, logs, pkg = '' }) {
+  const module = modulePath(backendDir);
+  const cut = new Set(Object.keys(cfg.units ?? {}));
+  if (pkg && !cut.has(pkg)) throw new Error(`${pkg} is not a cut package (known: ${[...cut].join(', ')})`);
+  const testSamples = new Map();
+  const pkgSamples = new Map();
+  const skipped = [];
+  for (const log of logs) {
+    const pkgs = parseGoPackageTimes(log.text, module);
+    for (const [p, secs] of pkgs) if (!cut.has(p)) pkgSamples.set(p, [...(pkgSamples.get(p) ?? []), secs]);
+    const only = pkgs.size === 1 ? [...pkgs.keys()][0] : '';
+    const owner = cut.has(only) ? only : pkgs.size === 0 ? pkg : '';
+    if (!owner) {
+      if (pkgs.size === 0) skipped.push(log.name);
+      continue;
+    }
+    if (!testSamples.has(owner)) testSamples.set(owner, new Map());
+    const samples = testSamples.get(owner);
+    for (const [name, secs] of parseGoTestTimes(log.text)) samples.set(name, [...(samples.get(name) ?? []), secs]);
+  }
+  const round1 = (n) => Math.round(n * 10) / 10;
+  const files = {};
+  const unknownTests = {};
+  for (const p of [...cut].sort()) {
+    const samples = testSamples.get(p);
+    if (!samples) continue;
+    const perFile = {};
+    const placed = new Set();
+    for (const [file, names] of packageTests(backendDir, p)) {
+      const measured = names.filter((n) => samples.has(n));
+      for (const n of measured) placed.add(n);
+      if (measured.length) perFile[file] = [round1(measured.reduce((s, n) => s + median(samples.get(n)), 0)), measured.length];
+    }
+    files[p] = perFile;
+    const gone = [...samples.keys()].filter((n) => !placed.has(n));
+    if (gone.length) unknownTests[p] = gone.sort();
+  }
+  const packages = {};
+  for (const p of [...pkgSamples.keys()].sort()) packages[p] = round1(median(pkgSamples.get(p)));
+  return { files, packages, logs: logs.length, skipped, unknownTests };
+}
+
+/**
+ * Seconds a test file of `pkg` weighs by `times` (scripts/test-times.json),
+ * for the files `onDisk` (packageTests) has now: what its measured tests
+ * took, plus the package's mean per test for each test it has that the times
+ * do not know (a file added since, or a test added to it).
+ */
+export function fileWeigher(times, pkg, onDisk) {
+  const files = times.files?.[pkg] ?? {};
+  let secs = 0;
+  let count = 0;
+  for (const [s, n] of Object.values(files)) {
+    secs += s;
+    count += n;
+  }
+  const mean = count ? secs / count : 1;
+  return (file) => {
+    const names = onDisk.get(file) ?? [];
+    const [s, n] = files[file] ?? [0, 0];
+    return s + Math.max(0, names.length - n) * mean;
+  };
+}
+
+/**
+ * Seconds each package unit weighs by `times`: its packages' sum (the rest
+ * unit: every package of `goPackages` no other unit names, sharded ones
+ * aside). A package the times do not know weighs the median of the measured
+ * packages that have tests.
+ */
+export function packageUnitSeconds(cfg, times, goPackages) {
+  const known = Object.values(times.packages ?? {}).filter((s) => s > 0);
+  const fallback = known.length ? median(known) : 0;
+  const weigh = (p) => times.packages?.[p] ?? fallback;
+  const named = new Set((cfg.packages ?? []).flatMap((u) => u.packages ?? []));
+  const sharded = new Set(Object.keys(cfg.units ?? {}));
+  const out = new Map();
+  for (const u of cfg.packages ?? []) {
+    const pkgs = u.rest === true ? goPackages.filter((p) => !named.has(p) && !sharded.has(p)) : (u.packages ?? []);
+    out.set(u.name, pkgs.reduce((s, p) => s + weigh(p), 0));
+  }
+  return out;
+}
+
+/**
+ * Minutes each shard of the `race` profile is expected to take on the runner
+ * `times` was measured on: `model.setup_min` (checkout, toolchain, the -race
+ * build) plus its tests - a cut shard's run one after another, a package
+ * shard's side by side, `model.package_parallel` at a time (go test -p).
+ * Returns [{ name, minutes, seconds }] in profile order.
+ */
+export function estimateRace(cfg, times, { backendDir, goPackages, profile = 'race' }) {
+  const model = times.model ?? {};
+  if (!(model.setup_min >= 0) || !(model.package_parallel > 0)) throw new Error('scripts/test-times.json: model.setup_min and model.package_parallel are missing');
+  const plan = planProfile(cfg, profile, { backendDir });
+  const pkgSecs = packageUnitSeconds(cfg, times, goPackages);
+  const weighers = new Map();
+  const weigherOf = (pkg) => {
+    if (!weighers.has(pkg)) weighers.set(pkg, fileWeigher(times, pkg, packageTests(backendDir, pkg)));
+    return weighers.get(pkg);
+  };
+  return plan.shards.map((s) => {
+    const seconds = s.run
+      ? s.files.reduce((n, f) => n + weigherOf(s.packages[0])(f), 0)
+      : s.units.reduce((n, u) => n + (pkgSecs.get(u) ?? 0), 0) / model.package_parallel;
+    return { name: s.name, minutes: Math.round((model.setup_min + seconds / 60) * 10) / 10, seconds };
+  });
+}
+
+/**
+ * scripts/test-times.json as text: the header and model pretty, one line per
+ * file and per package, so a re-measure reads as a diff of numbers.
+ */
+export function formatTimes(times) {
+  const q = (v) => JSON.stringify(v);
+  const block = (obj, indent) =>
+    Object.keys(obj).length === 0
+      ? '{}'
+      : `{\n${Object.entries(obj)
+          .map(([k, v]) => `${indent}  ${q(k)}: ${q(v)}`)
+          .join(',\n')}\n${indent}}`;
+  const head = Object.entries(times)
+    .filter(([k]) => k !== 'files' && k !== 'packages')
+    .map(([k, v]) => `  ${q(k)}: ${JSON.stringify(v, null, 2).split('\n').join('\n  ')}`);
+  const files = `  "files": {\n${Object.entries(times.files ?? {})
+    .map(([pkg, f]) => `    ${q(pkg)}: ${block(f, '    ')}`)
+    .join(',\n')}\n  }`;
+  const packages = `  "packages": ${block(times.packages ?? {}, '  ')}`;
+  return `{\n${[...head, files, packages].join(',\n')}\n}\n`;
 }

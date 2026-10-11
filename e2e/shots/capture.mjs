@@ -42,6 +42,7 @@ import { chromium } from '@playwright/test';
 import { goBuild } from '../../scripts/lib/go-build.mjs';
 import { SCENE_CONTEXT, sceneServerEnv, stageClock } from './clock.mjs';
 import { seedFixtures, syncAndWait } from './fixtures.mjs';
+import { growUntilShown } from './frame.mjs';
 import { configureMail, startMailSink } from './mailsink.mjs';
 import { shotsDir } from './release.mjs';
 
@@ -495,6 +496,9 @@ async function shootDemoLanding(browser, base) {
         'boot the demo instance without FILEX_DEMO_PASS so it shows the default',
     );
   }
+  // ⚠ The landing runs past a 1000px window, and its last paragraph (the
+  // "Also included" line) was sliced in two at the picture's foot (0.56).
+  await growUntilShown(dpage, ['document'], { max: 2400, what: 'demo-landing.png' });
   await shot(dpage, 'demo-landing.png');
   await dctx.close();
 }
@@ -601,6 +605,11 @@ async function run() {
       // "My shares" entry in v0.43.0, which moved that leftover point onto a
       // thumbnail.) Park it somewhere neutral and let the hover settle.
       await page.mouse.move(4, 4);
+      // ⚠ The navigation panel scrolls on its own, and at 620px its last
+      // section (Connections) ended the panel as a bare heading: both of its
+      // entries were below the fold, which reads as a heading over nothing
+      // (0.56 README). The window grows until the panel hides nothing.
+      await growUntilShown(page, ['.fe-sidenav__scroll'], { max: 1000, what: `explorer-grid-${scheme}.png` });
       await sleep(250);
       await shot(page, `explorer-grid-${scheme}.png`);
       await ctx.close();
@@ -645,7 +654,14 @@ async function run() {
     await page.locator('[role="listbox"] [role="option"][data-value="sftp"]').click();
     await page.waitForSelector('[data-testid="guide-facts"]', { timeout: 15_000 });
     await sleep(800);
-    await shot(page, 'connections-guide.png');
+    // ⚠ At 940px the page ran on past the window and the picture stopped half
+    // way through the sign-in line (0.56 README): the whole guide, then.
+    {
+      const before = page.viewportSize();
+      await growUntilShown(page, ['document'], { max: 2400, what: 'connections-guide.png' });
+      await shot(page, 'connections-guide.png');
+      await page.setViewportSize(before);
+    }
 
     // 4 — the share dialog, showing what it can actually do today: a PIN, an
     // expiry, a DOWNLOAD LIMIT and the one-line curl for the finished link.

@@ -27,13 +27,13 @@ async function load() {
 
 // The same two rules the public checkout's gate applies (scripts/hooks/
 // export-pre-push.sh): the private forge path, and any name under the
-// project domain but the two contact addresses.
+// project domain but the two contact addresses and the Helm repository.
 const FORGE = /gitlab\.com[:/]+brftech/i;
 const DOMAIN = /[a-z0-9._%+@/-]*\bbrf\.sh\b/gi;
 const leaks = (s: string) => {
   const out: string[] = [];
   if (FORGE.test(s)) out.push('forge path');
-  for (const m of s.match(DOMAIN) ?? []) if (!/^(hello|security)@brf\.sh$/i.test(m)) out.push(m);
+  for (const m of s.match(DOMAIN) ?? []) if (!/^((hello|security)@brf\.sh|\/*helm\.brf\.sh)$/i.test(m)) out.push(m);
   return out;
 };
 
@@ -41,7 +41,7 @@ describe.skipIf(!hasExporter)('the Releases page neutralizes release bodies with
   it('reads the rules from the exporter, in order', async () => {
     const { exportRules } = await load();
     const rules = exportRules()!;
-    expect(rules.keep).toEqual(expect.arrayContaining(['security@brf.sh', 'hello@brf.sh']));
+    expect(rules.keep).toEqual(expect.arrayContaining(['security@brf.sh', 'hello@brf.sh', 'helm.brf.sh']));
     expect(rules.replace.length).toBeGreaterThanOrEqual(5);
     // The registry line must come before the generic forge rule, as in convert().
     const reg = rules.replace.findIndex(([from]) => from.startsWith('registry.'));

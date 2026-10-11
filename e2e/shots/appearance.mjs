@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
 import { seedFixtures, syncAndWait } from './fixtures.mjs';
+import { endBelow } from './frame.mjs';
 import { addLocalStorage, bootInstance, client, log, newContext, shot, signIn, sleep, uploadTree, waitForThumbs } from './scene.mjs';
 
 const SET = 'appearance';
@@ -107,8 +108,14 @@ async function main() {
       return top >= barBottom - 1 ? '' : `the composing card starts ${Math.round(barBottom - top)}px under the sticky bar`;
     });
     if (clipped) throw new Error(`theme-editor-1440.png would be framed wrong: ${clipped}`);
+    // ⚠ …and END it on the card too: at 1000px the top edge of the next
+    // section showed under the card, a sliver of a page cut off (0.56
+    // README). The cards stand 16px apart; 12px under this one is still the gap.
+    const tall = page.viewportSize();
+    await endBelow(page, 'form:has([data-testid="theme-name"])', { pad: 12, what: 'theme-editor-1440.png' });
     await sleep(500);
     await shot(page, SET, 'theme-editor-1440.png');
+    await page.setViewportSize(tall);
     await page.getByTestId('theme-save').click();
     // Saved means served: the public palette list carries it.
     for (let i = 0; i < 40; i++) {

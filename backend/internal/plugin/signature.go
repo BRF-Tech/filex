@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/brf-tech/filex/backend/internal/compat"
 )
 
 // The detached-signature scheme both plugin kinds share: an ed25519 signature
@@ -109,10 +111,21 @@ func decodeSignature(signature string) ([]byte, error) {
 // mistaken for the sha256-only form, nor for any other text a store signs.
 //
 // The old form (the sha256 alone) is still accepted, with a warning on the
-// plugin's row and in the audit log, during filex 0.55; 0.56 refuses it.
+// plugin's row, in its log and in the audit log, for as long as its
+// compatibility window runs (LegacySignatureWindow): a plugin built and
+// signed for 0.55 keeps running unchanged through it. Refusing it is a
+// release's decision after the window, announced in the CHANGELOG first
+// (docs/CONTRIBUTING.md → "Compatibility window for plugins and apps").
 
 // BuildPayloadV1 is the first line of a build signature's text.
 const BuildPayloadV1 = "filex-storage-build:v1"
+
+// LegacySignatureWindow is how long the old sha256-only form stays
+// accepted: internal/compat's window for it, whose Until names the earliest
+// release that may refuse it and the date before which none does. Every
+// sentence that names the end (the plugin's log, `signature_notice`) takes
+// it from here, never as a literal.
+var LegacySignatureWindow = compat.Get("storage-build-signature-sha256")
 
 // BuildClaim is what a build signature names: the plugin, its version, the
 // platform the build is for and the build's sha256.
@@ -155,7 +168,8 @@ type BuildSignature struct {
 
 // VerifyBuild checks a storage plugin build's signature against the trusted
 // keys: over the claim's text first (BuildClaim.Payload), then - the old
-// form, accepted during 0.55 - over the lower-hex sha256 alone. No trusted
+// form, accepted during its window (LegacySignatureWindow) - over the
+// lower-hex sha256 alone. No trusted
 // keys → nothing is required (zero BuildSignature, nil); no signature →
 // ErrSignatureRequired; no key verifies either form → ErrSignatureInvalid.
 func VerifyBuild(trusted []ed25519.PublicKey, c BuildClaim, signature string) (BuildSignature, error) {

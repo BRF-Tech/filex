@@ -9,7 +9,7 @@
     "admin": "{name} Admin"
   },
   "install": {
-    "title": "Install filex as a web app",
+    "title": "Install {name} as a web app",
     "subtitle": "Add it to your device for quick, app-like access.",
     "install": "Install",
     "menuInstructions": "Open your browser's menu and choose “Install app” or “Add to Home screen”.",
@@ -1481,7 +1481,7 @@
     "creds": "Demo account: {email} · password: {password}",
     "sandbox": "Shared sandbox - everything resets nightly; storages, plugins and apps are switched off here.",
     "adminHint": "The admin panel is read-only here for every account - run your own filex to change what it shows.",
-    "alsoIncluded": "Also included: apps - sandboxed WebAssembly add-ons installed through a permission review, with e-Signature, Convert, filextext and draw.io shipping alongside · language packs, right-to-left layout included · instance themes on the Appearance screen · the links you made, under My shares · personal and team tags · symlinked folders · a view and sort remembered per folder · roles, groups and per-person exceptions, per-file and per-folder access, and apps' own permissions · multi-tenancy, each tenant with its own sign-in realm and able to run itself - its own sign-in providers, domain and certificate · OIDC SSO, LDAP / Active Directory and sign-in with a Windows or Linux account · sign-in attempt limits with an IP allow-list · in-place viewers and editors, Office through ONLYOFFICE · thumbnails of SVG, HEIC, text and archives, and folders drawn with the files that came into them last · Default apps: which app opens a kind of file · creating a document from + New - Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever ONLYOFFICE is connected · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
+    "alsoIncluded": "Also included: apps - sandboxed WebAssembly add-ons installed through a permission review, with e-Signature, Convert, an office editor, filextext and draw.io shipping alongside · an app you allow editing a file together, or a file of an encrypted folder, decrypted in your browser · language packs, right-to-left layout included · instance themes on the Appearance screen · the links you made, under My shares · personal and team tags · symlinked folders · a view and sort remembered per folder · roles, groups and per-person exceptions, per-file and per-folder access, and apps' own permissions · multi-tenancy, each tenant with its own sign-in realm and able to run itself - its own sign-in providers, domain and certificate · OIDC SSO, LDAP / Active Directory and sign-in with a Windows or Linux account · sign-in attempt limits with an IP allow-list · in-place viewers and editors, Office in the office editor app or through ONLYOFFICE · thumbnails of SVG, HEIC, text and archives, and folders drawn with the files that came into them last · Default apps: which app opens a kind of file · creating a document from + New - Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever ONLYOFFICE is connected or the office editor app is installed · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
     "features": {
       "storageTitle": "6 storage drivers, both directions",
       "storageBody": "Mount local disks, S3, SFTP, WebDAV, FTP/FTPS and SMB/NAS side by side as one tree - then reach that same tree back as S3, SFTP, FTPS, NFSv3 or WebDAV.",
@@ -1558,7 +1558,7 @@
       "permDeniedHint": "Re-allow notifications for this site in your browser settings.",
       "permDefault": "Permission not asked yet",
       "permUnsupported": "This browser cannot show notifications",
-      "iosHomeScreen": "On an iPhone or iPad, notifications work in filex added to the Home Screen (iOS 16.4 or later), not in a browser tab.",
+      "iosHomeScreen": "On an iPhone or iPad, notifications work in {name} added to the Home Screen (iOS 16.4 or later), not in a browser tab.",
       "desktopHandled": "The desktop app shows these itself",
       "saved": "Preference saved",
       "movedToSettings": "Your own notification settings - the bell, browser pop-ups, which events - are in your user settings.",
@@ -2504,7 +2504,7 @@
       "label": "Signature",
       "required": "This instance only accepts signed plugins: paste the detached signature over the build - its name, version, platform and SHA-256 - hex or base64, made with a key the operator trusts. Without it the install is refused.",
       "version": "Signed version",
-      "versionHint": "The version the signature names, e.g. 1.3.0. Without it only an older signature over the SHA-256 alone can verify: still accepted in 0.55, with a warning, and refused from 0.56."
+      "versionHint": "The version the signature names, e.g. 1.3.0. Without it only an older signature over the SHA-256 alone can verify: still accepted, with a warning on the plugin's row that says until when."
     },
     "sourceHint": "A GitHub repository (owner/name - filex reads the filex-storage.json attached to its latest release) or the https address of a filex-storage.json. filex checks it daily and tells you when a newer version is there; nothing is installed without you.",
     "checkUpdates": "Check for updates",

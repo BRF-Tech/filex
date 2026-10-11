@@ -19,6 +19,8 @@
 //    and is absent for a file that is not encrypted.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import type { PrintPdfOptions } from '@brftech/filex-core/src/lib/printPdf';
 
 interface PrintCall {
@@ -214,6 +216,36 @@ describe('ui.print', () => {
     expect(document.querySelector('iframe[data-testid="appframe-print"]')).toBeNull();
   });
 
+  // #217 (filex-office-editor 0.1.0 measured in filex 0.55): the question row
+  // was a flex item ABOVE the app's frame. Shown, it pushed the frame down and
+  // shrank it, and the office editor - busy with "Printing Document" - could
+  // not redraw at the new size: a blank editor until the print was over. The
+  // row now lies over the top of the frame, out of its flow (jsdom draws no
+  // layout, so the rule the browser applies is read from the component).
+  it('lays the question over the app’s frame, so the frame keeps its size (#217)', async () => {
+    const { port } = await connectFrame({ ui: PRINT });
+    activation(false);
+    const answer = ask(port, 1, 'ui.print', { name: 'report.pdf', data: PDF() });
+    await settle();
+    const bar = row()!;
+    expect(bar.dataset.shown).toBe('true');
+    expect(bar.classList.contains('fe-appframe__print'), 'the overlay class').toBe(true);
+    expect(bar.classList.contains('fe-appframe__print--parked')).toBe(false);
+
+    const sfc = readFileSync(path.resolve(__dirname, '../../../packages/core/src/components/plugin/AppFrame.vue'), 'utf8');
+    const css = sfc.slice(sfc.indexOf('<style'));
+    const at = css.indexOf('.fe-appframe__print {');
+    expect(at, 'a rule for the question row').toBeGreaterThanOrEqual(0);
+    const rule = css.slice(at, css.indexOf('}', at));
+    expect(rule).toMatch(/position:\s*absolute/);
+    expect(rule).toMatch(/inset-inline:\s*0/);
+    expect(rule).toMatch(/top:\s*0/);
+    expect(rule).toMatch(/z-index:/);
+
+    (document.querySelector('[data-testid="appframe-print-deny"]') as HTMLButtonElement).click();
+    expect((await answer).error.code).toBe('cancelled');
+  });
+
   it('prints one at a time: a second while the first is asked about is unavailable', async () => {
     const { port } = await connectFrame({ ui: PRINT });
     const first = ask(port, 1, 'ui.print', { name: 'report.pdf', data: PDF() });
@@ -363,10 +395,90 @@ describe('FileInfo.encrypted', () => {
 });
 
 describe('editing together (coedit.*)', () => {
-  it('is a known method that filex 0.55 does not offer: unavailable, never unknown_method', async () => {
+  // 0.55 answered every coedit.* `unavailable`; 0.56 offers them to an app
+  // granted files:co-edit, through the relay (lib/coeditSession).
+  it('needs files:co-edit to join, and a join for everything else - never unknown_method', async () => {
     const { port } = await connectFrame();
-    for (const [i, m] of ['coedit.join', 'coedit.subscribe', 'coedit.append', 'coedit.lease', 'coedit.cursor', 'coedit.blob.put', 'coedit.blob.get', 'coedit.leave'].entries()) {
-      expect((await ask(port, i + 1, m, {})).error.code, m).toBe('unavailable');
+    expect((await ask(port, 1, 'coedit.join', {})).error.code).toBe('not_granted');
+    for (const [i, m] of ['coedit.subscribe', 'coedit.append', 'coedit.lease', 'coedit.cursor', 'coedit.blob.put', 'coedit.blob.get'].entries()) {
+      expect((await ask(port, i + 2, m, {})).error.code, m).toBe('unavailable');
     }
+    expect((await ask(port, 9, 'coedit.leave', {})).result, 'leaving no session is nothing').toBeNull();
+  });
+
+  it('joins through the relay, hands the app the entries, names the session in a save and leaves when it goes', async () => {
+    const sockets: FakeWS[] = [];
+    class FakeWS {
+      readyState = 0;
+      sent: Record<string, unknown>[] = [];
+      onopen: ((e: unknown) => void) | null = null;
+      onmessage: ((e: { data: unknown }) => void) | null = null;
+      onclose: ((e: unknown) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      constructor(readonly url: string) {
+        sockets.push(this);
+        queueMicrotask(() => {
+          this.readyState = 1;
+          this.onopen?.({});
+        });
+      }
+      send(d: string) {
+        this.sent.push(JSON.parse(d));
+      }
+      close() {
+        this.readyState = 3;
+      }
+    }
+    vi.stubGlobal('WebSocket', FakeWS);
+    const calls: { op: string; body: Record<string, unknown>; opts?: unknown }[] = [];
+    const saves: { target: unknown; opts: unknown }[] = [];
+    const key = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+    const api = {
+      coeditJoin: vi.fn(async (app: string, view: string, path: string) => {
+        expect([app, view, path]).toEqual(['office', 'editor', 'main://report.docx']);
+        return {
+          session: '0123456789abcdef0123456789abcdef', created: true, head: 1, changes_head: 0, saved_through: 0,
+          me: { client: 'c1', user: 'aa11', name: 'Ayşe', index_user: 1, can_edit: true },
+          key_mode: 'server', key, token: 'tok', socket: { url: 'wss://files.example.com/api/coedit/ws', ticket: 't1' },
+        };
+      }),
+      coeditCall: vi.fn(async (_a: string, _v: string, _sid: string, op: string, body: Record<string, unknown>, opts?: unknown) => {
+        calls.push({ op, body, opts });
+        return op === 'lease' ? { granted: true } : { left: true };
+      }),
+      coeditBlobPut: vi.fn(async () => undefined),
+      coeditBlobGet: vi.fn(async () => new ArrayBuffer(0)),
+      pluginUISave: vi.fn(async (_a: string, _v: string, target: unknown, _body: unknown, opts?: unknown) => {
+        saves.push({ target, opts });
+        return { saved: true, path: 'main://report.docx', name: 'report.docx', size: 1 };
+      }),
+    };
+    const { w, port } = await connectFrame({ ui: { ...UI, grants: [...UI.grants, 'files:co-edit'] } }, api);
+    const events: { event: string; data: any }[] = [];
+    port.addEventListener('message', (ev: MessageEvent) => {
+      if (typeof ev.data?.event === 'string') events.push(ev.data);
+    });
+
+    const hello = (await ask(port, 1, 'coedit.join', {})).result;
+    expect(hello).toMatchObject({ session: '0123456789abcdef0123456789abcdef', created: true, me: { client: 'c1', indexUser: 1, canEdit: true } });
+    expect(JSON.stringify(hello), 'the app never holds the key').not.toContain(key);
+    await settle();
+    expect(sockets[0].url).toBe('wss://files.example.com/api/coedit/ws?ticket=t1');
+
+    expect((await ask(port, 2, 'coedit.subscribe', { from: 0 })).result).toBeNull();
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: 'entry', entry: { seq: 1, kind: 'join', client: 'c1', at: 5, member: { client: 'c1', user: 'aa11', name: 'Ayşe', index_user: 1, can_edit: true } } }) });
+    await settle();
+    expect(events.find((e) => e.event === 'coedit.entry')?.data).toMatchObject({ seq: 1, kind: 'join', member: { client: 'c1', indexUser: 1 } });
+
+    expect((await ask(port, 3, 'coedit.lease', { op: 'acquire', changesSeen: 0 })).result).toEqual({ granted: true });
+    expect(calls.find((c) => c.op === 'lease')?.body).toMatchObject({ client: 'c1', token: 'tok', op: 'acquire', changes_seen: 0 });
+
+    expect((await ask(port, 4, 'file.save', { data: 'v2', through: 1 })).result).toMatchObject({ saved: true });
+    expect(saves[0].opts).toEqual({ extra: { coedit: '0123456789abcdef0123456789abcdef', client: 'c1', token: 'tok', through: '1' } });
+
+    w.unmount();
+    await settle();
+    expect(calls.find((c) => c.op === 'leave')).toMatchObject({ opts: { keepalive: true } });
+    vi.unstubAllGlobals();
   });
 });

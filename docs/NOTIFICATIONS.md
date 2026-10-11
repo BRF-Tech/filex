@@ -668,9 +668,13 @@ event's [target](#click-target).
   [the server said them](#what-a-notification-says)) is the body, because a
   notification's second line is the app's identity and the browser fills it in
   only for an *installed* app; everywhere else it prints the bare origin. The
-  `icon` and the `badge` are **PNG** (`/admin/icons/icon-192.png`,
-  `badge-96.png`, rasterised from `icons/icon.svg` by
-  `scripts/make-icon-pngs.mjs`).
+  `icon` and the `badge` are **PNG**. The icon is the installed app's: the
+  first PNG `any` icon of the [manifest](CONFIGURATION.md#the-installed-app-pwa)
+  this server serves - the logo the server drew for a branded instance
+  (`/admin/brand-icons/<hash>-192.png`), filex's own `/admin/icons/icon-192.png`
+  otherwise (an SVG logo too, which has no PNG). The badge stays filex's
+  `badge-96.png`. Both of filex's PNGs are rasterised from `icons/icon.svg` by
+  `scripts/make-icon-pngs.mjs`.
   ⚠⚠ Not the SVG: Chromium decodes a notification's icon through its image
   decoders and SVG is not among them, so an SVG there is not a small logo or a
   blurry one - it is **no logo**, and the toast falls back to a generic bell.
@@ -758,7 +762,9 @@ service (Chrome's, Firefox's, Apple's, Microsoft's), also with filex closed.
   account language, laid out as the page's pop-up lays it out: the instance's
   name (the Branding page's) as the title, `<title> - <body>` as the body
   ("New file: report.pdf - Reports/report.pdf"; a digest "34 notifications -
-  Reports: 30 files added; …"). The service worker only shows it. A name, a
+  Reports: 30 files added; …"), and the icon the page's own pop-up shows: the
+  installed app's PNG, read off the manifest for the person's branding (a
+  tenant's own for its people). The service worker only shows it. A name, a
   count and where - never file content, never a credential, never an
   encrypted item's name (the lock word stands there) - and the payload is
   encrypted for the one browser (RFC 8291): the push service carries

@@ -46,6 +46,20 @@
 const FILEX_ICON = new URL('icons/icon-192.png', self.location.href).href;
 const FILEX_BADGE = new URL('icons/badge-96.png', self.location.href).href;
 
+// A push's icon (#219): the installed app's PNG as the server reads it off
+// the manifest it serves (spa_brand.go pushIcon) - `brand-icons/<hash>-192.png`
+// for a drawn logo, filex's own PNG otherwise - written relative to this
+// worker, so it is resolved here, under the base path. No icon, or one that is
+// not an address: filex's PNG.
+function pushIcon(icon) {
+  if (typeof icon !== 'string' || !icon) return FILEX_ICON;
+  try {
+    return new URL(icon, self.location.href).href;
+  } catch (_) {
+    return FILEX_ICON;
+  }
+}
+
 // The worker's own scope (`<base>/admin/`), what a push's addresses hang off.
 function filexScope() {
   const reg = self.registration;
@@ -119,7 +133,7 @@ self.addEventListener('push', (event) => {
   if (!url && payload.id && payload.open) url = new URL('notify/' + payload.id, filexScope()).href;
   const options = {
     body: payload.body || '',
-    icon: payload.icon || FILEX_ICON,
+    icon: pushIcon(payload.icon),
     badge: payload.badge || FILEX_BADGE,
     tag: tag,
     data: { url: url, home: payload.v ? filexScope() : '' },

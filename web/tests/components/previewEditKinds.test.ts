@@ -83,8 +83,10 @@ describe('Edit is offered on exactly what the server saves', () => {
 
   it('a .docm is an office document — the old list did not know it', async () => {
     const w = viewer(fileNamed('macro.docm', 'docm'), { onlyOfficeBase: null });
-    await settle();
-    expect(w.find('[data-testid="office-fallback"]').exists()).toBe(true);
+    // Waited for, not one tick: the office path mounts after the viewer's own
+    // watchers, and on a busy GitHub runner one setTimeout(0) was not enough
+    // (0.55 gate, TZ=Europe/Istanbul part; green on the same commit elsewhere).
+    await vi.waitFor(() => expect(w.find('[data-testid="office-fallback"]').exists()).toBe(true));
   });
 
   it('before the server has said, nothing is guessed', async () => {

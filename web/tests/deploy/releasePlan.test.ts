@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ciParts, gateParts } from '../../../scripts/ci-parts.mjs';
 import { toWslPath } from '../../../scripts/lib/go-build.mjs';
-import { gateCacheKey, inputEntries, matchesInputs, parseLsTree, selectGates } from '../../../scripts/release/checks.mjs';
+import { dockerfileSources, gateCacheKey, inputEntries, matchesInputs, parseLsTree, selectGates } from '../../../scripts/release/checks.mjs';
 import { findBash, shq, slash } from '../../../scripts/release/engine.mjs';
 import plan, { storeJobProblems } from '../../../scripts/release/plan.mjs';
 import { STAGES } from '../../../scripts/release/stages.mjs';
@@ -39,6 +39,8 @@ type Gate = {
   sh?: unknown;
   vitest?: { files: string[] };
   cmd?: (c: object, toolchain?: string) => string[];
+  cacheRecipe?: (c: object) => unknown;
+  cacheProof?: (c: object) => unknown;
 };
 const pretag = p.pretag as Gate[];
 const heavy = p.heavy as Gate[];
@@ -309,11 +311,19 @@ describe("this repository's release plan", () => {
 
   // ⚠ The cache may cost a run, never pass one: a gate that reads a file its
   // `inputs` miss would pass from the cache after that file changed. So a
-  // gate is cached only with inputs, and builds and images never are - they
-  // make what the later gates use.
-  it('builds and images are never cached; every other test gate names its inputs', () => {
+  // gate is cached only with inputs, and builds never are - they make what
+  // the later gates use. #165: the two image builds are, on what the image is
+  // made of, with the image's id as proof that it is still under its tag.
+  it('builds are never cached, an image only with a proof; every other test gate names its inputs', () => {
     for (const g of every) {
-      if (/^(build|docker): /.test(g.name) || g.name === 'go: echo.wasm fixture') expect(g.inputs, `${g.name} would pass from the cache`).toBeUndefined();
+      if (/^build: /.test(g.name) || g.name === 'go: echo.wasm fixture') expect(g.inputs, `${g.name} would pass from the cache`).toBeUndefined();
+      if (/^docker: (full|slim) image /.test(g.name)) {
+        expect(g.inputs, g.name).toBeTruthy();
+        expect(typeof g.cacheProof, `${g.name} would pass from the cache with its image gone`).toBe('function');
+        expect(typeof g.cacheRecipe, g.name).toBe('function');
+      } else if (/^docker: /.test(g.name)) {
+        expect(g.inputs, `${g.name} reads an image, not files`).toBeUndefined();
+      }
     }
     for (const n of ['go: vet + test', GO_PATCH, MIGRATIONS, 'web unit (TZ=UTC, like CI)', "web unit (this machine's clock)", 'e2e: Cypress (whole)', 'e2e: Playwright (whole)']) {
       expect(gate(n).inputs, `${n} has no inputs and runs every time`).toBeTruthy();
@@ -338,6 +348,53 @@ describe("this repository's release plan", () => {
     expect(key('e2e: Playwright (whole)', e2eFix)).not.toBe(key('e2e: Playwright (whole)', before));
     expect(key('e2e: Playwright (whole)', docsFix), 'a docs-only change re-runs the browser suite').toBe(key('e2e: Playwright (whole)', before));
     expect(matchesInputs(gate('web unit (TZ=UTC, like CI)').inputs!, 'docs/STORAGE.md'), 'the unit suite reads the docs').toBe(true);
+  });
+
+  // ⚠⚠ #165: at 0.54.0 and 0.55.0 each image build spent 30-52 minutes on
+  // BuildKit walking the checkout through WSL's 9P bridge (`docker build .`),
+  // and the four pretag runs of 0.55.0 took 4.5 hours, nearly all of it that.
+  it('builds the images from the release commit (git archive), never the working tree, and waits for no local build', () => {
+    const images = pretag.filter((g) => /^docker: (full|slim) image /.test(g.name));
+    expect(images.map((g) => g.name)).toEqual(['docker: full image (docker/Dockerfile, amd64)', 'docker: slim image (docker/Dockerfile.slim, amd64)']);
+    for (const g of images) {
+      const argv = g.cmd!({ repo: REPO, tag: 'v9.9.9', releaseCommit: 'c0ffee' });
+      expect(argv.slice(0, 2)).toEqual(['node', 'scripts/release/gates/docker-build.mjs']);
+      expect(argv.join(' ')).toContain('--commit c0ffee');
+      expect(argv, 'a build context of `.` is the working tree').not.toContain('.');
+      expect(g.after ?? [], `${g.name} waits for a local build it does not read`).toEqual([]);
+      // the key leaves out what only labels the throwaway image
+      expect(JSON.stringify(g.cacheRecipe!({ tag: 'v9.9.9', releaseCommit: 'c0ffee' }))).not.toContain('c0ffee');
+    }
+    const script = fs.readFileSync(path.join(REPO, 'scripts', 'release', 'gates', 'docker-build.mjs'), 'utf8');
+    expect(script).toMatch(/'archive', '--format=tar'/);
+    expect(script, 'the context is stdin').toMatch(/'-t', opts\.tag, '-',\s*\]/);
+    // second in the list, beside the UI build: off the pretag's longest path
+    expect(names(pretag).indexOf(images[0]!.name)).toBeLessThan(names(pretag).indexOf(BUILD_BIN));
+  });
+
+  it("an image's inputs are what its Dockerfile copies: a fix to a test of the desktop app or e2e, or the docs, leaves its key alone", () => {
+    for (const g of pretag.filter((x) => /^docker: (full|slim) image /.test(x.name))) {
+      const dockerfile = /\((docker\/Dockerfile[^,]*),/.exec(g.name)![1]!;
+      for (const src of dockerfileSources(fs.readFileSync(path.join(REPO, dockerfile), 'utf8'))!) expect(g.inputs, `${g.name}: ${src}`).toContain(src);
+      for (const f of [dockerfile, '.dockerignore', 'scripts/release/gates/docker-build.mjs']) expect(matchesInputs(g.inputs!, f), `${g.name}: ${f}`).toBe(true);
+      for (const f of ['web/src/main.ts', 'backend/internal/api/router.go', 'packages/core/src/index.ts', 'pnpm-lock.yaml']) expect(matchesInputs(g.inputs!, f), `${g.name}: ${f}`).toBe(true);
+      for (const f of ['desktop/src/main.ts', 'e2e/tests/40-share.spec.ts', 'docs/STORAGE.md', 'CHANGELOG.md']) expect(matchesInputs(g.inputs!, f), `${g.name}: ${f}`).toBe(false);
+    }
+  });
+
+  // #165: 0.55.0's ci stage read everything red three minutes into a 32-minute
+  // tag run, and waited for a person to come back.
+  it('the ci stage waits for the tag run before it reads what it published', () => {
+    expect(p.tagRunWait.workflow).toBe('release.yml');
+    expect(p.tagRunWait.pollMs).toBeGreaterThan(0);
+    expect(Number.isFinite(p.tagRunWait.timeoutMs)).toBe(true);
+    expect(p.tagRunWait.appearMs).toBeLessThan(p.tagRunWait.timeoutMs);
+  });
+
+  it('the export gate of the workflow guards is cached on this tree and the public workflows', () => {
+    const g = (p.exportGates as Array<{ name: string; inputs?: string[]; cacheExtra?: unknown; vitest?: unknown }>).find((x) => x.vitest)!;
+    expect(g.inputs).toEqual(['**']);
+    expect(typeof g.cacheExtra).toBe('function');
   });
 
   it('the chain profiles a minor or a patch accepts are profiles scripts/chain has', () => {
@@ -492,10 +549,10 @@ describe("this repository's release plan", () => {
     expect(fs.existsSync(path.join(REPO, p.backendTagPrefix, 'go.mod')), 'no Go module under the tag prefix').toBe(true);
   });
 
-  it('signs with the maintainer key and keeps only the contact addresses public', () => {
+  it('signs with the maintainer key and keeps only the contact addresses and the Helm repository public', () => {
     expect(p.signingKeys).toEqual(['EFA3B1262FD992800DBBB5E3A8FEBA97FF786513']);
     expect(p.privateHosts.forbid.length).toBeGreaterThanOrEqual(2);
-    for (const a of p.privateHosts.allow) expect(a).toMatch(/^(security|hello)@/);
+    for (const a of p.privateHosts.allow) expect(a).toMatch(/^((security|hello)@|helm[.])/);
   });
 });
 

@@ -103,6 +103,55 @@ export function weightOf(name, kind) {
 }
 
 /**
+ * The jobs that write to the run's disk heavily (`io: 'heavy'`): the
+ * scheduler runs at most CHAIN_IO_HEAVY_MAX of them at once, the browser
+ * round's line included (schedule.mjs pickJobs, ioWaits).
+ *
+ * ⚠ Task #194: with the memory budget right, the build host still stalled on
+ * its disk - a DRAM-less NVMe, 91% full, that stops for seconds while two
+ * writers fsync. Every stall of the two full runs of 2026-10-09
+ * (full-20261009-091337Z, -120857Z: writes of 1.0-4.7 s, the host stalled 90
+ * and 65 s) and of the night before had the same company: a Playwright line
+ * beside race-db-io and race-rest (14 PRESSURE minutes with Chromium), or
+ * go-io-rest beside Chromium (3.4 s), or two of those three together (1.1 and
+ * 1.3 s). The tests that wait a fixed time went red in those minutes
+ * (168, 172, 213).
+ *
+ * measured (result.json `load.written_gb`, GiB per job, the two full runs of
+ * 2026-10-09 and the night of 2026-10-08):
+ *   e2e-firefox 11.4-11.8 · e2e-chromium 3.4-4.5 · e2e-webkit 2.7-3.1 ·
+ *   race-rest 1.3-2.1 · go-io-rest 1.0-1.7 · race-db-io 0.6-1.4 · shots 1.3
+ *   - and every other job 0.8 at most (build 0.2-0.8, e2e-nopub 0.35,
+ *   go-handlers-1-2 0.07-0.3, go-db 0.08-0.24, the -race shards 0).
+ *
+ * A Playwright line that runs the suite, or a part of it, is heavy; one that
+ * a --grep narrows to a few specs is not (e2e-nods 0.15, e2e-s3 0.01).
+ * realenv (a Playwright runner beside its own Document Server) counts as
+ * heavy until a night measures it.
+ *
+ * race-auth (task #174 cut it from race-rest and race-db-io: the auth
+ * packages, and the SFTP, FTP and NFS servers with protocolauth) is light
+ * until a night measures it: the auth packages' tests hold their state in
+ * memory (6 t.TempDir() in the tests of 10 packages), the three servers
+ * write little (11), and the packages whose tests write the most stay where
+ * they were (sync, ops, dav and s3api in race-db-io, thumb and server in
+ * race-rest: 92 between them). Marked heavy, it would run after race-db-io and
+ * before race-rest instead of beside them: 8 minutes more on a full run, 16
+ * on 0.51's slower minutes (web/tests/deploy/chainSchedule.test.ts's replay).
+ * Its first night's `load.written_gb` decides: past ~1 GiB it goes here.
+ */
+export const IO_HEAVY_JOBS = ['go-io-rest', 'race-db-io', 'race-rest'];
+export const IO_HEAVY_KINDS = ['shots', 'realenv'];
+const PLAYWRIGHT_KINDS = ['local', 'nopub', 's3'];
+
+/** 'heavy' when a job writes to the disk as the jobs above do, else 'light'. */
+export function ioOf(job) {
+  if (IO_HEAVY_JOBS.includes(job.name) || IO_HEAVY_KINDS.includes(job.kind)) return 'heavy';
+  const grep = (job.args ?? []).some((a) => a === '--grep' || a.startsWith('--grep='));
+  return PLAYWRIGHT_KINDS.includes(job.kind) && !grep ? 'heavy' : 'light';
+}
+
+/**
  * Minutes a job is expected to take, for `run.mjs --plan` and the scheduling
  * test, where scripts/test-shards.json has nothing to say: measured on the
  * build host (chain.log of 0.51 and 0.52). The Go and -race shards' minutes
@@ -147,9 +196,16 @@ export const EXPECTED_MINUTES = {
  *   - plain `go test` is about RACE_SLOWDOWN times faster than -race
  *     (0.52: handlers 785 s plain against ~150 min under -race, wasmplugin
  *     424 s against ~70 min), and every Go job first compiles for about
- *     GO_COMPILE_MIN minutes.
+ *     GO_COMPILE_MIN minutes;
+ *   - the weights are seconds on GitHub's runner (scripts/test-times.json,
+ *     task #174), and this host takes HOST_SPEED of them for a unit cut by
+ *     test file, HOST_SPEED_PACKAGES for a package unit (GitHub measures its
+ *     packages four at a time on four cores, this host three at a time on
+ *     twenty): the nights of 2026-10-08 and -09 ran the cut -race shards in
+ *     0.76-0.81 of the times' sum (0.63-0.97 a shard), and race-db-io and
+ *     race-rest in 0.55-0.79 of their sum over RACE_P.
  */
-export const SHARD_TIMING = { RACE_P: 3, GO_P: 6, RACE_SLOWDOWN: 10, GO_COMPILE_MIN: 2 };
+export const SHARD_TIMING = { RACE_P: 3, GO_P: 6, RACE_SLOWDOWN: 10, GO_COMPILE_MIN: 2, HOST_SPEED: 0.8, HOST_SPEED_PACKAGES: 0.67 };
 
 /** Expected minutes per Go and -race job name (go-<shard>, race-<shard>), from scripts/test-shards.json in `src`. */
 export function shardMinutes(src) {
@@ -168,13 +224,13 @@ export function shardMinutes(src) {
     }
   }
   for (const u of cfg.packages ?? []) secs.set(u.name, u.weight_s ?? 0);
-  const { RACE_P, GO_P, RACE_SLOWDOWN, GO_COMPILE_MIN } = SHARD_TIMING;
+  const { RACE_P, GO_P, RACE_SLOWDOWN, GO_COMPILE_MIN, HOST_SPEED, HOST_SPEED_PACKAGES } = SHARD_TIMING;
   const round = (m) => Math.round(m * 10) / 10;
   const out = {};
   for (const [profile, shards] of Object.entries(cfg.profiles ?? {})) {
     for (const s of shards) {
-      const total = s.units.reduce((n, u) => n + (secs.get(u) ?? 0), 0) / 60;
       const byFile = s.units.every((u) => cut.has(u));
+      const total = (s.units.reduce((n, u) => n + (secs.get(u) ?? 0), 0) / 60) * (byFile ? HOST_SPEED : HOST_SPEED_PACKAGES);
       if (profile === 'race') out[`race-${s.name}`] = round(byFile ? total : total / RACE_P);
       if (profile === 'go') out[`go-${s.name}`] = round(GO_COMPILE_MIN + (byFile ? total : total / GO_P) / RACE_SLOWDOWN);
     }
@@ -235,6 +291,38 @@ export function shardOf(args, source = 'list') {
   const total = m ? Number(m[2]) : 0;
   if (!m || total < 1 || current < 1 || current > total) throw new Error(`${source}: --shard ${found.join(' ')}: one i/N, 1 <= i <= N`);
   return { current, total };
+}
+
+/**
+ * A browser line's arguments as its job's ARGS (run.mjs passes it with
+ * `-e`): one argument a line, which job/e2e.sh reads back with mapfile, so an
+ * argument with spaces - a `--grep` pattern such as CHAIN_E2E_GREP="01-smoke
+ * 02-" or a test title - reaches Playwright as the one argument it was.
+ *
+ * ⚠ Task #244: the arguments went joined with spaces and e2e.sh split them
+ * into words (`read -a`). Playwright took the pattern's first word for
+ * --grep and every other word for a file filter: on 2026-10-10 a targeted
+ * run asked for one spec by its title ran none of it and the halves of
+ * serial describes in seven others, which went red only for being cut, and
+ * another started on most of the suite, on three engines, holding the lock.
+ *
+ * An argument with a line break (or a NUL) cannot travel so and is refused:
+ * buildPlan calls this for every line of the round, before anything starts.
+ */
+export function argsEnv(args, source = 'list') {
+  const bad = args.find((a) => /[\n\0]/.test(a));
+  if (bad !== undefined) throw new Error(`${source}: the argument ${JSON.stringify(bad)} holds a line break; ARGS carries one argument a line`);
+  return args.join('\n');
+}
+
+/**
+ * A browser line's arguments as a person reads them (run.mjs --plan): one
+ * that is not a plain word in single quotes, as a shell would take it, so a
+ * pattern's spaces are seen to stay in it. (e2e.sh's `args=` line quotes
+ * every argument, bash's ${EXTRA[*]@Q}.)
+ */
+export function argsShown(args) {
+  return args.map((a) => (/^[\w.,:/=@%+-]+$/.test(a) ? a : `'${a.replace(/'/g, "'\\''")}'`)).join(' ');
 }
 
 /** The browser list: `name kind engines ds args...`. */
@@ -409,7 +497,13 @@ export function buildPlan({ profile, lists, env = {}, src = path.resolve(CHAIN_D
         env: { ...testEnv(r), BIN: bin },
       });
     } else {
-      add({ name: `race-${r.name}`, kind: 'race', prio: 40, weight: weightOf(`race-${r.name}`, 'race'), env: testEnv(r) });
+      // A package shard that writes heavily waits for the browser round's
+      // heavy lines anyway; one that does not (race-auth, #174) queues with
+      // the cut shards, so it does not take the place beside Chromium that
+      // the -race builds and the first cut shards would have.
+      const name = `race-${r.name}`;
+      const prio = ioOf({ name, kind: 'race' }) === 'heavy' ? 40 : 50 + i;
+      add({ name, kind: 'race', prio, weight: weightOf(name, 'race'), env: testEnv(r) });
     }
   });
 
@@ -420,6 +514,8 @@ export function buildPlan({ profile, lists, env = {}, src = path.resolve(CHAIN_D
     weight: weightOf(`e2e-${t.name}`, t.kind === 'cypress' ? 'cypress' : 'e2e'),
     expect: trackMinutes(t, table),
   }));
+  // Refused here rather than when the round reaches the line (argsEnv).
+  for (const t of round) argsEnv(t.args, t.name);
   const extra = (name) => {
     const only = name === 'shots' ? shotsOnly(env) : '';
     const j = {
@@ -454,8 +550,12 @@ export function buildPlan({ profile, lists, env = {}, src = path.resolve(CHAIN_D
     for (const name of extras) if (!DS_EXTRAS.includes(name)) round.push(extra(name));
   }
   // `index` is the line's place in the round: run.mjs gives each line the port
-  // CHAIN_E2E_PORT + index.
-  return { profile, pool, track: round.map((t, index) => ({ ...t, index })) };
+  // CHAIN_E2E_PORT + index. `io`: how the job writes to the disk (ioOf).
+  return {
+    profile,
+    pool: pool.map((j) => ({ ...j, io: ioOf(j) })),
+    track: round.map((t, index) => ({ ...t, index, io: ioOf(t) })),
+  };
 }
 
 /**

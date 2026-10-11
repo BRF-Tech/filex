@@ -772,8 +772,12 @@ Each tenant on its own host wants its own `site_name`, logo, default locale,
 external-service URLs, and mail sender identity. Branding shipped without a
 schema change ([§4](#4-data-model)): a tenant's values are kept under
 `tenant.<id>.branding.*` keys in the global `settings` table, and
-`GET /api/public/branding` answers them on the tenant's host. The rest of this
-list is still the instance's. Ties into `FILEX_DEFAULT_LOCALE` (already shipped).
+`GET /api/public/branding` answers them on the tenant's host. The installed app
+follows the same host: each tenant's host serves a manifest, an `index.html` and
+icons in the tenant's name and logo, so a tenant's users install the tenant's
+app ([CONFIGURATION.md → The installed app](CONFIGURATION.md#the-installed-app-pwa)).
+The rest of this list is still the instance's. Ties into `FILEX_DEFAULT_LOCALE`
+(already shipped).
 
 **Encryption.** `providers.e2e_allowed` (the operator's ceiling, default on) and
 `providers.e2e_policy` (`off` | `admins` | `permitted` | `approval`, the tenant

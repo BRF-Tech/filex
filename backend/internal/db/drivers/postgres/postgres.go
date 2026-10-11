@@ -104,6 +104,7 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.LoginThrottleSQL = &db.LoginThrottleSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	// Office editing sessions (00092), written once in internal/db.
 	s.OfficeSessionSQL = &db.OfficeSessionSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	s.CoEditSQL = &db.CoEditSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Vault write locks and idle times (00096), written once in internal/db.
 	s.VaultLockSQL = &db.VaultLockSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Replication initial copies (00094), written once in internal/db.
@@ -172,6 +173,7 @@ type Store struct {
 	// The office editing sessions (internal/db office_session_sql.go,
 	// migration 00092).
 	*db.OfficeSessionSQL
+	*db.CoEditSQL
 	// The vault write locks and idle times (internal/db vault_lock_sql.go,
 	// migration 00096).
 	*db.VaultLockSQL

@@ -10,10 +10,12 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 - [Installation](INSTALLATION.md) - minimal → full Compose → Helm → binary
 - [Configuration](CONFIGURATION.md) - every `FILEX_*` variable + `config.yaml`
+- [Features](FEATURES.md) - every feature as its own entry: how it behaves, its
+  limits and the guide that documents it
 - [Admin panel](ADMIN-PANEL.md) - the administrator's menu: where every page
   lives (Files & storage, People & security, System), who is offered which
   page, the keyboard, screen readers and the phone's drawer; and the panel's
-  search (pages, settings, people, API keys, apps, storages, shares, files,
+  [search](ADMIN-PANEL.md#search) (pages, settings, people, API keys, apps, storages, shares, files,
   the `file:` / `user:` … prefixes, recent searches)
 - [Databases](DATABASES.md) - SQLite, PostgreSQL, MySQL/MariaDB: which to pick,
   what each needs, and what "supported" is checked to mean
@@ -57,13 +59,15 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   [plugin validator](PLUGINS.md#the-stores-plugin-validator), a paid one's
   license), [what a signature covers](PLUGINS.md#what-is-signed) (0.55: the
   plugin, its version, its platform and its SHA-256; the old SHA-256-only
-  form taken with a warning until 0.56), each plugin's [log](PLUGINS.md#plugin-log), and
+  form taken with a warning during its
+  [compatibility window](PLUGINS.md#compatibility-window)), each plugin's [log](PLUGINS.md#plugin-log), and
   [an entry the storage could not answer for](PLUGINS.md#an-entry-your-stat-cannot-answer-for)
   (kept, marked, and left alone until the storage answers)
 - [Apps (app plugins)](APP-PLUGINS.md) - sandboxed WebAssembly apps that add
   actions to the file menu, screens filex draws for them, and public links for
-  outside participants: the four that ship (**e-Signature**,
-  `BRF-Tech/filex-sign`, **Convert**, `BRF-Tech/filex-convert`, **filextext**,
+  outside participants: the five that ship (**e-Signature**,
+  `BRF-Tech/filex-sign`, **Convert**, `BRF-Tech/filex-convert`, the **Office
+  editor**, `BRF-Tech/filex-office-editor`, **filextext**,
   `BRF-Tech/filextext-app`, and **draw.io**, `BRF-Tech/filex-drawio`), installing
   one from GitHub through the permission review, or
   [from a store](APP-PLUGINS.md#installing-from-a-store) - its
@@ -78,8 +82,11 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   version, [an app's own interface](APP-PLUGINS.md#an-apps-own-interface) (a
   viewer for a file type, in a sandboxed frame; 0.55: frames of its own
   package, `blob:` reads and printing through filex, each asked for and shown
-  in the review; an end-to-end encrypted file offered to no app and refused at
-  every app door), apps that wake up on their own,
+  in the review; 0.56: an app that asks for encrypted folders edits a file of
+  an unlocked folder or an open vault, which the browser decrypts for it and
+  encrypts again, and one that asks for editing together runs its session
+  through filex's relay - the server decrypts nothing for an app), apps that
+  wake up on their own,
   [signing documents end to end](APP-PLUGINS.md#signing-documents-end-to-end)
   (inside and outside signers, PINs, deadlines, the audit trail, verifying, your
   own certificate authority), [converting files](APP-PLUGINS.md#converting-files),
@@ -89,7 +96,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   troubleshooting
 - [Writing an app plugin](PLUGIN-KIT.md) - the manifest (and the
   [user permissions](PLUGIN-KIT.md#user-permissions-what-an-administrator-hands-out)
-  an app declares for the administrator to hand out), the exports,
+  an app declares for the administrator to hand out), the
+  [compatibility window](PLUGIN-KIT.md#compatibility-window) filex keeps for
+  an app built for an earlier release, the exports,
   every host function and its permission, the screen catalogue, **an app's own
   interface** (HTML/JS in a sandboxed frame, the `@brftech/filex-app-ui` SDK,
   with or without a module), the **hourly
@@ -100,8 +109,10 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   are built against; [printing a PDF](APP-PLUGINS-API.md#printing-a-pdf-uiprint-055)
   (`ui.print`: filex's print page, asked every time, printed on the person's
   *Allow*), [which rows say `encrypted`](APP-PLUGINS-API.md#which-rows-say-encrypted)
-  and [editing together](APP-PLUGINS-API.md#editing-together-coedit-055-defined-not-offered)
-  (`coedit.*`, defined, not offered yet) (0.55)
+  [a file of an encrypted folder, in the clear](APP-PLUGINS-API.md#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)
+  (`encrypted_folders`, `files:e2e-plaintext`, 0.56)
+  and [editing together](APP-PLUGINS-API.md#editing-together-coedit-056)
+  (`coedit.*` through filex's relay, `files:co-edit`, 0.56; defined in 0.55)
 
 ## Language & direction
 
@@ -142,7 +153,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 ## Authentication & access
 
 - [SSO (OIDC)](SSO.md) - sign in with Keycloak / Auth0 / Authentik / Okta / …
-- [LDAP & reverse-proxy auth](LDAP.md) - Active Directory / LDAP, groups and directory sync, several
+- [LDAP & reverse-proxy auth](LDAP.md) - Active Directory / LDAP, groups and [directory sync](LDAP.md#directory-sync), several
   directories, header auth
 - [Sign in with an operating-system account](OS-LOGIN.md) - Windows (local or domain) and Linux PAM,
   the first-sign-in rule, the e-mail token, and how the provider is tested
@@ -179,7 +190,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 ## Integrations
 
-- [OnlyOffice](ONLYOFFICE.md) - in-browser editing of Office documents, New
+- [OnlyOffice](ONLYOFFICE.md) - in-browser editing of Office documents (which
+  the office editor app does with no Document Server, alone or together), New
   document, and [drafts](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save):
   nothing is in the folder until you save; the three addresses that must work,
   the **Test** that fetches through a document's own door and warns when JWT is
@@ -241,10 +253,11 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   runs on: the ticket, the change and presence frames, how a burst is
   coalesced (and why a plain trailing debounce starves), the 12 s polling
   fallback, and [`access.changed`](REALTIME.md#when-access-changes), sent when a
-  grant, a role or an encryption policy changes (0.54)
+  grant, a role or an encryption policy changes (0.54), and
+  [editing together's socket](REALTIME.md#editing-togethers-socket) (0.56)
 - [Notifications](NOTIFICATIONS.md) - webhook + in-app bell: the unread badge,
   the full list inside the explorer for everybody, where a click goes, and the
-  optional digest (kinds turned off are told once per window, folder by
+  optional [digest](NOTIFICATIONS.md#the-digest) (kinds turned off are told once per window, folder by
   folder; out of the box everything is told at once);
   [what a notification says](NOTIFICATIONS.md#what-a-notification-says) - the
   server's sentence on every channel, in
@@ -271,10 +284,14 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   `filex encrypt` for making one on the command line, exactly what each
   one can and cannot open, and [who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt):
   a tenant's policy, the files.encrypt permission and an administrator's
-  approval, asked for with a reason (0.51)
+  approval, asked for with a reason (0.51); and
+  [editing in an app](E2E-ENCRYPTION.md#editing-in-an-app): an app you allow
+  edits a file of an unlocked folder or an open vault, your browser
+  decrypting it for the app and encrypting the save (0.56)
 - [End-to-end encryption roadmap](E2E-ROADMAP.md) - what is built
   (`filex encrypt` and large files in an in-place conversion since 0.50, the
-  vault level in 0.54) and the decisions behind the vault level
+  vault level in 0.54, editing in an app in 0.56) and the decisions behind the
+  vault level
 - [Vault format](E2E-VAULT-FORMAT.md) - level 3, built and off by default
   (`FILEX_E2E_VAULT`): the normative format (packs, the encrypted index, keys
   and the nonce rule), the server's single-writer lock and API, garbage
@@ -284,10 +301,12 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   editing a document in an encrypted folder with ONLYOFFICE in the browser,
   alone or with others, without a server reading it (the editor's Document
   Server answered in the browser, a relay that orders sealed entries), and
-  its protocol prototype; the editor's side is an AGPL app of its own
-  (`filex-office-editor`), and filex provides the platform it runs on; how
-  the app prints (filex's `ui.print`) and [what it does on a phone](E2E-OFFICE.md#on-a-phone)
-  (it reads, **Edit** opens the folded desktop editor); not offered anywhere yet
+  what of it exists: filex 0.56 carries filex's half (the relay, and the
+  document handed over and taken back by the browser); the editor's side is
+  an AGPL app of its own (`filex-office-editor`, whose 0.2.0 and 0.3.0 are
+  made for filex 0.56), and filex provides the platform it runs on; how the
+  app prints (filex's `ui.print`) and [what it does on a phone](E2E-OFFICE.md#on-a-phone)
+  (it reads, **Edit** opens the folded desktop editor)
 - [Multi-tenancy](MULTI-TENANCY.md) - provider/tenant mode and its switch on
   Admin → Multi-tenant mode, per-tenant isolation on one instance, and [realms](MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for):
   the tenant's sign-in name - the Realm field, `realm/name` over SFTP, the
@@ -305,7 +324,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   the handful of alerts worth having; [the row gate's](METRICS.md#the-row-gate)
   changes, fences and deferred scan judgements (0.55)
 - Packaging in the repo: [`deploy/compose/`](../deploy/compose/) (minimal + full)
-  and [`deploy/helm/filex/`](../deploy/helm/filex/) (Kubernetes)
+  and [`deploy/helm/filex/`](../deploy/helm/filex/) (Kubernetes; published as
+  `brf-tech/filex` at `https://helm.brf.sh` -
+  [INSTALLATION.md → Kubernetes (Helm)](INSTALLATION.md#kubernetes-helm))
 
 ## Develop & integrate
 
@@ -325,7 +346,10 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   [app install](API-ERRORS.md#app-install-refusals) refusals (0.55)
 - [Themes & appearance](INTEGRATION.md#themes) - the shipped palettes, an
   operator's own themes and instance default (Admin → **Appearance**), and the
-  custom stylesheet that is off until you switch it on
+  custom stylesheet that is off until you switch it on; and
+  [branding](CONFIGURATION.md#branding-white-label): the instance's name, logo
+  and accent, which [the installed app](CONFIGURATION.md#the-installed-app-pwa)
+  wears too (0.56)
 - [Embedding the explorer](INTEGRATION.md) - Vue / React / Web Component, and the
   two options every wrapper shares: the **navigation panel** (`sideNav`) and how
   much of the explorer to show (`uiProfile`: `standard` · `simple` - two values,

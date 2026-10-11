@@ -50,6 +50,21 @@ export interface VaultState extends VaultOwner {
   pack_log2: number;
   generation: number;
   lock: VaultLockInfo | null;
+  /** filex 0.56: what the browser says about this vault on its own clock,
+   *  in the reader's language (backend handlers vaultWords). */
+  words?: VaultWords;
+}
+
+/** The server's sentences for what only the browser knows about a vault
+ *  (it alone sees inside): said as they are, never composed here. */
+export interface VaultWords {
+  /** A minute before the vault locks itself, while an app holds unsaved
+   *  changes in it. */
+  app_lock_soon?: string;
+  /** The action that keeps the vault open. */
+  app_lock_soon_keep?: string;
+  /** Said once it is kept open. */
+  app_lock_kept?: string;
 }
 
 export interface VaultLockGrant {

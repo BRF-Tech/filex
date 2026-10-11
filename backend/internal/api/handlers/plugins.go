@@ -19,8 +19,10 @@
 // `version` is the version a build's signature names (docs/PLUGINS.md →
 // "What is signed"): a signature is over the plugin's name, its version, the
 // platform and the sha256. Without it only the old sha256-only form can
-// verify - accepted during 0.55, with `legacy_signature` on the plugin's row,
-// its sentence in `signature_notice`, and `legacy_signature` in the audit.
+// verify - accepted during its compatibility window
+// (plugin.LegacySignatureWindow), with `legacy_signature` on the plugin's
+// row, its sentence in `signature_notice` (naming the window's end), and
+// `legacy_signature` in the audit.
 //
 // ⚠⚠ Install, upgrade, PATCH and DELETE need an administrator SIGNED IN to
 // the panel (requireSession): an API key gets 403 and is pointed at
@@ -90,7 +92,8 @@ func (h *Plugins) wire(r *http.Request, st *plugin.Status) pluginWire {
 		out.UpdateSaid = storageUpdateSaid(langOf(r), st.Update)
 	}
 	if st != nil && st.LegacySignature {
-		out.SignatureNotice = srvtext.Text(langOf(r), "server.store_storage.legacy_signature", nil)
+		version, date := plugin.LegacySignatureWindow.Until()
+		out.SignatureNotice = srvtext.Text(langOf(r), "server.store_storage.legacy_signature", srvtext.Vars{"version": version, "date": date})
 	}
 	if h.Store == nil || st == nil || st.Plugin == nil {
 		return out
@@ -124,7 +127,7 @@ func installSaid(err error, generic string) string {
 
 // auditLegacySignature marks the request's audit row when the build it
 // installed or upgraded was taken with a signature in the old sha256-only
-// form (accepted during 0.55, with a warning).
+// form (accepted during its compatibility window, with a warning).
 func auditLegacySignature(r *http.Request, st *plugin.Status) {
 	if st != nil && st.LegacySignature {
 		auth.AddAuditDetail(r.Context(), "legacy_signature", true)
@@ -252,7 +255,8 @@ type pluginInstallReq struct {
 	// only when the instance configures trusted keys.
 	Signature string `json:"signature"`
 	// Version is the version the signature names. Without it only the old
-	// sha256-only form verifies (accepted during 0.55, with a warning).
+	// sha256-only form verifies (accepted during its compatibility window,
+	// with a warning).
 	Version string `json:"version"`
 	// Source is where newer versions are published (plugin/updates.go):
 	// alone, the plugin is installed from it; beside a url or a file, it is

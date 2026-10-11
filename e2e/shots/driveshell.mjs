@@ -202,6 +202,26 @@ async function indexPath(token, qualified) {
   return Array.isArray(body.files) ? body.files : [];
 }
 
+/**
+ * homePictures — the Home cards the server promises a picture for: every file
+ * on the person's Recent and Starred whose row carries a `thumb_url` (the
+ * server hands one out exactly when there is an image behind it, lib/nodeRow).
+ * Answered as the paths the cards wear (`data-fe-path`, "<storage>://<rel>").
+ */
+async function homePictures(token) {
+  const promised = new Set();
+  for (const list of ['/api/files/manager/recent', '/api/files/manager/star/list']) {
+    const res = await api(token, `${list}?limit=100&offset=0`);
+    if (!res.ok) throw new Error(`${list}: ${res.status} ${await res.text()}`);
+    const body = await res.json();
+    for (const row of Array.isArray(body.nodes) ? body.nodes : []) {
+      if (row.type === 'dir' || typeof row.thumb_url !== 'string' || !row.thumb_url) continue;
+      promised.add(`${row.storage}://${String(row.path ?? '').replace(/^\/+/, '')}`);
+    }
+  }
+  return [...promised];
+}
+
 function backfillThumbs() {
   if (!binPath) {
     log('⚠ no local binary — thumbnails will be generic icons');
@@ -383,11 +403,13 @@ async function seed() {
     if (!res.ok) log(`⚠ grant ${path}: ${res.status} ${await res.text()}`);
   }
 
-  // A quota, so the storage line has a ceiling to draw a bar against.
-  await api(adminToken, `/api/admin/users/${user.id}/quota`, {
-    method: 'POST',
-    body: JSON.stringify({ quota_bytes: 5 * 1024 * 1024 * 1024 }),
-  });
+  // ⚠⚠ NO quota for Ayse. With one, the storage line under the panel prints
+  // HER uploads against it (lib/storageLine.ts) - and everything on this
+  // drive was written to disk by the scene, so it is nobody's: the 0.56
+  // pictures said "48 B of 5.37 GB used" a hand's width under a Home card
+  // saying "My files 2.28 MB used". Both numbers were right and the picture
+  // read as a broken quota. Without a quota the line prints the size of the
+  // drives the panel lists, the figure Home's cards print, and the two agree.
 
   // Thumbnails are rendered on UPLOAD; fixtures written straight to disk have
   // none, and every grid shot comes out as a wall of generic icons.
@@ -622,30 +644,50 @@ async function run(tokens) {
       page.url(),
     );
     await page.waitForSelector('[data-testid="home-view"]', { timeout: 25_000 });
+    // ⚠⚠ Wait for the pictures the server promised, by name - not for "every
+    // <img> on the page has loaded". A card is drawn before its picture: the
+    // tile asks for it once the card is near the viewport (ThumbTile,
+    // lib/nearViewport) and draws the <img> only when the object URL is in.
+    // Asked of the pictures already there, the wait was true the moment the
+    // cards were (`[].every(...)` is true), so it held only when the pictures
+    // happened to land within one round trip: the 0.56 nightly (2026-10-11,
+    // the first night the shots job's /tmp was a tmpfs) counted 0 pictures on
+    // Home and a run of the same tree that morning 1, while the screenshot
+    // taken 150 ms later showed all eight both times, byte for byte the
+    // night before's.
+    const promised = await homePictures(tokens.userToken);
     await page.waitForFunction(
-      () => {
+      (want) => {
         const view = document.querySelector('[data-testid="home-view"]');
         if (!view || view.querySelector('.fe-home__loading')) return false;
-        const cards = view.querySelectorAll('[data-testid="home-recent"] .fe-grid__card, [data-testid="home-starred"] .fe-grid__card');
-        // ⚠ A card is drawn before its picture arrives: wait for the
-        // pictures themselves, or the hero is a grid of grey boxes.
-        const imgs = [...view.querySelectorAll('.fe-grid__thumb img')];
-        return cards.length >= 4 && imgs.every((i) => i.complete && i.naturalWidth > 0);
+        const cards = [
+          ...view.querySelectorAll('[data-testid="home-recent"] .fe-grid__card, [data-testid="home-starred"] .fe-grid__card'),
+        ];
+        if (cards.length < 4) return false;
+        return cards.every((card) => {
+          if (!want.includes(card.getAttribute('data-fe-path') ?? '')) return true;
+          const img = card.querySelector('.fe-grid__thumb img');
+          return !!img && img.complete && img.naturalWidth > 0;
+        });
       },
-      null,
+      promised,
       { timeout: 25_000 },
     );
-    const homeState = await page.evaluate(() => {
+    const homeState = await page.evaluate((want) => {
       const field = document.querySelector('[data-testid="drive-search"] input');
+      const cards = [
+        ...document.querySelectorAll('[data-testid="home-recent"] .fe-grid__card, [data-testid="home-starred"] .fe-grid__card'),
+      ];
       return {
         query: field ? field.value : null,
         storages: document.querySelectorAll('[data-testid="home-storage-card"]').length,
         recent: document.querySelectorAll('[data-testid="home-recent"] .fe-grid__card').length,
         starred: document.querySelectorAll('[data-testid="home-starred"] .fe-grid__card').length,
         thumbs: document.querySelectorAll('[data-testid="home-view"] .fe-grid__thumb img').length,
+        promisedCards: cards.filter((c) => want.includes(c.getAttribute('data-fe-path') ?? '')).length,
         homeRow: document.querySelector('[data-testid="sidenav"] [aria-current="page"]')?.textContent?.trim() ?? '',
       };
-    });
+    }, promised);
     check(
       'the hero is Home as somebody lands on it: their storages, what they opened last, what they starred',
       homeState.query === '' && homeState.storages >= 2 && homeState.recent >= 3 && homeState.starred >= 2,
@@ -655,7 +697,7 @@ async function run(tokens) {
     check(
       'the hero carries real thumbnails, not only type tiles',
       homeState.thumbs >= 1,
-      `${homeState.thumbs} pictures on Home`,
+      `${homeState.thumbs} pictures on Home (${homeState.promisedCards} cards the server gave one)`,
     );
     await shot(page, 'driveshell-hero-1440.png');
 

@@ -205,8 +205,10 @@ type service struct {
 	now    func() time.Time
 	mail   MailFunc
 
-	// Web Push (push.go): nil when it is off.
-	push *pushRuntime
+	// Web Push (push.go): nil when it is off. pushIcon (SetPushIcon) is
+	// guarded by mu.
+	push     *pushRuntime
+	pushIcon func(ctx context.Context, u *model.User) string
 }
 
 // destination is one webhook endpoint a single event is delivered to —

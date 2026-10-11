@@ -149,17 +149,28 @@ export function useRowTouch<T>(onLongPress: (item: T, at: TouchPoint) => void, o
    * ⚠ Bind it WITHOUT `.passive`: a passive listener cannot cancel the
    * emulated mouse events, and the click they end in would then reach the new
    * listing under the finger (FilePane's open guard catches that too).
+   *
+   * ⚠⚠ The finger lifted after a LONG PRESS is cancelled too. The browser may
+   * still take that lift for a tap (Chromium does, whenever its own long-press
+   * time is longer than ours) and emulate mousedown / mouseup / CLICK at the
+   * point under the finger - by then the menu the long press opened: the
+   * sheet's row there ran (Share, Details, …) or its backdrop closed it.
+   * Measured in the 0.56 nightly (e2e 102, Chromium touch emulation): the lift
+   * picked the sheet's Share row and the share dialog opened over the cards.
+   * useReorderDrag's cancelEmulatedClick is the same rule for a held row.
    */
   function onTouchEnd(ev?: TouchEvent) {
     stopTimer();
     const item = target;
-    const tapped = item !== null && !longPressed;
+    const held = longPressed;
+    const tapped = item !== null && !held;
     if (tapped) tapEndedAt = Date.now();
     target = null;
     if (tapped && startedOnItem && options.onTap) {
       if (ev?.cancelable) ev.preventDefault();
       options.onTap(item as T);
     }
+    if (held && ev?.cancelable) ev.preventDefault();
     startedOnItem = false;
   }
 

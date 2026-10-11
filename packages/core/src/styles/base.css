@@ -7840,6 +7840,15 @@ filex-explorer {
     --fe-viewer-chev-size: var(--fe-h-md);
     --fe-viewer-chev-inset: var(--fe-gap-xs);
   }
+  /* #217: and on a phone there is no gutter at all - the chevrons lie over
+     the surface's edges. Even the smaller gutter took 84 px of a 390 px
+     screen: an app's interface (the office editor) was squeezed to 306 px,
+     narrower than its own toolbar. Every pixel goes to the surface; the
+     chevrons are small there and stay at the very edge. One rule for every
+     surface that fills the stage (PreviewModal's FILL_KINDS). */
+  .fe-viewer__stage--gutter {
+    padding-inline: 0;
+  }
 }
 /* === /gorunum:v1-viewer === */
 

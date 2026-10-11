@@ -38,10 +38,32 @@
 //       browser) whole and once per part, and is red unless the parts add up
 //       to the whole with every test in exactly one part.
 //
-//   node scripts/test-shards.mjs rebalance --package ./internal/api/handlers --from <log> [--write]
-//       New file lists for a sharded package's units, from the time each test
-//       took in <log> (`go test -json` or `-v` output of that package; the
-//       chain's -race shards write -v). Prints the split; --write saves it.
+//   node scripts/test-shards.mjs times --from <log|dir> [--from …] [--package <pkg>] [--source <text>] [--write]
+//       Measures: the seconds each test file of a cut package and each other
+//       package took, the median over the -race logs given (a directory: every
+//       .out/.log/.json file under it; GitHub keeps each -race job's log as the
+//       artifact race-<shard>, `gh run download <id> -p 'race-*'`). --write
+//       saves scripts/test-times.json, keeping its model; --source says in it
+//       where the logs came from (runs, versions - never a machine path).
+//       --package: the cut package of logs that print no package line (the
+//       chain's cut shards run their binary directly).
+//
+//   node scripts/test-shards.mjs rebalance [--package <pkg>] [--write]
+//       New file lists for the units of the cut packages (or of --package),
+//       from scripts/test-times.json; a test file the times do not know
+//       weighs its package's mean per test. --write saves them, with every
+//       unit's weight_s (package units too: their packages' sum), and prints
+//       the estimate. The package units are cut by hand (a package moves
+//       whole); `estimate` says when one is too heavy.
+//
+//   node scripts/test-shards.mjs rebalance --package <pkg> --from <log> [--from …] [--write]
+//       The same from the time each test took in <log> (`go test -json` or
+//       `-v` output of that package), the longest when a test is seen twice.
+//
+//   node scripts/test-shards.mjs estimate [--budget <min>]
+//       Minutes each shard of the race profile is expected to take on the
+//       runner scripts/test-times.json was measured on, with the tree as it
+//       is; red (exit 1) when one is over the budget (RACE_BUDGET_MIN).
 //
 // Go runs natively where there is a Go on PATH, else through WSL from WSL's
 // own disk (scripts/lib/go-build.mjs wslMirrorCd: never on /mnt/<drive>).
@@ -55,11 +77,17 @@ import { localSpecs, parseListing, verifyPartition, MAX_SHARDS } from '../e2e/li
 import { nativeGo, wslGo, wslMirrorCd } from './lib/go-build.mjs';
 import {
   chainLines,
+  estimateRace,
+  fileWeigher,
+  formatTimes,
   goTestArgs,
+  measureTimes,
   modulePath,
   packageTests,
+  packageUnitSeconds,
   parseGoTestTimes,
   planProfile,
+  RACE_BUDGET_MIN,
   rebalanceUnits,
   relPackage,
   shardAtNode,
@@ -71,19 +99,25 @@ import {
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG = path.join(REPO, 'scripts', 'test-shards.json');
+const TIMES = path.join(REPO, 'scripts', 'test-times.json');
 
 const argv = process.argv.slice(2);
 const command = argv[0];
-const VALUES = ['profile', 'format', 'shard', 'node', 'shards', 'browsers', 'grep', 'grep-invert', 'package', 'from'];
+const VALUES = ['profile', 'format', 'shard', 'node', 'shards', 'browsers', 'grep', 'grep-invert', 'package', 'from', 'source', 'budget'];
+/** Options that may be given more than once: a list. */
+const REPEATED = ['from'];
 const FLAGS = ['offline', 'write'];
 
 function usage(code) {
   const out = code ? console.error : console.log;
-  out('usage: node scripts/test-shards.mjs <go|check|e2e-check|rebalance> [options]');
+  out('usage: node scripts/test-shards.mjs <go|check|e2e-check|times|rebalance|estimate> [options]');
   out('  go         [--profile go|race] [--format json|chain|matrix|args] [--shard <name> | --node <i/N>]');
   out('  check      [--offline]');
   out('  e2e-check  [--shards 4] [--browsers chromium[,firefox,webkit]] [--grep <p>] [--grep-invert <p>]');
-  out('  rebalance  --package ./internal/api/handlers --from <go test -json or -v log> [--write]');
+  out('  times      --from <-race log or directory of them> [--from …] [--package <pkg>] [--source <text>] [--write]');
+  out('  rebalance  [--package <pkg>] [--write]   (from scripts/test-times.json)');
+  out('  rebalance  --package <pkg> --from <go test -json or -v log> [--write]');
+  out(`  estimate   [--budget <minutes>, default ${RACE_BUDGET_MIN}]`);
   out('(the header of scripts/test-shards.mjs says what each one does)');
   process.exit(code);
 }
@@ -102,7 +136,8 @@ for (let i = 1; i < argv.length; i++) {
       console.error(`--${key} needs a value`);
       process.exit(2);
     }
-    opts[key] = v;
+    if (REPEATED.includes(key)) opts[key] = [...(opts[key] ?? []), v];
+    else opts[key] = v;
   } else if (key && FLAGS.includes(key) && inline === undefined) {
     opts[key] = true;
   } else {
@@ -357,31 +392,146 @@ function cmdE2eCheck() {
 
 // ── rebalance ───────────────────────────────────────────────────────────────
 
-function cmdRebalance() {
-  if (!opts.package || !opts.from) throw new Error('rebalance needs --package ./internal/x and --from <go test -json or -v log>');
+const loadTimes = () => {
+  if (!fs.existsSync(TIMES)) throw new Error(`${path.relative(REPO, TIMES)} is missing: measure first (times --from <logs> --write)`);
+  return JSON.parse(fs.readFileSync(TIMES, 'utf8'));
+};
+
+/** The files `--from` names: a file as it is, a directory as every log under it. */
+function logFiles(from) {
+  const out = [];
+  const walk = (p) => {
+    const st = fs.statSync(p);
+    if (st.isFile()) {
+      out.push(p);
+      return;
+    }
+    for (const e of fs.readdirSync(p, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const sub = path.join(p, e.name);
+      if (e.isDirectory()) walk(sub);
+      else if (e.isFile() && /\.(out|log|json|txt)$/.test(e.name)) out.push(sub);
+    }
+  };
+  for (const f of from) walk(f);
+  return out;
+}
+
+function printEstimate(rows, budget) {
+  const over = rows.filter((r) => r.minutes > budget);
+  for (const r of rows) console.log(`  ${r.name.padEnd(18)} ${r.minutes.toFixed(1).padStart(6)} min${r.minutes > budget ? `  ✗ over ${budget}` : ''}`);
+  console.log(`  longest            ${Math.max(...rows.map((r) => r.minutes)).toFixed(1).padStart(6)} min (budget ${budget})`);
+  return over;
+}
+
+function cmdTimes() {
+  if (!opts.from?.length) throw new Error('times needs --from <a -race log, or a directory of them>');
   const cfg = loadConfig();
   const backendDir = backendOf(cfg);
-  const pkg = opts.package;
-  const weights = parseGoTestTimes(fs.readFileSync(opts.from, 'utf8'), pkg.replace(/^\.\//, ''));
-  if (weights.size === 0) throw new Error(`${opts.from}: no test time in it (a go test -json or -v log of ${pkg})`);
-  const { units, totals } = rebalanceUnits(cfg, pkg, { backendDir, weights });
-  console.log(`${pkg}: ${weights.size} test times from ${opts.from}`);
-  units.forEach((u, i) => console.log(`  ${u.name.padEnd(16)} ${String(u.files.length).padStart(4)} files  ${totals[i].toFixed(1).padStart(8)} s${u.rest ? '  (rest)' : ''}`));
+  const files = logFiles(opts.from);
+  if (files.length === 0) throw new Error(`no log under ${opts.from.join(', ')} (.out, .log, .json or .txt)`);
+  const logs = files.map((f) => ({ name: path.basename(path.dirname(f)) + path.sep + path.basename(f), text: fs.readFileSync(f, 'utf8') }));
+  const got = measureTimes(cfg, { backendDir, logs, pkg: opts.package ?? '' });
+  console.log(`${got.logs} logs`);
+  for (const [pkg, perFile] of Object.entries(got.files)) {
+    const rows = Object.values(perFile);
+    const secs = rows.reduce((s, [x]) => s + x, 0);
+    const tests = rows.reduce((s, [, n]) => s + n, 0);
+    console.log(`  ${pkg}: ${tests} tests in ${rows.length} files, ${(secs / 60).toFixed(1)} min`);
+    if (got.unknownTests[pkg]) console.log(`    ${got.unknownTests[pkg].length} measured tests are in no file of the tree any more (renamed or deleted): left out`);
+  }
+  const pkgSecs = Object.values(got.packages).reduce((s, x) => s + x, 0);
+  console.log(`  ${Object.keys(got.packages).length} other packages, ${(pkgSecs / 60).toFixed(1)} min`);
+  for (const s of got.skipped) console.log(`  skipped ${s}: no package line, and no --package for it`);
+  if (!opts.write) {
+    console.log(`\n(not written: add --write to save it to ${path.relative(REPO, TIMES)})`);
+    return 0;
+  }
+  const prev = fs.existsSync(TIMES) ? JSON.parse(fs.readFileSync(TIMES, 'utf8')) : {};
+  const next = {
+    $comment: prev.$comment ?? [],
+    source: opts.source ?? prev.source ?? '',
+    model: prev.model ?? { setup_min: 2, package_parallel: 3 },
+    files: got.files,
+    packages: got.packages,
+  };
+  fs.writeFileSync(TIMES, formatTimes(next));
+  console.log(`\nwritten: ${path.relative(REPO, TIMES)}`);
+  return 0;
+}
+
+function cmdRebalance() {
+  const cfg = loadConfig();
+  const backendDir = backendOf(cfg);
+  let results;
+  let times = null;
+  if (opts.from?.length) {
+    if (!opts.package) throw new Error('rebalance --from needs --package ./internal/x (the package of the log)');
+    const pkg = opts.package;
+    const text = opts.from.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
+    const weights = parseGoTestTimes(text, pkg.replace(/^\.\//, ''));
+    if (weights.size === 0) throw new Error(`${opts.from.join(', ')}: no test time in it (a go test -json or -v log of ${pkg})`);
+    console.log(`${pkg}: ${weights.size} test times from ${opts.from.join(', ')}`);
+    results = [{ pkg, ...rebalanceUnits(cfg, pkg, { backendDir, weights }) }];
+  } else {
+    times = loadTimes();
+    const pkgs = opts.package ? [opts.package] : Object.keys(cfg.units);
+    results = pkgs.map((pkg) => {
+      const fileWeight = fileWeigher(times, pkg, packageTests(backendDir, pkg));
+      return { pkg, ...rebalanceUnits(cfg, pkg, { backendDir, fileWeight }) };
+    });
+    console.log(`from ${path.relative(REPO, TIMES)}`);
+  }
+  for (const { pkg, units, totals } of results) {
+    console.log(`${pkg}:`);
+    units.forEach((u, i) => console.log(`  ${u.name.padEnd(16)} ${String(u.files.length).padStart(4)} files  ${(totals[i] / 60).toFixed(1).padStart(6)} min${u.rest ? '  (rest)' : ''}`));
+  }
+  const measuredFrom = times ? 'measured: scripts/test-times.json (its source says which runs)' : `measured: ${opts.from.map((f) => path.basename(f)).join(', ')}`;
+  const nextUnits = { ...cfg.units };
+  for (const { pkg, units, totals } of results) {
+    nextUnits[pkg] = units.map((u, i) => {
+      const { measured: _old, ...rest } = u;
+      return { ...rest, weight_s: Math.round(totals[i]), weight_from: measuredFrom };
+    });
+  }
+  let next = { ...cfg, units: nextUnits };
+  if (times) {
+    const pkgSecs = packageUnitSeconds(next, times, walkGoPackages(backendDir));
+    next = { ...next, packages: next.packages.map((u) => ({ ...u, weight_s: Math.round(pkgSecs.get(u.name) ?? 0), weight_from: measuredFrom })) };
+  }
+  const errors = validateConfig(next);
+  if (errors.length) throw new Error(`the new split is not a valid list:\n  ${errors.join('\n  ')}`);
+  if (times) {
+    console.log('\nthe race profile, estimated:');
+    printEstimate(estimateRace(next, times, { backendDir, goPackages: walkGoPackages(backendDir) }), RACE_BUDGET_MIN);
+  }
   if (!opts.write) {
     console.log('\n(not written: add --write to save it to scripts/test-shards.json)');
     return 0;
   }
-  const next = { ...cfg, units: { ...cfg.units, [pkg]: units.map((u, i) => ({ ...u, weight_s: Math.round(totals[i]), measured: true })) } };
-  const errors = validateConfig(next);
-  if (errors.length) throw new Error(`the new split is not a valid list:\n  ${errors.join('\n  ')}`);
   fs.writeFileSync(CONFIG, `${JSON.stringify(next, null, 2)}\n`);
   console.log(`\nwritten: ${path.relative(REPO, CONFIG)}`);
   return 0;
 }
 
+// ── estimate ────────────────────────────────────────────────────────────────
+
+function cmdEstimate() {
+  const cfg = loadConfig();
+  const backendDir = backendOf(cfg);
+  const times = loadTimes();
+  const budget = opts.budget === undefined ? RACE_BUDGET_MIN : Number(opts.budget);
+  if (!Number.isFinite(budget) || budget <= 0) throw new Error(`--budget ${opts.budget}: minutes, a number above 0`);
+  console.log(`the race profile on the runner of ${path.relative(REPO, TIMES)} (${times.source || 'no source given'}):`);
+  console.log('(packages walked from the tree: an approximation of go list ./...)');
+  const over = printEstimate(estimateRace(cfg, times, { backendDir, goPackages: walkGoPackages(backendDir) }), budget);
+  if (over.length === 0) return 0;
+  console.error(`\n${over.length} shard(s) over ${budget} min: node scripts/test-shards.mjs rebalance --write (a cut package), or move a package between package units (docs/CONTRIBUTING.md, Testing → Shards)`);
+  return 1;
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 
-const COMMANDS = { go: cmdGo, check: cmdCheck, 'e2e-check': cmdE2eCheck, rebalance: cmdRebalance };
+const COMMANDS = { go: cmdGo, check: cmdCheck, 'e2e-check': cmdE2eCheck, times: cmdTimes, rebalance: cmdRebalance, estimate: cmdEstimate };
 if (!COMMANDS[command]) {
   console.error(`unknown command ${command}`);
   usage(2);

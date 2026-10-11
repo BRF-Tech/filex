@@ -1,0 +1,209 @@
+/* filex paints its colours onto <html> as --fe-* (the SDK's connect()); the
+   fallbacks are for the page opened on its own. */
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--fe-bg-elev, #f3f4f6);
+  color: var(--fe-text, #1f2937);
+  font-family: var(--fe-font, system-ui, sans-serif);
+  font-size: var(--fe-text-md, 14px);
+}
+body {
+  display: flex;
+  flex-direction: column;
+}
+[hidden] {
+  display: none !important;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--fe-bg, #fff);
+  border-bottom: 1px solid var(--fe-border, #e5e7eb);
+  min-width: 0;
+}
+.mark {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: #2b579a;
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+}
+.name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.lock {
+  flex: none;
+  font-size: var(--fe-text-xs, 12px);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--fe-primary-soft, #eef3ff);
+  color: var(--fe-primary-ink, #1d4ed8);
+  white-space: nowrap;
+}
+.grow {
+  flex: 1 1 auto;
+}
+.people {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.who {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px 2px 2px;
+  border-radius: 999px;
+  border: 1px solid var(--fe-border, #e5e7eb);
+  background: var(--fe-bg, #fff);
+  font-size: var(--fe-text-sm, 13px);
+  white-space: nowrap;
+}
+.who .dot {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--c, #2f6ceb);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.who .role {
+  color: var(--fe-text-muted, #6b7280);
+}
+.who.watch {
+  border-style: dashed;
+}
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 16px;
+  background: var(--fe-bg, #fff);
+  border-bottom: 1px solid var(--fe-border, #e5e7eb);
+  overflow: hidden;
+}
+.tools button {
+  font: inherit;
+  min-width: 30px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.tools button:hover:not(:disabled) {
+  border-color: var(--fe-border, #e5e7eb);
+}
+.tools button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.tools .sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--fe-border, #e5e7eb);
+}
+.state {
+  color: var(--fe-text-muted, #6b7280);
+  font-size: var(--fe-text-sm, 13px);
+  white-space: nowrap;
+}
+.watching {
+  margin: 0;
+  padding: 8px 16px;
+  font-size: var(--fe-text-sm, 13px);
+  background: var(--fe-primary-soft, #eef3ff);
+  color: var(--fe-primary-ink, #1d4ed8);
+  border-bottom: 1px solid var(--fe-border, #e5e7eb);
+}
+.desk {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 24px 16px 48px;
+}
+.page {
+  max-width: 720px;
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 48px 56px;
+  background: var(--fe-bg, #fff);
+  border: 1px solid var(--fe-border, #e5e7eb);
+  border-radius: 4px;
+  box-shadow: var(--fe-shadow-sm, 0 1px 3px rgb(0 0 0 / 8%));
+  line-height: 1.6;
+  outline: none;
+}
+.page h1 {
+  margin: 0 0 16px;
+  font-size: 26px;
+  line-height: 1.25;
+}
+.page h2 {
+  margin: 20px 0 8px;
+  font-size: 18px;
+}
+.page p {
+  margin: 0 0 12px;
+}
+.page [data-by] {
+  position: relative;
+  box-shadow: -10px 0 0 -7px var(--c, #2f6ceb);
+}
+.page [data-by]::after {
+  content: attr(data-by);
+  position: absolute;
+  left: -14px;
+  top: -18px;
+  padding: 0 6px;
+  border-radius: 4px 4px 4px 0;
+  background: var(--c, #2f6ceb);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.status {
+  color: var(--fe-text-muted, #6b7280);
+}
+@media (max-width: 640px) {
+  .bar,
+  .tools {
+    padding-inline: 10px;
+  }
+  .desk {
+    padding: 12px 8px 32px;
+  }
+  .page {
+    padding: 24px 18px;
+  }
+  .who .role {
+    display: none;
+  }
+}

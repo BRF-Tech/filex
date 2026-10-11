@@ -606,12 +606,17 @@ Two clocks, one after the other (decided by the owner, 2026-10-06):
    write lock (`reason: idle`) and the client goes back to read-only, as
    above.
 2. **Vault lock.** After a further **15 minutes** in which the open vault sees
-   no activity at all - no listing, no opening, no download, no write - the
-   **client** locks it: it drops the folder master key and every key derived
+   no activity at all - no listing, no opening, no download, no write (an
+   app's read or save of a file of the vault, or its saying it holds unsaved
+   changes, counts: 0.56) - the **client** locks it: it drops the folder master key and every key derived
    from it from memory (the same as pressing **Lock**), closes what it shows
-   of the vault and asks for the password, the recovery key or escrow again
+   of the vault - an app's frame on a file of it too, saying which file lost
+   changes the app had not saved - and asks for the password, the recovery key or escrow again
    to reopen it. A vault that was opened and never written starts this clock
-   when it is opened. The 15 minutes are fixed in format 1, not a setting.
+   when it is opened. A minute before (0.56), while an app holds changes to
+   one of its files that are not saved, the client warns - in the words the
+   `state` answer carries (`words`, below) - and offers to keep the vault
+   open, which is activity. The 15 minutes are fixed in format 1, not a setting.
    The server keeps no key, so this lock is the client's alone; nothing about
    it is stored or sent beyond an optional `vault.unlock` audit reason
    `locked_idle`, and that **only while the session still holds the write
@@ -638,7 +643,7 @@ rules of the files API. `path` is the vault folder's wire path
 | Request | Answer |
 |---|---|
 | `POST /create` `{path, marker, index}` | `201 {generation: 1, owner_id, owner_name, owner_self}` |
-| `GET /state?path=` | `200 {vault_id, pack_log2, generation, lock, owner_id, owner_name, owner_self}` |
+| `GET /state?path=` | `200 {vault_id, pack_log2, generation, lock, owner_id, owner_name, owner_self, words}` - `words` (0.56): the sentences the client shows on its own clock, in the reader's language (`app_lock_soon`, `app_lock_soon_keep`, `app_lock_kept`) |
 | `GET /list?path=&kind=&after=&limit=` | `200 {items, next}` |
 | `POST /lock` `{path, client, label}` | `200 {token, generation, lease_seconds, idle_seconds, expires_at}` · `409 VAULT_LOCKED` |
 | `POST /lock/renew` `{path, active}` + token | `200 {expires_at, idle_until}` · `409 VAULT_LOCK_LOST` |
@@ -880,6 +885,16 @@ Searching a vault searches its index, in the browser. An upload whose name is
 taken is [asked about first](#details-settled-by-the-first-test-runs-2026-10-07),
 and the listing's `e2e_vault` / `e2e_vault_root` tell the explorer where a
 vault it has not opened is.
+
+**Apps (0.56, task #189).** An app's interface granted `files:e2e-plaintext`
+edits a file of an open vault, all in the browser: the explorer picks the app
+by the name it read from the index (the kind rule, `applies`), reads the file
+from its packs for the app's `file.read`, and commits the app's `file.save` as
+the next generation - a change like any other, under the write lock, written
+only over the version the app read (`size:mtime:content id`). The server's
+app doors are not used (they refuse a vault), so no audit row names the file;
+the generation and the lock rows are the vault's own. See
+[E2E-ENCRYPTION.md → In a vault](E2E-ENCRYPTION.md#in-a-vault).
 
 ### filex decrypt
 

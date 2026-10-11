@@ -25,7 +25,7 @@
  * test runner, whose own round trips are larger than what is measured.
  */
 import { test, expect, type Page, type Route } from '@playwright/test';
-import { loginAs, logout } from '../helpers/auth';
+import { ADMIN_EMAIL, ADMIN_PASSWORD, dismissInstallBanner, logout } from '../helpers/auth';
 import { dropStorageByName, seedLocalStorage } from '../helpers/seed';
 import { settled } from '../helpers/stable';
 
@@ -56,21 +56,41 @@ function answerFor(page: Page, name: string, timeout = 20_000) {
   );
 }
 
+const FOLDER = `/drive/explore?storage=${encodeURIComponent(STORAGE)}`;
+
 /** Signed in, in the storage, with a file of its own that this browser has
  *  never asked about. `answer` stages the encryption question BEFORE the
  *  folder is listed with the file in it: the listing is what asks it now.
  *  Resolves to the answer the listing asked for the file (a promise: it may
- *  still be on its way). */
+ *  still be on its way).
+ *
+ *  ⚠⚠ The folder is the FIRST page this tab opens, and nothing navigates
+ *  away from a filex page that is still starting. This used to sign in
+ *  through the form (the start page boots), open the folder, upload, stage
+ *  the answer and reload. `goto` returns at the `load` event, before the
+ *  explorer has listed the folder, opened its socket and asked its
+ *  questions, so the reload tore down a page in the middle of all three: in
+ *  the 0.56 nightly (2026-10-11) WebKit's network process crashed under it
+ *  ("Network process crashed" on the socket) and the reload failed with
+ *  "WebKit encountered an internal error". The crash itself is WebKit's and
+ *  did not come back in 24 reloads of a starting explorer on the build host
+ *  (8 of them these very steps), but it is the only way WebKit has failed a
+ *  navigation in this suite's runs (109, 207, 213), each time leaving a filex
+ *  page with requests still in flight - so no step here does that. The
+ *  session is the page's own cookie jar (the API's sign-in, as
+ *  211-phone-install-band signs in), the file goes up through the API, and
+ *  the one page that boots, lists and asks is the one under test. */
 async function freshFile(page: Page, name: string, answer: (route: Route) => Promise<void>) {
   await page.addInitScript(() => localStorage.setItem('filex.tourDone', '1'));
-  await loginAs(page);
-  await page.goto(`/drive/explore?storage=${encodeURIComponent(STORAGE)}`);
+  await dismissInstallBanner(page);
+  const signedIn = await page.request.post('/api/auth/login', { data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } });
+  expect(signedIn.ok(), `sign-in: ${signedIn.status()}`).toBeTruthy();
   await upload(page, name);
   await page.route(ALLOWED, answer);
   const asked = answerFor(page, name);
   // Not unhandled when a test never waits for it.
   asked.catch(() => undefined);
-  await page.reload();
+  await page.goto(FOLDER);
   await expect(row(page, name)).toBeVisible({ timeout: 15_000 });
   return { asked };
 }
@@ -182,15 +202,18 @@ test.describe('The right-click menu holds still, and does not wait (#196)', () =
     await asked;
     await expect.poll(() => menuKeys(page), 'the answers are remembered').not.toEqual([]);
 
-    // The next page's questions take seconds: the menu does not wait for them.
-    await page.unroute(ALLOWED);
-    await page.route(ALLOWED, answerAfter(4_000));
-    await page.reload();
-    await expect(row(page, file)).toBeVisible({ timeout: 15_000 });
+    // The next visit's questions take seconds: the menu does not wait for
+    // them. A second tab of the same browser (the remembered answers are in
+    // its localStorage), not a reload: the first page is left as it is (see
+    // freshFile - nothing navigates away from a filex page still busy).
+    const again = await page.context().newPage();
+    await again.route(ALLOWED, answerAfter(4_000));
+    await again.goto(FOLDER);
+    await expect(row(again, file)).toBeVisible({ timeout: 15_000 });
 
-    const menu = await rightClick(page, file, { settle: false });
-    expect(await menuOpenedIn(page)).toBeLessThan(200);
-    const labels = (await menuRows(page)).map((r) => r.label);
+    const menu = await rightClick(again, file, { settle: false });
+    expect(await menuOpenedIn(again)).toBeLessThan(200);
+    const labels = (await menuRows(again)).map((r) => r.label);
     const download = labels.findIndex((l) => DOWNLOAD.test(l));
     expect(labels[download + 1], `the remembered row is in its place: ${JSON.stringify(labels)}`).toMatch(ENCRYPT);
     await expect(menu.getByRole('menuitem', { name: ENCRYPT })).toBeVisible();
@@ -198,13 +221,22 @@ test.describe('The right-click menu holds still, and does not wait (#196)', () =
 
   test('a right-click faster than the listing’s questions waits about 40 ms; the late row is added at the end', async ({ page }) => {
     const file = `gec-${STAMP}.txt`;
-    const { asked: answered } = await freshFile(page, file, answerAfter(4_000));
+    // The answer is held until the menu's first rows are read. A fixed 4 s
+    // delay let a stalled host's right-click arrive after the answer (0.55
+    // full chain, Firefox: the row was already there).
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { asked: answered } = await freshFile(page, file, async (route) => {
+      await gate;
+      await answerAllowed(route);
+    });
 
     const menu = await rightClick(page, file);
     expect(await menuOpenedIn(page), 'not the 400 ms of the first round').toBeLessThan(250);
     const first = await menuRows(page);
     expect(first.some((r) => ENCRYPT.test(r.label)), 'the answer is not in yet').toBe(false);
 
+    release();
     await answered;
     await expect(menu.getByRole('menuitem', { name: ENCRYPT })).toBeVisible();
     const after = await menuRows(page);

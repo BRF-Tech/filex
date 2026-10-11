@@ -1,11 +1,15 @@
 # Editing encrypted office documents
 
-> **Status: designed, with a protocol prototype. Nothing in filex offers it
-> yet.** Today a document in an encrypted folder opens read-only and
-> ONLYOFFICE is not offered for it ([E2E-ENCRYPTION.md, feature
-> trade-offs](E2E-ENCRYPTION.md#feature-trade-offs)). This page is the design
-> of editing it - alone or with other people, in the browser, without any
-> server ever reading it - and what of it exists.
+> **Status: filex 0.56 carries filex's half.** An app that asks for encrypted
+> folders opens and saves a document of an unlocked encrypted folder or a
+> vault, and an app that asks for editing together runs its session through
+> filex's relay ([E2E-ENCRYPTION.md → Editing in an app](E2E-ENCRYPTION.md#editing-in-an-app)).
+> The editor's half is `filex-office-editor` 0.2.0 (encrypted folders) and
+> 0.3.0 (editing together). filex's own viewer still opens such a document
+> read-only, and ONLYOFFICE is never offered for it
+> ([E2E-ENCRYPTION.md, feature trade-offs](E2E-ENCRYPTION.md#feature-trade-offs)).
+> This page is the design of editing it - alone or with other people, in the
+> browser, without any server ever reading it - and what of it exists.
 
 The editor's side is **an app**, `filex-office-editor`, in a repository of its
 own ([BRF-Tech/filex-office-editor](https://github.com/BRF-Tech/filex-office-editor),
@@ -20,13 +24,13 @@ all MIT.
 
 | Piece | Where | Status |
 |---|---|---|
-| The relay: one order for the editors' sealed entries, the changes lease, who is in a session, which part of the log a save holds | `backend/internal/e2eoffice` | Prototype: in memory, one process, no route reaches it |
-| Session keys, sealed entries, the reader that refuses a log the editors did not write | `packages/core/src/lib/e2eoffice.ts` | Prototype: no screen uses it |
+| The relay: one order for the editors' sealed entries, the changes lease, who is in a session and who only watches, which part of the log a save holds | `backend/internal/coedit` | **filex 0.56**: its routes and socket, its tables (migrations 00107 and 00109: cursors reach every filex process through the database) and blob store, the `files:co-edit` permission ([APP-PLUGINS-API.md → Editing together](APP-PLUGINS-API.md#editing-together-coedit-056)) |
+| Session keys, sealed entries, the reader that refuses a log the editors did not write | `packages/core/src/lib/e2eoffice.ts`, `lib/coeditSession.ts`, `lib/coeditOutbox.ts` | **filex 0.56**: the frame an app's interface runs in seals, orders and checks a session's log for it - in an ordinary folder with the server's session key, in an encrypted folder with a key the members' browsers seal with the folder key - and keeps the changes not yet placed in the browser (sealed there in an encrypted folder) until they are |
 | Who saves, and when | `packages/core/src/lib/e2eofficeSave.ts` | Prototype: no screen uses it |
-| The bridge (a Document Server for one editor, in the browser), the socket.io stand-in, the x2t driver | the `filex-office-editor` app (AGPL-3.0-or-later) | Built for one person; no release yet |
-| The app's page and editor frame, ONLYOFFICE's editor files in its package, the x2t WebAssembly build | the `filex-office-editor` app | Built and measured in Chromium, Firefox and WebKit, one person editing an ordinary (not encrypted) document, with Download as and Print through x2t and a phone layout ([On a phone](#on-a-phone)); x2t is CryptPad's build until the app's own; no release yet |
-| The platform features the app needs | filex | 0.55: a frame of its own package, `blob:` reads, printing, the `encrypted` field ([What filex gives the app](#what-filex-gives-the-app)) |
-| The relay's routes and database tables, the plaintext of an encrypted document for the app, "Edit (encrypted)" in the explorer | filex | Not built |
+| The bridge (a Document Server for one editor, in the browser), the socket.io stand-in, the x2t driver | the `filex-office-editor` app (AGPL-3.0-or-later) | One person: released (0.1.0, 0.1.1). Several people through filex's relay: its 0.3.0, built for filex 0.56 and released once it is measured there |
+| The app's page and editor frame, ONLYOFFICE's editor files in its package, the x2t WebAssembly build | the `filex-office-editor` app | Built and measured in Chromium, Firefox and WebKit, one person editing an ordinary (not encrypted) document, with Download as and Print through x2t and a phone layout ([On a phone](#on-a-phone)), and in filex 0.55 itself; released as 0.1.0 and 0.1.1, which carries the app's own x2t, built from ONLYOFFICE core at the editor's tag. A document in an encrypted folder: its 0.2.0, built for filex 0.56 and released once it is measured there |
+| The platform features the app needs | filex | 0.55: a frame of its own package, `blob:` reads, printing, the `encrypted` field; 0.56: the plaintext of a document in an unlocked encrypted folder, handed over and taken back by the browser ([What filex gives the app](#what-filex-gives-the-app)) |
+| An encrypted folder's editing session - its key sealed with the folder key - and editing together there | filex | **filex 0.56** ([E2E-ENCRYPTION.md → Editing in an app](E2E-ENCRYPTION.md#editing-in-an-app)); not in a vault, not a `.fxe` |
 
 ## The idea
 
@@ -172,8 +176,10 @@ it that somebody is editing one, and how much.
 
 ## What the server sees
 
-The relay cannot read an entry, a cursor, the base document or an image. It
-does see:
+The relay cannot read an entry, a cursor, the base document or an image -
+in an encrypted folder at all (the key is sealed with the folder key); in an
+ordinary folder the server keeps the session's key sealed with its own
+secret key, and could open them as it can read the file itself. It does see:
 
 - which file has a session, who joined and left it and when, and whether each
   may write;
@@ -205,9 +211,9 @@ like every other permission - and each is MIT, in filex:
 | A frame of its own: ONLYOFFICE's `DocsAPI.DocEditor` opens the editor page in a frame | `frame-src 'none'` | **filex 0.55:** `ui:frame-package` (`ui.frame_package`) - frames from the app's own package only, each page in a sandbox of its own under the same policy ([APP-PLUGINS-API.md → An app's own interface](APP-PLUGINS-API.md#an-apps-own-interface-v4)) |
 | To load the document from a `blob:` address | `connect-src 'none'`, or the package | **filex 0.55:** `ui:connect-blob` (`ui.connect_blob`) - `blob:` in `connect-src`; a `blob:` address never leaves the page, and the frame that reads it makes it |
 | To print: a sandboxed frame may not open the print dialog | `window.print()` is ignored in the frame | **filex 0.55:** `ui:print` (`ui.print`) - the app hands filex the PDF and filex prints it from its own print page ([APP-PLUGINS-API.md → Printing a PDF](APP-PLUGINS-API.md#printing-a-pdf-uiprint-055)) |
-| To know a file is encrypted (one person at a time in a vault) | - | **filex 0.55:** `encrypted: "folder" \| "vault" \| "file"` on the file's `FileInfo`, as the server stamps the file's row; absent for a plain file. Information only in 0.55: filex does not open an encrypted file in an app and refuses an app its bytes (the plaintext is the next row) |
-| The plaintext of a document in an unlocked encrypted folder | an app is never given a file there | planned: the explorer decrypts and hands the bytes over, and encrypts the save as a new version written only if the file is still the one the editor opened; a permission of its own, with a stern warning in the review: the app sees every document opened with it in an encrypted folder |
-| Editing together | - | **filex 0.55:** the bridge's `coedit.*` methods are defined ([APP-PLUGINS-API.md → Editing together](APP-PLUGINS-API.md#editing-together-coedit-055-defined-not-offered)) and answer `unavailable`; planned: the relay's routes and WebSocket, its tables and blob store, and the `files:co-edit` permission |
+| To know a file is encrypted (one person at a time in a vault) | - | **filex 0.55:** `encrypted: "folder" \| "vault" \| "file"` on the file's `FileInfo`, as the server stamps the file's row; absent for a plain file. On its own, information only: filex refuses an app the bytes of such a file (the plaintext is the next row) |
+| The plaintext of a document in an unlocked encrypted folder | an app is never given a file there | **filex 0.56:** `encrypted_folders: {"open": true}` (grant `files:e2e-plaintext`, with a stern sentence in the review: the app sees every document opened with it there) - the explorer offers the app on a file of an unlocked folder, decrypts it in the browser and hands the bytes over (`FileInfo.plaintext`), and encrypts the save, written as a new version only if the file is still the one the editor opened. The server carries only ciphertext; in a folder whose names are encrypted too (the browser picks the app by the decrypted name, which never reaches the server), in a vault too (the browser reads it from the vault and writes the save as the vault's next generation, under its write lock - [In a vault](E2E-ENCRYPTION.md#in-a-vault)); not a `.fxe` ([E2E-ENCRYPTION.md → Editing in an app](E2E-ENCRYPTION.md#editing-in-an-app)) |
+| Editing together | - | **filex 0.56:** `files:co-edit` - the bridge's `coedit.*` methods (defined in 0.55) through the relay's routes and socket, its tables and blob store ([APP-PLUGINS-API.md → Editing together](APP-PLUGINS-API.md#editing-together-coedit-056)). In an ordinary folder the session's key is the server's, kept sealed with `FILEX_SECRET_KEY`; in an encrypted folder (through the plaintext door above) the members' browsers make it and give the server only that key sealed with the folder key. A person who may only read the file watches; a change made while the connection is gone is kept in the browser and sent when it is back or the file is opened again |
 | A package of about 80-95 MB zipped (1,400 files, the largest 38.8 MB) | within the limits (128 MiB zipped, 20 000 files, 64 MiB a file), served uncompressed | planned: the package's files served compressed and cached by version, so a first opening downloads about 15-20 MB, not 80-90 MB |
 
 Two more things the editor expects - `localStorage`, which an opaque frame
@@ -274,29 +280,25 @@ trademark. The platform features above are filex's and stay MIT.
 
 ## What is not built yet
 
-In the app (`filex-office-editor`; built so far: ONLYOFFICE's editor files
+In the app (`filex-office-editor`; released: 0.1.0 and 0.1.1, one person
+editing a document that is not encrypted, with ONLYOFFICE's editor files
 from the official Document Server image at a pinned release, checked every
 week for a newer one, the stand-in in place of socket.io, the app's page,
 saving, pictures added while editing, Download as, PDF and Print through
-x2t, the phone layout):
+the app's own x2t, and the phone layout; built for filex 0.56 and released
+once they are measured in it: 0.2.0, a document in an encrypted folder, and
+0.3.0, editing together):
 
-- The x2t WebAssembly build from ONLYOFFICE core at the same version as the
-  editor files, in place of CryptPad's, and its comparison with the
-  Document Server's own x2t (plain text and CSV stay out until then: the
-  pinned build cuts letters outside ASCII there).
-- Measuring the editor against a Document Server on a body of real
-  documents, and in filex 0.55 itself.
-- Encrypted folders and editing together, on the filex features below.
+- Comparing the editor with a Document Server on a body of real documents.
+- A lighter first download, once filex serves an app's package compressed
+  (the planned row in [What filex gives the app](#what-filex-gives-the-app)).
 
 In filex:
 
 - The platform features still marked planned in
   [What filex gives the app](#what-filex-gives-the-app).
-- The relay's routes and WebSocket, its database tables (sessions and log,
-  the lease as a compare-and-set row) and the blob store inside the encrypted
-  folder; until then a restart forgets every session.
-- The explorer offering the app in an unlocked encrypted folder, the
-  unsaved-session sign on a file, and the measurements of encrypted editing:
+- The unsaved-session sign on a file, and the measurements of encrypted
+  editing (a folder whose names are encrypted and a vault included):
   spreadsheets and presentations, large documents, Firefox and Safari,
   phones (which read there as everywhere: [On a phone](#on-a-phone)).
 

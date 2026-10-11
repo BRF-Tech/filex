@@ -1135,7 +1135,12 @@ index file), `lock` is `null` or
 for the session whose token the request carries. The three `owner_*` keys say
 who owns the vault folder, as a listing row does (each omitted when there is
 nothing to say): every row inside the vault is drawn as the folder's, since
-the index records no author. Needs the right to download
+the index records no author. `words` (0.56) are the sentences the browser
+shows about the vault on its own clock, said here in the reader's language
+(only the browser sees inside a vault and knows the moment; no screen
+composes them): `app_lock_soon` (a minute before the vault locks itself while
+an app holds unsaved changes in it), `app_lock_soon_keep` (the action that
+keeps it open), `app_lock_kept`. Needs the right to download
 from the folder.
 
 ### `GET /api/files/e2e/vault/list` ![user](https://img.shields.io/badge/-user-blue)
@@ -2094,6 +2099,12 @@ Frame shapes, the coalescing contract (a burst is merged into one frame per
 window, carrying `count`) and the client-side debounce advice are in
 [REALTIME.md](REALTIME.md).
 
+### `GET /api/coedit/ws` ![user](https://img.shields.io/badge/-user-blue)
+A co-editing member's socket (0.56): opened with the single-use ticket its
+join answered, it hands the member its session's sealed entries in order and
+the others' cursors ([APP-PLUGINS-API.md → Editing together](APP-PLUGINS-API.md#editing-together-coedit-056)).
+Like `/api/ws`, a proxy must pass the upgrade on this path.
+
 ---
 
 ## Operations (long-running)
@@ -2295,9 +2306,11 @@ carries **`from_store`** (the store's origin) and, when it is paid,
 **`license`** - the same license view an app's License section reads (never
 the key) ([PLUGINS.md → Installing from a store](PLUGINS.md#installing-from-a-store)).
 On an instance that requires signatures, **`legacy_signature: true`** marks a
-build whose signature verified only in the old sha256-only form (taken in 0.55,
-refused from 0.56) and **`signature_notice`** is the server's sentence for it,
-in the reader's language ([PLUGINS.md → What is signed](PLUGINS.md#what-is-signed)).
+build whose signature verified only in the old sha256-only form (still taken,
+at least until filex 0.61 and 2027-10-09, whichever comes later:
+[PLUGINS.md → Compatibility window](PLUGINS.md#compatibility-window)) and
+**`signature_notice`** is the server's sentence for it, naming the window's
+end, in the reader's language ([PLUGINS.md → What is signed](PLUGINS.md#what-is-signed)).
 A store-licensed plugin is held before any plugin starts, and with the app
 store off it starts held (`state_error` `license: not checked - the app store is
 off on this server`).
@@ -2342,7 +2355,8 @@ with no `FILEX_SECRET_KEY` configured to seal its token, or - when
 ed25519 signature over the build's text - `filex-storage-build:v1`, the name it
 is installed under, `version` (the version it was signed as), this server's
 platform and the lower-case hex sha256 ([PLUGINS.md → What is signed](PLUGINS.md#what-is-signed)).
-The old form, over the sha256 alone, is still taken in 0.55: the answer then
+The old form, over the sha256 alone, is still taken during its
+[compatibility window](PLUGINS.md#compatibility-window): the answer then
 carries `legacy_signature: true` (and the list's `signature_notice`, the
 server's sentence), and the request's audit row `legacy_signature: true`. A
 build a store's `artifact` key signed is refused here unless that store still
@@ -2828,6 +2842,23 @@ What an app reads about its own license (0.52.0, `plugins.run`; the bridge's
 for an app that is not paid; `404` for no app of that name. Never the key, the
 licensee or the store ([APP-PLUGINS-API.md → The app reads its
 license](APP-PLUGINS-API.md#the-app-reads-its-license)).
+
+### Editing together: `…/plugins/ui/{plugin}/{view}/coedit/*` · `GET /api/coedit/ws` ![user](https://img.shields.io/badge/-user-blue)
+
+The relay an app's interface with `files:co-edit` edits a file together
+through (0.56, `internal/coedit`): `POST …/coedit/join` `{path, e2e?,
+unsent?}`, then for the member it answered (`client` + `token`)
+`POST …/coedit/{sid}/append`, `…/lease`, `…/ticket`, `…/leave`,
+`…/key` (an encrypted folder's session: the key the starter sealed with the
+folder key, once), `PUT`/`GET …/coedit/{sid}/blob/{name}`, and the member's
+socket `GET /api/coedit/ws?ticket=`. Sealed entries only: the relay orders
+them without reading them; a person who may only read the file joins as a
+watcher (`app_plugin.coedit_watch`) whose writes it refuses. State in the
+database (migrations 00107 and 00109 - the members' last cursors, for the
+other processes -, compare-and-set per session), blobs under
+`FILEX_COEDIT_DIR`. Shapes,
+codes and rules: [APP-PLUGINS-API.md → Editing together](APP-PLUGINS-API.md#editing-together-coedit-056);
+settings: [CONFIGURATION.md → Editing together](CONFIGURATION.md#editing-together).
 
 A plugin job is cancelled like any other op:
 [`POST /api/files/ops/:id/cancel`](#post-apifilesopsidcancel-) (`409 FINISHED`

@@ -40,7 +40,8 @@ import {
 import '@brftech/filex-core/style.css';
 import { liveTheme } from '@/lib/theme';
 import { getServerRoot } from '@/api/runtimeConfig';
-import { explorerAuth } from '@/lib/explorerConfig';
+import { appUserName, explorerAuth } from '@/lib/explorerConfig';
+import { useAuthStore } from '@/stores/auth';
 
 const { locale } = useI18n();
 const route = useRoute();
@@ -75,6 +76,9 @@ const drawioUrl = ref<string | null>(null);
 /* Could this person set up a missing service? Only picks which sentence a
  * missing document server gets (PreviewModal `canConfigure`). */
 const callerAdmin = ref(false);
+// Who is looking, for an app's own interface (`session.user.name`).
+const auth = useAuthStore();
+const userName = computed(() => appUserName(auth.user));
 /**
  * ⚠ The viewer waits for the probe. PreviewModal decides "no document server"
  * from `onlyOfficeBase`, and it decides at mount — so mounting it before the
@@ -318,6 +322,7 @@ onMounted(() => {
       :only-office-base="onlyOfficeBase"
       :only-office-config-endpoint="api('/api/files/onlyoffice/config')"
       :can-configure="callerAdmin"
+      :user-name="userName"
       :drawio-url="drawioUrl"
       :save-text-endpoint="api('/api/files/save-text')"
       :drafts-endpoint="api('/api/files/drafts')"

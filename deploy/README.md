@@ -7,7 +7,7 @@ newest release). Full walkthroughs: [`docs/INSTALLATION.md`](../docs/INSTALLATIO
 | Directory / file | Target |
 |---|---|
 | [`compose/`](compose/) | Docker Compose - `docker-compose.minimal.yml` (one container, SQLite) and `docker-compose.full.yml` (Postgres + Redis + Caddy + opt-in ONLYOFFICE / draw.io / S3 server (Versity S3 Gateway) / ClamAV), plus a multi-tenant variant. |
-| [`helm/filex/`](helm/filex/) | Kubernetes Helm chart (PVC + Ingress; optional bundled Postgres/Redis/S3 server, ONLYOFFICE wiring). |
+| [`helm/filex/`](helm/filex/) | Kubernetes Helm chart (PVC + Ingress; optional bundled Postgres/Redis/S3 server, ONLYOFFICE wiring). Published with every release: `helm repo add brf-tech https://helm.brf.sh`, then `helm install filex brf-tech/filex` (or `oci://ghcr.io/brf-tech/charts/filex`). |
 | [`umbrel/filex/`](umbrel/filex/) | Umbrel app package (`umbrel-app.yml` + app-proxy compose). |
 | [`casaos/`](casaos/) | CasaOS compose with the `x-casaos` store extension. |
 | [`runtipi/filex/`](runtipi/filex/) | Runtipi app package (`config.json` + dynamic `docker-compose.json`). |

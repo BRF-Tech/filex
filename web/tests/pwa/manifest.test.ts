@@ -227,6 +227,24 @@ describe('notify-sw.js: a Web Push from the server', () => {
     expect(w.opened).toEqual(['https://files.example/admin/notify/42']);
   });
 
+  // #219 - the server sends the installed app's PNG icon, read off the
+  // manifest it serves (spa_brand.go pushIcon), relative to this worker.
+  it('shows the installed app’s icon the server names, and filex’s PNG where it names none', async () => {
+    const w = bootWorker([], []);
+    await w.fire('push', {
+      data: { json: () => ({ v: 1, id: 7, title: 'BRF Teknoloji', body: 'x', tag: 'filex-notification-7', icon: 'brand-icons/0e11a9b8c7d6e5f4-192.png' }) },
+    });
+    expect(w.shown[0].options.icon).toBe('https://files.example/admin/brand-icons/0e11a9b8c7d6e5f4-192.png');
+
+    const plain = bootWorker([], []);
+    await plain.fire('push', { data: { json: () => ({ v: 1, id: 8, title: 'filex', body: 'x', tag: 'filex-notification-8' }) } });
+    expect(plain.shown[0].options.icon).toBe('https://files.example/admin/icons/icon-192.png');
+
+    const unbranded = bootWorker([], []);
+    await unbranded.fire('push', { data: { json: () => ({ v: 1, id: 9, title: 'filex', body: 'x', tag: 'filex-notification-9', icon: 'icons/icon-192.png' }) } });
+    expect(unbranded.shown[0].options.icon).toBe('https://files.example/admin/icons/icon-192.png');
+  });
+
   it('replaces the page’s own toast of the same row silently - one row, one alert', async () => {
     const w = bootWorker([], ['filex-notification-42']);
     await w.fire('push', { data: { json: () => ({ v: 1, id: 42, body: 'x', tag: 'filex-notification-42', open: true }) } });

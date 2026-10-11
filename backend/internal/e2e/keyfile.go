@@ -173,6 +173,33 @@ func ConversionPending(markerBytes []byte) bool {
 	return false
 }
 
+// NamesEncrypted reports whether a key file says the folder's NAMES are
+// encrypted (level 2, docs/E2E-ENCRYPTION.md → "Encrypted names"): v3 with
+// `names` among its required features and a names slot - the browser's
+// markerHasNames. A level-1 key file, a vault's (`req` exactly ["vault"]),
+// bytes that are not a key file: false.
+//
+// ⚠ The key file is the client's word, like every field of it: what this
+// answers is only what the server cannot read - the kind of a file whose
+// stored name is ciphertext (handlers app_ui_e2e.go: an app door leaves that
+// kind to the browser) - never a right.
+func NamesEncrypted(markerBytes []byte) bool {
+	var m struct {
+		V     int             `json:"v"`
+		Req   []string        `json:"req"`
+		Names json.RawMessage `json:"names"`
+	}
+	if err := json.Unmarshal(markerBytes, &m); err != nil || m.V != 3 || len(m.Names) == 0 || string(m.Names) == "null" {
+		return false
+	}
+	for _, f := range m.Req {
+		if f == "names" {
+			return true
+		}
+	}
+	return false
+}
+
 // KeepsVaultBlock is the vault's rule for a key file written through an
 // ordinary door (docs/E2E-VAULT-FORMAT.md → The key file): before is the key
 // file there now (nil when there is none, or it could not be read), after the

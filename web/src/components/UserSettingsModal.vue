@@ -52,6 +52,7 @@ import { getStoredTheme, setStoredTheme } from '@/lib/theme';
 import { openTriggerPref, setOpenTriggerPref } from '@/lib/explorerConfig';
 import { getStoredTimeZone, setStoredTimeZone } from '@/lib/timezone';
 import { getStartPage, setStartPage, type StartPage } from '@/lib/startPage';
+import { brandName } from '@/lib/brand';
 // ⚠⚠ THE SAME LIST THE REMINDER SHOWS, not a second copy of it. The corner
 // reminder (`InstallPrompt.vue`) can be closed for good, so the downloads need
 // a home that is always there; the platform detection and the per-platform
@@ -157,6 +158,13 @@ const host: UserSettingsHost = {
       // admin chrome and leave the file listing on the old mode.
       setCoreThemeMode(v);
     },
+  },
+  // #219 - the name the installed web app wears (lib/brand: /api/branding, the
+  // same answer the server writes into the manifest), for the install and
+  // push rows. A ref underneath, so the rows repaint when it lands; the
+  // router asks for it on every navigation (lib/documentTitle).
+  get brandName() {
+    return brandName();
   },
   language: {
     // i18n settle decides and applies — including a pack's language.

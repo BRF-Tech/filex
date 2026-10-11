@@ -61,20 +61,16 @@ func (p *VaultLockSQL) InsertVaultLock(ctx context.Context, l *model.VaultLock) 
 	if l == nil || l.VaultID == "" {
 		return false, errors.New("vault lock: missing vault id")
 	}
-	if _, err := Conn(ctx, p.Pool).ExecContext(ctx, p.q(
+	// The unique key on (tenant_id, vault_id): somebody was first.
+	taken := func() bool {
+		again, gerr := p.GetVaultLock(ctx, l.TenantID, l.VaultID)
+		return gerr == nil && again != nil
+	}
+	return insertFirst(ctx, p.Pool, "insert vault lock", &l.Rev, taken, p.q(
 		`INSERT INTO vault_locks (`+vaultLockCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
 		l.TenantID, l.VaultID, 1, l.TokenHash, l.HolderUserID, l.HolderName, l.HolderClient, l.HolderLabel,
 		l.StorageID, l.Path, l.TakenMs, l.LeaseMs, l.ActiveMs, l.IdleSeconds, l.IndexStartedMs, l.FirstGen, l.LastGen,
-		l.EndedTokenHash, l.EndedReason, l.EndedBy, l.EndedMs); err != nil {
-		// The unique key on (tenant_id, vault_id): somebody was first. The
-		// engines word that error three ways, so it is recognised by looking.
-		if again, gerr := p.GetVaultLock(ctx, l.TenantID, l.VaultID); gerr == nil && again != nil {
-			return false, nil
-		}
-		return false, fmt.Errorf("insert vault lock: %w", err)
-	}
-	l.Rev = 1
-	return true, nil
+		l.EndedTokenHash, l.EndedReason, l.EndedBy, l.EndedMs)
 }
 
 // UpdateVaultLock writes every column of l over the row - only while the row
@@ -85,7 +81,7 @@ func (p *VaultLockSQL) UpdateVaultLock(ctx context.Context, l *model.VaultLock, 
 	if l == nil || l.VaultID == "" {
 		return false, errors.New("vault lock: missing vault id")
 	}
-	res, err := Conn(ctx, p.Pool).ExecContext(ctx, p.q(
+	return updateAtRev(ctx, p.Pool, "update vault lock", &l.Rev, rev, p.q(
 		`UPDATE vault_locks SET rev=?, token_hash=?, holder_user_id=?, holder_name=?, holder_client=?, holder_label=?,
 		   storage_id=?, path=?, taken_ms=?, lease_ms=?, active_ms=?, idle_seconds=?, index_started_ms=?, first_gen=?, last_gen=?,
 		   ended_token_hash=?, ended_reason=?, ended_by=?, ended_ms=?, updated_at=CURRENT_TIMESTAMP
@@ -94,20 +90,6 @@ func (p *VaultLockSQL) UpdateVaultLock(ctx context.Context, l *model.VaultLock, 
 		l.StorageID, l.Path, l.TakenMs, l.LeaseMs, l.ActiveMs, l.IdleSeconds, l.IndexStartedMs, l.FirstGen, l.LastGen,
 		l.EndedTokenHash, l.EndedReason, l.EndedBy, l.EndedMs,
 		l.TenantID, l.VaultID, rev)
-	if err != nil {
-		return false, fmt.Errorf("update vault lock: %w", err)
-	}
-	// rev changes on every successful update, so a matched row is always a
-	// changed row - MySQL counts changed rows, and the count is the same.
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("update vault lock: %w", err)
-	}
-	if n != 1 {
-		return false, nil
-	}
-	l.Rev = rev + 1
-	return true, nil
 }
 
 // GetVaultIdleMinutes returns the idle time a person set (1 to 10), or 0 when

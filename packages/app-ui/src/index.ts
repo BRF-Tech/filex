@@ -84,8 +84,12 @@ export interface FilexApp {
   readonly session: Session;
   /** The file at `index` (default the first) the interface was opened with. */
   open(index?: number): Promise<OpenedFile>;
-  /** Save new content over an opened file. */
-  save(data: SaveData, opts?: { index?: number; mime?: string }): Promise<SaveResult>;
+  /**
+   * Save new content over an opened file. `through` (filex 0.56, editing
+   * together): the last log entry the saved document holds, so the session
+   * knows what is saved.
+   */
+  save(data: SaveData, opts?: { index?: number; mime?: string; through?: number }): Promise<SaveResult>;
   /** Save a NEW file; filex asks the person where (its own folder picker). */
   saveAs(name: string, data: SaveData, mime?: string): Promise<SaveAsResult>;
   /** Unsaved changes, or not: filex asks before the person leaves them. */
@@ -113,11 +117,13 @@ export interface FilexApp {
    */
   print(name: string, pdf: Blob | ArrayBuffer | ArrayBufferView | ReadableStream<Uint8Array>): Promise<PrintResult>;
   /**
-   * Editing together (filex 0.55: defined, not offered - every call answers
-   * `unavailable`, and the app edits alone). filex seals what the app
-   * appends, orders it through its relay and hands every member the same
-   * entries in the same order (`coedit.entry` events after `subscribe`);
-   * the app never holds a key.
+   * Editing together (filex 0.56; the app's manifest says `"co_edit":
+   * {"open": true}`, granted as `files:co-edit`). filex seals what the app appends, orders it
+   * through its relay and hands every member the same entries in the same
+   * order (`coedit.entry` events after `subscribe`); the app never holds a
+   * key. `join` answering `unavailable` (filex 0.55, editing together off
+   * here, an encrypted file) means: edit alone. The member that started the
+   * session (`created`) puts the base document before anybody else may join.
    */
   coedit: {
     join(index?: number): Promise<CoEditHello>;
@@ -133,7 +139,12 @@ export interface FilexApp {
   call<T = unknown>(method: string, params?: unknown): Promise<T>;
   /** Queue one of the app's actions on the opened files; answers the op. */
   submit(action: string, params?: Record<string, unknown>): Promise<{ op: unknown }>;
-  /** This person's small store for this app (JSON values, 8 KiB each). */
+  /**
+   * This person's small store for this app (JSON values, 8 KiB each). While
+   * the app holds a file of an encrypted folder in the clear
+   * (`FileInfo.plaintext`, filex 0.56) it is another store, sealed in the
+   * browser - apart from this one, and empty while the folder is locked.
+   */
   state: {
     get<T = unknown>(key: string): Promise<T | undefined>;
     set(key: string, value: unknown): Promise<void>;
@@ -333,7 +344,9 @@ function bridge(port: MessagePort, opts: ConnectOptions): FilexApp {
     },
     async save(data, o = {}) {
       const p = await payload(data);
-      return request<SaveResult>('file.save', { index: o.index ?? 0, data: p.data, mime: o.mime }, p.transfer);
+      const params: Record<string, unknown> = { index: o.index ?? 0, data: p.data, mime: o.mime };
+      if (typeof o.through === 'number') params.through = o.through;
+      return request<SaveResult>('file.save', params, p.transfer);
     },
     async saveAs(name, data, mime) {
       const p = await payload(data);

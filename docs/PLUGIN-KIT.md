@@ -133,7 +133,7 @@ function.
 | `languages` | the languages the plugin promises to speak, e.g. `["en", "tr"]` (empty = `["en"]`). **Every `Text` it returns must carry all of them** - the host refuses to install one whose `describe` answer is missing a language, and `pluginkit/plugintest` checks the screens too |
 | `ui_locales` | languages for **filex itself**: `{"es": {"ctx.download": "Descargar", …}}` by filex's own keys (both catalogues, one flat namespace). They join the language list every picker offers (public pages included) and leave with the app; a missing key falls back to English. A manifest with `ui_locales` and nothing that runs is a **language pack** and needs no module - see [Writing a language pack](#writing-a-language-pack) |
 | `settings` | the storage-driver field shape (`key, type, label, help, required, secret, default, placeholder, options, min, max`, plus `multi` / `show_when` / `required_when` - see *Fields*); `type` is `string \| password \| int \| bool \| select \| text \| date`; `secret` fields are sealed and only readable through `settings_get`. `label`, `help`, `placeholder` and an option's `label` may be **one string or a `Text`** (`{en, tr, …}`); a `Text` must carry every declared language, a plain string is shown as it is (every manifest written before v0.43 keeps installing). ⚠ `advanced` is **gone** - a setting that matters is on the form |
-| `actions[]` | menu rows: `applies` (`kind` file/dir/any, `ext` lower-case no dot, `mime` exact or `image/*`, `multi`, `min`, `max`, **`state` / `no_state`** - bare keys you keep with `StateSet`; the row is offered only where one of `state` is set and none of `no_state` is), optional `view` opened first, `confirm` text, `min_role` viewer/editor/owner, `danger`, `output.mode` sibling/version/none with `output.name` pattern (`{stem}`, `{ext}`, `{name}`), `limits.timeout_s`, **`hidden`** (never in a menu - only a surface's `job` or a page starts it: the second half of a flow), **`requires`** (since 0.49.0: the id of one of your `user_permissions` - only people who hold it see and run the action). **`applies.engine_ext`** `{engine: [ext…]}` adds extensions that apply only while that engine is installed and granted (office documents only where LibreOffice is); it adds to a non-empty `ext`/`mime` list |
+| `actions[]` | menu rows: `applies` (`kind` file/dir/any, `ext` lower-case no dot, `mime` exact or `image/*`, `multi`, `min`, `max`, **`state` / `no_state`** - bare keys you keep with `StateSet`; the row is offered only where one of `state` is set and none of `no_state` is), optional `view` opened first, `confirm` text, `min_role` viewer/editor/owner, `danger`, `output.mode` sibling/version/none with `output.name` pattern (`{stem}`, `{ext}`, `{name}`), `limits.timeout_s`, **`hidden`** (never in a menu - only a surface's `job` or a page starts it: the second half of a flow), **`requires`** (since 0.49.0: the id of one of your `user_permissions` - only people who hold it see and run the action). **`applies.engine_ext`** `{engine: [ext…]}` adds extensions that apply only while that engine is installed and granted (office documents only while the office engine - the connected ONLYOFFICE Document Server - is there); it adds to a non-empty `ext`/`mime` list |
 | `views[]` | screens: `placement` modal (dialog) / **page** (full page in a new tab - a wizard with the document beside it) / inspector (details panel, needs `applies`) / home (a row under Apps in the navigation). **`requires`** (since 0.49.0), as on an action: the screen - its opening, its events and every job it queues - is refused to people without that user permission |
 | `public_pages[]` | the screens an outside participant may be sent to: `pin` optional/required/none, TTL default and ceiling in days. Opening one mints a **share** (`/s/<token>`, see *Public links, end to end*); a page you never declare cannot be opened. **`purpose`** `{label, revoke, section}` names what its links are in My shares / Shares ("Signing request"), what revoking one does, and the section of your `home` view that shows it. `ShareCreate` takes the same `Purpose` for one link - it wins over the page's, and a page-less link (a plain share of a file) has no other way to say what it is |
 | `limits` | `memory_pages` (default 1024 = 64 MiB, ceiling 4096), `call_timeout_s` for screens (default 15, ceiling 60); jobs default 300 s, ceiling 900 |
@@ -197,6 +197,25 @@ check reads a newer version's name, version and range even when the manifest
 carries fields it does not know, and says *needs a newer filex* for it; install
 and upgrade still refuse such a manifest - an unknown field may be a permission
 this filex cannot enforce.
+
+### Compatibility window
+
+`filex` is your promise about which filex runs your app; this is filex's
+promise to you. An app published for a filex release keeps working,
+unchanged, for **at least 6 minor releases or 12 months after that release,
+whichever is longer**. When filex replaces something an app sends it - a
+manifest field, a host function, a call of the interface bridge, a signature
+format - the old form stays accepted for that long, with a warning saying
+until when. After the window a release may refuse it, and only once the
+CHANGELOG of an earlier release has said so, so you always get at least one
+release of notice. You do not have to rebuild for every minor release.
+
+No old form of an app's manifest, host functions or bridge has a window
+running today. The older spellings filex still reads (`min_filex`, the
+`public_page_*` host functions, the `libreoffice` engine name) are accepted
+with no end set; if one is ever retired, its window starts then. The list of
+open windows, storage plugins included, is in
+[CONTRIBUTING.md → Compatibility window for plugins and apps](CONTRIBUTING.md#compatibility-window-for-plugins-and-apps).
 
 ### Publishing so updates are found
 
@@ -1347,7 +1366,20 @@ my-editor/
 - **Don't list `ui` permissions yourself.** `ui`, `ui:eval`, `ui:wasm-eval`,
   `ui:package-fetch`, `ui:download`, `ui:frame-package`, `ui:connect-blob`, `ui:print`,
   `ui-net:<as>:<url>`, `ui-viewer:<kind>` and `ui-new:.<ext>` are derived from
-  the manifest; the review shows them like any other.
+  the manifest; the review shows them like any other. So is
+  `files:e2e-plaintext` (filex 0.56), from `"encrypted_folders": {"open":
+  true}`: your viewer is offered on files of an unlocked end-to-end
+  encrypted folder, filex decrypts them in the person's browser for
+  `file.read` and encrypts what `file.save` hands back (`FileInfo.plaintext`
+  says so) - [APP-PLUGINS-API.md → A file of an encrypted folder, in the
+  clear](APP-PLUGINS-API.md#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056).
+  It needs an interface, a viewer view and `files:read`, and
+  `"filex": ">=0.56.0"`; keep what you are handed in the frame. And so is
+  `files:co-edit` (filex 0.56), from `"co_edit": {"open": true}`: your
+  viewer edits a file together with whoever else opens it with your app,
+  through `fx.coedit` - filex seals and orders what you append, you never
+  hold a key ([APP-PLUGINS-API.md → Editing together](APP-PLUGINS-API.md#editing-together-coedit-056)).
+  The same three needs.
 - **New files of your kind.** `"new_documents": [{ "ext": "fxtxt", "label":
   {…}, "view": "editor", "template": "new/blank.txt" }]` adds a row to
   filex's **New document** dialog: the file is a copy of the template (a
@@ -1365,10 +1397,12 @@ my-editor/
   may not be shown `unavailable`: hand the PDF over with `fx.download` then.
 - **Your files may be end-to-end encrypted?** `fx.session.files[i].encrypted`
   is `'folder'`, `'vault'` or `'file'` (a single `.fxe`) when the server says
-  the file is (filex 0.55), and absent otherwise. It is information only:
-  filex 0.55 decrypts nothing for an app. The explorer offers an encrypted
-  file to no app, and should one reach your interface anyway it is
-  `readOnly`, its read is refused (`encrypted`) and so is a save
+  the file is (filex 0.55), and absent otherwise. On its own it is
+  information only: the server decrypts nothing for an app. The explorer
+  offers an encrypted file to no app that did not ask for encrypted folders
+  (`files:e2e-plaintext`, above - then `plaintext: true` comes beside it),
+  and should one reach your interface anyway it is `readOnly`, its read is
+  refused (`encrypted`) and so is a save
   ([APP-PLUGINS-API.md → Which rows say `encrypted`](APP-PLUGINS-API.md#which-rows-say-encrypted)).
 - **Your interface loads its own files at run time?** Say
   `"ui": { …, "package_fetch": true }`. `fetch('stencils/basic.xml')` and a
@@ -1459,7 +1493,9 @@ your package can widen it.
   `fx.call()` (its `http:<host>` permission is where the network is). The
   only exceptions are the ones your manifest asks for: your own package's
   files with `package_fetch`, and `blob:` addresses with `connect_blob`
-  (filex 0.55) - above.
+  (filex 0.55) - above. Editing together (`files:co-edit`, filex 0.56) is not
+  one: `fx.coedit` goes over the bridge, and filex's page talks to the relay
+  ([APP-PLUGINS-API.md → Editing together](APP-PLUGINS-API.md#editing-together-coedit-056)).
 - **No storage.** The frame is an opaque origin: `localStorage`,
   `sessionStorage`, `IndexedDB`, `document.cookie` throw. Use `fx.state`.
 - **Workers only from `blob:`** (`new Worker(URL.createObjectURL(blob))`); a

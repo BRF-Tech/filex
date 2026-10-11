@@ -25,6 +25,16 @@
 //                         is running while FIXTURE_GH_CI is, else success
 //   FIXTURE_GH_ARTIFACTS  what the dry run kept, comma-separated (default:
 //                         everything, macOS included)
+//   FIXTURE_GH_STEPS      "<part>=<step>;…": the step a red part failed in
+//                         (default "The part", a test step: the code's; `;`
+//                         between parts, a step's name may hold a comma)
+//   FIXTURE_GH_RERUN      how a part the gate asked GitHub to re-run ends
+//                         (#165): success | failure (default failure); every
+//                         `gh run rerun --failed` is written to
+//                         FIXTURE_GH/reruns.json, and the run's attempt counts it
+//   FIXTURE_GH_ERRORS     the first N questions about runs are answered with
+//                         FIXTURE_GH_ERROR_TEXT (default "gh: Server Error
+//                         (HTTP 502)"), as GitHub not answering
 //
 // CircleCI is a stand-in too (`circleci` below, task #181), for
 // `--gate circleci`, answering with the real circleci.mjs's mapping:
@@ -97,6 +107,32 @@ function partStates() {
   return out;
 }
 
+/** FIXTURE_GH_STEPS as { part: step }. */
+function partSteps() {
+  const out = {};
+  for (const item of (env.FIXTURE_GH_STEPS ?? '').split(';').filter(Boolean)) {
+    const at = item.indexOf('=');
+    out[item.slice(0, at)] = item.slice(at + 1);
+  }
+  return out;
+}
+
+/** How often the gate asked GitHub to re-run run `id` (FIXTURE_GH/reruns.json). */
+function rerunsOf(id) {
+  const f = path.join(env.FIXTURE_GH, 'reruns.json');
+  const all = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {};
+  return all[id] ?? 0;
+}
+
+/** Counts a question about runs; true while FIXTURE_GH_ERRORS says GitHub does not answer. */
+function unanswered() {
+  const f = path.join(env.FIXTURE_GH, 'errors.json');
+  fs.mkdirSync(env.FIXTURE_GH, { recursive: true });
+  const n = fs.existsSync(f) ? Number(fs.readFileSync(f, 'utf8')) : 0;
+  fs.writeFileSync(f, String(n + 1));
+  return n < Number(env.FIXTURE_GH_ERRORS || 0);
+}
+
 function github() {
   const file = () => path.join(env.FIXTURE_GH, 'dispatched.json');
   const dispatched = () => (fs.existsSync(file()) ? JSON.parse(fs.readFileSync(file(), 'utf8')) : []);
@@ -108,14 +144,17 @@ function github() {
     url: `https://github.invalid/runs/${id}`,
     status: state === 'in_progress' ? 'in_progress' : 'completed',
     conclusion: state === 'in_progress' ? '' : state,
+    attempt: 1 + rerunsOf(id),
   });
   return {
     repo: 'fixture/fixture',
     runs({ workflow, sha, event }) {
       asked('github');
+      if (unanswered()) return { error: env.FIXTURE_GH_ERROR_TEXT || 'gh: Server Error (HTTP 502)' };
       if (workflow === 'ci.yml' && event === 'push') {
         if (!env.FIXTURE_GH_CI || publicMain() !== sha) return { runs: [] };
-        return { runs: [asRun(1, sha, 'push', 'CI', env.FIXTURE_GH_CI)] };
+        const state = rerunsOf(1) ? (env.FIXTURE_GH_RERUN ?? 'failure') : env.FIXTURE_GH_CI;
+        return { runs: [asRun(1, sha, 'push', 'CI', state)] };
       }
       if (workflow === 'release.yml' && event === 'workflow_dispatch') {
         const state = env.FIXTURE_GH_DRY ?? 'success';
@@ -136,20 +175,35 @@ function github() {
     rerun(id) {
       return `gh run rerun ${id} --failed`;
     },
+    rerunFailed({ runId }) {
+      const f = path.join(env.FIXTURE_GH, 'reruns.json');
+      const all = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {};
+      fs.writeFileSync(f, JSON.stringify({ ...all, [runId]: (all[runId] ?? 0) + 1 }));
+      return { ok: true, detail: `gh run rerun ${runId} --failed` };
+    },
     jobs({ runId }) {
       asked('github');
       if (runId !== 1) return { jobs: [] };
       const states = partStates();
+      const steps = partSteps();
+      const again = rerunsOf(1);
       const jobs = [];
       PARTS.forEach((name, i) => {
-        const state = states[name] ?? (env.FIXTURE_GH_CI === 'in_progress' ? 'in_progress' : 'success');
+        let state = states[name] ?? (env.FIXTURE_GH_CI === 'in_progress' ? 'in_progress' : 'success');
+        let id = 1000 + i;
+        // A part the gate had re-run is a new job of the new attempt.
+        if (again && state === 'failure') {
+          state = env.FIXTURE_GH_RERUN ?? 'failure';
+          id = 1000 * (again + 1) + i;
+        }
         if (state === 'missing') return;
         jobs.push({
-          id: 1000 + i,
+          id,
           name,
           status: state === 'in_progress' ? 'in_progress' : 'completed',
           conclusion: state === 'in_progress' ? null : state,
-          url: `https://github.invalid/jobs/${1000 + i}`,
+          url: `https://github.invalid/jobs/${id}`,
+          failedSteps: state === 'failure' ? [steps[name] ?? 'The part'] : [],
         });
       });
       return { jobs };

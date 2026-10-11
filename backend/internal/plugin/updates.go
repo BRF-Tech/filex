@@ -97,7 +97,7 @@ type FeedBinary struct {
 	// Signature is the detached ed25519 signature over the build - its
 	// name, the feed's version, this key's platform and the sha256
 	// (signature.go VerifyBuild; the sha256 alone is the old form, accepted
-	// during 0.55) - for an instance that only runs signed plugins
+	// while LegacySignatureWindow runs) - for an instance that only runs signed plugins
 	// (FILEX_PLUGIN_TRUSTED_KEYS).
 	Signature string `json:"signature,omitempty"`
 }

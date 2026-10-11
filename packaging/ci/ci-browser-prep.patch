@@ -1,0 +1,198 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 515516a1..fac4f254 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -577,6 +577,12 @@ jobs:
+   # one run again below, with one. The apps the suite installs come from
+   # their public releases, and a missing one is a failure, not a skip
+   # (FILEX_REQUIRE_WASM_FIXTURE).
++  #
++  # ⚠ Every browser part is prepared by scripts/ci/browser-prep.mjs, the
++  # script CircleCI's Playwright job calls too (.circleci/config.yml): the
++  # apps are e2e/helpers/app-locations.mjs's, the font map is the build
++  # host's (scripts/chain/run.mjs, FONTS_CONF). It needs no token: the app
++  # repositories are public.
+   playwright:
+     name: ${{ matrix.name }}
+     needs: [plan, build]
+@@ -589,7 +595,6 @@ jobs:
+       E2E_BROWSERS: ${{ matrix.engine }}
+       SHARD: ${{ matrix.shard }}
+       FILEX_REQUIRE_WASM_FIXTURE: "1"
+-      GH_TOKEN: ${{ github.token }}
+     steps:
+       - uses: actions/checkout@v4
+       - uses: pnpm/action-setup@v4
+@@ -611,7 +616,7 @@ jobs:
+           chmod +x bin/filex
+           touch backend/internal/wasmplugin/testdata/echo/echo.wasm
+       - name: The apps the suite installs
+-        run: bash .github/workflows/scripts/ci-apps.sh "$RUNNER_TEMP/apps"
++        run: node scripts/ci/browser-prep.mjs apps "$RUNNER_TEMP/apps"
+       - name: The browser, with its system libraries
+         # The runner's apt-get update hung here for 44 minutes once (run
+         # 37661356185) and the part was cancelled at the job's 45-minute
+@@ -619,7 +624,7 @@ jobs:
+         timeout-minutes: 10
+         run: pnpm --dir e2e exec playwright install --with-deps "$E2E_BROWSERS"
+       - name: Latin fonts for the layout checks
+-        run: bash .github/workflows/scripts/ci-fonts.sh
++        run: node scripts/ci/browser-prep.mjs fonts "$RUNNER_TEMP/fc"
+       - name: The part
+         run: node e2e/run.mjs local --binary bin/filex --shard "$SHARD"
+       - name: Keep what failed
+@@ -652,7 +657,6 @@ jobs:
+       E2E_PORT: "5212"
+       DS_GREP: ${{ needs.plan.outputs.ds_grep }}
+       FILEX_REQUIRE_WASM_FIXTURE: "1"
+-      GH_TOKEN: ${{ github.token }}
+     steps:
+       - uses: actions/checkout@v4
+       - uses: pnpm/action-setup@v4
+@@ -676,14 +680,14 @@ jobs:
+           chmod +x bin/filex
+           touch backend/internal/wasmplugin/testdata/echo/echo.wasm
+       - name: The apps the suite installs
+-        run: bash .github/workflows/scripts/ci-apps.sh "$RUNNER_TEMP/apps"
++        run: node scripts/ci/browser-prep.mjs apps "$RUNNER_TEMP/apps"
+       - name: A Document Server, and its way back to filex
+         run: bash .github/workflows/scripts/ci-docserver.sh "$E2E_PORT" 18080
+       - name: The browser, with its system libraries
+         timeout-minutes: 10
+         run: pnpm --dir e2e exec playwright install --with-deps "$E2E_BROWSERS"
+       - name: Latin fonts for the layout checks
+-        run: bash .github/workflows/scripts/ci-fonts.sh
++        run: node scripts/ci/browser-prep.mjs fonts "$RUNNER_TEMP/fc"
+       - name: The specs whose path differs with a Document Server
+         run: node e2e/run.mjs local --binary bin/filex --port "$E2E_PORT" --grep "$DS_GREP"
+       - name: Embed placeholders
+@@ -730,7 +734,6 @@ jobs:
+       GREP: ${{ matrix.grep }}
+       FLAG: ${{ matrix.flag }}
+       FILEX_REQUIRE_WASM_FIXTURE: "1"
+-      GH_TOKEN: ${{ github.token }}
+     steps:
+       - uses: actions/checkout@v4
+       - uses: pnpm/action-setup@v4
+@@ -750,7 +753,7 @@ jobs:
+           chmod +x bin/filex
+           touch backend/internal/wasmplugin/testdata/echo/echo.wasm
+       - name: The apps the suite installs
+-        run: bash .github/workflows/scripts/ci-apps.sh "$RUNNER_TEMP/apps"
++        run: node scripts/ci/browser-prep.mjs apps "$RUNNER_TEMP/apps"
+       - name: An S3 gateway for the multi-storage spec
+         if: matrix.kind == 's3'
+         run: bash .github/workflows/scripts/ci-s3.sh
+@@ -758,7 +761,7 @@ jobs:
+         timeout-minutes: 10
+         run: pnpm --dir e2e exec playwright install --with-deps ${E2E_BROWSERS//,/ }
+       - name: Latin fonts for the layout checks
+-        run: bash .github/workflows/scripts/ci-fonts.sh
++        run: node scripts/ci/browser-prep.mjs fonts "$RUNNER_TEMP/fc"
+       - name: The line
+         run: node e2e/run.mjs local --binary bin/filex "$FLAG" --grep "$GREP"
+       - name: Keep what failed
+diff --git a/.github/workflows/scripts/ci-apps.sh b/.github/workflows/scripts/ci-apps.sh
+deleted file mode 100755
+index 198daa92..00000000
+--- a/.github/workflows/scripts/ci-apps.sh
++++ /dev/null
+@@ -1,38 +0,0 @@
+-#!/usr/bin/env bash
+-# The apps the browser suites install, for ci.yml's Playwright jobs:
+-#
+-#   bash .github/workflows/scripts/ci-apps.sh <dir>
+-#
+-# e-Signature and Convert from their latest public releases (plugin.wasm and
+-# filex-app.json, which is all a test install reads), and the three language
+-# packs that ship (Spanish, German, French) from their repositories - a pack
+-# is its manifest and has no build. The build host's chain mounts the same
+-# five from local checkouts (scripts/chain/job/e2e.sh); the specs find them
+-# through e2e/helpers/app-locations.mjs. The right-to-left specs install the
+-# repository's own fixture pack (e2e/helpers/langPack.ts).
+-#
+-# The variables are appended to $GITHUB_ENV for the steps after this one. An
+-# app that cannot be fetched fails the step: with FILEX_REQUIRE_WASM_FIXTURE
+-# set a missing app is a red spec anyway, and a red here says why.
+-set -euo pipefail
+-dir="${1:?usage: ci-apps.sh <dir>}"
+-mkdir -p "$dir"
+-for app in sign convert; do
+-  mkdir -p "$dir/$app"
+-  gh release download -R "BRF-Tech/filex-$app" -p filex-app.json -p plugin.wasm -D "$dir/$app" --clobber
+-  [ -s "$dir/$app/plugin.wasm" ] && [ -s "$dir/$app/filex-app.json" ] || { echo "::error::filex-$app: no plugin.wasm or filex-app.json in its latest release"; exit 1; }
+-  echo "filex-$app $(node -p "require('$dir/$app/filex-app.json').version")"
+-done
+-for lang in es de fr; do
+-  rm -rf "$dir/lang-$lang"
+-  git clone -q --depth 1 "https://github.com/BRF-Tech/filex-lang-$lang.git" "$dir/lang-$lang"
+-  [ -s "$dir/lang-$lang/filex-app.json" ] || { echo "::error::filex-lang-$lang has no filex-app.json"; exit 1; }
+-done
+-{
+-  echo "FILEX_SIGN_APP_DIR=$dir/sign"
+-  echo "FILEX_CONVERT_APP_DIR=$dir/convert"
+-  echo "FILEX_LANG_ES_APP_DIR=$dir/lang-es"
+-  echo "FILEX_E2E_LANG_PACK_ES=$dir/lang-es/filex-app.json"
+-  echo "FILEX_LANG_DE_APP_DIR=$dir/lang-de"
+-  echo "FILEX_LANG_FR_APP_DIR=$dir/lang-fr"
+-} >> "${GITHUB_ENV:?not in a GitHub job}"
+diff --git a/.github/workflows/scripts/ci-docserver.sh b/.github/workflows/scripts/ci-docserver.sh
+index 6f30c79c..2bc0a355 100755
+--- a/.github/workflows/scripts/ci-docserver.sh
++++ b/.github/workflows/scripts/ci-docserver.sh
+@@ -12,8 +12,9 @@
+ #
+ # Appends to $GITHUB_ENV what e2e/run.mjs passes to filex and the specs read
+ # (FILEX_ONLYOFFICE_URL, _JWT, _CALLBACK_URL) and what the office engine's Go
+-# test reads (FILEX_TEST_OO_*, FILEX_TEST_CONVERT: the Convert app ci-apps.sh
+-# fetched, which must run first). The secret is masked in the log.
++# test reads (FILEX_TEST_OO_*, FILEX_TEST_CONVERT: the Convert app that
++# `node scripts/ci/browser-prep.mjs apps` fetched, which must run first). The
++# secret is masked in the log.
+ set -euo pipefail
+ port="${1:?usage: ci-docserver.sh <filex port> <go test port>}"
+ goport="${2:?usage: ci-docserver.sh <filex port> <go test port>}"
+@@ -46,5 +47,5 @@ echo "Document Server up: $image, filex is $gw:$port to it"
+   echo "FILEX_TEST_OO_LISTEN=:$goport"
+   echo "FILEX_TEST_OO_CALLBACK=http://filex:$goport"
+   echo "FILEX_TEST_OO_FIXTURES=$PWD/e2e/fixtures/file-types"
+-  echo "FILEX_TEST_CONVERT=${FILEX_CONVERT_APP_DIR:?run ci-apps.sh first}"
++  echo "FILEX_TEST_CONVERT=${FILEX_CONVERT_APP_DIR:?run node scripts/ci/browser-prep.mjs apps first}"
+ } >> "${GITHUB_ENV:?not in a GitHub job}"
+diff --git a/.github/workflows/scripts/ci-fonts.sh b/.github/workflows/scripts/ci-fonts.sh
+deleted file mode 100755
+index 7483207e..00000000
+--- a/.github/workflows/scripts/ci-fonts.sh
++++ /dev/null
+@@ -1,31 +0,0 @@
+-#!/usr/bin/env bash
+-# A Latin sans-serif for the browser suites, for ci.yml's Playwright jobs:
+-#
+-#   bash .github/workflows/scripts/ci-fonts.sh
+-#
+-# `playwright install --with-deps` brings CJK fonts with the browsers, and
+-# fontconfig then answers sans-serif and system-ui with WenQuanYi Zen Hei,
+-# which sets Latin text wide: the suite's layout checks (a tile value that
+-# must fit its card, text that must fit a button) are calibrated on a Latin
+-# face and go red on it. The build host's chain maps the same four families
+-# to Liberation Sans (scripts/chain/run.mjs, FONTS_CONF); so does this, for the
+-# steps after it, through XDG_CONFIG_HOME in $GITHUB_ENV.
+-set -euo pipefail
+-dir="${RUNNER_TEMP:?not in a GitHub job}/fc"
+-mkdir -p "$dir/fontconfig"
+-cat > "$dir/fontconfig/fonts.conf" <<'EOF'
+-<?xml version="1.0"?>
+-<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+-<fontconfig>
+-  <alias binding="strong"><family>sans-serif</family><prefer><family>Liberation Sans</family></prefer></alias>
+-  <alias binding="strong"><family>system-ui</family><prefer><family>Liberation Sans</family></prefer></alias>
+-  <alias binding="strong"><family>ui-sans-serif</family><prefer><family>Liberation Sans</family></prefer></alias>
+-  <alias binding="strong"><family>Segoe UI</family><prefer><family>Liberation Sans</family></prefer></alias>
+-</fontconfig>
+-EOF
+-if ! fc-list | grep -q 'Liberation Sans'; then
+-  sudo apt-get update -qq
+-  sudo apt-get install -y -qq fonts-liberation
+-fi
+-echo "XDG_CONFIG_HOME=$dir" >> "${GITHUB_ENV:?not in a GitHub job}"
+-echo "sans-serif is now: $(XDG_CONFIG_HOME="$dir" fc-match sans-serif)"

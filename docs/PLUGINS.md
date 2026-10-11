@@ -608,17 +608,20 @@ The store's own tool signs the same text:
 fapps sign -key store.seed -sha256 "$sha" -name myfs -version 1.3.0 -platform linux/amd64
 ```
 
-> ⚠ **The old form - a signature over the SHA256 alone - is accepted in 0.55
-> only, with a warning, and refused from 0.56.** Until 0.55 the signature was
-> over the lower-hex SHA256 and nothing else; it vouched for the bytes but not
-> for which plugin, which version or which platform they were. A build whose
-> signature verifies only that way still installs and starts in 0.55, and:
+> ⚠ **The old form - a signature over the SHA256 alone - is still accepted,
+> with a warning, at least until filex 0.61 and 2027-10-09, whichever comes
+> later** (its [compatibility window](#compatibility-window)). Before 0.55 the
+> signature was over the lower-hex SHA256 and nothing else; it vouched for the
+> bytes but not for which plugin, which version or which platform they were. A
+> build whose signature verifies only that way still installs and starts, and:
 > its row on **Admin → Plugins → Storage plugins** says so (`legacy_signature:
 > true` and the server's sentence in `signature_notice` on
-> `GET /api/admin/plugins`), its log says so at every start, and the audit row
-> of the install or upgrade carries `legacy_signature: true`. Sign your builds
-> over the text above, and send `version`, before you upgrade to 0.56. A store's
-> signature in the old form is never taken (stores sign the text).
+> `GET /api/admin/plugins`, which names the end of the window), its log says
+> so at every start, and the audit row of the install or upgrade carries
+> `legacy_signature: true`. Sign your builds over the text above, and send
+> `version`; the release that stops taking the old form is announced in the
+> CHANGELOG at least one release ahead. A store's signature in the old form is
+> never taken (stores sign the text).
 
 > ⚠ A plugin installed with the new form is refused at its next start by a
 > filex older than 0.55 (it cannot read the text, nor the `.sig` file's second
@@ -668,6 +671,28 @@ signature and it runs again.
 
 > ⚠ Rotation is why the setting takes a list: any one trusted key verifying is
 > enough, so a new key can be added before the old one is retired.
+
+---
+
+## Compatibility window
+
+A storage plugin built and signed for a filex release keeps working,
+unchanged, for **at least 6 minor releases or 12 months after that release,
+whichever is longer**. When filex replaces something a plugin sends it - a
+signature format, a field or a call of the
+[protocol](#the-protocol-any-language) - the old form stays accepted for that
+long, with a warning on the plugin's row and in its log saying until when. After the window a release may refuse it, and only
+once the CHANGELOG of an earlier release has said so: you get at least one
+release of notice in the CHANGELOG before anything you built stops working.
+
+Old forms a storage plugin may still send:
+
+| Old form | Replaced in | Accepted at least until (the later of the two) |
+|---|---|---|
+| A build signature over the SHA256 alone ([What is signed](#what-is-signed)) | 0.55 (2026-10-09) | filex 0.61 and 2027-10-09 |
+
+The full list, apps included, and how filex keeps it:
+[CONTRIBUTING.md → Compatibility window for plugins and apps](CONTRIBUTING.md#compatibility-window-for-plugins-and-apps).
 
 ---
 

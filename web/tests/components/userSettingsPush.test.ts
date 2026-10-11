@@ -106,6 +106,33 @@ describe('push notifications on this device', () => {
     w.unmount();
   });
 
+  // #219: an installation called "BRF Teknoloji" is installed on the phone
+  // under that name (spa_brand.go), so the push rows name it, not filex.
+  it('names the app the installation is called, and filex where it is called nothing', async () => {
+    let w = await notificationsPane(host({ webPush: fakePush(pushState()), brandName: 'BRF Teknoloji' }).host);
+    expect(w.find('[data-testid="user-settings-push-row"]').text()).toContain('even while BRF Teknoloji is closed');
+    w.unmount();
+
+    const ios = pushState({ supported: false, permission: 'unsupported', on: false, thisDevice: null });
+    w = await notificationsPane(
+      host({
+        webPush: fakePush(ios),
+        installApp: { state: 'ios', install: vi.fn(async () => 'unavailable' as const) },
+        brandName: 'BRF Teknoloji',
+      }).host,
+    );
+    expect(w.find('[data-testid="user-settings-push-why"]').text()).toContain('work in BRF Teknoloji added to the Home Screen');
+    w.unmount();
+
+    w = await notificationsPane(host({ webPush: fakePush(pushState()), brandName: '  ' }).host);
+    expect(w.find('[data-testid="user-settings-push-row"]').text()).toContain('even while filex is closed');
+    w.unmount();
+
+    w = await notificationsPane(host({ webPush: fakePush(pushState()), brandName: 'BRF Teknoloji' }, 'tr').host);
+    expect(w.find('[data-testid="user-settings-push-row"]').text()).toContain('BRF Teknoloji kapalıyken de');
+    w.unmount();
+  });
+
   it('says this device is on, lists the person’s devices and marks this one', async () => {
     const push = fakePush(pushState());
     const w = await notificationsPane(host({ webPush: push }).host);
@@ -175,7 +202,9 @@ describe('push notifications on this device', () => {
     );
     expect(w.find('[data-testid="user-settings-push"]').attributes('disabled')).toBeDefined();
     expect(w.find('[data-testid="user-settings-push-state"]').text()).toBe(en['notifications.prefs.pushUnsupported']);
-    expect(w.find('[data-testid="user-settings-push-why"]').text()).toBe(en['notifications.prefs.iosHomeScreen']);
+    expect(w.find('[data-testid="user-settings-push-why"]').text()).toBe(
+      'On an iPhone or iPad, notifications work in filex added to the Home Screen (iOS 16.4 or later), not in a browser tab.',
+    );
     w.unmount();
 
     // Blocked by the browser: the switch cannot turn it on, and says where to fix it.

@@ -53,8 +53,8 @@
 // its full-width bottom band — see the template.
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { withAppBase } from '@brftech/filex-core';
 import { useDesktopDownloads, useInstallPrompt } from '@/composables/useInstallPrompt';
+import { brandAppIcon, brandName, filexMarkUrl, loadBrandAppIcon } from '@/lib/brand';
 import { placeChip, probeDom } from '@/lib/keepClear';
 
 // gorunum:v1 — the banner is painted from the product's palette (`--fe-*`),
@@ -67,13 +67,6 @@ import { placeChip, probeDom } from '@/lib/keepClear';
 // chunk the explorer routes used to fetch is gone). If the shell ever imports
 // it globally from main.ts, this import becomes redundant rather than extra.
 import '@brftech/filex-core/style.css';
-
-// Public-asset base: the build's '/admin/', under the base path the server
-// serves the app at (FILEX_BASE_PATH; the core's `withAppBase`). Used for the
-// icon below — see the comment on the <img> for why it must not be a static
-// src. ⚠ Not `import.meta.env.BASE_URL` alone: that is baked in at build time
-// and knows nothing of a sub-path.
-const baseUrl = withAppBase(import.meta.env.BASE_URL);
 
 // ⚠ The download rows were hardcoded English while their own card title came
 // from the catalogue, so a Turkish visitor met a Turkish heading over two
@@ -98,6 +91,30 @@ const {
   dismiss,
   reloadForUpdate,
 } = useInstallPrompt();
+
+// ⚠ The web app's offer names the app the home screen will show (#219): the
+// installation's name from the Branding page, the one the server writes into
+// the manifest (spa_brand.go), and "filex" where nobody set one. It was the
+// catalogue's constant "Install filex as a web app" on a branded instance.
+// The desktop app's offer keeps "filex": that download IS filex.
+// brandName() is a ref underneath, so the title repaints when the answer
+// lands; the router asks for it on every navigation (lib/documentTitle).
+//
+// ⚠⚠ And the mark beside it is the icon the home screen will get: the
+// manifest's own first `any` icon (lib/brand brandAppIcon), which the server
+// draws from the logo whether it was given as a data: URI or as an address.
+// It was filex's mark beside "Install BRF Teknoloji". Asked for only when
+// there is an offer to show; until the manifest answers the mark's box stays
+// empty rather than showing a picture that may be the wrong one. The desktop
+// app's offer keeps filex's mark.
+watch(
+  shouldOfferInstall,
+  (on) => {
+    if (on) loadBrandAppIcon();
+  },
+  { immediate: true },
+);
+const markUrl = computed(() => (showDesktopDownload.value ? filexMarkUrl() : brandAppIcon()));
 
 /* WHICH SHAPE — the full card, or the corner chip.
  *
@@ -436,17 +453,14 @@ onBeforeUnmount(() => {
         >
           <!-- Bound, not a static src: Vue's SFC compiler turns a literal `src`
                into a module import, and this file lives in public/ so Rollup
-               cannot resolve it — the production build fails outright. Binding
-               keeps it a plain runtime URL, and BASE_URL keeps it correct if the
-               app's base ever moves off /admin/. -->
-          <img
-            :src="`${baseUrl}icons/icon.svg`"
-            alt=""
-            class="ip-mark"
-          />
+               cannot resolve it — the production build fails outright. The
+               address is the manifest's icon (see markUrl), under the base
+               path the server serves the app at. -->
+          <img v-if="markUrl" :src="markUrl" alt="" class="ip-mark" data-testid="pwa-install-mark" />
+          <span v-else class="ip-mark" aria-hidden="true" />
           <span class="ip-head__text">
             <span class="ip-title">
-              {{ showDesktopDownload ? $t('install.desktopTitle') : $t('install.title') }}
+              {{ showDesktopDownload ? $t('install.desktopTitle') : $t('install.title', { name: brandName() }) }}
             </span>
             <!-- ⚠ The subtitle is what the chip gives up, and it is the right
                  thing to give up: the title alone still names the offer, which
@@ -672,6 +686,8 @@ onBeforeUnmount(() => {
   height: 40px;
   flex: 0 0 auto;
   border-radius: var(--fe-radius);
+  /* A brand's SVG logo need not be square. */
+  object-fit: contain;
 }
 .ip-card--chip .ip-mark {
   width: 20px;

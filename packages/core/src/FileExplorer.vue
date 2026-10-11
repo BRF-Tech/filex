@@ -196,6 +196,7 @@ import {
 } from './lib/e2ecrypto';
 import {
   createE2eNameView,
+  isBelowRoot,
   storedName,
   E2E_NAME_VIEW,
   wireJoinPath,
@@ -263,15 +264,21 @@ import {
   beginNativeDrag,
   canDownloadUrlDrag,
   createDragLinks,
+  dragItemOf,
   dragKey,
+  dragOutItems,
   downloadUrlPayload,
   endNativeDrag,
   hasInternalDrag,
   internalDragItems,
   internalDragOrigin,
+  mayDragOut,
+  mayMintDragLink,
   sayDragProgress,
   type DragItem,
+  type DragOutRow,
 } from './lib/dragOut';
+import { emptyDirs, readDrop, takeDrop, uploadDroppedTree, withRelativePath, type DropSource } from './lib/dropUpload';
 
 import NewFolderModal from './modals/NewFolderModal.vue';
 import ArchiveExtractModal from './modals/ArchiveExtractModal.vue';
@@ -291,7 +298,9 @@ import PluginViewModal from './components/plugin/PluginViewModal.vue'; /* App pl
 import AppFrameModal from './components/plugin/AppFrameModal.vue'; /* App plugins — an app's own interface */
 import { appliesItemOf, appliesMatches } from './lib/pluginApplies';
 import {
+  BUILTIN_VIEWER,
   isOfficeHandler,
+  nameHiddenFromServer,
   officeOpensKind,
   onlyBuiltinOpens,
   openHandlersFor,
@@ -301,6 +310,7 @@ import {
   type OpenHandler,
   type OpenHandlerOptions,
 } from './lib/appViewer';
+import { createAppPlaintextDoor, createAppVaultDoor } from './lib/appPlaintext';
 import { followOpenWithChoices, openWithChoice, setOpenWithChoice } from './lib/openWith';
 import OpenWithDialog from './modals/OpenWithDialog.vue';
 import PluginConfirmModal from './components/plugin/PluginConfirmModal.vue';
@@ -536,6 +546,7 @@ const vault = useE2eVault({
   formatCount: (n) => new Intl.NumberFormat(localeTag(locale.value)).format(n),
   onLocked: (root, why) => vaultLocked(root, why),
   onChanged: (root) => vaultChanged(root),
+  onLockSoon: (root, words) => vaultLockSoon(root, words) /* 0.56 - an app's unsaved changes, a minute before */,
   askName: (q) => askVaultName(q),
 });
 /** wiring:e2 vault — an upload's name is taken in the vault: the explorer's
@@ -1881,7 +1892,63 @@ const openOpts = computed<OpenHandlerOptions>(() => ({ onlyOffice: !!effectiveOn
  *  that says it is encrypted (Recent, Starred, a tag view, a search, Shared
  *  with me: lib/encryptedRow), filex's own viewer and nothing else. */
 function openOptsFor(n: FileNode | null | undefined): OpenHandlerOptions {
-  return { ...openOpts.value, inEncrypted: e2eActive.value || vault.isVaultRow(n) };
+  return { ...openOpts.value, inEncrypted: e2eActive.value || vault.isVaultRow(n), e2ePlaintext: !!e2ePlainRootOf(n) };
+}
+
+/**
+ * filex 0.56 (task #189) - the encrypted folder whose key lets this tab hand
+ * the file to an app in the clear (lib/appPlaintext), or null: a file of an
+ * encrypted folder unlocked here (not a vault's, not a `.fxe`) and the
+ * server's switch on (capabilities `apps_e2e_plaintext`; an older server,
+ * which has no such door, never says it). Which app is lib/appViewer's
+ * (`e2ePlaintext`): the browser's kind rule, by the row's decrypted name - in
+ * a folder whose names are encrypted too (level 2), where the server cannot
+ * read the kind and neither the name nor its extension is sent to it.
+ */
+function e2ePlainRootOf(n: FileNode | null | undefined): string | null {
+  void e2eRingVer.value;
+  if (!n || n.type !== 'file' || isFxeRow(n)) return null;
+  if (capabilitiesData.value?.apps_e2e_plaintext !== true) return null;
+  if (vault.isVaultRow(n)) return vaultAppRootOf(n);
+  if (n.encrypted && n.encrypted !== 'folder') return null;
+  const hint = (typeof n.e2e_root === 'string' && n.e2e_root) || (e2eActive.value ? e2eRoot.value : null);
+  const root = e2eNames.rootOf(n.path, hint);
+  if (!root || !e2eRing.has(root)) return null;
+  return root;
+}
+
+/**
+ * filex 0.56 (task #189) - a VAULT's file: its vault, while the vault is open
+ * in this tab (its keys in the engine). The app is handed the file by the
+ * vault engine itself (lib/appPlaintext createAppVaultDoor): read from the
+ * packs, saved as the vault's next generation under its write lock - the
+ * server's app doors, which refuse a vault, are never asked. Which app is
+ * lib/appViewer's vaultPlaintextViewersFor (the kind read from the name this
+ * tab decrypted).
+ */
+function vaultAppRootOf(n: FileNode): string | null {
+  void vault.version.value;
+  const root = typeof n.vault_root === 'string' ? n.vault_root : '';
+  return root && vault.isOpen(root) ? root : null;
+}
+
+/**
+ * filex 0.56 - an encrypted file opened IN AN APP (the handler the person's
+ * choice, their "always open with" or the administrator's order picks, when
+ * lib/appViewer offers one): no decrypted copy is made in this page - the
+ * app's frame is handed the plaintext itself (AppFrame `e2e`). False when no
+ * app opens it: the caller decrypts it for filex's own viewer.
+ */
+function openEncryptedInApp(n: FileNode, choice: string | null, mode: 'view' | 'edit'): boolean {
+  const h = pickOpenHandler(pluginViewList.value, n, choice, pluginOpenRules.value, personalOpenChoice(n), openOptsFor(n));
+  if (!h?.view) return false;
+  previewAppChoice.value = choice;
+  previewMode.value = mode === 'edit' && nodeCanEdit(n) ? 'edit' : 'view';
+  previewTarget.value = n;
+  showPreview.value = true;
+  emit('file-opened', { path: n.path, basename: n.basename });
+  void markRecent(n);
+  return true;
 }
 
 /** The handlers that open a file (lib/appViewer): on, in the administrator's
@@ -1966,7 +2033,12 @@ function openWithRows(sel: FileNode[]): ContextAction[] {
 /* ── "Choose an app…" (OpenWithDialog) ───────────────────────────────── */
 const openWithTarget = ref<FileNode | null>(null);
 const openWithHandlers = computed<OpenHandler[]>(() => openHandlersOf(openWithTarget.value).on);
-const openWithKind = computed(() => (openWithTarget.value ? openKindOf(openWithTarget.value) : ''));
+/* filex 0.56 - a file whose name the server cannot read (level 2): no
+   "Always use this app for .<ext> files", which would send its kind to the
+   account (lib/appViewer nameHiddenFromServer). */
+const openWithKind = computed(() =>
+  openWithTarget.value && !nameHiddenFromServer(openWithTarget.value) ? openKindOf(openWithTarget.value) : '',
+);
 const openWithCurrent = computed(() => {
   const n = openWithTarget.value;
   if (!n) return null;
@@ -1983,6 +2055,15 @@ function openWithChosen(id: string, always: boolean): void {
   const kind = openKindOf(n);
   openWithTarget.value = null;
   if (always && kind) setOpenWithChoice(kind, id);
+  /* filex 0.56 - an encrypted file: an app is handed it in the clear (no
+     copy decrypted here), filex's own viewer gets the decrypted copy. */
+  if ((e2eUnlocked.value || vault.isVaultRow(n)) && e2ePlainRootOf(n)) {
+    if (id === BUILTIN_VIEWER || !openEncryptedInApp(n, id, 'edit')) {
+      previewAppChoice.value = BUILTIN_VIEWER;
+      void e2eOpenPreview(n);
+    }
+    return;
+  }
   previewNode(n);
   previewAppChoice.value = id;
   if (id !== 'builtin' && nodeCanEdit(n)) previewMode.value = 'edit';
@@ -5818,7 +5899,7 @@ function onPaletteOpenHit(hit: GlobalSearchHit) {
   const hook = props.config.accountSearch;
   if (acc && hook) {
     const item = paletteHitItem(hit);
-    if (item) void Promise.resolve(hook.open(acc.id, item)).catch(reportHookFailure('search-open'));
+    if (item) void Promise.resolve(hook.open(acc.id, dragItemOf(item))).catch(reportHookFailure('search-open'));
     return;
   }
   void openSearchHit(hit);
@@ -5828,6 +5909,10 @@ function onPaletteOpenHit(hit: GlobalSearchHit) {
 function paletteHitCan(hit: GlobalSearchHit, action: 'download' | 'drag'): boolean {
   const item = paletteHitItem(hit);
   if (!item) return false;
+  // #243 — a hit only ever drags OUT (the palette covers the listing), and a
+  // file of an encrypted folder or a vault never leaves the window: the row
+  // is not draggable at all, and asks for no link (warm-hit).
+  if (action === 'drag' && !mayDragOut(item)) return false;
   if (foreignAccountOf(hit)) {
     const hook = props.config.accountSearch;
     return action === 'download' ? !!hook?.download : !!hook?.dragStart;
@@ -5846,8 +5931,10 @@ function paletteHitCan(hit: GlobalSearchHit, action: 'download' | 'drag'): boole
 /** #71 — the pointer rests on / presses a hit: get its drag-out link ready. */
 function onPaletteWarmHit(hit: GlobalSearchHit) {
   if (foreignAccountOf(hit)) return;
+  // The hit carries the server's `encrypted` / `e2e_root` (lib/searchHit
+  // hitItem), so the rule reads it as it reads a listing row.
   const item = paletteHitItem(hit);
-  if (item && item.type === 'file') warmDragLink(item.path);
+  if (item && mayMintDragLink(item)) warmDragLink(item.path);
 }
 
 function downloadSearchHit(hit: GlobalSearchHit) {
@@ -5856,7 +5943,9 @@ function downloadSearchHit(hit: GlobalSearchHit) {
   const acc = foreignAccountOf(hit);
   if (acc) {
     const hook = props.config.accountSearch;
-    if (hook?.download) void Promise.resolve(hook.download(acc.id, item)).catch(reportHookFailure('search-download'));
+    if (hook?.download) {
+      void Promise.resolve(hook.download(acc.id, dragItemOf(item))).catch(reportHookFailure('search-download'));
+    }
     return;
   }
   // The same row the advanced search draws for this hit, through the same
@@ -5867,7 +5956,11 @@ function downloadSearchHit(hit: GlobalSearchHit) {
 
 function onPaletteDragHit(hit: GlobalSearchHit, ev: DragEvent) {
   const item = paletteHitItem(hit);
-  if (!item || !ev.dataTransfer) {
+  // #243 — the same rule as a listing row (lib/dragOut mayDragOut), read off
+  // the hit itself: a file of an encrypted folder or a vault does not leave,
+  // for this account's hit and another account's alike. A hit has nothing
+  // else to be (the palette covers the listing), so the drag stops here.
+  if (!item || !ev.dataTransfer || !mayDragOut(item)) {
     ev.preventDefault();
     return;
   }
@@ -5878,12 +5971,15 @@ function onPaletteDragHit(hit: GlobalSearchHit, ev: DragEvent) {
     // Always the OS drag: the browser's own path would fetch another
     // server's file with THIS page's session.
     ev.preventDefault();
-    if (hook?.dragStart) void Promise.resolve(hook.dragStart(acc.id, [item])).catch(reportHookFailure('drag-out'));
+    if (hook?.dragStart) {
+      void Promise.resolve(hook.dragStart(acc.id, [dragItemOf(item)])).catch(reportHookFailure('drag-out'));
+    }
     return;
   }
   // `null` origin: a hit is dragged OUT, never moved — the palette covers the
-  // listing, so there is no folder in this window for it to land on.
-  handDragOut(ev, [item], null, typeof hit.mime === 'string' ? hit.mime : undefined);
+  // listing, so there is no folder in this window for it to land on. The
+  // hit's own fields decide, not the folder open behind the palette.
+  handDragOut(ev, [item], null, typeof hit.mime === 'string' ? hit.mime : undefined, false);
 }
 
 /** A hit drag let go inside the palette: the shell stops waiting for a drop. */
@@ -6107,8 +6203,11 @@ function openNode(n: FileNode) {
     return;
   }
   /* wiring:e2 vault — a file of an open vault (from either pane): decrypted
-     here, from its packs, into the read-only preview. */
+     here, from its packs, into the read-only preview - unless an app granted
+     files:e2e-plaintext opens it (filex 0.56): then the vault engine hands
+     its frame the plaintext, and nothing is decrypted here. */
   if (vault.isVaultRow(n) && n.type === 'file') {
+    if (openEncryptedInApp(n, null, 'edit')) return;
     void e2eOpenPreview(n);
     return;
   }
@@ -6131,6 +6230,9 @@ function openNode(n: FileNode) {
      viewers); while locked nothing opens at all (the lock screen already
      hides the listing). */
   if (e2eUnlocked.value && n.type === 'file') {
+    /* filex 0.56 - unless an app granted files:e2e-plaintext opens it: then
+       its frame is handed the plaintext, and nothing is decrypted here. */
+    if (openEncryptedInApp(n, null, 'edit')) return;
     void e2eOpenPreview(n);
     return;
   }
@@ -6254,8 +6356,9 @@ async function restoreSelection(targets?: FileNode[]) {
 }
 
 function previewNode(n: FileNode) {
-  /* wiring:e2 vault */
+  /* wiring:e2 vault (+ filex 0.56: an app that opens it, for a look) */
   if (vault.isVaultRow(n) && n.type === 'file') {
+    if (openEncryptedInApp(n, null, 'view')) return;
     void e2eOpenPreview(n);
     return;
   }
@@ -6266,6 +6369,8 @@ function previewNode(n: FileNode) {
   }
   /* wiring:e2 — the preview is fed from the decrypted blob as well */
   if (e2eUnlocked.value && n.type === 'file') {
+    /* filex 0.56 - an app that opens it is handed it itself (a look: view). */
+    if (openEncryptedInApp(n, null, 'view')) return;
     void e2eOpenPreview(n);
     return;
   }
@@ -7791,10 +7896,7 @@ async function submitNewFolder(name: string) {
       }
       return;
     }
-    /* wiring:e2 names — inside an encrypted-names folder the server gets the
-       stored name only (and a long name's sidecar first). */
-    const wireName = await e2eWireName(dirWire, name, { isDir: true });
-    await api.newFolder(dirWire, wireName);
+    await createFolderAt(dirWire, name);
     showNewFolder.value = false;
     // Free now, not after the listing below: a New folder opened meanwhile is
     // a new dialog, not this one still busy.
@@ -7806,6 +7908,19 @@ async function submitNewFolder(name: string) {
   } finally {
     newFolderReq.end(ticket);
   }
+}
+
+/**
+ * Make folder `name` in `dirWire` on the server and answer the new folder's
+ * wire path. New folder and a dropped folder (#94) both come here.
+ * wiring:e2 names — inside an encrypted-names folder the server gets the
+ * stored name only (and a long name's sidecar first). A vault's folders are
+ * the vault's (vault.mkdir), not this.
+ */
+async function createFolderAt(dirWire: string, name: string): Promise<string> {
+  const wireName = await e2eWireName(dirWire, name, { isDir: true });
+  await api.newFolder(dirWire, wireName);
+  return wireJoin(dirWire, wireName);
 }
 
 async function submitRename(name: string) {
@@ -8092,13 +8207,14 @@ function onFilePicked(ev: Event) {
   void uploadFiles(list);
 }
 
-async function uploadFiles(list: File[]) {
+async function uploadFiles(list: File[], dest?: string, opts: { reload?: boolean } = {}) {
   if (list.length === 0) return;
   // ⚠ The folder the files were dropped into or picked for, read ONCE. The
   // files go one after another, and each used to read the open folder again
   // when its turn came — so browsing while the first file was on its way sent
-  // the rest of the batch into whatever folder was open by then.
-  const target = qualify(currentPath.value);
+  // the rest of the batch into whatever folder was open by then. A dropped
+  // folder (#94) names each of its folders as `dest`.
+  const target = dest ?? qualify(currentPath.value);
   /* wiring:e2 vault — into the vault: encrypted here, file by file, into its
      packs, and committed as one change. No 200 MB limit: the contents are
      read and encrypted a chunk at a time. */
@@ -8163,6 +8279,67 @@ async function uploadFiles(list: File[]) {
     }
     await legacyUpload(f, target);
   }
+  if (opts.reload !== false) await load();
+}
+
+/** Which encrypted folder the screen is in and whether it is open: '' in a plain one. */
+function e2eDropState(): string {
+  return e2eActive.value ? `${e2eRoot.value}|${e2eUnlocked.value ? 'open' : 'locked'}` : '';
+}
+
+/**
+ * #94 — what was dropped from the operating system, uploaded into `target`
+ * (the folder on screen when it was dropped). Files alone take the ordinary
+ * upload, exactly as before. A folder is walked and made again here, empty
+ * folders included (lib/dropUpload): in a vault through the vault's own folder
+ * upload (`webkitRelativePath`, one change), everywhere else folder by folder
+ * through createFolderAt and uploadFiles, so an encrypted folder encrypts what
+ * lands below it the way it encrypts a picked file.
+ */
+async function uploadDrop(sources: DropSource[], target: string) {
+  // Read with the target, in the drop handler's own turn (nothing awaited yet).
+  const e2eAtDrop = e2eDropState();
+  const tree = await readDrop(sources);
+  for (const rel of tree.unreadable) flashToast(t('upload.failed', { name: rel }));
+  if (tree.dirs.length === 0) {
+    await uploadFiles(tree.files.map((f) => f.file), target);
+    return;
+  }
+  const vaultRoot = vault.rootOf(target);
+  if (vaultRoot) {
+    if (!vault.isOpen(vaultRoot)) {
+      flashToast(t('e2e.upload.locked'));
+      return;
+    }
+    const files = tree.files.map(({ file, dir }) => (dir ? withRelativePath(file, `${dir}/${file.name}`) : file));
+    if (files.length > 0) await vault.upload(target, files);
+    for (const dir of emptyDirs(tree)) {
+      const cut = dir.lastIndexOf('/');
+      await vault.mkdir(cut === -1 ? target : wireJoin(target, dir.slice(0, cut)), dir.slice(cut + 1));
+    }
+    return;
+  }
+  // No folder is made in an encrypted folder that is locked: its name would
+  // go to the server in plaintext.
+  if (e2eLocked.value) {
+    flashToast(t('e2e.upload.locked'));
+    return;
+  }
+  // ⚠ uploadFiles decides encryption by the folder ON SCREEN (e2eUnlocked,
+  // e2eKek), and a dropped tree is many calls of it over time. Browsing from
+  // an encrypted folder into a plain one meanwhile would send the rest in
+  // plaintext below the encrypted folder (the other way round, encrypted
+  // with a key that is not theirs): the rest stops instead, and says so.
+  const stay = <T,>(go: () => Promise<T>): Promise<T> =>
+    e2eDropState() === e2eAtDrop ? go() : Promise.reject(new Error('the encrypted folder was left during the upload'));
+  await uploadDroppedTree(tree, target, {
+    mkdir: (at, name) => stay(() => createFolderAt(at, name)),
+    upload: (files, at) => stay(() => uploadFiles(files, at, { reload: false })),
+    failed: (rel, err) => {
+      flashToast(t('upload.failed', { name: rel }));
+      emit('error', { message: (err as Error).message, context: { op: 'upload', file: rel } });
+    },
+  });
   await load();
 }
 
@@ -8394,9 +8571,13 @@ function onDropUpload(ev: DragEvent) {
     flashToast(t('toast.read_only_here'));
     return;
   }
-  const list = ev.dataTransfer?.files ? Array.from(ev.dataTransfer.files) : [];
-  if (list.length === 0) return;
-  void uploadFiles(list);
+  // #94 — taken NOW, before anything awaits: once the event is over the
+  // DataTransfer is empty. A dropped folder is its entry (walked later), never
+  // the File `files` holds for it (Safari's zip of it, Firefox's empty file,
+  // Chromium's placeholder that does not upload).
+  const sources = takeDrop(ev.dataTransfer);
+  if (sources.length === 0) return;
+  void uploadDrop(sources, qualify(currentPath.value));
 }
 
 function onWindowDragOver(ev: DragEvent) {
@@ -8541,13 +8722,13 @@ function onPaneItemDragStart(pane: 'main' | 'split', node: FileNode, ev: DragEve
   const dirWire =
     pane === 'split' ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
   const chosen = sel.some((n) => n.path === node.path) ? sel : [node];
-  const items = chosen
-    .filter((n) => !clippedPaths.value.has(n.path))
-    .filter((n) => n.basename !== '.trash')
-    .map((n) => ({ path: n.path, basename: n.basename, type: n.type })); // qualified
-  if (items.length === 0) return;
-
-  handDragOut(ev, items, dirWire, node.mime_type);
+  // The rows themselves (paths qualified): each says whether it may leave the
+  // window (`encrypted` / `e2e_root` / `vault_root`, #243).
+  const rows = chosen.filter((n) => !clippedPaths.value.has(n.path)).filter((n) => n.basename !== '.trash');
+  if (rows.length === 0) return;
+  // The pane's own folder: a row listed inside an encrypted folder or a vault
+  // does not always say so itself (a subfolder's row), the listing does.
+  handDragOut(ev, rows, dirWire, node.mime_type, paneInEncrypted(pane));
 }
 
 /**
@@ -8558,8 +8739,16 @@ function onPaneItemDragStart(pane: 'main' | 'split', node: FileNode, ev: DragEve
  * rows came from: set, the drag is ALSO an internal one (dropped on a folder
  * inside filex it is a move); null, it only goes out (a palette hit — the
  * palette covers the listing, so there is nowhere inside to drop it).
+ * `paneEncrypted`: the rows were listed inside an encrypted folder or a vault
+ * (the pane's own listing says it; a hit has none and says false).
  */
-function handDragOut(ev: DragEvent, items: DragItem[], origin: string | null, mime?: string): void {
+function handDragOut(
+  ev: DragEvent,
+  rows: DragOutRow[],
+  origin: string | null,
+  mime: string | undefined,
+  paneEncrypted: boolean,
+): void {
   /* wiring:f1 — drag-out (to the desktop / another application).
      When a shell is present the drag is ALWAYS an OS drag: folders and
      multi-selections land as REAL files, one by one, with NO SIZE LIMIT.
@@ -8569,11 +8758,15 @@ function handDragOut(ev: DragEvent, items: DragItem[], origin: string | null, mi
      the app the drag is still a server-side move — the payload stays with us —
      and the shell is told to "give up" so it doesn't watch the drives for
      nothing. */
-  /* wiring:e2 — a row inside an encrypted folder is never handed to the OS
-     as a file: the bytes behind its URL are ciphertext, and the OS would
-     save them under the plaintext name as if they were the document. The
-     in-app move still works (the payload is ours). */
-  if (e2eActive.value || items.some((it) => !!(it as { e2e_root?: string }).e2e_root)) return;
+  /* wiring:e2, #243 — a row inside an encrypted folder or a vault is never
+     handed to the OS: the bytes behind its URL are ciphertext, and the OS
+     would save them under the plaintext name as if they were the document (a
+     vault row's path IS its plaintext name). The ROW says it, wherever it is
+     listed - a ⌘K hit or a row on Recent sits in an encrypted folder while a
+     plain one is open (lib/dragOut dragOutItems). The in-app move still works
+     (the payload is ours). */
+  const items = dragOutItems(rows, { inEncryptedFolder: paneEncrypted });
+  if (!items) return;
   if (dragOut.value) {
     ev.preventDefault();
     if (origin !== null) beginNativeDrag(items, origin);
@@ -8614,7 +8807,9 @@ function handDragOut(ev: DragEvent, items: DragItem[], origin: string | null, mi
  *
  * Only where it is needed: no shell (the desktop app drags through the OS)
  * and a credential the browser cannot carry (a cookie session has the plain
- * URL). Nowhere else does a hover cost a request.
+ * URL). Nowhere else does a hover cost a request. And never for a row in an
+ * encrypted folder or a vault (lib/dragOut mayMintDragLink): the drag does not
+ * hand one out, and a vault row's path names the file in plaintext.
  */
 const dragLinksSupported = ref(true);
 const dragLinks = createDragLinks((p) => requestFileLink(api, p), {
@@ -8636,7 +8831,7 @@ function onRowPointerWarm(ev: PointerEvent) {
   const p = el?.getAttribute('data-fe-path');
   if (!p) return;
   const node = files.value.find((f) => f.path === p) ?? splitDisplayOrder.value.find((f) => f.path === p);
-  if (node && node.type === 'file' && node.basename !== '.trash') warmDragLink(node.path);
+  if (node && mayMintDragLink(node)) warmDragLink(node.path);
 }
 onMounted(() => {
   rootEl.value?.addEventListener('pointerover', onRowPointerWarm, { passive: true });
@@ -8681,11 +8876,14 @@ watch(
     // A folder's size isn't known from the listing; rather than guess it, we
     // leave it to the first drag.
     if (nodes.some((n) => n.type !== 'file')) return;
-    // wiring:e2 vault — nothing in a vault is handed to the shell by path.
-    if (nodes.some((n) => vault.isVaultRow(n))) return;
+    // wiring:e2 — what the drag would not hand out is not fetched for it
+    // either: nothing in a vault is handed to the shell by path (its path is
+    // the plaintext name), nothing of an encrypted folder (ciphertext) - the
+    // drag's own rule (lib/dragOut dragOutItems, #243).
+    const items = dragOutItems(nodes, { inEncryptedFolder: e2eActive.value });
+    if (!items) return;
     const total = nodes.reduce((sum, n) => sum + (n.size ?? 0), 0);
     if (total > DRAGOUT_PREFETCH_MAX_BYTES) return;
-    const items = nodes.map((n) => ({ path: n.path, basename: n.basename, type: n.type }));
     dragOutPrefetchTimer = setTimeout(() => void prepareDragOut(items, true), 400);
   },
   { deep: true },
@@ -10059,10 +10257,15 @@ function e2eLock() {
   e2eNames.forget(root);
   e2eRingVer.value++;
   e2eRevokeAll();
+  /* filex 0.56 - the preview of a file of this folder closes with the lock:
+     an app's frame holding its plaintext goes with it (unsaved changes too -
+     the lock is the person's "forget it now"; closePreviewOnLock says so). */
+  const unsaved = closePreviewOnLock(root);
   showE2eSettings.value = false;
   e2eRecoveryInHand = null;
   showPwChange.value = false;
-  flashToast(t('e2e.locked_toast'));
+  if (unsaved) showToast({ message: unsaved }, ERROR_TOAST_MS);
+  else flashToast(t('e2e.locked_toast'));
   void load();
 }
 
@@ -10113,11 +10316,92 @@ async function e2eOpenPreview(n: FileNode) {
     return;
   }
   previewMode.value = 'view';
+  // filex's own viewer shows the decrypted copy: never an app on top of it
+  // (filex 0.56 - an app is offered an encrypted file and handed it itself,
+  // openEncryptedInApp).
+  previewAppChoice.value = BUILTIN_VIEWER;
   previewTarget.value = n;
   showPreview.value = true;
   emit('file-opened', { path: n.path, basename: n.basename });
   void markRecent(n);
 }
+
+/**
+ * filex 0.56 (task #189) - the door an app's frame decrypts and encrypts a
+ * file of an encrypted folder through (lib/appPlaintext): it asks the ring
+ * for the folder's key at each call, so a folder locked meanwhile hands over
+ * nothing more.
+ */
+const appE2eDoor = createAppPlaintextDoor(
+  (path) => {
+    const root = e2eNames.rootOf(path, e2eActive.value ? e2eRoot.value : null);
+    const fmk = root ? e2eRing.get(root) : undefined;
+    return root && fmk ? { fmk, previous: e2eRing.previous(root) ?? null } : null;
+  },
+  /* a vault's file: the vault engine reads and writes it (useE2eVault). */
+  createAppVaultDoor(vault),
+);
+
+/**
+ * filex 0.56 - the app in the preview holds changes it has not saved (its
+ * `ui.dirty`, PreviewModal `app-dirty`). A lock that closes it says they
+ * are gone (closePreviewOnLock); on a vault's file, the app saying so is the
+ * person working in the vault - activity, so the vault's own 15-minute lock
+ * waits for it like it waits for a listing.
+ */
+const previewAppDirty = ref(false);
+function onPreviewAppDirty(dirty: boolean): void {
+  previewAppDirty.value = dirty;
+  const n = previewTarget.value;
+  if (dirty && n && vault.isVaultRow(n)) vault.touch(n.path);
+  if (!dirty) dropLockSoon();
+}
+watch(showPreview, (open) => {
+  if (!open) {
+    previewAppDirty.value = false;
+    dropLockSoon();
+  }
+});
+
+/** The "locks in a minute" warning on screen (vaultLockSoon), until it is
+ *  answered, the changes are saved, or the app closes. */
+let lockSoonToast: ToastState | null = null;
+/** The warning stays up for the minute it speaks of. */
+const VAULT_LOCK_SOON_MS = 60_000;
+
+/**
+ * filex 0.56 (task #189) - the vault locks itself in a minute
+ * (VAULT_IDLE_WARN_MS) and an app in the preview holds changes to one of
+ * its files that are not saved: once it locks they cannot be saved. Said in
+ * the SERVER's words (the vault's `state` answer, `words`: only this tab
+ * knows the moment, the server says the sentence), with an action that keeps
+ * the vault open - activity, like any listing - and its own word once done.
+ * A server that says nothing (older) gets nothing said here.
+ */
+function vaultLockSoon(root: string, words: { app_lock_soon?: string; app_lock_soon_keep?: string; app_lock_kept?: string }): void {
+  const n = previewTarget.value;
+  if (!showPreview.value || !n || !isBelowRoot(n.path, root) || !previewAppDirty.value) return;
+  if (!words.app_lock_soon || !words.app_lock_soon_keep) return;
+  const kept = words.app_lock_kept || words.app_lock_soon_keep;
+  lockSoonToast = {
+    message: words.app_lock_soon,
+    actionLabel: words.app_lock_soon_keep,
+    action: () => vault.touch(root),
+    after: { kind: 'plain', running: kept, done: kept },
+  };
+  showToast(lockSoonToast, VAULT_LOCK_SOON_MS);
+}
+
+/** The warning is no longer true (saved, closed): it goes. */
+function dropLockSoon(): void {
+  // The slot holds a copy (a ref's proxy): the same words are the same toast.
+  if (lockSoonToast && toast.value?.message === lockSoonToast.message) dismissToast();
+  lockSoonToast = null;
+}
+
+/** The door, for the app the preview opens - only where lib/appViewer
+ *  offered that app the file in the clear. */
+const previewAppE2e = computed(() => (previewAppViewer.value && e2ePlainRootOf(previewTarget.value) ? appE2eDoor : null));
 
 /** Decrypt + download under the original name. A file with no magic comes down as-is.
  *  wiring:e2 stream — decrypted AS IT ARRIVES, into the save sink this
@@ -10327,20 +10611,50 @@ function vaultForgetUrls(root: string, all: boolean): void {
   }
 }
 
+/** What an app on a file of a vault had not saved when the vault locked:
+ *  closePreviewOnLock's sentence, said by vaultLocked right after. */
+let vaultLockUnsaved = '';
+
+/**
+ * filex 0.56 (task #189) - the encrypted folder or vault at `root` locked:
+ * the preview of a file in it closes, and an app's frame on it - with the
+ * plaintext it holds - goes too. Changes the app had not saved cannot be
+ * encrypted any more: they are gone, and the person is told which file
+ * (the sentence, '' when nothing was lost). Every lock goes through here:
+ * Lock, a vault's own lock after 15 idle minutes.
+ */
+function closePreviewOnLock(root: string): string {
+  const n = previewTarget.value;
+  if (!showPreview.value || !n || !isBelowRoot(n.path, root)) return '';
+  // Only an app's frame says it (PreviewModal `app-dirty`). Not asked of
+  // previewAppViewer: the keys are gone by now, and with them the offer.
+  const lost = previewAppDirty.value;
+  showPreview.value = false;
+  previewAppDirty.value = false;
+  return lost ? t('e2e.app_closed_unsaved', { name: n.basename }) : '';
+}
+
 /** The vault locked (or was locked): its keys leave the ring, and what this
  *  explorer shows of it closes. */
 function vaultDropKeys(root: string): void {
   e2eRing.lock(root);
   e2eNames.forget(root);
   e2eRingVer.value++;
-  if (vaultUnder(previewTarget.value?.path, root)) showPreview.value = false;
+  // An app's frame on a file of the vault goes with its keys (filex 0.56);
+  // what it had not saved is said with the lock (vaultLocked).
+  vaultLockUnsaved = closePreviewOnLock(root);
   if (vaultUnder(quickLookTarget.value?.path, root)) quickLookOpen.value = false;
   vaultForgetUrls(root, true);
 }
 
 function vaultLocked(root: string, why: 'idle' | 'manual'): void {
+  const unsaved = vaultLockUnsaved;
+  vaultLockUnsaved = '';
   if (why === 'idle') {
-    showToast({ message: t('e2e.vault.locked_idle_toast', { name: wireBasename(root) }) }, 8000);
+    const said = t('e2e.vault.locked_idle_toast', { name: wireBasename(root) });
+    showToast({ message: unsaved ? `${said} ${unsaved}` : said }, unsaved ? 12000 : 8000);
+  } else if (unsaved) {
+    showToast({ message: unsaved }, ERROR_TOAST_MS);
   }
   if (e2eRoot.value === root || vaultUnder(qualify(currentPath.value), root)) {
     showE2eSettings.value = false;
@@ -12423,6 +12737,7 @@ function closeRecoveryKey() {
       :plugin-views="pluginInspectorViews /* App plugins — inspector sections */"
       :theme="themeMode"
       :storages="(props.config.storages ?? []).map((st) => st.name)"
+      :user-name="props.config.userName || ''"
       @plugin-op="(op) => onPluginOpQueued(op)"
       @plugin-open="(p) => onSurfaceOpen(p.plugin, p.req)"
       @open-tag="openTagView /* etiket:t1 — a tag chip in this panel is a door to
@@ -12585,6 +12900,7 @@ function closeRecoveryKey() {
       :only-office-ready="!!effectiveOnlyOfficeBase"
       :drawio-ready="!!effectiveDrawioUrl"
       :can-configure="callerAdmin"
+      :withheld-words="capabilitiesData?.newdoc_withheld ?? null"
       :drafts="draftsEnabled /* issue #71 — a new document is a draft until saved */"
       @close="showNewDocument = false"
       @open-drafts="openDraftsFromNewDocument"
@@ -12876,6 +13192,7 @@ function closeRecoveryKey() {
       :api-base="props.config.apiBase ?? ''"
       :drafts-endpoint="draftsEnabled ? api.draftsBase : null /* Drafts, issue #71 */"
       :app-viewer="previewAppViewer /* v4 — an app's own interface for this type */"
+      :app-e2e="previewAppE2e /* 0.56 — an encrypted file handed to that app in the clear */"
       :in-office="previewInOffice /* 0.51 - a .csv in ONLYOFFICE */"
       :api="api"
       :user-name="props.config.userName || ''"
@@ -12887,6 +13204,7 @@ function closeRecoveryKey() {
       @draft-saved="onPreviewDraftSaved"
       @draft-discarded="onPreviewDraftDiscarded"
       @saved="onPreviewSaved"
+      @app-dirty="onPreviewAppDirty /* 0.56 - a lock that closes it says what was lost */"
       @close="showPreview = false"
     />
     <!-- 0.50 - "Choose an app…": the handlers the administrator left on, and

@@ -9,7 +9,7 @@
     "admin": "{name} Yönetim"
   },
   "install": {
-    "title": "filex'i web uygulaması olarak kurun",
+    "title": "{name} web uygulamasını kurun",
     "subtitle": "Uygulama gibi hızlı erişim için cihazınıza ekleyin.",
     "install": "Kur",
     "menuInstructions": "Tarayıcınızın menüsünü açıp “Uygulamayı yükle” ya da “Ana ekrana ekle”yi seçin.",
@@ -1481,7 +1481,7 @@
     "creds": "Demo hesabı: {email} · parola: {password}",
     "sandbox": "Ortak deneme alanı - her gece sıfırlanır; burada depolama, eklenti ve uygulamalar kapalıdır.",
     "adminHint": "Burada yönetim paneli her hesap için salt okunur - gösterdiklerini değiştirmek için kendi filex'inizi çalıştırın.",
-    "alsoIncluded": "Ayrıca: uygulamalar - izin incelemesinden geçerek kurulan WebAssembly eklentileri, e-İmza, Dönüştür, filextext ve draw.io ile birlikte · dil paketleri ve sağdan sola yerleşim · Görünüm ekranından kurum temaları · oluşturduğunuz bağlantılar, Paylaştıklarım'da · kişisel ve takım etiketleri · sembolik bağlantılı klasörler · klasör başına hatırlanan görünüm ve sıralama · roller, gruplar ve kişiye özel istisnalar, dosya ve klasör bazında erişim ve uygulamaların kendi izinleri · her kiracının kendi realm'iyle (oturum açma adıyla) çok kiracılık; kiracı kendi oturum açma sağlayıcılarını, alan adını ve sertifikasını kendisi yönetir · OIDC SSO, LDAP / Active Directory ve Windows ya da Linux hesabıyla oturum açma · IP izin listesiyle giriş denemesi sınırı · yerinde görüntüleyiciler ve düzenleyiciler, ONLYOFFICE ile Office belgeleri · SVG, HEIC, metin ve arşiv küçük resimleri, içine en son gelen dosyalarla çizilen klasörler · Varsayılan uygulamalar: bir dosya türünü hangi uygulamanın açacağı · + Yeni menüsünden belge oluşturma - Markdown, metin, CSV ve kod her yerde; Word, Excel, PowerPoint ve OpenDocument ise ONLYOFFICE bağlıyken · tüm seçimi tek akışlı arşiv olarak indirme · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
+    "alsoIncluded": "Ayrıca: uygulamalar - izin incelemesinden geçerek kurulan WebAssembly eklentileri, e-İmza, Dönüştür, ofis düzenleyici, filextext ve draw.io ile birlikte · izin verdiğiniz bir uygulamayla bir dosyayı birlikte düzenleme ya da şifreli bir klasördeki dosyayı tarayıcınızda çözülmüş olarak açma · dil paketleri ve sağdan sola yerleşim · Görünüm ekranından kurum temaları · oluşturduğunuz bağlantılar, Paylaştıklarım'da · kişisel ve takım etiketleri · sembolik bağlantılı klasörler · klasör başına hatırlanan görünüm ve sıralama · roller, gruplar ve kişiye özel istisnalar, dosya ve klasör bazında erişim ve uygulamaların kendi izinleri · her kiracının kendi realm'iyle (oturum açma adıyla) çok kiracılık; kiracı kendi oturum açma sağlayıcılarını, alan adını ve sertifikasını kendisi yönetir · OIDC SSO, LDAP / Active Directory ve Windows ya da Linux hesabıyla oturum açma · IP izin listesiyle giriş denemesi sınırı · yerinde görüntüleyiciler ve düzenleyiciler, ofis düzenleyici uygulamasında ya da ONLYOFFICE ile Office belgeleri · SVG, HEIC, metin ve arşiv küçük resimleri, içine en son gelen dosyalarla çizilen klasörler · Varsayılan uygulamalar: bir dosya türünü hangi uygulamanın açacağı · + Yeni menüsünden belge oluşturma - Markdown, metin, CSV ve kod her yerde; Word, Excel, PowerPoint ve OpenDocument ise ONLYOFFICE bağlıyken ya da ofis düzenleyici uygulaması kuruluyken · tüm seçimi tek akışlı arşiv olarak indirme · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
     "features": {
       "storageTitle": "6 depolama sürücüsü, iki yönde",
       "storageBody": "Yerel diskleri, S3'ü, SFTP'yi, WebDAV'ı, FTP/FTPS'i ve SMB/NAS paylaşımlarını tek bir ağaçta yan yana bağlayın - sonra aynı ağaca S3, SFTP, FTPS, NFSv3 ya da WebDAV olarak geri erişin.",
@@ -1558,7 +1558,7 @@
       "permDeniedHint": "Tarayıcı ayarlarından bu siteye bildirim iznini yeniden verin.",
       "permDefault": "İzin henüz istenmedi",
       "permUnsupported": "Bu tarayıcı bildirim gösteremiyor",
-      "iosHomeScreen": "iPhone ve iPad'de bildirimler tarayıcı sekmesinde değil, ana ekrana eklenmiş filex'te çalışır (iOS 16.4 ve sonrası).",
+      "iosHomeScreen": "iPhone ve iPad'de bildirimler tarayıcı sekmesinde değil, ana ekrana eklenmiş {name} uygulamasında çalışır (iOS 16.4 ve sonrası).",
       "desktopHandled": "Masaüstü uygulaması bunları kendisi gösteriyor",
       "saved": "Tercih kaydedildi",
       "movedToSettings": "Kendi bildirim ayarlarınız - zil, tarayıcı bildirimleri, hangi olaylar - kullanıcı ayarlarınızda.",
@@ -2504,7 +2504,7 @@
       "label": "İmza",
       "required": "Bu kurulum yalnızca imzalı eklenti kabul eder: yapının adı, sürümü, platformu ve SHA-256 özeti üzerine, işletmecinin güvendiği bir anahtarla üretilmiş ayrık imzayı (hex ya da base64) yapıştırın. İmza olmadan kurulum reddedilir.",
       "version": "İmzalanan sürüm",
-      "versionHint": "İmzanın adını verdiği sürüm, örneğin 1.3.0. Boş bırakılırsa yalnız SHA-256 özeti üzerine atılmış eski biçim imza doğrulanabilir: 0.55'te uyarıyla kabul edilir, 0.56'dan itibaren reddedilir."
+      "versionHint": "İmzanın adını verdiği sürüm, örneğin 1.3.0. Boş bırakılırsa yalnız SHA-256 özeti üzerine atılmış eski biçim imza doğrulanabilir: hâlâ kabul edilir; eklentinin satırındaki uyarı ne zamana kadar kabul edileceğini söyler."
     },
     "sourceHint": "Bir GitHub reposu (sahip/ad - filex son sürüme eklenmiş filex-storage.json dosyasını okur) ya da bir filex-storage.json dosyasının https adresi. filex bunu her gün denetler ve yeni bir sürüm olduğunda size söyler; siz onaylamadan hiçbir şey kurulmaz.",
     "checkUpdates": "Güncellemeleri denetle",

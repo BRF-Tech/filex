@@ -115,6 +115,8 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	// Office editing sessions (00092), the same way; nothing in it is a
 	// timestamp.
 	s.OfficeSessionSQL = &db.OfficeSessionSQL{Pool: sqlDB}
+	// Editing together (00107), the same way; times are Unix milliseconds.
+	s.CoEditSQL = &db.CoEditSQL{Pool: sqlDB}
 	// Vault write locks and idle times (00096), the same way; nothing in it
 	// is a timestamp.
 	s.VaultLockSQL = &db.VaultLockSQL{Pool: sqlDB}
@@ -184,6 +186,9 @@ type Store struct {
 	// The office editing sessions (internal/db office_session_sql.go,
 	// migration 00092).
 	*db.OfficeSessionSQL
+	// The editing-together relay's rows (internal/db coedit_sql.go,
+	// migration 00107).
+	*db.CoEditSQL
 	// The vault write locks and idle times (internal/db vault_lock_sql.go,
 	// migration 00096).
 	*db.VaultLockSQL

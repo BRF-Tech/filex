@@ -278,16 +278,19 @@ node scripts/test-shards.mjs e2e-check --shards 4 --browsers chromium,firefox,we
 **Go** has one list, `scripts/test-shards.json`:
 
 - `internal/api/handlers` and `internal/wasmplugin` each outlast every other
-  package (in 0.52 on the build host: 785 s and 424 s plain, about 150 and
-  70 minutes under `-race`). They are cut into units by **test file**, and a
-  unit runs `go test -run '^(TestA|TestB|…)$'` with the exact names its files
-  declare. The unit marked `rest` also runs every test file no unit lists: a
-  new file is tested without an edit of the list.
+  package (under `-race` on GitHub's runner at 0.55: about 215 and 78
+  minutes). They are cut into units by **test file**, and a unit runs
+  `go test -run '^(TestA|TestB|…)$'` with the exact names its files declare.
+  The unit marked `rest` also runs every test file no unit lists: a new file
+  is tested without an edit of the list.
 - Every other package belongs to a package unit, and the package `rest` takes
-  every package `go list ./...` knows that no unit names.
+  every package `go list ./...` knows that no unit names. The package units
+  are cut by subject and weighed: `db`, `io` (storage, sync and the WebDAV
+  and S3 servers), `auth` (the auth packages, and the SFTP, FTP and NFS
+  servers with the sign-in they share) and the rest.
 - A profile groups the units into jobs: `go` (plain `go test`, two handlers
-  units a job) and `race` (`go test -race`, one unit a job). A profile runs
-  every unit exactly once.
+  units a job, `io` + `auth` + rest in one) and `race` (`go test -race`, one
+  unit a job, `db` + `io` in one). A profile runs every unit exactly once.
 
 ```bash
 node scripts/test-shards.mjs go --profile race                  # the shards, as JSON
@@ -327,16 +330,48 @@ rebalance. `check --offline` needs no Go toolchain (it walks the tree for
 packages); `web/tests/deploy/testShards.test.ts` holds the same against the
 tree on every web test run.
 
-⚠ The first split is an estimate: no run had timed single tests, so each test
-weighs its letter range's share of the 0.52 `-race` shards' minutes
-(`weight_from` says so per unit). After a full run whose output carries the
-times (`go test -v` or `-json`; the chain's `-race` shards run `-v`), re-cut a
-package from them - one log of that package, or its shards' logs put together:
+**The split is cut from measured times.** ⚠ The longest `-race` shard is how
+long ci.yml's full run takes, and that run is the release's land → green gate
+(Release process, step 7; 50 minutes). 0.53's split was an estimate nobody
+re-cut: by 0.55 the handlers' rest unit had taken every new test file (244 →
+437 tests) and ran 57 minutes, the run 71-75. `scripts/test-times.json` holds
+what GitHub's `-race` jobs measured - per test file of a cut package and per
+other package, the median seconds over the runs its `source` names - and
+how those seconds become a job's minutes on that runner (`model`):
 
 ```bash
-node scripts/test-shards.mjs rebalance --package ./internal/api/handlers --from race-handlers.out          # prints the split
-node scripts/test-shards.mjs rebalance --package ./internal/api/handlers --from race-handlers.out --write  # saves it
+node scripts/test-shards.mjs estimate             # the minutes each -race shard will take; red past 35
+node scripts/test-shards.mjs rebalance            # the cut packages' file lists, from the times
+node scripts/test-shards.mjs rebalance --write    # saved, with every unit's weight_s
 ```
+
+A test file added since the measurement weighs its package's mean per test,
+and runs in its package's rest unit until the next `rebalance`.
+`web/tests/deploy/testShards.test.ts` is red when `estimate` puts a `-race`
+shard past `RACE_BUDGET_MIN` (35 minutes: a `-race` job may also wait ~8
+minutes for one of the organisation's 20 runners, and a slow runner takes up
+to 30% longer than the median one the estimate is for). Red on a cut package: run
+`rebalance --write`. Red on a package shard: move a package between the
+package units by hand and run `estimate` again (a package moves whole, so
+`rebalance` leaves those units alone), then `rebalance --write` for their
+`weight_s`. Keep the number of `-race` jobs: one more is a runner fewer for
+the rest of the run.
+
+Re-measure when a release's `-race` shard ends far from its estimate. Each
+`-race` job keeps its `-v` log as the artifact `race-<shard>` for 7 days:
+
+```bash
+for r in <run id> <run id>; do gh run download "$r" -R BRF-Tech/filex -p 'race-*' -D "race-logs/$r"; done
+node scripts/test-shards.mjs times --from race-logs --source "GitHub Actions ubuntu-latest: the -race jobs of runs <ids> (<versions>)" --write
+node scripts/test-shards.mjs rebalance --write
+```
+
+`times` keeps the file's `model`: set it by hand from a run's job minutes
+when the runner changes (`$comment` says how it was measured). One log of a
+cut package (`go test -json` or `-v`) can still re-cut that package alone:
+`rebalance --package ./internal/api/handlers --from race-handlers.out
+[--write]`. The chain's cut shards run a prebuilt binary and print no package
+line: `times --package <pkg>` says whose tests they are.
 
 ### Against the real servers
 
@@ -394,7 +429,9 @@ above): the chain asks `node scripts/test-shards.mjs go --profile go|race
 --format chain` for them, so it splits the Go suite exactly the way every
 other runner does. Each job is named after its shard (`go-handlers-1-2`,
 `race-handlers-3`, `race-rest`), and its expected minutes come from the
-list's weights. A `-race` shard of a cut package runs `-v`, so its
+list's weights - GitHub's seconds, scaled to the host (`SHARD_TIMING` in
+`scripts/chain/plan.mjs`: 0.8 for a cut shard, 0.67 for a package one). A
+`-race` shard of a cut package runs `-v`, so its
 `out/race-<shard>/race.out` is what `rebalance` reads: put a package's
 shards' logs together (`cat out/race-handlers-*/race.out`) and re-cut it from
 the times of a real run.
@@ -405,7 +442,10 @@ its fast gates, then only what is asked for (`CHAIN_GO_PKGS`,
 `CHAIN_RACE_PKGS`, `CHAIN_MIGRATE=1`, `CHAIN_CY_SPECS`, `CHAIN_E2E_GREP` on
 `CHAIN_E2E_BROWSERS`, and `CHAIN_EXTRAS` - nightly extras by name, such as
 `s3-live`, or `shots` for a release's pictures, which `CHAIN_SHOTS_ONLY`
-narrows to some shot scripts).
+narrows to some shot scripts). `CHAIN_E2E_GREP` reaches Playwright's `--grep`
+as one argument, spaces and all (a test title, or `01-smoke 02-`): a browser
+line's arguments travel to its job one a line (split into words, as they
+were before #244, every word after the first became a file filter).
 
 **Memory decides what runs at once.** Every job is budgeted for the memory
 its container was measured to hold on the build host (`WEIGHTS` and
@@ -424,8 +464,29 @@ smaller, and `chain.log` names the containers that are not the chain's and
 what they hold. Another workload on the host makes a run longer, not red.
 `web/tests/deploy/chainSchedule.test.ts` replays a full run with the measured
 minutes through the same scheduler and holds the budget, `-race` running next
-to Chromium, the three-hour bound, and that every job runs on a smaller
-budget.
+to Chromium, one heavy writer at a time, the three-hour bound, and that every
+job runs on a smaller budget.
+
+**One heavy writer at a time.** The build host's disk (an NVMe without its
+own DRAM, nearly full) stops for seconds when two jobs that write a lot
+fsync together, and everything that waits on it that minute - a login, an
+upload, a test that waits a fixed time - waits with it. `IO_HEAVY_JOBS` and
+`ioOf` in `scripts/chain/plan.mjs` mark the jobs measured to write gigabytes
+in a run (`result.json` `load.written_gb`): the Playwright lines that run the
+suite or a part of it (not one that a `--grep` narrows to a few specs),
+`race-rest`, `go-io-rest`, `race-db-io` and `shots`; every other job of a full
+run wrote under 1 GB (`race-auth`, cut from `race-rest` and `race-db-io` in
+#174, is light until a night measures it). At most `CHAIN_IO_HEAVY_MAX` (1) of them run at once,
+the browser round's line included. A heavy line of the round waits for the
+heavy pool job running, at most `CHAIN_IO_WAIT_MIN` minutes, and from the
+moment the round turns to it the pool starts no heavy job; a heavy pool job
+waits without holding memory back, so the light jobs behind it go on, and
+runs in a lane of its own beside the `CHAIN_POOL_MAX` light ones. In practice
+the pool's heavy jobs run after the round's heavy lines, one after another:
+a full run takes about half an hour longer. `run.mjs --plan` marks them in
+its `disk` column, `chain.log` says when the round waits, and `result.json`
+records each job's `io` and `host.io_wait_secs`. `CHAIN_IO_HEAVY_MAX=0` turns
+the rule off.
 
 **The host's pressure.** Every 5 s the run reads the kernel's pressure stall
 information (`/proc/pressure`), the write latency of the disk it writes to
@@ -439,7 +500,21 @@ Go build directory stays on the disk), and so is a Playwright line's
 `e2e/test-results`: every test's trace and video is written there and deleted
 when it passes, and a red test's are copied to the run. Firefox keeps its HTTP
 cache in memory and no history database (`e2e/playwright.config.ts`), as a
-Chromium context does: before that the Firefox line wrote 33-34 GB in a run. Before a Playwright line the round
+Chromium context does: before that the Firefox line wrote 33-34 GB in a run.
+A Playwright line's `/tmp` is a tmpfs of its own (`CHAIN_BROWSER_TMPFS_GB`,
+6), and that is where everything the line wrote to the disk went: the
+browser's profile, the filex server's data directory (its database, search
+index and log) and the storages the specs make, and Chromium's shared memory
+(Playwright starts it with `--disable-dev-shm-usage`, which puts its shared
+memory in files under `/tmp`). Most of the 11.8 GB the Firefox line wrote was
+the panel's service worker precaching the app into every context's storage,
+50 fsyncs a second; on the disk a closed context's storage stayed in the one
+profile, on the tmpfs Firefox empties it. The same 125 Firefox tests wrote
+2.11 GiB with `/tmp` on the disk and nothing on the tmpfs, in 4 min 19 s
+instead of 7 min 51 s. The shots job is the same harness and gets the same
+`/tmp` (its run directory, with the binary it builds and runs, each scene's
+server data and the browser's profile; 1.3-1.43 GiB a night on the disk);
+its pictures stay in the tree. Before a Playwright line the round
 waits for `CHAIN_TEMP_QUERY` to cool to `CHAIN_TEMP_MAX`, at most
 `CHAIN_TEMP_WAIT_MIN` per line and `CHAIN_TEMP_WAIT_TOTAL_MIN` in a run. A
 timeout in a run is first a question about the host: memory "full" of 0.3, or
@@ -1307,6 +1382,75 @@ filex has two kinds:
 
 ---
 
+## Compatibility window for plugins and apps
+
+What a storage plugin or an app sends filex - a build signature, a manifest
+field, a host function, a call of the interface bridge, a field of the storage
+protocol - is a contract with code this repository does not build. Nobody
+should have to rebuild a plugin for every minor release, and nothing they
+built should stop working without notice. So when you replace one of these
+with a newer form:
+
+- **Keep accepting the old form, with a warning, for at least 6 minor
+  releases or 12 months, whichever is longer**, counted from the release that
+  first warns about it (normally the one that ships the replacement). A plugin
+  or an app published, built or signed for that release then runs unchanged
+  through the window. The warning goes where the administrator looks (the
+  plugin's or the app's row, its log, the audit row) and names the end of the
+  window; a sentence a person reads is the server's (`srvtext`) and takes the
+  end as `{version}` and `{date}`.
+- **Register the window** in `backend/internal/compat/windows.json` in the same
+  change: `id`, `form` (one sentence), `since` (`MAJOR.MINOR`), `since_date`
+  (that release's date) and `docs` (the page and anchor that describe the
+  form). The code that accepts the old form reads the end with
+  `compat.Get(id).Until()` - never a literal release, in code, in a sentence or
+  in a comment. Add its row to the table below and to the author's page:
+  [PLUGINS.md → Compatibility window](PLUGINS.md#compatibility-window) for a
+  storage plugin, [PLUGIN-KIT.md → Compatibility window](PLUGIN-KIT.md#compatibility-window)
+  for an app.
+- **Say it in the CHANGELOG** of that release: what is old, what replaces it,
+  and the window's end.
+- **Never promise an earlier end.** 0.55 wrote that 0.56, one release later,
+  would stop taking the old storage plugin signature; the rule replaced that
+  promise. A page, a sentence or a comment either states the end from
+  windows.json or says "during its compatibility window".
+
+Removing an old form, once its window is over:
+
+1. The release that will refuse it is past the window:
+   `compat.Get(id).Open(release, date)` is false for it - its version is at
+   least the window's end version and its date is not before the end date.
+2. A published release already announced it: its CHANGELOG section names the
+   `id` and the release that will refuse it. That release is `announced`; it
+   is published before the removal is, so the removal lands at least one
+   release after the notice.
+3. The removing change sets `announced` and `removed` (the release that refuses
+   it) on the window instead of deleting the row, takes the row out of the
+   author's page, and puts the removal under `### Removed` in the CHANGELOG,
+   naming the `id`.
+
+`web/tests/docs/compatWindow.test.ts` holds the rest to windows.json: the
+rule's numbers on this page and the authors' pages, the table below and the
+authors' tables, no living page, catalogue sentence or plugin source comment
+promising a refusal in a release later than the last published one other than
+at a window's end, and, for a `removed` window, an end it does not cut short and
+an `announced` section that is published, earlier and names the `id`.
+`backend/internal/compat` tests the arithmetic.
+
+Old forms still accepted:
+
+| id | Old form | Since | Accepted at least until (the later of the two) | Described in |
+|---|---|---|---|---|
+| `storage-build-signature-sha256` | A storage plugin build signature over the SHA-256 alone | 0.55 (2026-10-09) | 0.61 and 2027-10-09 | [PLUGINS.md → What is signed](PLUGINS.md#what-is-signed) |
+
+Older spellings filex still reads have no window: an app manifest's
+`min_filex` (beside `filex`), the `public_page_*` host functions and the
+`PublicPage*` wrappers (beside `share_*`), and the `libreoffice` engine name
+(for `office`). They are accepted with no end; retiring one starts its window
+at the release that first warns about it, with a row here.
+
+---
+
 ## Docs
 
 Doc updates live alongside code changes in the same PR. The pattern:
@@ -1331,6 +1475,20 @@ Doc updates live alongside code changes in the same PR. The pattern:
   the Gotchas list is where somebody looks after their change did nothing) and
   the page that owns the feature.
 - Behaviour change → CHANGELOG entry under `## [Unreleased]`.
+
+**A user guide says what is, briefly, and links the rest.** A page opens with
+what it is for and its short path (install, switch on, first use), then its
+reference. A fact lives on one page and the others link to it; the README keeps
+the short tour and every feature's full entry is in [FEATURES.md](FEATURES.md).
+History - "since 0.50", "used to", "fixed after", which release changed what - is
+the CHANGELOG's: a guide keeps only what a reader on today's version needs (a
+version a feature needs, an upgrade note that still bites). A reason or a
+measurement behind a behaviour that the CHANGELOG does not hold goes under
+[Background notes from the user guides](#background-notes-from-the-user-guides),
+and the guide links it where a reader would ask why. (#218: a reader on
+r/selfhosted called the docs "extremely verbose and lengthy documentation that
+is unclear at times"; the README was 20,270 words and #218 made it 5,937, with
+the rest in FEATURES.md.)
 
 **A plain hyphen, never a long dash.** Documentation, the changelog, filex.sh,
 store listings and package descriptions write `-` where a text would reach for
@@ -1367,6 +1525,505 @@ label, glossed once: the desktop app's own windows (*Settings → Accounts*,
 pack the explorer inside them wears. `scripts/check-links.mjs` and `scripts/check-doc-anchors.mjs`
 read every `README.*.md` at the root; the long-dash test reads every tracked
 markdown file, these included.
+
+---
+
+## Background notes from the user guides
+
+Reasons, measurements and design history that used to sit in the user guides
+(#218), kept for whoever changes the code behind them. Each guide links the note
+it relies on; the release that made a change is in the CHANGELOG.
+
+### Configuration background
+
+Notes behind [CONFIGURATION.md](CONFIGURATION.md).
+
+#### Configuration escrow adoption and its second variable
+
+`FILEX_INSTALLATION_E2E_ESCROW_KEY` is an install-time setting: any later change
+stops the server. Adoption is the one supervised exception, and it exists
+because the alternative was worse: escrow could only ever be chosen in the
+first second of an installation's life, and nobody decides key-escrow policy
+before they have a single file
+([E2E-ENCRYPTION.md → Adopting escrow](E2E-ENCRYPTION.md#adopting-escrow-on-an-installation-that-already-exists)).
+
+Why adoption takes a separate variable (`FILEX_INSTALLATION_E2E_ESCROW_ADOPT=1`)
+rather than "the key appeared, so they must have meant it": an escrow key
+arrives by being pasted into a compose file, a Helm values file or a `.env`,
+usually copied from another deployment. That is the shape of an accident, and
+the accident is silent - the installation gains a second key holder, only new
+folders get it, and nothing looks wrong until somebody needs the key on an old
+folder. One extra line, in the file the operator is already editing, is the
+smallest thing that is still a decision.
+
+#### Configuration trusted proxies and the gateway
+
+Why `auto` carves the gateway and filex's own address out of a container
+network ([CONFIGURATION.md → Trusted proxies](CONFIGURATION.md#trusted-proxies)),
+measured on Docker 29 and Podman 5.8:
+
+- a connection to a port published on `127.0.0.1` is relayed by `docker-proxy`
+  and reaches the container from the gateway (`172.x.0.1`), and a host process
+  that dials the container's address directly arrives from it too; rootful
+  Podman relays from `10.88.0.1` the same way. Trusting the gateway would let
+  anything that reaches the published port choose its own address;
+- rootless Podman on a user-defined network relays every published-port
+  connection - from the internet too - from the container's **own** address;
+- a client on the LAN that reaches a published port arrives with its own
+  address, which `auto` does not trust either.
+
+Whether an interface is a `veth`, a macvlan or an ipvlan is asked of the kernel
+over netlink (what `ip -d link` reads); `/sys/class/net` shows the three the
+same way, so it cannot be used to tell them apart.
+
+#### Configuration antivirus restart in both directions
+
+The ClamAV switch, mode and clamd address
+([CONFIGURATION.md → Antivirus (ClamAV)](CONFIGURATION.md#antivirus-clamav))
+apply only after a restart, in both directions, because the scan pipeline is
+wired once at boot: the queue handler is registered and the write paths are
+handed an enqueue function only when scanning resolved as available.
+
+This is a deliberate choice, not an oversight. Making "off" immediate while
+"on" stayed deferred - the shape a naive implementation falls into, since
+suppressing work is easy and creating a worker-pool handler at runtime is not -
+would give a control that is sometimes live and sometimes not, with no way to
+tell which from looking at it. The scan-size ceiling and the save-scan window
+are read per file: they tune a pipeline that is already running, while the
+three restart-bound settings decide whether it exists.
+
+#### Configuration ClamAV save-scan window bounds
+
+Why `FILEX_CLAMAV_SAVE_WINDOW_MINUTES` (`antivirus.save_scan_window_minutes`) is
+held to 2-60 minutes and refuses `0`
+([CONFIGURATION.md → The editor save-scan window](CONFIGURATION.md#the-editor-save-scan-window)):
+
+- **2 minutes minimum**: a save every couple of minutes is still one editing
+  session, so a shorter window stops coalescing anything while multiplying
+  scans.
+- **1 hour maximum**: the window *is* the time an infected file written through
+  the editor stays live. Longer is not a tuning preference, it is a different
+  security posture.
+- **`0` refused**: it reads equally as "scan every save" and "never scan", which
+  are opposite behaviours, and the second would silently re-open the gap the
+  window lives inside. Turning scanning off is the separate switch
+  (`antivirus.enabled`), which is explicit about being a separate control and
+  about applying at the next restart.
+- A value out of range is refused on save, so the administrator finds out while
+  looking at the field; one already stored out of range is clamped on read with
+  a WARN rather than refusing to boot over a scan interval.
+
+#### Configuration delete workers and object stores
+
+`FILEX_OPS_DELETE_WORKERS` (default 4, [CONFIGURATION.md → File operations](CONFIGURATION.md#file-operations-copy--move--delete))
+exists because on an object store every trashed file is several round trips:
+deleting one item at a time, a delete job of tens of thousands of files ran for
+hours. `1` restores that one-at-a-time behaviour.
+
+#### Configuration migrations behind the vault and co-editing
+
+The vault's write lock is the `vault_locks` table (migration 00096). The
+co-editing relay keeps its sessions in the database (migration 00107) and the
+members' cursors in `coedit_cursors` (migration 00109), which is how several
+filex processes on one database serve the same sessions
+([CONFIGURATION.md → Editing together](CONFIGURATION.md#editing-together)).
+
+### Desktop app background
+
+Notes behind [DESKTOP.md](DESKTOP.md).
+
+#### Desktop snap without Chromium's sandbox
+
+Chromium's sandbox inside a snap needs `browser-support` with
+`allow-sandbox: true`, which Snapcraft limits to trusted publishers, never
+connects by itself, and reviews by hand. 0.50 and 0.51 asked for it (as a
+`browser-sandbox` plug, with `sudo snap connect filex-app:browser-sandbox` to
+connect it); their revisions waited in the Snap Store's manual review and the
+stable channel stayed on 0.49. Since 0.52 the snap asks for no such permission,
+as Snapcraft advises for Electron apps, and its updates reach the stable channel
+again by themselves. A `browser-sandbox` connection made by hand goes away with
+the plug; there is nothing to undo. The cost, which the user guide states, is
+that the confinement walls the app off from the system but not the pages it
+shows from the app ([DESKTOP.md → The snap and the sandbox](DESKTOP.md#the-snap-and-the-sandbox)).
+
+The release check: every release installs the snap on x64 and arm64 Ubuntu
+24.04 machines before it publishes, and checks that it asks for no
+`allow-sandbox` and that every process of the app runs under the snap's
+AppArmor profile, in enforce mode, with a seccomp filter. Measured on Ubuntu
+26.04 (x64) with a snap built this way: `browser-support` connected by itself,
+nothing was left to connect for the app to open, and its browser, zygote,
+renderer, GPU and utility processes all ran as
+`snap.filex-app.filex-app (enforce)` with a seccomp filter.
+
+In 0.55 the snap moved from `core20` to `core24` with Snapcraft's GNOME
+extension; how it is confined and what it may reach did not change, and the
+window still opens through X11 (XWayland on a Wayland desktop).
+
+#### Desktop AppImage and the sandbox, how it got here
+
+- Up to 0.49 an AppImage that could not build Chromium's sandbox simply did not
+  appear, and the reason was only on a terminal: `The SUID sandbox helper
+  binary was found, but is not configured correctly`. 0.50 added the launcher
+  that shows the steps and exits with code 78.
+- Up to 0.49 the AppImage's own menu entry - the one AppImageLauncher, Gear
+  Lever and appimaged copy - started the app with `--no-sandbox`
+  (electron-builder's default), on every distribution. Since 0.50 it does not,
+  so an integrated AppImage on Ubuntu 23.10 and later needs the AppArmor
+  profile like any other.
+- The AppImage's entry point `AppRun`, as electron-builder 26 writes it, adds
+  `--no-sandbox` by itself whenever it cannot create a user namespace - which,
+  without the profile, is always on Ubuntu 23.10 and later. So the AppImage
+  keeps the entry point it had up to 0.54 (electron-builder 24's), which passes
+  on exactly the arguments it was given, and without the profile the launcher
+  still stops and shows the steps (0.55).
+
+#### Desktop code signing
+
+The downloads are not code-signed yet, and that is a real gap, not something
+to wave away: a signing certificate is a paid, separate step. On macOS the app
+is ad-hoc sealed because without that seal macOS 26 does not warn but
+*refuses* - "malware blocked and moved to Trash", no override (CHANGELOG
+0.20.3). Signing and notarization are the actual fix there, the same paid
+decision as on Windows.
+
+#### Desktop bearer token as a function
+
+The app authenticates with a bearer token rather than a cookie, and hands the
+explorer a *function* that returns the current account's token - the token
+changes when you switch accounts, and a value captured once would be the wrong
+account's. Up to v0.13.4 the explorer read that header builder synchronously,
+which quietly dropped a token supplied that way: the OnlyOffice config request,
+the starred list and recently-opened all answered `401`, and an editor that
+cannot fetch its own config simply never appears. The builder is asynchronous
+since and every viewer waits for it. In the same versions **Open in new tab**
+resolved its relative link against the app's internal `app://filex` origin, an
+address no operating system can open, so the menu entry did nothing visible
+(CHANGELOG 0.14.0).
+
+#### Desktop Open with filex, why it exists
+
+Most Linux desktops have no Microsoft Office, many Macs have none, and plenty
+of Windows machines have none either; filex already had a good editor, and the
+documents on the desktop had no way into it. The type list is deliberately
+office documents and `.csv` only: taking a file type away from an app that
+handles it better is not an improvement. `.csv` is in it for what the editor
+does with it - a save as CSV keeps the file's delimiter, byte order mark, line
+ends and the text of every cell nobody changed, which neither a text editor nor
+a spreadsheet app without import settings gives you. The strip that names the
+local target file under the editor is there because you are editing a copy and
+should see where it goes home to, and a save that fails silently is the one
+outcome the feature must never produce.
+
+#### Desktop default apps per operating system
+
+- **Windows**: since Windows 10 the `UserChoice` registry key is protected by a
+  hash over the extension, the account's SID and a Microsoft salt. An
+  application cannot write it, and forging that hash is exactly what the
+  protection exists to stop; an installer that appears to manage it is either
+  overwriting the plain `.docx` ProgId behind your back or tampering. So the
+  button opens the Default apps page.
+- **macOS**: the API exists (`LSSetDefaultRoleHandlerForContentType`) but
+  Electron exposes no binding for it, and filex ships no native code.
+
+#### Desktop window and settings choices
+
+- There is no appearance switch in the app's *Settings* on purpose: the theme
+  is a choice about the file list, and a second switch would be a second answer
+  to the same question.
+- *Shortcuts* and *Restart the tour* used to sit behind the "..." at the top
+  right of the file list; they are in the avatar menu now.
+- *Start when I sign in* shows what the OS did, not what was asked for:
+  policies and sandboxes refuse the request often enough that showing the app's
+  own intent back would be a lie.
+
+#### Desktop drag-out link timing
+
+The web explorer asks for the one-file drag link while the pointer rests on a
+row and again on press. Measured against a local server (2026-09-25, e2e 71): a
+mint takes 3-4 ms in the browser's own request timing (n = 6), and 66 ms passed
+from Playwright starting to hover the row to the link being in hand - a person
+rests on a row far longer than either before a drag, so the gap only shows over
+a very slow connection.
+
+Measured with a real mouse in `e2e/tests/71-admin-drag-out-link.spec.ts`
+(bearer: row, ⌘K result, the bytes behind the link, a drag that beats the link,
+the cookie session) and `e2e/tests/47-palette-everywhere.spec.ts`; the server
+side in `backend/internal/api/handlers/download_link_test.go`.
+
+### ONLYOFFICE background
+
+Notes behind [ONLYOFFICE.md](ONLYOFFICE.md).
+
+#### ONLYOFFICE Test, the measurement behind the JWT line
+
+The Test's second request without a token, and what a Document Server with JWT
+off does, were measured with Docs 9.4 (`e2e/realenv`, the S2 case of issue #80):
+its log says `checkJwt error ... invalid signature` for the editor and `... is
+not allowed. Because, It is private IP address` for the download. A Document
+Server that refuses the probe's signature is reported as **unmeasured** rather
+than as a broken route because that is a JWT problem, and sending the operator
+to the wrong address would be worse than saying nothing
+([ONLYOFFICE.md → Three machines, three addresses](ONLYOFFICE.md#three-machines-three-addresses)).
+
+#### ONLYOFFICE private-address filter, where the table comes from
+
+The table in [ONLYOFFICE.md → Failure: editor shows "Download failed"](ONLYOFFICE.md#failure-editor-shows-download-failed)
+was read from the ONLYOFFICE server source: 7.4.0 changed
+`request-filtering-agent.allowPrivateIPAddress` from `true` to `false`
+([e0aaeee6](https://github.com/ONLYOFFICE/server/commit/e0aaeee64331aff30270251bba1d830c65568346)),
+7.5.0 added `allowPrivateIPAddressForSignedRequests`, default `true`
+([1deefe3e](https://github.com/ONLYOFFICE/server/commit/1deefe3ee2b4483f0ad717172352508fcb39877e)),
+and 8.1.0 replaced it with `externalRequest`
+([446245c0](https://github.com/ONLYOFFICE/server/commit/446245c0aa3282e8b3c8999170cee03303f55d3c);
+defaults in the [server configuration reference](https://api.onlyoffice.com/docs/docs-api/get-started/configuration/server-config/)).
+
+#### ONLYOFFICE save scan, why it is not deferred
+
+A finished document (callback status 2) is scanned at once rather than on the
+save window's timer: scanning it on a timer would buy no coalescing (there is
+only one save to coalesce) and would leave it unscanned for up to a full
+window. The window is only worth paying for where saves actually repeat, which
+is force-save (status 6)
+([ONLYOFFICE.md → When the scan runs](ONLYOFFICE.md#when-the-scan-runs-and-why-the-status-code-decides-it)).
+
+#### ONLYOFFICE session records and the cache
+
+The `office_sessions` table (migration 00092) has filex's in-process cache in
+front of it (`internal/memcache`; no Redis, nothing outside the process). It
+only makes the frequent reads cheap - every editing config asks whether its
+session is recorded already. The decisions - may this save go over the file,
+did the person drop it, is the editor's session still current - are always
+read from the database, because another instance's answer is not in this
+instance's cache; a write goes to the database first and to the cache only when
+the database took it. The modification time is stored as an integer (Unix
+nanoseconds), so it compares exactly on every engine
+([ONLYOFFICE.md → When the document changes while it is open](ONLYOFFICE.md#when-the-document-changes-while-it-is-open)).
+
+#### ONLYOFFICE new documents, why the bytes are built in
+
+New office documents are minimal valid documents embedded in the binary
+(`backend/internal/newdoc`), not made by the Document Server or LibreOffice,
+because `:slim` and the bare binary deliberately carry no external tools, and a
+feature that works on one image and answers 500 on another is worse than one
+with a narrower promise. The server only states which service a type's editor
+needs (`newdoc_types[].requires`) and the client resolves it, deliberately: an
+embedder may point at a document server this process cannot reach, so the
+client is the only place that knows the true answer. What the client must not
+do is re-derive the dependency from an extension list of its own - that list
+rots the moment the registry grows a type
+([ONLYOFFICE.md → Creating new documents](ONLYOFFICE.md#creating-new-documents),
+[BACKEND.md → Rules the server publishes](BACKEND.md#rules-the-server-publishes)).
+
+#### ONLYOFFICE CSV measurements
+
+- Opening a CSV with `document.options` filled in (delimiter and UTF-8) was
+  measured on Docs 9.4: ready in about 4 seconds, no "Choose CSV options"
+  dialog.
+- The filex process that refused a CSV save gives the next opening of the file
+  a new editing session because, measured on Docs 9.4, an editor opened on the
+  session whose save was refused never finished loading.
+- Every cell rule below is pinned by the bytes a Docs 9.4.0 saved
+  (`backend/internal/onlyoffice/csv_keep_measured_test.go`).
+
+#### ONLYOFFICE CSV cell values as measured
+
+[ONLYOFFICE.md → Cells nobody changed keep their text](ONLYOFFICE.md#cells-nobody-changed-keep-their-text)
+gives the rules; these are the values behind them, as measured. 0.51.0 put
+back only the file's delimiter, byte order mark and line ends; measured on
+0.51.0 with Docs 9.4.0, one cell edited in a semicolon file, the editor in
+English, in cells nobody had touched `05320000001` came back as `5320000001`,
+`007` as `7`, `000` as `0` and `01.02.2026` as `1/2/2026` (`15.03.2026`
+stayed: ONLYOFFICE read the month first, and 15 is no month), and every data
+row gained an empty cell at its end; with the editor in Turkish the dates came
+back as `1.02.2026`. In the lists below, "written as in 0.51.0" means the
+file's delimiter, byte order mark and line ends with ONLYOFFICE's values.
+
+"The same value written ONLYOFFICE's way" is what Docs 9.4.0 was measured
+writing for a cell nobody touched (the editor in English, Turkish, German and
+French), and nothing else. It is one way only: `7` is what ONLYOFFICE writes
+for `007`, so the file keeps `007`; `007` is never what it writes for `7`.
+
+- **A whole number** without its leading zeros (`007` and `7`, `05320000001`
+  and `5320000001`), its `+` (`+905320000001` and `905320000001`) or the
+  spaces in front of it and one after it (` 42` and `42`); one written as
+  hexadecimal (`0x10` and `16`); and one too long for a spreadsheet's number:
+  `9007199254740993` comes back as `9007199254740992`, `123456789012345678`
+  as `1.2345678901234568e+17`, and every one from 2^63 up, either way, as
+  `-9.2233720368547758e+18` (`12345678901234567890`, a 24-digit account
+  number).
+- **A number with a decimal point**, which ONLYOFFICE keeps to six decimals:
+  `03.50` and `3.50`, `0.1234567` and `0.1234570`, `+1.5` and `1.5`; with
+  nothing before the point, `.5` as `.0` (the value gone) and `-.5` as
+  `-0.5`. Never a decimal comma: `3,5` is text to ONLYOFFICE in every
+  language measured and comes back as it was.
+- **A date with a four-digit year from 1900 on**, written the way the editor's
+  language writes one, with the same three numbers in the same order. In
+  English month/day/year without leading zeros: `01.02.2026`, `01/02/2026`
+  and `1-2-2026` as `1/2/2026`. In Turkish day.month.year, the month in two
+  digits: `01.02.2026`, `1/2/2026` and `1-2-2026` as `1.02.2026`, `15/3/2026`
+  as `15.03.2026`. An ISO date: `2026-02-01` as `2/1/2026` and as
+  `1.02.2026`.
+- **`true` and `false`**, saved as `TRUE` and `FALSE` (`True` comes back as it
+  was).
+- **A tab inside a cell**, which ONLYOFFICE drops (unless the file is
+  tab-separated), and a text longer than 32767 characters, which it cuts
+  there.
+
+⚠ Nothing that only looks like one of these. A date ONLYOFFICE does not read
+as one (`15.03.2026` in English, the 15th month) comes back as it was, and
+what a person types over it is theirs: in the English editor a typed
+`15/3/2026`, `01.02.2026` or `1.2.2026` is saved as typed, and the file gets
+it. That is also why German's `01.02.2026` and French's `01/02/2026` are no
+rule. A line end inside a quoted cell comes back as it was. Every rule is
+pinned by the bytes a Docs 9.4.0 saved
+(`backend/internal/onlyoffice/csv_keep_measured_test.go`).
+
+⚠ What is still written as ONLYOFFICE writes it:
+
+- **The cell you edit.** Type `007` into a cell and the file gets `7`.
+- **A change that is only another way of writing the same value** cannot be
+  made in ONLYOFFICE. It shows `007` as `7` already and saves the same text
+  whether or not somebody retyped it, so filex cannot tell the two apart and
+  the file keeps `007`. Edit the file as text for that.
+- **What ONLYOFFICE changes in a way no rule puts back**, edited or not
+  (measured, every language unless said): a time (`08:05:30` as `8:05`,
+  `00:13` as `0:12`, a minute short), a percent (`12.34%` as `12.3%`), a
+  number with an exponent (`1e3` as `1000.00000`), `5.` as `5`, a date with a
+  time (`2026-02-01T10:30:45Z` as `2/1/2026 10:30`), a two-digit year
+  (`01.02.26` as `1/2/2026`), a year before 1900 (`01.02.1850` as
+  `1/2/3750`), a day that is not in its month (`31.02.2026` as `3.03.2026`
+  in Turkish), a formula (`=1+1` as `2`). Keep such a file out of
+  ONLYOFFICE, or edit it as text.
+- **A date in an editor language other than English and Turkish**, unless
+  that language happens to write it the English or the Turkish way (German
+  writes `15/3/2026` as `15.03.2026`, which is the Turkish way, and it is
+  kept; `1.2.2026` as `01.02.2026`, which is not). Since 0.54 the editor
+  opens in the language of the person who edits
+  ([The editor's language](ONLYOFFICE.md#the-editors-language)), so this is a person whose
+  filex speaks German, French or another language ONLYOFFICE has - or
+  everybody, when the administrator fixes such a language. The same goes for
+  a regional setting other than the language's own (`en-GB` writes day first).
+- **A date typed as text in the way the other language writes one.** The
+  English editor keeps a date typed with dots as text (measured: `01.02.2026`
+  and `1.2.2026` typed are saved as typed). Typed as `1.02.2026` over a cell
+  whose text has the same three numbers in the same order (`1.2.2026`), it is
+  the Turkish way of writing that text, and filex keeps the file's; the same
+  holds the other way round for a date the Turkish editor cannot read
+  (`1/13/2026` typed over `01/13/2026`). Only the spelling is lost: the
+  numbers and their order are the cell's.
+- **A file that is not UTF-8** (ONLYOFFICE asked for its encoding when it
+  opened): its text cannot be compared with what ONLYOFFICE saved, so its
+  first save is written as in 0.51.0, in UTF-8 with a byte order mark. From
+  then on it is a UTF-8 file and its cells are kept.
+- **A file over 64 MiB or two million rows, or with a row of more than 16384
+  cells** (as many columns as an ONLYOFFICE sheet has): written as in 0.51.0.
+- **A column added, removed or moved**: the cells from that column on are
+  written as ONLYOFFICE saved them, in every row. The cells before it keep
+  their text only while they are more than half of the row's filled cells;
+  otherwise the whole row is ONLYOFFICE's. A last column that was removed
+  leaves an empty cell at the end of each row.
+- **A row filex cannot tell from a new one**: a row in which half of the cells
+  or more were changed at once, a row that was edited and also moved (edited,
+  then the list sorted), and every one of several rows that differ only in
+  how a value is written (`A;007` and `A;7`) when one of them was deleted or
+  another added.
+- **A row typed to read like another row of the file** (`5` typed where
+  another row says `05`) is written as typed while the rows around it stand
+  where they stood. When rows were added, deleted or moved there in the same
+  save, or that other row was itself changed, filex cannot tell which of the
+  rows that now read the same is the file's: the first of them in the save
+  gets the file's text, `05`.
+
+### Apps background
+
+Notes behind [APP-PLUGINS.md](APP-PLUGINS.md).
+
+#### Apps store screen row rule
+
+Whether the navigation's **Apps → App store** row is drawn is one rule in the
+explorer for every host: the host has the page, the caller is a person (a
+browser session or the desktop app's own pairing), and the server shows them
+the screen. Keeping it one rule is why the web app and the desktop app cannot
+disagree about it ([APP-PLUGINS.md → The store screen](APP-PLUGINS.md#the-store-screen)).
+
+#### Apps hidden actions are not switches
+
+An app's hidden actions (e-Signature's *Apply a signer's submission*, a
+scheduled *expire*) are its machinery. Before 0.43.0 they were offered as
+switches under **Menu actions**, and switching one off half-broke the app in a
+way no menu showed. They are no longer listed, an override sent for one is not
+stored, and one already in the table is not honoured
+([APP-PLUGINS.md → What the administrator controls after install](APP-PLUGINS.md#what-the-administrator-controls-after-install)).
+
+#### Apps screen rules
+
+The three rules filex enforces on every screen an app describes - every choice
+visible, nothing behind "advanced", one step asks one thing - hold whichever
+app drew the screen because a form that hides what it is asking is the same bug
+in every app. And filex refuses to install an app whose own screens miss a
+language it promised: a half-translated screen is the author's bug, and the
+author should meet it before an administrator does
+([APP-PLUGINS.md → What a person sees](APP-PLUGINS.md#what-a-person-sees)).
+
+#### Apps open-with choices from before 0.50
+
+Since 0.50 a person's "always open this kind with this app" choice is one
+record on the account. Choices an earlier build kept per surface (in each
+surface's preference document) were adopted once: those of the surface
+document written last
+([APP-PLUGINS.md → Default apps](APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)).
+
+#### Apps e-Signature certify seal and lock
+
+The closing of a completed signature request - the first signature certifies
+(DocMDP P=2), filex seals the whole file (P=1), the SHA-256 of the sealed bytes
+goes to every party, and the signed file can stay locked - is the owner's
+answer (2026-09-22) to the question "after a document is fully signed and
+someone changes it, does the signature say so, or do we lock the file?": both,
+plus a seal ([APP-PLUGINS.md → When it is done](APP-PLUGINS.md#when-it-is-done)).
+
+#### Apps signing authority import of p12
+
+The signing authority import takes PEM only, and the page tells the operator to
+convert an encrypted `.p12`/`.pfx` first
+(`openssl pkcs12 -in ca.p12 -nodes -out ca.pem`): the encrypted containers in
+the wild are more varied than any one library reads, and a half-supported
+import is worse than an honest instruction
+([APP-PLUGINS.md → The signing authority](APP-PLUGINS.md#the-signing-authority)).
+
+#### Apps signing certificates for documents only
+
+Before 0.50.0 a signer's certificate and the platform seal also carried
+emailProtection. With the name and the address the app chose, that made each
+one an S/MIME certificate under the operator's authority. Since 0.50.0 they
+carry only the document-signing usages (RFC 9336's `1.3.6.1.5.5.7.3.36` and
+Adobe's `1.2.840.113583.1.1.5`); a seal issued before is replaced the next time
+it is used
+([APP-PLUGINS.md → The signing authority](APP-PLUGINS.md#the-signing-authority)).
+
+### Protocols background
+
+Notes behind [PROTOCOLS.md](PROTOCOLS.md).
+
+#### What an SMB server for filex would take
+
+The user's answer is in [PROTOCOLS.md → Why there is no SMB server](PROTOCOLS.md#why-there-is-no-smb-server);
+this is the size of the job behind it.
+
+- Writing it means MS-SMB2 from NEGOTIATE upward: NTLMSSP session setup, TREE_CONNECT,
+  CREATE with its create-contexts, READ/WRITE, IOCTL, locks, CHANGE_NOTIFY, oplocks and
+  leases, durable handles, signing and encryption. Windows does not consider a share
+  "working" until most of that is there. It is legal (MS-SMB2 is an open specification)
+  and it is the single largest item on filex's board.
+- If it is ever written, note that port 445 is not carried across the public internet by
+  most ISPs; the way out is **SMB over QUIC** (TLS 1.3 on UDP/443, ALPN token `smb`), which
+  needs Windows 11 24H2+ / Server 2025 on the client side, or Samba 4.23+ on Linux.
+
+#### Why the SFTP server sends exit-status
+
+OpenSSH 9+ speaks SFTP for `scp`, and without `exit-status` on the subsystem channel every
+copy ended in a silent `exit 1` with the bytes already transferred
+([PROTOCOLS.md → SFTP](PROTOCOLS.md#sftp)).
 
 ---
 
@@ -1645,6 +2302,14 @@ no agent: Claude Code is checked for, and named when it is missing.
   no copy of the credential, and a token renewed in the vault is the one the
   next night uses. A run by hand can name a token file instead
   (`LANGPACKS_CLAUDE_TOKEN_FILE`).
+- **Its account's limit.** A session that the account's usage or rate limit
+  ends (HTTP 429, read from Claude Code's JSON result: `accountLimit` in
+  `scripts/lib/langpacks-nightly.mjs`) stops the night there: no fix round,
+  the packs left are not started, nothing is applied. The night is not red:
+  its title says `Claude account limit (429): translation tried again next
+  night`, its first line quotes the account's words (when the limit resets),
+  and it is told at severity info with no agent woken. Nothing is kept that
+  holds the next night, which translates as any other.
 - **What it says.** One notification (`FILEX_NOTIFY_*` for a person - the
   test chain's key will do - and `FILEX_WAKE_*` for an agent, as the release
   train's tools): per language, what was translated and what is left, every
@@ -1652,8 +2317,8 @@ no agent: Claude Code is checked for, and named when it is missing.
   pending says nothing (`LANGPACKS_NOTIFY`). The worklists, the prompts and
   the agent's logs of the last `LANGPACKS_KEEP_NIGHTS` (14) nights stay in
   `<root>/nights`, with `last.json` and `history.jsonl`; outside every
-  repository. Exit 0 green or nothing to do, 1 something left or red, 2 could
-  not run - a failed unit.
+  repository. Exit 0 green or nothing to do, 1 something left or red, or the
+  account's limit, 2 could not run - a failed unit.
 
 Nothing is pushed or tagged from the build host: the commits wait in its pack
 checkouts for release day. Every setting, with its default, is in
@@ -1875,8 +2540,9 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
 
    ```bash
    ls **/README.md docs/*.md docs/index.md
-   grep -rn '"description"\|description:' package.json packages/*/package.json \
-     deploy/helm/*/Chart.yaml deploy/*/*app*.yml deploy/*/docker-compose*.yml
+   grep -rn '"description"\|description:\|<Overview>' package.json packages/*/package.json \
+     deploy/helm/*/Chart.yaml deploy/*/*/umbrel-app.yml deploy/*/docker-compose*.yml \
+     deploy/runtipi/*/config.json deploy/unraid/*.xml deploy/portainer/*.json
    ```
 
    In this repo that is at least twelve places:
@@ -1893,7 +2559,7 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    | `packages/*/README.md` | these are the **npm pages** - an export nobody documents does not exist for anybody installing the package |
    | `desktop/README.md` | what the app actually does |
    | `deploy/*/README.md` | install instructions per target |
-   | `deploy/umbrel/*/umbrel-app.yml`, `deploy/casaos/*` (`x-casaos.description`), `deploy/runtipi/*/metadata/description.md` | **app-store listings** - public product copy. Three stores, and the Runtipi one is a whole markdown page rather than one line, which is exactly why it is the one that rots |
+   | `deploy/umbrel/*/umbrel-app.yml`, `deploy/casaos/*` (`x-casaos.description`), `deploy/runtipi/*/metadata/description.md` and `config.json`, `deploy/unraid/filex.xml` (`<Overview>`), `deploy/portainer/template.json` | **app-store listings** - public product copy. Five stores, and the Runtipi one is a whole markdown page rather than one line, which is exactly why it is the one that rots. The Unraid and Portainer ones are XML and JSON, so a search for `description:` passes them by: at the 0.56 audit both still said only *e-Signature and Convert* ship, two apps and three releases behind |
    | `deploy/helm/*/Chart.yaml` | shown by `helm search` |
    | `package.json` descriptions | shown on npm |
    | `deploy/compose/*.yml` | new env vars and **published ports** with the traps beside them |
@@ -2030,6 +2696,21 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    installing filex from CasaOS, Umbrel or Runtipi got a build from February.
    `web/tests/deploy/deployVersions.test.ts` now fails the build if any of the
    seven pins drifts, and `--check` reports them without writing.
+
+   The chart then publishes itself:
+   [BRF-Tech/helm-charts](https://github.com/BRF-Tech/helm-charts) packages
+   `deploy/helm/filex` from the tag and puts it in `https://helm.brf.sh` and
+   `oci://ghcr.io/brf-tech/charts/filex`, nobody in the loop. Its `publish`
+   workflow runs every ten minutes, but GitHub starts a schedule late or not
+   at all (on that new repository it did not start for hours), so the ship's
+   `helm` step starts the workflow itself
+   (`gh workflow run publish.yml -R BRF-Tech/helm-charts`) and reads the
+   index until it lists `appVersion: vX.Y.Z` - see
+   [The ship](#the-ship-filex-shipsh). It publishes a
+   chart version once and refuses a release whose chart reuses one with a
+   different `appVersion` - which is why the script above bumps the chart's
+   `version` whenever `appVersion` moves. A refused release shows as a red run
+   in that repository's Actions.
 6. Commit: `chore(release): vX.Y.Z`.
    ⚠⚠ **Not with `git add -A`, and not before these checks.** The release
    commit is the one commit in the project that is allowed to touch
@@ -2041,8 +2722,8 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    git status --porcelain | grep '^??' && echo "untracked files - commit them or move them to their branch"
    pnpm -s --filter ./web build      # vue-tsc + vite, the gate nothing else runs
    (cd web && TZ=UTC npx vitest run) # the unit suite on CI's clock, which is UTC
-   docker build --platform linux/amd64 -f docker/Dockerfile      -t filex:release-check .
-   docker build --platform linux/amd64 -f docker/Dockerfile.slim -t filex:release-check-slim .
+   git archive HEAD | docker build --platform linux/amd64 -f docker/Dockerfile      -t filex:release-check -
+   git archive HEAD | docker build --platform linux/amd64 -f docker/Dockerfile.slim -t filex:release-check-slim -
    (cd desktop && pnpm run build && node scripts/fetch-cli.mjs --platform win32 && pnpm e2e:store)  # Windows, Developer Mode: the Store package as a Store copy; no window comes on screen (--keep-windows-hidden), only a test toast
    ```
 
@@ -2087,8 +2768,35 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    builds and what reads `e2e/` again, and finds the Go suite and the
    migrations where they were. Only green is kept; an entry the tool cannot
    read, a working tree that is not `HEAD`, or an input outside the repository
-   it cannot see means the gate runs. `--no-cache` runs every gate. Builds and
-   images are never taken from the cache - later gates use what they make.
+   it cannot see means the gate runs. `--no-cache` runs every gate. Builds are
+   never taken from the cache - later gates use what they make. The two
+   images are (#165), on what each is made of: the files its Dockerfile
+   copies, the Dockerfile, `.dockerignore` and the gate's own script - so a
+   fix to a test, the docs or the desktop app does not build them again. The
+   key leaves out the commit and the date the build stamps into the
+   throwaway image (CI builds the published ones), and the entry keeps the
+   image's id: a hit holds only while that very image is still under its tag,
+   since the two image gates after it run it.
+
+   **The images are built from the release commit, not from the working
+   tree** (#165): `git archive` of the commit, streamed to `docker build -`
+   (`scripts/release/gates/docker-build.mjs`). On the maintainer's workstation
+   docker is the WSL docker-ce behind a forwarder, so `docker build .` read
+   the checkout through WSL's 9P bridge, and BuildKit walked all of it - the
+   `.git` directory, every worktree under `.claude/worktrees`, the ignored
+   build output - before it sent a byte. Measured from the build logs: 30.4
+   and 31.6 minutes per image at 0.55.0 (276 kB sent), 49.5 and 52.4 at
+   0.54.0, while the builds themselves took one to five minutes; the four
+   pretag runs of 0.55.0 took 4.5 of that day's hours, nearly all of it this
+   walk. The commit's tree is ~70 MB and a second, and nothing loose in the
+   working tree can reach the image. BuildKit applies no `.dockerignore` to a
+   tar on stdin, so the gate first checks that `.dockerignore` leaves out no
+   tracked file the Dockerfile copies - the context is then the one CI's
+   checkout gives docker - and is red, before docker runs, when it does or
+   when `.dockerignore` holds a pattern its reader does not know (`[...]`, a
+   `\` escape, `**` inside a segment). With the walk gone the images need no
+   local build: they start beside the UI build, and the pretag's longest path
+   is the UI build and then the web unit suite - about 12-15 minutes.
 
    The export (the next stage) runs no test suite of its own any more: GitHub
    runs both on the very commit that lands, before anything is tagged. What it
@@ -2206,10 +2914,29 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    When GitHub Actions cannot run anything, this step waits on CircleCI
    instead: [When GitHub Actions is down](#when-github-actions-is-down).
 
+   **A part red on the runner is re-run once, by the tool** (#165): when every
+   step that failed or was cancelled in a red part is one that only sets the
+   machine up - GitHub's job setup or service containers, a checkout, a
+   toolchain, a cache or an artifact moved, the browser install through apt
+   (`checks.mjs` → `INFRA_STEPS`) - the gate waits for the run to finish,
+   asks GitHub once (`gh run rerun <id> --failed`), keeps that with the
+   release's state and reads the new attempt. A part red again after it, and
+   any part red in a step of its own (a test, a build, a script), is red as
+   before: the tool never re-runs a red test - a flake is a finding, and a
+   person decides it is one ([Known flaky tests](#known-flaky-tests)). A part
+   GitHub copied into the new attempt without running it again (lesson
+   #1275) is asked for once more, twice in all. Measured at 0.55.0: two
+   Playwright parts hit the browser install's 10-minute limit on apt, and the
+   gate waited 38 minutes for a person to type the re-run. And GitHub not
+   answering - a 5xx, a timeout, a dropped connection - is asked again at the
+   next poll, ten polls in a row at most, instead of stopping the gate: 0.55.0's
+   stopped on one `Server Error (HTTP 502)` while reading a run that was green.
+   A 4xx is an answer, and stops it.
+
    A red run spends no version number, because nothing is tagged yet:
 
-   * a flake: re-run its failed jobs (`gh run rerun <id> --failed`, the tool
-     prints it), then `--resume`;
+   * a flake in a test: re-run its failed jobs (`gh run rerun <id> --failed`,
+     the tool prints it), then `--resume`;
    * a fault in the code: fix it on `main` - a commit on top of the release
      commit - push it, and `--resume`: the chain, the export, this step and
      the gate run again on the fix;
@@ -2313,6 +3040,14 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    public listing instead (green once certification passes, hours to three
    working days later). A Store job that ran and failed stays red.
 
+   After the tags are pushed, the `ci` stage waits for the tag's run to
+   finish before it reads what it published (#165; the plan's `tagRunWait`:
+   a poll a minute, up to two hours, or at once when no run of the tag has
+   appeared in 15 minutes). However that run ended, what it published is then
+   read and judged exactly as before: waiting passes nothing. 0.55.0's `ci`
+   stage read everything red three minutes into a 32-minute tag run, and the
+   next look was a person's resume half an hour later.
+
    Once a tag is on a remote, `--resume` never goes back to the stamp or the
    test chain, whatever `main` has done since: the release is the tag. When
    the `ci` stage is held red by something that is not ours to hurry (0.51.0:
@@ -2391,7 +3126,8 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    >   rule stops at 26 characters, which is not even half of the routable
    >   `.01.` form); credentials written as `${VAR:-value}` shell defaults; the
    >   private forge path; host names and addresses under the project's own
-   >   domain other than the two contact addresses; the server addresses, the
+   >   domain other than the two contact addresses and the Helm repository
+   >   (`helm.brf.sh`, which users add); the server addresses, the
    >   names (people, tenants, customers, the project's own machines) and the
    >   withheld files that `scripts/export-public.sh` itself lists; and
    >   handover notes anywhere in the tree. The names are looked for in what
@@ -2492,7 +3228,7 @@ of step 8, then these jobs):
 and steps 9-12 below - and the rest a script can do after them - run as
 `bash scripts/train/filex-ship.sh X.Y.Z`: a backup, the trusted-proxy check,
 the deploy instance by instance with its rollback, both feeds and the CDN purge,
-the Releases page, docs.filex.sh, npm and the embeds, and last
+the Releases page, the Helm chart, docs.filex.sh, npm and the embeds, and last
 `pnpm release X.Y.Z --resume --only deploy`
 ([The ship](#the-ship-filex-shipsh)). The steps below are what it runs, and
 what to do by hand where it is not set up; step 13 it leaves to a person and
@@ -2505,7 +3241,8 @@ ones not yet published apply on top of one another in this order:
 1. `release-npm-trusted-publishing.patch` (#146): npm without a token.
 2. `ci-full-matrix.patch` (#173): `ci.yml` as the full matrix, and its helper
    scripts under `.github/workflows/scripts/` (`ci-apps.sh`, `ci-fonts.sh`,
-   `ci-docserver.sh`, `ci-s3.sh`, `migrate-roundtrip.sh`).
+   `ci-docserver.sh`, `ci-s3.sh`, `migrate-roundtrip.sh`; the first two are
+   gone again with 7).
 3. `release-promote.patch` (#174): `release.yml` without its own test suite,
    `verify` asking for the full matrix, the release candidate and the
    promotion, `-f macos=false`, and `release-files.mjs`.
@@ -2531,6 +3268,15 @@ ones not yet published apply on top of one another in this order:
    this build's version), `desktop-upgrade-windows.ps1` and
    `desktop-upgrade-linux.sh`; the Windows row's artifact carries the x64
    installer as well. The first run of it is the release's dry run.
+7. `ci-browser-prep.patch` (#181, 0.56): every browser part of `ci.yml`
+   (`playwright`, `playwright-ds`, `playwright-extra`) is prepared by
+   `node scripts/ci/browser-prep.mjs apps` and `fonts`, the script CircleCI's
+   Playwright job calls too, instead of `ci-apps.sh` and `ci-fonts.sh`,
+   which it deletes. The apps are `e2e/helpers/app-locations.mjs`'s,
+   fetched without a token (so the three jobs lose their `GH_TOKEN`), the
+   font map is the build host's; `ci-docserver.sh` names the new step. It
+   needs `scripts/ci/browser-prep.mjs` in the tree, so it lands with the
+   export that brings it.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and
@@ -2790,12 +3536,19 @@ own jobs, and runs the same tests on every push of the public `main`
 
 - the Go suite in the shards of `scripts/test-shards.json`, one copy of the
   `go` job per shard of the `go` profile ([Shards](#shards)), beside
-  PostgreSQL, MySQL and Redis, and red unless the engine suites really ran on
-  both engines (`scripts/ci/engines-ran.mjs`: without a DSN they skip, and a
-  skip is a pass); `go vet` in the build job;
+  PostgreSQL, MySQL, Redis and Samba (`GO_SERVICES` in
+  `scripts/ci-parts.mjs`, the list GitHub's Go parts are held to too), and
+  red unless the engine suites really ran on both engines
+  (`scripts/ci/engines-ran.mjs`: without a DSN they skip, and a skip is a
+  pass); `go vet` and the embedded UI check in the build job;
 - the web and package unit suites in UTC, and the desktop unit tests;
 - the Playwright suite in Chromium, in parts (`--shard i/N`), against the
-  binary the build job made.
+  binary the build job made (`BROWSER_BUILD`, what GitHub's build hands its
+  parts), prepared as GitHub's parts are, by the same script
+  (`scripts/ci/browser-prep.mjs`): the apps of
+  `e2e/helpers/app-locations.mjs` from their public releases, and the build
+  host's font map. The first run (2026-10-10) had neither, and every app
+  spec failed to load.
 
 When step 7 waits on a GitHub that cannot run anything, resume the gate on
 CircleCI:
@@ -2853,13 +3606,15 @@ never writes them, and a change to them reaches the public repository as a
 an export must never rewrite the pipeline that publishes it. The CircleCI
 config publishes nothing, holds no secret and asks for none, and it calls this
 tree's scripts (`scripts/test-shards.mjs`, `e2e/run.mjs`,
-`scripts/ci/engines-ran.mjs`), so it has to change in the same commit as they
-do. It is ordinary source: the export copies it with the code it tests, and
+`scripts/ci/engines-ran.mjs`, `scripts/ci/browser-prep.mjs`), so it has to
+change in the same commit as they do. It is ordinary source: the export copies it with the code it tests, and
 the pipeline of a landed commit runs the config written for that commit. A
 workflow pushed to the public repository ahead of its export goes red there,
 which is what happened to a `packaging/ci` patch on 0.52.0.
 `web/tests/deploy/circleciConfig.test.ts` holds the config to the shard list,
-to the scripts it calls (in the tree, and not withheld by the export), to the
+to `GO_SERVICES` and `BROWSER_BUILD`, to the shared preparation of the
+browser parts (and to naming no app of its own), to the scripts it calls and
+every file they import (in the tree, and not withheld by the export), to the
 toolchain versions the tree pins (`backend/go.mod`, `pnpm-lock.yaml`) and to
 the names the gate reads, on every web test run.
 
@@ -3024,6 +3779,7 @@ where they can, each with its own log under `.git/filex-ship/vX.Y.Z/logs/`:
 | `manifest` | the update manifest servers and the CLI read (step 9) |
 | `desktop`, `purge` | the release's desktop packages and feeds from the GitHub Release onto the feed host, then every one of those files out of the CDN's cache: their names never change, and a stale package fails the sha512 its new feed promises (step 9) |
 | `releases` | the Releases page: the release's summary must be in `docs-site/data/release-highlights.json` and publishable, the page is regenerated and, when it changed, committed on `main` as `docs(releases): vX.Y.Z` (step 10; not pushed) |
+| `helm` | the Helm chart (step 5): `SHIP_HELM_CMD` starts the charts repository's publishing, then `SHIP_HELM_INDEX` is read every 30 seconds until it lists the chart at `appVersion: vX.Y.Z`, for at most `SHIP_HELM_WAIT` minutes (15); an index that already lists it is green without starting anything. It waits only for `preflight`, so a red Releases page does not hold the chart back. Red at the end of the wait, with what the index lists and what to look at |
 | `docs` | docs.filex.sh: the server's snapshot copied, the public checkout's pages and the summaries copied in, the site rebuilt (step 11) |
 | `npm` | waits until npm serves every package of the release (the registry can lag minutes behind the job) |
 | `embeds` | the vendored explorer moved to the release, and deployed when a command for it is set |

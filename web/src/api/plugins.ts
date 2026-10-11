@@ -110,9 +110,9 @@ export interface Plugin {
   from_store?: string;
   /**
    * The build's signature verified only in the old form, over its SHA-256
-   * alone (not over its name, version and platform): still accepted in 0.55,
-   * refused from 0.56. `signature_notice` is the server's sentence for it, in
-   * the reader's language - shown as it is.
+   * alone (not over its name, version and platform): still accepted during
+   * its compatibility window. `signature_notice` is the server's sentence for
+   * it, naming the window's end, in the reader's language - shown as it is.
    */
   legacy_signature?: boolean;
   signature_notice?: string;

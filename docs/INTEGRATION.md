@@ -820,6 +820,14 @@ config.dragOut = {
 };
 ```
 
+**Encrypted rows.** `prepare` and `start` are never called for a file of an
+end-to-end encrypted folder or a vault, nor for the encrypted folder itself,
+wherever the row is listed (its folder, a ⌘K result, Recent, Starred, a tag, a
+search): the row says so (`encrypted`, `e2e_root`), the bytes behind it are
+ciphertext the OS would save under the file's name, and a vault row's path is
+its plaintext name. The single-file `DownloadURL` is withheld the same way. The
+drag stays the component's own, so a move onto a folder inside it still works.
+
 **Progress.** `done` / `total` count the dragged items. `dropped` is set once a
 drop has landed and the shell is filling it in (a shell that hands the OS
 placeholders downloads the real content afterwards), and `files` counts the
@@ -849,7 +857,9 @@ anything about that; a host writing its own drop targets does.
 A result in the ⌘K palette's **Everywhere** group drags out through the same
 path - `dragOut` when the host supplies it, the single-file `DownloadURL`
 (plain URL or minted link, as above) otherwise - and carries a download button
-of its own. A drag
+of its own. A result inside an encrypted folder or a vault is not draggable
+(see **Encrypted rows** above); the accounts hook's `dragStart` is not called
+for one either. A drag
 let go on the palette itself is swallowed there (the explorer's root would take
 an OS file drop for an upload) and the host's `cancel` is called.
 

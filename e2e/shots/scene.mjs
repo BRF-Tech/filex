@@ -525,6 +525,32 @@ export async function installApp(admin, app) {
   return res.json();
 }
 
+/**
+ * Installs an app that is only an interface (no module) the way the wizard
+ * does: a dry run for the review, then the install granting exactly what the
+ * review listed - the manifest's permissions and the ones filex derives
+ * (`ui:*` from its `ui` block, `files:e2e-plaintext` from
+ * `encrypted_folders`, `files:co-edit` from `co_edit`). Throws unless the
+ * review lists every id in `expect`. Answers the granted ids.
+ */
+export async function installInterfaceApp(admin, { zip, manifest }, { expect = [] } = {}) {
+  const form = (grant) => {
+    const fd = new FormData();
+    fd.append('grant', JSON.stringify({ permissions: grant }));
+    fd.append('manifest', new Blob([Buffer.from(JSON.stringify(manifest))]), 'filex-app.json');
+    fd.append('ui', new Blob([zip]), 'ui.zip');
+    return fd;
+  };
+  const dry = await admin.call('/api/admin/app-plugins?dry_run=1', { method: 'POST', body: form([]) });
+  if (!dry.ok) throw new Error(`the review of ${manifest.name}: ${dry.status} ${(await dry.text()).slice(0, 400)}`);
+  const rows = ((await dry.json()).permissions ?? []).map((r) => r.id);
+  const missing = expect.filter((id) => !rows.includes(id));
+  if (missing.length) throw new Error(`the review of ${manifest.name} does not list ${missing.join(', ')}: ${rows.join(', ')}`);
+  const res = await admin.call('/api/admin/app-plugins', { method: 'POST', body: form(rows) });
+  if (!res.ok) throw new Error(`install ${manifest.name}: ${res.status} ${(await res.text()).slice(0, 400)}`);
+  return rows;
+}
+
 // ── the browser ───────────────────────────────────────────────────────────
 
 /**

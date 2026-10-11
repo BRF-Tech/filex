@@ -29,6 +29,9 @@ export const VAULT_HEARTBEAT_MS = 15_000;
 export const VAULT_LOST_AFTER_MS = 45_000;
 /** The vault lock: 15 minutes with no activity at all after the write lock ended. */
 export const VAULT_IDLE_LOCK_MS = 15 * 60_000;
+/** filex 0.56: how long before the vault lock its `warn` is called (an app
+ *  holding unsaved changes in the vault is said so, and may keep it open). */
+export const VAULT_IDLE_WARN_MS = 60_000;
 /** Ask `state` this often while a vault is open. */
 export const VAULT_STATE_POLL_MS = 30_000;
 /** Commit at least this often during a long change in which packs were stored. */
@@ -60,8 +63,11 @@ export interface WriteLockOptions {
   label: string;
   clock?: Clock;
   /** The lock ended without this session releasing it. Called once. With
-   *  `taken` or `broken` the server names who holds it now, or broke it. */
-  onLost(reason: LockEnd, holder?: VaultHolder | null): void;
+   *  `taken` or `broken` the server names who holds it now, or broke it.
+   *  `said`: the server's own sentence for it (its `message`, srvtext
+   *  server.e2e.vault.lock_lost.*), '' when no answer said one (the
+   *  connection). */
+  onLost(reason: LockEnd, holder?: VaultHolder | null, said?: string): void;
   /** Headers for the keepalive release (the page is closing; nothing can await). */
   headersNow?: () => Record<string, string>;
 }
@@ -143,7 +149,8 @@ export class VaultWriteLock {
   /** A write answered VAULT_LOCK_LOST: end now. */
   lostBy(err: unknown): boolean {
     if (err instanceof VaultApiError && err.code === 'VAULT_LOCK_LOST') {
-      this.end((err.reason as LockEnd) || 'expired', err.holder);
+      const said = typeof err.fields.message === 'string' ? err.fields.message.trim() : '';
+      this.end((err.reason as LockEnd) || 'expired', err.holder, said);
       return true;
     }
     return false;
@@ -199,12 +206,12 @@ export class VaultWriteLock {
     this.timer = null;
   }
 
-  private end(reason: LockEnd, holder: VaultHolder | null = null): void {
+  private end(reason: LockEnd, holder: VaultHolder | null = null, said = ''): void {
     if (this.ended) return;
     this.ended = true;
     this.stop();
     this.token = null;
-    this.opts.onLost(reason, holder);
+    this.opts.onLost(reason, holder, said);
   }
 }
 
@@ -216,14 +223,22 @@ export class VaultWriteLock {
  */
 export class VaultIdleLock {
   private timer: unknown = null;
+  private warnTimer: unknown = null;
   private lastActivity = 0;
   private paused = false;
   private readonly clock: Clock;
 
+  /**
+   * `warn` (filex 0.56): called once, VAULT_IDLE_WARN_MS before the vault
+   * would lock itself, while nothing has been done in it - every activity
+   * starts the count again, and a `touch` after it puts the lock off as
+   * any activity does.
+   */
   constructor(
     private readonly onLock: () => void,
     clock?: Clock,
     private readonly ms = VAULT_IDLE_LOCK_MS,
+    private readonly warn?: () => void,
   ) {
     this.clock = clock ?? realClock;
   }
@@ -282,10 +297,29 @@ export class VaultIdleLock {
       if (this.clock.now() - this.lastActivity >= this.ms) this.onLock();
       else this.arm();
     }, left);
+    this.armWarn();
+  }
+
+  /** The warning, a minute before the lock - not when the lock is due by
+   *  then (a late timer locks; nothing is left to warn about). */
+  private armWarn(): void {
+    if (!this.warn || this.ms <= VAULT_IDLE_WARN_MS) return;
+    const at = this.lastActivity + this.ms - VAULT_IDLE_WARN_MS;
+    const left = at - this.clock.now();
+    if (left < 0) return;
+    const armedFor = this.lastActivity;
+    this.warnTimer = this.clock.setTimeout(() => {
+      this.warnTimer = null;
+      if (this.paused || this.lastActivity !== armedFor) return;
+      const idle = this.clock.now() - this.lastActivity;
+      if (idle >= this.ms - VAULT_IDLE_WARN_MS && idle < this.ms) this.warn?.();
+    }, left);
   }
 
   private disarm(): void {
     if (this.timer !== null) this.clock.clearTimeout(this.timer);
     this.timer = null;
+    if (this.warnTimer !== null) this.clock.clearTimeout(this.warnTimer);
+    this.warnTimer = null;
   }
 }

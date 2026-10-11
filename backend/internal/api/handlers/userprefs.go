@@ -73,17 +73,35 @@ const maxUserPrefsBytes = 64 << 10
 // to live in the page alone (packages/core lib/appState).
 const appStateMaxBytes = 16 << 10
 
+// appStateKeys are the document's two app stores, each judged on its own:
+// `appState`, what an interface keeps in an ordinary session, and
+// `appStateE2e` (filex 0.56, task #189), what it keeps while it holds a file
+// of an encrypted folder in the clear - sealed in the browser with a key
+// derived from the folder's (packages/core lib/appStateE2e), so the server
+// measures ciphertext it cannot read, under the same ceiling.
+var appStateKeys = []string{"appState", "appStateE2e"}
+
 // appStateTooLarge names the first app whose kept state is over
 // appStateMaxBytes, or "" when every one fits (or the document keeps none).
-// A document whose appState is not the shape the page writes is not judged
+// A document whose app store is not the shape the page writes is not judged
 // here: it is the page's own value, bounded by the document's size.
 func appStateTooLarge(doc string) string {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(doc), &top); err != nil {
 		return ""
 	}
-	raw, ok := top["appState"]
-	if !ok {
+	for _, key := range appStateKeys {
+		if app := appStoreTooLarge(top[key]); app != "" {
+			return app
+		}
+	}
+	return ""
+}
+
+// appStoreTooLarge judges one app store (a JSON string holding {app: ...}):
+// the first app whose share is over appStateMaxBytes as compact JSON.
+func appStoreTooLarge(raw json.RawMessage) string {
+	if len(raw) == 0 {
 		return ""
 	}
 	var inner string

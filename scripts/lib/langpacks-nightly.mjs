@@ -20,6 +20,8 @@
 //      the packs and the tree measured unchanged around it, then
 //      `apply --commit`; refused answers or a red validator go back to the
 //      agent with what was said, LANGPACKS_FIX_ROUNDS times (applyOutcome);
+//      a session the Claude account's limit ended (accountLimit) stops the
+//      night there: no second round, no pack after it - the next night tries;
 //   5. `status` again, and one notification: per language, what was
 //      translated and what is left (languageRows, composeReport).
 // Nothing is pushed or tagged: the commits stay in the build host's pack
@@ -321,7 +323,54 @@ export function agentResult(text) {
   if (Number.isFinite(doc.num_turns)) out.turns = doc.num_turns;
   if (Number.isFinite(doc.total_cost_usd)) out.costUsd = doc.total_cost_usd;
   if (typeof doc.result === 'string') out.result = doc.result.slice(0, 300);
+  // A session the API ended: its HTTP status, the error's name, and why the
+  // session stopped (accountLimit reads them).
+  if (Number.isFinite(doc.api_error_status)) out.apiStatus = doc.api_error_status;
+  if (typeof doc.api_error === 'string') out.apiError = doc.api_error;
+  if (typeof doc.terminal_reason === 'string') out.terminalReason = doc.terminal_reason;
   return out;
+}
+
+const LIMIT_ERROR = /usage_limit|rate_limit/i;
+const LIMIT_WORDS = /\b(?:hit|reached) your (?:[\w-]+ )?limit\b|\busage limit\b|\brate[ _]limit\b/i;
+
+/**
+ * Whether the Claude account's limit is what ended an agent session: a
+ * subscription's usage limit (the weekly one, the session one) or an API
+ * key's rate limit, both answered with HTTP 429. Then the agent did nothing,
+ * and nothing it could be told would change that tonight.
+ *
+ * Claude Code's JSON result says so in its own fields, and exits 1:
+ *   "is_error": true, "api_error_status": 429, "api_error": "usage_limit_reached",
+ *   "terminal_reason": "api_error", "result": "You've hit your weekly limit · resets 6am (UTC)"
+ * A session that wrote no JSON result (an older Claude Code, a crash) is read
+ * by the words of what it printed, `output`, when it exited non-zero.
+ *
+ * `a`: one session as runAgent records it (agentResult's fields, `code`,
+ * `timedOut`). Returns { status, said } - `said` the account's own words,
+ * which name when the limit resets - or null.
+ *
+ * ⚠ Why this exists (#177): on 2026-10-09 the account's weekly limit ended
+ * every session in under a second, the worklists came back empty, and the
+ * night reported "answers refused after 2 rounds" for each pack - after a
+ * second round that met the same limit - with the empty answers listed as if
+ * an agent had refused them. The real reason was only in the agent's log.
+ */
+export function accountLimit(a, output = '') {
+  if (!a || a.timedOut) return null;
+  const said = String(a.result ?? '').trim();
+  const status = Number.isFinite(a.apiStatus) ? a.apiStatus : 429;
+  if (a.apiStatus === 429 || LIMIT_ERROR.test(String(a.apiError ?? '')) || (a.isError === true && LIMIT_WORDS.test(said))) {
+    return { status, said: (said || String(a.apiError ?? '') || 'HTTP 429').slice(0, 200) };
+  }
+  if (a.isError === undefined && a.code !== 0) {
+    const line = String(output ?? '')
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => LIMIT_WORDS.test(l) || LIMIT_ERROR.test(l));
+    if (line) return { status, said: line.slice(0, 200) };
+  }
+  return null;
 }
 
 // ── the agent ───────────────────────────────────────────────────────────────
@@ -441,7 +490,10 @@ export function languageRows(before, after) {
 
 const RED_STATES = new Set(['refused', 'red', 'failed', 'error', 'guard', 'agent']);
 
-function outcomeText(o) {
+/** How the report names the account's limit: `limit` is accountLimit's { status, said }. */
+const limitName = (limit) => `Claude account limit (${limit?.status ?? 429})`;
+
+function outcomeText(o, limit) {
   const rounds = o.rounds > 1 ? ` after ${o.rounds} rounds` : '';
   switch (o.state) {
     case 'committed':
@@ -458,6 +510,10 @@ function outcomeText(o) {
       return 'RED: something outside the agent\'s directory changed while it ran, nothing applied';
     case 'agent':
       return 'RED: the agent did not start';
+    case 'limit':
+      return o.rounds > 0
+        ? `${limitName(limit)}: the agent could not work, nothing written, tried again next night`
+        : `not started: ${limitName(limit)}, tried again next night`;
     case 'time':
       return 'not started: no time left tonight';
     case 'skipped':
@@ -483,46 +539,62 @@ const lastLines = (text, n) =>
  *   rows     languageRows
  *   packs    each pack's outcome { dir, state, commit, rounds, feedback, agent }
  *   error    why the night could not run, when it could not
+ *   limit    the Claude account's limit that stopped the night (accountLimit's
+ *            { status, said }), when one did
  *   took     how long it took; where: the night's directory
  *
  * Returns { result, title, message }: result `ok` (everything pending was
  * translated and committed), `red` (a pack red, or the night could not run),
- * `waiting` (something left, nothing red: no time) or `info` (nothing was
- * pending).
+ * `limit` (the account's limit stopped the night, nothing red: expected, and
+ * the next night tries again by itself), `waiting` (something left, nothing
+ * red: no time) or `info` (nothing was pending).
  */
-export function composeReport({ day, tree = null, wait = null, rows = [], packs = [], error = '', took = '', where = '' }) {
+export function composeReport({ day, tree = null, wait = null, rows = [], packs = [], error = '', limit = null, took = '', where = '' }) {
   const lines = [];
   const translated = rows.reduce((n, r) => n + r.translated, 0);
   const left = rows.reduce((n, r) => n + r.left, 0);
   const red = !!error || packs.some((p) => RED_STATES.has(p.state));
+  const limited = !!limit || packs.some((p) => p.state === 'limit');
   const pending = rows.some((r) => r.was > 0) || packs.length > 0;
   if (tree) lines.push(`tree: ${tree.ref} at ${short(tree.sha)}${tree.subject ? ` ${tree.subject}` : ''}`);
   if (wait?.why) lines.push(`the nightly run: ${wait.why}`);
   if (error) lines.push(`could not run: ${error}`);
+  if (limited) {
+    lines.push(
+      `${limitName(limit)}${limit?.said ? `: "${limit.said}"` : ''}. The translation stopped there and the packs left were not tried; the next night translates again by itself.`,
+    );
+  }
   for (const r of rows) {
     const o = packs.find((p) => p.dir === r.dir);
     if (!o && r.was === 0) {
       lines.push(`${r.pack} ${r.tag}: up to date`);
       continue;
     }
-    lines.push(`${r.pack} ${r.tag}: ${r.translated} translated, ${r.left} left${o ? ` - ${outcomeText(o)}` : ''}`);
+    lines.push(`${r.pack} ${r.tag}: ${r.translated} translated, ${r.left} left${o ? ` - ${outcomeText(o, limit)}` : ''}`);
+    // A pack the limit stopped has nothing more to say: the line above names it.
+    if (o?.state === 'limit') continue;
     if (o && o.state !== 'committed') for (const l of lastLines(o.feedback, 8)) lines.push(`    ${l}`);
     const trouble = (o?.agent ?? []).filter((a) => a.timedOut || a.code !== 0);
     if (trouble.length) lines.push(`    agent: ${trouble.map((a) => `round ${a.round + 1} ${a.timedOut ? 'stopped at its time limit' : `exit ${a.code}`}`).join(', ')}`);
   }
-  if (pending && !error) lines.push('Nothing is pushed or tagged: the commits wait in these pack checkouts for release day (node scripts/langpacks.mjs pull, then release X.Y.Z).');
+  const committed = packs.some((p) => p.state === 'committed');
+  if (pending && !error && (committed || !limited)) lines.push('Nothing is pushed or tagged: the commits wait in these pack checkouts for release day (node scripts/langpacks.mjs pull, then release X.Y.Z).');
   if (where) lines.push(`worklists and logs: ${where}`);
   if (took) lines.push(`took ${took}`);
 
   let result = 'info';
   if (red) result = 'red';
+  else if (limited) result = 'limit';
   else if (left > 0) result = 'waiting';
   else if (translated > 0) result = 'ok';
   const at = tree?.sha ? ` (${short(tree.sha)})` : '';
   let title;
   if (error) title = `filex language packs ${day}: could not run`;
   else if (!pending) title = `filex language packs ${day}: up to date${at}`;
-  else title = `filex language packs ${day}: ${translated} translated, ${left} left${red ? ', RED' : ''}${at}`;
+  else {
+    const why = limited ? `, ${limitName(limit)}: translation tried again next night` : '';
+    title = `filex language packs ${day}: ${translated} translated, ${left} left${red ? ', RED' : ''}${why}${at}`;
+  }
   return { result, title, message: lines.join('\n').slice(0, 7900) };
 }
 
@@ -533,7 +605,19 @@ export function notifyWanted(mode, result) {
   return result !== 'info';
 }
 
-/** The exit code of a night: 0 green or nothing to do, 1 something left or red, 2 could not run. */
+/**
+ * How a night's result is told (scripts/lib/notify.mjs announce): a night the
+ * account's limit stopped is said quietly - severity info, and no agent is
+ * woken (FILEX_WAKE_*), which would spend the same account on nothing - since
+ * nobody has anything to do: the next night tries again. Every other result
+ * goes as it is. Returns { result, wake }.
+ */
+export function announceAs(result) {
+  if (result === 'limit') return { result: 'info', wake: false };
+  return { result, wake: true };
+}
+
+/** The exit code of a night: 0 green or nothing to do, 1 something left, red or the account's limit, 2 could not run. */
 export function exitCode({ result, error = '' }) {
   if (error) return 2;
   return result === 'ok' || result === 'info' ? 0 : 1;

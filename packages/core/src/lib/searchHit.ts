@@ -16,7 +16,7 @@
 import type { GlobalSearchHit } from '../composables/useFileApi';
 import type { SearchAccount } from '../types/ExplorerConfig';
 import type { FileNode } from '../types/FileNode';
-import type { DragItem } from './dragOut';
+import type { DragOutRow } from './dragOut';
 import { isEncryptedKind } from './encryptedRow';
 
 /** What the explorer knows about drives when a hit does not say its own. */
@@ -101,12 +101,25 @@ export function hitToNode(h: GlobalSearchHit, storageName: string): FileNode {
  * The hit as a drag-out / download item (`name://rel`, its name, its kind) —
  * or null when there is nothing to address: no path, or no drive to put it on.
  * The same `{path, basename, type}` a listing row hands the drag-out hook.
+ *
+ * #243 — with what the server says of its encryption (`e2e_root`,
+ * `encrypted`), as a listing row of the same file carries it: the drag reads
+ * the ROW to decide whether it may leave the window (lib/dragOut mayDragOut),
+ * and a hit dropped those two fields, so a file of an encrypted folder found
+ * with ⌘K went out while a plain folder was open. Hand the host's hooks
+ * `dragItemOf(item)`: they take the plain item.
  */
-export function hitItem(hit: GlobalSearchHit, ctx: HitDriveContext): DragItem | null {
+export function hitItem(hit: GlobalSearchHit, ctx: HitDriveContext): DragOutRow | null {
   const drive = hitStorageName(hit, ctx);
   if (!hitRelPath(hit) || !drive) return null;
   const n = hitToNode(hit, drive);
-  return { path: n.path, basename: n.basename, type: n.type };
+  return {
+    path: n.path,
+    basename: n.basename,
+    type: n.type,
+    ...(n.e2e_root ? { e2e_root: n.e2e_root } : {}),
+    ...(n.encrypted ? { encrypted: n.encrypted } : {}),
+  };
 }
 
 /** One account's hits, in the server's order. `account` undefined = no rail. */

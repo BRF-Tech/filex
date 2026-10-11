@@ -236,8 +236,16 @@ test.describe.serial('An app’s interface prints a PDF through filex, and is to
 
   test('"Don’t allow" prints nothing and tells the interface cancelled', async ({ page }) => {
     const frame = await openAppInterface(page, store, `doc.${ext}`);
+    const appFrame = page.locator('iframe[data-testid="app-frame"]');
+    const before = await appFrame.boundingBox();
     const answer = frame.evaluate(() => (window as unknown as Probe).__print());
-    await printQuestion(page);
+    const bar = await printQuestion(page);
+    // #217: the question lies over the top of the app's frame; it does not
+    // push the frame down (an editor busy printing could not redraw at the
+    // smaller size and stayed blank until the print was over).
+    expect(await appFrame.boundingBox(), 'the frame keeps its place and size while asked').toEqual(before);
+    const barBox = (await bar.boundingBox())!;
+    expect(barBox.y, 'the row is over the frame').toBeGreaterThanOrEqual(before!.y - 1);
     await page.locator('[data-testid="appframe-print-deny"]').click();
     expect((await answer).error?.code).toBe('cancelled');
     await expect(page.locator('[data-testid="appframe-print-ask"]')).toHaveCount(0);

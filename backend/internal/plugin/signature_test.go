@@ -21,7 +21,8 @@ import (
 // The checkSignature tests below pin the sha256-only form: the binary's
 // sha256, lower-case hex, as a STRING (what an app module is still signed
 // over, and what a storage plugin build was signed over until 0.55 - its old
-// form, accepted in 0.55 with a warning). A storage plugin build is now
+// form, accepted with a warning during its compatibility window). A storage
+// plugin build is now
 // signed over its text - name, version, platform, sha256 (VerifyBuild, the
 // tests at the end of this file).
 
@@ -227,7 +228,7 @@ func TestVerifyBuild_TheSignatureNamesTheBuild(t *testing.T) {
 		}
 	}
 
-	// The old form: still taken during 0.55, and said to be the old form.
+	// The old form: still taken during its window, and said to be the old form.
 	old := sign(t, priv, sum)
 	v, err := VerifyBuild(trusted, c, old)
 	if err != nil || !v.Legacy {

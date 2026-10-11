@@ -28,7 +28,8 @@ import { useI18n } from 'vue-i18n';
 import { PluginPageView, useFileApi } from '@brftech/filex-core';
 import type { ExplorerConfig } from '@brftech/filex-core';
 
-import { explorerAuth } from '@/lib/explorerConfig';
+import { appUserName, explorerAuth } from '@/lib/explorerConfig';
+import { useAuthStore } from '@/stores/auth';
 import { getServerRoot } from '@/api/runtimeConfig';
 import { currentMountBase } from '@/router';
 import { useAppHomeRoute } from '@/composables/useAppHomeRoute';
@@ -55,6 +56,9 @@ const queueHref = computed(() => `${currentMountBase()}queue`);
 function onQueued(_op: Record<string, unknown>): void {
   /* the Queue page polls `/api/admin/queue`; nothing to register here */
 }
+
+// Who is looking, for the app's own interface (`session.user.name`).
+const auth = useAuthStore();
 </script>
 
 <template>
@@ -82,6 +86,7 @@ function onQueued(_op: Record<string, unknown>): void {
         :key="`${plugin}/${view}`"
         frame="embedded"
         :locale="uiLocale"
+        :user-name="appUserName(auth.user)"
         :theme="theme"
         :api="api"
         :plugin="plugin"

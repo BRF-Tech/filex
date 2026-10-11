@@ -582,6 +582,41 @@ type Manifest struct {
 	// grant. filex before 0.50.0 does not know this field and refuses the
 	// manifest - declare it with `filex: ">=0.50.0"`.
 	Thumbnails *ThumbnailSpec `json:"thumbnails,omitempty"`
+	// EncryptedFolders says the app's interface edits files inside end-to-end
+	// encrypted folders (filex 0.56.0, task #189). The server holds such a file
+	// only as ciphertext and has no key to it, so filex never decrypts it on
+	// the server: the person's browser decrypts the file with the folder key
+	// it holds, hands the plaintext to the app's sandboxed frame only, and
+	// encrypts what the app saves before it leaves the browser. Derived
+	// permission `files:e2e-plaintext`, so the install review says it in its
+	// own words. filex before 0.56.0 does not know this field and refuses the
+	// manifest - declare it with `filex: ">=0.56.0"`.
+	EncryptedFolders *EncryptedFolders `json:"encrypted_folders,omitempty"`
+	// CoEdit says the app's interface edits a file together with other
+	// people (filex 0.56.0, task #189): its `viewer` views open a file in
+	// the file's editing session, through filex's relay (the bridge's
+	// `coedit.*`). Derived permission `files:co-edit`, so the install review
+	// says it in its own words. filex before 0.56.0 does not know this field
+	// and refuses the manifest - declare it with `filex: ">=0.56.0"`.
+	CoEdit *CoEditSpec `json:"co_edit,omitempty"`
+}
+
+// CoEditSpec is the `co_edit` block (filex 0.56.0).
+type CoEditSpec struct {
+	// Open: the app's `viewer` views open a file in its editing session -
+	// whoever opens the same file with the app edits it with them. Needs an
+	// interface (`ui`), a viewer view and `files:read`.
+	Open bool `json:"open,omitempty"`
+}
+
+// EncryptedFolders is the `encrypted_folders` block (filex 0.56.0).
+type EncryptedFolders struct {
+	// Open: the app's `viewer` views are offered on files in an unlocked
+	// encrypted folder, and their `file.read` / `file.save` carry the
+	// plaintext (FileInfo.plaintext). Needs an interface (`ui`), a viewer
+	// view and `files:read`. Not in a vault and not for a single encrypted
+	// file (`.fxe`) - filex 0.56 offers neither.
+	Open bool `json:"open,omitempty"`
 }
 
 // ThumbnailSpec is the `thumbnails` block: the kinds of file the app draws.

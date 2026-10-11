@@ -3974,7 +3974,7 @@
         ],
         "responses": {
           "200": {
-            "description": "`{vault_id, pack_log2, generation, lock, owner_id, owner_name, owner_self}`; lock is null or `{holder, since, expires_at, mine}`; the owner keys say who owns the vault folder, as a listing row does (each absent when there is nothing to say).",
+            "description": "`{vault_id, pack_log2, generation, lock, owner_id, owner_name, owner_self, words}`; lock is null or `{holder, since, expires_at, mine}`; the owner keys say who owns the vault folder, as a listing row does (each absent when there is nothing to say); words (0.56) are the sentences the browser shows about the vault on its own clock, in the reader's language.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4006,6 +4006,13 @@
                     "owner_self": {
                       "type": "boolean",
                       "description": "Present (true) when the caller owns it."
+                    },
+                    "words": {
+                      "type": "object",
+                      "description": "0.56: app_lock_soon (a minute before the vault locks itself while an app holds unsaved changes in it), app_lock_soon_keep (the action that keeps it open), app_lock_kept.",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
                     }
                   },
                   "additionalProperties": true
@@ -6946,6 +6953,689 @@
           }
         },
         "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/plugins/ui/{plugin}/{view}/coedit/join": {
+      "post": {
+        "operationId": "appUiCoEditJoin",
+        "summary": "Editing together: join (or start) the session of a file an interface was opened with",
+        "description": "For an app granted `files:co-edit` and `files:read` (0.56). Checked here: the app runs, the view is its interface and opens this kind of file, the person may read the file; a file the server holds only as ciphertext needs `e2e: true` and an app the encrypted folder's door lets in (`403 encrypted` otherwise). Who joins and whether they may write are the server's answer. Answers the session, the member (`me`), the file's session key `doc` and the person's opaque `owner`, the session key for the filex page (an ordinary folder; sealed with `FILEX_SECRET_KEY` on the server) or - a file of an encrypted folder, joined with `e2e: true` - the `sealed_key` the members sealed with the folder key, the member's token and a socket ticket; `unsent_words` when the body says `unsent: {count}`. A person who may only read the file joins as a watcher (`can_edit: false`). `409 coedit_not_ready` while the session's creator has not stored the base document; `409 coedit_nothing_to_watch` for a person who may only read the file while nobody started a session (a watcher never starts one); `503 coedit_off` / `coedit_no_secret_key` when there is no editing together here.",
+        "tags": [
+          "Apps"
+        ],
+        "parameters": [
+          {
+            "name": "plugin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "The file, `<storage>://<path>`."
+                  },
+                  "e2e": {
+                    "type": "boolean",
+                    "description": "The page holds the folder key of the file's end-to-end encrypted folder (0.56): needed to join a file the server holds only as ciphertext."
+                  },
+                  "unsent": {
+                    "type": "object",
+                    "description": "Changes this browser kept from an earlier opening (0.56): the answer adds `unsent_words`.",
+                    "properties": {
+                      "count": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/APP-PLUGINS-API.md#editing-together-coedit-056"
+        },
+        "x-filex-token-verb": "read"
+      }
+    },
+    "/api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/append": {
+      "post": {
+        "operationId": "appUiCoEditAppend",
+        "summary": "Editing together: a member's sealed entry, at the place it saw last",
+        "description": "`{client, token, kind: changes|lock|release, base, ctr, ct}` → `{seq}`. The entry lands at `base + 1` or not at all (`409 coedit_conflict {head}`); `changes` need the lease (`409 coedit_no_lease`); `403 coedit_read_only` for a member that may not write; `410 coedit_gone` for a request that is not the member's.",
+        "tags": [
+          "Apps"
+        ],
+        "parameters": [
+          {
+            "name": "plugin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The session id (32 hex digits) the join answered."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "client",
+                  "token",
+                  "kind",
+                  "base",
+                  "ctr",
+                  "ct"
+                ],
+                "properties": {
+                  "client": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "changes",
+                      "lock",
+                      "release"
+                    ]
+                  },
+                  "base": {
+                    "type": "integer"
+                  },
+                  "ctr": {
+                    "type": "integer"
+                  },
+                  "ct": {
+                    "type": "string",
+                    "contentEncoding": "base64"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/APP-PLUGINS-API.md#editing-together-coedit-056"
+        },
+        "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/lease": {
+      "post": {
+        "operationId": "appUiCoEditLease",
+        "summary": "Editing together: take, renew or give back the changes lease",
+        "description": "`{client, token, op: acquire|release, changes_seen}` → `{granted}`: one writer at a time, and only one that has seen every change.",
+        "tags": [
+          "Apps"
+        ],
+        "parameters": [
+          {
+            "name": "plugin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The session id (32 hex digits) the join answered."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "client",
+                  "token",
+                  "op"
+                ],
+                "properties": {
+                  "client": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  },
+                  "op": {
+                    "type": "string",
+                    "enum": [
+                      "acquire",
+                      "release"
+                    ]
+                  },
+                  "changes_seen": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/APP-PLUGINS-API.md#editing-together-coedit-056"
+        },
+        "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/key": {
+      "post": {
+        "operationId": "appUiCoEditKey",
+        "summary": "Editing together: store an encrypted folder's session key, sealed by the members' folder key",
+        "description": "`{client, token, sealed}` → `{stored: true}`, once (filex 0.56). The member that started the session of a file of an end-to-end encrypted folder made the key in its page and sealed it with the folder key; the server keeps it as it is and cannot open it. A member that joins later is handed it (`sealed_key`) and opens it in its own page.",
+        "tags": [
+          "Apps"
+        ],
+        "parameters": [
+          {
+            "name": "plugin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The session id (32 hex digits) the join answered."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "client",
+                  "token",
+                  "sealed"
+                ],
+                "properties": {
+                  "client": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  },
+                  "sealed": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/APP-PLUGINS-API.md#editing-together-coedit-056"
+        },
+        "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/ticket": {
+      "post": {
+        "operationId": "appUiCoEditTicket",
+        "summary": "Editing together: a fresh ticket for the member's socket",
+        "description": "`{client, token}` → `{url, ticket}`; open `GET /api/coedit/ws?ticket=` with it (single use, 60 s).",
+        "tags": [
+          "Apps"
+        ],
+        "parameters": [
+          {
+            "name": "plugin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The session id (32 hex digits) the join answered."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "client",
+                  "token"
+                ],
+                "properties": {
+                  "client": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/APP-PLUGINS-API.md#editing-together-coedit-056"
+        },
+        "x-filex-token-verb": "read"
+      }
+    },
+    "/api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/leave": {
+      "post": {
+        "operationId": "appUiCoEditLeave",
+        "summary": "Editing together: leave the session",
+        "description": "`{client, token}` → `{left: true}`. The log records it; the member's lease goes.",
+        "tags": [
+          "Apps"
+        ],
+        "parameters": [
+          {
+            "name": "plugin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The session id (32 hex digits) the join answered."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "client",
+                  "token"
+                ],
+                "properties": {
+                  "client": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/APP-PLUGINS-API.md#editing-together-coedit-056"
+        },
+        "x-filex-token-verb": "read"
+      }
+    },
+    "/api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/blob/{name}": {
+      "put": {
+        "operationId": "appUiCoEditBlobPut",
+        "summary": "Editing together: store a sealed blob of the session, once",
+        "description": "The base document (`base`) or an image added while editing, sealed by the filex page. `201 {size}`; `409 coedit_blob_exists`; `413 coedit_too_large` past the session's budget.",
+        "tags": [
+          "Apps"
+        ],
+        "parameters": [
+          {
+            "name": "plugin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The session id (32 hex digits) the join answered."
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "`^[A-Za-z0-9._-]{1,128}$`"
+          },
+          {
+            "name": "client",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/APP-PLUGINS-API.md#editing-together-coedit-056"
+        },
+        "x-filex-token-verb": "write"
+      },
+      "get": {
+        "operationId": "appUiCoEditBlobGet",
+        "summary": "Editing together: read a sealed blob of the session",
+        "tags": [
+          "Apps"
+        ],
+        "parameters": [
+          {
+            "name": "plugin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The session id (32 hex digits) the join answered."
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "client",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The sealed bytes.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/APP-PLUGINS-API.md#editing-together-coedit-056"
+        },
+        "x-filex-token-verb": "read"
       }
     },
     "/api/files/plugins/users": {

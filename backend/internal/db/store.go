@@ -1250,6 +1250,10 @@ type Store interface {
 	// PruneOfficeSessions removes the rows that expired before `before`.
 	PruneOfficeSessions(ctx context.Context, before time.Time) (int64, error)
 
+	// Editing together (migration 00107, internal/coedit, #189): see
+	// CoEditStore, which internal/coedit asks for by name.
+	CoEditStore
+
 	// Vault write locks (migration 00096, internal/vaultlock,
 	// docs/E2E-VAULT-FORMAT.md → The write lock): one row per tenant and
 	// vault id, written by compare-and-set. Written once for every engine
@@ -1375,6 +1379,48 @@ type Store interface {
 	// the tenant up first.
 	SetProviderE2EPolicy(ctx context.Context, providerID int64, policy string) error
 	SetProviderE2EAllowed(ctx context.Context, providerID int64, allowed bool) error
+}
+
+// CoEditStore is the editing-together half of Store (migration 00107,
+// internal/coedit, #189): the relay asks for exactly this, beside WithTx,
+// so the method set is written once.
+type CoEditStore interface {
+	// The relay's sessions, members, sealed log and blob rows. A session
+	// moves by compare-and-set on rev. Written once for every engine
+	// (CoEditSQL).
+	// GetCoEditSession / GetCoEditSessionByDoc answer (nil, nil) for none.
+	GetCoEditSession(ctx context.Context, sid string) (*model.CoEditSession, error)
+	GetCoEditSessionByDoc(ctx context.Context, docKey string) (*model.CoEditSession, error)
+	// InsertCoEditSession creates a session at rev 1; ok = false when the
+	// file already has one.
+	InsertCoEditSession(ctx context.Context, s *model.CoEditSession) (bool, error)
+	// UpdateCoEditSession writes s while the row is still at rev; ok = false
+	// when another writer came first.
+	UpdateCoEditSession(ctx context.Context, s *model.CoEditSession, rev int64) (bool, error)
+	// DeleteCoEditSession removes a session, its members, log and blob rows.
+	DeleteCoEditSession(ctx context.Context, sid string) error
+	// ListIdleCoEditSessions: sessions nobody is in, least recently active first.
+	ListIdleCoEditSessions(ctx context.Context, limit int) ([]*model.CoEditSession, error)
+	ListCoEditMembers(ctx context.Context, sid string) ([]*model.CoEditMember, error)
+	GetCoEditMember(ctx context.Context, sid, client string) (*model.CoEditMember, error)
+	InsertCoEditMember(ctx context.Context, m *model.CoEditMember) error
+	SetCoEditMemberCounter(ctx context.Context, sid, client string, ctr int64) error
+	// TouchCoEditMember: ok = false when the member is not in the session.
+	TouchCoEditMember(ctx context.Context, sid, client string, seenMs int64) (bool, error)
+	DeleteCoEditMember(ctx context.Context, sid, client string) (bool, error)
+	// ListStaleCoEditMembers: members last seen before beforeMs, any session.
+	ListStaleCoEditMembers(ctx context.Context, beforeMs int64, limit int) ([]*model.CoEditMember, error)
+	InsertCoEditEntry(ctx context.Context, e *model.CoEditEntry) error
+	// ListCoEditEntries: up to limit entries after `after`, in order.
+	ListCoEditEntries(ctx context.Context, sid string, after int64, limit int) ([]*model.CoEditEntry, error)
+	// InsertCoEditBlob: ok = false when the name is taken.
+	InsertCoEditBlob(ctx context.Context, b *model.CoEditBlob) (bool, error)
+	GetCoEditBlob(ctx context.Context, sid, name string) (*model.CoEditBlob, error)
+	// PutCoEditCursor writes a member's latest sealed cursor over its row
+	// (migration 00109); ListCoEditCursors: a session's rows written after
+	// sinceMs (Unix ms).
+	PutCoEditCursor(ctx context.Context, c *model.CoEditCursor) error
+	ListCoEditCursors(ctx context.Context, sid string, sinceMs int64) ([]*model.CoEditCursor, error)
 }
 
 // TrashTally is one storage's share of the trash a purge sweep will walk.

@@ -219,11 +219,12 @@ export function classifyDeletions(exportDeleted, { sourceDeleted, sourceFiles })
 
 /**
  * Lines of `git grep -n` output that name a private host after the allowed
- * contact addresses are taken out. `forbid` is a list of RegExps.
+ * addresses are taken out. `forbid` is a list of RegExps.
  *
  * ⚠ The two contact addresses must stay REACHABLE in the public tree (a
- * security report sent to example.com goes nowhere), which is why the export
- * keeps them and why they are the only allowed spelling.
+ * security report sent to example.com goes nowhere), and so must the Helm
+ * repository users add (`helm repo add brf-tech https://helm.brf.sh`): that is
+ * why the export keeps them and why they are the only allowed spellings.
  */
 export function privateHostLines(grepLines, { allow = [], forbid = [] }) {
   return grepLines.filter((line) => {
@@ -530,10 +531,12 @@ export function runVerdict(runs) {
  * A run's parts, read one by one (#174): ci.yml's matrix is a job per part,
  * and the gate stage waits for every part it expects (`expected`, job names)
  * rather than for the run's one conclusion. `jobs` are the run's latest
- * attempt ({ name, status, conclusion, url }); `finished` says whether the
- * run itself has completed - before that, a matrix job GitHub has not
- * created yet (it expands a matrix once its plan job is done) is `waiting`,
- * after it a part with no job is `missing`.
+ * attempt ({ name, status, conclusion, url, id, failedSteps }); `finished`
+ * says whether the run itself has completed - before that, a matrix job
+ * GitHub has not created yet (it expands a matrix once its plan job is done)
+ * is `waiting`, after it a part with no job is `missing`. A part carries its
+ * job's `id` and `failedSteps` along, for the re-run of a part that is red on
+ * the runner rather than in the code (rerunDecision, #165).
  *
  * A part that ended any way but success - failure, cancelled, timed out,
  * skipped - is `failure`: a part the full matrix leaves out did not pass.
@@ -547,8 +550,8 @@ export function partsVerdict(jobs, expected, { finished = false } = {}) {
   const parts = (expected ?? []).map((name) => {
     const j = byName.get(name);
     if (!j) return { name, state: finished ? 'missing' : 'waiting' };
-    if (j.status !== 'completed') return { name, state: 'running', url: j.url };
-    return { name, state: j.conclusion === 'success' ? 'success' : 'failure', conclusion: j.conclusion ?? 'none', url: j.url };
+    if (j.status !== 'completed') return { name, state: 'running', url: j.url, id: j.id };
+    return { name, state: j.conclusion === 'success' ? 'success' : 'failure', conclusion: j.conclusion ?? 'none', url: j.url, id: j.id, failedSteps: j.failedSteps ?? null };
   });
   const of = (...states) => parts.filter((p) => states.includes(p.state));
   const failed = of('failure');
@@ -869,4 +872,292 @@ export function chainVerdict(result, { accepted = [], since = null, stampFile = 
     if (other.length) problems.push(`${other.length} file(s) changed since it ran, beyond the stamp: ${other.slice(0, 8).join(', ')}`);
   }
   return { ok: problems.length === 0, problems };
+}
+
+// ── the image builds' context (task #165) ───────────────────────────────────
+//
+// The pretag's image gates build from `git archive` of the release commit,
+// streamed to `docker build -` (scripts/release/gates/docker-build.mjs), and
+// no longer from the working tree. On the maintainer's workstation docker is
+// the WSL docker-ce behind a forwarder, so `docker build .` read the Windows checkout
+// through WSL's 9P bridge, and BuildKit walked all of it before it sent a
+// byte: the .git directory, every worktree under .claude/worktrees and the
+// ignored build output (.dockerignore leaves out only node_modules, dist and
+// the like). The walk took 30.4 and 31.6 minutes per image at 0.55.0 and 49.5
+// and 52.4 at 0.54.0, to send 276 kB; the builds themselves took one to five.
+//
+// ⚠ BuildKit applies no .dockerignore to a tar on stdin (a "remote" context;
+// measured with docker 29.7, 2026-10-10). The tracked tree is what CI's
+// checkout holds, so the two contexts are the same exactly when .dockerignore
+// leaves out no tracked file - which the image gate checks before it builds,
+// with the reader below.
+
+const BACKSLASH = String.fromCharCode(92);
+const BOM = String.fromCharCode(0xfeff);
+
+/** A slash path cleaned as Go's filepath.Clean cleans it ("a//b/./c/" → "a/b/c"). */
+function cleanSlashPath(p) {
+  const rooted = p.startsWith('/');
+  const out = [];
+  for (const seg of p.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      if (out.length && out[out.length - 1] !== '..') out.pop();
+      else if (!rooted) out.push('..');
+      continue;
+    }
+    out.push(seg);
+  }
+  const s = out.join('/');
+  return rooted ? `/${s}` : s || '.';
+}
+
+/** One .dockerignore pattern as the regular expression moby/patternmatcher compiles it to. */
+function dockerPatternRegExp(pattern) {
+  const special = '.+^$(){}|/';
+  let re = '^';
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === '*') {
+      if (pattern[i + 1] === '*') {
+        i += 1;
+        if (pattern[i + 1] === '/') i += 1;
+        re += i + 1 >= pattern.length ? '.*' : '(?:.*/)?';
+      } else {
+        re += '[^/]*';
+      }
+    } else if (ch === '?') {
+      re += '[^/]';
+    } else if (special.includes(ch)) {
+      re += BACKSLASH + ch;
+    } else {
+      re += ch;
+    }
+  }
+  return new RegExp(`${re}$`);
+}
+
+/**
+ * .dockerignore as the docker CLI reads it (moby/patternmatcher): a pattern a
+ * line, `#` comments and blank lines skipped, `!` takes a path back, each
+ * pattern cleaned like a path and without a leading `/`. In a pattern `*` is
+ * any run of characters within one path segment, `?` one such character and
+ * `**` any number of segments. `[...]` classes and `\` escapes are not read
+ * here: such a pattern is `unsupported`, and the caller cannot tell what the
+ * file leaves out.
+ */
+export function dockerignoreRules(text) {
+  const rules = [];
+  const unsupported = [];
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    const line = raw.startsWith(BOM) ? raw.slice(1) : raw;
+    if (line.startsWith('#')) continue;
+    let p = line.trim();
+    if (!p) continue;
+    const exclusion = p.startsWith('!');
+    if (exclusion) p = p.slice(1).trim();
+    if (!p) continue;
+    // `**` other than a whole segment ("**/x", "x/**", "x/**/y") is matched
+    // by suffix or prefix in moby, not by its expression: not read here.
+    if (p.includes('[') || p.includes(']') || p.includes(BACKSLASH) || /\*\*(?!\/|$)/.test(p) || /[^/]\*\*/.test(p)) {
+      unsupported.push(line.trim());
+      continue;
+    }
+    p = cleanSlashPath(p);
+    if (p.length > 1 && p.startsWith('/')) p = p.slice(1);
+    rules.push({ pattern: p, exclusion, re: dockerPatternRegExp(p) });
+  }
+  return { rules, unsupported };
+}
+
+/**
+ * Whether .dockerignore's `rules` leave `file` (a slash path in the context)
+ * out: the last pattern that matches it, or one of the directories above it,
+ * decides (moby/patternmatcher MatchesOrParentMatches).
+ */
+export function dockerignoreExcludes(rules, file) {
+  const parents = String(file).split('/').slice(0, -1);
+  let matched = false;
+  for (const r of rules) {
+    if (r.exclusion !== matched) continue;
+    let match = r.re.test(file);
+    for (let i = 1; !match && i <= parents.length; i++) match = r.re.test(parents.slice(0, i).join('/'));
+    if (match) matched = !r.exclusion;
+  }
+  return matched;
+}
+
+/**
+ * The tracked `files` a `git archive` context would hold and the docker CLI's
+ * own context would not, because .dockerignore (`text`) leaves them out -
+ * among those the build reads (`sources`: dockerfileSources' globs; null, the
+ * whole tree). A file no COPY reads changes nothing: .dockerignore leaves out
+ * two tracked notes under sweep-2026-05-09/, and no image copies them.
+ * `unsupported`: the patterns the reader cannot read; then `excluded` is
+ * empty and proves nothing.
+ */
+export function dockerignoreLeavesOut(text, files, sources = null) {
+  const { rules, unsupported } = dockerignoreRules(text);
+  if (unsupported.length) return { unsupported, excluded: [] };
+  const read = (files ?? []).filter((f) => sources == null || matchesInputs(sources, f));
+  return { unsupported, excluded: read.filter((f) => dockerignoreExcludes(rules, f)) };
+}
+
+/**
+ * The repository paths a Dockerfile's build reads, as globs (matchesInputs'
+ * grammar) for the gate cache's key of an image gate: every source of a COPY
+ * or ADD that is not `--from` another stage or image, and not a URL. A source
+ * that may be a directory stands for everything under it as well. null when it
+ * cannot be told - a source with `?`, `[` or a variable, a heredoc, a
+ * `RUN --mount` that binds the context - and the whole tree is the input then.
+ */
+export function dockerfileSources(text) {
+  const lines = [];
+  let cur = '';
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    if (!cur && /^\s*#/.test(raw)) continue;
+    const l = raw.replace(/\s+$/, '');
+    if (l.endsWith(BACKSLASH)) {
+      cur += `${l.slice(0, -1)} `;
+      continue;
+    }
+    lines.push(cur + l);
+    cur = '';
+  }
+  if (cur) lines.push(cur);
+  const out = new Set();
+  for (const line of lines) {
+    const m = /^\s*([A-Za-z]+)\s+(.*)$/.exec(line);
+    if (!m) continue;
+    const ins = m[1].toUpperCase();
+    let rest = m[2].trim();
+    const flags = [];
+    while (rest.startsWith('--')) {
+      const sp = rest.search(/\s/);
+      flags.push(sp < 0 ? rest : rest.slice(0, sp));
+      rest = sp < 0 ? '' : rest.slice(sp).trim();
+    }
+    if (ins === 'RUN') {
+      for (const f of flags.filter((x) => x.startsWith('--mount='))) {
+        const kv = Object.fromEntries(f.slice('--mount='.length).split(',').map((x) => x.split('=')));
+        if ((kv.type ?? 'bind') === 'bind' && !kv.from) return null;
+      }
+      continue;
+    }
+    if (ins !== 'COPY' && ins !== 'ADD') continue;
+    if (flags.some((f) => f.startsWith('--from='))) continue;
+    if (rest.includes('<<')) return null;
+    let args;
+    if (rest.startsWith('[')) {
+      try {
+        args = JSON.parse(rest);
+      } catch {
+        return null;
+      }
+    } else {
+      args = rest.split(/\s+/).filter(Boolean);
+    }
+    if (!Array.isArray(args) || args.length < 2) return null;
+    for (const s of args.slice(0, -1)) {
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) || s.startsWith('git@')) continue;
+      if (/[?[\]$]/.test(s)) return null;
+      const src = s.replace(/^(?:\.\/)+/, '').replace(/^\/+/, '');
+      if (src === '' || src === '.') return ['**'];
+      if (src.endsWith('/')) {
+        out.add(`${src}**`);
+      } else {
+        out.add(src);
+        out.add(`${src}/**`);
+      }
+    }
+  }
+  return [...out].sort();
+}
+
+// ── GitHub, when it does not answer, and a runner that fails (task #165) ────
+
+/**
+ * Whether what `gh` said is GitHub, or the way to it, failing to answer - a
+ * 5xx, a timeout, a dropped connection, the secondary rate limit - rather than
+ * GitHub answering. The gate stage asks again at its next poll, a few times in
+ * a row, instead of stopping: the 0.55.0 gate stopped on one "Server Error
+ * (HTTP 502)" while reading the jobs of a run that was green five minutes
+ * later, and waited for a person to resume it. Anything else (401, 403 and the
+ * primary rate limit, 404, a bad request, an answer that does not parse) is an
+ * answer, and stops the gate.
+ */
+export function transientGithubError(text) {
+  const t = String(text ?? '');
+  if (/HTTP 5\d\d\b/.test(t)) return true;
+  return /\b(?:Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out|secondary rate limit|i\/o timeout|TLS handshake timeout|context deadline exceeded|connection reset|connection refused|unexpected EOF|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|no such host|timed out)\b/i.test(t);
+}
+
+/**
+ * The steps of a GitHub job that only set its machine up: GitHub's own job
+ * setup and service containers, the checkout, a toolchain, a cache or an
+ * artifact moved (and their clean-up steps), and the browser install through
+ * apt (`playwright install --with-deps`: at 0.55.0's gate it reached the
+ * 10-minute limit on apt, at 0.53.0 it hung 44 minutes, lesson #1274). None of
+ * them runs a line of this repository's code or tests. A step not on this
+ * list is the code's, whatever it failed on.
+ */
+export const INFRA_STEPS = [
+  /^Set up job$/,
+  /^Initialize containers$/,
+  /^Stop containers$/,
+  /^(?:Post )?Run (?:actions\/(?:checkout|setup-node|setup-go|setup-python|cache|download-artifact|upload-artifact)|pnpm\/action-setup|docker\/(?:setup-buildx-action|setup-qemu-action))@/,
+  /^The browsers?, with (?:its|their) system libraries$/,
+  /^Cache the Cypress binary$/,
+];
+
+/**
+ * Whether a red job is the runner's fault: every step that failed or was
+ * cancelled is one of INFRA_STEPS. A job with no such step is the code's (a
+ * test that hung to the job's time limit is cancelled in its own step).
+ */
+export function infraFailure(failedSteps) {
+  const steps = failedSteps ?? [];
+  return steps.length > 0 && steps.every((s) => INFRA_STEPS.some((re) => re.test(s)));
+}
+
+/**
+ * What the gate does about the red parts (jobs) of one GitHub run (#165), from
+ * what it sees now and what it asked before. `run`: { status, attempt };
+ * `failed`: { name, id, failedSteps } of the run's latest attempt; `record`:
+ * the re-run it asked for before, { attempt, at, requests, parts: { name: job
+ * id } }, or null.
+ *   wait   a re-run was asked for and its attempt has not started yet; or
+ *          every red part is the runner's and the run is still going (GitHub
+ *          re-runs only a finished run)
+ *   rerun  every red part is the runner's and has not had its one re-run: ask
+ *          GitHub now. A part GitHub copied into the new attempt without
+ *          running it again (the same job id, lesson #1275) has not had it.
+ *   red    a part is red in a step of the code's, or red again after its
+ *          re-run, or GitHub was asked `maxRequests` times, or never started
+ *          the re-run it was asked for within `startMs`
+ * ⚠ Never a re-run for a red test: a flaky test is a finding, and only a
+ * person decides it is one (docs/CONTRIBUTING.md, "Known flaky tests").
+ */
+export function rerunDecision({ run, failed, record = null, now = Date.now(), maxRequests = 2, startMs = 10 * 60_000 }) {
+  const attempt = run?.attempt ?? 1;
+  if (record && attempt <= record.attempt) {
+    if (now - Date.parse(record.at) < startMs) return { action: 'wait', code: [], spent: [], retry: [], why: `the re-run asked for at ${record.at} has not started yet` };
+    return { action: 'red', code: [], spent: [], retry: [], why: `GitHub never started the re-run asked for at ${record.at}` };
+  }
+  const code = [];
+  const spent = [];
+  const retry = [];
+  for (const p of failed ?? []) {
+    const before = record?.parts?.[p.name];
+    if (!infraFailure(p.failedSteps)) code.push(p);
+    else if (before !== undefined && before !== p.id) spent.push(p);
+    else retry.push(p);
+  }
+  const out = (action, why) => ({ action, code, spent, retry, why });
+  if (code.length) return out('red', `${code.length} part(s) red in a step of the code's`);
+  if (spent.length) return out('red', `${spent.length} part(s) red again after the one re-run the runner's failure gets`);
+  if (!retry.length) return out('red', 'no red part to re-run');
+  if (run?.status !== 'completed') return out('wait', `${retry.length} part(s) red on the runner, not in the code: re-run once the run has finished`);
+  if ((record?.requests ?? 0) >= maxRequests) return out('red', `GitHub was asked ${record.requests} time(s) to re-run it already`);
+  return out('rerun', `${retry.length} part(s) red on the runner, not in the code`);
 }

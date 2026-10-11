@@ -52,6 +52,8 @@ const props = defineProps<{
   locale: LocaleCode;
   theme?: ThemeMode;
   api: FileApi;
+  /** Who is looking, for the app's own interface (`session.user.name`; never an e-mail). */
+  userName?: string;
   plugin: string;
   view: string;
   /** Adapter-qualified path the page was opened on; echoed on every event. */
@@ -443,6 +445,7 @@ const showsDocument = computed(() => {
         :locale="locale"
         :theme="theme"
         :title="title"
+        :user-name="userName"
         @toast="(m) => (toast = m.text)"
         @op="(op) => emit('op', op)"
       />

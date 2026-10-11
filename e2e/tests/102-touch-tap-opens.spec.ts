@@ -74,6 +74,23 @@ async function longPress(target: Locator) {
   await cdp.detach();
 }
 
+/**
+ * ⚠ The lift that ends a long press picks nothing from the menu the press
+ * opened under the finger, then Escape closes that menu. Chromium takes the
+ * 800 ms hold for a tap and emulates a click at the finger (useRowTouch cancels
+ * that touchend). Before, the click picked the sheet's row under the finger:
+ * the 0.56 nightly's was Share, and the share dialog covered the cards for the
+ * rest of the test. A moment for anything the lift could set off - a picked
+ * row closes the sheet - and the sheet is still what is open.
+ */
+async function closeMenuAfterLift(page: Page) {
+  await page.waitForTimeout(400);
+  await expect(page.locator('.fe-sheet'), 'the menu outlives the lift').toBeVisible();
+  await expect(page.locator('.fe-share__scrim'), 'the lift picked no row').toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.fe-sheet')).toHaveCount(0);
+}
+
 const row = (page: Page, rel: string) => page.locator(`[data-fe-path="${STORAGE}://${rel}"]`);
 const nameOf = (r: Locator) => r.locator('.fe-list__name, .fe-grid__label, .fe-gal__label').first();
 const checkOf = (r: Locator) => r.locator('.fe-list__check').first();
@@ -175,7 +192,7 @@ test.describe('Phone — a tap anywhere on an item opens it (issue #26)', () => 
 
     await longPress(png);
     await expect(png).toHaveAttribute('aria-selected', 'true');
-    await page.keyboard.press('Escape');
+    await closeMenuAfterLift(page);
 
     await checkOf(other).tap();
     await expect(other).toHaveAttribute('aria-selected', 'true');
@@ -262,7 +279,7 @@ test.describe('Phone — grid cards (issue #26, fourth round)', () => {
 
     await longPress(png);
     await expect(png).toHaveAttribute('aria-selected', 'true');
-    await page.keyboard.press('Escape');
+    await closeMenuAfterLift(page);
 
     await expect(otherCheck, 'every card shows its box once something is selected').toHaveCSS('opacity', '1');
     await checkOf(other).tap();

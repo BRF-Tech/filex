@@ -67,6 +67,7 @@ import ThemePalette from './ThemePalette.vue';
 import TimeZonePicker from './TimeZonePicker.vue';
 import { formatInstant, localeTag, useLocale } from '../composables/useLocale';
 import { useSystemDark } from '../composables/useSystemDark';
+import { DEFAULT_BRAND_NAME } from '../composables/usePublicBranding';
 import { accountChecker, refusalField, type AccountCheckAnswer } from '../lib/accountRules';
 import { foreignText } from '../lib/direction';
 import { availableLocales } from '../lib/uiLocales';
@@ -119,6 +120,9 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>();
 
 const currentLocale = computed(() => props.host.locale);
 const { t, formatSize } = useLocale(() => props.host.locale);
+/** What the installed web app is called: the installation's name, "filex" where
+ *  nobody set one (#219). The install row and the push rows say it. */
+const appName = computed(() => props.host.brandName?.trim() || DEFAULT_BRAND_NAME);
 
 type Section = 'profile' | 'preferences' | 'notifications' | 'security' | 'ai';
 
@@ -766,7 +770,9 @@ const pushChip = computed<{ text: string; tone: '' | 'ok' | 'bad' } | null>(() =
 const pushWhy = computed(() => {
   const st = pushState.value;
   if (!st) return '';
-  if (!st.supported) return props.host.installApp?.state === 'ios' ? t('notifications.prefs.iosHomeScreen') : '';
+  if (!st.supported) {
+    return props.host.installApp?.state === 'ios' ? t('notifications.prefs.iosHomeScreen', { name: appName.value }) : '';
+  }
   if (!st.status?.available) {
     if (!props.host.isAdmin) return '';
     if (st.status?.reason === 'no_secret_key') return t('notifications.prefs.pushNoSecretKey');
@@ -1517,7 +1523,7 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
               :data-state="host.installApp.state"
             >
               <span class="fx-us__group-title">{{ t('userSettings.prefs.installApp') }}</span>
-              <p class="fx-us__readout">{{ t('userSettings.prefs.installAppLead') }}</p>
+              <p class="fx-us__readout">{{ t('userSettings.prefs.installAppLead', { name: appName }) }}</p>
               <div v-if="host.installApp.state === 'prompt'" class="fx-us__install-foot">
                 <button
                   type="button"
@@ -1683,7 +1689,7 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
                       class="fx-us__hint"
                       data-testid="user-settings-browser-ios"
                     >
-                      {{ t('notifications.prefs.iosHomeScreen') }}
+                      {{ t('notifications.prefs.iosHomeScreen', { name: appName }) }}
                     </span>
                   </template>
                 </div>
@@ -1709,7 +1715,7 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
               </button>
               <div class="fx-us__switch-text">
                 <span class="fx-us__label">{{ t('notifications.prefs.push') }}</span>
-                <span class="fx-us__hint">{{ t('notifications.prefs.pushHint') }}</span>
+                <span class="fx-us__hint">{{ t('notifications.prefs.pushHint', { name: appName }) }}</span>
                 <div v-if="pushChip || pushOn" class="fx-us__chips">
                   <span
                     v-if="pushChip"

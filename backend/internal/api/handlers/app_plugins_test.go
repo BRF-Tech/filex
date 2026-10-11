@@ -25,6 +25,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/capability"
+	"github.com/brf-tech/filex/backend/internal/coedit"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/identitystore"
@@ -32,6 +33,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
+	"github.com/brf-tech/filex/backend/internal/secretbox"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
@@ -66,6 +68,8 @@ type appFixture struct {
 	// extra are storages a test added after the first (addStorage); the
 	// resolver the router and the registry share reads them.
 	extra map[int64]storage.Driver
+	// coedit is the editing-together relay the router serves (coedit_test.go).
+	coedit *coedit.Relay
 }
 
 // addStorage adds a second local storage the fixture's resolver knows —
@@ -153,6 +157,11 @@ func newAppFixture(t *testing.T, cfgMutate func(*config.Config)) *appFixture {
 	opsSvc.SetDecorator(reg.DecorateOps)
 	assocSvc := assoc.New(store)
 	assocSvc.SetSource(reg)
+	// Editing together, as internal/server wires it: the raw store, a blob
+	// folder, and a secret key for the session keys of ordinary folders.
+	coBox, err := secretbox.New("0123456789abcdef0123456789abcdef")
+	require.NoError(t, err)
+	coRelay := coedit.New(coedit.Options{Store: store, BlobDir: filepath.Join(t.TempDir(), "coedit"), Keys: coBox})
 
 	srv := httptest.NewServer(api.BuildRouter(&api.Deps{
 		Cfg:             cfg,
@@ -166,13 +175,14 @@ func newAppFixture(t *testing.T, cfgMutate func(*config.Config)) *appFixture {
 		AppPlugins:      reg,
 		Assoc:           assocSvc,
 		LocalAuth:       localDrv,
+		CoEdit:          coRelay,
 	}))
 	t.Cleanup(srv.Close)
 
 	client := freshClient(t)
 	email, pw := testutil.SeedAdmin(t, store)
 	testutil.LoginAs(t, srv, client, email, pw)
-	return &appFixture{srv: srv, admin: client, store: store, reg: reg, ops: opsSvc, st: st, root: root, sql: sqlDB, extra: extra, assoc: assocSvc}
+	return &appFixture{srv: srv, admin: client, store: store, reg: reg, ops: opsSvc, st: st, root: root, sql: sqlDB, extra: extra, assoc: assocSvc, coedit: coRelay}
 }
 
 func (f *appFixture) writeFile(t *testing.T, rel, content string) {

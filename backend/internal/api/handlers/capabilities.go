@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
 
 // Capabilities exposes /api/capabilities.
@@ -184,6 +185,11 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	// The vault level (encryption level 3): true only where its API answers.
 	// Always present, so a client never guesses from an absence.
 	merged["e2e_vault"] = h.E2EVault
+	// An app granted files:e2e-plaintext may be offered a file of an unlocked
+	// encrypted folder (filex 0.56, app_ui_e2e.go): the administrator's switch
+	// for every app, read per request like the doors read it. Always present;
+	// the explorer offers no app there while it is false.
+	merged["apps_e2e_plaintext"] = wasmplugin.E2EPlaintextSetting.Resolve(r.Context(), h.Store)
 
 	// Per-tenant branding: identify only the tenant this host belongs to.
 	if h.MultiTenant && h.Store != nil {
@@ -323,6 +329,11 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 		types = append(types, h.AppDocs()...)
 	}
 	merged["newdoc_types"] = types
+	// What the dialog says when a family of those types is held back (#217),
+	// in the reader's language: the CLIENT decides which family is missing
+	// (only it knows whether it can reach the document server, and whether an
+	// app's row makes the kind anyway), the server says it.
+	merged["newdoc_withheld"] = newdocWithheld(langOf(r), merged["caller_admin"] == true)
 
 	// Drafts (issue #71): New document makes a draft rather than the file,
 	// for a caller who may keep them (draftsFor — a person acting for

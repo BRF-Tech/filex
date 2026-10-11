@@ -6,7 +6,8 @@
 #   DS       1: connect the Document Server at DS_URL (JWT in DS_SECRET_FILE).
 #            filex listens on PORT and the server calls it back at
 #            http://filex:PORT, forwarded from DS_FILEX_IP:PORT here
-#   ARGS     the rest of the list line, one word per argument
+#   ARGS     the rest of the list line (or the targeted run's --grep and its
+#            pattern), ONE ARGUMENT A LINE (plan.mjs argsEnv)
 #   PORT     this line's own port (run.mjs: CHAIN_E2E_PORT + its place in the
 #            list), used where the Document Server must call filex back
 #
@@ -21,7 +22,11 @@
 # part's traces mid-run. A whole run leaves the shard-* directories alone.
 . /w/chain/job/common.sh
 cd /w/src || exit 1
-read -r -a EXTRA <<< "${ARGS:-}"
+# ⚠ By line, never by word (task #244): split into words, a pattern with
+# spaces gave Playwright its first word for --grep and every other word for a
+# file filter, and the run ran the wrong specs, some of them cut in half.
+EXTRA=()
+if [ -n "${ARGS:-}" ]; then mapfile -t EXTRA <<< "$ARGS"; fi
 LABEL=""
 for i in "${!EXTRA[@]}"; do
   a="${EXTRA[$i]}"
@@ -62,7 +67,7 @@ fi
 export E2E_BROWSERS="${ENGINES:-chromium}"
 unset FILEX_ONLYOFFICE_URL FILEX_ONLYOFFICE_JWT FILEX_ONLYOFFICE_CALLBACK_URL
 BIN=/w/src/bin/filex
-echo "kind=$KIND engines=${ENGINES:--} ds=${DS:-0} args=${ARGS:-}"
+echo "kind=$KIND engines=${ENGINES:--} ds=${DS:-0} args=${EXTRA[*]@Q}"
 echo "apps: sign=${FILEX_SIGN_APP_DIR:-none} convert=${FILEX_CONVERT_APP_DIR:-none} es=${FILEX_LANG_ES_APP_DIR:-none} ar=${FILEX_E2E_LANG_PACK_AR:-none}"
 
 case "$KIND" in

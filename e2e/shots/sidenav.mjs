@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { SCENE_CONTEXT, pinTimes, sceneServerEnv, stageClock } from './clock.mjs';
 import { seedFixtures, syncAndWait, writeOfficeFile } from './fixtures.mjs';
+import { growUntilShown } from './frame.mjs';
 import { shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -603,7 +604,15 @@ async function run(tokens) {
         onTop === 'overlay',
         `topmost element at the card is "${onTop}"`,
       );
+      // ⚠ The connection guide is taller than a 900px window, and the
+      // panel's own scroll left its last instructions cut mid-line at the
+      // picture's foot (0.56 README): the window grows to hold the card.
+      const before = page.viewportSize();
+      if (shot_ === 'connect-1440.png') {
+        await growUntilShown(page, ['.fe-overlay__card'], { max: 2600, what: shot_ });
+      }
       await shot(page, shot_);
+      await page.setViewportSize(before);
       await page.keyboard.press('Escape');
       await sleep(400);
       check(

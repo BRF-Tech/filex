@@ -118,6 +118,10 @@ func (m *Manifest) Validate() error {
 			// And what the app draws thumbnails of: its `thumbnails` block.
 			return fmt.Errorf("manifest: permission %q is derived from the thumbnails block - leave it out of permissions", raw)
 		}
+		if isE2EPlainPerm(p) {
+			// And whether it edits inside encrypted folders (e2eplain.go).
+			return fmt.Errorf("manifest: permission %q is derived from the encrypted_folders block - leave it out of permissions", raw)
+		}
 		if !seen[p] {
 			seen[p] = true
 			m.Perms = append(m.Perms, p)
@@ -297,6 +301,12 @@ func (m *Manifest) Validate() error {
 		return err
 	}
 	if err := m.checkThumbnails(); err != nil {
+		return err
+	}
+	if err := m.checkEncryptedFolders(); err != nil {
+		return err
+	}
+	if err := m.checkCoEdit(); err != nil {
 		return err
 	}
 	for i := range m.PublicPages {

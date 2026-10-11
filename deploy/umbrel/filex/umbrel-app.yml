@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.55.0"
+version: "0.56.0"
 releaseNotes: |-
-  filex v0.55.0 - 2026-10-09
-  • Storage plugins from an app store
-  • A frame of its own package and blob: reads for an app's interface
-  • Printing for an app's interface: ui.print
-  • An app's interface is told when a file is end-to-end encrypted
-  • Editing together in the app SDK, defined
+  filex v0.56.0 - 2026-10-11
+  • An app edits a file of an end-to-end encrypted folder
+  • In a folder whose names are encrypted too, the browser picks the app
+  • What an app keeps while it edits an encrypted file is sealed
+  • An app edits a file of a vault
+  • Editing a file together, through filex's relay
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-
@@ -30,7 +30,8 @@ description: >-
   starred. + New makes a folder or a document: Markdown, text, CSV or code
   straight away, and Word, Excel, PowerPoint or OpenDocument once an
   ONLYOFFICE server is connected. The templates are real documents compiled
-  into the binary, so nothing here needs LibreOffice installed. Select a dozen
+  into the binary, so nothing here needs LibreOffice installed; the office
+  editor app adds Word, Excel and PowerPoint rows of its own. Select a dozen
   files and Download hands back one ZIP, streamed rather than assembled, so a
   large archive costs the server almost no memory. Every file records its
   owner, so the listing has an Owner column, the filter row an Owner entry,
@@ -50,8 +51,11 @@ description: >-
   (OIDC/LDAP), a desktop app with two-way folder sync, an embeddable web
   component, and an AI/MCP API for agents. An open folder keeps itself current
   over a WebSocket, so a file somebody else uploads appears without a refresh.
-  ONLYOFFICE and draw.io can be connected for in-browser document and diagram
-  editing, and so can a ClamAV container: give filex its address and every
+  The office editor app edits Office documents in the browser with no
+  document server - in an encrypted folder too, your browser decrypting the
+  document for it. ONLYOFFICE and draw.io can be
+  connected for in-browser document and diagram editing, and so can a ClamAV
+  container: give filex its address and every
   file written is scanned, with infected ones quarantined into the trash.
 
 

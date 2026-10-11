@@ -51,6 +51,9 @@ interface Fixture {
   /** Some kinds can't honour `mode=edit` (no save endpoint contract).
    *  Defaults to 'edit' so md/code take the editor branch. */
   mode?: 'edit' | 'view';
+  /** The VIEWER_MATRIX entry the page is held to, when it is not `ext`'s
+   *  own (the same file opened another way). Also names the test. */
+  matrixKey?: string;
 }
 
 const FIXTURES: Fixture[] = [
@@ -75,7 +78,10 @@ const FIXTURES: Fixture[] = [
   { name: 'layered.psd',    ext: 'psd' },
   { name: 'book.epub',      ext: 'epub' },
   { name: 'notebook.ipynb', ext: 'ipynb' },
-  { name: 'flow.mmd',       ext: 'mmd' },
+  // A Mermaid diagram: looking at it draws it; Edit opens its SOURCE in the
+  // text editor, saved as text (#216 - the viewer only draws and has no save).
+  { name: 'flow.mmd',       ext: 'mmd', mode: 'view' },
+  { name: 'flow.mmd',       ext: 'mmd', mode: 'edit', matrixKey: 'mmd@edit' },
   { name: 'diagram.drawio', ext: 'drawio' },
   { name: 'cube.glb',       ext: 'glb' },
   { name: 'cube.obj',       ext: 'obj' },
@@ -130,8 +136,8 @@ test.describe('Viewer audit — per-extension UI mount', () => {
     // on disk. Catches accidental rename or new entries in FIXTURES
     // without the corresponding asset.
     for (const f of FIXTURES) {
-      if (!VIEWER_MATRIX[f.ext]) {
-        throw new Error(`fixture ${f.name} has no VIEWER_MATRIX entry for ext=${f.ext}`);
+      if (!VIEWER_MATRIX[f.matrixKey ?? f.ext]) {
+        throw new Error(`fixture ${f.name} has no VIEWER_MATRIX entry for ${f.matrixKey ?? `ext=${f.ext}`}`);
       }
       if (!fs.existsSync(path.join(FIXTURES_DIR, f.name))) {
         throw new Error(`fixture asset missing: ${f.name}`);
@@ -141,8 +147,9 @@ test.describe('Viewer audit — per-extension UI mount', () => {
   });
 
   test.beforeAll(async ({ authedRequest: request }) => {
-    for (const f of FIXTURES) {
-      await uploadFixture(request, f.name);
+    // Each file once: a fixture opened two ways (flow.mmd) is one file.
+    for (const name of new Set(FIXTURES.map((f) => f.name))) {
+      await uploadFixture(request, name);
     }
     // Probe capabilities — drives per-extension skip logic. The server's
     // states are "ok" (probe answered), "unreachable", "unconfigured" and
@@ -169,7 +176,7 @@ test.describe('Viewer audit — per-extension UI mount', () => {
   });
 
   for (const f of FIXTURES) {
-    test(`viewer mounts for ${f.ext} (${f.name})`, async ({ page }) => {
+    test(`viewer mounts for ${f.matrixKey ?? f.ext} (${f.name})`, async ({ page }) => {
       // Skip externally-dependent viewers when their upstream isn't
       // reachable from this host. The fallback path is already
       // exercised by 82-capability-gating; here we only want to
@@ -217,7 +224,12 @@ test.describe('Viewer audit — per-extension UI mount', () => {
 
         // Per-ext mount contract. 0.51 - a .csv opens in ONLYOFFICE where
         // the document server answers (the read-only table otherwise).
-        await expectViewerForExt(page, f.ext === 'csv' && CAPS.onlyofficeReachable ? 'csv@onlyoffice' : f.ext);
+        await expectViewerForExt(page, f.matrixKey ?? (f.ext === 'csv' && CAPS.onlyofficeReachable ? 'csv@onlyoffice' : f.ext));
+        if (f.matrixKey === 'mmd@edit') {
+          // The source, not the drawing; the badge names what the file is.
+          await expect(page.locator('.filex-viewer-mermaid')).toHaveCount(0);
+          await expect(page.getByTestId('code-lang')).toHaveText(/^mermaid$/i);
+        }
 
         // Failures of the lazy viewer chunks would show up here.
         const collected = sink.collect();

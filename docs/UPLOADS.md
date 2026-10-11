@@ -34,6 +34,15 @@ everywhere and works on **every** driver, including `local`, `sftp`, `ftp`,
 "Large" means **above the chunk size** - `FILEX_UPLOAD_CHUNK_SIZE`, 8 MiB by
 default - on every one of them, so the word means the same thing everywhere.
 
+A **folder dropped onto the explorer** (from Finder, Explorer or a file
+manager) is made again where it lands: its folders first, empty ones
+included, then each folder's files through the same upload as above. The
+explorer reads the drop's entries, not its file list, because a browser puts
+a dropped folder in that list as one file - Safari the folder zipped, Firefox
+an empty file, Chromium a placeholder that cannot be read ([GitHub #94](https://github.com/BRF-Tech/filex/issues/94)).
+Inside an encrypted folder the files are encrypted as they are when picked;
+into a vault the whole folder is one change.
+
 ### Upload tickets: the agent's way past its own context
 
 An AI agent is the one client that cannot simply POST a local file: everything it

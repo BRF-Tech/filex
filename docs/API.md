@@ -20,10 +20,12 @@ guide: what to set, and why.
 publishes `dist/style.css` for a host that would rather serve the sheet
 itself.)
 
-⚠ **@brftech/filex 0.54 needs a filex 0.54 server.** Which files are office
+⚠ **Keep the packages and the server on one version: `@brftech/filex` `X.Y`
+needs a filex `X.Y` server.** Which files are office
 documents or text a person edits (`edit_kinds`), the input limits (`limits`)
 and the version line's parts (`release`, `commit`, `built`) come from the
-server's `/api/files/capabilities`; the packages keep no list of their own to
+server's `/api/files/capabilities`, and whether a file is end-to-end encrypted
+comes from its row (`encrypted`); the packages keep no list of their own to
 fall back on. Against an older server nothing is offered Edit, nothing opens
 as an office document and the version line is not drawn - update the server
 with the packages ([BACKEND.md → Rules the server publishes](BACKEND.md#rules-the-server-publishes)).
@@ -735,6 +737,11 @@ export interface Capabilities {
   /** Document types this build can create. Absent on a server older than the
    *  "New document" feature - treat that as "offer nothing". */
   newdoc_types?: NewDocType[];
+  /** What New document says when a whole family of those types is held back
+   *  (#217): `{onlyoffice, drawio}` - one sentence per service, in the
+   *  reader's language - and `admin` (where to set it up) for a caller who
+   *  can. The client decides which family is missing; the words are these. */
+  newdoc_withheld?: Record<string, string>;
   /** 0.54: the release, the commit and the build time apart (`version`
    *  keeps the one-line `v0.54.0 (<commit>, <built>)`). */
   release?: string;
@@ -866,7 +873,9 @@ root, path included, as `apiBase`.
 | `GET /api/files/capabilities` → `queued` | the changes this server runs as jobs of its operations queue when asked with `queued=1`: `rename` (above), `restore` (`POST /api/files/manager/restore?queued=1` with `{ node_ids }`) and `purge` (`DELETE /api/admin/trash/{id}?queued=1`), see [TRASH-VERSIONING.md](TRASH-VERSIONING.md#trash-endpoints). Absent on an older server, which changes inside the request: ask it the old way |
 | `/api/files/e2e/vault/*` and `GET /api/files/capabilities` → `e2e_vault` | the vault, encryption level 3 ([E2E-VAULT-FORMAT.md](E2E-VAULT-FORMAT.md)): `create`, `state`, `list`, `lock` (`renew`, `release`, `break`), `PUT pack`, `PUT index`, `delete` and `prefs`, with the write lock's token in `X-Filex-Vault-Lock`. A pack is up to 16 MiB and an index file up to 64 MiB of request body - a proxy that caps bodies must let those two through. `e2e_vault` is always present and `true` only where the API answers (`FILEX_E2E_VAULT`); while it is `false` every route answers `404 VAULT_DISABLED`. Full reference: [BACKEND.md → Vault](BACKEND.md#vault-encryption-level-3) |
 | `/api/files/drafts` | a new document is a **draft** until its first save (#71): `POST` makes one (the `newfile` body), `GET` lists the caller's own (`{ drafts, count, limit }`), `GET …/count` is the panel's badge, `POST …/{key}/save` puts it in its folder - `409 TARGET_TAKEN` with a `suggested` free `name (2).ext` when the name is taken, never a replace - and `DELETE …/{key}` discards it into the trash. A person's own, only: an app token or a caller confined to a root gets `403 DRAFTS_UNAVAILABLE` and keeps using `newfile`, and `capabilities.drafts` says which a caller is. Full reference: [BACKEND.md → Drafts](BACKEND.md#drafts); what a person sees: [ONLYOFFICE.md → Drafts](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save) |
+| `/api/files/plugins/ui/{plugin}/{view}/coedit/*` and `GET /api/coedit/ws` | editing together (0.56, an app with `files:co-edit`): the frame's join, appends, lease, blobs and leave, and the member's own socket (a WebSocket upgrade, opened with the ticket the join answered - like `/api/ws`, a proxy must pass the upgrade). An appended entry is up to about 3 MiB of JSON and a blob up to the session's budget (256 MiB by default) - a proxy that caps bodies must let those through. Without them an app edits alone. Full reference: [APP-PLUGINS-API.md → Editing together](APP-PLUGINS-API.md#editing-together-coedit-056) |
 | `GET /api/files/capabilities` → `newdoc_types` | the document types **this build** can create, from a template registry compiled into the binary. Each row is `{ ext, group, mime, requires, ext_required }` - `ext_required` is `true` where the editor finds the file by its extension (office, diagrams) and `false` for text, which may be named anything (#56). Published to anonymous callers too: it is a static property of the build and names no host. A **signed-in person** is also told the rows running apps add (`new_documents`): `{ ext, key, group: "app", requires: "app", ext_required: true, app: { plugin, view, label } }` - never an anonymous caller or an app token |
+| `GET /api/files/capabilities` → `newdoc_withheld` | the line New document shows when a whole family of `newdoc_types` cannot be offered (#217): `{ onlyoffice, drawio }`, one sentence per service, in the reader's language (the account's, then `Accept-Language`), plus `admin` - where to set it up - for a caller who can (`caller_admin`). The client decides which family is missing: one whose service it cannot reach **and** none of whose kinds an app's row makes; the words are the server's |
 | `GET /api/branding` → `sso_label` | the operator's text for the sign-in page's SSO button (settings key `branding.sso_label`, tenant-overlaid like the rest of branding). Empty means the translated default |
 | `GET /api/me/custom-css` | the operator stylesheet (settings key `ui.custom_css`), **behind authentication** and `no-store`: `{ css, enabled }`, already sanitised and already wrapped in its `@scope` guard. ⚠ It used to ride `GET /api/branding`, which is public - so it reached anonymous visitors and the sign-in form. The `custom_css` field is **removed** from that payload rather than emptied, so a client still reading it fails loudly instead of quietly rendering nothing. Off by default (`ui.custom_css_enabled`); see [INTEGRATION.md](INTEGRATION.md#operator-custom-css) |
 

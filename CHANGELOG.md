@@ -7,6 +7,471 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-10-11
+
+### Added
+
+- **An app edits a file of an end-to-end encrypted folder** (#189). An app
+  whose manifest says `"encrypted_folders": {"open": true}` (filex 0.56; it
+  needs an interface, a `viewer` view and `files:read`) is granted the
+  derived permission `files:e2e-plaintext`, which the install review lists
+  in its own words - the app sees every such file opened with it, the server
+  still holds only encrypted data - and which is never written into
+  `permissions`; an update that starts asking is a new grant, and a module
+  app's describe must say the same. With the folder unlocked, **Open** and
+  **Open with** offer such an app beside filex's own viewer (the Default
+  apps rule for the kind applies; never ONLYOFFICE, never an app without
+  the grant). The browser does both halves, the CryptPad way: the app's read
+  door answers the ciphertext (`?e2e=1`), the explorer decrypts it and
+  transfers the plaintext to the app's sandboxed frame (`FileInfo.plaintext`
+  says so; no `blob:` address is made of it), and encrypts what the app
+  saves before sending it to the save door (`?e2e=1`), which writes a new
+  version only over the file as it was opened (`expect`; `412 changed`
+  otherwise) and refuses a body that is not an encrypted file (`422
+  not_encrypted`). While the frame holds such a file, save-as, `engine.call`
+  and `job.submit` answer `unavailable`; **Lock** closes the app. In a vault
+  too (its own entry below). Not for a `.fxe`, at most 200 MiB a file
+  (`LIMITS.maxEncryptedBytes`). The administrator's switch
+  `apps.e2e_plaintext` (on; seeded once from `FILEX_APPS_E2E_PLAINTEXT`;
+  `capabilities.apps_e2e_plaintext`) turns it off for every app; every
+  handover and save is an audit row (`app_plugin.e2e_read`,
+  `app_plugin.e2e_save`). An app's save over a file also takes `expect` and
+  answers the version's `modified`
+  ([E2E-ENCRYPTION.md → Editing in an app](docs/E2E-ENCRYPTION.md#editing-in-an-app),
+  [APP-PLUGINS-API.md](docs/APP-PLUGINS-API.md#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)).
+- **In a folder whose names are encrypted too, the browser picks the app**
+  (#189). At level 2 the server stores each name as ciphertext and cannot
+  tell the kind of a file, so an app was not offered there. Now the explorer
+  decrypts the name and chooses the app by its extension - the views granted
+  `files:e2e-plaintext` that apply to it, the administrator's rule for the
+  kind, the person's choice, filex's own viewer last - with one rule every
+  surface uses (core `plaintextOpenOf`); neither the name nor its extension
+  is ever sent, and *Choose an app…* offers no "Always use this app" for
+  such a file (that choice is kept on the account). The app doors do not ask
+  a kind of a stored name that is ciphertext - a save there is held to the
+  grant, the encrypted folder, the person's write right, `expect` and
+  ciphertext only - and keep holding every name they can read to its kind
+  ([E2E-ENCRYPTION.md → The kind is the browser's](docs/E2E-ENCRYPTION.md#the-kind-is-the-browsers)).
+- **What an app keeps while it edits an encrypted file is sealed** (#189).
+  `state.set` in an encrypted session goes to a store of its own,
+  `appStateE2e` in the account's preferences: one ledger per account, app and
+  folder, encrypted in the browser with a key derived from the folder key
+  (HKDF, the signed-in account and the app's name in the context and in the
+  associated data, so a member's ledger copied into another member's
+  preferences does not open), so a "setting" can no longer carry plaintext to
+  the server. It is apart from the app's ordinary store; the same limits hold,
+  measured on what is stored (the server enforces them on the sealed store
+  too, `413 APP_STATE_TOO_LARGE`); a locked folder reads as an empty store
+  ([E2E-ENCRYPTION.md → The app's own store, sealed](docs/E2E-ENCRYPTION.md#the-apps-own-store-sealed)).
+- **An app edits a file of a vault** (#189, encryption level 3). The same
+  app, granted the same `files:e2e-plaintext`, is offered a file of a vault
+  the person has opened and edits it there - the vault's own way, all in the
+  browser: the explorer picks the app by the name it read from the vault's
+  encrypted index (the server never learns a vault's names), its vault engine
+  reads the file from the packs for the app's `file.read` and writes the
+  app's `file.save` as the vault's next generation, under the vault's write
+  lock, only over the version the app read (`failed` / `changed` otherwise; a
+  file that went meanwhile is not made again). One writer at a time: a save
+  while somebody else writes the vault is refused in the server's words
+  (`failed` / `vault_locked`), and one whose write lock ended before the
+  commit writes nothing and says why and what was not saved (`failed` /
+  `vault_lock_lost`). When the vault locks - **Lock**, or its own lock after
+  15 idle minutes - the app closes with it and the person is told which file
+  lost the changes the app had not saved; the app's reads, saves and
+  `ui.dirty` count as activity in the vault. A minute before the vault would
+  lock itself while the app holds unsaved changes, filex warns above the app
+  in the server's words (the vault's `state` answer now carries `words`) and
+  offers **Keep it open**. The app's own store there is the sealed one, keyed
+  from the vault's own key and the account; where the page cannot tell which
+  account it is signed in as, `state.set` now says so instead of calling the
+  folder locked (folders too). No server door is used and no
+  endpoint was added: the server sees packs and an index, never the file's
+  name, its path or that an app opened it, and its app doors keep refusing a
+  vault (`403 encrypted`, whose sentence now says where a vault's file is
+  opened). The SDK's `FileInfo.plaintext` comes beside `encrypted: "vault"`
+  too ([E2E-ENCRYPTION.md → In a vault](docs/E2E-ENCRYPTION.md#in-a-vault),
+  [APP-PLUGINS-API.md](docs/APP-PLUGINS-API.md#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)).
+
+- **Editing a file together, through filex's relay** (#189). An app whose
+  manifest says `"co_edit": {"open": true}` (filex 0.56; it needs an
+  interface, a `viewer` view and `files:read`) is granted the derived
+  permission `files:co-edit` - the review says it in its own words, it is
+  never written into `permissions` - and edits a file with other people: the
+  bridge's `coedit.*` methods 0.55 defined now answer. filex's page seals what the
+  app appends with the session's key, the relay (`internal/coedit`) puts the
+  sealed entries in one order without reading them, and every member's page
+  reads the whole log through the reader that refuses one the writers did
+  not write; the app never holds a key or opens a connection. A conflict is
+  filex's to retry, the changes lease goes to one writer at a time and only
+  to one that has seen every change, a member's cursor reaches the others
+  unkept, a save with `through` is recorded in the log, a member whose page
+  went away is dropped after 45 s, and a session keeps its unsaved changes
+  for the next person who opens the file (30 days). Who joins and whether
+  they may write are the server's answer (two people behind one proxy token
+  are two members, each request carries the member's token, rights are read
+  again while a member is in). The relay's state is in the database
+  (migration 00107, compare-and-set per session: several processes on one
+  database serve one session), its blobs under `FILEX_COEDIT_DIR`. In an
+  ordinary folder the session's key is the server's, kept sealed with
+  `FILEX_SECRET_KEY` (without it the app edits alone); in an encrypted
+  folder, see the next entry. With the
+  office editor app's 0.3.0, editing office documents - alone or together -
+  needs **no ONLYOFFICE Document Server**; one you have stays supported and
+  optional (filex's office thumbnails and server-side office conversions
+  still use it). New: `FILEX_COEDIT`, `FILEX_COEDIT_DIR`,
+  `FILEX_COEDIT_MAX_MEMBERS`, `FILEX_COEDIT_MAX_LOG_MB`,
+  `FILEX_COEDIT_MAX_BLOB_MB`, `FILEX_COEDIT_UNSAVED_DAYS`; the SDK's
+  `CoEditHello.created`, `coedit.dropped`'s `reason` and
+  `fx.save(data, {through})`
+  ([APP-PLUGINS-API.md → Editing together](docs/APP-PLUGINS-API.md#editing-together-coedit-056),
+  [CONFIGURATION.md → Editing together](docs/CONFIGURATION.md#editing-together)).
+- **Editing together in an encrypted folder, watching, and nothing lost to a
+  dropped connection** (#189). A file of an end-to-end encrypted folder is
+  edited together by an app also granted `files:e2e-plaintext`: the member
+  that starts the session makes its key in the page and gives the server
+  only that key sealed with the folder key (`POST …/coedit/{sid}/key`,
+  once); a member that joins (`e2e: true`) is handed it as it is
+  (`sealed_key`) and opens it with the folder key - the server opens neither
+  the key nor anything of the session; not in a vault, not a `.fxe`. A
+  person who may only read the file joins as a **watcher** (`canEdit:
+  false`): every change reaches them live, the relay refuses whatever they
+  would write, and the audit says `app_plugin.coedit_watch`. Every change is
+  kept in the browser's own IndexedDB until the relay placed it (sealed with
+  the folder key in an encrypted folder) and a request that got no answer is
+  sent again: what a lost connection, a closed tab or a crash left is sent
+  when the file is opened again - at once when nobody wrote since, otherwise
+  after the person's answer to a question above the editor in the server's
+  words (`unsent_words`, English and Turkish); a tab still open keeps its own
+  (Web Locks), so none is sent twice. Cursors reach the members connected to
+  every filex process: each member's last sealed cursor is a row (migration
+  00109, `coedit_cursors`), written at most twice a second, read with the
+  log. A save in a session is held to the file the session holds (its base
+  or its last save, by any member) instead of the page's `expect`: two
+  members' saves no longer refuse each other, and a version written outside
+  the session meanwhile is refused (`412 changed`) in an ordinary folder too
+  ([APP-PLUGINS-API.md → Editing together](docs/APP-PLUGINS-API.md#editing-together-coedit-056),
+  [E2E-ENCRYPTION.md → Editing in an app](docs/E2E-ENCRYPTION.md#editing-in-an-app)).
+
+- **The Helm chart installs from a Helm repository.** `helm repo add brf-tech
+  https://helm.brf.sh`, then `helm install filex brf-tech/filex`; the same
+  chart is at `oci://ghcr.io/brf-tech/charts/filex`. Every release's chart is
+  published there within ten minutes of the release, from 0.55.0 on, by
+  [BRF-Tech/helm-charts](https://github.com/BRF-Tech/helm-charts); `--version`
+  pins a chart version, and `helm search repo brf-tech/filex --versions` shows
+  which filex release each one installs. The chart's source stays in
+  `deploy/helm/filex`
+  ([INSTALLATION.md → Kubernetes (Helm)](docs/INSTALLATION.md#kubernetes-helm)).
+
+### Changed
+
+- **A storage plugin build signed over its SHA-256 alone is still accepted:
+  plugins and apps get a compatibility window.** 0.55 said this old form would
+  be refused from 0.56; it is not. A storage plugin or an app built for a
+  release keeps working, unchanged, for at least 6 minor releases or 12 months
+  after it, whichever is longer: an old form it sends (a signature format, a
+  manifest field, a host function, a bridge call) stays accepted with a warning
+  through that window, and is refused only after the CHANGELOG of an earlier
+  release has announced it. The old signature form
+  (`storage-build-signature-sha256`) is accepted at least until filex 0.61 and
+  2027-10-09, whichever comes later; the plugin's row and its log name that
+  end ([PLUGINS.md → Compatibility window](docs/PLUGINS.md#compatibility-window),
+  [CONTRIBUTING.md → Compatibility window for plugins and apps](docs/CONTRIBUTING.md#compatibility-window-for-plugins-and-apps)).
+- The co-editing relay prototype (`internal/e2eoffice`, in memory) is
+  replaced by `internal/coedit`, which keeps the same rules in the database
+  (#189).
+- **The README and the first-steps guides are shorter, and start with the
+  short path** (#218; a reader on r/selfhosted called the documentation
+  "extremely verbose and lengthy"). The README is about 6,200 words instead of
+  20,270: each tour part keeps its short version and its screenshots, and the
+  long text and the full feature list are one entry per feature on the new
+  [FEATURES.md](docs/FEATURES.md); its five translations follow the new
+  structure. [CONFIGURATION.md](docs/CONFIGURATION.md#quick-start),
+  [DESKTOP.md](docs/DESKTOP.md#in-five-minutes),
+  [PROTOCOLS.md](docs/PROTOCOLS.md#quick-start),
+  [ONLYOFFICE.md](docs/ONLYOFFICE.md#prerequisites) and
+  [APP-PLUGINS.md](docs/APP-PLUGINS.md) open with what to do first; "since
+  0.xx" stories leave the guides (the release that made a change is in this
+  file) and the reasons and measurements behind them are in
+  [CONTRIBUTING.md → Background notes from the user guides](docs/CONTRIBUTING.md#background-notes-from-the-user-guides).
+  The arm64 table moved to [INSTALLATION.md](docs/INSTALLATION.md#arm-arm64).
+  API.md's version note said 0.54, PLUGIN-KIT.md's `engine_ext` still named
+  LibreOffice as the office engine: both corrected.
+- **`pnpm release` builds its two images from the release commit, in
+  minutes** (#165). The pretag's image gates stream `git archive` of the
+  commit into `docker build -` instead of building `.`: on a workstation whose
+  docker reads the checkout through WSL's 9P bridge, BuildKit's walk of it
+  (`.git`, every worktree, the build output) took 30-52 minutes per image at
+  0.54.0 and 0.55.0, and 0.55.0's four pretag runs 4.5 hours. The gate first
+  checks that `.dockerignore` leaves out no tracked file the Dockerfile copies
+  (BuildKit applies none to a tar on stdin), the images start beside the UI
+  build instead of after the binary, and each is taken from the gate cache
+  while what it is made of is unchanged and its image is still under its
+  tag. The pretag goes from 66-74 minutes to about 12-15.
+- **The release gate re-runs a part red on the runner, once, by itself, and
+  asks GitHub again when it does not answer** (#165). A part whose every
+  failed step only sets the machine up (GitHub's setup, a checkout, a
+  toolchain, an artifact, the browser install through apt) is re-run with
+  `gh run rerun --failed` once the run has finished; a red test never is. A
+  5xx, a timeout or a dropped connection is asked again at the next poll
+  instead of stopping the gate. The `ci` stage waits for the tag's run to
+  finish before it reads what it published, and the export's workflow-guard
+  gate is taken from the gate cache on an unchanged tree and workflows
+  ([CONTRIBUTING.md → Release process](docs/CONTRIBUTING.md#release-process)).
+- **The `-race` shards are cut from measured times, and none is expected to
+  take over 35 minutes** (#174). The longest one is how long CI's full run
+  takes, and that run is the release's land → green gate (50 minutes). 0.53's
+  split was an estimate: by 0.55 the handlers' rest shard had taken every new
+  test file (244 → 437 tests) and ran 53-57 minutes, the run 71-75.
+  `scripts/test-times.json` keeps the median seconds of every test file and
+  package from the `-race` jobs of five GitHub runs (0.53-0.55);
+  `node scripts/test-shards.mjs rebalance --write` cuts the handlers and
+  wasmplugin units from it, `times` re-measures from a run's `race-*`
+  artifacts, and `estimate` says what each shard will take. Still 14 `-race`
+  jobs: wasmplugin runs in three instead of four (`Go (wasmplugin-3-4)` is
+  now `Go (wasmplugin-3)`), and a new `auth` shard (the auth packages, and
+  the SFTP, FTP and NFS servers) takes what `db-io` (37 minutes) and `rest`
+  (41) had too much of. Estimated on GitHub's runner: 26-30 minutes a shard,
+  against 22-61 before. `web/tests/deploy/testShards.test.ts` is red when a
+  shard is estimated past 35 minutes with the tree as it is, so the rest
+  shard's growth shows before a release waits for it. The build host's chain
+  reads the same list, with GitHub's seconds scaled to the host
+  ([CONTRIBUTING.md → Shards](docs/CONTRIBUTING.md#shards)).
+- **The ship publishes the Helm chart itself and waits for it** (#247).
+  `filex-ship.sh` has a `helm` step, waiting only for the preflight (a red
+  Releases page does not hold it back): it starts the Helm charts
+  repository's publishing (`SHIP_HELM_CMD`, e.g.
+  `gh workflow run publish.yml -R BRF-Tech/helm-charts`) and reads the
+  repository's index (`SHIP_HELM_INDEX`) every 30 seconds until it lists the
+  chart at the release's `appVersion`, for at most `SHIP_HELM_WAIT` minutes
+  (15), red after that. An index that already lists the release is green
+  without starting anything. That repository publishes on a ten-minute
+  schedule, which GitHub had not started for hours, so a release could sit
+  without its chart and nobody saw it. Without the settings the step is left
+  to a person and listed at the end
+  ([CONTRIBUTING.md → The ship](docs/CONTRIBUTING.md#the-ship-filex-shipsh)).
+
+### Fixed
+
+- **A folder dropped into the explorer arrives as a folder** (#246,
+  [GitHub #94](https://github.com/BRF-Tech/filex/issues/94)). The explorer
+  uploaded the drop's `files` list, and a browser puts a dropped folder in
+  that list as one file named after it: Safari on macOS hands over the folder
+  zipped, so it became a zip file with no extension; Firefox hands over an
+  empty file, so an empty file named after the folder was made; Chromium hands
+  over a placeholder that cannot be read, so the upload failed (both measured
+  with a real folder dragged in from a file manager). The
+  drop is now read through its entries (`webkitGetAsEntry`, which Safari,
+  Chromium and Firefox all have), taken while the drop event is still
+  running: a folder is walked and made again where it was dropped, its
+  folders first (empty ones included) and then each folder's files, encrypted
+  inside an encrypted folder and written as one change into a vault (leaving
+  the encrypted folder while a dropped folder is still on its way stops the
+  rest rather than send it unencrypted). Files dropped on their own upload
+  exactly as before. One module reads every drop
+  (`lib/dropUpload`), and New folder and a dropped folder make a folder the
+  same way.
+- **An app's interface knows who is looking** (#189). No page of the web
+  app set the person's name for the explorer, so `session.user.name`
+  reached no app: an office editor named everyone "filex" on their own
+  avatar and as the author of their comments and tracked changes. Every
+  page and panel that mounts an app now hands it the display name (else
+  the username, never the e-mail).
+- **CircleCI prepares the browser suite as GitHub does, with the same
+  script** (#181). Its first run (the 0.55 export) had the Go, unit and
+  build jobs green and every Playwright copy red in seconds: nothing fetched
+  the sign and convert apps, so with `FILEX_REQUIRE_WASM_FIXTURE` set every
+  app spec failed to load ("the sign app's plugin.wasm is not built").
+  GitHub fetched them in a script of its own, with a list of its own. Now
+  `scripts/ci/browser-prep.mjs` prepares every browser part of both CIs: the
+  apps of `e2e/helpers/app-locations.mjs` from their public releases (no
+  token) under the variables the specs read, and the build host's font map
+  (the Playwright image's sans-serif is WenQuanYi Zen Hei, which sets Latin
+  wide for the layout checks). CircleCI's Go job also runs beside Samba now
+  (its 11 live SMB tests skipped there, and a skip is a pass), and its
+  build hands on `packages/core/dist` and checks the embedded UI, as
+  GitHub's does; `scripts/ci-parts.mjs` holds the services and the build's
+  hand-off once for both (`GO_SERVICES`, `BROWSER_BUILD`). GitHub's side is
+  `packaging/ci/ci-browser-prep.patch` (it deletes `ci-apps.sh` and
+  `ci-fonts.sh`).
+- **The installed app wears the instance's branding** (white label). An
+  instance branded on the Branding page still installed on a phone as plain
+  "filex" with filex's icon: the web app manifest was the build's, byte for
+  byte, so three filex instances installed on one phone were three identical
+  "filex" icons. The server now writes the branding into what a browser
+  installs from, read without a session as Chrome's WebAPK server reads it:
+  the manifest's `name`, `short_name`, `theme_color` (the accent) and `icons`,
+  and in `index.html` the `<title>`, the `theme-color` meta, the favicon and
+  the `apple-touch-icon`, in the first paint. The icons are drawn on the server
+  from the logo - 192 and 512 px, `any` and `maskable` (the logo inside the
+  safe zone, on its own corner colour or white) - at addresses named after
+  their content, so a new logo is a new address and Chrome updates the
+  installed icon. An SVG logo is offered as the `any` icon beside filex's PNGs
+  (there is no SVG rasteriser in the binary). A logo given as an http(s)
+  address is fetched by the server and drawn the same way (#219), through the
+  guarded download client plugins use: a public address only (checked after
+  DNS and on every redirect, at most five, never from https down to http), an
+  image type, at most 1 MiB, 10 seconds; in the background, read again
+  hourly, a failed read keeping the icon it had, and only the first page after
+  a new address waiting for it (1.5 s at most). A site-relative logo (`/...`)
+  names the server itself and is not fetched. The worker's precache revisions of `index.html` and the manifest carry
+  the brand's fingerprint, so an app already installed fetches them again when
+  the branding changes instead of keeping the brand of the day its worker
+  installed. ⚠ The manifest `id` and `start_url` do not change: an installed
+  app keeps its identity and is renamed in place, not installed twice. On a
+  multi-tenant install each tenant's host gets its own. ([CONFIGURATION.md →
+  Branding](docs/CONFIGURATION.md#branding-white-label))
+- **The offer to install the web app says the installation's name** (#219).
+  On an instance branded "BRF Teknoloji" the band still read "Install filex as
+  a web app", while the app it installs was going to be called "BRF
+  Teknoloji" on the home screen. The band, the user settings row that offers
+  the install ("Put ... on this device's home screen") and the notification
+  rows that send an iPhone to the Home Screen app or say push arrives "while
+  ... is closed" now name the installation from the Branding page - the same
+  name the server writes into the manifest - and "filex" where none is set.
+  The band's mark is the manifest's own first `any` icon, so it is the
+  picture the home screen gets, whatever the logo was given as (it was
+  filex's mark beside the brand's name). The desktop app's offer still says
+  filex and shows filex's mark: that download is filex. Notifications show
+  the installed app's icon too: the page's own pop-up and a Web Push both use
+  the manifest's first PNG icon (the drawn logo; filex's PNG when nothing is
+  branded or the logo is an SVG), the push's read by the server for the
+  person's tenant branding and sent in the payload. Both were filex's PNG
+  whatever the branding. The status-bar badge stays filex's.
+- **The test chain writes to its disk one heavy writer at a time** (#194).
+  With the memory budget right, the build host's disk still stopped for
+  seconds: the two full runs of 0.55 held writes of 4.7 and 2.0 s and stalled
+  the host for 90 and 65 s, every time with a Playwright line beside
+  `race-db-io` and `race-rest` (or `go-io-rest` beside Chromium), and the
+  tests that wait a fixed time went red in those minutes. The plan now marks
+  the jobs that write heavily - the Playwright lines that run the suite
+  (Firefox wrote 11.4 GB in a run, Chromium 3.4-4.5, WebKit 2.7), `race-rest`,
+  `go-io-rest`, `race-db-io` and `shots` - and the scheduler runs at most
+  `CHAIN_IO_HEAVY_MAX` (1) of them at once: a heavy line of the browser round
+  waits for the heavy pool job running (at most `CHAIN_IO_WAIT_MIN`, 45 min),
+  the pool starts no heavy job beside a heavy line, and the heavy jobs run in
+  a lane of their own beside the light ones. A full run is expected to take
+  about 35 minutes longer (3:06 instead of 2:31 on the measured minutes);
+  `run.mjs --plan` marks the heavy jobs, `result.json` records `io` per job and
+  `host.io_wait_secs`, and the morning report says how long the round waited
+  for the disk. `CHAIN_IO_HEAVY_MAX=0` runs them together as before.
+- **The language packs' nightly translation says when the Claude account's
+  limit stopped it, and tries again the next night** (#177). On 2026-10-09
+  the account's weekly limit ended every agent session in under a second
+  (HTTP 429, "You've hit your weekly limit"), and the night reported each pack
+  as "answers refused after 2 rounds", listed the empty answers as if an
+  agent had refused them and posted a red notification: the reason was only
+  in the agent's log, after a fix round and two more packs that met the same
+  limit. The run now reads the limit from Claude Code's JSON result
+  (`api_error_status` 429, `api_error` `usage_limit_reached` or a rate limit,
+  the account's own words) or, without one, from what the session printed,
+  and stops there: no second round, the packs left not started, nothing
+  applied. The title says `Claude account limit (429): translation tried
+  again next night`, the first line quotes the account (which names when the
+  limit resets), and the night is told once at severity info with no agent
+  woken. It exits 1 like a night with something left (not a failed unit),
+  and nothing is kept that holds the next night, which translates as any
+  other. `check --probe` names the limit too. Answers `apply` refuses are red
+  as before.
+- **The test chain's browser lines no longer write to the disk** (#194). Even
+  one at a time, a Playwright line stalled the build host's disk on its own
+  (writes of 1.0-5.8 s): the Firefox line wrote 11.4-11.8 GB a run, Chromium
+  3.4-4.5 and WebKit 2.7-3.1, everything of it under `/tmp`. Measured on the
+  line's cgroup, three quarters and more of the Firefox line's writes were its
+  contexts' Cache API storage: the panel's service worker precaches the app
+  into every context, about 15 MB of writes a context and 50 fsyncs a second,
+  and on that disk a closed context's storage stayed in the one profile. The
+  rest, and all of Chromium's and WebKit's, was the filex server's data
+  directory (its database, search index, compiled plugins and log, 10-25
+  fsyncs a second), the storages the specs make, and Chromium's shared memory,
+  which Playwright's `--disable-dev-shm-usage` puts in files under `/tmp`. A
+  Playwright line's `/tmp` is now a tmpfs (`CHAIN_BROWSER_TMPFS_GB`, 6 GiB;
+  `0` keeps it on the disk). The same 125 Firefox tests wrote 2.11 GiB with
+  `/tmp` on the disk and nothing on the tmpfs, and took 4 min 19 s instead of
+  7 min 51 s; the closed contexts' storage was emptied there (64 MB after 71
+  contexts against 328 MB after 66). The suite and `e2e/playwright.config.ts`
+  are unchanged, and a red test's traces, videos and screenshots are kept as
+  before. The shots job, the same harness (1.3-1.43 GiB a night), gets the
+  same `/tmp`: its run directory - the binary it builds and runs from there,
+  each scene's server data - the browser's profile and Chromium's shared
+  memory; its pictures stay in the tree and are copied to the run as before.
+- **A targeted chain run's `CHAIN_E2E_GREP` reaches Playwright whole** (#244).
+  A browser line's arguments went to its job joined with spaces and the job
+  split them back into words, so a pattern with spaces gave Playwright its
+  first word for `--grep` and every other word for a file filter: a run asked
+  for one spec by its test titles ran none of it and the halves of serial
+  describes in seven other specs, which went red only for being cut, and
+  another started on most of the suite, on three engines. They now travel
+  one a line, and the job hands each to `e2e/run.mjs` whole - spaces, `|`,
+  parentheses and quotes included. Its log's `args=` line quotes each
+  argument, and `run.mjs --plan` quotes one with spaces; an argument with a
+  line break is refused before the run starts.
+- **Edit on a Mermaid diagram (`.mmd`, `.mermaid`) opens its text, and saves
+  it** (#216). The preview offered Edit on a Mermaid diagram, which the
+  server saves as text, but Edit opened the Mermaid viewer again, which only
+  draws the diagram and has no save: whatever the person changed could not
+  be kept. Edit now opens the diagram's source in the built-in text editor,
+  saved through save-text like any other text file; looking at it still
+  draws the diagram. Which files are saved as text stays the server's answer
+  (`capabilities.edit_kinds`). The editor's badge says "mermaid", not
+  "plaintext".
+- **New document no longer says office documents need a document server
+  while an app makes them** (#217). With an office editor app installed and
+  no ONLYOFFICE, the dialog listed the app's `.docx`, `.xlsx` and `.pptx`
+  rows and, right above them, "Office documents need a document server
+  (ONLYOFFICE), which is not set up here." The line now names a family only
+  when nothing here makes any of its kinds - neither the service nor an
+  app's row - and its words are the server's, in the reader's language
+  (`capabilities.newdoc_withheld`; a server without it shows no line).
+- **On a phone, the viewer's previous/next arrows no longer narrow the
+  file** (#217). A surface that fills the viewer (an app's interface, an
+  editor, a document) kept a gutter on each side for the arrows; on a 390 px
+  screen it took 84 px and squeezed an app's interface to 306 px. On a
+  narrow screen (640 px and less) the surface takes the whole width and the
+  arrows lie over its edges; on a wider screen they still stand beside it.
+- **An app's print question no longer pushes its interface down** (#217).
+  The "X wants to print ... Allow / Don't allow" row was drawn above the
+  app's frame and shrank it the moment it showed; the office editor, busy
+  making the PDF, could not redraw at the new size and stayed blank until
+  the print was over. The row now lies over the top of the frame, which
+  keeps its size.
+- **Lifting the finger after a long press no longer picks a row of the menu
+  it opened** (issue #26). A long press on a file or folder in the list, the
+  grid or the gallery opens its menu under the finger (on a phone, the
+  bottom sheet). When the browser took the lift for a tap - Chromium does
+  whenever its own long-press time is longer than filex's 500 ms - it
+  clicked the menu row that had come under the finger: the menu closed and
+  that row ran (Share, Details, ...). The touchend that ends a long press is
+  now cancelled, as a held row's already was in the storage list, and the
+  menu stays open for the person's choice.
+- **Hovering a file in an open vault no longer sends its name to the
+  server** (#189). In the admin app the explorer asks the server for a
+  drag-out link to a file while the pointer rests on it (#71), and it asked
+  for a vault's files too: a vault's row lives only in the tab and its path
+  names the file in plaintext, so every hover posted the name the vault keeps
+  from the server (`POST /api/files/archive/download`). The link is no longer
+  asked for a file in a vault or in an encrypted folder, which the drag never
+  hands out anyway (its bytes are ciphertext), from a listing row or a ⌘K
+  hit alike.
+- **A file of an encrypted folder is no longer dragged out of a ⌘K result or
+  of Recent** (#243, #189). The drag-out refused such a file only while its
+  own folder was the one open: a ⌘K result and a listing row were handed to
+  the drag as path, name and kind, without what the server says of their
+  encryption. So the same file found with ⌘K, or listed on Recent, Starred, a
+  tag or a search while a plain folder was open, went out - in a cookie
+  session (an embed) the drag carried the plain download URL and the browser
+  saved the ciphertext on the desktop under the file's name, as if it were the
+  document (measured in Chromium, Firefox and WebKit), and the desktop app's
+  drag took the same path; the admin app's own bearer session carried nothing,
+  since no link is asked for such a file (#242). The drag now reads the row
+  (`encrypted`, `e2e_root`, a vault's own rows) and the pane it was listed
+  in, for the browser's download and the desktop app alike: such a ⌘K result
+  is not draggable and asks for no link, a listing row keeps its move inside
+  the window and hands nothing out, and the desktop app no longer prepares
+  such a file ahead of a drag. The encrypted folder's own row is not dragged
+  out of the desktop app either (**Download encrypted copy** stays the way to
+  take the ciphertext), and a plain ⌘K result now drags out while an
+  encrypted folder is open behind the palette.
+
 ## [0.55.0] - 2026-10-09
 
 ### Added
@@ -94,7 +559,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `coedit.dropped`) and `file.save`'s `through`, so the office editor app can
   be written against them (`fx.coedit` in `@brftech/filex-app-ui`); filex
   0.55 offers no relay yet and answers each `unavailable`
-  ([APP-PLUGINS-API.md → Editing together](docs/APP-PLUGINS-API.md#editing-together-coedit-055-defined-not-offered)).
+  ([APP-PLUGINS-API.md → Editing together](docs/APP-PLUGINS-API.md#editing-together-coedit-056)).
 - **The test chain can move what else its host runs out of the way** (#194).
   `CHAIN_PAUSE_CMD` runs once `scripts/chain/run.sh` holds the build lock,
   before the run measures the memory it may take, and when it succeeded

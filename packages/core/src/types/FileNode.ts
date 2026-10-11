@@ -265,6 +265,11 @@ export interface Capabilities {
   /** Document types this build can create. Absent on a server older than the
    *  "New document" feature — hosts must treat that as "offer nothing". */
   newdoc_types?: NewDocType[];
+  /** What New document says when a whole family of `newdoc_types` is held
+   *  back (#217): one sentence per service (`onlyoffice`, `drawio`) and,
+   *  for a caller who can set one up, `admin`. The server's words, in the
+   *  reader's language; which family is missing the dialog decides. */
+  newdoc_withheld?: Record<string, string>;
   /** Drafts (issue #71): present when the server keeps drafts for THIS caller
    *  (a person acting for themselves — not an app token, not a caller
    *  confined to one folder). New document then makes a draft; absent, it
@@ -360,6 +365,12 @@ export interface Capabilities {
    *  docs/E2E-VAULT-FORMAT.md): level 3 is offered for a new folder only
    *  here. Absent or false: the level is not drawn at all. */
   e2e_vault?: boolean;
+  /** filex 0.56 (task #189) — an app granted `files:e2e-plaintext` may be
+   *  handed a file of an unlocked encrypted folder in the clear (decrypted in
+   *  this tab, lib/appPlaintext): the administrator's switch for every app
+   *  (`apps.e2e_plaintext`). Absent (an older server, which has no such door)
+   *  or false: no app is offered an encrypted file. */
+  apps_e2e_plaintext?: boolean;
 }
 
 /**

@@ -25,7 +25,8 @@ import { ArrowLeft } from 'lucide-vue-next';
 import { PluginPageView, useFileApi } from '@brftech/filex-core';
 import type { ExplorerConfig } from '@brftech/filex-core';
 
-import { explorerAuth } from '@/lib/explorerConfig';
+import { appUserName, explorerAuth } from '@/lib/explorerConfig';
+import { useAuthStore } from '@/stores/auth';
 import { getServerRoot } from '@/api/runtimeConfig';
 import { currentMountBase } from '@/router';
 import { useAppHomeRoute } from '@/composables/useAppHomeRoute';
@@ -60,6 +61,9 @@ function back(): void {
 function onQueued(_op: Record<string, unknown>): void {
   /* the explorer's tray polls /api/files/ops — nothing to register here */
 }
+
+// Who is looking, for the app's own interface (`session.user.name`).
+const auth = useAuthStore();
 </script>
 
 <template>
@@ -83,6 +87,7 @@ function onQueued(_op: Record<string, unknown>): void {
         :key="`${plugin}/${view}/${uiLocale}`"
         frame="embedded"
         :locale="uiLocale"
+        :user-name="appUserName(auth.user)"
         :theme="theme"
         :api="api"
         :plugin="plugin"

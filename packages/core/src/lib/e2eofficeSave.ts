@@ -14,12 +14,14 @@
  *   - Save (the editor's button, Ctrl+S) saves at once, by whoever pressed it;
  *   - the last writer to leave saves what is not saved yet;
  *   - unsaved changes nobody saved stay in the session for 30 days
- *     (backend/internal/e2eoffice DefaultUnsavedRetention);
+ *     (backend/internal/coedit DefaultUnsavedRetention);
  *   - in a vault (level 3) the editor runs alone: no relay, nothing reaches
  *     the server until the save, so a vault does not tell the server that
  *     somebody is editing which document.
  *
- * ⚠ Prototype: no surface uses this yet.
+ * filex itself does not save for an app: the office editor app follows these
+ * rules from the same log (its own copy, AGPL); this file is the rule as
+ * filex states it, and its tests.
  */
 
 /** A version every 10 minutes while there are unsaved changes. */

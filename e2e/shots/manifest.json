@@ -11,7 +11,7 @@
       "bytes": 228584,
       "scene": "capture.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "admin-plugins.png": {
       "sha256": "c25fa69cfc7c2e314c63289ec380f263ca8560d919e0ad733900cbe48d3b81d6",
@@ -20,16 +20,16 @@
       "bytes": 256213,
       "scene": "capture.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "appearance/theme-editor-1440.png": {
-      "sha256": "7cf3d997f7b15dc64a68459cedaf6ad87e9965ba64796df087a9858c307eb4c9",
+      "sha256": "5b28006557f81b7bd5751c38c2218d3412f2ce107c0943faf403512ad2609dc4",
       "width": 2880,
-      "height": 2000,
-      "bytes": 286895,
+      "height": 1988,
+      "bytes": 286578,
       "scene": "appearance.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "appearance/themed-explorer-1440.png": {
       "sha256": "dbe464fc39c7e0f926383190cbb434476a6559fbbb83d7337578204051a3c495",
@@ -38,16 +38,16 @@
       "bytes": 309084,
       "scene": "appearance.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "appearance/themed-signin-1440.png": {
-      "sha256": "3a7aa7199497a1befa9f90bfccddbfbb8e6f9371c13f73058e54c73e102ec8f2",
+      "sha256": "98801a84bea26355565990928698e29b6f1af14a6f8ad8223760199caeef6715",
       "width": 2880,
       "height": 1800,
-      "bytes": 100175,
+      "bytes": 100256,
       "scene": "appearance.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "apppermissions/person-delegated.png": {
       "sha256": "625d9350683e789faed4ca1ef1063fd8013210738f2ed7ad34393eaebf9218be",
@@ -86,40 +86,40 @@
       "checked": "2026-10-09T09:10:41.300Z"
     },
     "appprint/print-consent-1280.png": {
-      "sha256": "ae34e6af4815cd11b6f673223da3780326f9e34cf64e19c699a82844cc9b60b1",
+      "sha256": "454c0567b284ed19d078052f321150496e7ef3e7271c2e6b90a9e290e3d279a0",
       "width": 2560,
       "height": 1800,
-      "bytes": 87127,
+      "bytes": 77169,
       "scene": "appprint.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
     },
     "appprint/print-consent-390.png": {
-      "sha256": "18641d25735e61e0fbe6e2ce56fe809036c393ad240f1f716e29f0f87b19cbba",
+      "sha256": "d372f0664c9fafad804fb4c4814af9ae936bea6082511e3876ef3843783c44fd",
       "width": 780,
       "height": 1688,
-      "bytes": 70910,
+      "bytes": 58995,
       "scene": "appprint.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
     },
     "appprint/print-consent-dark-tr-1280.png": {
-      "sha256": "dfafb44d29f34661e0a851309734ebc08c7b7e68eec68ad5327d99f063c68b5e",
+      "sha256": "0c2f5bd7a7d6fd84fa3a2b3d506879d5247e72ce33bc2e910e4a49cdf2b763db",
       "width": 2560,
       "height": 1800,
-      "bytes": 92000,
+      "bytes": 80450,
       "scene": "appprint.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
     },
     "appprint/print-consent-dark-tr-390.png": {
-      "sha256": "3233b024d1b6f055863443cf8925c0a25318a23418059afdf089a03338c0c2dc",
+      "sha256": "a9436934c13b8c53713e8e5c7ac453addfd551de906001a6fd04efeff1f3c287",
       "width": 780,
       "height": 1688,
-      "bytes": 77452,
+      "bytes": 63630,
       "scene": "appprint.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
     },
     "apps/app-interface-review-1440.png": {
       "sha256": "51df0aa460adf276dc480a1b779ae217791c9014137780e7875ae91960d00852",
@@ -212,13 +212,13 @@
       "checked": "2026-10-09T09:10:41.300Z"
     },
     "connections-guide.png": {
-      "sha256": "cf9a135724c968c15e1236fa11ec276e6e2cffc372fca1f07ae5d71a757c8529",
+      "sha256": "98a4f82ecd9d1591227c5d19732b3828971f77c9b4893833969721c017fee73c",
       "width": 3200,
-      "height": 1880,
-      "bytes": 322140,
+      "height": 3278,
+      "bytes": 542641,
       "scene": "capture.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "csvoffice/csv-choose-app.png": {
       "sha256": "57b1ed93440f56e98d06f2430261ff62e11c7c8a9f716b9130ca4e74695cef6d",
@@ -356,13 +356,13 @@
       "checked": "2026-10-09T09:10:41.300Z"
     },
     "demo-landing.png": {
-      "sha256": "d2b345f6a229cd1c23381dcd404d1d58ba922cd56ddd24c9fad2c502a636f396",
+      "sha256": "bb2b8d97d4ff1e8b6ff6e6117f7f8a0f3dd31aafc78f8bd1e6eff30dbef9b675",
       "width": 3200,
-      "height": 2000,
-      "bytes": 430676,
+      "height": 2530,
+      "bytes": 570368,
       "scene": "capture.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/admin-shell-1440.png": {
       "sha256": "577e28cb6ecc1eb51bbda6a798f4270f9c1826fa6e9f7206a10b88f5a7e372b2",
@@ -371,7 +371,7 @@
       "bytes": 351512,
       "scene": "driveshell.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-390-dark.png": {
       "sha256": "3a0b31804a90d0b8ee25fb239c174dc7237fdd889abc003514416d884c5e898f",
@@ -380,7 +380,7 @@
       "bytes": 86920,
       "scene": "driveshell.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-390.png": {
       "sha256": "fe8ed1863506371285ba0f0a1ddaf7be9a882bccc89f43180245abf12e3047d4",
@@ -389,133 +389,133 @@
       "bytes": 85507,
       "scene": "driveshell.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-dark-1440.png": {
-      "sha256": "f1e16a38990f1e17a5da1565615da00ab982053815234cd30e0954f27c5bea4b",
+      "sha256": "ac8f51dc37bfe6dc95f33c33c7482f1cba7c207471afe3428b4653e7404baa89",
       "width": 2880,
       "height": 1800,
-      "bytes": 294851,
+      "bytes": 293391,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-dark-info-1440.png": {
-      "sha256": "c9ebf7658c03ae1a984e9ba685567cddbb7d0e5a8e92351b803297a487fff2ae",
+      "sha256": "24ea65df3005842a7de6a7b79f87bc4f65a6f2d6890f1b2ac1ec79b2ecfc000d",
       "width": 2880,
       "height": 1800,
-      "bytes": 330532,
+      "bytes": 329000,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-drawer-390.png": {
-      "sha256": "a5daea2f6c4a897c3619de6627cca2adfacb83467e45bb2481614e2d789c6baf",
+      "sha256": "81dbf484af7671641ee3ea710f3fe5816926ecd4fdf9fca7cd9d4e6429c12ec3",
       "width": 780,
       "height": 1688,
-      "bytes": 93937,
+      "bytes": 92654,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-filter-1440.png": {
-      "sha256": "460f639b022d264ec7bf3af256c86c3d123a42c2f0789c59824c61a1d97e3284",
+      "sha256": "103b38da1aeabdafa4ceea1edaf3a7febc0b62f409064c41cf31cdd2829bcaa6",
       "width": 2880,
       "height": 1800,
-      "bytes": 179094,
+      "bytes": 177625,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-filter-empty-1440.png": {
-      "sha256": "34ed86707c1a983f01f0bf1c695e67e8f323f5f9c7a3b5dc84796850eba2452c",
+      "sha256": "f0f8aacd743dd578a6c0ba3c36013abefc0fe9b0c50b655bf32d54823f1bb992",
       "width": 2880,
       "height": 1800,
-      "bytes": 176217,
+      "bytes": 174745,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-grid-1440.png": {
-      "sha256": "d8c44de4f498e95a7b0cca6320185df029934e37bf877b7b6c6bd41800f6af86",
+      "sha256": "0bd2f5561b16b9f573cb97ffd2898259072e7163561ac570812f82181d388e92",
       "width": 2880,
       "height": 1800,
-      "bytes": 296526,
+      "bytes": 295051,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-hero-1440.png": {
-      "sha256": "16742e2491655c9d88c2a5368da4f54557be0142142e5e56d3e58672c4482aca",
+      "sha256": "16ace59f07c3ac605d028241c820f07b831292739ad0ab3d3f365f8fbfc70536",
       "width": 2880,
       "height": 1800,
-      "bytes": 313017,
+      "bytes": 311526,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-info-activity-1440.png": {
-      "sha256": "e523fbc6b06fdbd4cfdac171197a24144546502da8939a54bb82b9776dd1f12b",
+      "sha256": "c4353c2e19c1eb4762e728ec2f02b23eddab2a083fe522549ae8be020e5d4c0d",
       "width": 2880,
       "height": 1800,
-      "bytes": 347110,
+      "bytes": 345731,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-info-details-1440.png": {
-      "sha256": "d00428419a6c75f2291de557b215f46e631279a18c77474f695cedaadb4466d0",
+      "sha256": "0fc6437dd3e99ec0321604c9e7e2bac23da4a4be37ac614acb40ae395a34a548",
       "width": 2880,
       "height": 1800,
-      "bytes": 387544,
+      "bytes": 386054,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-info-link-1440.png": {
-      "sha256": "2bc864c64788a4787e1eaed6131306d02324987ade91a3e60f52457378e0b5b3",
+      "sha256": "430a21bf7943090994b28a79f6ad63550fccfcf263ddf32eb15c040ab56dfa6e",
       "width": 2880,
       "height": 1800,
-      "bytes": 413134,
+      "bytes": 409105,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-info-people-1440.png": {
-      "sha256": "d7bf43cc1aa470ae3df224703b96dedce36d49a20a6dd1c3b4f3b3eac072891f",
+      "sha256": "86d5eeec36ac75d75188c2a2fdaf71f1a96803dc516498d3f215c85ad58d221a",
       "width": 2880,
       "height": 1800,
-      "bytes": 248692,
+      "bytes": 247219,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-list-1440.png": {
-      "sha256": "2c7799436d0419258880d531ed97a1a9dac32a610c9f0bfed976ba12979b157e",
+      "sha256": "f977dbf4cca5070458e34baff975a8c8371314f3e09a59f76da867d23f56082f",
       "width": 2880,
       "height": 1800,
-      "bytes": 309472,
+      "bytes": 307983,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-new-menu-1440.png": {
-      "sha256": "58aee2616e93be83909c074fdf788f488e196a25f51806e63643af0f1ad9d02d",
+      "sha256": "543754d914d384ab34bce932c19bf02c207f5a4e7606c1b351cf3dca8edafc26",
       "width": 2880,
       "height": 1800,
-      "bytes": 304865,
+      "bytes": 303384,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-palette-1440.png": {
-      "sha256": "0af5df10d5c10f0febc33b82e0b1c96be3288de445769a1d7d896629665be38d",
+      "sha256": "17a2fff06062e7bd0910d3146b4851b98e2b30f30ec10d81b9a3374b4051bb39",
       "width": 2880,
       "height": 1800,
-      "bytes": 214237,
+      "bytes": 212840,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-rail-1440.png": {
       "sha256": "89aa2e1e3c011902e6a241c387772c2dca81911082bb1162b2e39cae9f854f66",
@@ -524,16 +524,16 @@
       "bytes": 237596,
       "scene": "driveshell.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/driveshell-search-1440.png": {
-      "sha256": "119e6bd4390562049af9d1bf4a943a2f9b02b67e18df9c67dad2ada7020163fd",
+      "sha256": "c0f3ceda0ec411b4f45857635bae87badc664d2aea3659e4ae795ede360545f0",
       "width": 2880,
       "height": 1800,
-      "bytes": 190720,
+      "bytes": 189242,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "driveshell/embed-no-panel-1440.png": {
       "sha256": "dd009a7c601b0709c600b7baf820c9c7d719b01c6a88be1ba46fbf368c11d754",
@@ -542,7 +542,7 @@
       "bytes": 135811,
       "scene": "driveshell.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "e2e-recovery/create-encrypted-folder.png": {
       "sha256": "83f4e4a875bd498322af31a45a360fa962980c7e59db6948aff329913247b632",
@@ -634,6 +634,33 @@
       "taken": "2026-10-07T01:02:26.153Z",
       "checked": "2026-10-09T09:10:41.300Z"
     },
+    "e2eapp/app-encrypted-folder-1280.png": {
+      "sha256": "856d3586a9e22f3b467118e0e891751c169ffb2bad374306cebaa7da1339561c",
+      "width": 2560,
+      "height": 1720,
+      "bytes": 144513,
+      "scene": "e2eapp.mjs",
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
+    },
+    "e2eapp/open-with-encrypted-1280.png": {
+      "sha256": "aa5c86c8c9bb51a6d6b0bdd71cc433baf2a21021b4799b12368786ab75199ae5",
+      "width": 840,
+      "height": 460,
+      "bytes": 33840,
+      "scene": "e2eapp.mjs",
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
+    },
+    "e2eapp/vault-lock-soon-1280.png": {
+      "sha256": "df4684a99783d54ba55fb1d524e2263e4e061701f49bcb06a023a1aa1963036b",
+      "width": 2560,
+      "height": 1720,
+      "bytes": 150271,
+      "scene": "e2eapp.mjs",
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
+    },
     "encryption/admin-encryption-1440.png": {
       "sha256": "b74163acb93ce89894617c3d8582e6c1ba7c5fa6b432518a0283c2f13aff985c",
       "width": 2880,
@@ -662,22 +689,22 @@
       "checked": "2026-10-09T09:10:41.300Z"
     },
     "explorer-grid-dark.png": {
-      "sha256": "5ddafe2dac64338ee840faa52755162b854a62e439d55429b8dab63c9f42de4d",
+      "sha256": "e032d7456831aa37cfded92c6480cf35d0e6dac7d0fdde12dca62b6d674c487d",
       "width": 3200,
-      "height": 1240,
-      "bytes": 279613,
+      "height": 1408,
+      "bytes": 293030,
       "scene": "capture.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "explorer-grid-light.png": {
-      "sha256": "484fb070ca19a354bdcb139d7ab1fb59603f8a51ca0fcecbba3a9fdf18cce48f",
+      "sha256": "de398671d43b347426305848059ec28d81e6d98e109b1d7e58315a7b5e027908",
       "width": 3200,
-      "height": 1240,
-      "bytes": 279955,
+      "height": 1408,
+      "bytes": 294063,
       "scene": "capture.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "groups/group-page-1440.png": {
       "sha256": "61f4012ef1b0f2ef786be13cb0738d6bbdec205ae1664febf6ebc4bdaf27c44e",
@@ -725,40 +752,49 @@
       "checked": "2026-10-09T09:10:41.300Z"
     },
     "loginsecurity/login-locked-1440.png": {
-      "sha256": "fafb1136af30559f4a922b319803b3877b0143406a857c34a3dc9c6d6401eed2",
+      "sha256": "3f4c6d3233f33de33c54309ac55615361c6f466cd37ca1166df12ea061daeb3e",
       "width": 2880,
       "height": 1800,
-      "bytes": 117863,
+      "bytes": 117933,
       "scene": "loginsecurity.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "loginsecurity/login-remaining-1440.png": {
-      "sha256": "961ed40adfd4060e1d77a6f76144f6eadbb62971e477a5ce61c731cf6eff6bd1",
+      "sha256": "de6ab8c9e4a360c2dc8b1655f3bce7a81ee73eae4a83c062471e7b5beede22c7",
       "width": 2880,
       "height": 1800,
-      "bytes": 115870,
+      "bytes": 115966,
       "scene": "loginsecurity.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "loginsecurity/login-security-1440.png": {
+      "sha256": "077cec3f1b0ad84158256c3de00fb2530415cc7027de7488ec15f241ad5d0ff1",
+      "width": 2880,
+      "height": 1908,
+      "bytes": 283689,
+      "scene": "loginsecurity.mjs",
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
+    },
+    "loginsecurity/login-security-958.png": {
+      "sha256": "2f48a232f4c7a93600331743046132f4e25415ea06155e357110a80254ac3b4c",
+      "width": 1916,
+      "height": 5756,
+      "bytes": 1120284,
+      "scene": "loginsecurity.mjs",
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
+    },
+    "loginsecurity/login-security-page-1440.png": {
       "sha256": "fa0a391a5c197ba1aef9998253b4dbda35f417333b03359dad4831e7b35bb340",
       "width": 2880,
       "height": 5684,
       "bytes": 1185003,
       "scene": "loginsecurity.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
-    },
-    "loginsecurity/login-security-958.png": {
-      "sha256": "f45f12951dd5f28a253d50ed3a67a2f4a0de633e5e73e437942599f99c1949ef",
-      "width": 1916,
-      "height": 5756,
-      "bytes": 1120029,
-      "scene": "loginsecurity.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "megamenu/drawer-390.png": {
       "sha256": "507bf798ed166732dea4dbab97d72c1fff4799fc7de307d9d2dca6f6309054ae",
@@ -804,6 +840,24 @@
       "scene": "megamenu.mjs",
       "taken": "2026-10-09T09:10:41.300Z",
       "checked": "2026-10-09T09:10:41.300Z"
+    },
+    "mermaid/mermaid-edit-1280.png": {
+      "sha256": "cab051b8dfb0390ab1976752cfbc3f0fd0adc61c2233c44786cfef3e0131f89b",
+      "width": 2560,
+      "height": 1720,
+      "bytes": 76200,
+      "scene": "mermaid.mjs",
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
+    },
+    "mermaid/mermaid-view-1280.png": {
+      "sha256": "cb1ef3b761eedad831cd74235a1646d3eb59f715bbf53338a5d2f6d6ab906024",
+      "width": 2560,
+      "height": 1720,
+      "bytes": 91859,
+      "scene": "mermaid.mjs",
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
     },
     "newdoc/drafts-close-1280.png": {
       "sha256": "d49e1e1267da70d8f113f5eb725ece138c77309e5c85dd85e7a0a66695699ab7",
@@ -868,6 +922,60 @@
       "taken": "2026-10-07T01:02:26.153Z",
       "checked": "2026-10-09T09:10:41.300Z"
     },
+    "officeapp/coedit-editor-1280.png": {
+      "sha256": "92d45b0674952aaa51f3b461563be28e7bfc1c297382884bdf50acaf475c154c",
+      "width": 2560,
+      "height": 1720,
+      "bytes": 159685,
+      "scene": "officeapp.mjs",
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
+    },
+    "officeapp/coedit-watcher-1280.png": {
+      "sha256": "904b31e20f365669a9883ab7360d6ce129f12c72c86e5c5ed0a5954f9a85148b",
+      "width": 2560,
+      "height": 1720,
+      "bytes": 178296,
+      "scene": "officeapp.mjs",
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
+    },
+    "officeapp/newdoc-office-app-1280.png": {
+      "sha256": "70ef3ae038a7f7e857cbd55bd984aa722fb176709424f5553a729df17ec508ad",
+      "width": 1600,
+      "height": 1552,
+      "bytes": 141872,
+      "scene": "officeapp.mjs",
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
+    },
+    "officeapp/newdoc-office-app-dark-tr-1280.png": {
+      "sha256": "4f71d02f903cb08450aab36d04e2518e0937c8361e969f1253310bd8992f3a53",
+      "width": 1600,
+      "height": 1520,
+      "bytes": 143276,
+      "scene": "officeapp.mjs",
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
+    },
+    "officeapp/office-app-phone-390.png": {
+      "sha256": "b56888356934bee84539791e8bf7a8f0b7a14426a98f96b19b0b032db15928c4",
+      "width": 780,
+      "height": 1688,
+      "bytes": 103058,
+      "scene": "officeapp.mjs",
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
+    },
+    "officeapp/office-app-review-1440.png": {
+      "sha256": "0431e9a31479c93c194ac90fb7dc90cde9f0d761c79a959a2ba5189a53db856a",
+      "width": 1344,
+      "height": 3914,
+      "bytes": 565588,
+      "scene": "officeapp.mjs",
+      "taken": "2026-10-10T00:12:33.406Z",
+      "checked": "2026-10-10T00:12:33.406Z"
+    },
     "pluginrequests/requests-1440.png": {
       "sha256": "ec6723def503fa8769d8873ed1897499ac78ac6d2367d7849d92f0221cfa0b82",
       "width": 2560,
@@ -893,7 +1001,7 @@
       "bytes": 664139,
       "scene": "capture.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "realm/login-realm-1440.png": {
       "sha256": "8f475089f6400db49a64af243ea2ae6b6949f01f9ebf6f4f65ca2bfb74041a63",
@@ -959,13 +1067,13 @@
       "checked": "2026-10-09T09:10:41.300Z"
     },
     "share-modal.png": {
-      "sha256": "e296e9b6ceeaca5452f3105db8b25976aecbbdef87957060543305a8a7c5af7b",
+      "sha256": "d6f6572228eaf81018033d78f705fa951d50196abe38adf66fb4c6f585637f11",
       "width": 880,
       "height": 1620,
-      "bytes": 153276,
+      "bytes": 154226,
       "scene": "capture.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/admin-rail-1440.png": {
       "sha256": "2cc91b15c805e8441cc1e7d1e41be73ada2a3c0102d46fe7de525127da539704",
@@ -974,7 +1082,7 @@
       "bytes": 135227,
       "scene": "sidenav.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/admin-storages-order-1440.png": {
       "sha256": "18320ebce8d8b3536f877aafba8204a2ba4b6721150af221fdea3cd8e4855ba5",
@@ -983,7 +1091,7 @@
       "bytes": 164141,
       "scene": "sidenav.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/apikeys-1440.png": {
       "sha256": "0697d3157b70f1cc333c5f6de1eba38cab45c4086b2b643ed0646cf0f1257c94",
@@ -992,25 +1100,25 @@
       "bytes": 305574,
       "scene": "sidenav.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/apikeys-minted-1440.png": {
-      "sha256": "328d7d7adac45a8d8d3af18a7775b043aaa877a1946397d7dc2df89cc6e5de8d",
+      "sha256": "0ac3d81aa9f57baef1479f3b1d078ba55e05010aeb1a641b1aa63033b2f120f8",
       "width": 2880,
       "height": 1800,
-      "bytes": 348258,
+      "bytes": 347524,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/connect-1440.png": {
-      "sha256": "7327ccaf3ae3cd447f33c9202c31020b501e280335e19bc460b688769df2f865",
+      "sha256": "8bfbe35780f4d31bd16e8d514519ee5f547085872e8500b41e9f8b07748bee59",
       "width": 2880,
-      "height": 1800,
-      "bytes": 411066,
+      "height": 3108,
+      "bytes": 706442,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/embed-apikeys-1440.png": {
       "sha256": "0690e85084b35df101a75695d798c01c261f16695f3ed47dee3e12bb7bb14aae",
@@ -1019,7 +1127,7 @@
       "bytes": 299429,
       "scene": "sidenav.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/embed-webcomponent-1440.png": {
       "sha256": "c8c25d893d249bcaec6c069e243c4c3f5cf8e03c143941bc01ec56b9c850879c",
@@ -1028,7 +1136,7 @@
       "bytes": 183336,
       "scene": "sidenav.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/sidenav-closed-390.png": {
       "sha256": "ebdeaf8520b39ec52842449d85be8287161fa4327d610fb551ad8983a66134e4",
@@ -1037,7 +1145,7 @@
       "bytes": 75717,
       "scene": "sidenav.mjs",
       "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/sidenav-drawer-390.png": {
       "sha256": "28b9b3a394f14d37a0b2b0e4b5476ded89726b23fc8e9b067e1bc7f9fa090302",
@@ -1046,7 +1154,7 @@
       "bytes": 97567,
       "scene": "sidenav.mjs",
       "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/sidenav-expanded-1440.png": {
       "sha256": "461d5aaaff2ac34c4b983b02c492650b0fbd409b9824dfd7a83666c45d01a5ae",
@@ -1055,7 +1163,7 @@
       "bytes": 315339,
       "scene": "sidenav.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/sidenav-rail-1440.png": {
       "sha256": "843a2158380d105b408a0edd3ab70cc0f66663748e19b61f95dbdf137f8f9a7f",
@@ -1064,7 +1172,7 @@
       "bytes": 258941,
       "scene": "sidenav.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/storage-order-menu-1440.png": {
       "sha256": "6aeee0490716893c7c794efd2b188583cf055fbc20585a163eae7de70f72f50e",
@@ -1073,7 +1181,7 @@
       "bytes": 211482,
       "scene": "sidenav.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/view-recent-1440.png": {
       "sha256": "d895bd46f19adb26cde250a46e9fca07cadf5512ad038844b86e98040cd513b7",
@@ -1082,7 +1190,7 @@
       "bytes": 279743,
       "scene": "sidenav.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/view-shared-1440.png": {
       "sha256": "475ec2d8b49fce1e7df819aafacf57621211ae797dd8e68ea43976e726bc339e",
@@ -1091,7 +1199,7 @@
       "bytes": 187951,
       "scene": "sidenav.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/view-starred-1440.png": {
       "sha256": "6e829c536361f9a713bd3aa56222e8206434dd94f9b7867de6d94fa4b11b792f",
@@ -1100,7 +1208,7 @@
       "bytes": 239883,
       "scene": "sidenav.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "sidenav/view-trash-1440.png": {
       "sha256": "ab3cfb3b01cf2f75fb622ba8925134fb4dd78ef0ac732053d9b02b7692330b88",
@@ -1109,7 +1217,7 @@
       "bytes": 206040,
       "scene": "sidenav.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "signing/admin-table-actions-1440.png": {
       "sha256": "7e448107c5b9923f16d0c2a9dc4910be7847912cbab666cac8fd17e565919074",
@@ -1526,13 +1634,13 @@
       "checked": "2026-10-09T09:10:41.300Z"
     },
     "tags/tags-kinds-1440.png": {
-      "sha256": "a9f9fff4d4fd5134791df385dab756f08269206d12ddb5f92595dceb308d54a6",
+      "sha256": "64e4d6a5ccbcc549bf35d3c09af2f7165327dd67909fcc2a4b80f86698d13696",
       "width": 2880,
       "height": 2000,
-      "bytes": 222374,
+      "bytes": 243457,
       "scene": "tags.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-11T08:49:42.736Z",
+      "checked": "2026-10-11T08:49:42.736Z"
     },
     "tenancy/confirm-1440.png": {
       "sha256": "c9b56a713e35b612411d39d45bf5d422aa78b93074d2c267b247bb11c13323b1",
@@ -1685,18 +1793,18 @@
       "bytes": 222145,
       "scene": "capture.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-11T08:49:42.736Z"
     }
   },
   "scenes": {
     "appearance.mjs": {
-      "digest": "780986e684511a88efa94926f02fc6fa4d5abf6a858bc2e66e536a0219494d41"
+      "digest": "9783b02be8b5bc86d08d37594575050616daa6d45e4c281ea32eea8a5ccc20bc"
     },
     "apppermissions.mjs": {
       "digest": "94bf2cca18c94f33ae460de443bcdb3a5bf60b58e763c813277f8eae7af9e1bb"
     },
     "appprint.mjs": {
-      "digest": "059250c1e7bf020cbc5e7376d29dcff15ab53c71660844c7d65c3aedf18ac6a5"
+      "digest": "84d646c3066efb9d55848dd0b9f425941447b2e65960a9b8819476356b7bd8aa"
     },
     "apps.mjs": {
       "digest": "e87145b623228222116a7bbdc36350eec10804fca7680a54b15387c32cd0851e"
@@ -1705,7 +1813,7 @@
       "digest": "902374b87c58cc1a7e757e2633722559b18721ae9fab3777c40b63094604a3be"
     },
     "capture.mjs": {
-      "digest": "9098d4d024457d4f921cc45865378e320a6020795f6afe4599ab3285f8bd0cb5"
+      "digest": "790febeb2ea55744013cc648b6a31c9e7d71842bfed7ff0fcf1f08f156ec8eca"
     },
     "csvoffice.mjs": {
       "digest": "b0e3dc13003c2673f2c8035581419090586e1c8dd03efe057072cdbee7ce2d30"
@@ -1714,10 +1822,13 @@
       "digest": "bed889fcab018781a3f5e361e8c7cdd5420a8f73bb16d78b824a16c110255877"
     },
     "driveshell.mjs": {
-      "digest": "8c25ee3bbd72a31ca1072aa8b47c8817b1b071f893e28c01e410194f25c75beb"
+      "digest": "a3277625dd6ad4972dd497dbe1f0f3c857a73247d4ed5f54833214348fc9cab2"
     },
     "e2e-recovery.mjs": {
       "digest": "26b3d1669716478d522986cda1f1055ed217bc8e81afcc0ad45afc156ac054a5"
+    },
+    "e2eapp.mjs": {
+      "digest": "d6cf0a76b62c4c562e63337f901f1c94a6bec60c3de27cf1859762085eaa79a9"
     },
     "encryption.mjs": {
       "digest": "e59b16eefe273d0b747a989de71332f428d5db126afb6c07aed60afc6f368c93"
@@ -1729,16 +1840,22 @@
       "digest": "5195bc9626828dbdec9a59c824140c036b8b9be8135434a58f40d6a24c7ad5fa"
     },
     "loginsecurity.mjs": {
-      "digest": "85913ce85b509586e4176655d9cfd21ade7a173dcee8b0a3d1e4e7c87e3a58d7"
+      "digest": "11c052204682312bf9990f215f9f309d2003b1d8cea615f1dd6fac71adc29b40"
     },
     "megamenu.mjs": {
       "digest": "f491a40d8fdb007f77d8879bd2d2a9a95e09c7fdd355e7e8ef3e42ad399c4d9b"
+    },
+    "mermaid.mjs": {
+      "digest": "0e2f8c93741a62a9102f064d56b99523e194779a19590718874681ddb2fb5209"
     },
     "newdoc.mjs": {
       "digest": "acb2f5fca935fedaae5992e2f2a767a533b152c5e79412496c84f5a993931daa"
     },
     "notifications.mjs": {
       "digest": "71881a826efc4c322642b169ac9787eacc446f030a669ebdae00413f59db24b2"
+    },
+    "officeapp.mjs": {
+      "digest": "90a3c19b1e4597e359deb2916c900a14ca60d327b6bb6ba62a3bca8001f2cb39"
     },
     "pluginrequests.mjs": {
       "digest": "229cdb113c7a3d8a04fa06914e7bdfd2d0d144a536e2a15d42a14801e2b9af05"
@@ -1750,7 +1867,7 @@
       "digest": "6bfca62866ea691497f312359fd3495fcf6ebb85db2a25914d465e50df9afe77"
     },
     "sidenav.mjs": {
-      "digest": "fe080b150874a9956eb9cf3d5727d6cd348a3e1f05ad59194b06c90fbabbe944"
+      "digest": "63b32bb975331c7f09a6d399f2eaf7a7e04ef3ac8f63d1da861b75e10da72cf3"
     },
     "signing.mjs": {
       "digest": "ee34138a1433ae2f9225e7933907bf13a892c32e1a2e4ee3bcfd246469ec157e"
@@ -1765,7 +1882,7 @@
       "digest": "1939172a037187cce3c1a9cca5eec8a7d0bbe5ab9cb3f5b02b4611b8c559820d"
     },
     "tags.mjs": {
-      "digest": "ed5cae2af23224f1f3446b24b2ee1e75d0f64ed2b89c78d328da9b394e0ec787"
+      "digest": "b2c147c37c1b7789c45e86932da6df175ebc9169801c8b193395fd3772cfd199"
     },
     "tenancy.mjs": {
       "digest": "fc5776f77c59108f0c6f84aa1c56bb689864ef1aa4e336ecc8ee5a22dc796e5c"

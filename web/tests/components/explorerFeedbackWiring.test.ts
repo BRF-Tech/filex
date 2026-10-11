@@ -45,7 +45,8 @@ describe('explorer feedback wiring', () => {
 
   it('reads the upload destination once per batch', () => {
     const upload = fn('uploadFiles');
-    expect(upload).toMatch(/const target = qualify\(currentPath\.value\)/);
+    // A dropped folder (#94) names each of its folders; anything else reads the open one.
+    expect(upload).toMatch(/const target = dest \?\? qualify\(currentPath\.value\)/);
     expect(upload).toMatch(/chunkedUpload\(f, target\)/);
     expect(upload).toMatch(/legacyUpload\(f, target\)/);
     expect(upload.match(/currentPath\.value/g) ?? [], 'the folder is read exactly once').toHaveLength(1);

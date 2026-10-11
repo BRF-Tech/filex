@@ -222,6 +222,16 @@ var permRouteTable = map[string]permRoute{
 	"POST /api/files/plugins/views/{plugin}/{view}/event":   gated(perm.PluginsRun),
 	"POST /api/files/plugins/ui/{plugin}/{view}/call":       gated(perm.PluginsRun),
 	"PUT /api/files/plugins/ui/{plugin}/{view}/save":        gated(perm.PluginsRun),
+	// Editing together (routes.go, handlers/coedit.go): the whole
+	// …/coedit group sits behind plugins.run, its writes ask `write` of
+	// a token on top.
+	"POST /api/files/plugins/ui/{plugin}/{view}/coedit/join":             gated(perm.PluginsRun),
+	"POST /api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/append":     gated(perm.PluginsRun),
+	"POST /api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/lease":      gated(perm.PluginsRun),
+	"POST /api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/key":        gated(perm.PluginsRun),
+	"POST /api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/ticket":     gated(perm.PluginsRun),
+	"POST /api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/leave":      gated(perm.PluginsRun),
+	"PUT /api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/blob/{name}": gated(perm.PluginsRun),
 }
 
 // walkStateChanging returns every non-GET route under the covered prefixes,

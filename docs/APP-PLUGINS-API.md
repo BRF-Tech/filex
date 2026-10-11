@@ -5,7 +5,9 @@
 > [APP-PLUGINS.md](APP-PLUGINS.md); plugin authors read
 > [PLUGIN-KIT.md](PLUGIN-KIT.md); this page is the reference both link to.
 > The Go shapes live in `backend/pkg/pluginkit/wire/wire.go` and are the
-> source of truth.
+> source of truth. A shape an app sends that a newer one replaces stays
+> accepted through its
+> [compatibility window](PLUGIN-KIT.md#compatibility-window).
 
 ## Vocabulary
 
@@ -2466,6 +2468,11 @@ a draft until its first save (issue #71), like any other new document.
   the kind granted; the create call names the row by its `key`
   (`POST /api/files/manager?action=newfile` or `POST /api/files/drafts`,
   `{path, name, type: "app:drawio:drawio", exact_name}`).
+- A family an app's row makes is not said to be missing: with no document
+  server, an app offering `.docx` rows means the dialog does not say "Office
+  documents need a document server" (`capabilities.newdoc_withheld`, #217).
+
+![New document with an office app installed: its .docx, .xlsx and .pptx rows, and no line asking for a document server](https://filex.sh/shots/officeapp/newdoc-office-app-1280.70ef3ae038a7.png)
 
 ### Permissions an interface adds
 
@@ -2484,13 +2491,16 @@ grant them, an upgrade that adds one answers `permissions_changed`.
 | `ui:frame-package` | Its interface opens pages of its own package in frames inside it - this version's pages only, each in the same sandbox and under the same rules as the interface (`ui.frame_package`) |
 | `ui:connect-blob` | Its interface reads `blob:` addresses it created itself in your browser - such an address reaches no server (`ui.connect_blob`) |
 | `ui:print` | Its interface can print documents it hands to filex (a PDF) - each time you allow it; the print dialog can also save the PDF (`ui.print`) |
+| `files:e2e-plaintext` | Opens files in encrypted folders you have unlocked - your browser decrypts each one you open with it and hands this app its contents in the clear, and encrypts what the app saves; the app sees every such file opened with it, the server still holds only encrypted data. Derived from the manifest's `encrypted_folders` block, not from `ui` (filex 0.56, [A file of an encrypted folder](#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)) |
+| `files:co-edit` | Lets several people edit a file it opens together: what each of them changes reaches the others through filex's relay, sealed, and a session's unsaved changes are kept until somebody saves them (up to 30 days). Derived from the manifest's `co_edit` block, not from `ui` (filex 0.56, [Editing together](#editing-together-coedit-056)) |
 | `ui-net:<as>:<url>` | Your browser loads `<as>` from `<url>` while you use it (a live address) |
 | `ui-new:.<ext>` | Adds a new `.<ext>` file to the New menu; it opens in this app's interface (`new_documents`) |
 | `ui-viewer:.<ext>` / `ui-viewer:<type/subtype>` | Opens those files in its own interface, in place of filex's preview - one line per kind a `viewer` view names, so an update that makes the app the viewer of one more kind asks again |
 
 The bridge also answers to the ordinary permissions: `files:read` for
-`file.read`, `files:write` for `file.save` / `file.saveAs`, `settings` for the
-administrator's settings in the session.
+`file.read`, `files:write` for `file.save` / `file.saveAs`, `files:co-edit`
+(0.56) for editing together (`coedit.*`, [below](#editing-together-coedit-056)),
+`settings` for the administrator's settings in the session.
 
 ### Serving: `GET <base>/_appui/<app>/<bundle-sha[:16]>/<path>`
 
@@ -2637,10 +2647,10 @@ driver's words.
 
 | Method | Params → result | Needs |
 |---|---|---|
-| `session.get` | → `{v, app: {name, version}, view: {id, placement}, locale, dir, theme: {mode, tokens}, user: {name}, files: [{index, name, ext, size, mime, readOnly, encrypted?}], grants, settings?}`. `encrypted` (0.55) is `"folder"` for a file in an end-to-end encrypted folder, `"vault"` in a vault and `"file"` for a single encrypted file (`.fxe`), as the server stamps the file's row - in every view the file can be opened from ([Which rows say `encrypted`](#which-rows-say-encrypted)); absent for a file that is not encrypted. ⚠ It is information, not plaintext: filex 0.55 decrypts nothing for an app - such a file's `readOnly` is `true`, `file.read` is refused (`failed`, `encrypted`) and so is a save, and the explorer offers no app an encrypted file at all | - |
-| `file.read` | `{index?, as: stream / bytes / text}` → `{name, size, mime, stream / bytes / text}`. A stream is transferred (`ReadableStream<Uint8Array>`); text is UTF-8 and refused over 32 MiB. | `files:read` |
-| `file.save` | `{index?, data: ReadableStream / ArrayBuffer / string, mime?, through?}` → `{saved: true, size}`. Only over a file the interface was opened with - a new version of it, or the draft it is. `through` (0.55, editing together): the last log entry the saved document holds; ignored outside a session. | `files:write` |
-| `file.saveAs` | `{name, data, mime?}` → `{saved: true, name, size}`. A NEW file, in a folder the person picks in filex's own folder dialog - the one *Move to…* uses, titled with the app's name and the file's. It opens in the folder of the file the interface was opened with (a draft: the folder it will be saved to; no file: the folder the person is in, else the list of storages), never in one of filex's own folders, and only a folder the person may write into can be chosen. A view-only opening (where `file.save` is `read_only`) may still save as: the new file goes elsewhere, and the server checks that folder. The same in every placement and every host (the web app, the desktop app, an embed). `name` is a file name, no folder (`invalid` otherwise); the answer's `name` is the one it was saved under (a taken name gets a free one beside it). `cancelled` when the person closes the dialog, `unavailable` while the frame's previous save-as dialog is still open. The server holds it to the view's kind of file (`invalid` / `not_applicable`) and keeps it out of an encrypted folder (`failed` / `encrypted`) - the `PUT …/save` section below. | `files:write` |
+| `session.get` | → `{v, app: {name, version}, view: {id, placement}, locale, dir, theme: {mode, tokens}, user: {name}, files: [{index, name, ext, size, mime, readOnly, encrypted?}], grants, settings?}`. `encrypted` (0.55) is `"folder"` for a file in an end-to-end encrypted folder, `"vault"` in a vault and `"file"` for a single encrypted file (`.fxe`), as the server stamps the file's row - in every view the file can be opened from ([Which rows say `encrypted`](#which-rows-say-encrypted)); absent for a file that is not encrypted. ⚠ On its own it is information, not plaintext: such a file's `readOnly` is `true`, `file.read` is refused (`failed`, `encrypted`) and so is a save. `plaintext: true` (0.56) beside `encrypted: "folder"` or `"vault"`: filex hands this file over in the clear - the app's manifest asks for it (`encrypted_folders`) and the folder is unlocked in the person's browser ([A file of an encrypted folder, in the clear](#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)) | - |
+| `file.read` | `{index?, as: stream / bytes / text}` → `{name, size, mime, stream / bytes / text}`. A stream is transferred (`ReadableStream<Uint8Array>`); text is UTF-8 and refused over 32 MiB. A file handed over in the clear (`plaintext`, 0.56) is decrypted by filex in the page, whole, at most `LIMITS.maxEncryptedBytes` (200 MiB, `too_large` past it); `bytes` is transferred, so the page keeps no copy; `unavailable` when the folder was locked meanwhile, `failed` when it cannot be decrypted. A vault's file is read from the vault in the page, never through the server ([In a vault](#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)). | `files:read` |
+| `file.save` | `{index?, data: ReadableStream / ArrayBuffer / string, mime?, through?}` → `{saved: true, size}`. Only over a file the interface was opened with - a new version of it, or the draft it is. `through` (editing together, 0.56): the last log entry the saved document holds - filex records the save in the session's log with the file's signature the server reads after the write; ignored outside a session. A file handed over in the clear (`plaintext`, 0.56): filex encrypts what the app hands over in the page and sends only the ciphertext, over the file as it was opened - `failed` with `changed` when another version was written meanwhile (open it again); at most `LIMITS.maxEncryptedBytes`. A vault's file (0.56) is written as the vault's next generation, under its write lock: `failed` with `vault_locked` while somebody else writes the vault, `failed` with `vault_lock_lost` when the write lock ended before the commit (nothing was written), `not_found` when the file is no longer in the vault. `size` is what the app handed over. | `files:write` |
+| `file.saveAs` | `{name, data, mime?}` → `{saved: true, name, size}`. A NEW file, in a folder the person picks in filex's own folder dialog - the one *Move to…* uses, titled with the app's name and the file's. It opens in the folder of the file the interface was opened with (a draft: the folder it will be saved to; no file: the folder the person is in, else the list of storages), never in one of filex's own folders, and only a folder the person may write into can be chosen. A view-only opening (where `file.save` is `read_only`) may still save as: the new file goes elsewhere, and the server checks that folder. The same in every placement and every host (the web app, the desktop app, an embed). `name` is a file name, no folder (`invalid` otherwise); the answer's `name` is the one it was saved under (a taken name gets a free one beside it). `cancelled` when the person closes the dialog, `unavailable` while the frame's previous save-as dialog is still open. The server holds it to the view's kind of file (`invalid` / `not_applicable`) and keeps it out of an encrypted folder (`failed` / `encrypted`) - the `PUT …/save` section below. `unavailable` while a file of an encrypted folder is open in the clear (0.56): a copy elsewhere would leave the folder decrypted. | `files:write` |
 | `ui.dirty` | `{dirty: bool}` | - |
 | `ui.title` | `{text}` - the frame's title | - |
 | `ui.toast` | `{text, tone?: info / success / warning / error}` - drawn by filex, prefixed with the app's name | - |
@@ -2648,11 +2658,11 @@ driver's words.
 | `ui.close` | - filex asks first when there are unsaved changes | - |
 | `ui.download` | `{name, data: ReadableStream / ArrayBuffer / string, mime?}` → `{saved: true, size}` - a file for the person's own disk. `name` is a file name (no folder). **The person's call** (below). Chromium: File System Access - the person picks where, and a stream is written as it is read, never whole in the page; elsewhere a Blob the browser downloads. At most `LIMITS.maxDownloadBytes` (256 MiB), streamed or not: past it `too_large` and nothing is kept (a picked file is aborted). `cancelled` when the person says no or closes the picker | `ui:download` |
 | `ui.print` | `{name, data: ArrayBuffer / ReadableStream, mime?: "application/pdf"}` → `{printed: true, size}` - filex prints the PDF from its own page ([Printing a PDF](#printing-a-pdf-uiprint-055)). `name` is a file name (no folder); the bytes must start `%PDF-` (`invalid` otherwise - a stream at its first bytes, and the rest is not read). **filex asks every time**, gesture or not, and the print dialog opens on the person's click on its Allow. At most `LIMITS.maxPrintBytes` (64 MiB), streamed or not: past it `too_large`. `cancelled` when the person says no; `unavailable` where the host offers no print page, where its print page may not be shown (a site not in the server's `FILEX_FRAME_ANCESTORS`) or while another print is being asked about; `failed` when the browser could not print it. filex 0.54 and older answer `unknown_method` | `ui:print` |
-| `coedit.join` / `coedit.subscribe` / `coedit.append` / `coedit.lease` / `coedit.cursor` / `coedit.blob.put` / `coedit.blob.get` / `coedit.leave` | editing together ([below](#editing-together-coedit-055-defined-not-offered)). **filex 0.55 answers each `unavailable`**: the methods are defined so an app can be written against them | `files:co-edit` (planned) |
+| `coedit.join` / `coedit.subscribe` / `coedit.append` / `coedit.lease` / `coedit.cursor` / `coedit.blob.put` / `coedit.blob.get` / `coedit.leave` | editing together, through filex's relay ([below](#editing-together-coedit-056)). filex 0.56; 0.55 answers each `unavailable` (the app edits alone) | `files:co-edit` (+ `files:read`) |
 | `clipboard.write` | `{text}` - the host writes it, the same in every browser (Chrome refuses a sandboxed frame; Firefox and WebKit let it). **The person's call:** on a gesture in the frame, or filex asks (`cancelled` on "no") | - |
-| `engine.call` | `{method, params}` → the module's answer | a module with a `ui_call` export |
-| `job.submit` | `{action, params?}` → `{op}` - one of the app's actions on the opened files, through the ordinary submit checks. **The person's call**, like `clipboard.write` | a module |
-| `state.get` / `state.set` | `{key}` → value / `{key, value}` - this person's small store for this app (JSON, 8 KiB a value, 16 KiB an app), kept in the account's preferences | - |
+| `engine.call` | `{method, params}` → the module's answer. `unavailable` while a file of an encrypted folder is open in the clear (0.56): nothing the app took from it reaches the server's side | a module with a `ui_call` export |
+| `job.submit` | `{action, params?}` → `{op}` - one of the app's actions on the opened files, through the ordinary submit checks. **The person's call**, like `clipboard.write`. `unavailable` while a file of an encrypted folder is open in the clear (0.56) | a module |
+| `state.get` / `state.set` | `{key}` → value / `{key, value}` - this person's small store for this app (JSON, 8 KiB a value, 16 KiB an app), kept in the account's preferences. While the frame holds a file of an encrypted folder in the clear (0.56) it is ANOTHER store, sealed in the browser ([below](#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)) | - |
 | `license.get` | → `{status, valid_until?, updates_until?}` - the app's license ([The app reads its license](#the-app-reads-its-license)); `{status: "free"}` for a free app (0.52.0) | - |
 
 There is no `fetch`, no storage and no cookie in the frame: an interface that
@@ -2692,9 +2702,10 @@ with the message `busy`.
 **Events** (host → app, `{event, data}`): `theme` (`{mode, tokens}` - the
 SDK paints `--fe-*` onto `<html>` by itself), `locale` (`{locale, dir}`),
 `file.changed`, `close.request`, `app.updated` (an administrator approved a
-new version; reload to use it); editing together (0.55: defined, never sent
-yet) `coedit.entry` (the next opened log entry), `coedit.cursor` (another
-member's cursor), `coedit.dropped` (`{from}` - subscribe again from there).
+new version; reload to use it); editing together (0.56) `coedit.entry` (the
+next opened log entry), `coedit.cursor` (another member's cursor),
+`coedit.dropped` (`{from, reason}` - `gone`: join again; `broken`: stop
+editing together).
 
 **The host's own requests** (`{hid, request, params}`, answered
 `{hid, result}` or `{hid, error}`): `save` - filex's Save button and a
@@ -2755,7 +2766,103 @@ event, an interface's call and read
 ([`…/read`](#get-apifilespluginsuipluginviewreadpathqualified)) and a save
 over it answer `403 {"error": "encrypted"}`, the reason in the reader's
 language (0.55; before it, a `.fxe` was refused at none of them and an
-encrypted folder's file at all but the read).
+encrypted folder's file at all but the read). The one exception (0.56): an
+interface whose app asks for `encrypted_folders` is offered a file of an
+encrypted folder the person has unlocked, and handed it in the clear by the
+browser, never by the server - the next section.
+
+### A file of an encrypted folder, in the clear (`encrypted_folders`, 0.56)
+
+```json
+{
+  "filex": ">=0.56.0",
+  "permissions": ["files:read", "files:write"],
+  "ui": { "bundle": { "url": "…", "sha256": "…" } },
+  "encrypted_folders": { "open": true },
+  "views": [{ "id": "editor", "placement": "viewer", "ui": "index.html", "applies": { "ext": ["docx"] }, "label": { "en": "Editor" } }]
+}
+```
+
+`encrypted_folders.open` asks that the app's interface edit the files of an
+end-to-end encrypted folder ([E2E-ENCRYPTION.md → Editing in an
+app](E2E-ENCRYPTION.md#editing-in-an-app)). It needs an interface, a
+`viewer` view (the only place an encrypted file opens in an app) and
+`files:read`; it derives the permission `files:e2e-plaintext`, which the
+review lists in its own words and which is never written into
+`permissions` (refused there). filex before 0.56 refuses the field. A
+module app's describe must declare the same block (security review UI-2).
+
+The server never holds the plaintext, here either. The person's browser,
+which holds the folder key while the folder is unlocked, does both halves:
+
+- **Offered.** The explorer offers the app on a file of an unlocked encrypted
+  folder - beside filex's own viewer, under the administrator's Default apps
+  rule for the kind; never ONLYOFFICE, never an app without the grant, never
+  for a `.fxe` (a vault's file is offered too, 0.56, its own way - below). **The browser decides the kind**: by the file's
+  name as the browser reads it (its extension, and the MIME type that
+  implies) against the view's `applies`. In a folder whose names are
+  encrypted (level 2) that is the name the browser decrypted - the server
+  cannot read it, and neither the name nor its extension is sent to it; "Choose
+  an app…" offers no "Always use this app for .ext files" there (that choice
+  is kept on the account). A file whose name the tab could not decrypt opens
+  in filex's own viewer. `FileInfo` says the decrypted `name` and `ext`,
+  `encrypted: "folder"`, `plaintext: true`, and `readOnly` as for any file.
+- **`file.read`.** The frame reads the file through
+  [`…/read`](#get-apifilespluginsuipluginviewreadpathqualified) with `e2e=1`
+  and gets the ciphertext; it decrypts it in the page and transfers the
+  plaintext to the interface over the bridge's port. No `blob:` address is
+  made of it and the page keeps no copy.
+- **`file.save`.** The frame encrypts what the interface hands over (a file of
+  an encrypted folder as the explorer's own upload writes it) and sends only
+  the ciphertext to [`…/save`](#put-apifilespluginsuipluginviewsave) with
+  `e2e=1` and the file's `expect`; the next save names the version the last
+  one wrote.
+- **Nothing else leaves.** While the frame holds such a file, `file.saveAs`,
+  `engine.call` and `job.submit` answer `unavailable`. `ui.download` and
+  `ui.print` still hand the person a copy on their click or yes, as the
+  explorer's own decrypted download does.
+- **Its own small store, sealed.** `state.get` / `state.set` use a store of
+  their own while the frame holds such a file: one per account, app and
+  encrypted folder, sealed in the browser with a key derived from the folder
+  key (HKDF, the signed-in account and the app's name in the context label,
+  both also bound as associated data - another member's ledger copied into
+  this person's preferences does not open), kept in the person's
+  preferences as `appStateE2e`. The server stores it and cannot read it, so
+  what the app keeps cannot reach the server in the clear as a "setting". It
+  is APART from the app's ordinary store: a value kept while editing an
+  encrypted file is not there when the app opens a plain one, nor the other
+  way round. The rules are the ordinary ones - 8 KiB a value as JSON, and
+  16 KiB an app measured on what is STORED (sealed and base64, about 12 KiB
+  of JSON; `too_large` before anything is written). A folder locked while
+  the app is open: `state.get` answers an empty store (no error) and
+  `state.set` answers `unavailable`. A store that does not open (another
+  folder key after a re-key has finished, damage) reads as empty.
+- **Lock** closes the app with the folder: its frame and the plaintext in it
+  go, unsaved changes too.
+- **The administrator's switch** `apps.e2e_plaintext` (on by default; seeded
+  once from `FILEX_APPS_E2E_PLAINTEXT`; `capabilities.apps_e2e_plaintext`
+  says it): off, no app is offered an encrypted file and both doors refuse
+  (`403 encrypted`).
+- **Audit:** every handover `app_plugin.e2e_read`, every save
+  `app_plugin.e2e_save` - the app, the view, the file; never a byte of it.
+- **In a vault** (level 3, 0.56; [E2E-ENCRYPTION.md → In a
+  vault](E2E-ENCRYPTION.md#in-a-vault)). `FileInfo` says `encrypted:
+  "vault"`, `plaintext: true`. The server's doors are never asked - they
+  refuse a vault anyway: the explorer picks the app by the name it read from
+  the vault's encrypted index, its vault engine reads the file from the
+  vault's packs for `file.read`, and writes a `file.save` as the vault's next
+  generation under the vault's write lock, only over the version the app
+  read. One writer at a time: `failed` with `vault_locked` while somebody else
+  writes the vault, `failed` with `vault_lock_lost` when this session's lock
+  ended before the commit (nothing is written; the person is told why in the
+  server's words), `failed` with `changed` / `not_found` when the file changed
+  or went meanwhile, `unavailable` once the vault is locked - filex then
+  closes the app, and says which file lost the changes it had not saved; a
+  minute before the vault would lock itself for idleness, while the app says
+  it holds unsaved changes (`ui.dirty`), filex warns the person and offers to
+  keep it open. `state.get` / `state.set` use the sealed store, its key from
+  the vault's own key. No `app_plugin.e2e_*` row: the server never learns
+  which file an app opened in a vault.
 
 ### Printing a PDF (`ui.print`, 0.55)
 
@@ -2772,8 +2879,10 @@ the PDF (`fx.print(name, pdf)`) and filex prints it:
    and stops at `LIMITS.maxPrintBytes` (64 MiB; `too_large`). 64 MiB, not
    the download's 256 MiB: a download may stream to the person's disk, a
    print is held whole in the page until the print dialog has read it.
-2. It asks, **every time**: "Office wants to print “report.pdf”", above the
-   frame, with *Allow* and *Don't allow*. The row's *Allow* is not a button
+2. It asks, **every time**: "Office wants to print “report.pdf”", over the
+   top of the frame, with *Allow* and *Don't allow*. The row lies over the
+   interface and does not resize it (#217: pushed down, an editor busy making
+   the PDF could not redraw and stayed blank until the print was over). The row's *Allow* is not a button
    of filex's page: it is a frame of the server's **print page**,
    `GET <base>/_print/` (`backend/internal/printframe`), which draws that
    one button itself. AppFrame waits for the page's `filex:print-ready`
@@ -2830,35 +2939,198 @@ What the person sees when an app asks to print - **Allow** (the print page's
 own button) is armed a moment after the row appears; **Don’t allow**
 answers the app `cancelled`:
 
-![An app's interface asks to print a PDF: filex asks above the frame, Allow or Don't allow](https://filex.sh/shots/appprint/print-consent-1280.ae34e6af4815.png)
+![An app's interface asks to print a PDF: filex asks over the top of the frame, Allow or Don't allow](https://filex.sh/shots/appprint/print-consent-1280.454c0567b284.png)
 
 
-### Editing together (`coedit.*`, 0.55: defined, not offered)
+### Editing together (`coedit.*`, 0.56)
 
-The office editor app (task #189) edits a document together the way
-[E2E-OFFICE.md](E2E-OFFICE.md) describes: every member's editor applies the
-same log entries in the same order, filex seals each entry with the
-session's key and orders the sealed entries through its relay, and the app
-never holds a key. The bridge's half is defined in filex 0.55 so the app can
-be written against it; **filex 0.55 has no relay route yet and answers every
-`coedit.*` call `unavailable`** - the app edits alone then. The relay's
-routes, its tables and the `files:co-edit` permission come later.
+An app granted `files:co-edit` - the office editor app (task #189) - edits a
+file together with other people: every member's editor applies the same log
+entries in the same order. filex's page (the frame's host, AppFrame) seals
+each entry the app appends with the session's key, filex's **relay**
+(`backend/internal/coedit`) puts the sealed entries in one order without
+reading them, and every member's page opens them again and checks that the
+log is the one the writers wrote. **The app never holds a key and never
+touches the network**: it calls the bridge, as for everything else. The
+model is CryptPad's, measured on ONLYOFFICE before it was designed
+([E2E-OFFICE.md](E2E-OFFICE.md)). filex 0.55 defined these methods and
+answers each `unavailable`; an app that gets `unavailable` edits alone.
+
+The manifest says it in a block of its own, and the grant is derived from
+it, the way `encrypted_folders` derives `files:e2e-plaintext`:
+
+```json
+{
+  "filex": ">=0.56.0",
+  "permissions": ["files:read", "files:write"],
+  "co_edit": { "open": true },
+  "ui": { "bundle": { "url": "…", "sha256": "…" } },
+  "views": [{ "id": "editor", "placement": "viewer", "ui": "index.html", "applies": { "ext": ["docx"] } }]
+}
+```
+
+`co_edit.open`: the app's `viewer` views open a file in its editing session -
+whoever opens the same file with the app edits it with them. It needs an
+interface, a `viewer` view and `files:read`, and it is granted as
+**`files:co-edit`**, which the review says in its own words and which is
+never written into `permissions` (listing it there is refused); an update
+that starts asking is a new grant, an app that is only an interface may hold
+it, and a module app's `describe` must say the same. filex 0.55 and older
+refuse a manifest with the block.
 
 | Method | Params → result |
 |---|---|
-| `coedit.join` | `{index?}` → `{session, me: {client, user, name, indexUser, canEdit}, head, changesHead, savedThrough}` - join (or start) the session of an opened file. `user` is an opaque id of the person in this session, never an account id; `indexUser` is never given twice in a session |
-| `coedit.subscribe` | `{from}` - the entries after `from` arrive as `coedit.entry` events, then the new ones as they land |
-| `coedit.append` | `{kind: changes / lock / release, body}` → `{seq}` - filex seals it and the relay places it; it comes back as a `coedit.entry` too. A conflict with another member's entry is filex's to retry |
-| `coedit.lease` | `{op: acquire / release, changesSeen}` → `{granted}` - the changes lease: one writer at a time, and only one that has seen every change |
-| `coedit.cursor` | `{cursor}` - passed to the other members, not kept |
-| `coedit.blob.put` / `coedit.blob.get` | `{name, data: ArrayBuffer}` / `{name}` → `{name, bytes}` - the session's sealed blobs (the base document a member who joins late opens, an image added while editing) |
-| `coedit.leave` | - leave the session |
+| `coedit.join` | `{index?}` → `{session, me: {client, user, name, indexUser, canEdit}, head, changesHead, savedThrough, created}` - join (or start) the session of an opened file. `user` is an opaque id of the person in this session (the same for each of their connections), never an account id; `indexUser` is never given twice in a session; `canEdit` is filex's answer (the person may change the file, the app holds `files:write`, the storage is not read-only); a person who may only read the file joins as a **watcher** (`canEdit: false`): every entry and cursor reaches them live, and whatever they would write the relay refuses (`read_only`). `created`: this member started the session and puts the base document - exactly the bytes it opened - with `coedit.blob.put('base', …)` before anybody else may join; a member that did not start it opens `coedit.blob.get('base')`, never the file (the file may hold a save of the session already, and the log applies to the base). Another member's join waits for that by itself (up to 20 s, then `unavailable` / `not_ready`). `unavailable` with the reason as its message when there is no editing together here: `coedit_off`, `coedit_no_secret_key`, `coedit_build` (the others run another version of the app), `coedit_file_changed`, `coedit_full`, `nothing_to_watch` (a person who may only read the file, and nobody started a session to follow), `encrypted` (a vault's file, a `.fxe`, an encrypted folder's file the app is not handed in the clear), `locked` (the folder was locked meanwhile); `failed` / `forged` when the session's key does not open with the folder key. Changes this browser kept from an earlier opening are sent before the join answers (see *Changes kept in this browser* below), so they are in the log the app reads |
+| `coedit.subscribe` | `{from}` - the entries after `from` arrive as `coedit.entry` events, in order, each once, then the new ones as they land. filex reads the whole log itself (it checks the chain from the start) and holds the entries until the app subscribes |
+| `coedit.append` | `{kind: changes / lock / release, body}` → `{seq}` - filex seals `body` (JSON) and the relay places it; it comes back as a `coedit.entry` too. A conflict with another member's entry is filex's to retry, and so is a request that got no answer (a lost connection, a server restarting): the call waits until the change is placed, kept in this browser meanwhile. `failed` / `no_lease` for `changes` without the lease, `failed` / `log_full` past the log's size, `read_only` for a member that may not write, `too_large` past an entry's size |
+| `coedit.lease` | `{op: acquire / release, changesSeen}` → `{granted}` - the changes lease (60 s, renewed by each `changes` entry): granted only to a writer whose `changesSeen` is the seq of the last `changes` entry, while nobody else holds it - a Document Server's save lock |
+| `coedit.cursor` | `{cursor}` - passed to the other members, sealed, not kept (a watcher's are not sent). filex sends a few a second at most (the last one wins); the relay passes at most ten a second, and to members connected to another filex process within about two seconds |
+| `coedit.blob.put` / `coedit.blob.get` | `{name, data: ArrayBuffer}` / `{name}` → `{name, bytes}` - the session's sealed blobs (the base document, an image added while editing), each name once (`^[A-Za-z0-9._-]{1,128}$`; `failed` / `exists` when it is taken, `not_found` when there is none yet). The session's blobs together stay under 256 MiB by default |
+| `coedit.leave` | - leave the session. Closing the frame leaves it too, and a member whose page went away is dropped after 45 s |
 
 A log entry (`coedit.entry`) is `{seq, at, client, kind, ...}`: `changes` /
 `lock` / `release` with the member's `body`, `join` with the `member`,
 `leave`, and `saved` with `through` (the file now holds the log up to
-there). `at` is the relay's clock, the same for every member. `file.save`
-takes `through` in a session so the session knows what is saved.
+there). `at` is the relay's clock, the same for every member. A save over
+the file with `through` (`file.save`) is recorded as a `saved` entry; who
+saves when is the app's rule, the same in every member's page because it
+reads the same log (the office editor: a version every 10 minutes by the
+writer who joined first, Save by whoever pressed it, the last writer to
+leave saves the rest - `packages/core/src/lib/e2eofficeSave.ts` states it).
+
+Two people in one file, through an example app written for these pictures:
+the app lists who is in the session from the `join` entries (`member.name`,
+`member.canEdit`), and draws the other members' `coedit.cursor`. The second
+person may only read the file: filex lets him in as a watcher.
+
+![Editing together: the editor's screen, the app listing who is in the document - a second person as a watcher](https://filex.sh/shots/officeapp/coedit-editor-1280.92d45b067495.png)
+
+![Editing together: the watcher's screen - the other person's sentence and cursor as she types, nothing to change](https://filex.sh/shots/officeapp/coedit-watcher-1280.904b31e20f36.png)
+
+#### What filex does with them
+
+- **Keys.** A session's key is made once, when it starts. In an ordinary
+  folder the **server** makes it and keeps it sealed with `FILEX_SECRET_KEY`
+  (without one, an ordinary folder is not edited together:
+  `coedit_no_secret_key`); each member's filex page is handed it when it
+  joins. The server holds such a file in the clear anyway, so this is not
+  end-to-end encryption - it is the same path as an encrypted folder's, and
+  it keeps the unsaved work in the database and the data directory sealed at
+  rest. A file of an **end-to-end encrypted folder** is edited together
+  when its app is handed it in the clear (`files:e2e-plaintext`, the
+  administrator's switch - [Editing in an app](E2E-ENCRYPTION.md#editing-in-an-app)):
+  the member that starts the session makes the key in its page, seals it
+  with the folder key (AES-256-GCM, bound to the session and the file) and
+  gives the server only that, once (`…/key`); a member that joins is handed
+  it as it is (`sealed_key`) and opens it with the folder key it holds - or
+  the folder's previous key while the folder is being re-keyed. The server
+  can open neither the key nor anything sealed with it, so it never sees
+  the document, a change, a cursor or a blob of such a session. A vault's
+  file and a `.fxe` are edited alone
+  ([E2E-OFFICE.md → In a vault](E2E-OFFICE.md#in-a-vault)).
+- **Sealing and checking.** Each entry is AES-256-GCM under a key derived
+  from the session's, with its place (seq), writer, counter and kind in the
+  authenticated data, and it names the digest of the sealed entry before it.
+  The page reads the log one entry at a time (`OfficeLogReader`) and refuses
+  the first one that is missing, moved, altered, replayed or of an unknown
+  kind - then everything after it, and the app is told `coedit.dropped`
+  `broken`: editors that read different logs build different documents.
+- **One order.** An entry is written against the head the page read last and
+  lands right after it or not at all (`409 coedit_conflict {head}`); the page
+  then reads up to that head, seals again at the new place and sends it
+  again.
+- **Members.** Who joins and whether they may write are the server's answer -
+  the account signed in on the request (and the person behind a shared proxy
+  token: two people behind one token are two members) and filex's rules for
+  the file - never something the joining page says. Each request that names
+  a member carries the member's token (handed out once, kept as a hash) and
+  must come from the member's account. While a member's socket is open, the
+  server reads the person's rights on the file again every 15 s: a person who
+  may no longer read it (or change it, when they could) is taken out of the
+  session.
+- **Watching.** A person who may read the file but not change it (a
+  viewer's share or ACL, a read-only storage, an app without
+  `files:write`, an API key without the `write` verb) joins as a watcher: they read the base, every entry and
+  every cursor as they land, and the relay refuses each entry, lease, blob
+  and save they would write (`403 coedit_read_only`). Their page sends no
+  cursor and keeps nothing for the relay. A watcher never starts a session -
+  its starter chooses the base document every member builds on: while
+  nobody who may write has one open, a watcher's join answers
+  `409 coedit_nothing_to_watch` and the app shows the file as it is. Audited
+  as `app_plugin.coedit_watch` instead of `app_plugin.coedit_join`.
+- **Changes kept in this browser.** Every `changes` entry is kept in the
+  page's own IndexedDB (`filex-coedit`) until the relay placed it - sealed
+  with the folder key in an encrypted folder, never in the clear there - and
+  a request that got no answer is sent again (1, 2, 4… up to 30 s apart).
+  What is still kept when the file is opened again - the page closed, the
+  tab crashed, the connection never came back - is sent then: at once when
+  it belongs to the same session and nobody wrote a change since; otherwise
+  filex asks the person above the frame, in the server's words
+  (`unsent_words`), whether to apply it on top of what is there now or to
+  discard it. A record belongs to the person who made it (`owner`, an opaque
+  id of the person and the file) and to the tab that made it while that tab
+  is open (a lock of the member's name, Web Locks): another tab never sends
+  it twice. A browser without IndexedDB keeps them in memory - a lost
+  connection still loses nothing, a closed tab then does.
+- **Saves in a session.** A save that names the session (`coedit`, `client`,
+  `token`, `through`) is held to what the session holds instead of the
+  page's `expect`: the file must still be the session's base or its last
+  save - by whichever member - and anything else written over it meanwhile
+  (outside the session) is refused (`412 changed`), in an ordinary folder
+  and an encrypted one alike.
+- **Lifetime.** A member whose page gives no sign of life for 45 s is dropped
+  (a `leave` entry: its lease goes, every bridge drops its locks). A session
+  nobody is in is forgotten after an hour when everything in it is saved,
+  after 30 days when it holds unsaved changes (the next person to open the
+  file joins it and can save them), after 10 minutes when it never got its
+  base. A new opening of a file whose session nobody is in and whose log is
+  all saved starts a new session (from the file as it is now); one that
+  still holds unsaved changes but whose file changed outside it is refused
+  (`coedit_file_changed`: the app opens it alone).
+
+#### The server's routes
+
+The page calls these with the person's session (the interface cannot):
+
+| Route | Does |
+|---|---|
+| `POST /api/files/plugins/ui/{plugin}/{view}/coedit/join` `{path, e2e?, unsent?: {count}}` | join (or start) the file's session → `{session, doc, owner, created, me, head, changes_head, saved_through, key_mode, key` or `sealed_key, token, socket: {url, ticket}, limits, unsent_words?}`. Checked here: the app runs, the view is its interface and opens this kind of file, the app holds `files:co-edit` and `files:read`, the person may read the file (confinement, ACL). A file the server holds only as ciphertext needs `e2e: true` (the page holds the folder key) and an app the encrypted folder's door lets in - `files:e2e-plaintext`, the administrator's switch, not a vault, not a `.fxe` (`403 encrypted` otherwise) - and in a folder whose names are encrypted, no kind is asked of a stored name the server cannot read, as at the read and save doors; its answer is `key_mode: "folder"` with the members' `sealed_key` (empty until the starter stored it), never a `key`. `doc` is the file's session key and `owner` an opaque id of the person for it (what this browser's kept changes are filed under); `unsent: {count}` (changes this browser kept) adds `unsent_words` - the question and its two answers in the reader's language. `409 coedit_not_ready` while the session's creator has not stored the base, `409 coedit_nothing_to_watch` for a person who may only read the file while there is no session to follow |
+| `POST …/coedit/{sid}/key` `{client, token, sealed}` | an encrypted folder's session: the key its starter sealed with the folder key, stored as it is, once → `{stored: true}` (`400 coedit_invalid` for a session of an ordinary folder or a second time) |
+| `POST …/coedit/{sid}/append` `{client, token, kind, base, ctr, ct}` | a sealed entry (`ct`, base64) at `base + 1` → `{seq}`; `409 coedit_conflict {head}`, `409 coedit_no_lease`, `403 coedit_read_only`, `409 coedit_log_full`, `413 coedit_too_large` |
+| `POST …/coedit/{sid}/lease` `{client, token, op, changes_seen}` | → `{granted}` |
+| `PUT` / `GET …/coedit/{sid}/blob/{name}?client=&token=` | a sealed blob, once per name (`201 {size}`; `409 coedit_blob_exists`) / its bytes (`404 coedit_no_blob`) |
+| `POST …/coedit/{sid}/ticket` `{client, token}` | a fresh socket ticket → `{url, ticket}` |
+| `POST …/coedit/{sid}/leave` `{client, token}` | leave → `{left: true}` |
+| `GET /api/coedit/ws?ticket=` | the member's socket: after `{"type":"subscribe","from":N}` every entry after N in order (`{"type":"entry","entry":…}`), each once, then each new one; the others' cursors (`{"type":"eph","client","ctr","ct"}`); `{"type":"ended","reason"}` when the membership ends (`left`, `timeout`, `revoked`, `closed`). It takes the member's cursors (`{"type":"cursor","ctr","ct"}`) and pings. A ticket is single-use and lasts 60 s |
+| `PUT …/save?path=…&coedit=<sid>&client=&token=&through=N` | the save over the file, recorded in the session's log as `saved` (`through` and the file's signature after the write); refused (`412 changed`) when the file is no longer what the session holds |
+
+A request naming a member that is not the caller's (another account, a wrong
+token), a session that ended or another app's session answers
+`410 coedit_gone`. Writes (`append`, `lease`, `blob` PUT) need a token's
+`write` verb, like a save; a token without it joins as a watcher. Audited: `app_plugin.coedit_join`,
+`app_plugin.coedit_watch` (a watcher's join), `app_plugin.coedit_leave`
+(with its reason), `app_plugin.coedit_saved`; a join's row says `e2e` for a
+file of an encrypted folder.
+
+The relay's state is in the database (migration 00107: `coedit_sessions`,
+`coedit_members`, `coedit_entries`, `coedit_blobs`; 00109:
+`coedit_cursors`); a session moves by compare-and-set, so several filex
+processes on one database serve one session. The sealed blobs are files
+under `FILEX_COEDIT_DIR` (`<data_dir>/coedit`), which they must share. A
+socket is woken at once by an entry written in its own process and reads
+the log from the database otherwise (every 2 s). A cursor reaches the
+members of its own process at once and the others' through the database:
+each member's last sealed cursor is one row, written at most twice a second
+and gone when the member leaves, which every socket reads with the log - no
+other service between the processes. Settings: [CONFIGURATION.md → Editing together](CONFIGURATION.md#editing-together).
+
+What the relay sees: which file has a session, who joined and left it and
+when, whether each may write, how many entries of each kind and how big, how
+often cursors move, the size of the base and of each blob, when a save
+happened and which part of the log it holds - never an entry's, a cursor's or
+a blob's content (in an ordinary folder the server could open them with the
+key it keeps, as it can read the file itself; in an encrypted folder it
+holds only the key sealed with the folder key and cannot).
 
 ### `PUT /api/files/plugins/ui/{plugin}/{view}/save`
 
@@ -2878,7 +3150,28 @@ into an encrypted folder (`403 encrypted`). A failed write answers
 server's log.
 
 - `?path=<qualified>` - a new version of that file (versioning keeps the
-  previous one) → `200 {saved, path, name, size}`; audit `app_plugin.ui_save`.
+  previous one) → `200 {saved, path, name, size, modified}`; audit
+  `app_plugin.ui_save`. `modified` (0.56) is the version's date as a listing
+  says it (Unix ms): with `size`, the `expect` of the next save.
+- `&expect=<size>:<ms>` (0.56) - only over the file as it was listed then
+  (upload_expect's rule): another version written meanwhile answers
+  `412 {"error": "changed"}` and nothing is written.
+- `&e2e=1` (0.56) - a file of an end-to-end encrypted folder, for an app
+  granted `files:e2e-plaintext`: the body is ALREADY encrypted in the browser
+  with the folder key, and one that does not start like a file of an
+  encrypted folder (`filexe2e`, version 1 or 2) is refused
+  (`422 {"error": "not_encrypted"}`). Refused also: an app without the grant
+  (`403 not_granted`), the administrator's switch off, a vault (`403
+  encrypted`), a `.fxe` (`403 encrypted`), a file no longer in an encrypted
+  folder (`409 changed`). Audit `app_plugin.e2e_save`. A chunked save names
+  `e2e=1` in every chunk (a chunk without it is not that save's: `404`).
+  ⚠ In a folder whose names are encrypted (level 2) the file's stored name is
+  ciphertext and tells the server no kind, so it does NOT hold such a save to
+  the kinds the view applies to: the browser chose the app by the decrypted
+  name. What it holds the save to there is the grant, the encrypted folder
+  (no vault), the person's write right on the file, the gates, `expect` and
+  ciphertext only. A name it can read (level 1, or a name written in the
+  clear into a level-2 folder) is held to its kind as always.
 - `?dir=<qualified folder>&name=<file name>` - a NEW file there, under a free
   name beside anything that is there → `201`. The folder is the one the
   person chose in the frame's folder dialog; nothing in the request proves
@@ -2910,10 +3203,23 @@ says `encrypted` - is never read here: `403 {"error": "encrypted"}`, its
 ciphertext). Asked only of a file the person may read; anything else gets
 the preview's own answer.
 
+`&e2e=1` (0.56): the explorer holds the folder's key and will decrypt in the
+browser ([A file of an encrypted folder, in the clear](#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)).
+For an app granted `files:e2e-plaintext`, a file of an encrypted folder (not
+a vault's, not a `.fxe`) is answered as the ciphertext the storage holds,
+and the handover is recorded (`app_plugin.e2e_read`); without the grant
+`403 not_granted`, with the administrator's switch off or in a vault
+`403 encrypted`. A plain file reads as without it. In a folder whose names
+are encrypted (level 2), the administrator's rule for the kind
+(`403 handler_off`) is not asked of a stored name the server cannot read:
+the browser asked it of the decrypted name.
+
 An interface's kept state (`state.get` / `state.set`) lives in the person's
 preference document; one app may keep up to `limits.app_state_max_bytes`
 (16 KiB of JSON) there, which `PUT /api/me/prefs` enforces
 (`413 APP_STATE_TOO_LARGE`) and the frame says as `too_large` before it saves.
+The sealed store of an encrypted session (`appStateE2e`, 0.56) is a second
+share under the same number, measured on the ciphertext the server keeps.
 
 ### `POST /api/files/plugins/ui/{plugin}/{view}/call`
 

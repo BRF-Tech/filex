@@ -12,7 +12,9 @@
 //   - the decisions: wait while the nightly run is going (and only then,
 //     and not for ever); nothing pending -> no agent, no commit;
 //     refused answers or a red validator -> the pack put back, the agent told
-//     once more, and the night red when it still fails;
+//     once more, and the night red when it still fails; the Claude account's
+//     limit (HTTP 429) -> the night stops there, says so, quietly, and the
+//     next night runs as any other;
 //   - the boundary: the agent's command line (no command or web tool, no MCP
 //     server, file tools confined to its directory) and its own HOME; only
 //     its answers cross into what `apply` reads; a write outside its
@@ -41,8 +43,10 @@ import {
   DEFAULT_TRAILER,
   NIGHTLY_ROOT,
   accountEnv,
+  accountLimit,
   agentPrompt,
   agentResult,
+  announceAs,
   applyOutcome,
   claudeArgs,
   composeReport,
@@ -61,7 +65,7 @@ import {
   waitStep,
 } from '../../../scripts/lib/langpacks-nightly.mjs';
 import { FIXED_NAMES, TRANSLATOR_RULES, checkoutRoots, jsonText, mainCheckout, packDiff, worklistItems } from '../../../scripts/lib/langpacks.mjs';
-import { toolResult, wakeVerdict } from '../../../scripts/lib/notify.mjs';
+import { severityOf, toolResult, wakeVerdict } from '../../../scripts/lib/notify.mjs';
 import { type Catalogue, type Rows, filesOf, git, makePack, readJson, write, writeCatalogue } from '../helpers/langPacks';
 
 const ROOT = path.resolve(__dirname, '../../..');
@@ -99,7 +103,8 @@ const GOOD = { 'b.office': 'In ONLYOFFICE bearbeiten', 'd.new': 'Neues Ding' };
    saw. A plan can also make it misbehave: tamper (rewrite everything but
    the answers, write a second worklist naming another pack, edit the
    catalogue copy), escape (write a file outside its directory), broken (write
-   no JSON in the first round).
+   no JSON in the first round), limit (answer nothing and end the way Claude
+   Code ends at the account's limit: its JSON result with HTTP 429, exit 1).
    ⚠ Windows: the driver starts LANGPACKS_AGENT_CMD through cmd.exe. Until
    #197 it did so in a detached process, which has no console; the node it
    started got a console of its own - a visible window on the workstation -
@@ -124,6 +129,10 @@ const file = process.env.LANGPACKS_WORKLIST;
 const plan = JSON.parse(process.env.FAKE_PLAN || '{}');
 if (process.env.FAKE_LOG) {
   fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ round, cwd: process.cwd(), home: process.env.HOME, file, prompt, stdinTty, files: fs.readdirSync('.').sort() }) + '\\n');
+}
+if (plan.limit) {
+  process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, num_turns: 1, total_cost_usd: 0, terminal_reason: 'api_error', api_error_status: 429, api_error: 'usage_limit_reached', result: plan.limit }));
+  process.exit(1);
 }
 const rounds = plan.rounds || [];
 const answers = rounds[Math.min(round, rounds.length - 1)] || {};
@@ -418,6 +427,52 @@ describe('what apply said', () => {
   });
 });
 
+describe("the Claude account's limit", () => {
+  // The fields of a real session the account's weekly limit ended (the build
+  // host, 2026-10-09: every session ended so in under a second, and the night
+  // said "answers refused after 2 rounds"), its ids left out.
+  const SAID = `You've hit your weekly limit ${String.fromCharCode(0xb7)} resets 6am (UTC)`;
+  const REAL = {
+    type: 'result',
+    subtype: 'success',
+    is_error: true,
+    num_turns: 1,
+    total_cost_usd: 0,
+    duration_ms: 800,
+    duration_api_ms: 0,
+    stop_reason: 'stop_sequence',
+    terminal_reason: 'api_error',
+    api_error_status: 429,
+    api_error: 'usage_limit_reached',
+    result: SAID,
+    permission_denials: [],
+  };
+
+  it("reads it from Claude Code's JSON result: the status, the error's name and the account's own words", () => {
+    const a = { ...agentResult(JSON.stringify(REAL)), code: 1, timedOut: false };
+    expect(a).toMatchObject({ isError: true, subtype: 'success', apiStatus: 429, apiError: 'usage_limit_reached', terminalReason: 'api_error', result: SAID });
+    expect(accountLimit(a)).toEqual({ status: 429, said: SAID });
+    // Any one of the signs is enough.
+    expect(accountLimit({ code: 1, apiError: 'rate_limit_error' })).toMatchObject({ status: 429, said: 'rate_limit_error' });
+    expect(accountLimit({ code: 1, isError: true, result: 'Claude AI usage limit reached|1760000000' })).toEqual({ status: 429, said: 'Claude AI usage limit reached|1760000000' });
+    expect(accountLimit({ code: 1, isError: true, result: "You've hit your 5-hour limit" })).not.toBeNull();
+    // A session that wrote no JSON result: the words it printed, when it failed.
+    expect(accountLimit({ code: 1 }, 'starting\nClaude AI usage limit reached|1760000000\n')).toEqual({ status: 429, said: 'Claude AI usage limit reached|1760000000' });
+    expect(accountLimit({ code: 0 }, 'Claude AI usage limit reached|1760000000')).toBeNull();
+  });
+
+  it('is no other ending: another API error, a session that worked, one at its time limit, one whose words only mention a limit', () => {
+    expect(accountLimit({ ...agentResult(JSON.stringify({ ...REAL, api_error_status: 500, api_error: 'api_error', result: 'API Error: 500 Internal server error' })), code: 1 })).toBeNull();
+    expect(accountLimit({ code: 1, isError: true, result: 'Credit balance is too low' })).toBeNull();
+    // The agent's own words in a session that worked are not read for it.
+    expect(accountLimit({ code: 0, isError: false, result: 'Translated 74 items, "rate limit reached" among them.' })).toBeNull();
+    expect(accountLimit({ code: 143, timedOut: true }, 'usage limit reached')).toBeNull();
+    // A JSON result that named another error is not second-guessed by the output.
+    expect(accountLimit({ code: 1, isError: true, result: 'boom' }, 'usage limit reached')).toBeNull();
+    expect(accountLimit(null)).toBeNull();
+  });
+});
+
 describe('the report', () => {
   const before = {
     packs: [
@@ -466,8 +521,70 @@ describe('the report', () => {
     expect(r.message).toContain('round 2 stopped at its time limit');
     expect(r.message).toContain('lang-fr fr: up to date');
     expect(r.message).toContain('Nothing is pushed or tagged');
+    expect(r.message).not.toContain('Claude account limit');
     expect(exitCode(r)).toBe(1);
     expect(notifyWanted('changes', r.result)).toBe(true);
+    // Told loudly, and the agents woken, as before.
+    expect(announceAs(r.result)).toEqual({ result: 'red', wake: true });
+    expect(severityOf(announceAs(r.result).result)).toBe('danger');
+  });
+
+  it("says the account's limit in its title and first line, without RED and without the empty answers, and is told quietly", () => {
+    const limit = { status: 429, said: "You've hit your weekly limit, resets 6am (UTC)" };
+    const rows = [
+      { pack: 'lang-de', dir: '/w/de', tag: 'de', was: 74, left: 74, translated: 0 },
+      { pack: 'lang-es', dir: '/w/es', tag: 'es', was: 74, left: 74, translated: 0 },
+    ];
+    const r = composeReport({
+      day: '2026-10-09',
+      tree,
+      rows,
+      limit,
+      packs: [
+        { dir: '/w/de', state: 'limit', rounds: 1, feedback: limit.said, agent: [{ round: 0, code: 1, timedOut: false, limit }] },
+        { dir: '/w/es', state: 'limit', rounds: 0 },
+      ],
+    });
+    expect(r.result).toBe('limit');
+    expect(r.title).toBe('filex language packs 2026-10-09: 0 translated, 148 left, Claude account limit (429): translation tried again next night (1a2b3c4d)');
+    expect(r.message).toContain(`Claude account limit (429): "${limit.said}". The translation stopped there and the packs left were not tried; the next night translates again by itself.`);
+    expect(r.message).toContain('lang-de de: 0 translated, 74 left - Claude account limit (429): the agent could not work, nothing written, tried again next night');
+    expect(r.message).toContain('lang-es es: 0 translated, 74 left - not started: Claude account limit (429), tried again next night');
+    for (const word of ['RED', 'refused', 'agent: round', 'Nothing is pushed']) expect(r.message, word).not.toContain(word);
+    expect(r.title).not.toContain('RED');
+    // Failed but expected: exit 1 (the unit is not failed), one notification
+    // at severity info, and no agent woken on the same account.
+    expect(exitCode(r)).toBe(1);
+    expect(notifyWanted('changes', r.result)).toBe(true);
+    expect(announceAs(r.result)).toEqual({ result: 'info', wake: false });
+    expect(severityOf(announceAs(r.result).result)).toBe('info');
+  });
+
+  it('keeps a pack committed before the limit in the report, and a red pack keeps the night red', () => {
+    const limit = { status: 429, said: "You've hit your session limit" };
+    const rows = [
+      { pack: 'lang-de', dir: '/w/de', tag: 'de', was: 2, left: 0, translated: 2 },
+      { pack: 'lang-es', dir: '/w/es', tag: 'es', was: 2, left: 2, translated: 0 },
+    ];
+    const mixed = composeReport({ day: 'd', tree, rows, limit, packs: [{ dir: '/w/de', state: 'committed', commit: 'c0ffee12', rounds: 1 }, { dir: '/w/es', state: 'limit', rounds: 1 }] });
+    expect(mixed.result).toBe('limit');
+    expect(mixed.title).toBe('filex language packs d: 2 translated, 2 left, Claude account limit (429): translation tried again next night (1a2b3c4d)');
+    expect(mixed.message).toContain('lang-de de: 2 translated, 0 left - committed c0ffee12, not pushed');
+    expect(mixed.message).toContain('Nothing is pushed or tagged');
+    const red = composeReport({
+      day: 'd',
+      tree,
+      rows,
+      limit,
+      packs: [
+        { dir: '/w/de', state: 'refused', rounds: 2, feedback: 'lang-de: 1 answer(s) to fix, nothing written:\n    de NAME d.new: x' },
+        { dir: '/w/es', state: 'limit', rounds: 1 },
+      ],
+    });
+    expect(red.result).toBe('red');
+    expect(red.title).toContain(', RED, Claude account limit (429)');
+    expect(red.message).toContain('RED: answers refused after 2 rounds');
+    expect(announceAs(red.result).wake).toBe(true);
   });
 
   it('is green when everything pending was committed, quiet when nothing was pending, and says why it could not run', () => {
@@ -830,6 +947,71 @@ describe('a night: the pack validators go red', () => {
     expect(rec.packs[0]).toMatchObject({ state: 'red', rounds: 2 });
     expect(rec.rows[0]).toMatchObject({ translated: 0, left: 2 });
     expect(r.out).toContain('RED');
+  });
+});
+
+describe("a night: the Claude account's limit", () => {
+  const SAID = "You've hit your weekly limit, resets 6am (UTC)";
+  const ES = { 'a.title': 'Archivos', 'b.office': 'Abrir en ONLYOFFICE' };
+  /** The German pack of setup() and a Spanish one beside it: two packs, two strings each. */
+  const twoPacks = (prefix: string) => {
+    const s = setup(prefix);
+    const es = makePack(s.base, { catalogue: PREV, rows: ROWS, translation: ES, name: 'filex-lang-es', tag: 'es', remote: false });
+    return { s, es, packs: { LANGPACKS_PACKS: [s.pack, es].join(path.delimiter) } };
+  };
+
+  it('stops at the first session it ends: no second round, no other pack, nothing written, and the night says why', SLOW, () => {
+    const { s, es, packs } = twoPacks('filex-langpacks-night-limit-');
+    const heads = [git(s.pack, 'rev-parse', 'HEAD'), git(es, 'rev-parse', 'HEAD')];
+    const r = night(s, { plan: { rounds: [GOOD], limit: SAID }, extra: packs });
+    expect(r.code, `${r.out}${r.err}`).toBe(1);
+    // One session: the German pack's first round. The fix round and the
+    // Spanish pack would meet the same limit.
+    const calls = agentCalls(s);
+    expect(calls).toHaveLength(1);
+    expect(path.basename(calls[0].cwd)).toBe('filex-lang-de');
+    for (const [i, dir] of [s.pack, es].entries()) {
+      expect(git(dir, 'rev-parse', 'HEAD')).toBe(heads[i]);
+      expect(git(dir, 'status', '--porcelain')).toBe('');
+    }
+    const rec = last(s);
+    expect(rec).toMatchObject({ decision: 'translated', result: 'limit', exit: 1, limit: { status: 429, said: SAID } });
+    expect(rec.packs.map((p: { name: string; state: string; rounds: number }) => [p.name, p.state, p.rounds])).toEqual([
+      ['lang-de', 'limit', 1],
+      ['lang-es', 'limit', 0],
+    ]);
+    expect(rec.title).toContain('0 translated, 4 left, Claude account limit (429): translation tried again next night');
+    expect(rec.title).not.toContain('RED');
+    const report = fs.readFileSync(path.join(rec.night, 'report.txt'), 'utf8');
+    expect(report).toContain(`Claude account limit (429): "${SAID}"`);
+    expect(report).toContain('lang-es es: 0 translated, 2 left - not started: Claude account limit (429), tried again next night');
+    // Not what 2026-10-09 said: no refusal, no list of empty answers.
+    for (const word of ['refused', 'UNTRANSLATED', 'RED']) expect(report, word).not.toContain(word);
+    expect(r.out).toContain(SAID);
+    // The session's own log stays where a person looks for it.
+    expect(fs.readFileSync(path.join(rec.night, 'logs', 'filex-lang-de-agent-1.json'), 'utf8')).toContain('usage_limit_reached');
+    expect(fs.existsSync(path.join(s.state, 'run.lock'))).toBe(false);
+  });
+
+  it('holds nothing for the next night: it translates and commits every pack as any other', SLOW, () => {
+    const { s, es, packs } = twoPacks('filex-langpacks-night-limit-next-');
+    expect(night(s, { plan: { rounds: [GOOD], limit: SAID }, extra: packs }).code).toBe(1);
+    expect(last(s).result).toBe('limit');
+    const r = night(s, { plan: { rounds: [GOOD] }, extra: packs });
+    expect(r.code, `${r.out}${r.err}`).toBe(0);
+    for (const [dir, tag] of [
+      [s.pack, 'de'],
+      [es, 'es'],
+    ]) {
+      expect(readJson(path.join(dir, 'translations', `${tag}.json`))['d.new']).toBe(GOOD['d.new']);
+      expect(git(dir, 'status', '--porcelain')).toBe('');
+    }
+    const rec = last(s);
+    expect(rec).toMatchObject({ result: 'ok', exit: 0 });
+    expect(rec.limit).toBeUndefined();
+    expect(rec.packs.map((p: { state: string }) => p.state)).toEqual(['committed', 'committed']);
+    // One session the first night, one per pack the second.
+    expect(agentCalls(s)).toHaveLength(3);
   });
 });
 

@@ -33,7 +33,9 @@
 //               /etc/filex-langpacks.env); the process environment wins
 //
 // Exit: 0 every pending string translated and committed, or nothing pending;
-// 1 something is left or red (the notification says what); 2 could not run.
+// 1 something is left or red (the notification says what), or the Claude
+// account's limit stopped the night (expected: said quietly, and the next
+// night tries again); 2 could not run.
 // It runs from the copies scripts/chain/install-langpacks.sh puts in
 // <LANGPACKS_ROOT>/bin. docs/CONTRIBUTING.md -> Translations and language packs.
 //
@@ -63,8 +65,10 @@ import { localDate } from './chain/nightly-lib.mjs';
 import { findPacks, jsonText, readJSON } from './lib/langpacks.mjs';
 import {
   accountEnv,
+  accountLimit,
   agentPrompt,
   agentResult,
+  announceAs,
   applyOutcome,
   claudeArgs,
   composeReport,
@@ -422,13 +426,18 @@ function runAgent(cfg, { dir, prompt, timeoutMs, outFile, errFile, round, workli
           /* closed */
         }
       }
-      let summary = {};
-      try {
-        summary = agentResult(fs.readFileSync(outFile, 'utf8'));
-      } catch {
-        summary = {};
-      }
-      resolve({ round, code, timedOut, secs: Math.round((Date.now() - t0) / 1000), ...(why ? { why } : {}), ...summary });
+      const printed = (file) => {
+        try {
+          return fs.readFileSync(file, 'utf8');
+        } catch {
+          return '';
+        }
+      };
+      const stdout = printed(outFile);
+      const summary = agentResult(stdout);
+      const a = { round, code, timedOut, secs: Math.round((Date.now() - t0) / 1000), ...(why ? { why } : {}), ...summary };
+      const limit = accountLimit(a, `${tail(stdout, 20)}\n${tail(printed(errFile), 20)}`);
+      resolve(limit ? { ...a, limit } : a);
     };
     const group = process.platform === 'linux';
     let child;
@@ -528,6 +537,13 @@ async function translatePack(cfg, { tree, pack, night, deadline, guards, templat
       return { ...out, state: 'guard', feedback: `changed while the agent ran: ${moved.join(', ')} - nothing applied, the night stops` };
     }
     if (a.code === 127) return { ...out, state: 'agent', feedback: a.why ?? 'the agent did not start' };
+    // The account's limit: the agent could not work, and another round - or
+    // another pack - would meet the same answer. What it may have answered
+    // before the limit stays in its directory; nothing is applied.
+    if (a.limit) {
+      log(`${pack.name}: the Claude account's limit (${a.limit.status}): ${a.limit.said}`);
+      return { ...out, state: 'limit', limit: a.limit, feedback: a.limit.said };
+    }
 
     // Only the answers are taken from the worklist the agent wrote.
     let edited;
@@ -624,10 +640,12 @@ async function cmdRun(cfg, env, args) {
         const deadline = t0 + cfg.budgetMin * 60_000;
         const guards = [{ dir: tree.dir, untracked: tree.made }, ...(before.packs ?? []).map((p) => ({ dir: p.dir, untracked: true }))];
         const template = readPromptTemplate();
-        let stop = false;
+        // What the packs after a stop are recorded as: `skipped` after a
+        // guard, `limit` after the account's limit (they are not tried).
+        let stop = '';
         for (const p of todo) {
           if (stop) {
-            record.packs.push({ name: p.name, dir: p.dir, state: 'skipped', rounds: 0 });
+            record.packs.push({ name: p.name, dir: p.dir, state: stop, rounds: 0 });
             continue;
           }
           if (deadline - Date.now() < 5 * 60_000) {
@@ -636,7 +654,11 @@ async function cmdRun(cfg, env, args) {
           }
           const o = await translatePack(cfg, { tree, pack: p, night, deadline, guards, template, credential: credential.env });
           record.packs.push(o);
-          if (o.state === 'guard') stop = true;
+          if (o.state === 'guard') stop = 'skipped';
+          if (o.state === 'limit') {
+            stop = 'limit';
+            record.limit = o.limit;
+          }
         }
         // 5. what is left
         const afterFile = path.join(night, 'status-after.json');
@@ -663,6 +685,7 @@ async function cmdRun(cfg, env, args) {
       rows: record.rows,
       packs: record.packs,
       error: record.error ?? '',
+      limit: record.limit ?? null,
       took: duration((Date.now() - t0) / 1000),
       where: record.night ?? '',
     });
@@ -671,9 +694,10 @@ async function cmdRun(cfg, env, args) {
     record.exit = record.dryRun && !record.error ? 0 : exitCode({ result: report.result, error: record.error ?? '' });
     console.log(`\n${report.title}\n\n${report.message}`);
     if (!record.dryRun && notifyWanted(cfg.notify, report.result)) {
+      const how = announceAs(report.result);
       const sent = await announce(
-        { FILEX_NOTIFY_SOURCE: 'filex-langpacks', FILEX_WAKE_FROM: 'filex-langpacks', ...env },
-        { title: report.title, message: report.message, result: report.result },
+        { FILEX_NOTIFY_SOURCE: 'filex-langpacks', FILEX_WAKE_FROM: 'filex-langpacks', ...env, ...(how.wake ? {} : { FILEX_WAKE_URL: '' }) },
+        { title: report.title, message: report.message, result: how.result },
         { log },
       );
       record.notified = { notify: sent.notify?.sent ?? false, wake: (sent.wake ?? []).filter((w) => w.sent).map((w) => w.agent) };
@@ -818,6 +842,7 @@ async function cmdCheck(cfg, env, args) {
         credential: credential.env,
       });
       if (a.code === 0 && a.isError !== true && /\bOK\b/.test(a.result ?? '')) say(`probe: the agent answered (${duration(a.secs)}${a.costUsd !== undefined ? `, ${a.costUsd} USD` : ''})`);
+      else if (a.limit) problems.push(`probe: Claude account limit (${a.limit.status}): "${a.limit.said}" - the sign-in works, the account has no usage left now; a night meeting it stops and tries again the next night`);
       else problems.push(`probe: the agent did not answer OK (exit ${a.code}${a.timedOut ? ', timed out' : ''}): see ${path.join(cfg.state, 'probe.err')} and probe.json`);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

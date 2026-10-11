@@ -86,7 +86,7 @@ type Status struct {
 	// LegacySignature: on an instance that requires signatures, the build's
 	// signature verified only in the old form - over its sha256 alone, not
 	// over its name, version and platform (signature.go VerifyBuild). Still
-	// accepted during filex 0.55, with this warning; 0.56 refuses it.
+	// accepted, with this warning, while LegacySignatureWindow runs.
 	LegacySignature bool `json:"legacy_signature,omitempty"`
 }
 
@@ -1207,6 +1207,15 @@ func (m *Manager) checkStoredSignature(bin, name, sha string) (legacy bool, err 
 	return v.Legacy, nil
 }
 
+// LegacySignatureLog is the line the plugin's log and the server's log carry
+// for a build whose signature verified only in the old form: it names the
+// end of the form's compatibility window (LegacySignatureWindow.Until).
+func LegacySignatureLog() string {
+	version, date := LegacySignatureWindow.Until()
+	return "signature over the sha256 alone: still accepted, at least until filex " + version + " and " + date +
+		", whichever comes later - install a build signed over its name, version and platform"
+}
+
 // noteLegacySignature records whether e's build signature verified only in
 // the old form, and says so in the plugin's log and the server's.
 func (m *Manager) noteLegacySignature(e *entry, legacy bool) {
@@ -1217,7 +1226,7 @@ func (m *Manager) noteLegacySignature(e *entry, legacy bool) {
 	if !legacy {
 		return
 	}
-	const msg = "signature over the sha256 alone: accepted until filex 0.56 - install a build signed over its name, version and platform"
+	msg := LegacySignatureLog()
 	e.logs.Add("warn", msg)
 	m.log.Warn("plugin: "+msg, slog.String("plugin", name))
 }

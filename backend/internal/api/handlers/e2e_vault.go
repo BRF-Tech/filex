@@ -706,13 +706,14 @@ func (h *E2EVault) Create(w http.ResponseWriter, r *http.Request) {
 
 // State answers a vault's id, pack size, latest generation and lock.
 //
-//	GET /api/files/e2e/vault/state?path= → 200 {vault_id, pack_log2, generation, lock, owner_id, owner_name, owner_self}
+//	GET /api/files/e2e/vault/state?path= → 200 {vault_id, pack_log2, generation, lock, owner_id, owner_name, owner_self, words}
 //
 // lock is null or {holder: {name, client, label}, since, expires_at, mine};
 // mine is true for the session whose token the request carries. owner_id,
 // owner_name and owner_self say who owns the vault folder, as a listing row
 // does (each omitted when there is nothing to say; folderOwner): the
-// explorer draws every row inside the vault with them.
+// explorer draws every row inside the vault with them. words (0.56) are the
+// sentences the browser says about the vault on its own clock (vaultWords).
 func (h *E2EVault) State(w http.ResponseWriter, r *http.Request) {
 	if !h.on(w, r) {
 		return
@@ -746,7 +747,29 @@ func (h *E2EVault) State(w http.ResponseWriter, r *http.Request) {
 	answer["pack_log2"] = v.info.PackLog2
 	answer["generation"] = latestOf(idx)
 	answer["lock"] = lockJSON
+	answer["words"] = vaultWords(langOf(r), path.Base(v.rel))
 	writeJSON(w, http.StatusOK, answer)
+}
+
+// vaultWords are the sentences the browser says about this vault on its own
+// clock (#189, filex 0.56): only the browser sees inside a vault, so only it
+// knows when an app on one of the vault's files holds changes that the
+// vault's own idle lock would take away - but the words are said here, in
+// the reader's language, and no screen composes them. The browser shows
+// them as they are (the vault folder's own name is no secret: the server
+// stores it).
+//
+//	app_lock_soon       a minute before the vault locks itself, while an app
+//	                    holds unsaved changes in it
+//	app_lock_soon_keep  the action that keeps the vault open
+//	app_lock_kept       said once it is kept open
+func vaultWords(lang, name string) map[string]string {
+	vars := srvtext.Vars{"name": name}
+	return map[string]string{
+		"app_lock_soon":      srvtext.Text(lang, "server.e2e.vault.app_lock_soon", vars),
+		"app_lock_soon_keep": srvtext.Text(lang, "server.e2e.vault.app_lock_soon_keep", nil),
+		"app_lock_kept":      srvtext.Text(lang, "server.e2e.vault.app_lock_kept", vars),
+	}
 }
 
 // ── GET /list ───────────────────────────────────────────────────────────

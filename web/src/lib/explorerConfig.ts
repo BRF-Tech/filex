@@ -7,7 +7,7 @@
 // how one of them ends up not sending the token.
 
 import { ref } from 'vue';
-import type { AuthConfig } from '@brftech/filex-core';
+import { personName, type AuthConfig } from '@brftech/filex-core';
 
 /**
  * The mouse open gesture, a per-viewer preference stored in localStorage
@@ -69,4 +69,21 @@ export function explorerAuth(): AuthConfig {
   const csrf = readCsrfCookie();
   if (csrf) return { kind: 'csrf', csrf };
   return { kind: 'none' };
+}
+
+/**
+ * The name an app's own interface is told who is looking (`session.user.name`,
+ * packages/app-ui protocol.ts `Session.user`): the person's display name,
+ * else their username - never the e-mail address, which the SDK promises it
+ * is not. '' when there is neither (the interface is then told nothing).
+ *
+ * ⚠ Every page of this SPA that mounts an app's interface hands it this -
+ * the explorer (its viewer and dialogs, `ExplorerConfig.userName`), the
+ * standalone editor and the app pages. Until 0.56 none did: the office
+ * editor named everyone "filex" (its own avatar, its comments and tracked
+ * changes) while editing together showed the right names for the others,
+ * which the relay knows.
+ */
+export function appUserName(u: { display_name?: string | null; username?: string | null } | null | undefined): string {
+  return personName({ display_name: u?.display_name, username: u?.username });
 }

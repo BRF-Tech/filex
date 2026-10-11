@@ -10,6 +10,13 @@
  * the person to the next browser. Where the host keeps no account document (an
  * embed that wires none), it lasts as long as the page — never in another
  * app's reach either way.
+ *
+ * ⚠ filex 0.56 (task #189): while the interface holds a file of an encrypted
+ * folder in the clear, its `state.get` / `state.set` go to ANOTHER store,
+ * sealed in this tab with a key derived from the folder's (lib/appStateE2e).
+ * This one is the ordinary session's, and the two never mix. The rules of an
+ * entry (stateEntry) and the app's share (appStateMax) are this file's, for
+ * both.
  */
 import { LIMITS } from '@brftech/filex-app-ui/protocol';
 import { currentPrefs, savePref } from './prefs';
@@ -23,11 +30,16 @@ import { serverLimit } from './serverRules';
  * account document being refused; a server that publishes no number holds
  * the document to its own 64 KiB and nothing is checked here.
  */
-function appStateMax(): number | undefined {
+export function appStateMax(): number | undefined {
   return serverLimit('app_state_max_bytes');
 }
 
 const utf8 = new TextEncoder();
+
+/** The size of a JSON text as the server measures it (UTF-8 bytes). */
+export function jsonBytes(text: string): number {
+  return utf8.encode(text).length;
+}
 
 type Store = Record<string, Record<string, unknown>>;
 
@@ -50,8 +62,12 @@ export function appStateGet(app: string, key: string): unknown {
 
 export class AppStateTooLarge extends Error {}
 
-/** Keep `value` (JSON) under `key` for this app; undefined removes it. */
-export function appStateSet(app: string, key: string, value: unknown): void {
+/**
+ * One `state.set` entry as the rules take it: a key of 1-128 characters
+ * (never an object's own), a value of at most LIMITS.maxStateBytes as JSON.
+ * Answers the value's JSON, undefined for a removal; throws AppStateTooLarge.
+ */
+export function stateEntry(key: string, value: unknown): string | undefined {
   if (!key || key.length > 128 || key === '__proto__' || key === 'constructor' || key === 'prototype') {
     throw new AppStateTooLarge('a state key is 1-128 characters');
   }
@@ -59,12 +75,18 @@ export function appStateSet(app: string, key: string, value: unknown): void {
   if (encoded !== undefined && encoded.length > LIMITS.maxStateBytes) {
     throw new AppStateTooLarge(`a state value is at most ${LIMITS.maxStateBytes} bytes as JSON`);
   }
+  return encoded;
+}
+
+/** Keep `value` (JSON) under `key` for this app; undefined removes it. */
+export function appStateSet(app: string, key: string, value: unknown): void {
+  const encoded = stateEntry(key, value);
   const all = read('appState') as Store;
   const mine: Record<string, unknown> = { ...(all[app] ?? {}) };
   if (encoded === undefined) delete mine[key];
   else mine[key] = JSON.parse(encoded);
   const max = appStateMax();
-  if (max !== undefined && utf8.encode(JSON.stringify(mine)).length > max) {
+  if (max !== undefined && jsonBytes(JSON.stringify(mine)) > max) {
     throw new AppStateTooLarge(`an app keeps at most ${max} bytes`);
   }
   const next: Store = { ...all, [app]: mine };

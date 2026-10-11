@@ -157,6 +157,14 @@ export interface UserSettingsHost {
   readonly zone: { get(): string; set(tz: string): void };
   /** Light / automatic / dark — whichever store this surface paints from. */
   readonly mode: { get(): SettingsThemeMode; set(mode: SettingsThemeMode): void };
+  /**
+   * What this installation is called: the Branding page's name (`GET
+   * /api/branding`), the same answer the server writes into the installed
+   * web app's manifest (spa_brand.go). The rows about putting the web app on
+   * a home screen and about its notifications name it, so they say the name
+   * the home screen will show (#219). Absent or empty: "filex".
+   */
+  readonly brandName?: string;
 
   /* ── rows only some surfaces have (absent → not drawn) ─────────────────── */
 

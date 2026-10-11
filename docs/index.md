@@ -27,7 +27,7 @@ hero:
 features:
   - icon: ✍️
     title: Apps - things to do with a file
-    details: A second kind of plugin - a sandboxed WebAssembly module, an interface of its own that filex runs in a sandboxed frame, or both - adding actions to the file menu, screens and public pages for people with no account. Installed from a GitHub address or a trusted store's link through a review of every permission it asks for, with exactly that grant, and the people of your filex can browse a store's catalog on filex's own App store screen and ask for an app; the review also says plainly what a browser cannot promise about an interface. An interface prints through filex, on the person's Allow, and an end-to-end encrypted file is offered to no app. Apps say when their source has a newer version, nothing is installed until an administrator has reviewed what it changes, and the previous version is one click away. Four ship alongside filex as public repositories - e-Signature, which sends a document round for signature and seals the finished file with the installation's own seal, Convert, filextext (an end-to-end encrypted text workspace) and draw.io. Write your own in stock Go, against a test kit.
+    details: A second kind of plugin - a sandboxed WebAssembly module, an interface of its own that filex runs in a sandboxed frame, or both - adding actions to the file menu, screens and public pages for people with no account. Installed from a GitHub address or a trusted store's link through a review of every permission it asks for, with exactly that grant, and the people of your filex can browse a store's catalog on filex's own App store screen and ask for an app; the review also says plainly what a browser cannot promise about an interface. An interface prints through filex, on the person's Allow; one you allow edits a file of an end-to-end encrypted folder, which your browser decrypts for it and encrypts again, and one can let several people edit a file together through filex's relay, which never reads their changes. Apps say when their source has a newer version, nothing is installed until an administrator has reviewed what it changes, and the previous version is one click away. Five ship alongside filex as public repositories - e-Signature, which sends a document round for signature and seals the finished file with the installation's own seal, Convert, the Office editor (Word, Excel and PowerPoint in ONLYOFFICE's editor, in the browser, with no Document Server), filextext (an end-to-end encrypted text workspace) and draw.io. Write your own in stock Go, against a test kit.
     link: /APP-PLUGINS
     linkText: Apps docs
   - icon: 🌍
@@ -37,12 +37,12 @@ features:
     linkText: Right-to-left docs
   - icon: 🎨
     title: Wear your own colours
-    details: Compose named themes on the admin Appearance screen - twelve colours for light and for dark, a corner radius, a font stack, previewed as you type - and make one the instance default. It reaches the sign-in page and every public link too, because branding that stops at the login is not branding.
+    details: Compose named themes on the admin Appearance screen - twelve colours for light and for dark, a corner radius, a font stack, previewed as you type - and make one the instance default. It reaches the sign-in page and every public link too, because branding that stops at the login is not branding - and the instance's name and logo go onto the web app a phone installs.
     link: /INTEGRATION#themes
     linkText: Themes & appearance
   - icon: 🌐
     title: A browser client for your users
-    details: Give someone a user or viewer account and the address …/drive, and they land on their own Home - their storages, what they opened last, what they starred - one click from the file manager itself, with its uploads, sharing, search and editor, and with no admin panel around it and no separate frontend to deploy. …/admin is the operator's door to the same application, and it opens on the same Home. On a phone the same web app installs like an app, from a band that offers it on the first visit.
+    details: Give someone a user or viewer account and the address …/drive, and they land on their own Home - their storages, what they opened last, what they starred - one click from the file manager itself, with its uploads, sharing, search and editor, and with no admin panel around it and no separate frontend to deploy. …/admin is the operator's door to the same application, and it opens on the same Home. On a phone the same web app installs like an app, under your instance's name and logo, from a band that offers it on the first visit.
     link: /RBAC
     linkText: Roles and access
   - icon: 🖥️
@@ -142,7 +142,7 @@ features:
     linkText: How the limit works
   - icon: 🔐
     title: End-to-end encrypted folders
-    details: "Encrypted in the browser with WebCrypto: the server stores ciphertext and never receives a key. A folder encrypts its contents, or its contents and its names; a folder you already have, or a single file, is encrypted where it is. Each gets a recovery key, shown once, so a forgotten password is not automatically lost data - and an operator can optionally hold an escrow key, with the limits stated rather than implied. Who may encrypt is the organisation's call: nobody, administrators, everyone whose role allows it, or anyone after an administrator's approval. A third level, the vault, hides the shape of the tree as well - built, and off until the server turns it on."
+    details: "Encrypted in the browser with WebCrypto: the server stores ciphertext and never receives a key. A folder encrypts its contents, or its contents and its names; a folder you already have, or a single file, is encrypted where it is. Each gets a recovery key, shown once, so a forgotten password is not automatically lost data - and an operator can optionally hold an escrow key, with the limits stated rather than implied. Who may encrypt is the organisation's call: nobody, administrators, everyone whose role allows it, or anyone after an administrator's approval. A third level, the vault, hides the shape of the tree as well - built, and off until the server turns it on. An app you allow edits an encrypted file in your browser, which decrypts it for the app and encrypts what it saves; the server still holds only ciphertext."
     link: /E2E-ENCRYPTION
     linkText: How it works
   - icon: 🏙️
@@ -157,7 +157,7 @@ features:
     linkText: LDAP docs
   - icon: ⚡
     title: Live updates and presence
-    details: An open explorer is told what changed over a WebSocket instead of polling for it, and shows who else is in the folder and what they are looking at. One write appears the moment it lands; a burst - a zip extraction, a folder upload, an NFS client writing chunk after chunk - is merged into one frame per window, so five thousand files arriving at once cost the page a bounded trickle rather than five thousand redraws.
+    details: An open explorer is told what changed over a WebSocket instead of polling for it, and shows who else is in the folder and what they are looking at. One write appears the moment it lands; a burst - a zip extraction, a folder upload, an NFS client writing chunk after chunk - is merged into one frame per window, so five thousand files arriving at once cost the page a bounded trickle rather than five thousand redraws. An app can let several people edit one file together, filex's relay putting their sealed changes in one order.
     link: /REALTIME
     linkText: Realtime docs
   - icon: 🔔

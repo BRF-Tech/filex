@@ -946,6 +946,76 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     expect(dispatched(fx)).toHaveLength(1);
     expect(gitIn(fx, fx.src, 'tag', '--list', TAG)).toBe('');
   });
+
+  // #165, 0.55.0: two Playwright parts hit the browser install's 10-minute
+  // limit on apt, and the gate waited 38 minutes for a person to type
+  // `gh run rerun --failed`. A part red on the runner is re-run once by the
+  // gate itself; a part red in a test never is.
+  it('re-runs once, by itself, a part red on the runner (the browser install), and never a red test', { timeout: TIMEOUT }, async () => {
+    const reruns = (fx: Fixture) => {
+      const f = path.join(fx.root, 'gh', 'reruns.json');
+      return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {};
+    };
+    const M = { FIXTURE_GH_MATRIX: '1', FIXTURE_GH_CI: 'failure', FIXTURE_GH_PARTS: 'failure:Go (b)' };
+    const infra = { FIXTURE_GH_STEPS: 'Go (b)=The browser, with its system libraries' };
+
+    // A red test: red at once, and nothing is re-run.
+    let fx = fixture();
+    await toLand(fx);
+    let exportCommit = landBoth(fx);
+    let r = await release(fx, [VERSION, '--resume'], { ...M, FIXTURE_GH_STEPS: 'Go (b)=The part' });
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toContain(`FAILED  ci.yml (push) passed on ${exportCommit.slice(0, 10)}`);
+    expect(r.out).toContain('Go (b) (failure, step "The part"');
+    expect(r.out).toContain("red in a step of the code's");
+    expect(reruns(fx)).toEqual({});
+
+    // Red on the runner, the run still going: waited for, not re-run yet.
+    r = await release(fx, [VERSION, '--resume'], { ...M, ...infra, FIXTURE_GH_CI: 'in_progress', FIXTURE_GATE_TIMEOUT_MS: '500' });
+    expect(r.code, r.out).toBe(3);
+    expect(r.out).toContain('WAITING at gate');
+    expect(r.out).toContain('red on the runner, not in the code: re-run once the run has finished');
+    expect(reruns(fx)).toEqual({});
+
+    // Finished: re-run once, and the new attempt is green - on to the tags.
+    r = await release(fx, [VERSION, '--resume'], { ...M, ...infra, FIXTURE_GH_RERUN: 'success' });
+    expect(r.code, r.out).toBe(3);
+    expect(r.out).toContain('re-run   ci.yml run 1: Go (b) (failure, step "The browser, with its system libraries")');
+    expect(r.out).toContain(`ok      ci.yml (push) passed on ${exportCommit.slice(0, 10)}`);
+    expect(r.out).toContain('WAITING at sign');
+    expect(reruns(fx)).toEqual({ 1: 1 });
+    expect(recordOf(fx).gateReruns).toMatchObject({ sha: exportCommit, runs: { 1: { attempt: 1, requests: 1, parts: { 'Go (b)': 1002 } } } });
+
+    // Red again after its one re-run: red, and not asked a second time.
+    fx = fixture();
+    await toLand(fx);
+    exportCommit = landBoth(fx);
+    r = await release(fx, [VERSION, '--resume'], { ...M, ...infra, FIXTURE_GH_RERUN: 'failure' });
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toContain('red again after the one re-run');
+    expect(reruns(fx)).toEqual({ 1: 1 });
+  });
+
+  // #165, 0.55.0: one "Server Error (HTTP 502)" stopped the gate while GitHub
+  // was reading out a run that was green; a person resumed it.
+  it('asks again when GitHub does not answer (a 5xx), and stops at once on an answer that is no', { timeout: TIMEOUT }, async () => {
+    const fx = fixture();
+    await toLand(fx);
+    landBoth(fx);
+    let r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_ERRORS: '4', FIXTURE_GH_ERROR_TEXT: 'gh: Server Error (HTTP 502)' });
+    expect(r.code, r.out).toBe(3);
+    expect(r.out).toContain('no answer on the runs of the export commit: gh: Server Error (HTTP 502)');
+    expect(r.out).toContain('(2/10)');
+    expect(r.out).toContain('WAITING at sign');
+
+    const other = fixture();
+    await toLand(other);
+    landBoth(other);
+    r = await release(other, [VERSION, '--resume'], { FIXTURE_GH_ERRORS: '5', FIXTURE_GH_ERROR_TEXT: 'gh: HTTP 404: Not Found' });
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toContain('FAILED  GitHub answered');
+    expect(r.out).not.toContain('no answer');
+  });
 });
 
 // #181: GitHub Actions down (2026-10-05: the 0.52.0 dry run could not get a

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createI18n } from 'vue-i18n';
 import { createMemoryHistory, createRouter } from 'vue-router';
+import { createPinia } from 'pinia';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -154,7 +155,7 @@ async function openTab(query: string, caps: Record<string, unknown>) {
   await router.push(`/files/edit?${query}`);
   await router.isReady();
   const i18n = createI18n({ legacy: false, locale: 'en', messages: { en } });
-  mount({ template: '<router-view />' }, { global: { plugins: [router, i18n] }, attachTo: document.body });
+  mount({ template: '<router-view />' }, { global: { plugins: [router, i18n, createPinia()] }, attachTo: document.body });
   await settle();
 }
 

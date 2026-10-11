@@ -1,4 +1,4 @@
-// The test shards (tasks #171, #180): the browser suite split by Playwright's
+// The test shards (tasks #171, #180, #174): the browser suite split by Playwright's
 // --shard, each part on a server of its own; the Go suite split by one list,
 // scripts/test-shards.json, that the build host's chain, GitHub and CircleCI
 // all read.
@@ -12,7 +12,11 @@
 //   - two parts on one machine share no output directory: Playwright EMPTIES
 //     its output directory when a run starts, so a second part would delete
 //     the first one's traces mid-run;
-//   - an option run.mjs cannot read stops the run (lib/args.mjs).
+//   - an option run.mjs cannot read stops the run (lib/args.mjs);
+//   - no -race shard is estimated past RACE_BUDGET_MIN on the runner
+//     scripts/test-times.json was measured on, with the tree as it is: the
+//     longest -race shard is how long ci.yml's full run - the release's
+//     land → green gate - takes.
 //
 // The real list is held to the real tree here without a Go toolchain (the
 // package list is walked, the tests are read from the sources);
@@ -38,13 +42,21 @@ import {
 import {
   binPack,
   chainLines,
+  estimateRace,
+  fileWeigher,
+  formatTimes,
   goTestArgs,
   goTestNames,
   isTestName,
   MAX_RUN_CHARS,
+  measureTimes,
+  median,
   packageTests,
+  packageUnitSeconds,
+  parseGoPackageTimes,
   parseGoTestTimes,
   planProfile,
+  RACE_BUDGET_MIN,
   rebalanceUnits,
   runRegex,
   testsReport,
@@ -57,6 +69,7 @@ const REPO = path.resolve(__dirname, '../../..');
 const E2E = path.join(REPO, 'e2e');
 const read = (rel: string) => readFileSync(path.join(REPO, rel), 'utf8');
 const CONFIG = JSON.parse(read('scripts/test-shards.json'));
+const TIMES = JSON.parse(read('scripts/test-times.json'));
 const BACKEND = path.join(REPO, CONFIG.module);
 
 const scratch: string[] = [];
@@ -500,5 +513,174 @@ describe('rebalance: from the times a run measured', () => {
     expect(units.flatMap((u: { files: string[] }) => u.files).sort()).toEqual(['a_test.go', 'b_test.go', 'c_test.go', 'd_test.go']);
     // TestD has no time: it counts as the median (9), so 10+2 | 9+9.
     expect(totals).toEqual([18, 12]);
+  });
+});
+
+// ── Go: measured times and the -race budget (#174) ──────────────────────────
+//
+// ⚠ 0.53's split was an estimate nobody re-cut: by 0.55 the handlers' rest
+// unit had taken every new test file (244 → 437 tests), ran 57 minutes on
+// GitHub, and held ci.yml's full run - the release's land → green gate - to
+// 58-75 minutes against 50. These hold the measured times, the split cut from
+// them, and an estimate that turns red while the tree outgrows the split.
+
+const TAB = String.fromCharCode(9);
+
+describe('times: what a run measured, per test file and per package', () => {
+  const tree = () =>
+    goTree({
+      'internal/big/a_test.go': testFile('big', 'TestA1', 'TestA2'),
+      'internal/big/b_test.go': testFile('big', 'TestB1'),
+      'internal/big/c_test.go': testFile('big', 'TestC1', 'TestCNew'),
+      'internal/big/big.go': 'package big\n',
+      'internal/db/db.go': 'package db\n',
+      'internal/io/io.go': 'package io\n',
+      'internal/none/none.go': 'package none\n',
+    });
+  const cfg = {
+    module: '.',
+    units: {
+      './internal/big': [
+        { name: 'big-1', files: ['a_test.go'] },
+        { name: 'big-2', rest: true, files: ['b_test.go'] },
+      ],
+    },
+    packages: [
+      { name: 'db', packages: ['./internal/db'] },
+      { name: 'rest', rest: true },
+    ],
+    profiles: {
+      race: [
+        { name: 'big-1', units: ['big-1'] },
+        { name: 'big-2', units: ['big-2'] },
+        { name: 'db', units: ['db'] },
+        { name: 'rest', units: ['rest'] },
+      ],
+    },
+  };
+  const pass = (name: string, secs: number) => `--- PASS: ${name} (${secs.toFixed(2)}s)`;
+  const ok = (pkg: string, secs: number, module = 'example.com/m') => `ok  ${TAB}${module}/${pkg}${TAB}${secs.toFixed(3)}s`;
+
+  it('reads the package lines: ok, FAIL, no test files as 0, and -json', () => {
+    const text = [
+      ok('internal/db', 12.5),
+      `FAIL${TAB}example.com/m/internal/io${TAB}3.250s`,
+      `?   ${TAB}example.com/m/internal/none${TAB}[no test files]`,
+      `ok  ${TAB}example.com/m/internal/db${TAB}(cached)`,
+      'ok  elsewhere.org/x/y 9.000s',
+      JSON.stringify({ Action: 'pass', Package: 'example.com/m/cmd/x', Elapsed: 4.5 }),
+      JSON.stringify({ Action: 'pass', Package: 'example.com/m/cmd/x', Test: 'TestX', Elapsed: 4 }),
+    ].join('\n');
+    expect(Object.fromEntries(parseGoPackageTimes(text, 'example.com/m'))).toEqual({ './internal/db': 12.5, './internal/io': 3.25, './internal/none': 0, './cmd/x': 4.5 });
+  });
+
+  it("reads the public repository's logs too: its module path is this one's, renamed by the export", () => {
+    const text = [ok('internal/db', 7, 'github.com/brf-tech/filex/backend'), ok('', 1, 'github.com/brf-tech/filex/backend').replace(`backend/${TAB}`, `backend${TAB}`)].join('\n');
+    expect(Object.fromEntries(parseGoPackageTimes(text, 'gitlab.example/brftech/filemanager/backend'))).toEqual({ './internal/db': 7, '.': 1 });
+  });
+
+  it("gives a cut shard's tests to its package, the median of the runs, and every other package its own time", () => {
+    const dir = tree();
+    const run = (a1: number, rest: number) => [
+      { name: `big-1`, text: [pass('TestA1', a1), pass('TestA2', 2), ok('internal/big', a1 + 2)].join('\n') },
+      { name: `big-2`, text: [pass('TestB1', 5), pass('TestC1', 1), pass('TestGone', 3), ok('internal/big', 9)].join('\n') },
+      // A package log names tests of many packages: none of them is big's.
+      { name: 'rest', text: [pass('TestA1', 999), ok('internal/db', rest), ok('internal/io', 2)].join('\n') },
+    ];
+    const got = measureTimes(cfg, { backendDir: dir, logs: [...run(10, 30), ...run(20, 40), ...run(60, 50)] });
+    expect(got.files).toEqual({ './internal/big': { 'a_test.go': [22, 2], 'b_test.go': [5, 1], 'c_test.go': [1, 1] } });
+    expect(got.packages).toEqual({ './internal/db': 40, './internal/io': 2 });
+    expect(got.unknownTests).toEqual({ './internal/big': ['TestGone'] });
+    expect(got.skipped).toEqual([]);
+  });
+
+  it("takes a log with no package line (the chain's prebuilt binaries) only for the --package it is given", () => {
+    const dir = tree();
+    const logs = [{ name: 'race-big-1/race.out', text: [pass('TestA1', 4), 'PASS'].join('\n') }];
+    expect(measureTimes(cfg, { backendDir: dir, logs }).skipped).toEqual(['race-big-1/race.out']);
+    expect(measureTimes(cfg, { backendDir: dir, logs, pkg: './internal/big' }).files['./internal/big']).toEqual({ 'a_test.go': [4, 1] });
+    expect(() => measureTimes(cfg, { backendDir: dir, logs, pkg: './internal/db' })).toThrow(/not a cut package/);
+  });
+
+  it('weighs a test the times do not know at its package mean, and a package they do not know at the median one', () => {
+    const dir = tree();
+    const times = { model: { setup_min: 2, package_parallel: 2 }, files: { './internal/big': { 'a_test.go': [20, 2], 'b_test.go': [4, 1], 'c_test.go': [6, 1] } }, packages: { './internal/db': 60, './internal/none': 0 } };
+    const w = fileWeigher(times, './internal/big', packageTests(dir, './internal/big'));
+    // 30 s over 4 tests: TestCNew, which no run measured, weighs 7.5.
+    expect([w('a_test.go'), w('b_test.go'), w('c_test.go'), w('gone_test.go')]).toEqual([20, 4, 13.5, 0]);
+    // internal/io is unknown: the median of the measured packages with tests (60).
+    const units = packageUnitSeconds(cfg, times, walkGoPackages(dir));
+    expect(Object.fromEntries(units)).toEqual({ db: 60, rest: 60 });
+    const est = estimateRace(cfg, times, { backendDir: dir, goPackages: walkGoPackages(dir) });
+    expect(est.map((e: { name: string; minutes: number }) => [e.name, e.minutes])).toEqual([
+      ['big-1', 2.3],
+      ['big-2', 2.3],
+      ['db', 2.5],
+      ['rest', 2.5],
+    ]);
+  });
+
+  it('rebalance cuts the units from the times: every file placed, the rest the lightest', () => {
+    const dir = tree();
+    const times = { files: { './internal/big': { 'a_test.go': [20, 2], 'b_test.go': [4, 1], 'c_test.go': [6, 1] } }, packages: {} };
+    const fileWeight = fileWeigher(times, './internal/big', packageTests(dir, './internal/big'));
+    const { units, totals } = rebalanceUnits(cfg, './internal/big', { backendDir: dir, fileWeight });
+    expect(units.map((u: { files: string[] }) => u.files)).toEqual([['a_test.go'], ['b_test.go', 'c_test.go']]);
+    expect(units[1].rest).toBe(true);
+    expect(totals).toEqual([20, 17.5]);
+  });
+
+  it('writes the times one line a file, and reads back what it wrote', () => {
+    const times = { $comment: ['x'], source: 'runs 1, 2', model: { setup_min: 2, package_parallel: 3.2 }, files: { './internal/big': { 'a_test.go': [20.5, 2] } }, packages: { './internal/db': 40 } };
+    const text = formatTimes(times);
+    expect(JSON.parse(text)).toEqual(times);
+    expect(text).toContain('\n      "a_test.go": [20.5,2]');
+    expect(text).toContain('\n    "./internal/db": 40\n');
+    expect(median([3, 1, 2])).toBe(2);
+    expect(median([4, 1, 2, 3])).toBe(2.5);
+  });
+});
+
+describe('scripts/test-times.json and the -race shards cut from it (#174)', () => {
+  const goPackages = walkGoPackages(BACKEND);
+  const estimate = estimateRace(CONFIG, TIMES, { backendDir: BACKEND, goPackages });
+
+  it('holds what GitHub measured: every cut package, the other packages, the model, and where it came from', () => {
+    expect(Object.keys(TIMES.files).sort()).toEqual(Object.keys(CONFIG.units).sort());
+    for (const [pkg, files] of Object.entries(TIMES.files as Record<string, Record<string, [number, number]>>)) {
+      expect(Object.keys(files).length, pkg).toBeGreaterThan(10);
+      for (const [file, [secs, n]] of Object.entries(files)) {
+        expect(file.endsWith('_test.go'), file).toBe(true);
+        expect(secs >= 0 && Number.isInteger(n) && n > 0, `${pkg} ${file}`).toBe(true);
+      }
+    }
+    expect(Object.keys(TIMES.packages).length).toBeGreaterThan(100);
+    expect(TIMES.model.setup_min).toBeGreaterThan(0);
+    expect(TIMES.model.package_parallel).toBeGreaterThan(1);
+    expect(TIMES.source).toMatch(/GitHub/);
+    expect(read('scripts/test-times.json')).toBe(formatTimes(TIMES));
+  });
+
+  it(`estimates no -race shard above ${RACE_BUDGET_MIN} minutes (RACE_BUDGET_MIN) with the tree as it is`, () => {
+    expect(estimate.map((e: { name: string }) => e.name)).toEqual(CONFIG.profiles.race.map((s: { name: string }) => s.name));
+    const over = estimate.filter((e: { minutes: number }) => e.minutes > RACE_BUDGET_MIN).map((e: { name: string; minutes: number }) => `${e.name} ${e.minutes} min`);
+    expect(over, 'node scripts/test-shards.mjs rebalance --write (a cut package), or move a package between package units: docs/CONTRIBUTING.md, Testing → Shards').toEqual([]);
+  });
+
+  it("gives every unit the weight the times give it: the chain's minutes come from weight_s", () => {
+    const pkgSecs = packageUnitSeconds(CONFIG, TIMES, goPackages);
+    for (const u of CONFIG.packages) expect(Math.abs(u.weight_s - pkgSecs.get(u.name)!), u.name).toBeLessThanOrEqual(Math.max(60, pkgSecs.get(u.name)! * 0.25));
+    for (const [pkg, units] of Object.entries(CONFIG.units as Record<string, Array<{ name: string; files: string[]; weight_s: number }>>)) {
+      const w = fileWeigher(TIMES, pkg, packageTests(BACKEND, pkg));
+      for (const u of units) {
+        const secs = u.files.reduce((n, f) => n + w(f), 0);
+        expect(u.weight_s, u.name).toBeGreaterThan(0);
+        expect(Math.abs(u.weight_s - secs), u.name).toBeLessThanOrEqual(Math.max(60, secs * 0.25));
+      }
+    }
+  });
+
+  it('keeps the race profile at the jobs it had: a shard more is a GitHub runner fewer for the rest of the run', () => {
+    expect(CONFIG.profiles.race).toHaveLength(14);
   });
 });

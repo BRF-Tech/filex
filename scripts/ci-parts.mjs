@@ -86,6 +86,30 @@ export const EXTRA = [
 /** The unit suite runs once on CI's clock and once on the maintainer's. */
 export const TIMEZONES = ['UTC', 'Europe/Istanbul'];
 
+/**
+ * ⚠⚠ What every CI's Go parts run beside, for GitHub's ci.yml and CircleCI's
+ * config alike (ciFullMatrix.test.ts and circleciConfig.test.ts hold both to
+ * this): the variable each test reads, and the service that answers it. A
+ * test whose variable is unset SKIPS, and a skip is a pass - CircleCI's first
+ * run had no Samba, and the 11 live SMB tests GitHub runs passed there by
+ * skipping.
+ */
+export const GO_SERVICES = {
+  FILEX_TEST_PG_DSN: 'postgres',
+  FILEX_TEST_MYSQL_DSN: 'mysql',
+  FILEX_TEST_REDIS_URL: 'redis',
+  FILEX_SMB_TEST: 'samba',
+};
+
+/**
+ * ⚠⚠ What the build hands every CI's browser parts (ci.yml's e2e-build
+ * artifact, CircleCI's workspace; the two guards hold both to this): the
+ * server binary, the echo app module, and packages/core/dist, with which 173
+ * builds a real .fxe (v0.53.0's first full matrix: "Cannot find module
+ * packages/core/dist/filex-core.js" in Playwright chromium 2/4).
+ */
+export const BROWSER_BUILD = ['bin/filex', 'backend/internal/wasmplugin/testdata/echo/echo.wasm', 'packages/core/dist'];
+
 /** The jobs that are no matrix, by their key in ci.yml. */
 export const FIXED = {
   plan: 'Plan the matrix',

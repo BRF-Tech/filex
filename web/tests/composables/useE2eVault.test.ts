@@ -3,7 +3,8 @@
 // "API"): listing from the index, a change that takes the write lock and
 // commits, somebody else's lock, a lock lost mid-change (nothing saved, and
 // the strip lists what), a lock lost to idleness, the vault locking itself
-// after 15 minutes, and the server never hearing a path below the vault.
+// after 15 minutes, and the server never hearing a path below the vault -
+// and (0.56) an app's interface reading and saving a file of the vault.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -68,6 +69,14 @@ const HTTP: VaultHost['http'] = {
   downloadUrl: (p) => `/api/files/manager?action=download&path=${encodeURIComponent(p)}`,
 };
 
+/** The server's sentences for what the browser says on its own clock, as
+ *  `state` answers them (backend vaultWords) - never composed in the tab. */
+const SRV_WORDS = {
+  app_lock_soon: 'An app has changes in “Kasa” that are not saved, and the vault locks itself in a minute. Save them, or keep the vault open.',
+  app_lock_soon_keep: 'Keep it open',
+  app_lock_kept: '“Kasa” stays open: it locks itself 15 minutes after the last thing done in it.',
+};
+
 /** The vault API and the download, in memory. */
 function fakeServer(made: Awaited<ReturnType<typeof createVault>>) {
   const files = new Map<string, Uint8Array>();
@@ -79,9 +88,13 @@ function fakeServer(made: Awaited<ReturnType<typeof createVault>>) {
     lock: null as null | { token: string; holder: { name: string; client: string; label: string }; since: string; mine: boolean },
     ended: '' as string,
     failIndexWith: '' as string,
+    /** The `message` of that refusal (the server's sentence; '' says none). */
+    failIndexSays: '' as string,
     seen: [] as string[],
     /** Who owns the vault folder, as `state` and `create` answer it. */
     owner: { owner_id: 7, owner_name: 'Dana Reyes', owner_self: true } as Record<string, unknown>,
+    /** What `state` says the browser may say on its own clock (0.56). */
+    words: { ...SRV_WORDS } as Record<string, string>,
   };
   const json = (status: number, body?: unknown) =>
     new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -118,6 +131,7 @@ function fakeServer(made: Awaited<ReturnType<typeof createVault>>) {
           pack_log2: made.marker.vault!.pack,
           generation: srv.generation,
           lock: srv.lock ? { holder: srv.lock.holder, since: srv.lock.since, expires_at: '', mine: srv.lock.token === token } : null,
+          words: srv.words,
         });
       case '/list': {
         const kind = u.searchParams.get('kind');
@@ -165,7 +179,7 @@ function fakeServer(made: Awaited<ReturnType<typeof createVault>>) {
       case '/index': {
         const refused = held();
         if (refused) return refused;
-        if (srv.failIndexWith) return json(409, { error: srv.failIndexWith, message: '', reason: 'taken', holder: { name: 'Ayşe', client: 'desktop', label: 'filex, macOS' } });
+        if (srv.failIndexWith) return json(409, { error: srv.failIndexWith, message: srv.failIndexSays, reason: 'taken', holder: { name: 'Ayşe', client: 'desktop', label: 'filex, macOS' } });
         const gen = Number(u.searchParams.get('generation'));
         if (gen !== srv.generation + 1) return json(409, { error: 'VAULT_GENERATION', message: '', latest: srv.generation });
         files.set(`v/idx/${gen.toString(16).padStart(16, '0')}.fxi`, new Uint8Array(init.body as Uint8Array));
@@ -492,5 +506,201 @@ describe('useE2eVault', () => {
     await v.open('docs://Yeni', made.marker, made.fmk, { initial: emptyIndexState(1) });
     expect(spy).not.toHaveBeenCalled();
     expect(v.strips['docs://Yeni'].generation).toBe(1);
+  });
+});
+
+// filex 0.56 (task #189) - an app's interface editing a file of the vault
+// (lib/appPlaintext createAppVaultDoor -> useE2eVault readForApp /
+// saveForApp). The engine reads the file from its packs and writes the app's
+// save as the vault's next generation, under the write lock, all in this tab:
+// the server sees packs and an index - never the file's name, a path below
+// the vault, or a byte of what the app saved. One writer at a time: a save
+// while somebody else writes, or after this session's write lock ended, is
+// refused and said; a file changed or gone since the app read it is not
+// written over or made again.
+//
+// Red before 0.56: the engine had no readForApp / saveForApp (TypeError).
+describe('an app editing a file of the vault (filex 0.56)', () => {
+  const FILE = `${ROOT}/Bütçe/plan 2027.txt`;
+  const NAME = 'plan 2027.txt';
+  const BODY = 'gizli bütçe: 2027 planı';
+  const enc = (s: string) => new TextEncoder().encode(s);
+  const dec = (b: Uint8Array) => new TextDecoder().decode(b);
+  /** `needle` appears in `hay`, byte for byte. */
+  const holds = (hay: Uint8Array, needle: Uint8Array) => {
+    outer: for (let i = 0; i + needle.length <= hay.length; i++) {
+      for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
+      return true;
+    }
+    return false;
+  };
+
+  async function withFile(extra: Partial<VaultHost> = {}) {
+    const ctx = await setup(extra);
+    expect(await ctx.vault.mkdir(ROOT, 'Bütçe')).toBe(true);
+    expect(await ctx.vault.upload(`${ROOT}/Bütçe`, [new File([enc(BODY)], NAME, { lastModified: 1_791_277_200_000 })])).toBe(true);
+    return ctx;
+  }
+
+  async function readIt(vault: ReturnType<typeof useE2eVault>) {
+    const r = await vault.readForApp(FILE, 1 << 20);
+    if (!r.ok) throw new Error(`read refused: ${r.why}`);
+    return r;
+  }
+
+  it('hands over the plaintext and its version, and writes the save over it as the next generation', async () => {
+    const { vault, srv } = await withFile();
+    const r = await readIt(vault);
+    expect(dec(r.bytes)).toBe(BODY);
+    const gen = srv.generation;
+    const text = 'yeni içerik: kayıt sonrası';
+    const saved = await vault.saveForApp(FILE, enc(text), r.sig);
+    expect(saved).toMatchObject({ ok: true, size: enc(text).length });
+    expect(srv.generation, 'one commit').toBe(gen + 1);
+    expect(dec(await vault.readBytes(FILE))).toBe(text);
+    expect(vault.rows(`${ROOT}/Bütçe`)!.map((x) => x.basename), 'written over the file, not beside it').toEqual([NAME]);
+    // The next save names the version this one wrote.
+    if (!saved.ok) throw new Error('save');
+    expect(saved.sig).not.toBe(r.sig);
+    expect((await vault.saveForApp(FILE, enc('üçüncü'), saved.sig)).ok).toBe(true);
+    expect(dec(await vault.readBytes(FILE))).toBe('üçüncü');
+  });
+
+  it('the server hears no name and no path below the vault, and holds no byte of what the app saved', async () => {
+    const { vault, srv } = await withFile();
+    const r = await readIt(vault);
+    expect((await vault.saveForApp(FILE, enc('yeni içerik: kayıt sonrası'), r.sig)).ok).toBe(true);
+    for (const u of srv.seen) {
+      expect(u).not.toContain('Bütçe');
+      expect(u).not.toContain('plan 2027');
+    }
+    for (const [k, b] of srv.files) {
+      expect(holds(b, enc('kayıt sonrası')), k).toBe(false);
+      expect(holds(b, enc('gizli bütçe')), k).toBe(false);
+    }
+  });
+
+  it('a file written meanwhile is not saved over: changed, nothing committed, and said', async () => {
+    const { vault, srv, calls } = await withFile();
+    const first = await readIt(vault);
+    // Another save lands first (the same file open in a second frame).
+    expect((await vault.saveForApp(FILE, enc('önce gelen'), first.sig)).ok).toBe(true);
+    const gen = srv.generation;
+    expect(await vault.saveForApp(FILE, enc('sonra gelen'), first.sig)).toEqual({ ok: false, why: 'changed' });
+    expect(srv.generation, 'nothing committed').toBe(gen);
+    expect(dec(await vault.readBytes(FILE))).toBe('önce gelen');
+    expect(calls.toasts.at(-1)).toBe(en('e2e.vault.err.changed', { name: NAME }));
+  });
+
+  it('an app that saves what it did not read names the version by the row: its size and time', async () => {
+    const { vault } = await withFile();
+    const [row] = vault.rows(`${ROOT}/Bütçe`)!;
+    const asListed = `${row.size}:${row.last_modified}`;
+    expect((await vault.saveForApp(FILE, enc('v2'), asListed)).ok).toBe(true);
+    expect(await vault.saveForApp(FILE, enc('v3'), asListed)).toEqual({ ok: false, why: 'changed' });
+  });
+
+  it('a file that is gone is not made again', async () => {
+    const { vault, srv } = await withFile();
+    const r = await readIt(vault);
+    expect(await vault.remove([FILE])).toBe(true);
+    const gen = srv.generation;
+    expect(await vault.saveForApp(FILE, enc('geri gelmesin'), r.sig)).toEqual({ ok: false, why: 'gone' });
+    expect(srv.generation).toBe(gen);
+    expect(vault.rows(`${ROOT}/Bütçe`)).toEqual([]);
+    expect(await vault.readForApp(FILE, 1 << 20)).toEqual({ ok: false, why: 'gone' });
+  });
+
+  it("somebody else writes the vault: held, nothing written, said in the server's words", async () => {
+    const { vault, srv, clock, calls } = await withFile();
+    const r = await readIt(vault);
+    // The upload's write lock ends (idle) and another session takes it.
+    srv.lock = null;
+    srv.ended = 'idle';
+    await clock.advance(15_000);
+    expect(vault.strips[ROOT].mode).toBe('read');
+    srv.lock = { token: 'theirs', holder: { name: 'Ayşe', client: 'desktop', label: 'filex, macOS' }, since: '2026-10-10T09:00:00Z', mine: false };
+    const gen = srv.generation;
+    expect(await vault.saveForApp(FILE, enc('yazılmayacak'), r.sig)).toEqual({ ok: false, why: 'held' });
+    expect(srv.generation).toBe(gen);
+    expect(calls.toasts.at(-1)).toBe('Ayşe is writing this vault. It stays readable; try again when they are done.');
+    expect(vault.strips[ROOT].holder?.name).toBe('Ayşe');
+  });
+
+  it("the write lock lost before the commit: nothing written, and the person told in the server's words", async () => {
+    const { vault, srv, calls } = await withFile();
+    const r = await readIt(vault);
+    srv.failIndexWith = 'VAULT_LOCK_LOST';
+    srv.failIndexSays = 'Somebody else took over writing, so the vault went back to read-only.';
+    const gen = srv.generation;
+    expect(await vault.saveForApp(FILE, enc('kaybolacak'), r.sig)).toEqual({ ok: false, why: 'lock_lost' });
+    expect(srv.generation, 'nothing committed').toBe(gen);
+    expect(vault.strips[ROOT].unsaved).toEqual([NAME]);
+    expect(vault.strips[ROOT].mode).toBe('read');
+    expect(calls.toasts.at(-1)).toBe(`Somebody else took over writing, so the vault went back to read-only. ${en('e2e.vault.unsaved', { names: NAME })}`);
+    srv.failIndexWith = '';
+    expect(dec(await vault.readBytes(FILE))).toBe(BODY);
+  });
+
+  it('the vault locked meanwhile: nothing handed over, nothing taken', async () => {
+    const { vault, srv } = await withFile();
+    const r = await readIt(vault);
+    vault.lock(ROOT);
+    await settle();
+    const gen = srv.generation;
+    expect(await vault.readForApp(FILE, 1 << 20)).toEqual({ ok: false, why: 'locked' });
+    expect(await vault.saveForApp(FILE, enc('kilitliyken'), r.sig)).toEqual({ ok: false, why: 'locked' });
+    expect(srv.generation).toBe(gen);
+  });
+
+  it('a file larger than the app may be handed is not fetched', async () => {
+    const { vault, srv } = await withFile();
+    const before = srv.seen.length;
+    expect(await vault.readForApp(FILE, 4)).toEqual({ ok: false, why: 'too_large' });
+    expect(srv.seen.slice(before).filter((u) => u.includes('action=download')), 'no pack read').toEqual([]);
+  });
+
+  it("an app's read is activity: the vault's own 15-minute lock waits for it", async () => {
+    const { vault, srv, clock } = await withFile();
+    // The upload's write lock ends; from then the vault's clock runs.
+    srv.lock = null;
+    srv.ended = 'idle';
+    await clock.advance(15_000);
+    await clock.advance(VAULT_IDLE_LOCK_MS - 60_000);
+    expect(vault.isOpen(ROOT)).toBe(true);
+    await readIt(vault);
+    await clock.advance(VAULT_IDLE_LOCK_MS - 60_000);
+    expect(vault.isOpen(ROOT), 'the read reset the clock').toBe(true);
+    await clock.advance(120_000);
+    expect(vault.isOpen(ROOT)).toBe(false);
+  });
+});
+
+// filex 0.56 (task #189): a minute before the vault locks itself, the
+// explorer is told - with the server's words from `state` - so it can warn
+// about an app's unsaved changes and keep the vault open. Red before 0.56: no
+// onLockSoon, no words.
+describe('the vault says, a minute before, that it locks itself (filex 0.56)', () => {
+  it("tells the explorer a minute before, in the server's words; keeping it open puts the lock off", async () => {
+    const soon: Array<[string, unknown]> = [];
+    const { vault, clock, calls } = await setup({ onLockSoon: (root, words) => void soon.push([root, words]) });
+    await clock.advance(VAULT_IDLE_LOCK_MS - 61_000);
+    expect(soon).toEqual([]);
+    await clock.advance(1000);
+    expect(soon).toEqual([[ROOT, SRV_WORDS]]);
+    expect(vault.isOpen(ROOT)).toBe(true);
+    // The warning's action: activity in the vault.
+    vault.touch(ROOT);
+    await clock.advance(61_000);
+    expect(vault.isOpen(ROOT), 'kept open').toBe(true);
+    expect(calls.locked).toEqual([]);
+  });
+
+  it('not while this session holds the write lock (the vault does not lock then)', async () => {
+    const soon: unknown[] = [];
+    const { vault, clock } = await setup({ onLockSoon: (root) => void soon.push(root) });
+    await vault.mkdir(ROOT, 'A');
+    await clock.advance(VAULT_IDLE_LOCK_MS);
+    expect(soon).toEqual([]);
   });
 });

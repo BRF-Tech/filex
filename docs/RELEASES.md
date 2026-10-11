@@ -19,14 +19,283 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.54.0, 8 October 2026
-The server does the server's work: the rules, numbers and sentences the web app, the desktop app and the packages used to keep copies of now come from the server, so every surface says the same thing in the reader's language, and every refusal carries the server's own sentence next to a stable code. Notifications reach a phone or a browser with filex closed (Web Push, iPhone and iPad from iOS 16.4), with the same kinds, mutes and digest as the bell, and a notification is translated at its last stop, for whoever receives it. The ONLYOFFICE editor opens in the person's language (FILEX_ONLYOFFICE_LANG pins one), the desktop app follows its account's language, and the CLI installs with winget. The vault (encryption level 3) arrives in the explorer and the CLI behind FILEX_E2E_VAULT, off by default. Search, Recent, Starred, Shared with me and tag pages are narrowed and sorted on the server, and every listed link says where it stands. The presigned S3 multipart upload is gone; the staged upload works on every driver. Embedders: the 0.54 packages need a 0.54 server. Security hardening across ONLYOFFICE save callbacks, apps, encrypted folders, share e-mails, quotas and the S3 gateway; upgrading is recommended.
+::: tip Latest - v0.55.0, 9 October 2026
+An app store lists storage plugins beside apps: the same link and review, every build pinned and signed by the store, the plugin checked by the store's validator before it is listed, and a paid one held while its license does not hold. A storage plugin's signature now names the plugin, its version and its platform; the old checksum-only form is still accepted with a warning (0.55 said it would be refused from 0.56; 0.56 withdrew that: it stays accepted at least until 0.61 and 2027-10-09). An app's interface can frame pages of its own package, read blob: addresses and print through filex, which asks every time and opens the print dialog only on the person's Allow - the platform the coming office editor app is built on; where the web component runs on another site, that site needs to be in FILEX_FRAME_ANCESTORS for its apps to print. Every file row says whether it is end-to-end encrypted, and an encrypted file is offered to no app and refused at every app door. A rename, move or delete over WebDAV, SFTP, FTPS, NFS, the S3 gateway or the AI surface no longer loses rows to a storage scan running beside it, and a long one no longer holds up the scan or the queue. Every refusal and update state on the Apps and Storage plugins pages and the app store is the server's sentence, in the reader's language. The snap moves to core24, and every desktop release is tested as an update of the previous one before it ships. Embedders: the 0.55 packages need a 0.55 server. Security hardening across app printing, encrypted files in apps, the store's plugin validator, storage plugin signatures and paid plugin licenses; upgrading is recommended.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.54.0
-docker pull ghcr.io/brf-tech/filex:full-v0.54.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.55.0
+docker pull ghcr.io/brf-tech/filex:full-v0.55.0
 ```
+
+## v0.55.0
+
+<span class="filex-release-date">9 October 2026</span>
+
+An app store lists storage plugins beside apps: the same link and review, every build pinned and signed by the store, the plugin checked by the store's validator before it is listed, and a paid one held while its license does not hold. A storage plugin's signature now names the plugin, its version and its platform; the old checksum-only form is still accepted with a warning (0.55 said it would be refused from 0.56; 0.56 withdrew that: it stays accepted at least until 0.61 and 2027-10-09). An app's interface can frame pages of its own package, read blob: addresses and print through filex, which asks every time and opens the print dialog only on the person's Allow - the platform the coming office editor app is built on; where the web component runs on another site, that site needs to be in FILEX_FRAME_ANCESTORS for its apps to print. Every file row says whether it is end-to-end encrypted, and an encrypted file is offered to no app and refused at every app door. A rename, move or delete over WebDAV, SFTP, FTPS, NFS, the S3 gateway or the AI surface no longer loses rows to a storage scan running beside it, and a long one no longer holds up the scan or the queue. Every refusal and update state on the Apps and Storage plugins pages and the app store is the server's sentence, in the reader's language. The snap moves to core24, and every desktop release is tested as an update of the previous one before it ships. Embedders: the 0.55 packages need a 0.55 server. Security hardening across app printing, encrypted files in apps, the store's plugin validator, storage plugin signatures and paid plugin licenses; upgrading is recommended.
+
+## What changed
+
+### Added
+
+- **Storage plugins from an app store** (#215). A store link (or the
+  store screen's new **Storage plugins** tab, through a request and its
+  approval) installs a storage plugin the store lists: the review reads the
+  release's own `filex-storage.json` the store reviewed, holds this server's
+  build to the store's pin and says - in the reader's language, from the
+  server - that the plugin is a program running with filex's rights outside
+  any sandbox, what the store's plugin validator measured and on which
+  platform, and whether the build's signature satisfies
+  `FILEX_PLUGIN_TRUSTED_KEYS` (refused when it must and cannot); **Install**
+  downloads the build, refuses other bytes before anything runs and installs
+  it as a binary plugin, which filex starts and probes as any other, keeping
+  its repository as its source. A paid storage plugin's license is the
+  store's, kept under its own row and checked daily; while it does not hold
+  the plugin is **held** (new state: nothing runs, its storages do not open,
+  nothing is removed), with **License…** on its row. The plugin list says
+  which store a plugin came from (`from_store`, `license`). The store screen's
+  row states are the server's answer (`state`), and every refusal of a
+  storage link is the server's sentence (`detail.kind: "storage"`). The
+  Storage plugins tab has the store screen's own audience; a store lists only
+  self-contained builds (`linux/amd64` and `linux/arm64` required, `windows/*`
+  and `darwin/*` optional and signed when present). New `filex plugin-validator`
+  command: the network-less conformance runner a store uses
+  ([PLUGINS.md → Installing from a store](./PLUGINS.md#installing-from-a-store),
+  [CLI.md](./CLI.md#filex-plugin-validator---an-app-stores-conformance-runner)).
+- **A frame of its own package and `blob:` reads for an app's interface**
+  (#189). Two narrow exceptions to an interface's sandbox, for an editor
+  that runs in the browser. `ui.frame_package` (permission
+  `ui:frame-package`) lets the interface open pages of its own package in
+  frames of its own: this version's pages only - `frame-src` and `child-src`
+  name the package's path, never `data:`, `blob:`, another app, a page of
+  filex or the network - each served under the same policy, as an opaque
+  origin of its own, with the script that removes WebRTC; filex's bridge
+  still answers only the frame filex drew. Every interface page now carries
+  no `frame-ancestors` (it was `*`, which does not match the opaque origin
+  of an interface framing its own page - Chromium refused it), and filex's
+  security-headers middleware adds none to them. `ui.connect_blob` (permission
+  `ui:connect-blob`) puts `blob:` in `connect-src`, so the interface reads a
+  `blob:` address it made with `fetch` or `XMLHttpRequest`; nothing else
+  opens. Both are off unless the manifest asks, derived like the interface's
+  other permissions and part of the module's described interface, shown in
+  the install review in the administrator's language, and an update that
+  adds one stops at the review. An app that asks needs filex 0.55
+  (`"filex": ">=0.55.0"`): an older filex refuses the field. The office
+  editor app needs both - ONLYOFFICE's editor opens its page in a frame and
+  loads the document from a `blob:` address
+  ([APP-PLUGINS.md → What the review shows](./APP-PLUGINS.md#what-the-review-shows),
+  [APP-PLUGINS-API.md → An app's own interface](./APP-PLUGINS-API.md#an-apps-own-interface-v4)).
+- **Printing for an app's interface: `ui.print`** (#189). A sandboxed
+  frame may not open the browser's print dialog, so an interface with the new
+  `ui.print` (permission `ui:print`, the same kind as `ui:download` - the
+  print dialog can save the PDF) hands filex a PDF and filex prints it from a
+  page of its own, `GET /_print/`: its policy frames only the `blob:` PDF it
+  makes from the bytes posted to it, and filex's pages frame it by path
+  beside `/_appui/` and `/z/` (theirs still frame no `blob:`). filex asks
+  every time, and the print dialog opens on the person's click on the
+  question's Allow, a button of the print page itself; at most 64 MiB
+  (`LIMITS.maxPrintBytes`), `%PDF-` bytes only; `fx.print(name, pdf)` in
+  `@brftech/filex-app-ui`. Where the web component runs in another site, that
+  site needs to be in `FILEX_FRAME_ANCESTORS` for its apps to print
+  ([CONFIGURATION.md → Security headers and framing](./CONFIGURATION.md#security-headers-and-framing)).
+  An app that asks needs filex 0.55
+  ([APP-PLUGINS-API.md → Printing a PDF](./APP-PLUGINS-API.md#printing-a-pdf-uiprint-055)).
+- **An app's interface is told when a file is end-to-end encrypted**
+  (#189). Every file row the server answers with says it - the folder
+  listing, the explorer's search and `/api/files/search`, Recent, Starred, a
+  tag view, Shared with me, a file's own `/api/files/stat` and the id-based
+  listing: `encrypted: "folder"` inside an encrypted folder, `"vault"` inside
+  a vault, `"file"` for a single encrypted file (`.fxe`), by one server rule -
+  and an app's interface reads it as `FileInfo.encrypted`, whichever of those
+  views it was opened from; a plain file and a folder row carry no such field.
+  The server says it, no client guesses it. It is information: filex 0.55
+  decrypts nothing for an app. Shared with me rows also say `e2e_root` now, as
+  the other views' rows do, and an encrypted file in any of those views is
+  offered no app ("Open with", an app's action) and no ONLYOFFICE, as in its
+  folder
+  ([APP-PLUGINS-API.md → session.get](./APP-PLUGINS-API.md#which-rows-say-encrypted)).
+- **Editing together in the app SDK, defined** (#189). The interface
+  bridge knows `coedit.join`, `coedit.subscribe`, `coedit.append`,
+  `coedit.lease`, `coedit.cursor`, `coedit.blob.put` / `coedit.blob.get` and
+  `coedit.leave`, their events (`coedit.entry`, `coedit.cursor`,
+  `coedit.dropped`) and `file.save`'s `through`, so the office editor app can
+  be written against them (`fx.coedit` in `@brftech/filex-app-ui`); filex
+  0.55 offers no relay yet and answers each `unavailable`
+  ([APP-PLUGINS-API.md → Editing together](./APP-PLUGINS-API.md#editing-together-coedit-056)).
+- **The test chain can move what else its host runs out of the way** (#194).
+  `CHAIN_PAUSE_CMD` runs once `scripts/chain/run.sh` holds the build lock,
+  before the run measures the memory it may take, and when it succeeded
+  `CHAIN_RESUME_CMD` runs once when the run ends - green, red or stopped by a
+  signal - for a hand run, a CI run and the nightly run alike. A pause that
+  fails is logged and the run goes on; `result.json` `host.pause` and the
+  morning report say what it did
+  ([CONTRIBUTING.md → The whole chain on one Linux host](./CONTRIBUTING.md#the-whole-chain-on-one-linux-host)).
+
+### Changed
+
+- **The snap is built on core24** (#68). The Snap Store package `filex-app`
+  moves from the `core20` base to `core24` (Ubuntu 24.04) with Snapcraft's
+  GNOME extension, on x64 and arm64: the first install also brings the GNOME
+  46 runtime, the graphics libraries and the GTK themes as shared content
+  snaps. It stays strictly confined, asks for the same interfaces (no
+  `allow-sandbox`) and still opens through X11 (XWayland on a Wayland
+  desktop). The desktop packages are built with electron-builder 26 (from
+  24), on Node 22; the installers, their names and the update feeds are
+  unchanged ([DESKTOP.md → The snap and the sandbox](./DESKTOP.md#the-snap-and-the-sandbox)).
+  The `.deb` and the `.rpm` keep electron-builder 24's install script: the
+  sandbox helper stays setuid, as every version since 0.50 opened with
+  (electron-builder 26's would have swapped it for an AppArmor profile).
+  The AppImage keeps electron-builder 24's entry point: 26's adds
+  `--no-sandbox` by itself where it cannot create a user namespace, so on
+  Ubuntu 23.10 and later without the AppArmor profile the image would have
+  opened with Chromium's sandbox off instead of saying what to do
+  ([DESKTOP.md → AppImage on recent Ubuntu](./DESKTOP.md#appimage-on-recent-ubuntu)).
+- **Every release now updates the previous one before it ships** (#68). On
+  real Windows (x64 and arm64) and Ubuntu (x64 and arm64) machines, the
+  previous release's installer, `.deb`, AppImage and snap are installed and
+  opened, and the new release is installed over them the way the app updates
+  itself; it must leave one copy, of the new version, in the same place, with
+  the app's data folder the old copy wrote ([DESKTOP.md → Updates](./DESKTOP.md#updates)).
+- **The screenshots show 0.55's new screens** (#215, #189). The store scene
+  takes the store screen's Storage plugins tab and a storage plugin's store
+  review (the review only from a store served over https, as the build
+  host's test chain serves it); a new scene takes the question filex asks
+  before an app's PDF is printed. Each in English and
+  Turkish, light and dark, at 1280 and 390 px, measured for fit. A page can
+  name a picture before it is published (`<!-- shot: <name> | <alt> -->`):
+  publishing it turns the line into the picture
+  ([e2e/shots/README.md](https://github.com/BRF-Tech/filex/blob/main/e2e/shots/README.md#writing-a-scene)).
+- **The office editor's page says what the app does on a phone and how it
+  prints** (#189): ONLYOFFICE's open-source phone apps only read, so a phone
+  opens the document to read and **Edit** opens the folded desktop editor;
+  Print goes through filex's `ui.print`
+  ([E2E-OFFICE.md](./E2E-OFFICE.md#on-a-phone)).
+
+### Fixed
+
+- **A rename or delete over WebDAV, SFTP, FTPS, NFS, the S3 gateway or the AI
+  surface no longer loses rows to a storage scan running beside it** (#201).
+  0.54 gave each storage a row gate that the queue and the explorer's rename
+  and move hold from the first byte to the last row (#192); the protocol
+  servers, the AI and MCP move and delete, the explorer's delete, saving and
+  discarding a draft (into the trash, or for good on a storage that keeps
+  none), a restore made inside the request, a cross-storage
+  move's source delete and the antivirus quarantine made their two steps
+  without it. A scan between them could drop a moved row with its shares,
+  versions and comments, or a trashed row with the trash entry it could be
+  restored from. Every protocol server now goes through one shared frame
+  (`protocolsync` `Relocate`, `Discard`, `Purge`), and the other surfaces hold
+  the gate the same way ([ARCHITECTURE.md](./ARCHITECTURE.md), "The row
+  gate").
+- **New document no longer types its suggestion over the name being typed.**
+  The dialog fills the name field with the server's first free
+  `Untitled.<ext>` once its dry run answers; on a slow server that answer
+  could arrive after the first keystrokes and replace them mid-word
+  (`Untitled.txtnutes.txt`). A suggestion now only fills a name nobody has
+  typed.
+- **A file in a vault names its owner, not "System"** (#94). Every row inside
+  a vault is the vault folder's - the server knows no file in it and the index
+  records no author - and the explorer drew them with no owner, which the
+  Owner column says as "System", the word for a file nobody put there through
+  filex. The vault's `state` and `create` answers now carry the folder's
+  `owner_id`, `owner_name` and `owner_self`, and every row in the vault shows
+  them.
+- **The trash restore and an app on a read-only storage say the server's
+  sentence** (#209). Restoring onto a name that is taken now answers the one
+  refusal shape (`409 name_taken` with its sentence in the reader's language;
+  `code: EXISTS`, `name` and `path` stay), and the admin Trash page shows the
+  server's `message` for every refusal instead of a sentence of its own or the
+  code in `error`. The explorer no longer words an app action's refusal
+  itself: a read-only storage (`read_only`) and a selection the action does
+  not apply to (`422 not_applicable`, whose sentence was English for every
+  reader and is now the server's) are said in the server's words.
+- **An app's refusals and every app store refusal are said in the server's
+  sentence** (#209). An app's run, screen and save doors answered
+  `permission_denied`, `encrypted`, `not_found`, `handler_off`, `not_granted`
+  and `not_applicable` with an English sentence of their own for every reader
+  ("insufficient permission: docs/a.txt", "plugins cannot read files in an
+  encrypted folder"); the codes stay and `message` is now the reason in the
+  reader's language, and a path outside a folder-limited key is said the same
+  way on every door. A store link's refusal (an app's or a language pack's,
+  the trust, the connection, a license key) carried English as well, and the
+  admin panel threw it away for a copy of its own built from the code; the
+  server now writes it, with `detail.kind` and its English detail in
+  `detail.reason`, and the panel prints it
+  ([API-ERRORS.md](./API-ERRORS.md#app-store-refusals)). A plugin
+  request's refusal (the store screen's request, the Requests panel) is the
+  server's sentence as well, and the store screen's own copies of "too many
+  requests" and "installed already" are gone.
+- **The Apps and Storage plugins lists say an update's state in the server's
+  sentences** (#209). A newer version that needs another filex, what an
+  approval adds, an update undone, no source to check, an installed app
+  outside its range and the version kept to go back to were lines the panel
+  built from the row's fields (deciding there too which one a row got); the
+  list answers them in `update_said`, `compat.message` and `previous.message`,
+  in the reader's language and on their clock, and the panel prints them. A
+  storage plugin's source that could not be read is said too instead of the
+  check's English error, and the Apps tab's header (apps on or off, the
+  processor, signed apps only, a development build, the update check and its
+  last run) comes from the server as `runtime.said`.
+- **The install review says an app's filex range in the server's sentence**
+  (#209). A range that leaves this filex out was a sentence the install wizard
+  built from `compat.requires` and `compat.filex`; the dry run now answers it
+  in `compat.message`, in the reader's language, and the wizard prints it.
+- **An app's install, upgrade and update refusals, and the refusals a request
+  cannot be read with, are said by the server too** (#209). The install wizard
+  and the Apps list built an install refusal's sentence themselves
+  (`fetch_failed`, `manifest_invalid`, `permissions_incomplete`,
+  `incompatible` …); the server now writes it in `message` in the reader's
+  language, with its English in `detail`, and says an update check's stored
+  refusal again for whoever reads the list. The app, store, plugin request,
+  storage plugin and Default apps doors no longer answer an English phrase or
+  Go's error text: a body that is not JSON, no file or too many, a storage
+  that is not there, a full job queue, a chunked save's offset, a server fault
+  (`internal_error`), the host's own refusals in an app call (busy, timeout,
+  out of memory), the session gates, a Default apps rule, a storage plugin's
+  failed install and the platform operator's gate on every admin door
+  (`supertenant_only`) each carry a code and the server's sentence
+  ([API-ERRORS.md](./API-ERRORS.md)). Some codes that were English phrases
+  are codes now (`bad json` -> `bad_json`, `too many paths` ->
+  `too_many_paths`, `paths are required` -> `paths_required`, `ops queue unavailable` -> `queue_unavailable`, `bad id` -> `bad_id`, a storage
+  plugin's install error -> `install_failed` with the reason in `detail`).
+- **A store link opened after the session ended comes back to the store page
+  after the sign-in** (#199). The panel went to the sign-in page the moment a
+  request was refused, while it still believed in the session; the sign-in
+  page sent that "signed-in" reader on to Home, whose own refusal named Home
+  as the place to come back to, and the link was lost. A refused request now
+  asks the server whether the session is over first: if it is, the sign-in
+  page names the page you were on, with nothing in between; if it is not (a
+  wrong current password, a one-time code), you stay where you are.
+- **"Delete permanently" in the Trash no longer closes having deleted
+  nothing** (#199). Every listing of the trash cleared the selection, so a
+  refresh that arrived while the confirmation was open (a live update, the
+  Refresh button) left it nothing to delete. A reload of the trash on screen
+  keeps what was selected.
+- **The app SDK no longer promises an app the plaintext of an encrypted
+  file** (#189). `FileInfo.encrypted` said filex decrypts in the browser and
+  encrypts the save; filex 0.55 does neither for an app. The interface now
+  gets `readOnly: true` for such a file and its `file.save` is answered
+  `read_only` in the frame (`@brftech/filex-app-ui` protocol,
+  [APP-PLUGINS-API.md](./APP-PLUGINS-API.md#which-rows-say-encrypted)).
+- **A table narrower than its words cuts them cleanly.** A column header too
+  narrow for its name ends in an ellipsis instead of stopping mid-letter
+  ("Store che"), and a sortable header's tooltip names the column ("Sort by
+  Store checks"). A pill in a cell (a request's "Waiting", "Installed", the
+  explorer's lock and link badges) keeps its border and dot and shortens its
+  words inside it, with the whole text on hover, instead of running out
+  through its edge. The frozen Actions column draws its edge while columns
+  continue beneath it, so a column cut there reads as one that goes on. One
+  fix in the shared table, so every table has it.
+
+**This release has more to it than fits on one page.** The rest of the
+entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0550---2026-10-09).
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.55.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.55.0`
 
 ## v0.54.0
 
@@ -233,7 +502,15 @@ entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-
 - **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
 - **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
 
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.54.0) · `ghcr.io/brf-tech/filex:slim-v0.54.0`
+## Security advisories
+
+- [GHSA-5896-rqg6-cqjr](https://github.com/BRF-Tech/filex/security/advisories/GHSA-5896-rqg6-cqjr) - a forged ONLYOFFICE save callback signed with an editor configuration's token was accepted (Critical, 9.6)
+- [GHSA-25hj-4g7f-8c2c](https://github.com/BRF-Tech/filex/security/advisories/GHSA-25hj-4g7f-8c2c) - a non-owner who could write an encrypted folder could delete its key file history (High, 8.1)
+- [GHSA-w8mc-47jv-jp74](https://github.com/BRF-Tech/filex/security/advisories/GHSA-w8mc-47jv-jp74) - the share e-mail sent a caller-supplied link under the instance's mail identity (Medium, 4.1)
+
+All three are fixed in 0.54.0; upgrading is recommended.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.54.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.54.0`
 
 ## v0.53.0
 
@@ -3229,75 +3506,13 @@ A fix release for four reports on 0.42.0.
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.42.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.42.0`
 
-## v0.41.4
-
-<span class="filex-release-date">15 September 2026</span>
-
-A fix release that carries 0.41.3, whose release build never finished. Only the checkbox selects now, and any other click or tap on a file or folder opens it - beside the name, on the size and date cells, with a selection, with Ctrl held (#26). Grid and gallery cards gained a checkbox of their own, shown on hover and on every card once something is selected, so a phone can pick several files after a long press. From 0.41.3: on a phone one tap opens, even where the browser swallows the click, and the external services Test button says what its probe saw - an HTTP status, a timeout or the connection error - with a docservice hint for an ONLYOFFICE 502 (#17).
-
-Upgrade notes that matter: a click beside a name, or a Ctrl/Shift click, no longer selects - tick the checkbox. POST /api/admin/external/:name/test gains a detail field. No migrations.
-
-## What changed
-
-### Changed
-
-- **Only the checkbox selects; any other click or tap opens** (#26, fourth
-  round). In 0.41.2 a click opened only when it landed on the name itself - the
-  reporter: "need to click precisely on name, if a lil bit on the right then it
-  selects file, change it so if only clicking on checkbox it selects it, any
-  other click will open." That is now the rule, with a mouse and on a phone
-  alike:
-  - A click or tap **anywhere** on a list row, grid card or gallery tile opens
-    it - the name, the icon, the empty space to its right, the size and date
-    cells - with or without a selection, and with Ctrl or Shift held.
-  - The **checkbox** is the one click that selects. Shift on a checkbox still
-    extends the range from the last tick. A right click or a long press still
-    opens the menu; the star and the ⋮ button still do their own job.
-  - **Grid and gallery cards have a checkbox now.** It shows on hover, when the
-    card is focused or selected, and on every card once anything is selected -
-    so on a phone a long press selects the first file and the boxes are there
-    for the rest. In the grid it takes the type icon's place, so the name does
-    not move; in the gallery it sits in the thumbnail's corner opposite the
-    star. The recent and starred cards on Home have none: a click there opens,
-    and there is no selection to add to.
-  - On a phone the tap opens at the moment the finger lifts wherever it lands
-    on the item (0.41.3 did that for the name only), so it never depends on the
-    browser delivering a click.
-  - Ticking a checkbox with the mouse leaves the keyboard focus where it was,
-    so tick-then-Space quick-looks the file instead of unticking it again.
-  - A double-click still opens only the first item: the second click lands on
-    the listing that just opened and is ignored for half a second.
-
-  For embedders: `GridView` and `GalleryView` take a `selectable` prop (default
-  on) that draws the card checkbox; the `click-row` / `click-card` payload marks
-  a checkbox click with `check: true`, and `FilePane` treats every other click
-  as an open.
-
-### Fixed
-
-- **The release build of 0.41.3 stopped on a race in the SFTP server's test
-  harness.** `Addr()` read the listener while `ListenAndServe` was still
-  assigning it, and an interface value read in the middle of that assignment
-  can carry its type with a nil pointer - `(*TCPListener).Addr` then panicked.
-  The SFTP and NFS servers (the same code) now guard the listener, and a
-  `Close` that arrives before the listener is up no longer leaves it open.
-  `go test -race` is clean on both packages.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0414---2026-09-15)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.41.4) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.41.4`
-
 ## Earlier releases
 
-The 115 releases before v0.41.4, in brief. Full notes are on GitHub.
+The 116 releases before v0.42.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.41.4](https://github.com/BRF-Tech/filex/releases/tag/v0.41.4) | 15 September 2026 | A fix release that carries 0.41.3, whose release build never finished. Only the checkbox selects now, and any other click or tap on a file or folder opens it - beside the name, on the size and date cells, with a selection, with… |
 | [v0.41.2](https://github.com/BRF-Tech/filex/releases/tag/v0.41.2) | 15 September 2026 | A fix release for four reports on 0.41.1. A press on a file or folder name now opens it on every device - a tap on a phone, a click on a desktop - even while something is selected; the checkbox selects, and a right click or a… |
 | [v0.41.1](https://github.com/BRF-Tech/filex/releases/tag/v0.41.1) | 14 September 2026 | A fix release for three reports and the rough edges left after 0.41.0. Moving a file larger than 8 MiB onto an S3 storage served over plain http (Garage or MinIO on a container network) works again (#27). |
 | [v0.41.0](https://github.com/BRF-Tech/filex/releases/tag/v0.41.0) | 14 September 2026 | The explorer has one face now, on every surface. It is rebuilt around the end-user shell a contributor designed on top of filex (#14): a top bar with one search field and + New, a panel with Home, Shared with me, Recent, Starred… |
@@ -3416,4 +3631,4 @@ The 115 releases before v0.41.4, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-10-08 from 135 published releases.</small>
+<small>Last refreshed 2026-10-09 from 136 published releases.</small>

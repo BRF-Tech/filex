@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   VAULT_HEARTBEAT_MS,
   VAULT_IDLE_LOCK_MS,
+  VAULT_IDLE_WARN_MS,
   VAULT_LOST_AFTER_MS,
   VaultIdleLock,
   VaultWriteLock,
@@ -119,7 +120,7 @@ describe('the write lock (holder side)', () => {
     await lock.acquire();
     await clock.advance(VAULT_HEARTBEAT_MS);
     expect(lost).toHaveBeenCalledTimes(1);
-    expect(lost).toHaveBeenCalledWith('idle', null);
+    expect(lost).toHaveBeenCalledWith('idle', null, '');
     expect(lock.held).toBe(false);
     expect(lock.tokenValue).toBeNull();
     // No more renewals after the end.
@@ -141,7 +142,7 @@ describe('the write lock (holder side)', () => {
     await clock.advance(VAULT_LOST_AFTER_MS - 1);
     expect(lost).not.toHaveBeenCalled();
     await clock.advance(VAULT_HEARTBEAT_MS);
-    expect(lost).toHaveBeenCalledWith('connection', null);
+    expect(lost).toHaveBeenCalledWith('connection', null, '');
   });
 
   it('a write answered VAULT_LOCK_LOST ends it too', async () => {
@@ -149,8 +150,17 @@ describe('the write lock (holder side)', () => {
     const lock = new VaultWriteLock({ api: lockApi(), path: 'docs://Kasa', client: 'web', label: '', clock: fakeClock(), onLost: lost });
     await lock.acquire();
     expect(lock.lostBy(new VaultApiError(409, 'VAULT_LOCK_LOST', '', { reason: 'broken', holder: { name: 'Admin', client: 'web' } }))).toBe(true);
-    expect(lost).toHaveBeenCalledWith('broken', { name: 'Admin', client: 'web' });
+    expect(lost).toHaveBeenCalledWith('broken', { name: 'Admin', client: 'web' }, '');
     expect(lock.lostBy(new VaultApiError(409, 'VAULT_GENERATION', ''))).toBe(false);
+  });
+
+  it("hands on the server's own sentence for the end (filex 0.56), as it said it", async () => {
+    const lost = vi.fn();
+    const lock = new VaultWriteLock({ api: lockApi(), path: 'docs://Kasa', client: 'web', label: '', clock: fakeClock(), onLost: lost });
+    await lock.acquire();
+    const said = 'Admin broke your write lock on this vault.';
+    expect(lock.lostBy(new VaultApiError(409, 'VAULT_LOCK_LOST', said, { reason: 'broken', message: ` ${said} ` }))).toBe(true);
+    expect(lost).toHaveBeenCalledWith('broken', null, said);
   });
 
   it('release, and the keepalive release when the page closes', async () => {
@@ -242,5 +252,68 @@ describe('the vault lock (15 minutes, the client\'s own)', () => {
     expect(VAULT_IDLE_LOCK_MS).toBe(15 * 60_000);
     expect(VAULT_HEARTBEAT_MS).toBe(15_000);
     expect(VAULT_LOST_AFTER_MS).toBe(45_000);
+  });
+});
+
+// filex 0.56 (task #189): a minute before the vault locks itself the vault
+// says so (`warn`) - the explorer tells the person when an app holds unsaved
+// changes in the vault, and lets them keep it open. Red before 0.56: there
+// was no warning, and VAULT_IDLE_WARN_MS did not exist.
+describe('the vault lock warns a minute before (filex 0.56)', () => {
+  it('once, a minute before the lock, and the lock comes as before', async () => {
+    const clock = fakeClock();
+    const onLock = vi.fn();
+    const warn = vi.fn();
+    const idle = new VaultIdleLock(onLock, clock, VAULT_IDLE_LOCK_MS, warn);
+    idle.start();
+    await clock.advance(VAULT_IDLE_LOCK_MS - VAULT_IDLE_WARN_MS - 1);
+    expect(warn).not.toHaveBeenCalled();
+    await clock.advance(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(onLock).not.toHaveBeenCalled();
+    await clock.advance(VAULT_IDLE_WARN_MS);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(onLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('an activity after the warning (the warning\'s "keep it open") puts the lock off, and warns again later', async () => {
+    const clock = fakeClock();
+    const onLock = vi.fn();
+    const warn = vi.fn();
+    const idle = new VaultIdleLock(onLock, clock, VAULT_IDLE_LOCK_MS, warn);
+    idle.start();
+    await clock.advance(VAULT_IDLE_LOCK_MS - 30_000);
+    expect(warn).toHaveBeenCalledTimes(1);
+    idle.touch();
+    await clock.advance(60_000);
+    expect(onLock, 'kept open').not.toHaveBeenCalled();
+    await clock.advance(VAULT_IDLE_LOCK_MS - VAULT_IDLE_WARN_MS - 60_000);
+    expect(warn, 'a minute before the new deadline').toHaveBeenCalledTimes(2);
+    await clock.advance(VAULT_IDLE_WARN_MS);
+    expect(onLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('no warning while this session writes (the clock does not run), nor after an activity that came first', async () => {
+    const clock = fakeClock();
+    const warn = vi.fn();
+    const idle = new VaultIdleLock(vi.fn(), clock, VAULT_IDLE_LOCK_MS, warn);
+    idle.start();
+    await clock.advance(10 * 60_000);
+    idle.touch();
+    await clock.advance(5 * 60_000);
+    expect(warn, 'the first deadline went with the activity').not.toHaveBeenCalled();
+    idle.pause();
+    await clock.advance(60 * 60_000);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('a minute, and no warning without a listener (the clock as before)', async () => {
+    expect(VAULT_IDLE_WARN_MS).toBe(60_000);
+    const clock = fakeClock();
+    const onLock = vi.fn();
+    const idle = new VaultIdleLock(onLock, clock);
+    idle.start();
+    await clock.advance(VAULT_IDLE_LOCK_MS);
+    expect(onLock).toHaveBeenCalledTimes(1);
   });
 });

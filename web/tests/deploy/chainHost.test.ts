@@ -216,6 +216,10 @@ describe('the run and the morning report', () => {
         'worst memory full 0.08, io full 0.43, disk writes 812 ms (dm-0); waited 25 min for the disk to cool',
     );
     expect(hostLine({ ...h, budget_cut: false, budget_gb: 8, temp_wait_secs: 0 })).toBe('host: budget 8 GiB; worst memory full 0.08, io full 0.43, disk writes 812 ms (dm-0)');
+    // A heavy browser line waiting for the pool's heavy writers (#194).
+    expect(hostLine({ ...h, budget_cut: false, budget_gb: 8, temp_wait_secs: 0, io_wait_secs: 1250 })).toBe(
+      'host: budget 8 GiB; worst memory full 0.08, io full 0.43, disk writes 812 ms (dm-0); the browser round waited 21 min for the disk',
+    );
     expect(hostLine(undefined as unknown as typeof h)).toBeNull();
   });
 

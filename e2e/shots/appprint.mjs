@@ -1,5 +1,7 @@
 // An app prints a PDF through filex (`ui.print`, 0.55, task #189) - the row
-// filex shows above an app's interface each time an app asks to print. Its
+// filex lays over the top of an app's interface each time an app asks to
+// print (0.56, #217: over the frame, not above it - the frame keeps its size,
+// so an editor busy making the PDF is not left blank). Its
 // Allow is the print page's own button (a frame of `/_print/` in the row:
 // only a click in that page opens the print dialog, security review sec055
 // S9):
@@ -9,7 +11,7 @@
 // Writes e2e/.artifacts/shots/capture/appprint/ (or SHOTS_OUT):
 //
 //   print-consent-1280.png          a report open in an app's own interface,
-//                                   and above it filex's question, in filex's
+//                                   and over its top filex's question, in filex's
 //                                   words: "Reports wants to print “Q3
 //                                   2026.pdf”." - Allow (armed) and Don't allow
 //   print-consent-dark-tr-1280.png  the same in Turkish, in the dark theme
@@ -18,7 +20,9 @@
 //
 // It also MEASURES the row in a real browser at 1280 and 390 px, light and
 // dark, in English and Turkish: the row and its two buttons inside the
-// window, nothing on top of anything. A failed measurement throws. The
+// window, nothing on top of anything, and the app's frame where and as large
+// as it was before the question showed - the row lies over it (#217). A
+// failed measurement throws. The
 // pictures are shown in docs/APP-PLUGINS-API.md → Printing a PDF (the
 // `<!-- shot: … -->` lines there become the pictures once they are
 // published: scripts/lib/shots-site.mjs → relinkText).
@@ -46,6 +50,7 @@ import {
   client,
   dismissToasts,
   documentPDF,
+  installInterfaceApp,
   log,
   mustSay,
   newContext,
@@ -183,27 +188,6 @@ function packReportsApp() {
   return { zip, manifest };
 }
 
-/**
- * Install an interface-only app the way the wizard does: a dry run for the
- * review, then the install granting exactly what the review listed (the
- * manifest's permissions and the ones filex derives from its `ui` block).
- */
-async function installInterfaceApp(admin, { zip, manifest }) {
-  const form = (grant) => {
-    const fd = new FormData();
-    fd.append('grant', JSON.stringify({ permissions: grant }));
-    fd.append('manifest', new Blob([Buffer.from(JSON.stringify(manifest))]), 'filex-app.json');
-    fd.append('ui', new Blob([zip]), 'ui.zip');
-    return fd;
-  };
-  const dry = await admin.call('/api/admin/app-plugins?dry_run=1', { method: 'POST', body: form([]) });
-  if (!dry.ok) throw new Error(`the review of ${manifest.name}: ${dry.status} ${(await dry.text()).slice(0, 400)}`);
-  const rows = ((await dry.json()).permissions ?? []).map((r) => r.id);
-  if (!rows.includes('ui:print')) throw new Error(`the review of ${manifest.name} does not list ui:print: ${rows.join(', ')}`);
-  const res = await admin.call('/api/admin/app-plugins', { method: 'POST', body: form(rows) });
-  if (!res.ok) throw new Error(`install ${manifest.name}: ${res.status} ${(await res.text()).slice(0, 400)}`);
-}
-
 /* ── measuring the row ──────────────────────────────────────────────────── */
 
 /** The four looks a picture is taken in, of the eight the scene measures. */
@@ -243,6 +227,24 @@ async function rowProblems(row) {
   });
 }
 
+/**
+ * Where the question lies against the app's frame (#217): the frame where
+ * and as large as it was before the question showed, the row's top on or
+ * below the frame's top - over it, not above it pushing it down.
+ */
+async function overTheFrame(row, iframe, before) {
+  const out = [];
+  const after = await iframe.boundingBox();
+  const box = await row.boundingBox();
+  if (!before || !after || !box) return ['the frame or the row has no box to measure'];
+  const moved = ['x', 'y', 'width', 'height'].filter((k) => Math.abs(after[k] - before[k]) > 0.5);
+  if (moved.length) {
+    out.push(`the app's frame moved or shrank while asked (${moved.map((k) => `${k} ${Math.round(before[k])} -> ${Math.round(after[k])}`).join(', ')})`);
+  }
+  if (box.y < before.y - 1) out.push(`the row starts above the frame (${Math.round(box.y)} < ${Math.round(before.y)}): it pushes the frame down`);
+  return out;
+}
+
 async function main() {
   const reports = packReportsApp();
   const inst = await bootInstance({ name: SET, admin: ADMIN, env: { FILEX_UPDATE_CHECK: '0' } });
@@ -256,7 +258,7 @@ async function main() {
     writeFileSync(join(seed, FOLDER, FILE), `${JSON.stringify(REPORT, null, 2)}\n`);
     await addLocalStorage(admin, 'demo', inst.storageRoot('demo'), { onHost: !inst.container });
     await uploadTree(admin, 'demo://', seed);
-    await installInterfaceApp(admin, reports);
+    await installInterfaceApp(admin, reports, { expect: ['ui:print'] });
 
     const problems = [];
     for (const look of LOOKS) {
@@ -283,7 +285,11 @@ async function main() {
       const failed = await frame.evaluate(() => document.body.dataset.error ?? null);
       if (failed) throw new Error(`the Reports interface did not start: ${failed}`);
 
-      // The app asks to print: filex asks, every time.
+      // The app asks to print: filex asks, every time - over the top of the
+      // frame, which keeps its place and its size (#217).
+      // By its id: once asked, the row's print page is an iframe in the frame too.
+      const appIframe = appframe.locator('iframe[data-testid="app-frame"]');
+      const before = await appIframe.boundingBox();
       const asked = frame.evaluate(() => window.__print());
       const consent = page.locator('[data-testid="appframe-print-ask"][data-shown="true"]');
       await consent.waitFor({ state: 'visible', timeout: 15_000 });
@@ -296,6 +302,7 @@ async function main() {
       for (let i = 0; i < 40 && (await allow.isDisabled()); i++) await sleep(100);
       if (await allow.isDisabled()) throw new Error('"Allow" stays disabled under the print question');
       for (const x of await rowProblems(consent)) problems.push(`${look.scheme} ${look.locale} ${look.width}px: ${x}`);
+      for (const x of await overTheFrame(consent, appIframe, before)) problems.push(`${look.scheme} ${look.locale} ${look.width}px: ${x}`);
       if (look.suffix) {
         await dismissToasts(page);
         await page.mouse.move(2, 2);

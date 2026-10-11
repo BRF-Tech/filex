@@ -28,6 +28,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/clientip"
+	"github.com/brf-tech/filex/backend/internal/coedit"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/dbsetting"
@@ -151,6 +152,9 @@ type Server struct {
 	// constructs the handler the routes use — running the sweeper against a
 	// second instance would sweep a different view of the same directory.
 	stagedUploads *handlers.StagedUpload
+	// coedit is the editing-together relay (internal/coedit); nil when
+	// FILEX_COEDIT is off. Its sweep runs with the other background work.
+	coedit *coedit.Relay
 	// staging is the upload staging area, held so a purge can release the
 	// directory that belonged to the node being destroyed instead of leaving
 	// it to age out of the idle sweeper (up to upload.staging_ttl later).
@@ -1039,6 +1043,9 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// in Admin → Tools → Thumbnail repair.
 	dbsetting.SeedAll(ctx, store, thumb.SVGMaxMBSetting, thumb.SVGTimeoutSetting, thumb.FolderPreviewsSetting,
 		thumb.OfficeMaxMBSetting, thumb.OfficeSlotsSetting)
+	// Whether an app granted files:e2e-plaintext may edit a file of an
+	// encrypted folder (wasmplugin/e2eplain.go, filex 0.56).
+	dbsetting.SeedAll(ctx, store, wasmplugin.E2EPlaintextSetting)
 	// ⚠⚠ This resolution is what the process RUNS with until it restarts.
 	// enabled / mode / clamd address are read once, here, because the lines
 	// below are the wiring itself: registering the queue handler and handing
@@ -1407,6 +1414,36 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		E2EEscrow:                escrowKey,          /* wiring:e2 — nil when escrow is off */
 		LoginGuard:               loginGuard,
 		TenantLockout:            tenantLockout,
+	}
+	// Editing together (internal/coedit, task #189): the relay an app
+	// interface with files:co-edit edits a file through. The raw store: its
+	// rows are not a tenant's listing. The session keys of ordinary folders
+	// are sealed with the same key as every other secret filex reads back
+	// (FILEX_SECRET_KEY); without it only encrypted folders could be edited
+	// together, and those wait for files:e2e-plaintext.
+	if cfg.CoEdit.Enabled {
+		srvObj.coedit = coedit.New(coedit.Options{
+			Store:            store,
+			BlobDir:          cfg.CoEdit.Dir,
+			Keys:             authBox,
+			MaxMembers:       cfg.CoEdit.MaxMembers,
+			MaxLogBytes:      int64(cfg.CoEdit.MaxLogMB) << 20,
+			MaxBlobBytes:     int64(cfg.CoEdit.MaxBlobMB) << 20,
+			UnsavedRetention: time.Duration(cfg.CoEdit.UnsavedDays) * 24 * time.Hour,
+			OnDeparture: func(ctx context.Context, d coedit.Departure) {
+				uid := d.Member.UserID
+				_ = store.InsertAuditEntry(context.WithoutCancel(ctx), &model.AuditEntry{
+					UserID: &uid, Action: "app_plugin.coedit_leave", TargetType: "app_plugin", TargetID: d.App,
+					Metadata: map[string]any{"storage_id": d.StorageID, "path": d.Path, "session": d.SID, "client": d.Member.Client, "reason": d.Reason},
+				})
+			},
+		})
+		deps.CoEdit = srvObj.coedit
+		if !authBox.Enabled() {
+			slog.Info("coedit: no FILEX_SECRET_KEY - files in ordinary folders are not edited together (an app edits them alone)")
+		}
+	} else {
+		slog.Info("coedit: editing together is off (FILEX_COEDIT=0)")
 	}
 	// WebDAV server (/dav/<storage>/<path>, HTTP Basic) — the handler itself
 	// is composed inside api.BuildRouter (single Mount line, see
@@ -1890,6 +1927,11 @@ func (s *Server) Start(ctx context.Context) error {
 	// logged with its id, path and staged size.
 	if s.stagedUploads != nil {
 		go s.stagedUploads.RunSweeper(ctx, s.cfg.Upload.SweepInterval)
+	}
+	// Editing together: members whose page went away are dropped, and
+	// sessions nobody is in are forgotten on time (internal/coedit sweep.go).
+	if s.coedit != nil {
+		go s.coedit.Run(ctx)
 	}
 	// Thumbnail cache reconciler — the same argument as the staging sweeper,
 	// for the directory that had no GC at all until issue #18. It repairs

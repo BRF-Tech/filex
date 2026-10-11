@@ -527,8 +527,14 @@ var readLevelMutations = map[string]bool{
 	"POST /api/files/plugins/actions/{plugin}/{action}/run": true,
 	"POST /api/files/plugins/views/{plugin}/{view}/event":   true,
 	"POST /api/files/plugins/ui/{plugin}/{view}/call":       true,
-	"POST /api/files/e2e/escrow/challenge":                  true,
-	"POST /api/files/e2e/escrow/used":                       true,
+	// Editing together (coedit.go): joining, a socket ticket and leaving
+	// are reading along - a key without `write` joins as a watcher; the
+	// member's writes (append, lease, key, blob) ask `write`.
+	"POST /api/files/plugins/ui/{plugin}/{view}/coedit/join":         true,
+	"POST /api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/ticket": true,
+	"POST /api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/leave":  true,
+	"POST /api/files/e2e/escrow/challenge":                           true,
+	"POST /api/files/e2e/escrow/used":                                true,
 	// The explorer's "may I encrypt here" — a question, like ?action=allowed.
 	"POST /api/files/e2e/allowed": true,
 	// A vault writer's idle time: the person's own setting, like the other

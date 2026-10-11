@@ -1,8 +1,9 @@
 # Full install: bundled Postgres + Redis + S3 server, plus external ONLYOFFICE and
 # draw.io wired in. Every add-on is a toggle — flip `enabled` to add/remove it.
 #
-# Usage:
-#   helm install filex ./deploy/helm/filex -f deploy/helm/filex/values-full.yaml \
+# Usage (this file ships inside the chart; `helm pull brf-tech/filex --untar`
+# writes it to ./filex/values-full.yaml):
+#   helm install filex brf-tech/filex -f filex/values-full.yaml \
 #     --set ingress.host=files.example.com \
 #     --set publicURL=https://files.example.com
 

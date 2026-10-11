@@ -333,7 +333,8 @@ type Pending struct {
 	RequestID int64
 	// LegacySignature: the storage plugin's build was taken with a
 	// signature in the old sha256-only form (plugin.VerifyBuild; accepted
-	// during 0.55 with a warning). Finish says so in the audit row.
+	// with a warning while plugin.LegacySignatureWindow runs). Finish says so
+	// in the audit row.
 	LegacySignature bool
 }
 
@@ -591,6 +592,14 @@ func normalizePerms(ids []string) []string {
 func derivedPermission(id string) bool {
 	switch id {
 	case "ui", "ui:eval", "ui:wasm-eval", "ui:package-fetch", "ui:download", "ui:frame-package", "ui:connect-blob", "ui:print":
+		return true
+	case "files:e2e-plaintext":
+		// 0.56: derived from the manifest's `encrypted_folders` block
+		// (wasmplugin/e2eplain.go), never in its `permissions`.
+		return true
+	case "files:co-edit":
+		// 0.56: derived from the manifest's `co_edit` block
+		// (wasmplugin/permissions_coedit.go).
 		return true
 	}
 	for _, p := range []string{"ui:", "ui-net:", "ui-viewer:", "ui-new:", "thumbnail:"} {

@@ -42,11 +42,13 @@ import {
   privateHostLines,
   profileCovers,
   promotionVerdict,
+  rerunDecision,
   runVerdict,
   sectionGroups,
   selectGates,
   setPackageVersion,
   stampWrites,
+  transientGithubError,
   unreleasedBody,
   versionProblems,
   workspacePackages,
@@ -86,6 +88,8 @@ export const STAGES = [
       'the dry run kept what the tag run promotes: both images by digest, the files of every desktop row',
       'meanwhile, here: the heavy gates GitHub does not run (minor), or a green scripts/chain run (--chain)',
       'waits for both; red spends no number — fix main, resume, and it runs again',
+      'a part red on the runner (its setup, a checkout, a toolchain, an artifact, the browser install) is re-run once, by itself; a red test never is',
+      'GitHub not answering (a 5xx, a timeout) is asked again at the next poll, ten times in a row at most',
       'GitHub Actions down (--gate circleci): the CircleCI workflow `ci` on the export commit instead, recorded as the source; no dry run',
     ],
   },
@@ -94,7 +98,7 @@ export const STAGES = [
     builtin: ['private tag: annotated, good signature by the release key, on the release commit', 'public tag: signed, on the export commit GitHub tested, not the private one', 'backend/ tag (optional): signed, backend/ identical'],
   },
   { id: 'push', title: 'push', what: 'the tags, one ref at a time — a person', builtin: ['private remote: the tag is the release commit', 'public remote: the tag is the export commit — a tag naming the private commit is the lesson #55 leak'] },
-  { id: 'ci', title: 'ci', what: 'what the release workflow published', builtin: [] },
+  { id: 'ci', title: 'ci', what: 'what the release workflow published', builtin: ["(with the plan's tagRunWait) waits for the tag's run to finish, then reads"] },
   { id: 'deploy', title: 'deploy', what: 'servers, feeds, embeds, docs — a person, then verified', builtin: ['waits for: --ack deploy'] },
 ];
 
@@ -796,7 +800,8 @@ export async function exportStage(R) {
     },
     {
       // ⚠ Lesson #55 and the export's own rewrite: the public tree may name
-      // this project's private hosts only as the two contact addresses.
+      // this project's private hosts only as the two contact addresses and
+      // the Helm repository.
       name: 'no private host or module path in the public tree',
       check: () => {
         if (!R.plan.privateHosts.forbid.length) return { ok: false, detail: 'the plan names no private-host patterns, so this gate would check nothing' };
@@ -1130,11 +1135,66 @@ export async function gate(R) {
     if (!expected?.length) return fail(`the parts of ${wf.ci}'s matrix`, 'the plan names none, so the run would be read as a whole');
   }
   let shown = '';
+  // #165: GitHub, or the way to it, not answering (a 5xx, a timeout, a dropped
+  // connection) is asked again at the next poll, `unansweredMax` polls in a
+  // row, before the gate calls it red: 0.55.0's gate stopped on one HTTP 502
+  // while reading the jobs of a run that was green, and waited for a person.
+  let unanswered = 0;
+  const unansweredMax = wait.unansweredMax ?? 10;
+  const askAgain = async (what, error) => {
+    if (!transientGithubError(error) || unanswered >= unansweredMax) return false;
+    unanswered += 1;
+    console.log(`  ${dim('github  ')}  ${yellow('no answer')} ${what}: ${String(error).split('\n')[0].slice(0, 160)} - asking again in ${Math.round(wait.pollMs / 1000)} s (${unanswered}/${unansweredMax})`);
+    await sleep(wait.pollMs);
+    return true;
+  };
+  // #165: the red parts of a run that are red on the runner (its setup, a
+  // checkout, a toolchain, an artifact, the browser install), never in the
+  // code, are re-run once, without a person (checks.mjs → rerunDecision).
+  // What was asked is kept with the release's state, so a resume asks again
+  // only what GitHub never did. 0.55.0: two Playwright parts hit the browser
+  // install's 10-minute limit on apt, and the gate waited 38 minutes for a
+  // person to type `gh run rerun --failed`.
+  const reruns = () => {
+    if (S.gateReruns?.sha !== sha) S.gateReruns = { sha, runs: {} };
+    return S.gateReruns.runs;
+  };
+  const stepsOf = (p) => (p.failedSteps?.length ? `, step "${p.failedSteps.join('", "')}"` : '');
+  /** { action: 'red' | 'wait' | 'asked' | 'again', why }: 'again' = GitHub did not answer the re-run, poll again. */
+  const retryOnRunner = (label, run, failed) => {
+    if (!gh.rerunFailed || !failed.length) return { action: 'red', why: '' };
+    const record = reruns()[String(run.id)] ?? null;
+    const d = rerunDecision({ run, failed, record, maxRequests: wait.rerunMax ?? 2, startMs: wait.appearMs });
+    if (d.action !== 'rerun') return d;
+    const asked = gh.rerunFailed({ runId: run.id });
+    if (!asked.ok) {
+      if (transientGithubError(asked.detail) && unanswered < unansweredMax) {
+        unanswered += 1;
+        return { action: 'again', why: `GitHub did not answer the re-run of ${label} (${String(asked.detail).split('\n')[0]}); asking again` };
+      }
+      return { action: 'red', why: `${d.why}, and GitHub was asked to re-run them and said: ${asked.detail}` };
+    }
+    reruns()[String(run.id)] = {
+      attempt: run.attempt ?? 1,
+      at: new Date().toISOString(),
+      requests: (record?.requests ?? 0) + 1,
+      parts: { ...(record?.parts ?? {}), ...Object.fromEntries(d.retry.map((p) => [p.name, p.id])) },
+    };
+    R.save?.();
+    console.log(
+      `  ${dim('github  ')}  ${yellow('re-run  ')} ${label}: ${d.retry.map((p) => `${p.name} (${p.conclusion ?? 'red'}${stepsOf(p)})`).join('; ')} - red on the runner, not in the code; asked GitHub once: ${gh.rerun ? gh.rerun(run.id) : `re-run ${run.id}`}`,
+    );
+    return { action: 'asked', why: `re-run asked for: ${d.retry.map((p) => p.name).join(', ')}` };
+  };
   for (;;) {
+    let clean = true;
     const ci = gh.runs({ workflow: wf.ci, sha, event: 'push' });
     const dr = gh.runs({ workflow: wf.release, sha, event: 'workflow_dispatch' });
     const error = ci.error || dr.error;
-    if (error) return fail('GitHub answered', `could not ask GitHub (${error}) — whether ${short(sha)} passed is unknown, and unknown does not pass`);
+    if (error) {
+      if (await askAgain('on the runs of the export commit', error)) continue;
+      return fail('GitHub answered', `could not ask GitHub (${error}) — whether ${short(sha)} passed is unknown, and unknown does not pass`);
+    }
 
     const dryRuns = dr.runs.filter((x) => x.title === title);
     if (!dryRuns.length) {
@@ -1157,7 +1217,10 @@ export async function gate(R) {
           );
         }
         const d = gh.dispatch(dispatch);
-        if (!d.ok) return fail(`started the dry run of ${wf.release}`, d.detail);
+        if (!d.ok) {
+          if (await askAgain('to the start of the dry run', d.detail)) continue;
+          return fail(`started the dry run of ${wf.release}`, d.detail);
+        }
         S.gate = { sha, dispatchedAt: new Date().toISOString() };
         R.save?.();
         console.log(`  ${dim('started ')}  ${startCmd}`);
@@ -1177,14 +1240,46 @@ export async function gate(R) {
     if (expected && v.ci.run) {
       const jr = gh.jobs ? gh.jobs({ runId: v.ci.run.id }) : { error: "the plan's GitHub cannot read the jobs of a run" };
       if (jr.error) {
+        if (await askAgain(`on the jobs of ${wf.ci} run ${v.ci.run.id}`, jr.error)) continue;
         return fail('GitHub answered', `could not read the jobs of ${wf.ci} run ${v.ci.run.id} (${jr.error}) — whether every part passed is unknown, and unknown does not pass`);
       }
       jobs = jr.jobs;
       parts = partsVerdict(jobs, expected, { finished: v.ci.state !== 'running' });
     }
-    const ciState = matrixState(v.ci.state, parts);
+    let ciState = matrixState(v.ci.state, parts);
+    let dryState = v.dry.state;
+    let ciWhy = '';
+    let dryWhy = '';
+    // #165: red on the runner, not in the code: re-run once, and wait.
+    if (ciState === 'failure' && parts?.failed.length) {
+      // The verdict job is red because a part is; it is a part of its own
+      // only when nothing else is red.
+      const own = parts.failed.filter((p) => p.name !== matrix?.complete);
+      const r = retryOnRunner(`${wf.ci} run ${v.ci.run.id}`, v.ci.run, own.length ? own : parts.failed);
+      ciWhy = r.why;
+      if (r.action === 'again') clean = false;
+      if (r.action !== 'red') ciState = 'running';
+    }
+    if (dryState === 'failure' && v.dry.run && gh.jobs && gh.rerunFailed) {
+      const jr = gh.jobs({ runId: v.dry.run.id });
+      if (jr.error) {
+        if (await askAgain(`on the jobs of the dry run ${v.dry.run.id}`, jr.error)) continue;
+        dryWhy = `its jobs could not be read (${jr.error}), so nothing was re-run`;
+      } else {
+        const red = jr.jobs.filter((j) => j.status === 'completed' && !['success', 'skipped', 'neutral'].includes(j.conclusion));
+        const r = retryOnRunner(`the dry run ${v.dry.run.id}`, v.dry.run, red);
+        if (r.action === 'again') clean = false;
+        if (r.action !== 'red') {
+          dryState = 'running';
+          dryWhy = r.why;
+        } else {
+          dryWhy = [r.why, red.length ? `red: ${red.slice(0, 8).map((j) => `${j.name} (${j.conclusion}${stepsOf(j)})`).join('; ')}` : ''].filter(Boolean).join(' - ');
+        }
+      }
+    }
+    if (clean) unanswered = 0;
     const said = (x, state = x.state) => `${state}${x.run?.url ? ` ${x.run.url}` : ''}`;
-    const line = `${wf.ci}: ${said(v.ci, ciState)}${parts ? ` (${partsLine(parts)})` : ''}  ·  dry run: ${said(v.dry)}`;
+    const line = `${wf.ci}: ${said(v.ci, ciState)}${parts ? ` (${partsLine(parts)})` : ''}  ·  dry run: ${said(v.dry, dryState)}${ciWhy || dryWhy ? `  ·  ${[ciWhy, dryWhy].filter(Boolean).join('; ')}` : ''}`;
     if (line !== shown) {
       console.log(`  ${dim('github  ')}  ${line}`);
       if (parts) {
@@ -1200,8 +1295,13 @@ export async function gate(R) {
       }
       shown = line;
     }
-    const finished = ciState === 'failure' || ciState === 'incomplete' || v.dry.state === 'failure' || (ciState === 'success' && v.dry.state === 'success');
+    const finished = ciState === 'failure' || ciState === 'incomplete' || dryState === 'failure' || (ciState === 'success' && dryState === 'success');
     if (finished) {
+      let artifacts = null;
+      if (promotion && ciState === 'success' && dryState === 'success' && gh.artifacts) {
+        artifacts = gh.artifacts({ runId: v.dry.run.id });
+        if (artifacts.error && (await askAgain(`on the artifacts of the dry run ${v.dry.run.id}`, artifacts.error))) continue;
+      }
       const ciVerdict = {
         name: `${wf.ci} (push) passed on ${short(sha)}`,
         check: () => {
@@ -1219,7 +1319,7 @@ export async function gate(R) {
             const still = v.ci.state === 'running' ? ' The run is still going: re-run its red parts once it has finished.' : '';
             return {
               ok: false,
-              detail: `${parts.failed.length} part(s) red: ${parts.failed.slice(0, 12).map((p) => `${p.name} (${p.conclusion}${p.url ? `, ${p.url}` : ''})`).join('; ')}.${still}`,
+              detail: `${parts.failed.length} part(s) red: ${parts.failed.slice(0, 12).map((p) => `${p.name} (${p.conclusion}${stepsOf(p)}${p.url ? `, ${p.url}` : ''})`).join('; ')}.${still}${ciWhy ? ` (${ciWhy})` : ''}`,
             };
           }
           if (ciState === 'failure') return { ok: false, detail: `${v.ci.run.url ?? `run ${v.ci.run.id}`} ended "${v.ci.run.conclusion}"` };
@@ -1230,16 +1330,16 @@ export async function gate(R) {
         name: `${wf.release} dry run passed on ${short(sha)}`,
         check: () => {
           const x = v.dry;
-          if (x.state === 'success') return { ok: true, detail: x.run.url };
-          if (x.state === 'failure') return { ok: false, detail: `${x.run.url ?? `run ${x.run.id}`} ended "${x.run.conclusion}"` };
-          return { ok: false, detail: x.state === 'none' ? `no run named "${title}"` : `not finished (${x.state})` };
+          if (dryState === 'success') return { ok: true, detail: x.run.url };
+          if (dryState === 'failure') return { ok: false, detail: `${x.run.url ?? `run ${x.run.id}`} ended "${x.run.conclusion}"${dryWhy ? ` (${dryWhy})` : ''}` };
+          return { ok: false, detail: dryState === 'none' ? `no run named "${title}"` : `not finished (${dryState})` };
         },
       };
       const kept = {
         name: `the dry run kept what the ${R.tag} run promotes`,
         check: () => {
           if (!gh.artifacts) return { ok: false, detail: "the plan's GitHub cannot list the artifacts of a run" };
-          const ar = gh.artifacts({ runId: v.dry.run.id });
+          const ar = artifacts;
           if (ar.error) return { ok: false, detail: `could not ask GitHub (${ar.error}) — whether the tag run has anything to promote is unknown, and unknown does not pass` };
           const pv = promotionVerdict(ar.names, promotion);
           if (!pv.ok) {
@@ -1257,17 +1357,19 @@ export async function gate(R) {
         },
       };
       const verdicts = [ciVerdict, dryVerdict];
-      if (promotion && ciState === 'success' && v.dry.state === 'success') verdicts.push(kept);
+      if (promotion && ciState === 'success' && dryState === 'success') verdicts.push(kept);
       const ok = await R.gates.all('gate', verdicts, R.ctx());
       if (ok) {
         return settle(done({ exportHead: sha, source: 'github', ci: v.ci.run.url, parts: parts ? partsLine(parts) : null, dryRun: v.dry.run.url, profile: R.profile ?? 'minor' }));
       }
-      const failed = (ciState === 'failure' || ciState === 'incomplete' ? v.ci.run : null) ?? (v.dry.state === 'failure' ? v.dry.run : null);
+      const failed = (ciState === 'failure' || ciState === 'incomplete' ? v.ci.run : null) ?? (dryState === 'failure' ? v.dry.run : null);
       const rerun = failed && gh.rerun ? gh.rerun(failed.id) : 'gh run rerun <id> --failed';
       for (const l of [
         '',
         `Nothing is tagged, and ${R.tag} is not spent. Then:`,
         `  - a flake:  ${failed && v.ci.state === 'running' && failed === v.ci.run ? `once that run has finished, ${rerun}` : rerun}, then  pnpm release ${R.version} --resume`,
+        `    (the gate re-runs by itself only a part red on the runner - GitHub's setup, a checkout, a toolchain, an artifact, the browser install -`,
+        `    once; a red test is never re-run by the tool: it is a finding, and a person judges it)`,
         `  - a fault in the code: fix it on ${branch} (a commit on top of the release commit), push, pnpm release ${R.version} --resume —`,
         `    the chain, the export, the landing and this gate run again on the fix`,
         `  - a fault in a workflow: fix it in ${slash(R.exp)}, commit, push ${branch}, pnpm release ${R.version} --resume —`,
@@ -1622,10 +1724,64 @@ export async function push(R) {
 
 // ── 11. ci ──────────────────────────────────────────────────────────────────
 
+/**
+ * #165: the tag's run, waited for before what it published is read. 0.55.0's
+ * ci stage read everything red at 16:45, three minutes into a 32-minute tag
+ * run, and the next look was a person's resume half an hour later. With the
+ * plan's `tagRunWait` the stage polls the run the push of the tag started on
+ * the export commit until it has finished - however it ended: what it
+ * published is then read and judged exactly as before - or until no run has
+ * appeared within `appearMs` (then it reads at once), or one is still going
+ * after `timeoutMs` (then it waits for a person: --resume). GitHub not
+ * answering is asked again, as at the gate; a wait never passes anything.
+ */
+export async function waitForTagRun(R) {
+  const w = R.plan.tagRunWait;
+  const gh = R.plan.github;
+  const sha = R.state.exportHead;
+  if (!w || !gh?.runs || !sha) return { waited: false };
+  const wait = { pollMs: 60_000, timeoutMs: 2 * 3600_000, appearMs: 15 * 60_000, unansweredMax: 10, workflow: 'release.yml', ...w };
+  const t0 = Date.now();
+  let shown = '';
+  let unanswered = 0;
+  for (;;) {
+    const r = gh.runs({ workflow: wait.workflow, sha, event: 'push' });
+    if (r.error) {
+      if (transientGithubError(r.error) && unanswered < wait.unansweredMax) {
+        unanswered += 1;
+        console.log(`  ${dim('github  ')}  ${yellow('no answer')} on the ${R.tag} run: ${String(r.error).split('\n')[0].slice(0, 160)} - asking again (${unanswered}/${wait.unansweredMax})`);
+        await sleep(wait.pollMs);
+        continue;
+      }
+      console.log(`  ${yellow('note  ')}  could not ask GitHub about the ${R.tag} run (${r.error}); reading what it published as it is`);
+      return { waited: true };
+    }
+    unanswered = 0;
+    const runs = r.runs.filter((x) => !x.branch || x.branch === R.tag);
+    const latest = runs[0] ?? null;
+    const line = latest ? `${wait.workflow} on ${R.tag}: ${latest.status}${latest.conclusion ? ` (${latest.conclusion})` : ''} ${latest.url ?? ''}`.trim() : `${wait.workflow} on ${R.tag}: no run yet`;
+    if (line !== shown) {
+      console.log(`  ${dim('github  ')}  ${line}`);
+      shown = line;
+    }
+    if (latest && !runs.some((x) => x.status !== 'completed')) return { waited: true };
+    if (!latest && Date.now() - t0 >= wait.appearMs) {
+      console.log(`  ${yellow('note  ')}  no ${wait.workflow} run of ${R.tag} appeared in ${Math.round(wait.appearMs / 60_000)} min; reading what was published as it is`);
+      return { waited: true };
+    }
+    if (Date.now() - t0 >= wait.timeoutMs) return { waited: true, going: line };
+    await sleep(wait.pollMs);
+  }
+}
+
 export async function ci(R) {
   const lines = (R.plan.ciWatch ?? []).map((l) => l.replaceAll('{tag}', R.tag).replaceAll('{version}', R.version));
   if (R.dry) return waiting(['The release workflow runs on the pushed tag; then this checks what it published:', ...R.plan.published.map((g) => `  - ${g.name}`), ...lines], { dry: true });
   if (lines.length) for (const l of lines) console.log(`  ${dim(l)}`);
+  const tagRun = await waitForTagRun(R);
+  if (tagRun.going) {
+    return waiting([`The ${R.tag} run has not finished yet:`, `  ${tagRun.going}`, '', `Carry on waiting with:  pnpm release ${R.version} --resume`]);
+  }
   const ok = await R.gates.all('ci', R.plan.published, R.ctx());
   if (!ok) {
     console.log(`\n  ${dim(`If the workflow is still running, wait for it and run: pnpm release ${R.version} --resume`)}`);

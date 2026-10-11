@@ -1,0 +1,123 @@
+{
+  "manifest_version": 1,
+  "name": "office",
+  "version": "1.0.0",
+  "filex": ">=0.56.0",
+  "label": {
+    "en": "Office",
+    "tr": "Ofis"
+  },
+  "description": {
+    "en": "Opens Word documents in the browser - alone, or together with whoever else opens them. An example app for filex's screenshots; it is not published.",
+    "tr": "Word belgelerini tarayıcıda açar - tek başınıza ya da onları açan herkesle birlikte. filex'in ekran görüntüleri için yazılmış örnek bir uygulama; yayımlanmaz."
+  },
+  "languages": [
+    "en",
+    "tr"
+  ],
+  "permissions": [
+    "files:read",
+    "files:write"
+  ],
+  "permission_reasons": {
+    "files:read": {
+      "en": "To open the document you choose.",
+      "tr": "Seçtiğiniz belgeyi açmak için."
+    },
+    "files:write": {
+      "en": "To save the document when you press Save.",
+      "tr": "Kaydet'e bastığınızda belgeyi kaydetmek için."
+    },
+    "ui": {
+      "en": "The document is drawn by the app's own page.",
+      "tr": "Belgeyi uygulamanın kendi sayfası çizer."
+    },
+    "ui-viewer:.docx": {
+      "en": "So that Word documents open in it.",
+      "tr": "Word belgeleri onda açılsın diye."
+    },
+    "ui-viewer:.xlsx": {
+      "en": "So that Excel spreadsheets open in it.",
+      "tr": "Excel tabloları onda açılsın diye."
+    },
+    "ui-viewer:.pptx": {
+      "en": "So that PowerPoint presentations open in it.",
+      "tr": "PowerPoint sunuları onda açılsın diye."
+    },
+    "ui-new:.docx": {
+      "en": "So that New document can start one.",
+      "tr": "Yeni belge bir tane başlatabilsin diye."
+    },
+    "ui-new:.xlsx": {
+      "en": "So that New document can start one.",
+      "tr": "Yeni belge bir tane başlatabilsin diye."
+    },
+    "ui-new:.pptx": {
+      "en": "So that New document can start one.",
+      "tr": "Yeni belge bir tane başlatabilsin diye."
+    },
+    "files:e2e-plaintext": {
+      "en": "So that the documents of your encrypted folders open in it too.",
+      "tr": "Şifreli klasörlerinizdeki belgeler de onda açılsın diye."
+    },
+    "files:co-edit": {
+      "en": "So that you and your colleagues edit a document at the same time.",
+      "tr": "Siz ve iş arkadaşlarınız bir belgeyi aynı anda düzenleyebilesiniz diye."
+    }
+  },
+  "encrypted_folders": {
+    "open": true
+  },
+  "co_edit": {
+    "open": true
+  },
+  "ui": {
+    "bundle": {
+      "url": "ui.zip"
+    }
+  },
+  "views": [
+    {
+      "id": "editor",
+      "placement": "viewer",
+      "ui": "index.html",
+      "applies": {
+        "ext": [
+          "docx",
+          "xlsx",
+          "pptx"
+        ]
+      },
+      "label": {
+        "en": "Office",
+        "tr": "Ofis"
+      }
+    }
+  ],
+  "new_documents": [
+    {
+      "ext": "docx",
+      "label": {
+        "en": "Word document",
+        "tr": "Word belgesi"
+      },
+      "view": "editor"
+    },
+    {
+      "ext": "xlsx",
+      "label": {
+        "en": "Excel spreadsheet",
+        "tr": "Excel tablosu"
+      },
+      "view": "editor"
+    },
+    {
+      "ext": "pptx",
+      "label": {
+        "en": "PowerPoint presentation",
+        "tr": "PowerPoint sunusu"
+      },
+      "view": "editor"
+    }
+  ]
+}

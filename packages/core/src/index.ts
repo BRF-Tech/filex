@@ -285,8 +285,19 @@ export {
   OFFICE_OPEN_KINDS,
   officeOpensKind,
   isOfficeHandler,
+  // 0.56 - the browser's kind rule for a file the server holds only as
+  // ciphertext: the app chosen by its decrypted name (#189).
+  plaintextOpenOf,
+  nameHiddenFromServer,
 } from './lib/appViewer';
-export type { OpenHandler, OpenHandlers, OpenHandlerOptions } from './lib/appViewer';
+export type {
+  OpenHandler,
+  OpenHandlers,
+  OpenHandlerOptions,
+  PlaintextFile,
+  PlaintextOpen,
+  PlaintextOpenOptions,
+} from './lib/appViewer';
 // 0.50 - the person's "always open this kind with this app" (lib/openWith).
 export {
   openWithChoice,

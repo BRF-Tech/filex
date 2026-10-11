@@ -10,7 +10,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createDragLinks, type MintedLink } from '../../../packages/core/src/lib/dragOut';
+import { createDragLinks, mayMintDragLink, type MintedLink } from '../../../packages/core/src/lib/dragOut';
 import { requestFileLink } from '../../../packages/core/src/lib/downloadSelection';
 
 /** A mint the test resolves by hand, recording what was asked. */
@@ -166,5 +166,46 @@ describe('requestFileLink', () => {
       url: '/z/tok', ticket: 'tok', name: 'a.txt.zip', files: 1, bytes: 3, expires_at: 'x',
     });
     expect(await requestFileLink(fakeApi('/api/files/manager', jsonFetch), 'main://a.txt')).toBeNull();
+  });
+});
+
+// wiring:e2 (#189, e2e 236) - the link is asked for on hover, before anyone
+// drags, so the question "may this row leave as a file" is asked there too.
+// A vault's row exists only in this tab and its path names the file in
+// plaintext: minting a link for it posted that path to the server
+// (`/api/files/archive/download {"paths":["…://Kasa/Bütçe planı.vtxt"],
+// "mode":"file"}`), on every hover of every file in an open vault.
+describe('mayMintDragLink', () => {
+  it('a plain file gets a link', () => {
+    expect(mayMintDragLink({ type: 'file', basename: 'a.txt' })).toBe(true);
+  });
+
+  it('a vault’s file, as the vault engine draws it, never does - its path is the plaintext name', () => {
+    const row = {
+      path: 'main://Kasa/Bütçe planı.vtxt',
+      type: 'file',
+      basename: 'Bütçe planı.vtxt',
+      e2e_root: 'main://Kasa',
+      vault_root: 'main://Kasa',
+      encrypted: 'vault',
+    };
+    expect(mayMintDragLink(row)).toBe(false);
+  });
+
+  it('a file in an encrypted folder never does: the drag does not hand it out (ciphertext)', () => {
+    expect(mayMintDragLink({ type: 'file', basename: 'a.txt', encrypted: 'folder' })).toBe(false);
+    // a row the name view decorated (encrypted names): e2e_root, no `encrypted`
+    expect(mayMintDragLink({ type: 'file', basename: 'a.txt', e2e_root: 'main://Gizli' })).toBe(false);
+  });
+
+  it('a single encrypted file (.fxe) is the file itself, and gets one', () => {
+    expect(mayMintDragLink({ type: 'file', basename: 'rapor.pdf.fxe', encrypted: 'file' })).toBe(true);
+  });
+
+  it('a folder, the trash and nothing get none', () => {
+    expect(mayMintDragLink({ type: 'dir', basename: 'Belgeler' })).toBe(false);
+    expect(mayMintDragLink({ type: 'file', basename: '.trash' })).toBe(false);
+    expect(mayMintDragLink(null)).toBe(false);
+    expect(mayMintDragLink(undefined)).toBe(false);
   });
 });

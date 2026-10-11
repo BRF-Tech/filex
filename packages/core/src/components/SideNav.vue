@@ -187,10 +187,11 @@ const props = withDefaults(defineProps<{
    * make a folder (the modal offers the encrypted variant from inside itself),
    * and ask somebody else for files.
    *
-   * There is deliberately no "Upload folder": the upload path takes a flat
-   * `File[]` and would have to create the intermediate directories itself, and
-   * an entry that quietly flattens someone's folder into one heap is worse
-   * than an entry that is not there.
+   * There is no "Upload folder" entry here. A folder DROPPED onto the
+   * explorer is made again, folders and all (FileExplorer uploadDrop,
+   * lib/dropUpload, #94); a picker for a whole folder would have to go the
+   * same way, never through the flat `File[]` upload - an entry that quietly
+   * flattens someone's folder into one heap is worse than no entry.
    */
   /** Offer "Request files" in that menu — a folder we may write to and share. */
   canRequestFiles?: boolean;

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -44,6 +45,7 @@ type pushed struct {
 	Tag      string `json:"tag"`
 	Open     bool   `json:"open"`
 	Renotify bool   `json:"renotify"`
+	Icon     string `json:"icon"`
 }
 
 // handset is one browser: the keys it subscribes with.
@@ -284,6 +286,55 @@ func TestPush_ABurstIsOnePush(t *testing.T) {
 	require.True(t, got[0].Renotify, "a new summary alerts again")
 	require.Zero(t, got[0].ID)
 	require.False(t, got[0].Open)
+}
+
+// TestPush_TheInstalledAppsIconRidesThePush (#219): a push shows the icon the
+// installed app's manifest names for the person's branding - the HTTP layer
+// hands it in (SetPushIcon, read off the manifest in api spa_brand.go). With
+// nothing handed in the payload carries no icon and the worker shows filex's
+// own PNG. A row's push, a summary and the test push all carry it.
+func TestPush_TheInstalledAppsIconRidesThePush(t *testing.T) {
+	_, store := dbtest.NewTestDB(t)
+	ps := newPushService(t)
+	svc, _, p := pushSetup(t, store, &digestClock{}, ps)
+	defer svc.Stop()
+	st := newStorage(t, store, "ekip")
+	uid := digestUser(t, store, "ayse@example.test", "en")
+	ctx := context.Background()
+	_, err := p.PushSubscribe(ctx, uid, ps.handset(t, "phone"))
+	require.NoError(t, err)
+
+	upload(t, svc, uid, st.ID, "Rapor/a.pdf")
+	require.Equal(t, 1, flush(t, p))
+	got := ps.received("phone")
+	require.Empty(t, got[0].Icon, "nothing handed in: no icon, the worker's own filex PNG")
+
+	pi, ok := svc.(notify.PushIcons)
+	require.True(t, ok, "the service takes the installed app's icon")
+	var asked []int64
+	pi.SetPushIcon(func(_ context.Context, u *model.User) string {
+		if u != nil {
+			asked = append(asked, u.ID)
+		}
+		return "brand-icons/0e11a9b8c7d6e5f4-192.png"
+	})
+
+	upload(t, svc, uid, st.ID, "Rapor/b.pdf")
+	require.Equal(t, 1, flush(t, p))
+	for i := 0; i < 5; i++ {
+		upload(t, svc, uid, st.ID, fmt.Sprintf("Rapor/%d.pdf", i))
+	}
+	require.Equal(t, 1, flush(t, p))
+	_, err = p.PushTest(ctx, uid)
+	require.NoError(t, err)
+
+	got = ps.received("phone")
+	require.Len(t, got, 4)
+	for _, g := range got[1:] {
+		assert.Equal(t, "brand-icons/0e11a9b8c7d6e5f4-192.png", g.Icon, g.Tag)
+	}
+	assert.Equal(t, "filex-push-summary", got[2].Tag)
+	assert.Contains(t, asked, uid, "the icon is the person's own branding (a tenant's for its people)")
 }
 
 // TestPush_ABroadcastReachesTheDevicesOfThoseWhoseBellTakesIt: an antivirus

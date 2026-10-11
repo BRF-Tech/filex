@@ -14,65 +14,18 @@ be reached *as*:
 | SMB / CIFS | ✅ | ❌ - see [Why no SMB server](#why-there-is-no-smb-server) |
 | HTTPS (`filex mount`) | - | ✅ always, no server-side switch |
 
-A backend that is in **neither** column can still be mounted: a
-[storage plugin](PLUGINS.md) is a separate program that teaches filex a backend
-it does not ship, and a storage on one is served over every protocol in the
-right-hand column exactly like a built-in - WebDAV, SFTP, FTPS, NFS and the S3
-endpoint each have a test against a live plugin. ⚠ When such a plugin is down,
-those surfaces answer an **error**, never an empty listing: a mirroring client
-that saw an empty success would delete the user's local copy.
+## Quick start
 
-Everything below lands in the **same tree**, with the same RBAC grants, the same trash,
-the same quota, the same search index and the same audit trail as the web UI. A file
-uploaded over FTPS is thumbnailed, indexed and counted exactly like one dropped in the
-browser, because every protocol writes through the same funnel - and since v0.34.0 it
-also **announces itself** on the realtime socket, so a browser with that folder open
-sees it appear rather than finding out on its next navigation
-([REALTIME.md](REALTIME.md)). ⚠ A write over any of these protocols that **replaces**
-an existing file emits `file.updated`, not `file.uploaded` - worth knowing if you have
-a webhook watching protocol traffic ([NOTIFICATIONS.md](NOTIFICATIONS.md)).
-
-A rename (or MOVE) and a delete over any of them also keep out of the storage
-scan's way the way the web UI's do (since 0.55, issue #201): the bytes and the
-rows that follow them go under the storage's row gate, so a scan running beside
-the client never sees a folder at its new name with its rows at the old one,
-and never drops a trashed file's row - and the trash entry it could be
-restored from - before the rename or delete has written it
-([ARCHITECTURE.md → The row gate](ARCHITECTURE.md#the-row-gate)). The verb
-waits for the gate on the client's request or session, so a client that gives
-up while it waits changes nothing, and once it has the gate it asks again what
-it checked before (a destination found free, the item it was asked about):
-a MOVE or rename that waited refuses a file that landed on its name
-meanwhile instead of replacing it. A folder moved or deleted into the trash on
-an object store, which goes one object at a time, fences only its own path and
-its destination's instead of the whole storage: the scan leaves those alone
-and goes on everywhere else until the rows have followed.
-
-⚠⚠ **One thing is not shared: version history.** WebDAV and the S3 gateway take a
-pre-write snapshot; **SFTP, FTPS and NFS do not**, so an overwrite over those three
-destroys the previous bytes silently. See
-[TRASH-VERSIONING.md](TRASH-VERSIONING.md#what-triggers-a-snapshot).
-
-⚠ **Nor the catalogue's "unavailable" mark** (0.50, issue #104). An entry the
-storage could not answer for is listed in the explorer with a warning and
-refused on every filex surface - the explorer, the REST and AI/MCP APIs - with
-`409 ENTRY_UNAVAILABLE` ([PLUGINS.md](PLUGINS.md#an-entry-your-stat-cannot-answer-for)).
-WebDAV, SFTP, FTPS, NFS and the S3 gateway serve the storage driver directly and
-never read that mark: a client of theirs meets whatever the storage itself
-answers for the path.
-
-Every one of them addresses a storage the same way - the first path segment, or the
-bucket over S3 - and every one accepts either the storage's **name** or its immutable
-**uid**. Give a machine the uid and the mount survives a rename; the rule is one function
-(`internal/storageref`) rather than five, so there is no protocol where only one of the
-two works. See [STORAGE.md](STORAGE.md#editing-a-storage-afterwards).
-
-**The connection instructions are in the app**, not here: **How to connect** - the entry
-in the file explorer's navigation panel, on every surface that draws it (the web app, the
-desktop app, any embed) - builds every command from *this* deployment: its host, its port,
-your login, the key or export you just minted. Admins reach the same panel from
-*Connections* in the admin menu (*Files & storage*). This document is the map; that page is the thing you
-copy from.
+1. **Switch on what you need.** S3 and WebDAV are on already; SFTP, FTPS and NFS
+   each take one variable ([Turning them on](#turning-them-on)). Set
+   `FILEX_SECRET_KEY` before anybody mints an S3 access key.
+2. **Open How to connect** - the entry in the file explorer's navigation panel, on
+   every surface that draws it (the web app, the desktop app, any embed); admins
+   also reach it from *Connections* in the admin menu (*Files & storage*). It
+   builds every command from *this* deployment - its host, its port, your login -
+   and mints the credential the protocol takes ([below](#the-one-thing-to-understand-first-credentials)).
+3. **Paste the command into your client.** This page is the map; that panel is the
+   thing you copy from.
 
 ---
 
@@ -202,6 +155,56 @@ all, and the file permissions each operation
 
 ---
 
+## What every protocol shares
+
+A backend in **neither** column of the table at the top can still be mounted: a
+[storage plugin](PLUGINS.md) is a separate program that teaches filex a backend
+it does not ship, and a storage on one is served over every protocol in the
+right-hand column exactly like a built-in - WebDAV, SFTP, FTPS, NFS and the S3
+endpoint each have a test against a live plugin. ⚠ When such a plugin is down,
+those surfaces answer an **error**, never an empty listing: a mirroring client
+that saw an empty success would delete the user's local copy.
+
+Everything lands in the **same tree**, with the same RBAC grants, the same trash,
+the same quota, the same search index and the same audit trail as the web UI. A file
+uploaded over FTPS is thumbnailed, indexed and counted exactly like one dropped in the
+browser, because every protocol writes through the same funnel, and it
+**announces itself** on the realtime socket, so a browser with that folder open
+sees it appear rather than finding out on its next navigation
+([REALTIME.md](REALTIME.md)). ⚠ A write over any of these protocols that **replaces**
+an existing file emits `file.updated`, not `file.uploaded` - worth knowing if you have
+a webhook watching protocol traffic ([NOTIFICATIONS.md](NOTIFICATIONS.md)).
+
+A rename (or MOVE) and a delete over any of them keep out of the storage scan's way
+the way the web UI's do: the bytes and the rows that follow them go under the
+storage's row gate, so a scan running beside the client never sees a folder at its
+new name with its rows at the old one, and never drops a trashed file's row - and the
+trash entry it could be restored from - before the rename or delete has written it.
+A client that gives up while the verb waits for the gate changes nothing, and a MOVE
+or rename that waited refuses a file that landed on its name meanwhile instead of
+replacing it ([ARCHITECTURE.md → The row gate](ARCHITECTURE.md#the-row-gate)).
+
+⚠⚠ **One thing is not shared: version history.** WebDAV and the S3 gateway take a
+pre-write snapshot; **SFTP, FTPS and NFS do not**, so an overwrite over those three
+destroys the previous bytes silently. See
+[TRASH-VERSIONING.md](TRASH-VERSIONING.md#what-triggers-a-snapshot).
+
+⚠ **Nor the catalogue's "unavailable" mark.** An entry the
+storage could not answer for is listed in the explorer with a warning and
+refused on every filex surface - the explorer, the REST and AI/MCP APIs - with
+`409 ENTRY_UNAVAILABLE` ([PLUGINS.md](PLUGINS.md#an-entry-your-stat-cannot-answer-for)).
+WebDAV, SFTP, FTPS, NFS and the S3 gateway serve the storage driver directly and
+never read that mark: a client of theirs meets whatever the storage itself
+answers for the path.
+
+Every one of them addresses a storage the same way - the first path segment, or the
+bucket over S3 - and every one accepts either the storage's **name** or its immutable
+**uid**. Give a machine the uid and the mount survives a rename; the rule is one function
+(`internal/storageref`) rather than five, so there is no protocol where only one of the
+two works. See [STORAGE.md](STORAGE.md#editing-a-storage-afterwards).
+
+---
+
 ## S3
 
 `FILEX_S3=1`. A bucket **is** a storage: `main`, `photos`, `archive` are what
@@ -217,7 +220,7 @@ all, and the file permissions each operation
   verified, and held to the `x-amz-decoded-content-length` they declare: that number is
   what the quota and the per-file limit are asked with, so a body (or a part) that is
   longer or shorter is refused with `400 IncompleteBody` and nothing is kept. The
-  catalogue records the size that landed on the storage (since 0.54.0).
+  catalogue records the size that landed on the storage.
 - Path-style and virtual-hosted addressing both work.
 
 > ⚠ **Give the endpoint its own hostname** (`FILEX_S3_DOMAIN=s3.example.com`) if you can.
@@ -246,10 +249,8 @@ the desktop app's open-with working area `.filex-open/` and the people's
 [drafts](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save)
 `.filex-drafts/` - are **not** exposed here, at any depth, on any verb: not
 listed, not readable by known key, and not writable. A draft is not shown even
-to its owner over a protocol: it is not a file yet. Every protocol judges this by the same list (`backend/internal/syspath`);
-before it existed each carried its own three-name copy and all of them listed
-`.filex-open/`. Every other protocol has always hidden the first three;
-the S3 gateway is the one that had to catch up, and it matters most here
+to its owner over a protocol: it is not a file yet. Every protocol judges this by
+the same list (`backend/internal/syspath`). It matters most here
 because [version history](TRASH-VERSIONING.md#what-triggers-a-snapshot) holds a
 copy of every file this gateway has replaced - the `.versions/` tree is real
 data, not scratch space.
@@ -262,9 +263,8 @@ both use it, while 2222 means "SSH in a container"), not a route.
 - Password (an API token) **or** a registered public key. `ssh-copy-id` cannot work
   against filex - it appends to `~/.ssh/authorized_keys` over a shell and filex has no
   shell - so keys are pasted at *Connections → SFTP*.
-- `exit-status` is sent on the subsystem channel, so **`scp` reports success correctly**.
-  OpenSSH 9+ speaks SFTP for `scp`, and without this every copy ended in a silent
-  `exit 1` with the bytes already transferred.
+- `exit-status` is sent on the subsystem channel, so **`scp` reports success correctly**
+  (OpenSSH 9+ speaks SFTP for `scp`).
 - posix-rename, `statvfs` (your quota is what `df` shows), permission bits synthesised
   from your ACL level, resumable reads and writes.
 - Tested with **OpenSSH, sshfs, WinSCP, FileZilla, rclone**.
@@ -300,9 +300,7 @@ whenever they change** - every handshake checks their mtime and size - so a real
 auto-renewing certificate can be bound: mount your reverse proxy's certificate
 directory read-only, point the two variables at the `.crt`/`.key`, and the
 renewal Caddy or certbot writes every couple of months is what the next FTPS
-client sees, with no restart. (Before v0.25 the pair was read once at start-up,
-which is why a renewed certificate would have been served expired for weeks
-while `/healthz` stayed green.) A renewal that lands half-written, or a key that
+client sees, with no restart. A renewal that lands half-written, or a key that
 does not match its certificate, keeps the previous pair serving and logs a
 warning once; a good pair written afterwards is picked up.
 
@@ -329,10 +327,9 @@ than trusted, and the permissions you see are synthesised from your ACL.
 
 ⚠ NFSv3 has **no "close"**, so the server opens, writes and closes the handle on every
 write RPC and filex commits on each close: one `cp -p` of a 5 MB file is a `CREATE` plus
-five 1 MiB writes. That used to reach every open browser as six separate change frames;
-they are now coalesced into two ([REALTIME.md](REALTIME.md)). Nothing is dropped - the
-last frame of a burst always reflects the final state - so this is a difference you
-notice only in how quiet the page is.
+five 1 MiB writes. Open browsers get those coalesced into two change frames
+([REALTIME.md](REALTIME.md)); nothing is dropped - the last frame of a burst always
+reflects the final state.
 
 ## WebDAV
 
@@ -401,22 +398,15 @@ storage.
 
 ### Why there is no SMB server
 
-Not a licence problem and not a protocol problem - a size problem, stated plainly:
+Not a licence problem and not a protocol problem - a size problem:
 
 - There is **no MIT/Apache-licensed, mature Go SMB *server***. The one that genuinely
   works (`macos-fuse-t/go-smb2`) is AGPL-3.0, which would relicense filex; the MIT one
   (`gentlemanautomaton/smb`) says *"not yet suitable for use"* in its own README.
-- Writing it means MS-SMB2 from NEGOTIATE upward: NTLMSSP session setup, TREE_CONNECT,
-  CREATE with its create-contexts, READ/WRITE, IOCTL, locks, CHANGE_NOTIFY, oplocks and
-  leases, durable handles, signing and encryption. Windows does not consider a share
-  "working" until most of that is there. It is legal (MS-SMB2 is an open specification)
-  and it is the single largest item on filex's board.
+- Writing one is the single largest item on filex's board
+  ([what it would take](CONTRIBUTING.md#what-an-smb-server-for-filex-would-take)).
 - And the thing people actually want from it - a drive letter - is already answered by
   `filex mount` off-LAN and by NFSv3 on-LAN, at a fraction of the cost.
-
-If it is ever written, note that port 445 is not carried across the public internet by
-most ISPs; the way out is **SMB over QUIC** (TLS 1.3 on UDP/443, ALPN token `smb`), which
-needs Windows 11 24H2+ / Server 2025 on the client side, or Samba 4.23+ on Linux.
 
 ---
 

@@ -31,7 +31,7 @@
  */
 import { reactive, ref, type Ref } from 'vue';
 import type { FileNode } from '../types/FileNode';
-import type { VaultClientKind, VaultHttp } from '../lib/e2evault/api';
+import type { VaultClientKind, VaultHttp, VaultWords } from '../lib/e2evault/api';
 import type { Clock, LockEnd } from '../lib/e2evault/lock';
 import type { VaultIndexState } from '../lib/e2evault/vindex';
 import type { RandomSource } from '../lib/e2evault/writer';
@@ -93,6 +93,13 @@ export interface VaultHost {
   onLocked(root: string, why: 'idle' | 'manual'): void;
   /** The tree, or the strip, changed: draw it again. */
   onChanged(root: string): void;
+  /**
+   * filex 0.56: the vault locks itself in a minute (VAULT_IDLE_WARN_MS)
+   * unless something is done in it. The explorer warns when an app holds
+   * unsaved changes in it - in the server's words (`words`, the vault's
+   * `state` answer), with an action that keeps it open (`touch`).
+   */
+  onLockSoon?(root: string, words: VaultWords): void;
   clock?: Clock;
   random?: RandomSource;
   /** A count in the person's language ("212,400" / "212.400"). Default: digits. */
@@ -249,6 +256,14 @@ export function useE2eVault(host: VaultHost) {
     create: async (...a: Parameters<VaultEngine['create']>) => (await load()).create(...a),
     readBytes: async (...a: Parameters<VaultEngine['readBytes']>) => (await load()).readBytes(...a),
     readUrl: async (...a: Parameters<VaultEngine['readUrl']>) => (await load()).readUrl(...a),
+    /** filex 0.56 (#189): an app's interface reads / saves a file of an open
+     *  vault (lib/appPlaintext createAppVaultDoor). No engine: no vault is
+     *  open, so nothing is loaded for it. */
+    readForApp: async (...a: Parameters<VaultEngine['readForApp']>): ReturnType<VaultEngine['readForApp']> =>
+      engine ? engine.readForApp(...a) : { ok: false, why: 'locked' },
+    saveForApp: async (...a: Parameters<VaultEngine['saveForApp']>): ReturnType<VaultEngine['saveForApp']> =>
+      engine ? engine.saveForApp(...a) : { ok: false, why: 'locked' },
+    keyForApp: (...a: Parameters<VaultEngine['keyForApp']>): CryptoKey | null => engine?.keyForApp(...a) ?? null,
     download: async (...a: Parameters<VaultEngine['download']>) => (await load()).download(...a),
     upload: async (...a: Parameters<VaultEngine['upload']>) => (await load()).upload(...a),
     mkdir: async (...a: Parameters<VaultEngine['mkdir']>) => (await load()).mkdir(...a),

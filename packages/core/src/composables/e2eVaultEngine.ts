@@ -66,9 +66,11 @@ import {
   type VaultClientKind,
   type VaultLockGrant,
   type VaultOwner,
+  type VaultWords,
 } from '../lib/e2evault/api';
 import {
   VAULT_COMMIT_EVERY_MS,
+  VAULT_IDLE_LOCK_MS,
   VAULT_STATE_POLL_MS,
   VaultIdleLock,
   VaultWriteLock,
@@ -76,6 +78,7 @@ import {
   type LockEnd,
 } from '../lib/e2evault/lock';
 import { vaultRelOf, type VaultHost, type VaultOpenOptions, type VaultReadOnly, type VaultShared, type VaultStripState } from './useE2eVault';
+import type { VaultAppRead, VaultAppRefusal, VaultAppSaved } from '../lib/appPlaintext';
 
 interface Session {
   root: string;
@@ -102,6 +105,12 @@ interface Session {
   lastState: number;
   closed: boolean;
   strip: VaultStripState;
+  /** The server's sentence for the last write lock lost ('' for the
+   *  connection): an app's save that it stopped is told in it. */
+  lostSaid: string;
+  /** The server's sentences for what this tab says on its own clock (the
+   *  `state` answer's `words`, filex 0.56). */
+  words: VaultWords;
 }
 
 /** A short label for the lock holder: the browser and the system. */
@@ -337,7 +346,7 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
       perm: opts.perm,
       owner: {},
       lock: null,
-      idle: new VaultIdleLock(() => void lockIdle(root), clock),
+      idle: new VaultIdleLock(() => void lockIdle(root), clock, VAULT_IDLE_LOCK_MS, () => lockSoon(root)),
       uploaded: new Set(),
       deleted: new Set(),
       queue: Promise.resolve(),
@@ -346,6 +355,8 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
       lastState: 0,
       closed: false,
       strip: strips[root],
+      lostSaid: '',
+      words: {},
     };
     sessions.set(root, s);
     shared.remember(root);
@@ -359,6 +370,7 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
         const st = await api.state(root);
         s.lastState = clock.now();
         s.owner = vaultOwnerOf(st);
+        s.words = st.words ?? {};
         noteHolder(s, st.lock);
         if (st.generation < vaultRollbackGuard.highest(s.idHex)) s.strip.readOnly = 'rollback';
         const loaded = await loadLatestGeneration(s.keys, st.generation, indexSource(s));
@@ -440,6 +452,14 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
     host.onLocked(root, 'idle');
   }
 
+  /** The vault lock is a minute away (filex 0.56): the explorer is told,
+   *  with the server's words, and decides whether anything is to be said. */
+  function lockSoon(root: string): void {
+    const s = sessions.get(root);
+    if (!s || s.closed || s.lock?.held || s.strip.busy) return;
+    host.onLockSoon?.(root, s.words);
+  }
+
   /** Every vault (the explorer unmounts, or the page closes). */
   function closeAll(how: 'manual' | 'silent' = 'manual'): void {
     for (const r of [...sessions.keys()]) close(r, how);
@@ -483,6 +503,7 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
       s.lastState = clock.now();
       if (s.closed) return;
       s.owner = vaultOwnerOf(st);
+      if (st.words) s.words = st.words;
       noteHolder(s, st.lock);
       if (st.generation < vaultRollbackGuard.highest(s.idHex)) {
         s.strip.readOnly = 'rollback';
@@ -542,6 +563,12 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
   /** The bytes of a file, decrypted. Tries once more after loading the latest
    *  generation when a pack is gone (a collection ran meanwhile). */
   async function readBytes(wire: string): Promise<Uint8Array> {
+    return (await readNode(wire)).bytes;
+  }
+
+  /** readBytes, with the node that was read (an app's save names its version).
+   *  `limit`: a file larger than that is not fetched at all. */
+  async function readNode(wire: string, limit = Infinity): Promise<{ bytes: Uint8Array; node: VaultNode }> {
     const s = sessionOf(wire);
     if (!s) throw new Error('vault: not open');
     touch(wire);
@@ -549,15 +576,17 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
     const rel = relOf(s.root, wire);
     const n = s.state.tree.get(rel);
     if (!n || n.kind === VAULT_ENTRY_FOLDER) throw new VaultWriteError('not_found', rel);
+    if (n.size > limit) throw new VaultTooLargeError(limit);
     try {
-      return await readWholeFile(s.keys, n, fetchRangeOf(s));
+      return { bytes: await readWholeFile(s.keys, n, fetchRangeOf(s)), node: n };
     } catch (err) {
       if (!(err instanceof VaultApiError && err.code === 'VAULT_PACK_GONE')) throw err;
       const st = await api.state(s.root);
       await refresh(s, st.generation);
       const again = s.state.tree.get(rel);
       if (!again || again.kind === VAULT_ENTRY_FOLDER) throw new VaultWriteError('not_found', rel);
-      return readWholeFile(s.keys, again, fetchRangeOf(s));
+      if (again.size > limit) throw new VaultTooLargeError(limit);
+      return { bytes: await readWholeFile(s.keys, again, fetchRangeOf(s)), node: again };
     }
   }
 
@@ -635,7 +664,8 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
     return run;
   }
 
-  function onLockLost(s: Session, reason: LockEnd, holder?: { name?: string; label?: string } | null): void {
+  function onLockLost(s: Session, reason: LockEnd, holder?: { name?: string; label?: string } | null, said = ''): void {
+    s.lostSaid = said;
     s.strip.lostMinutes = s.lock ? Math.max(1, Math.round(s.lock.idleSeconds / 60)) : Math.max(1, s.strip.idleMinutes);
     s.strip.lostTo = holder ? holder.name || holder.label || '' : '';
     s.lock = null;
@@ -659,7 +689,7 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
       client: kind,
       label: vaultLockLabel(kind),
       clock,
-      onLost: (r, h) => onLockLost(s, r, h),
+      onLost: (r, h, said) => onLockLost(s, r, h, said),
       headersNow: () => host.headersNow(),
     });
     let grant: VaultLockGrant;
@@ -758,13 +788,23 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
   /**
    * One change the person sees: take the lock, apply, commit. Only after the
    * commit succeeded is it reported as saved. False when nothing was saved
-   * (the reason is already said).
+   * (the reason is already said). `failed` hears why (an app's save answers
+   * the app with it, saveForApp).
    */
-  async function change(s: Session, labels: string[], run: (ctx: ChangeCtx) => Promise<void>, opts: { quiet?: boolean } = {}): Promise<boolean> {
+  async function change(
+    s: Session,
+    labels: string[],
+    run: (ctx: ChangeCtx) => Promise<void>,
+    opts: { quiet?: boolean; failed?: (err: unknown) => void } = {},
+  ): Promise<boolean> {
     return enqueue(s, async () => {
-      if (s.closed) return false;
+      if (s.closed) {
+        opts.failed?.(abortError());
+        return false;
+      }
       if (s.strip.readOnly) {
         host.toast(readOnlyWords(s.strip.readOnly), true);
+        opts.failed?.(new VaultReadOnlyError(s.strip.readOnly));
         return false;
       }
       s.strip.lost = '';
@@ -775,6 +815,7 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
         await ensureLock(s);
       } catch (err) {
         say(s, err);
+        opts.failed?.(err);
         return false;
       }
       const lock = s.lock!;
@@ -830,6 +871,7 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
         } else if (!opts.quiet) {
           say(s, err);
         }
+        opts.failed?.(ctl.signal.aborted ? abortError() : err);
         return false;
       } finally {
         done();
@@ -1127,6 +1169,108 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
     });
   }
 
+  // ------------------------------------------------------------------
+  // An app's interface editing a file of the vault (filex 0.56, #189)
+  // ------------------------------------------------------------------
+  //
+  // lib/appPlaintext's vault door: the explorer hands an app granted
+  // `files:e2e-plaintext` a vault's file in the clear, and takes its save
+  // back. Both happen here, in this tab, through the vault API like every
+  // other read and change: the server sees packs and an index, never the
+  // file's name, its path or that an app opened it.
+
+  /** The version of a file an app read: its size, its time and its content
+   *  id (a new one at every write, the nonce rule). */
+  function appSig(n: VaultNode): string {
+    return `${n.size}:${n.mtime}:${n.content?.id ?? ''}`;
+  }
+
+  /** The file is still the version `expect` names: a read's `appSig`, or
+   *  "<size>:<ms>" as the file's row said it (an app that saves unread). */
+  function isVersion(n: VaultNode, expect: string | undefined): boolean {
+    if (!expect) return true;
+    return expect.split(':').length === 2 ? expect === `${n.size}:${n.mtime}` : expect === appSig(n);
+  }
+
+  /** Why an app's change did not land (change's `failed`). */
+  function refusalOf(s: Session, err: unknown): VaultAppRefusal {
+    if (s.closed) return 'locked';
+    if (err instanceof VaultReadOnlyError) return 'read_only';
+    if (err instanceof VaultWriteError) return err.code === 'changed' ? 'changed' : err.code === 'not_found' ? 'gone' : 'failed';
+    if (err instanceof VaultApiError) {
+      if (err.code === 'VAULT_LOCKED') return 'held';
+      if (err.code === 'VAULT_LOCK_LOST') return 'lock_lost';
+      return 'failed';
+    }
+    // A change stopped mid-way while the vault stays open: the write lock went.
+    if ((err as Error)?.name === 'AbortError') return 'lock_lost';
+    return 'failed';
+  }
+
+  /**
+   * An app reads a file of the vault: decrypted from its packs (readNode),
+   * whole - nothing past `limit` is fetched - with its version's signature.
+   * Counts as activity, like an opening.
+   */
+  async function readForApp(wire: string, limit: number): Promise<VaultAppRead> {
+    if (!sessionOf(wire)) return { ok: false, why: 'locked' };
+    try {
+      const { bytes, node: n } = await readNode(wire, limit);
+      return { ok: true, bytes, sig: appSig(n) };
+    } catch (err) {
+      if (!sessionOf(wire)) return { ok: false, why: 'locked' };
+      if (err instanceof VaultTooLargeError) return { ok: false, why: 'too_large' };
+      if (err instanceof VaultWriteError && err.code === 'not_found') return { ok: false, why: 'gone' };
+      host.emitError?.((err as Error)?.message ?? String(err), 'e2e-vault-app-read');
+      if (err instanceof VaultContentError) host.toast(host.t('e2e.vault.damaged_file'), true);
+      return { ok: false, why: 'failed' };
+    }
+  }
+
+  /**
+   * An app saves a file of the vault: the bytes written over it as the
+   * vault's next generation, a change like any other - it takes the write
+   * lock (somebody else holding it: refused, in the server's words), and
+   * lands only when its commit did. Only over the version the app read
+   * (`expect`): a file another writer changed meanwhile is not overwritten,
+   * and one that is gone is not made again. A write lock lost before the
+   * commit saves nothing, and the person is told in the server's words.
+   */
+  async function saveForApp(wire: string, bytes: Uint8Array, expect: string | undefined): Promise<VaultAppSaved> {
+    const s = sessionOf(wire);
+    if (!s) return { ok: false, why: 'locked' };
+    touch(wire);
+    const rel = relOf(s.root, wire);
+    const label = baseName(wire);
+    let why = 'failed' as VaultAppRefusal;
+    const ok = await change(
+      s,
+      [label],
+      async (ctx) => {
+        const n = ctx.tree().get(rel);
+        if (!n || n.kind === VAULT_ENTRY_FOLDER) throw new VaultWriteError('not_found', rel);
+        if (!isVersion(n, expect)) throw new VaultWriteError('changed', rel);
+        await ctx.apply({ op: 'write', path: rel, mtime: clock.now(), content: bytes });
+      },
+      { failed: (err) => void (why = refusalOf(s, err)) },
+    );
+    const n = ok ? s.state.tree.get(rel) : undefined;
+    if (ok && n) return { ok: true, size: n.size, sig: appSig(n) };
+    if (why === 'lock_lost') {
+      // change() lists it on the strip, which the app's frame covers: said
+      // here too, in the server's sentence for why the lock ended.
+      const lost = s.lostSaid || (s.strip.lost === 'connection' ? host.t('e2e.vault.lost_connection') : host.t('e2e.vault.lost_expired'));
+      host.toast(`${lost} ${host.t('e2e.vault.unsaved', { names: label })}`, true);
+    }
+    return { ok: false, why };
+  }
+
+  /** The vault's folder key (an HKDF key) while it is open in this tab: an
+   *  app's sealed store for the vault is derived from it (lib/appPlaintext). */
+  function keyForApp(wire: string): CryptoKey | null {
+    return sessionOf(wire)?.keys.fmk ?? null;
+  }
+
   /** The strip's "Take over": end the other session's lock, then take it. */
   async function takeOver(root: string): Promise<boolean> {
     const s = sessions.get(root);
@@ -1214,6 +1358,9 @@ export function createVaultEngine(host: VaultHost, shared: VaultShared) {
     onEvent,
     readBytes,
     readUrl,
+    readForApp,
+    saveForApp,
+    keyForApp,
     download,
     upload,
     mkdir,
@@ -1234,6 +1381,14 @@ export class VaultReadOnlyError extends Error {
   constructor(public readonly why: VaultReadOnly) {
     super(`vault: read-only (${why})`);
     this.name = 'VaultReadOnlyError';
+  }
+}
+
+/** A file larger than its reader takes (an app's limit): not fetched. */
+export class VaultTooLargeError extends Error {
+  constructor(public readonly limit: number) {
+    super(`vault: larger than ${limit} bytes`);
+    this.name = 'VaultTooLargeError';
   }
 }
 

@@ -56,8 +56,10 @@ var viewOnly = map[string]bool{"pdf": true, "xps": true, "epub": true}
 
 // textExts round-trip cleanly as UTF-8 plain text: JSON, YAML, code,
 // markdown, config files. A draw.io diagram is XML and the draw.io viewer
-// saves it as text; a Mermaid diagram and a GraphQL schema are text their
-// viewers save the same way.
+// saves it as text. A Mermaid diagram and a GraphQL schema are text too: the
+// Mermaid viewer only draws its file, and Edit opens the source in the
+// built-in text editor, which saves it here (#216 - Edit used to reopen the
+// viewer, which has no save).
 var textExts = map[string]bool{}
 
 // textNames are files with no telling extension that are text by name.

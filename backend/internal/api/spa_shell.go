@@ -25,6 +25,9 @@ import (
 // are served byte for byte as built. That matters most for the manifest `id`,
 // the installed app's identity — change it and every existing install becomes
 // a second, separate app.
+//
+// The operator's branding is laid over these per request, at the root too
+// (spa_brand.go): name, colour and icons, never `id` or `start_url`.
 
 // shellDocs holds the two documents rewritten for one base.
 type shellDocs struct {

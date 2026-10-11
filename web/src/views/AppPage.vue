@@ -20,7 +20,8 @@ import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { PluginPageView, useFileApi } from '@brftech/filex-core';
 import type { ExplorerConfig } from '@brftech/filex-core';
-import { explorerAuth } from '@/lib/explorerConfig';
+import { appUserName, explorerAuth } from '@/lib/explorerConfig';
+import { useAuthStore } from '@/stores/auth';
 import { getServerRoot } from '@/api/runtimeConfig';
 import { getStoredLocale } from '@/i18n';
 import { liveTheme } from '@/lib/theme';
@@ -74,11 +75,15 @@ const exploreHref = computed(() => `${currentMountBase()}explore`);
 function onQueued(_op: Record<string, unknown>): void {
   /* the explorer's own poll picks the row up; see the note above */
 }
+
+// Who is looking, for the app's own interface (`session.user.name`).
+const auth = useAuthStore();
 </script>
 
 <template>
   <PluginPageView
     :locale="locale"
+    :user-name="appUserName(auth.user)"
     :theme="theme"
     :api="api"
     :plugin="plugin"

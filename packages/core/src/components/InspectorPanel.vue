@@ -146,6 +146,8 @@ const props = withDefaults(
   theme?: ThemeMode;
   /** Storage names a surface's file-chooser may span. */
   storages?: string[];
+  /** Who is looking, for an app's own interface (`session.user.name`; never an e-mail). */
+  userName?: string;
   }>(),
   {
     /* ⚠ ON by default, and that is the owner's call of 2026-09-12, not a
@@ -1020,6 +1022,7 @@ watch(
           :locale="locale"
           :theme="theme"
           :storages="storages"
+          :user-name="userName"
           @op="(op) => emit('plugin-op', op)"
           @toast="(m) => emit('toast', m)"
           @open="(req) => emit('plugin-open', { plugin: v.plugin, req })"

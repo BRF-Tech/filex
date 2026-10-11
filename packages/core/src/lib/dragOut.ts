@@ -35,6 +35,8 @@
  * so an internal move never waits on a download it does not need.
  */
 
+import { rowInEncryptedFolder, type EncryptedRowLike } from './encryptedRow';
+
 export interface DragItem {
   path: string;
   basename: string;
@@ -309,6 +311,82 @@ export function createDragLinks(
       return supported;
     },
   };
+}
+
+/** What `mayDragOut` / `mayMintDragLink` read of a row or a search hit. */
+export type DragLinkRow = EncryptedRowLike & { type?: string; basename?: string; vault_root?: string | null };
+
+/**
+ * A row as a drag hands it on: the item itself (path, name, kind) and what
+ * says whether it may leave the window - a listing row (`FileNode`) and a
+ * ⌘K hit (lib/searchHit `hitItem`) both carry it, as the server stamped it.
+ */
+export type DragOutRow = DragItem & EncryptedRowLike & { vault_root?: string | null };
+
+/**
+ * wiring:e2, #243 — may this row be handed OUT of the window: to the OS as a
+ * file or a folder (the desktop shell's drag), or to the browser's download
+ * stack (`DownloadURL`)? Not when it is inside an encrypted folder or a vault,
+ * or is one (lib/encryptedRow rowInEncryptedFolder; `vault_root` on a vault's
+ * own rows), and never the trash.
+ *
+ * The bytes behind such a row's URL are ciphertext, and the OS would save them
+ * under the file's name as if they were the document. A vault's row is worse:
+ * it exists only in this tab and its path names the file in plaintext, so
+ * handing it to the download stack or the shell sends that name to the server.
+ * A single encrypted file (`.fxe`, `encrypted: 'file'`) is the exception: it
+ * IS the file, carrying its own key slots.
+ *
+ * ⚠ The ROW says it (the server's `encrypted` / `e2e_root`), not the folder
+ * on screen: a ⌘K hit, a row on Recent, Starred, a tag view or a search sits
+ * in an encrypted folder while a plain one is open. Before task #243 the
+ * explorer read only the open folder, and the hit and the listing's drag kept
+ * path, name and kind - so such a row went out.
+ */
+export function mayDragOut(row: DragLinkRow | null | undefined): boolean {
+  return (
+    !!row &&
+    row.basename !== '.trash' &&
+    !rowInEncryptedFolder(row) &&
+    !(typeof row.vault_root === 'string' && row.vault_root !== '')
+  );
+}
+
+/** The item a drag hands on - path, name, kind and nothing else - for the
+ *  shell's hook and the in-app payload. */
+export function dragItemOf(row: DragItem): DragItem {
+  return { path: row.path, basename: row.basename, type: row.type };
+}
+
+/**
+ * The rows a drag may hand out of the window, as plain items - or null when
+ * it may hand out none: the drag started in an encrypted folder or a vault
+ * (`inEncryptedFolder`, the pane's own listing: a folder row inside one says
+ * nothing of it itself), or one of the rows may not leave (`mayDragOut`).
+ * All or nothing, like the drag: a selection is one gesture.
+ *
+ * Refused, the drag stays filex's own - a move onto a folder in this window
+ * still works; nothing is handed to the OS or the download stack.
+ */
+export function dragOutItems(
+  rows: ReadonlyArray<DragOutRow>,
+  opts: { inEncryptedFolder?: boolean } = {},
+): DragItem[] | null {
+  if (opts.inEncryptedFolder || rows.length === 0) return null;
+  if (!rows.every((r) => mayDragOut(r))) return null;
+  return rows.map(dragItemOf);
+}
+
+/**
+ * #71, wiring:e2 — may the explorer ask the server for a drag-out link to this
+ * row (`createDragLinks().warm`)? Only for a file the drag may hand out
+ * (`mayDragOut`): a link minted for any other row is never used. In a vault
+ * the mint is worse than useless: a vault's row exists only in this tab and
+ * its path names the file in plaintext, and the mint posts that path to the
+ * server - the name the vault keeps from it (e2e 236).
+ */
+export function mayMintDragLink(row: DragLinkRow | null | undefined): boolean {
+  return !!row && row.type === 'file' && mayDragOut(row);
 }
 
 /** One report of a drop being filled in (ExplorerConfig.dragOut.onProgress). */

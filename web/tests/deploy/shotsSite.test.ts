@@ -727,6 +727,23 @@ describe('this repository shows exactly the published pictures', () => {
     const v055 = ['store/store-screen-storage-tab-1280.png', 'store/storage-store-review-1280.png', 'appprint/print-consent-1280.png'];
     const linked = v055.filter((n) => manifest.pictures[n] || waiting.some((w: { name: string }) => w.name === n));
     expect(linked, 'the 0.55 store and print pictures are published or waited for in the docs').toEqual(v055);
+    // ...and the 0.56 ones (#216, #217, #189), the same way (lesson #1427:
+    // "published OR waited for", never a count of waiting lines).
+    const v056 = [
+      'officeapp/office-app-review-1440.png',
+      'officeapp/newdoc-office-app-1280.png',
+      'officeapp/newdoc-office-app-dark-tr-1280.png',
+      'officeapp/office-app-phone-390.png',
+      'officeapp/coedit-editor-1280.png',
+      'officeapp/coedit-watcher-1280.png',
+      'e2eapp/open-with-encrypted-1280.png',
+      'e2eapp/app-encrypted-folder-1280.png',
+      'e2eapp/vault-lock-soon-1280.png',
+      'mermaid/mermaid-view-1280.png',
+      'mermaid/mermaid-edit-1280.png',
+    ];
+    const linked056 = v056.filter((n) => manifest.pictures[n] || waiting.some((w: { name: string }) => w.name === n));
+    expect(linked056, 'the 0.56 pictures are published or waited for in the docs').toEqual(v056);
     const lost = waiting.filter((w: { name: string }) => sceneOfName(sets, w.name) === null).map((w: { file: string; name: string }) => `${w.file}: ${w.name}`);
     expect(lost, 'a page waits for a picture no scene writes - it would stay a comment for ever').toEqual([]);
     // ...and that scene names such a file: a literal, or a template whose

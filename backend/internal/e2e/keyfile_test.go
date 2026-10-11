@@ -50,6 +50,21 @@ func TestConversionPending(t *testing.T) {
 	require.False(t, ConversionPending(nil))
 }
 
+// filex 0.56 (#189): the browser's markerHasNames, read by the app doors to
+// know a stored name is ciphertext.
+func TestNamesEncrypted(t *testing.T) {
+	require.True(t, NamesEncrypted([]byte(`{"v":3,"req":["names"],"names":{"alg":"AES-SIV-512","key":"a2V5"}}`)))
+	require.True(t, NamesEncrypted([]byte(`{"v":3,"req":["names","conv"],"names":{"alg":"AES-SIV-512","pending":true}}`)), "a names pass under way: still level 2")
+	require.False(t, NamesEncrypted([]byte(`{"v":2,"salt":"c2FsdA==","fmk":"wrapped"}`)), "level 1")
+	require.False(t, NamesEncrypted([]byte(`{"v":3,"req":["names"]}`)), "no names slot")
+	require.False(t, NamesEncrypted([]byte(`{"v":3,"req":["names"],"names":null}`)), "no names slot")
+	require.False(t, NamesEncrypted([]byte(`{"v":3,"req":["conv"],"names":{"alg":"AES-SIV-512"}}`)), "not required")
+	require.False(t, NamesEncrypted([]byte(`{"v":3,"req":["vault"],"vault":{"v":1}}`)), "a vault")
+	require.False(t, NamesEncrypted([]byte(`{}`)))
+	require.False(t, NamesEncrypted([]byte(`not json`)))
+	require.False(t, NamesEncrypted(nil))
+}
+
 func TestKeepsVaultBlock(t *testing.T) {
 	vault := `{"v":3,"req":["vault"],"salt":"c2FsdA==","iter":600000,"verify":"dmVy","fmk":"wrapped","fmk_pw":"cHc=","vault":{"v":1,"id":"wpU155hSR3hD1u8bSnGv7w","pack":22}}`
 	newPassword := `{"v":3,"req":["vault"],"salt":"bmV3","iter":600000,"verify":"bmV3dg==","fmk":"wrapped","fmk_pw":"bmV3cA==","vault":{"v":1,"id":"wpU155hSR3hD1u8bSnGv7w","pack":22}}`

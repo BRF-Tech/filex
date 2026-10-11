@@ -1,7 +1,7 @@
 // sec055 S5: a storage plugin build's signature is over the build's name,
 // version, platform and SHA-256, so an install or upgrade that carries a
 // signature also says which version it was signed as. Without it only the
-// old sha256-only form can verify (taken in 0.55, refused from 0.56).
+// old sha256-only form can verify (taken during its compatibility window).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const posts: Array<{ url: string; body: unknown }> = [];

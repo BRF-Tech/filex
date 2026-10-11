@@ -117,6 +117,9 @@ const props = defineProps<{
   /** Could this person set a missing service up (`capabilities.caller_admin`)?
    *  Adds WHERE to the line that says which families are missing. */
   canConfigure?: boolean;
+  /** The server's sentences for that line (`capabilities.newdoc_withheld`,
+   *  #217): one per service, and `admin`. Absent (an older server): no line. */
+  withheldWords?: Record<string, string> | null;
   /** Make a DRAFT rather than the file (issue #71): the server keeps drafts
    *  for this person (`capabilities.drafts`). Absent: the file is created. */
   drafts?: boolean;
@@ -147,22 +150,32 @@ function satisfied(ty: NewDocType): boolean {
 
 const offered = computed(() => (props.types ?? []).filter(satisfied));
 
-/** Services that are holding a type back, so the dialog can say which.
- *  A kind an app's row makes anyway (draw.io's app for `.drawio`) is not
- *  missing: saying "Diagrams need draw.io" beside the app's own .drawio row
- *  would contradict the row. */
+/** Services that are holding a family of types back, so the dialog can say
+ *  which. A family is missing only when NOTHING here makes any of its kinds:
+ *  neither the service (`satisfied`) nor an app's row.
+ *
+ *  ⚠ #217: the check was per extension. An office editor app offering .docx,
+ *  .xlsx and .pptx left .odt/.ods/.odp held back, so the dialog said "Office
+ *  documents need a document server (ONLYOFFICE)" right above the app's own
+ *  .docx row - the line denied what the row offered. Saying "Diagrams need
+ *  draw.io" beside draw.io's app row was the same mistake. */
 const withheld = computed(() => {
+  const types = props.types ?? [];
   const madeByApps = new Set(offered.value.filter((ty) => ty.app).map((ty) => ty.ext));
   const out: string[] = [];
-  for (const ty of props.types ?? []) {
-    if (satisfied(ty) || !ty.requires || ty.requires === 'app' || madeByApps.has(ty.ext)) continue;
-    if (!out.includes(ty.requires)) out.push(ty.requires);
+  for (const ty of types) {
+    if (satisfied(ty) || !ty.requires || ty.requires === 'app' || out.includes(ty.requires)) continue;
+    const svc = ty.requires;
+    const familyMadeByAnApp = types.some((o) => !o.app && o.requires === svc && madeByApps.has(o.ext));
+    if (!familyMadeByAnApp) out.push(svc);
   }
   return out;
 });
 
 /**
- * The withheld services as one sentence.
+ * The withheld services as one line: the SERVER's sentences
+ * (`capabilities.newdoc_withheld`, #217), in the reader's language. The
+ * dialog only picks which; it writes none of them.
  *
  * ⚠ Joined in script rather than looped in the template with a `<span> </span>`
  * separator: Vue's compiler drops a whitespace-only text node between
@@ -171,10 +184,12 @@ const withheld = computed(() => {
  * test that asserts on textContent.
  */
 const withheldText = computed(() => {
-  const parts = withheld.value.map((svc) => t('newdoc.withheld.' + svc));
+  const words = props.withheldWords ?? {};
+  const parts = withheld.value.map((svc) => words[svc]).filter((s): s is string => !!s);
   /* Someone who can fix it is told where (the owner's rule for a missing
-     service, lib/serviceGate); everybody else reads only what is missing. */
-  if (parts.length && props.canConfigure) parts.push(t('newdoc.withheld_admin'));
+     service, lib/serviceGate); everybody else reads only what is missing.
+     The server sends `admin` only to a caller who can. */
+  if (parts.length && props.canConfigure && words.admin) parts.push(words.admin);
   return parts.join(' ');
 });
 

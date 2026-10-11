@@ -128,6 +128,9 @@ var bare = map[Permission]bool{
 	PermPublicPages: true, PermSchedule: true,
 	PermUI: true, PermUIEval: true, PermUIWasmEval: true, PermUIPackageFetch: true, PermUIDownload: true,
 	PermUIFramePackage: true, PermUIConnectBlob: true, PermUIPrint: true,
+	// Derived from `encrypted_folders` (e2eplain.go); parsed here so a stored
+	// grant and an approval naming it read back.
+	PermFilesE2EPlaintext: true,
 }
 
 // ParsePermission validates one manifest entry.
@@ -305,6 +308,8 @@ func (p Permission) Label(lang string) string {
 		return permText(lang, "files_write", nil)
 	case p == PermFilesLock:
 		return permText(lang, "files_lock", nil)
+	case p == PermFilesE2EPlaintext:
+		return permText(lang, "files_e2e_plaintext", nil)
 	case p == PermSign:
 		return permText(lang, "sign", nil)
 	case p == PermMailSend:
@@ -321,6 +326,8 @@ func (p Permission) Label(lang string) string {
 		return permText(lang, "public_pages", nil)
 	case p == PermSchedule:
 		return permText(lang, "schedule", nil)
+	case p == PermFilesCoEdit:
+		return permText(lang, "files_co_edit", nil)
 	case p == PermUI:
 		return permText(lang, "ui", nil)
 	case p == PermUIEval:

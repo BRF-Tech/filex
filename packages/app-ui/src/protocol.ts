@@ -56,10 +56,10 @@ export type Method =
   /** 0.55.0: filex prints a PDF the app hands it (`PrintParams`, grant `ui:print`). */
   | 'ui.print'
   /**
-   * 0.55.0, editing together (`coedit.*`, task #189): the session's log the
-   * host seals, orders through filex's relay and opens again. Defined so an
-   * app can be written against them; filex 0.55 offers no relay yet, so each
-   * answers `unavailable` - edit alone then (see `CoEditHello`).
+   * Editing together (`coedit.*`, task #189): the session's log the host
+   * seals, orders through filex's relay and opens again. Defined in filex
+   * 0.55, which answers each `unavailable`; offered from 0.56 to an app
+   * granted `files:co-edit` (see `CoEditHello`). `unavailable` = edit alone.
    */
   | 'coedit.join'
   | 'coedit.subscribe'
@@ -115,9 +115,10 @@ export type HostEvent =
   /** Editing together: another member's cursor (not kept). `data: CoEditCursor`. */
   | 'coedit.cursor'
   /**
-   * Editing together: the host stopped handing entries over (the app fell
-   * behind, or the connection dropped). `data: {from}` - subscribe again
-   * from the last entry the app holds.
+   * Editing together: the host stopped handing entries over. `data:
+   * CoEditDropped` - `gone`: the membership ended (join again); `broken`: an
+   * entry did not check out (stop editing together). A connection that drops
+   * for a moment is the host's own: it reconnects and says nothing.
    */
   | 'coedit.dropped';
 
@@ -219,13 +220,43 @@ export interface FileInfo {
    * `file` for a single encrypted file (`.fxe`). As the server says it;
    * ABSENT for a file that is not encrypted.
    *
-   * ⚠ filex 0.55 decrypts nothing for an app: the server holds such a file
-   * only as ciphertext and has no key, so `file.read` is refused
-   * (`failed` with `encrypted`), a save is refused, and `readOnly` is true.
-   * The explorer offers no app an encrypted file in the first place; the
-   * field is information, not a promise of plaintext.
+   * ⚠ The server holds such a file only as ciphertext and has no key. Unless
+   * `plaintext` is true, filex hands the app nothing of it: `file.read` is
+   * refused (`failed` with `encrypted`), a save is refused, and `readOnly`
+   * is true.
    */
   encrypted?: 'folder' | 'vault' | 'file';
+  /**
+   * 0.56.0: filex hands this encrypted file to the app in the clear. The
+   * person's browser, which holds the folder key while the folder is
+   * unlocked, decrypts it for `file.read` and encrypts what `file.save`
+   * hands over before it leaves the browser; the server sees only
+   * ciphertext. Only with `encrypted: 'folder'` or `'vault'`, for an app
+   * whose manifest says `encrypted_folders: {"open": true}` (the grant
+   * `files:e2e-plaintext`) - never for a `.fxe`. ABSENT otherwise.
+   *
+   * In a vault (`encrypted: 'vault'`) the browser reads the file from the
+   * vault's packs and writes a save as the vault's next generation, under
+   * the vault's write lock (one writer at a time). A save is refused -
+   * `failed` with `vault_locked` - while somebody else writes the vault, and
+   * with `vault_lock_lost` when this session's write lock ended before the
+   * save was committed: nothing was written, save again. The vault locked
+   * meanwhile (its keys left the browser): `unavailable`, and filex closes
+   * the app.
+   *
+   * What changes for the app: a read and a save are held whole in the page
+   * (at most LIMITS.maxEncryptedBytes); a save is written only over the file
+   * as it was opened (`failed` with `changed` when it changed meanwhile);
+   * `file.saveAs` answers `unavailable` (a copy elsewhere would leave the
+   * folder decrypted); the app's module (`engine.call`, `job.submit`) is
+   * never handed the file; `state.get` / `state.set` use a store of their
+   * own for this folder, sealed in the person's browser (the server keeps it
+   * and cannot read it; apart from the app's ordinary store, a little smaller
+   * as it is measured sealed). Everything the app holds is plaintext: keep it
+   * in the frame. In a folder whose names are encrypted too, `name` and
+   * `ext` are the decrypted name's - the server never sees them.
+   */
+  plaintext?: true;
 }
 
 /** What `session.get` answers — what the app knows about where it runs. */
@@ -325,7 +356,7 @@ export interface PrintResult {
   size: number;
 }
 
-/* ── editing together (coedit.*, filex 0.55.0: defined, not offered) ────── */
+/* ── editing together (coedit.*: filex 0.55 defined, 0.56 offers) ──────── */
 
 /** What a member appends: the editor's changes, a lock request, a release. */
 export type CoEditKind = 'changes' | 'lock' | 'release';
@@ -354,18 +385,46 @@ export interface CoEditJoinParams {
  * What `coedit.join` answers: who the app is in the session and how far
  * the log has gone. The entries come as `coedit.entry` events once the app
  * subscribes (`coedit.subscribe` from 0 for the whole log). `unavailable`
- * when filex offers no editing together here (filex 0.55, a vault, a file
- * that cannot be shared): the app edits alone.
+ * when filex offers no editing together here (filex 0.55, editing together
+ * turned off, an encrypted file, a vault): the app edits alone - the message
+ * says why (`not_ready` after waiting for a session's creator, `encrypted`,
+ * `nothing_to_watch` for a person who may only read the file while nobody
+ * edits it, or the server's code: `coedit_off`, `coedit_build`,
+ * `coedit_file_changed`).
  */
 export interface CoEditHello {
   session: string;
   me: CoEditMember;
-  /** The last entry's seq (0: an empty log). */
+  /**
+   * The last entry's seq when filex handed the session over (0: an empty
+   * log). filex 0.56: the changes this browser kept from an earlier opening
+   * of the file (a lost connection, a closed tab), which filex sends before
+   * it answers, are in the log up to here - an editor that starts once it
+   * has read this far opens with them.
+   */
   head: number;
-  /** The last `changes` entry's seq. */
+  /** The last `changes` entry's seq, as far as `head`. */
   changesHead: number;
   /** The last entry the file on the storage holds. */
   savedThrough: number;
+  /**
+   * filex 0.56: this member started the session. Before anybody else can
+   * join it puts the base document - EXACTLY the bytes it opened - with
+   * `coedit.blob.put('base', bytes)`. A member that did not start it opens
+   * `coedit.blob.get('base')`, never the file: the file may hold a save of
+   * the session already, and the log applies to the base.
+   */
+  created: boolean;
+}
+
+/** `coedit.dropped` event data (filex 0.56). */
+export interface CoEditDropped {
+  /** The last entry the host handed over. */
+  from: number;
+  /** `gone`: the membership ended (the session closed, or the page was away
+   *  too long) - join again. `broken`: an entry did not check out (missing,
+   *  moved, altered, replayed) - stop editing together. */
+  reason: 'gone' | 'broken';
 }
 
 /** `coedit.subscribe` params: entries after `from` arrive as `coedit.entry`. */
@@ -396,7 +455,8 @@ export interface CoEditLeaseResult {
   granted: boolean;
 }
 
-/** `coedit.cursor` params: passed to the other members, not kept. */
+/** `coedit.cursor` params: passed to the other members, not kept. The host
+ *  sends a few a second at most (the last one wins). */
 export interface CoEditCursorParams {
   cursor: unknown;
 }
@@ -523,6 +583,13 @@ export const LIMITS = {
    * is far smaller.
    */
   maxPrintBytes: 64 << 20,
+  /**
+   * The largest file of an encrypted folder filex hands an app in the clear
+   * or takes back from it (filex 0.56, `FileInfo.plaintext`): it is
+   * decrypted and encrypted whole in the page, as filex's own explorer does
+   * for a file of this size.
+   */
+  maxEncryptedBytes: 200 << 20,
 } as const;
 
 /* ── guards ────────────────────────────────────────────────────────────── */

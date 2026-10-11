@@ -4,9 +4,15 @@
 //
 // Writes e2e/.artifacts/shots/capture/tags/:
 //
-//   tags-kinds-1440.png   Tagged files: the person's OWN tags and their TEAM's,
-//                         under their own headings, with a team tag opened and
-//                         its files listed from every folder they live in
+//   tags-kinds-1440.png   the explorer: the person's OWN tags and their TEAM's
+//                         under their own headings in the navigation panel,
+//                         with a team tag opened and its files listed from
+//                         every folder they live in
+//
+// ⚠ The explorer, not Admin → Tagged files. Until 0.56 this picture was the
+// admin panel's page, and the README shows it in "The explorer" under a
+// caption about the explorer: true of the data, wrong about the screen, and
+// an administrator's page is not where most people meet their tags.
 //
 // ⚠⚠ Why this is its own scene rather than another shot in starstags.mjs: that
 // script photographs the explorer's tag PANEL and asserts exact counts on it
@@ -25,7 +31,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
-import { seedFixtures } from './fixtures.mjs';
+import { seedFixtures, syncAndWait } from './fixtures.mjs';
 import { addLocalStorage, bootInstance, client, log, newContext, shot, signIn, sleep, uploadTree } from './scene.mjs';
 
 const SET = 'tags';
@@ -60,8 +66,12 @@ async function main() {
     await api.patch('/api/auth/profile', { locale: 'en', display_name: ADMIN.display_name });
 
     seedFixtures(seed);
-    await addLocalStorage(api, 'demo', inst.storageRoot('demo'), { onHost: !inst.container });
+    const demo = await addLocalStorage(api, 'demo', inst.storageRoot('demo'), { onHost: !inst.container });
     await uploadTree(api, 'demo://', seed);
+    // One finished sync: uploads catalogue the files but never finish a
+    // storage's FIRST sync, and the panel's storage line then reads "at least
+    // 78.6 KB used" - true of a half-indexed storage, beside the point here.
+    await syncAndWait((_token, path, init) => api.call(path, init), null, demo.id);
 
     const photos = await filesUnder(api, 'demo://Photos');
     const docs = await filesUnder(api, 'demo://Documents');
@@ -90,38 +100,46 @@ async function main() {
     // The uploads above each rang the bell; this picture is about tags.
     await api.post('/api/notifications/read-all', {});
 
-    await page.goto(`${inst.url}/admin/tagged`);
-    const personal = page.getByTestId('tagged-group-personal');
-    const team = page.getByTestId('tagged-group-team');
+    await page.goto(`${inst.url}/drive/explore`);
+    const personal = page.getByTestId('sidenav-tags-personal');
+    const team = page.getByTestId('sidenav-tags-team');
     await personal.waitFor({ timeout: 25_000 });
     await team.waitFor({ timeout: 25_000 });
 
-    // Open a TEAM tag, so the list below is the answer to a question the
-    // picture has already asked on screen.
-    await team.getByRole('button', { name: /contracts/ }).first().click();
-    const results = page.getByTestId('tagged-files');
-    await results.waitFor({ timeout: 15_000 });
-    // ⚠ The shared DataTable is not an HTML <table> — one table, the
-    // explorer's, drawn with rows of `.fe-list__row`. A `tbody tr` wait here
-    // simply never resolves.
+    // Open a TEAM tag, so the list beside the panel is the answer to a
+    // question the picture has already asked on screen.
+    const contracts = page.locator('[data-testid="sidenav-tag-contracts"][data-tag-kind="team"]');
+    await contracts.click();
+    // The list, whatever view the account last left: its Location column is
+    // what says "from every folder they live in".
+    const listView = page.getByTestId('view-list').first();
+    if (await listView.isVisible().catch(() => false)) await listView.click();
     await page.waitForFunction(
-      () => (document.querySelector('[data-testid="tagged-files"]')?.querySelectorAll('.fe-list__row').length ?? 0) > 0,
+      () => document.querySelectorAll('.fe-list__row[data-fe-path]').length >= 4,
       undefined,
-      { timeout: 15_000 },
+      { timeout: 20_000 },
     );
 
     // ⚠ Both headings have to be READABLE in the picture, not merely present
-    // in the DOM: a scroll position that leaves one of them above the frame
-    // turns "two kinds of tag" into "a list of tags", which is the picture
-    // this release does NOT need.
+    // in the DOM, and the files must come from more than one folder: one
+    // heading alone turns "two kinds of tag" into "a list of tags", and one
+    // folder's files say nothing about where a tag reaches.
     const hidden = await page.evaluate(() => {
       const out = [];
-      for (const id of ['tagged-group-personal', 'tagged-group-team']) {
+      for (const id of ['sidenav-tags-personal', 'sidenav-tags-team']) {
         const el = document.querySelector(`[data-testid="${id}"]`);
         if (!el) return [`${id} is not on the page`];
         const r = el.getBoundingClientRect();
         if (r.top < 0 || r.bottom > window.innerHeight) out.push(`${id} is outside the window`);
       }
+      const active = document.querySelector('[data-testid="sidenav-tag-contracts"][data-tag-kind="team"]');
+      if (!active?.classList.contains('is-active')) out.push('the team tag "contracts" is not the open view');
+      const folders = new Set(
+        [...document.querySelectorAll('.fe-list__row[data-fe-path]')].map((r) =>
+          (r.getAttribute('data-fe-path') ?? '').replace(/\/[^/]*$/, ''),
+        ),
+      );
+      if (folders.size < 2) out.push(`the tagged files come from ${folders.size} folder(s): ${[...folders].join(', ')}`);
       return out;
     });
     if (hidden.length) throw new Error(`tags-kinds-1440.png would hide half the story: ${hidden.join('; ')}`);

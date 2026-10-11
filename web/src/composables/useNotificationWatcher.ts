@@ -36,6 +36,7 @@ import { useNotificationsStore } from '@/stores/notifications';
 import { openNotificationTarget } from '@/lib/notificationNav';
 import { currentMountBase } from '@/router';
 import { canShowBrowserNotification, raiseBrowserNotification } from '@/lib/browserNotify';
+import { loadBrandAppIcon } from '@/lib/brand';
 import { reconcileWebPush } from '@/lib/webPush';
 
 /** Same cadence the bell has always polled at — core's, the one every
@@ -72,6 +73,9 @@ export function useNotificationWatcher() {
   function announceNew(): void {
     if (highWater.value == null) return;
     if (!canShowBrowserNotification(auth.user?.id)) return;
+    // #219 - the icon is asked for at start(); a browser allowed to notify
+    // only since then asks here (its first toast may still wear filex's PNG).
+    loadBrandAppIcon();
     const since = highWater.value;
     // Oldest first, so a burst arrives in the order it happened. Unread only:
     // a row read in another tab meanwhile is not news.
@@ -134,6 +138,10 @@ export function useNotificationWatcher() {
     // subscription true (a rotated key, one the browser dropped). Asks
     // nothing and sends nothing where they did not.
     void reconcileWebPush(auth.user?.id);
+    // #219 - a toast's icon is the installed app's, read off the manifest
+    // (lib/brand): asked now, so it is in before the first toast, and only
+    // by a browser that may show one.
+    if (canShowBrowserNotification(auth.user?.id)) loadBrandAppIcon();
     void prime().then(poll);
     handle = window.setInterval(() => void poll(), NOTIFY_POLL_MS);
   }

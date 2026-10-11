@@ -190,6 +190,26 @@ type Pushes interface {
 
 var _ Pushes = (*service)(nil)
 
+// PushIcons is how the HTTP layer hands push the installed app's icon (#219).
+// Its own interface for the same reason as Pushes.
+type PushIcons interface {
+	// SetPushIcon sets where a push's icon comes from: the PNG icon the
+	// installed app's manifest names for a person's branding (api
+	// spa_brand.go), as an address relative to the worker (`<base>/admin/`).
+	// Unset, or "" for a person: no icon in the payload, and the worker shows
+	// filex's own PNG.
+	SetPushIcon(fn func(ctx context.Context, u *model.User) string)
+}
+
+var _ PushIcons = (*service)(nil)
+
+// SetPushIcon implements PushIcons.
+func (s *service) SetPushIcon(fn func(ctx context.Context, u *model.User) string) {
+	s.mu.Lock()
+	s.pushIcon = fn
+	s.mu.Unlock()
+}
+
 // pushRuntime is push's state in memory. Everything that must survive a
 // restart (the key, the devices, their marks) is in the database.
 type pushRuntime struct {
@@ -457,7 +477,7 @@ func (s *service) PushTest(ctx context.Context, userID int64) (PushTestResult, e
 		return PushTestResult{}, err
 	}
 	w := s.pushWords(ctx, userID)
-	m := pushMessage{Title: w.brand, Body: srvtext.Text(w.lang, "server.notify.push.test", nil), Tag: pushTestTag, Renotify: true}
+	m := pushMessage{Title: w.brand, Icon: w.icon, Body: srvtext.Text(w.lang, "server.notify.push.test", nil), Tag: pushTestTag, Renotify: true}
 	var out PushTestResult
 	for _, sub := range subs {
 		if taken, _ := s.deliverPush(ctx, key, sub, m); taken {
@@ -628,19 +648,32 @@ func (s *service) pushPerson(ctx context.Context, uid int64, key *webpush.Key) (
 	return sent, nil
 }
 
-// pushWords is what every push to one person says the same: their language
-// and the instance's name.
+// pushWords is what every push to one person says the same: their language,
+// the instance's name and the installed app's icon.
 type pushWords struct {
 	lang  string
 	brand string
+	icon  string
 }
 
 func (s *service) pushWords(ctx context.Context, uid int64) pushWords {
 	u, err := s.store.GetUser(ctx, uid)
 	if err != nil || u == nil {
-		return pushWords{lang: PersonLang(nil), brand: s.brandName(ctx, nil)}
+		u = nil
 	}
-	return pushWords{lang: PersonLang(u), brand: s.brandName(ctx, u)}
+	return pushWords{lang: PersonLang(u), brand: s.brandName(ctx, u), icon: s.pushIconFor(ctx, u)}
+}
+
+// pushIconFor is the installed app's PNG icon for this person's branding, the
+// one the manifest names (SetPushIcon); "" when nothing sets it.
+func (s *service) pushIconFor(ctx context.Context, u *model.User) string {
+	s.mu.Lock()
+	fn := s.pushIcon
+	s.mu.Unlock()
+	if fn == nil {
+		return ""
+	}
+	return fn(ctx, u)
 }
 
 // brandName is the instance's name as the Branding page set it - a tenant's
@@ -669,6 +702,10 @@ type pushMessage struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 	Tag   string `json:"tag"`
+	// Icon is the installed app's PNG icon, relative to the worker
+	// (`brand-icons/<hash>-192.png`, `icons/icon-192.png`): the picture the
+	// manifest gives the home screen. Empty: the worker's own filex PNG.
+	Icon string `json:"icon,omitempty"`
 	// Open: the row has somewhere to go. Without it a tap only opens filex.
 	Open bool `json:"open,omitempty"`
 	// Renotify: alert again when it replaces one with the same tag (a
@@ -695,6 +732,7 @@ func (s *service) pushMessages(ctx context.Context, w pushWords, fresh []*model.
 	if len(keep) > pushPerPass {
 		return []pushMessage{{
 			Title:    w.brand,
+			Icon:     w.icon,
 			Body:     srvtext.Plural(w.lang, "server.mail.digest.subject", len(keep), nil),
 			Tag:      pushSummaryTag,
 			Renotify: true,
@@ -706,6 +744,7 @@ func (s *service) pushMessages(ctx context.Context, w pushWords, fresh []*model.
 		out = append(out, pushMessage{
 			ID:      n.ID,
 			Title:   w.brand,
+			Icon:    w.icon,
 			Body:    clip(ToastBody(Say(w.lang, n)), pushBodyMax),
 			Tag:     fmt.Sprintf("filex-notification-%d", n.ID),
 			Open:    Opens(n.Target),

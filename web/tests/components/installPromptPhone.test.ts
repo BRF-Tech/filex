@@ -29,8 +29,16 @@ vi.mock('@/lib/serviceWorker', async () => {
   };
 });
 
+// #219: the installation's name, as GET /api/branding answers it, and the
+// manifest the browser installs from, as the server writes it.
+const branding = vi.hoisted(() => ({ name: '', manifest: null as unknown, manifestAsked: [] as string[] }));
+vi.mock('@/api/branding', () => ({
+  BrandingApi: { boot: vi.fn(async () => ({ name: branding.name })) },
+}));
+
 import InstallPrompt from '@/components/InstallPrompt.vue';
 import { __resetInstallPrompt, captureInstallPrompt } from '@/composables/useInstallPrompt';
+import { __resetBrand, loadBrandName } from '@/lib/brand';
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 
@@ -45,7 +53,7 @@ const UA = {
 
 const Blank = { template: '<div />' };
 
-async function mountAt(at: string) {
+async function mountAt(at: string, locale = 'en') {
   const router = createRouter({
     history: createMemoryHistory('/admin/'),
     routes: [
@@ -57,7 +65,7 @@ async function mountAt(at: string) {
   });
   await router.push(at);
   await router.isReady();
-  const i18n = createI18n({ legacy: false, locale: 'en', fallbackLocale: 'en', messages: { en, tr } });
+  const i18n = createI18n({ legacy: false, locale, fallbackLocale: 'en', messages: { en, tr } });
   const w = mount(InstallPrompt, { global: { plugins: [router, i18n] }, attachTo: document.body });
   await flushPromises();
   return w;
@@ -85,10 +93,23 @@ beforeEach(() => {
     removeListener() {},
     dispatchEvent: () => false,
   }));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      branding.manifestAsked.push(String(url));
+      return branding.manifest
+        ? { ok: true, json: async () => branding.manifest }
+        : { ok: false, json: async () => null };
+    }),
+  );
 });
 
 afterEach(() => {
   __resetInstallPrompt();
+  __resetBrand();
+  branding.name = '';
+  branding.manifest = null;
+  branding.manifestAsked = [];
   vi.unstubAllGlobals();
 });
 
@@ -185,7 +206,7 @@ describe("a phone's sign-in page", () => {
     expect(phone.find('.ip-card--install').exists()).toBe(true);
     expect(phone.find('[data-testid="pwa-install-button"]').exists()).toBe(true);
     expect(phone.find('[data-testid="desktop-download-button"]').exists()).toBe(false);
-    expect(phone.text()).toContain(en.install.title);
+    expect(phone.text()).toContain('Install filex as a web app');
     phone.unmount();
 
     __resetInstallPrompt();
@@ -196,5 +217,123 @@ describe("a phone's sign-in page", () => {
     expect(pc.find('.ip-card--install').exists()).toBe(true);
     expect(pc.find('[data-testid="desktop-download-button"]').exists()).toBe(true);
     expect(pc.find('[data-testid="pwa-install-button"]').exists()).toBe(false);
+  });
+});
+
+/* #219 - the band names the app the home screen will show.
+ *
+ * ⚠ 0.56 made the installed app wear the installation's brand (spa_brand.go:
+ * the manifest's name, the icons, the first paint), but the band offering the
+ * install still read the catalogue's constant "Install filex as a web app" on
+ * an instance called "BRF Teknoloji". The name comes from lib/brand (GET
+ * /api/branding, the same BrandingSource the manifest is written from). */
+describe('the band names the installation', () => {
+  const title = (w: Awaited<ReturnType<typeof mountAt>>) => w.find('.ip-title').text();
+
+  it('a branded installation: its own name, repainted when the answer lands', async () => {
+    vi.stubGlobal('navigator', { userAgent: UA.android, platform: 'Linux armv8l' });
+    captureInstallPrompt();
+    offerInstall();
+    branding.name = 'BRF Teknoloji';
+    const w = await mountAt('/login');
+    // Painted before the answer: the product's own name, never a blank.
+    expect(title(w)).toBe('Install filex as a web app');
+    loadBrandName();
+    await flushPromises();
+    expect(title(w)).toBe('Install BRF Teknoloji as a web app');
+    w.unmount();
+  });
+
+  it('an installation nobody named: filex', async () => {
+    vi.stubGlobal('navigator', { userAgent: UA.android, platform: 'Linux armv8l' });
+    captureInstallPrompt();
+    offerInstall();
+    loadBrandName();
+    await flushPromises();
+    const w = await mountAt('/explore');
+    expect(title(w)).toBe('Install filex as a web app');
+    w.unmount();
+  });
+
+  it('speaks Turkish with Turkish characters, and no suffix glued to the name', async () => {
+    vi.stubGlobal('navigator', { userAgent: UA.iPhone, platform: 'iPhone' });
+    captureInstallPrompt();
+    branding.name = 'BRF Teknoloji';
+    loadBrandName();
+    await flushPromises();
+    const w = await mountAt('/login', 'tr');
+    expect(title(w)).toBe('BRF Teknoloji web uygulamasını kurun');
+    w.unmount();
+  });
+});
+
+/* #219 - and the mark beside the offer is the icon the home screen will get.
+ *
+ * ⚠ The band showed filex's mark beside "Install BRF Teknoloji". It now shows
+ * the manifest's own first `any` icon - the one the server draws from the logo
+ * (spa_brand.go), whether the logo was given as a data: URI or as an address -
+ * so the offer and the home screen cannot disagree. The manifests below are
+ * shaped the way the server writes them in each case. */
+describe('the band shows the icon the home screen will get', () => {
+  const at = (p: string) => new URL(p, window.location.href).href;
+  const rasterBrand = (hash: string) => ({
+    name: 'BRF Teknoloji',
+    icons: [
+      { src: `brand-icons/${hash}-192.png`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: `brand-icons/${hash}-512.png`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: `brand-icons/${hash}-maskable-192.png`, sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+      { src: `brand-icons/${hash}-maskable-512.png`, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ],
+  });
+  const unbranded = {
+    name: 'filex - File Manager',
+    icons: [
+      { src: 'icons/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+      { src: 'icons/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' },
+      { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+    ],
+  };
+  const mark = (w: Awaited<ReturnType<typeof mountAt>>) => w.find('[data-testid="pwa-install-mark"]');
+
+  async function phoneBand(manifest: unknown) {
+    vi.stubGlobal('navigator', { userAgent: UA.android, platform: 'Linux armv8l' });
+    captureInstallPrompt();
+    offerInstall();
+    branding.manifest = manifest;
+    return mountAt('/login');
+  }
+
+  it('a logo given as a data: URI: the manifest’s icon drawn from it', async () => {
+    const w = await phoneBand(rasterBrand('d4a7a0e1c2b3f405'));
+    expect(branding.manifestAsked).toEqual([at('/admin/manifest.webmanifest')]);
+    expect(mark(w).attributes('src')).toBe(at('/admin/brand-icons/d4a7a0e1c2b3f405-192.png'));
+    w.unmount();
+  });
+
+  it('a logo given as an address: the same, the icon the server drew from what it fetched', async () => {
+    const w = await phoneBand(rasterBrand('0e11a9b8c7d6e5f4'));
+    expect(mark(w).attributes('src')).toBe(at('/admin/brand-icons/0e11a9b8c7d6e5f4-192.png'));
+    w.unmount();
+  });
+
+  it('nothing branded: filex’s mark, because that is what the manifest leads with', async () => {
+    const w = await phoneBand(unbranded);
+    expect(mark(w).attributes('src')).toBe(at('/admin/icons/icon.svg'));
+    w.unmount();
+  });
+
+  it('a manifest that cannot be read: filex’s mark, never an empty box for good', async () => {
+    const w = await phoneBand(null);
+    expect(mark(w).attributes('src')).toBe('/admin/icons/icon.svg');
+    w.unmount();
+  });
+
+  it('a PC’s desktop-app offer keeps filex’s mark: that download is filex', async () => {
+    vi.stubGlobal('navigator', { userAgent: UA.windows, platform: 'Win32' });
+    branding.manifest = rasterBrand('d4a7a0e1c2b3f405');
+    const w = await mountAt('/login');
+    expect(w.find('[data-testid="desktop-download-button"]').exists()).toBe(true);
+    expect(mark(w).attributes('src')).toBe('/admin/icons/icon.svg');
+    w.unmount();
   });
 });

@@ -728,7 +728,8 @@ function onRowAction(key: string, row: Plugin) {
               {{ t('plugins.restarts', { count: row.restarts }) }}
             </span>
             <!-- The server's sentence (sec055 S5): the build's signature is
-                 the old sha256-only form - taken in 0.55, refused from 0.56. -->
+                 the old sha256-only form - taken during its compatibility
+                 window, whose end the sentence names. -->
             <span
               v-if="row.signature_notice"
               class="tbl-sub tbl-clamp text-amber-600 dark:text-amber-400"

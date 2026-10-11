@@ -165,7 +165,16 @@ func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmp
 			return
 		}
 	}
-	if refuseEncryptedAtDoor(w, r, encryptedAtDoor(r.Context(), h.Store, storageID, rel), rel, true) {
+	// `e2e=1` (filex 0.56, app_ui_e2e.go): a body the browser encrypted with
+	// the folder's key, from an app granted files:e2e-plaintext. Without it,
+	// a file of an encrypted folder is refused as before.
+	e2eSave := wantsE2E(r)
+	kind := encryptedAtDoor(r.Context(), h.Store, storageID, rel)
+	if e2eSave {
+		if !h.e2eDoor(w, r, p, storageID, rel, kind, true) {
+			return
+		}
+	} else if refuseEncryptedAtDoor(w, r, kind, rel, true) {
 		return
 	}
 	drv, err := h.StorageResolver(storageID)
@@ -178,8 +187,33 @@ func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmp
 		notFound(w, "file")
 		return
 	}
-	if !viewSaves(w, r, v, rel, obj.Mime) {
+	// The kinds the view opens, wherever the server can read the kind: over a
+	// file whose stored name is ciphertext (a folder with encrypted names,
+	// level 2) the browser chose the app by the decrypted name, and the
+	// server holds the save to the grant, the folder, the person's write
+	// right and ciphertext only (app_ui_e2e.go).
+	if !(e2eSave && kind == encryptedInFolder && e2eKindUnreadable(r.Context(), h.Store, drv, storageID, rel)) && !viewSaves(w, r, v, rel, obj.Mime) {
 		return
+	}
+	// "Only over the file as the app opened it" (`expect`, the listing's
+	// size and date - upload_expect.go): asked when the explorer sends it, as
+	// it does for a file of an encrypted folder, so a version written
+	// meanwhile is never overwritten unseen.
+	// In an editing session (coedit.go) the session says it instead: the
+	// file must be what the session holds - its base or its last save -
+	// whoever of its members saved it last.
+	inSession, sessionHolds := h.coeditSaveHolds(r, p, drv, storageID, rel)
+	if (inSession && !sessionHolds) || (!inSession && !uploadExpectHolds(r.Context(), h.Store, h.StorageResolver, storageID, rel, r.URL.Query().Get("expect"))) {
+		writeErrorSaid(w, r, http.StatusPreconditionFailed, "changed", "app_save_changed", apierr.Params{"name": rel})
+		return
+	}
+	if e2eSave {
+		enc, ok := encryptedBody(body)
+		if !ok {
+			writeErrorSaid(w, r, http.StatusUnprocessableEntity, "not_encrypted", "app_e2e_not_encrypted", apierr.Params{"name": rel})
+			return
+		}
+		body = enc
 	}
 	if !h.roomFor(w, r, size) {
 		return
@@ -189,8 +223,20 @@ func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmp
 		writeSaveFailure(w, r, err)
 		return
 	}
-	h.auditUISave(r, p, storageID, rel, size, "version")
-	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "path": st.Name + "://" + rel, "name": path.Base(rel), "size": size})
+	if e2eSave {
+		h.auditE2E(r, p, v, storageID, rel, "save", size)
+	} else {
+		h.auditUISave(r, p, storageID, rel, size, "version")
+	}
+	// Editing together: which part of the session's log this save holds.
+	h.coeditSaved(r, p, drv, storageID, rel)
+	out := map[string]any{"saved": true, "path": st.Name + "://" + rel, "name": path.Base(rel), "size": size}
+	// The listing's date of the version just written: with `size`, the
+	// `expect` of the next save over the same file.
+	if ms, ok := h.listingModified(r.Context(), storageID, rel); ok {
+		out["modified"] = ms
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // uiSaveNew writes a NEW file into a folder the person picked in filex's own

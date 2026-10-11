@@ -17,8 +17,8 @@ import path from 'node:path';
 
 import { ciParts, completeName, gateParts } from '../ci-parts.mjs';
 import { goShellArgv, goToolchain } from '../lib/go-build.mjs';
-import { goPackageDirs } from './checks.mjs';
-import { docker, dockerArgv, run, shq, slash } from './engine.mjs';
+import { dockerfileSources, goPackageDirs } from './checks.mjs';
+import { docker, dockerImageId, run, shq, slash } from './engine.mjs';
 import { circleciPipelines } from './circleci.mjs';
 import { githubActions } from './github.mjs';
 import { desktopFeeds, docsSite, readmePictures, runningRelease, snapChannel, storeListing, updateManifest, windowsFeedArches } from './verify.mjs';
@@ -111,6 +111,23 @@ const MIGRATION_INPUTS = [...GO_INPUTS, 'scripts/release/gates/engines.mjs'];
 // engines as services).
 const MIGRATION_PATCH = ['backend/db/**', 'backend/internal/db/**', 'backend/go.mod', 'backend/go.sum', 'scripts/release/gates/engines.mjs'];
 const E2E_INPUTS = ['**', '!docs/**', '!docs-site/**', '!site/**'];
+
+/**
+ * An image build's inputs (#165): what its Dockerfile copies from the build
+ * context (checks.mjs → dockerfileSources), the Dockerfile and .dockerignore,
+ * and the gate's own script with the release code it runs. The whole tree when
+ * the Dockerfile's sources cannot be told.
+ */
+export function dockerInputs(repo, dockerfile) {
+  let sources = null;
+  try {
+    sources = dockerfileSources(fs.readFileSync(path.join(repo, dockerfile), 'utf8'));
+  } catch {
+    sources = null;
+  }
+  if (!sources) return ALL;
+  return [...new Set([dockerfile, '.dockerignore', 'scripts/release/gates/docker-build.mjs', 'scripts/release/checks.mjs', 'scripts/release/engine.mjs', ...sources])];
+}
 
 // Names other gates wait for (`after`).
 const BUILD_UI = 'build: packages, admin (vue-tsc + vite), embed';
@@ -224,7 +241,9 @@ const WORKFLOW_GUARDS = [
   'never cancels the run of a push: each commit keeps its own verdict',
   'takes every migration up, three steps down and up again through the CLI, on three engines',
   'migrate-roundtrip.sh is red when a down does not undo exactly one migration, or an up does not bring them all back',
-  'every browser part fetches the apps, maps the fonts as the build host does, and runs e2e/run.mjs',
+  // #181: the browser parts' preparation is the script CircleCI calls too
+  // (packaging/ci/ci-browser-prep.patch).
+  'every browser part is prepared by the script CircleCI calls too, and runs e2e/run.mjs',
   // #174: a tag run promotes what the dry run of its commit built
   // (web/tests/deploy/releasePromote.test.ts).
   "a tag run publishes only after ci.yml's full matrix passed on its commit",
@@ -469,18 +488,25 @@ export default function plan({ repo, version, tag }) {
   const exportDir = path.resolve(process.env.FILEX_EXPORT_DIR ?? path.join(repo, '..', 'filex-export'));
   const bin = `bin/filex-release-e2e${IS_WIN ? '.exe' : ''}`;
   const img = (kind) => `filex-release:${kind}-${version}`;
+  // ⚠⚠ #165: from the release COMMIT, streamed as `git archive` into
+  // `docker build -` (scripts/release/gates/docker-build.mjs), never `.`: on
+  // the maintainer's workstation `.` is read through WSL's 9P bridge, and
+  // BuildKit's walk of the checkout (its .git, every worktree, the build
+  // output) took 30-52 minutes per image at 0.54.0 and 0.55.0 to send 276 kB.
+  // So the images need no local build and wait for none (`after`).
+  //
+  // Cached on what the image is made of (dockerInputs): a fix to a test, the
+  // docs or the desktop app leaves both images' keys alone. The recipe leaves
+  // out the commit and the date the build stamps into this throwaway image
+  // (CI builds the published ones), and the cache keeps the image's id: a hit
+  // holds only while that very image is still under its tag, which the two
+  // gates after it run.
   const dockerBuild = (dockerfile, kind) => ({
     name: `docker: ${kind} image (${dockerfile}, amd64)`,
-    env: { MSYS_NO_PATHCONV: '1', MSYS2_ARG_CONV_EXCL: '*' },
-    cmd: (c) => {
-      const [bin, args] = dockerArgv([
-        'build', '--progress=plain', '--platform', 'linux/amd64',
-        '--build-arg', `VERSION=${c.tag}`, '--build-arg', `COMMIT=${c.releaseCommit}`,
-        '--build-arg', `DATE=${new Date().toISOString().replace(/\.\d+Z$/, 'Z')}`,
-        '-f', dockerfile, '-t', img(kind), '.',
-      ], c.bash);
-      return [bin, ...args];
-    },
+    cmd: (c) => ['node', 'scripts/release/gates/docker-build.mjs', '--dockerfile', dockerfile, '--tag', img(kind), '--version', c.tag, '--commit', c.releaseCommit ?? 'HEAD'],
+    inputs: dockerInputs(repo, dockerfile),
+    cacheRecipe: (c) => ({ dockerfile, tag: img(kind), version: c.tag, platform: 'linux/amd64' }),
+    cacheProof: () => dockerImageId(img(kind)),
   });
   const workflowsOf = (dir) => slash(path.join(dir, '.github', 'workflows'));
 
@@ -497,9 +523,10 @@ export default function plan({ repo, version, tag }) {
     // The maintainer key (docs/CONTRIBUTING.md → Release process, step 8).
     signingKeys: ['EFA3B1262FD992800DBBB5E3A8FEBA97FF786513'],
     // The public tree may name this project's hosts only as these two
-    // contact addresses, which the export keeps reachable on purpose.
+    // contact addresses and the Helm repository users add, which the export
+    // keeps reachable on purpose (KEEP in scripts/export-public.sh).
     privateHosts: {
-      allow: ['security@brf.sh', 'hello@brf.sh'],
+      allow: ['security@brf.sh', 'hello@brf.sh', 'helm.brf.sh'],
       forbid: [/brf\.sh/, /gitlab\.com[/:]brftech/],
     },
 
@@ -553,14 +580,27 @@ export default function plan({ repo, version, tag }) {
     // 0.44.1 tag round, because they ran before the bump).
     //
     // ⚠ Fast: the builds and vue-tsc, the unit suites in UTC, the desktop and
-    // the Store copy, both images, the shop window - about 15-20 minutes with
-    // the lanes side by side (`jobs`). The heavy suites are `heavy` below, and
+    // the Store copy, both images, the shop window - about 12-15 minutes with
+    // the lanes side by side (`jobs`), the longest path the UI build and then
+    // the web unit suite (#165). It was 66-74 minutes at 0.55.0, and four runs
+    // of it 4.5 of that day's hours: the two image builds, one after the
+    // other, each spent ~31 minutes letting BuildKit walk the checkout over
+    // WSL's 9P bridge (dockerBuild above). The heavy suites are `heavy` below, and
     // the profile (checks.mjs → PROFILES) says where they run. `always`: a
     // patch runs it too, whatever changed - the builds and the packaging,
     // because 0.43.0 and 0.44.0/0.44.1 died building, not testing (#76).
     jobs: 3,
     pretag: [
       { name: BUILD_UI, lane: 'build', always: true, sh: "pnpm -r --filter './packages/*' build && pnpm --filter ./web build && node scripts/sync-embed.mjs" },
+      // v0.43.0: npm and the Release went out, the images never built —
+      // nothing local had ever built one. #165: built from the release
+      // commit's own tree (git archive), so they read nothing the local builds
+      // write and wait for none of them: second in the list, they start at
+      // once, beside the UI build, and are off the pretag's longest path.
+      { ...dockerBuild('docker/Dockerfile', 'full'), lane: 'docker', always: true },
+      { ...dockerBuild('docker/Dockerfile.slim', 'slim'), lane: 'docker', always: true },
+      { name: 'docker: both images report the release', lane: 'docker', always: true, cmd: ['node', 'scripts/release/gates/docker-image.mjs', '--version', tag, img('full'), img('slim')] },
+      { name: 'docker: the full image serves the admin UI and /embed.js', lane: 'docker', always: true, cmd: ['node', 'scripts/release/gates/docker-image.mjs', '--serve', img('full')] },
       // ⚠ Lane `go` holds every gate that goes through the WSL mirror of the
       // Go module (scripts/lib/go-build.mjs): each one rsyncs it with
       // --delete, and two at once would rewrite files under a running build.
@@ -604,13 +644,6 @@ export default function plan({ repo, version, tag }) {
             always: true,
             cmd: ['node', '-e', 'console.error("store-e2e installs an MSIX: run the release on Windows with Developer Mode"); process.exit(1)'],
           },
-      // v0.43.0: npm and the Release went out, the images never built —
-      // nothing local had ever built one. After the local builds: the image
-      // build reads the tree they are writing into.
-      { ...dockerBuild('docker/Dockerfile', 'full'), lane: 'docker', always: true, after: [BUILD_BIN] },
-      { ...dockerBuild('docker/Dockerfile.slim', 'slim'), lane: 'docker', always: true, after: [BUILD_BIN] },
-      { name: 'docker: both images report the release', lane: 'docker', always: true, cmd: ['node', 'scripts/release/gates/docker-image.mjs', '--version', tag, img('full'), img('slim')] },
-      { name: 'docker: the full image serves the admin UI and /embed.js', lane: 'docker', always: true, cmd: ['node', 'scripts/release/gates/docker-image.mjs', '--serve', img('full')] },
       // CONTRIBUTING step 12, "before the tag": demo mode refuses writes,
       // anonymous capabilities name no host. Exit 2 (could not check) is red.
       { name: 'shop window: a throwaway instance', lane: 'e2e', always: true, after: [BUILD_BIN], cmd: ['node', 'scripts/check-shop-window.mjs', '--instance', '--boot', bin] },
@@ -808,6 +841,11 @@ export default function plan({ repo, version, tag }) {
       },
       {
         name: 'export: the workflow guards ran against the workflows that will run',
+        // #165: green on exactly this tree and these workflows before (an
+        // export run again after a fix in the public checkout's workflows
+        // only, or after a red gate elsewhere) passes from the cache.
+        inputs: ALL,
+        cacheExtra: (c) => workflowsTree(c.exportTarget),
         vitest: {
           cwd: 'web',
           files: [
@@ -865,6 +903,10 @@ export default function plan({ repo, version, tag }) {
     circleciWorkflow: 'ci',
 
     // ── 11. ci: what the tag's workflow actually published ──────────────────
+    // #165: the stage waits for the tag's run to finish before it reads
+    // (stages.mjs → waitForTagRun): a tag run takes ~30 minutes, and reading
+    // at once was red until a person came back to resume.
+    tagRunWait: { workflow: 'release.yml', pollMs: 60_000, timeoutMs: 2 * 3600_000, appearMs: 15 * 60_000 },
     ciWatch: [
       'gh run list -R BRF-Tech/filex --workflow release.yml -L 3',
       'gh run watch <run id> -R BRF-Tech/filex --exit-status',

@@ -12,6 +12,8 @@
  *   office (docx/xlsx/pptx)       → OnlyOffice iframe (config.onlyOfficeBase)
  *   plain text (txt/log/conf)     → CodeMirror when saveText is set,
  *                                    `<pre>` otherwise
+ *   mermaid (mmd/mermaid)         → MermaidViewer to look at; Edit opens
+ *                                    the source in the text editor (#216)
  *   no telling extension          → as `openAs` says (a New document's
  *     (LICENSE, notes.custom)       type), else as plain text when the
  *                                    server's mime says text (#56)
@@ -57,6 +59,7 @@ import { useDraftSave, type SavedDraft } from '../composables/useDraftSave';
 import DraftCloseModal from './DraftCloseModal.vue';
 import AppFrame from '../components/plugin/AppFrame.vue';
 import type { PluginViewRow } from '../types/Plugins';
+import type { AppPlaintextDoor } from '../lib/appPlaintext';
 import type { FileApi } from '../composables/useFileApi';
 import { labelOf as pluginLabelOf } from '../lib/pluginLabel';
 import DraftConflictModal from './DraftConflictModal.vue';
@@ -197,6 +200,14 @@ const props = defineProps<{
    * goes back as `outside-resolved`. lib/outsideChange has the rule.
    */
   outsideChange?: OutsideChange | null;
+  /**
+   * filex 0.56 (task #189): the file is in an encrypted folder this tab
+   * holds the key of, and `appViewer` may be handed it in the clear - the
+   * door that decrypts and encrypts it here (lib/appPlaintext, AppFrame
+   * `e2e`). The host gives it only where lib/appViewer offered the app
+   * (`e2ePlaintext`).
+   */
+  appE2e?: AppPlaintextDoor | null;
 }>();
 
 const emit = defineEmits<{
@@ -223,6 +234,10 @@ const emit = defineEmits<{
   /** #110: the file in view was saved from here (an app's interface, the
    *  code or Markdown editor): its new size, so the host's row catches up. */
   (e: 'saved', saved: { path: string; size?: number }): void;
+  /** filex 0.56: the app's interface says it holds changes it has not saved
+   *  (`ui.dirty`), each time it says it - a lock that closes the viewer
+   *  tells the person what was lost, and a vault counts it as activity. */
+  (e: 'app-dirty', dirty: boolean): void;
   /** #184: whether the office editor holds an edit of this session's (sticky
    *  from the first keystroke until the editor is reloaded). The desktop app
    *  reads it; nothing else has to. */
@@ -333,6 +348,12 @@ const VIEWER_MAP: Record<string, () => Promise<Component>> = {
   txz: () => import('../viewers/ArchiveViewer.vue'),
 };
 
+/* The viewers that draw a diagram from its TEXT and do not edit it: Edit opens
+ * that text in the built-in text editor, which save-text saves (`kind` is
+ * 'code' in edit mode). ⚠ #216: Edit used to open the Mermaid viewer again,
+ * which has no save - the person changed nothing they could keep. */
+const SOURCE_VIEWERS = new Set(['mmd', 'mermaid']);
+
 type PreviewKind =
   | 'image' | 'video' | 'audio' | 'pdf' | 'markdown' | 'code'
   | 'office' | 'text' | 'viewer' | 'app' | 'other';
@@ -367,6 +388,9 @@ const appFiles = computed(() =>
         readOnly: !!props.file.read_only || props.file.perm === 'viewer' || props.file.perm === 'none',
         // As the server stamped it (#189): the interface is told, never guesses.
         ...(props.file.encrypted ? { encrypted: props.file.encrypted } : {}),
+        // Its listing's date: with the size, the `expect` of an encrypted
+        // file's save (filex 0.56).
+        ...(typeof props.file.last_modified === 'number' ? { modified: props.file.last_modified } : {}),
       }]
     : [],
 );
@@ -378,6 +402,7 @@ function onAppSaved(r: { path: string; size: number; index: number }): void {
 }
 function onAppDirty(v: boolean): void {
   appDirty.value = v;
+  emit('app-dirty', v);
   if (v) draftTouched.value = true;
 }
 
@@ -408,7 +433,12 @@ const kind = computed<PreviewKind>(() => {
   const wantEdit = props.openMode !== 'view';
   if (e === 'md' || e === 'markdown') return 'markdown';
   if (e in CODE_LANGS) return 'code';
-  if (e in VIEWER_MAP) return 'viewer';
+  // A diagram drawn from its text (Mermaid): Edit opens that text in the text
+  // editor, which save-text saves (#216) - the viewer itself only draws it.
+  if (e in VIEWER_MAP) {
+    if (wantEdit && SOURCE_VIEWERS.has(e) && isTextEditable({ basename: props.file?.basename, extension: e })) return 'code';
+    return 'viewer';
+  }
   if (isOfficeExt(e)) return 'office';
   if (TEXT_PLAIN.includes(e)) return wantEdit ? 'code' : 'text';
   // Text the server saves (`.properties`, `.lua`, a `Makefile`) that has no
@@ -531,12 +561,13 @@ function buildAndOpenStandalone(mode: 'view' | 'edit'): void {
  * with a 415, and none on `.properties`, `.lua` or a `Makefile`, which it
  * saves. Read-only kinds (image, video, audio, 3D, archive) have none.
  */
-/* The viewers here that EDIT what they show (and save it as text): a diagram's.
+/* The viewers here that EDIT what they show (and save it as text): draw.io's.
  * Any other viewer only shows its file (the table a .csv is drawn as), so text
  * the server saves but this client has no editor for in that viewer is not
  * offered Edit. Which components exist is this client's own knowledge, not a
- * rule of the server's. */
-const EDITING_VIEWERS = new Set(['drawio', 'dio', 'mmd', 'mermaid']);
+ * rule of the server's - whether the file is saved as text at all stays the
+ * server's (isTextEditable). */
+const EDITING_VIEWERS = new Set(['drawio', 'dio']);
 
 const canEditKind = computed<boolean>(() => {
   const f = props.file;
@@ -545,7 +576,7 @@ const canEditKind = computed<boolean>(() => {
   const e = ext(f);
   if (isOfficeExt(e)) return true;
   if (!isTextEditable({ basename: f.basename, extension: e, mime_type: f.mime_type })) return false;
-  return kind.value !== 'viewer' || EDITING_VIEWERS.has(e);
+  return kind.value !== 'viewer' || EDITING_VIEWERS.has(e) || SOURCE_VIEWERS.has(e);
 });
 
 /**
@@ -1269,6 +1300,11 @@ onMounted(() => {
 });
 
 const codeLanguage = computed(() => CODE_LANGS[ext(props.file)] || 'plaintext');
+// The toolbar badge names what the file IS. highlight.js has no mermaid
+// grammar, so Mermaid's source is highlighted as plain text, but its badge
+// said "PLAINTEXT" over a diagram's source (#216's Edit, 0.56 shots).
+const CODE_LANG_LABELS: Record<string, string> = { mmd: 'mermaid', mermaid: 'mermaid' };
+const codeLanguageLabel = computed(() => CODE_LANG_LABELS[ext(props.file)] || codeLanguage.value);
 
 // --- OnlyOffice DocEditor (real, JWT-signed) ---
 
@@ -2384,6 +2420,7 @@ onBeforeUnmount(() => {
               :theme="theme"
               :user-name="userName"
               :title="appLabel"
+              :e2e="appE2e"
               @dirty="onAppDirty"
               @saved="onAppSaved"
               @toast="(m) => emit('toast', m.text)"
@@ -2444,7 +2481,7 @@ onBeforeUnmount(() => {
                      sibling uppercase labels (.fe-sidenav__heading and friends)
                      hold real Turkish words where "ETİKETLER" is exactly right,
                      so the transform stays and only this one token opts out. -->
-                <span class="fe-preview__code-lang" lang="en">{{ codeLanguage }}</span>
+                <span class="fe-preview__code-lang" lang="en" data-testid="code-lang">{{ codeLanguageLabel }}</span>
                 <span v-if="!monacoReady && codeHtml" class="fe-preview__code-status">
                   {{ saveTextEndpoint && !monacoUnavailable ? t('viewer.editor_loading') : t('viewer.read_only') }}
                 </span>

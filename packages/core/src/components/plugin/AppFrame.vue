@@ -45,6 +45,31 @@
  * it in the row): only a click in that page counts as the person's there
  * (security review sec055 S9).
  *
+ * A file of an end-to-end encrypted folder (filex 0.56, task #189) is
+ * handed to an app granted `files:e2e-plaintext` IN THE CLEAR when the host
+ * gives this frame the folder's door (`e2e`, lib/appPlaintext): `file.read`
+ * fetches the ciphertext through the server's app door (`e2e=1`), decrypts
+ * it in this tab and TRANSFERS the plaintext to the interface (this page
+ * keeps no copy, and no `blob:` address is made of it); `file.save`
+ * encrypts what the interface hands over in this tab and sends only the
+ * ciphertext, over the file as it was opened (`expect`). While the frame
+ * holds such a file, nothing leaves it toward the server but that encrypted
+ * save: `file.saveAs`, `engine.call` and `job.submit` answer `unavailable`,
+ * and `state.get` / `state.set` use the app's ENCRYPTED store for that
+ * folder (lib/appStateE2e, keys derived from the folder key through the
+ * door), never its ordinary one (lib/appState) - the two do not mix.
+ *
+ * Editing together (`coedit.*`, filex 0.56, task #189): an app granted
+ * `files:co-edit` joins the file's session through the server's relay, and
+ * THIS page holds the session's key, seals what the app appends, reads the
+ * whole log through the reader that refuses a log the writers did not write
+ * and hands the app the entries (lib/coeditSession). The app never holds a
+ * key and never touches the network; closing the frame leaves the session.
+ * In an encrypted folder the session's key is sealed with the folder key
+ * here (the door's `folderKeys`); the changes not placed yet are kept in
+ * this browser (lib/coeditOutbox) and the question about an earlier
+ * opening's is asked above the frame in the server's words.
+ *
  * ⚠ `file.saveAs` asks the person for a folder in filex's own dialog — the
  * one Move to… / Copy to… use (modals/DestinationPickerModal) — and THIS
  * frame draws it, so every placement in every host offers save-as the same
@@ -55,6 +80,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   BRIDGE_VERSION,
   LIMITS,
+  type CoEditAppendParams,
+  type CoEditBlobGetParams,
+  type CoEditBlobPutParams,
+  type CoEditCursorParams,
+  type CoEditJoinParams,
+  type CoEditLeaseParams,
+  type CoEditSubscribeParams,
   type ConfirmParams,
   type DownloadParams,
   type EngineCallParams,
@@ -83,6 +115,11 @@ import { parentOfWire } from '../../lib/destinationTree';
 import { isInternalPath, listingAddress } from '../../lib/internalPaths';
 import { collectPdf, isPdf, lookOf, printPdf, PrintFailure } from '../../lib/printPdf';
 import { isEncryptedKind, type EncryptedKind } from '../../lib/encryptedRow';
+import { APP_PLAINTEXT_LIMIT, LedgerNeedsAccount, TooLargeToHand, VaultAppRefused, type AppPlaintextDoor } from '../../lib/appPlaintext';
+import { sealedStateGet, sealedStateSet, type AppStateLedger } from '../../lib/appStateE2e';
+import { E2E_PLAINTEXT_GRANT } from '../../lib/appViewer';
+import { CoEditSession, type CoEditTransport } from '../../lib/coeditSession';
+import { browserOutbox, type OutboxStore } from '../../lib/coeditOutbox';
 import PluginConfirmModal from './PluginConfirmModal.vue';
 import Modal from '../../modals/Modal.vue';
 import DestinationPickerModal from '../../modals/DestinationPickerModal.vue';
@@ -96,8 +133,12 @@ export interface AppFrameFile {
   /** Cannot be written (read-only storage, view-only opening). */
   readOnly?: boolean;
   /** End-to-end encrypted, as the server stamped the row (#189): handed to
-   *  the interface as `FileInfo.encrypted`, and never saved over. */
+   *  the interface as `FileInfo.encrypted`. Never saved over - unless it is
+   *  handed over in the clear (`e2e`, filex 0.56). */
   encrypted?: EncryptedKind;
+  /** Unix ms, as its listing said it: with `size`, the `expect` of a save
+   *  over a file of an encrypted folder (filex 0.56). */
+  modified?: number;
 }
 
 const props = defineProps<{
@@ -137,6 +178,13 @@ const props = defineProps<{
    * that file's folder.
    */
   startAt?: string;
+  /**
+   * filex 0.56 (task #189): the door that decrypts and encrypts the files of
+   * an encrypted folder in this tab (lib/appPlaintext). Given by a host that
+   * can hand them to this app in the clear (lib/appViewer `e2ePlaintext`);
+   * absent, an encrypted file is refused to the interface as before.
+   */
+  e2e?: AppPlaintextDoor | null;
 }>();
 
 const emit = defineEmits<{
@@ -208,11 +256,27 @@ function extOf(name: string): string {
   return i > 0 ? name.slice(i + 1).toLowerCase() : '';
 }
 
-/** filex 0.55 saves no app's work over an end-to-end encrypted file: the
- *  server holds it only as ciphertext and refuses the app its bytes and its
- *  save (`403 encrypted`), so the interface is told it is read-only. */
+/**
+ * filex 0.56: this file is handed to the interface in the clear - a file of
+ * an encrypted folder, or of a vault where the host gave the door's vault
+ * half (never a `.fxe`), a host that gave the door, an app granted
+ * `files:e2e-plaintext`.
+ */
+function plaintextOf(f: AppFrameFile): boolean {
+  const door = props.e2e;
+  if (!door || !grants.value.has(E2E_PLAINTEXT_GRANT)) return false;
+  return f.encrypted === 'folder' || (f.encrypted === 'vault' && !!door.vault);
+}
+
+/** The frame holds plaintext of an encrypted folder: nothing but the
+ *  encrypted save may leave it toward the server. */
+const holdsPlaintext = computed(() => (props.files ?? []).some(plaintextOf));
+
+/** Any other end-to-end encrypted file is saved over by no app: the server
+ *  holds it only as ciphertext and refuses the app its bytes and its save
+ *  (`403 encrypted`), so the interface is told it is read-only. */
 function cannotSave(f: AppFrameFile): boolean {
-  return !!props.readOnly || !!f.readOnly || isEncryptedKind(f.encrypted);
+  return !!props.readOnly || !!f.readOnly || (isEncryptedKind(f.encrypted) && !plaintextOf(f));
 }
 
 function fileInfos(): FileInfo[] {
@@ -226,6 +290,7 @@ function fileInfos(): FileInfo[] {
     readOnly: !writable || cannotSave(f),
     // Only when the server said so: absent means not encrypted.
     ...(isEncryptedKind(f.encrypted) ? { encrypted: f.encrypted } : {}),
+    ...(plaintextOf(f) ? { plaintext: true as const } : {}),
   }));
 }
 
@@ -265,6 +330,251 @@ async function toBody(data: unknown, mime?: string): Promise<Blob | ReadableStre
   if (data instanceof ArrayBuffer) return new Blob([data], { type });
   if (typeof ReadableStream !== 'undefined' && data instanceof ReadableStream) return data as ReadableStream<Uint8Array>;
   throw new BridgeFailure('invalid', 'save takes a string, an ArrayBuffer or a ReadableStream');
+}
+
+/* ── a file of an encrypted folder, in the clear (filex 0.56) ────────── */
+
+/** Each encrypted file's size and date as the server last wrote it (the
+ *  answer of a save): the `expect` of its next save. */
+const savedSigs = new Map<number, { size: number; modified: number }>();
+
+/** "Only over the file as it was opened": "<size>:<ms>", or nothing when
+ *  the host did not say when it was last changed. */
+function expectOf(index: number, f: AppFrameFile): string | undefined {
+  const s = savedSigs.get(index);
+  if (s) return `${s.size}:${s.modified}`;
+  return typeof f.size === 'number' && typeof f.modified === 'number' ? `${f.size}:${f.modified}` : undefined;
+}
+
+function tooLargeToHand(): BridgeFailure {
+  return new BridgeFailure('too_large', `at most ${APP_PLAINTEXT_LIMIT >> 20} MiB in an encrypted folder`);
+}
+
+function folderLocked(): BridgeFailure {
+  return new BridgeFailure('unavailable', 'the encrypted folder was locked');
+}
+
+/**
+ * filex 0.56 - the ledger of an ENCRYPTED SESSION (the frame holds a file of
+ * an encrypted folder in the clear): this app's store for that folder,
+ * sealed with keys derived from the folder key (lib/appStateE2e, through the
+ * door). null: no such session, or the folder is locked now.
+ */
+async function sealedLedger(): Promise<AppStateLedger | null> {
+  const f = (props.files ?? []).find(plaintextOf);
+  if (!f || !props.e2e) return null;
+  // A vault's file: the store sealed with the vault's own key (the door's
+  // vault half, filex 0.56).
+  if (f.encrypted === 'vault') return props.e2e.vault ? props.e2e.vault.ledger(f.path, props.app) : null;
+  return props.e2e.ledger(f.path, props.app);
+}
+
+/** The sealed store is bound to the account this page is signed in as, and
+ *  the page could not tell which (LedgerNeedsAccount): said as it is - not
+ *  as a locked folder, which it is not. A literal key for the catalogue. */
+function noAccountWords(): string {
+  return t('appframe.state_no_account');
+}
+
+/** What the interface saves, whole, as bytes this page owns (zeroed by the
+ *  caller once encrypted). */
+async function plainBytes(data: unknown): Promise<Uint8Array<ArrayBuffer>> {
+  const isStream = typeof ReadableStream !== 'undefined' && data instanceof ReadableStream;
+  if (typeof data !== 'string' && !(data instanceof ArrayBuffer) && !isStream) {
+    throw new BridgeFailure('invalid', 'save takes a string, an ArrayBuffer or a ReadableStream');
+  }
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for await (const chunk of chunksOf(data as string | ArrayBuffer | ReadableStream<Uint8Array>)) {
+      size += chunk.byteLength;
+      if (size > APP_PLAINTEXT_LIMIT) throw tooLargeToHand();
+      parts.push(chunk);
+    }
+  } catch (e) {
+    for (const p of parts) p.fill(0);
+    throw e;
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.byteLength;
+    p.fill(0);
+  }
+  return out;
+}
+
+/** The plaintext of a file of an encrypted folder: the ciphertext through
+ *  the server's door, decrypted here. null: the folder is locked now. */
+async function folderRead(f: AppFrameFile): Promise<Uint8Array<ArrayBuffer> | null> {
+  const door = props.e2e;
+  const read = props.api.pluginUIRead;
+  if (!door || typeof read !== 'function') throw new BridgeFailure('unavailable', 'this host does not hand over encrypted files');
+  const res = await read(props.app, props.view, f.path, { e2e: true });
+  const body = res.body ?? new Blob([await res.arrayBuffer()]).stream();
+  try {
+    return await door.open(f.path, body);
+  } catch (e) {
+    if (e instanceof TooLargeToHand) throw tooLargeToHand();
+    throw new BridgeFailure('failed', 'the file could not be decrypted here');
+  }
+}
+
+/* A VAULT's file (level 3, filex 0.56): the door's vault half
+ * (lib/appPlaintext AppVaultDoor, the explorer's vault engine). The file is
+ * read from the vault's packs and a save is the vault's next generation,
+ * both in this tab - nothing goes through the server's app doors, which
+ * refuse a vault anyway, and its path (the vault folder, then a path that
+ * exists only in this tab) is never sent. A save takes the vault's write
+ * lock like any change in it, and lands only over the version the
+ * interface read. */
+
+/** Each vault file's version as the interface last read or saved it, by
+ *  path: the `expect` of its next save. */
+const vaultSigs = new Map<string, string>();
+
+/** A vault's refusal, as the interface is told it. The person was told by
+ *  the vault (its toast, its strip); a lock closes the frame itself. */
+function vaultFailure(e: unknown, failed: string): BridgeFailure {
+  if (e instanceof BridgeFailure) return e;
+  if (e instanceof TooLargeToHand) return tooLargeToHand();
+  if (!(e instanceof VaultAppRefused)) return new BridgeFailure('failed', failed);
+  switch (e.why) {
+    case 'locked':
+      return new BridgeFailure('unavailable', 'the vault was locked');
+    case 'too_large':
+      return tooLargeToHand();
+    case 'gone':
+      return new BridgeFailure('not_found', 'the file is not in the vault any more');
+    case 'read_only':
+      return new BridgeFailure('read_only', 'the vault is read-only here');
+    case 'changed':
+      return new BridgeFailure('failed', 'changed');
+    case 'held':
+      return new BridgeFailure('failed', 'vault_locked');
+    case 'lock_lost':
+      return new BridgeFailure('failed', 'vault_lock_lost');
+    default:
+      return new BridgeFailure('failed', failed);
+  }
+}
+
+/** The plaintext of a vault's file, read from its packs here. null: the
+ *  vault is not open any more. */
+async function vaultRead(f: AppFrameFile): Promise<Uint8Array<ArrayBuffer> | null> {
+  const door = props.e2e?.vault;
+  if (!door) throw new BridgeFailure('unavailable', 'this host does not hand over files of a vault');
+  try {
+    const r = await door.read(f.path);
+    if (!r) return null;
+    vaultSigs.set(f.path, r.sig);
+    return r.bytes;
+  } catch (e) {
+    throw vaultFailure(e, 'the file could not be decrypted here');
+  }
+}
+
+/** `file.save` of a vault's file: the vault's next generation, written here
+ *  under the vault's write lock, only over the version the interface read. */
+async function saveToVault(index: number, f: AppFrameFile, data: unknown) {
+  const door = props.e2e?.vault;
+  if (!door) throw new BridgeFailure('unavailable', 'the vault was locked');
+  const plain = await plainBytes(data);
+  const size = plain.byteLength;
+  let r: { size: number; sig: string };
+  try {
+    r = await door.save(f.path, plain, vaultSigs.get(f.path) ?? expectOf(index, f));
+  } catch (e) {
+    throw vaultFailure(e, 'the vault did not save it');
+  } finally {
+    plain.fill(0);
+  }
+  vaultSigs.set(f.path, r.sig);
+  emit('saved', { path: f.path, size: r.size, index });
+  dirty.value = false;
+  emit('dirty', false);
+  return { saved: true as const, size };
+}
+
+/** `file.read` of a file handed over in the clear: decrypted here (a folder's
+ *  through the server's door, a vault's from its packs), transferred to the
+ *  interface. */
+async function readPlain(f: AppFrameFile, as: ReadParams['as']) {
+  const plain = f.encrypted === 'vault' ? await vaultRead(f) : await folderRead(f);
+  if (!plain) throw f.encrypted === 'vault' ? vaultFailure(new VaultAppRefused('locked'), '') : folderLocked();
+  const out = { name: f.name, size: plain.byteLength, mime: f.mime || '' };
+  switch (as ?? 'stream') {
+    case 'text': {
+      if (plain.byteLength > LIMITS.maxTextBytes) {
+        plain.fill(0);
+        throw new BridgeFailure('too_large', 'read a file this large as bytes');
+      }
+      const text = new TextDecoder().decode(plain);
+      plain.fill(0);
+      return { ...out, text };
+    }
+    case 'bytes':
+      // Transferred (lib/appBridge): this page keeps no copy.
+      return { ...out, bytes: plain.buffer };
+    case 'stream': {
+      const whole = plain;
+      return {
+        ...out,
+        stream: new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(whole);
+            c.close();
+          },
+        }),
+      };
+    }
+    default:
+      plain.fill(0);
+      throw new BridgeFailure('invalid', 'as is stream, bytes or text');
+  }
+}
+
+/** `file.save` of a file handed over in the clear: encrypted here, then only
+ *  the ciphertext goes to the server's door, over the file as it was opened. */
+async function savePlain(index: number, f: AppFrameFile, data: unknown, through?: number) {
+  if (f.encrypted === 'vault') return saveToVault(index, f, data);
+  const door = props.e2e;
+  if (!door) throw folderLocked();
+  const plain = await plainBytes(data);
+  const size = plain.byteLength;
+  let ct: ArrayBuffer | null;
+  try {
+    ct = await door.seal(f.path, plain);
+  } catch (e) {
+    if (e instanceof TooLargeToHand) throw tooLargeToHand();
+    throw e;
+  } finally {
+    plain.fill(0);
+  }
+  if (!ct) throw folderLocked();
+  // Never a draft's path: a file of an encrypted folder is saved where it is.
+  // In an editing session the session holds the file to what it holds
+  // (another member's save between two of this page's is no change), and
+  // records which part of its log this save holds.
+  const together = coedit && typeof through === 'number' ? coedit.saveParams(through) : null;
+  const r = await props.api.pluginUISave(props.app, props.view, { path: f.path }, new Blob([ct], { type: 'application/octet-stream' }), {
+    e2e: true,
+    expect: expectOf(index, f),
+    ...(together ? { extra: together } : {}),
+  });
+  if (typeof r.modified === 'number') savedSigs.set(index, { size: r.size, modified: r.modified });
+  emit('saved', { path: r.path || f.path, size: r.size, index });
+  dirty.value = false;
+  emit('dirty', false);
+  return { saved: true as const, size };
+}
+
+/** While the frame holds plaintext, the module and a copy elsewhere are not
+ *  offered: either would carry the file (or what the app took from it) out
+ *  of the encrypted folder to the server. */
+function refuseWhilePlain(what: string): void {
+  if (holdsPlaintext.value) throw new BridgeFailure('unavailable', `${what} is not offered while a file of an encrypted folder is open`);
 }
 
 /* ── the bridge's methods: every decision is made here ─────────────────── */
@@ -647,6 +957,7 @@ const handlers = {
     need('files:read');
     const p = (params ?? {}) as ReadParams;
     const f = fileAt(p.index);
+    if (plaintextOf(f)) return readPlain(f, p.as);
     // Through the server's own door for an interface (#211, audit B19): it
     // checks the grant and the kind again, as it does for a save. A host api
     // without it (an older embed) reads the preview as before.
@@ -678,9 +989,14 @@ const handlers = {
     const index = typeof p.index === 'number' ? p.index : 0;
     const f = fileAt(index);
     if (cannotSave(f)) throw new BridgeFailure('read_only', 'this file cannot be saved over here');
+    if (plaintextOf(f)) return savePlain(index, f, p.data, p.through);
     const body = await toBody(p.data, p.mime);
     const target = index === 0 && props.savePath ? props.savePath : f.path;
-    const r = await props.api.pluginUISave(props.app, props.view, { path: target }, body);
+    // In a session, the save says which part of its log it holds (0.56).
+    const together = coedit && typeof p.through === 'number' ? coedit.saveParams(p.through) : null;
+    const r = together
+      ? await props.api.pluginUISave(props.app, props.view, { path: target }, body, { extra: together })
+      : await props.api.pluginUISave(props.app, props.view, { path: target }, body);
     emit('saved', { path: r.path || target, size: r.size, index });
     // Saved: whatever the interface held is on the storage now. It says
     // `dirty(true)` again with its next change.
@@ -695,6 +1011,10 @@ const handlers = {
     const name = typeof p.name === 'string' ? p.name.trim() : '';
     if (!name || name.includes('/') || name.includes('\\') || name === '.' || name === '..' || name.length > 255) {
       throw new BridgeFailure('invalid', 'name is a file name, without a folder');
+    }
+    if (holdsPlaintext.value) {
+      if (typeof ReadableStream !== 'undefined' && p.data instanceof ReadableStream) await p.data.cancel().catch(() => undefined);
+      refuseWhilePlain('save as');
     }
     const body = await toBody(p.data, p.mime);
     let dir: string | null;
@@ -873,6 +1193,7 @@ const handlers = {
 
   async 'engine.call'(params: unknown) {
     if (!current.value.engine) throw new BridgeFailure('unavailable', 'this app has no module');
+    refuseWhilePlain("the app's module");
     const p = (params ?? {}) as EngineCallParams;
     if (typeof p.method !== 'string' || !p.method) throw new BridgeFailure('invalid', 'method is required');
     const r = await props.api.pluginUICall(props.app, props.view, {
@@ -885,6 +1206,7 @@ const handlers = {
 
   async 'job.submit'(params: unknown) {
     if (!current.value.engine) throw new BridgeFailure('unavailable', 'this app has no module');
+    refuseWhilePlain("the app's module");
     const p = (params ?? {}) as JobSubmitParams;
     if (typeof p.action !== 'string' || !p.action) throw new BridgeFailure('invalid', 'action is required');
     if (!gestureNow()) await askConsent(jobQuestion(await actionLabel(p.action)));
@@ -898,8 +1220,15 @@ const handlers = {
     return { op };
   },
 
-  'state.get'(params: unknown) {
+  /* An encrypted session (the frame holds plaintext of an encrypted folder)
+     reads and writes its own sealed store; a locked folder reads as an empty
+     one. Any other session: the app's ordinary store, as always. */
+  async 'state.get'(params: unknown) {
     const key = String((params as { key?: unknown } | null)?.key ?? '');
+    if (holdsPlaintext.value) {
+      const ledger = await sealedLedger().catch(() => null);
+      return ledger ? ((await sealedStateGet(props.app, ledger, key)) ?? null) : null;
+    }
     return appStateGet(props.app, key) ?? null;
   },
 
@@ -917,17 +1246,167 @@ const handlers = {
     return out;
   },
 
-  'state.set'(params: unknown) {
+  async 'state.set'(params: unknown) {
     const p = (params ?? {}) as { key?: unknown; value?: unknown };
     try {
-      appStateSet(props.app, String(p.key ?? ''), p.value);
+      if (holdsPlaintext.value) {
+        const ledger = await sealedLedger();
+        if (!ledger) throw folderLocked();
+        await sealedStateSet(props.app, ledger, String(p.key ?? ''), p.value);
+      } else {
+        appStateSet(props.app, String(p.key ?? ''), p.value);
+      }
     } catch (e) {
       if (e instanceof AppStateTooLarge) throw new BridgeFailure('too_large', e.message);
+      if (e instanceof LedgerNeedsAccount) throw new BridgeFailure('unavailable', noAccountWords());
       throw e;
     }
     return null;
   },
+
+  /* ── editing together (0.56, files:co-edit) ─────────────────────────── */
+
+  async 'coedit.join'(params: unknown) {
+    need('files:co-edit');
+    need('files:read');
+    const p = (params ?? {}) as CoEditJoinParams;
+    const f = fileAt(p.index);
+    // A file of an encrypted folder (0.56): edited together only where this
+    // page hands it to the interface in the clear (the folder's door,
+    // files:e2e-plaintext); the session's key is then sealed with the folder
+    // key, here. Any other encrypted file (a vault's, a `.fxe`): alone.
+    const encrypted = isEncryptedKind(f.encrypted);
+    const door = props.e2e;
+    // A vault's file is handed over in the clear too (0.56), but a vault is
+    // one person's at a time: never edited together.
+    if (encrypted && (f.encrypted !== 'folder' || !plaintextOf(f) || typeof door?.folderKeys !== 'function')) {
+      throw new BridgeFailure('unavailable', 'encrypted');
+    }
+    const folder = encrypted && door?.folderKeys ? () => door.folderKeys!(f.path) : undefined;
+    const t = coeditTransport();
+    if (!t) throw new BridgeFailure('unavailable', 'this host offers no editing together');
+    // One membership per frame: a second join leaves the first.
+    const before = coedit;
+    coedit = null;
+    if (before) await before.leave();
+    const s = await CoEditSession.join(t, f.path, {
+      entry: (e) => bridge?.emit('coedit.entry', e),
+      cursor: (c) => bridge?.emit('coedit.cursor', c),
+      dropped: (d) => {
+        if (coedit === s) coedit = null;
+        bridge?.emit('coedit.dropped', d);
+      },
+    }, { folder, outbox: coeditOutbox(), askUnsent });
+    if (!bridge) {
+      // The frame went while the session was joined: leave it again.
+      void s.leave({ keepalive: true });
+      throw new BridgeFailure('unavailable', 'gone');
+    }
+    coedit = s;
+    return s.hello();
+  },
+
+  'coedit.subscribe'(params: unknown) {
+    const p = (params ?? {}) as CoEditSubscribeParams;
+    inSession().subscribe(Number(p.from ?? 0));
+    return null;
+  },
+
+  async 'coedit.append'(params: unknown) {
+    const p = (params ?? {}) as CoEditAppendParams;
+    return inSession().append(p.kind, p.body);
+  },
+
+  async 'coedit.lease'(params: unknown) {
+    const p = (params ?? {}) as CoEditLeaseParams;
+    return { granted: await inSession().lease(p.op, Number(p.changesSeen ?? 0)) };
+  },
+
+  'coedit.cursor'(params: unknown) {
+    inSession().cursor((params as CoEditCursorParams | null)?.cursor);
+    return null;
+  },
+
+  async 'coedit.blob.put'(params: unknown) {
+    const s = inSession();
+    const p = (params ?? {}) as CoEditBlobPutParams;
+    if (!(p.data instanceof ArrayBuffer)) throw new BridgeFailure('invalid', 'a blob is an ArrayBuffer');
+    await s.putBlob(String(p.name ?? ''), p.data);
+    return null;
+  },
+
+  async 'coedit.blob.get'(params: unknown) {
+    const p = (params ?? {}) as CoEditBlobGetParams;
+    const name = String(p.name ?? '');
+    return { name, bytes: await inSession().getBlob(name) };
+  },
+
+  async 'coedit.leave'() {
+    const s = coedit;
+    coedit = null;
+    await s?.leave();
+    return null;
+  },
 };
+
+/* ── editing together: the session this frame joined ───────────────── */
+
+/** The frame's membership of its file's session (0.56), null when none. */
+let coedit: CoEditSession | null = null;
+
+function inSession(): CoEditSession {
+  if (!coedit) throw new BridgeFailure('unavailable', 'not in a session (coedit.join first)');
+  return coedit;
+}
+
+/** The relay's routes through the host's API; null when the host has none
+ *  (an older embed's api): then there is no editing together here. */
+function coeditTransport(): CoEditTransport | null {
+  const api = props.api;
+  if (typeof api.coeditJoin !== 'function' || typeof api.coeditCall !== 'function') return null;
+  return {
+    join: (path, extra) => api.coeditJoin(props.app, props.view, path, extra),
+    call: (sid, op, body, opts) => api.coeditCall(props.app, props.view, sid, op, body, opts),
+    putBlob: (sid, name, member, bytes) => api.coeditBlobPut(props.app, props.view, sid, name, member, bytes),
+    getBlob: (sid, name, member) => api.coeditBlobGet(props.app, props.view, sid, name, member),
+  };
+}
+
+/** The changes not placed yet, kept in this browser (lib/coeditOutbox): one
+ *  store for every frame of the page. */
+let outboxStore: OutboxStore | null = null;
+function coeditOutbox(): OutboxStore {
+  outboxStore ??= browserOutbox();
+  return outboxStore;
+}
+
+/**
+ * The changes of an earlier opening that never reached the others: apply
+ * them, or not - asked above the frame in the server's words (the join
+ * answered them), filex's own question, not the app's.
+ */
+const unsentAsk = ref<{ text: string; apply: string; discard: string; resolve: (v: boolean | null) => void } | null>(null);
+
+function askUnsent(q: { text: string; apply: string; discard: string }): Promise<boolean | null> {
+  if (unsentAsk.value) return Promise.resolve(null);
+  return new Promise<boolean | null>((resolve) => {
+    unsentAsk.value = { ...q, resolve };
+  });
+}
+
+/** true: apply, false: discard, null: the frame went without an answer (kept). */
+function answerUnsent(apply: boolean | null) {
+  const q = unsentAsk.value;
+  unsentAsk.value = null;
+  q?.resolve(apply);
+}
+
+/** Leave the session when the frame goes (the page may be going too). */
+function leaveSession() {
+  const s = coedit;
+  coedit = null;
+  if (s) void s.leave({ keepalive: true });
+}
 
 function answerConfirm(yes: boolean) {
   const q = confirmAsk.value;
@@ -975,6 +1454,8 @@ function mount() {
 }
 
 function unmount() {
+  leaveSession();
+  if (unsentAsk.value) answerUnsent(null);
   bridge?.destroy();
   bridge = null;
   dropPrintFrame();
@@ -997,6 +1478,8 @@ const HOST_GESTURES = ['pointerdown', 'keydown', 'touchstart'] as const;
 onMounted(() => {
   if (activationLive()) hostGestureAt = Date.now();
   for (const ev of HOST_GESTURES) window.addEventListener(ev, onHostGesture, true);
+  // A tab that closes unmounts nothing: the session is left on the way out.
+  window.addEventListener('pagehide', leaveSession);
   mount();
   offUpdated = onAppUpdated((app, version) => {
     if (app !== props.app || !version || version === appVersion.value) return;
@@ -1013,6 +1496,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   for (const ev of HOST_GESTURES) window.removeEventListener(ev, onHostGesture, true);
+  window.removeEventListener('pagehide', leaveSession);
   offUpdated?.();
   offUpdated = null;
   unmount();
@@ -1153,6 +1637,21 @@ defineExpose({ requestSave, confirmClose, notifyUpdated, notifyClosing, reload, 
       </button>
     </div>
     <div
+      v-if="unsentAsk"
+      class="fe-appframe__note fe-appframe__consent fe-appframe__over"
+      role="alertdialog"
+      aria-live="assertive"
+      data-testid="appframe-unsent"
+    >
+      <span class="fe-appframe__note-text">{{ unsentAsk.text }}</span>
+      <button type="button" class="fe-btn fe-btn--primary" data-testid="appframe-unsent-apply" @click="answerUnsent(true)">
+        {{ unsentAsk.apply }}
+      </button>
+      <button type="button" class="fe-btn" data-testid="appframe-unsent-discard" @click="answerUnsent(false)">
+        {{ unsentAsk.discard }}
+      </button>
+    </div>
+    <div
       v-if="consentAsk"
       class="fe-appframe__note fe-appframe__consent"
       role="alertdialog"
@@ -1175,7 +1674,7 @@ defineExpose({ requestSave, confirmClose, notifyUpdated, notifyClosing, reload, 
     </div>
     <div
       v-if="printAsk"
-      class="fe-appframe__note fe-appframe__consent"
+      class="fe-appframe__note fe-appframe__consent fe-appframe__print"
       :class="{ 'fe-appframe__print--parked': !printAsk.shown }"
       :role="printAsk.shown ? 'alertdialog' : undefined"
       :aria-live="printAsk.shown ? 'assertive' : undefined"
@@ -1282,12 +1781,36 @@ defineExpose({ requestSave, confirmClose, notifyUpdated, notifyClosing, reload, 
   flex: 1 1 16rem;
   min-width: 0;
 }
+/* The print question lies OVER the top of the app's frame instead of above
+   it (#217). In the flow it pushed the frame down and shrank it the moment
+   it showed, and an editor that was busy making the PDF ("Printing
+   Document" in the office editor) could not redraw at its new size: the
+   person looked at a blank editor until the print was over. Out of the flow,
+   the frame keeps its size from the first print to the last. */
+.fe-appframe__print {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: 3;
+  box-shadow: var(--fe-shadow-sm, 0 2px 6px rgba(0, 0, 0, 0.12));
+}
+/* The question about the changes an earlier opening left (editing together,
+   0.56) lies over the frame too, for the same reason: it may come while the
+   editor is starting. */
+.fe-appframe__over {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: 3;
+  box-shadow: var(--fe-shadow-sm, 0 2px 6px rgba(0, 0, 0, 0.12));
+}
 /* The print question while nobody is asked (the print page loading, or the
    PDF already handed to the dialog): laid out, so the frame in it keeps its
    PDF, but not seen and not reachable. */
 .fe-appframe__print--parked {
   position: absolute;
   inset-inline-start: -10000px;
+  inset-inline-end: auto;
   top: 0;
   width: 1px;
   height: 1px;

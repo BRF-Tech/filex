@@ -559,8 +559,10 @@ export function hostLine(h) {
     Number.isFinite(h.disk_write_ms_max) ? `disk writes ${Math.round(h.disk_write_ms_max)} ms${h.disk ? ` (${h.disk})` : ''}` : null,
   ].filter(Boolean);
   const temp = h.temp_wait_secs > 0 ? `; waited ${Math.round(h.temp_wait_secs / 60)} min for the disk to cool` : '';
+  // run.mjs trackDisk (#194): a heavy browser line waiting for the pool's heavy writers.
+  const io = h.io_wait_secs > 0 ? `; the browser round waited ${Math.round(h.io_wait_secs / 60)} min for the disk` : '';
   const pause = pauseWords(h.pause);
-  return `host: ${budget}${peaks.length ? `; worst ${peaks.join(', ')}` : ''}${temp}${pause ? `; ${pause}` : ''}`;
+  return `host: ${budget}${peaks.length ? `; worst ${peaks.join(', ')}` : ''}${temp}${io}${pause ? `; ${pause}` : ''}`;
 }
 
 /** What history.jsonl keeps of a night: the record without the night's working fields. */

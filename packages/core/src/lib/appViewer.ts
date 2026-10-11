@@ -22,11 +22,39 @@
  *    viewer, which decrypts it in the tab - no app's interface and no
  *    ONLYOFFICE, whatever the rule or the person's choice says (#189). The
  *    same answer from a folder, Recent, Starred, a tag view, a search or
- *    Shared with me.
+ *    Shared with me;
+ *  - except (filex 0.56) where the host can hand the file to an app in the
+ *    clear (`e2ePlaintext`: a file of an encrypted folder - not a vault, not
+ *    a `.fxe` - that is unlocked in this tab, and the administrator's switch
+ *    on): then the app interfaces granted `files:e2e-plaintext`
+ *    (lib/appPlaintext) open it too, under the same rule, and filex's own
+ *    viewer stays last. Never ONLYOFFICE, never an app without the grant.
+ *    Which ones is THE BROWSER'S KIND RULE, `plaintextOpenOf`: decided from
+ *    the PLAINTEXT name alone, in this tab - in a folder whose names are
+ *    encrypted (level 2) the server cannot read the kind at all, and neither
+ *    the name nor its extension is ever sent to it.
+ *  - and (filex 0.56) a VAULT's file, its own way (vaultPlaintextViewersFor,
+ *    handsOverVault): with the vault open in this tab, the same apps by the
+ *    same rule - the kind read HERE, from the name this tab read in the
+ *    vault's encrypted index, which the server never sees.
  */
 import type { OpenRule, PluginViewRow } from '../types/Plugins';
 import { rowIsEncrypted, type EncryptedRowLike } from './encryptedRow';
-import { appliesItemOf, appliesMatches, type AppliesNodeLike } from './pluginApplies';
+import { appliesItemOf, appliesMatches, stateKeysOf, type AppliesNodeLike } from './pluginApplies';
+import { e2eMimeForExt } from './e2emime';
+import { extensionOf } from './e2enames';
+
+/**
+ * The grant an app holds to be handed a file of an encrypted folder in the
+ * clear (filex 0.56; derived from its manifest's `encrypted_folders`, backend
+ * wasmplugin/e2eplain.go). The door itself is lib/appPlaintext.
+ */
+export const E2E_PLAINTEXT_GRANT = 'files:e2e-plaintext';
+
+/** Whether an app (its view's `ui.grants`) was granted encrypted folders. */
+export function takesPlaintext(grants: readonly string[] | null | undefined): boolean {
+  return !!grants && grants.includes(E2E_PLAINTEXT_GRANT);
+}
 
 /** filex's own viewer, as a handler id (and "Open with"'s choice of it). */
 export const BUILTIN_VIEWER = 'builtin';
@@ -63,9 +91,31 @@ export interface OpenHandlerOptions {
    * (onlyBuiltinOpens).
    */
   inEncrypted?: boolean;
+  /**
+   * filex 0.56: the host can hand this encrypted file to an app in the clear
+   * (lib/appPlaintext) - a file of an encrypted folder unlocked in this tab,
+   * not a `.fxe`, and the server's switch (capabilities
+   * `apps_e2e_plaintext`) on - or (0.56) a vault's file, the vault open in
+   * this tab. The app interfaces granted `files:e2e-plaintext` then open it
+   * beside filex's own viewer, chosen by its decrypted name
+   * (`plaintextOpenOf`) - in a folder whose names are encrypted too, the
+   * row's name decrypted in this tab; in a vault, the name read from its
+   * index.
+   */
+  e2ePlaintext?: boolean;
 }
 
-type NodeLike = (AppliesNodeLike & EncryptedRowLike & { type?: string }) | null | undefined;
+type NodeLike =
+  | (AppliesNodeLike &
+      EncryptedRowLike & {
+        type?: string;
+        /** A folder with encrypted names (lib/useE2eNames): what the server
+         *  stores, and whether `basename` is the decrypted name. */
+        e2e_stored?: unknown;
+        e2e_name_state?: string;
+      })
+  | null
+  | undefined;
 
 /**
  * Only filex's own viewer opens this file: it is end-to-end encrypted, by its
@@ -129,6 +179,161 @@ export interface OpenHandlers {
   custom: boolean;
 }
 
+/* ── the browser's kind rule (filex 0.56, task #189) ─────────────────── */
+
+/**
+ * What the browser knows of a file the server holds only as ciphertext, to
+ * choose the app that opens it: its PLAINTEXT name - decrypted in this tab
+ * where the folder's names are encrypted - and its row's app state keys
+ * (`<plugin>:<key>`, the listing's `app_state`), if any. Nothing of it is
+ * ever sent anywhere.
+ */
+export interface PlaintextFile {
+  name: string;
+  app_state?: string[];
+}
+
+/** What else the choice reads (each optional). */
+export interface PlaintextOpenOptions {
+  /** The administrator's open rules, by kind (Default apps; capabilities). */
+  rules?: Readonly<Record<string, OpenRule>> | null;
+  /** What "Open with" chose, a handler id. */
+  choice?: string | null;
+  /** The person's "always open with" choice for the kind (lib/openWith) -
+   *  or a function of the kind, as the kind is known only here. */
+  personal?: string | null | ((kind: string) => string | null);
+}
+
+/** The handlers of a file chosen by its plaintext name, and the one that opens it. */
+export interface PlaintextOpen extends OpenHandlers {
+  /** The kind: the plaintext name's extension, lower-case, no dot ('' for none). */
+  kind: string;
+  /** The handler that opens it (`choice`, else `personal`, else the first on). */
+  handler: OpenHandler | null;
+}
+
+/** The MIME type the rule reads for a kind: the one the decrypted copy is
+ *  given (lib/e2emime) where the kind has one, none otherwise. */
+function plaintextMimeOf(kind: string): string {
+  const m = e2eMimeForExt(kind);
+  return m === 'application/octet-stream' ? '' : m;
+}
+
+/** The app interfaces granted files:e2e-plaintext whose `applies` take the file. */
+function plaintextApps(views: readonly PluginViewRow[], file: PlaintextFile, kind: string): PluginViewRow[] {
+  const mime = plaintextMimeOf(kind);
+  return viewerViews(views).filter(
+    (v) =>
+      takesPlaintext(v.ui?.grants) &&
+      appliesMatches(v.applies ?? {}, [{ kind: 'file', ext: kind, mime, state: stateKeysOf({ app_state: file.app_state }, v.plugin) }]),
+  );
+}
+
+/**
+ * filex 0.56 (task #189) - THE BROWSER'S KIND RULE: which handlers open a
+ * file the server holds only as ciphertext, and which one opens it, decided
+ * from its PLAINTEXT name alone, in this tab.
+ *
+ * The server holds a file of an encrypted folder only as ciphertext; in a
+ * folder whose names are encrypted (level 2) - and in a vault (level 3) - it
+ * cannot even read the name, so it cannot tell the kind: the kind is decided
+ * here, and neither the name nor its extension is ever sent. The rule is the
+ * one every other file opens by (header): the app interfaces granted
+ * `files:e2e-plaintext` whose `applies` take the name's extension (and the
+ * MIME type it implies, lib/e2emime), in the server's order, filex's own
+ * viewer last; the administrator's rule for the kind (`rules[kind]`) orders
+ * them and switches them off; the one that opens it is `choice`, else
+ * `personal`, else the first that is on. No app takes it: filex's own viewer
+ * alone. Never ONLYOFFICE, never an app without the grant.
+ *
+ * The CALLER has already decided the file may be handed to an app in the
+ * clear at all (an unlocked folder, the administrator's switch, the door) -
+ * openHandlersFor's `e2ePlaintext`, or a vault's own surface. A name given
+ * as a string is the file's whole name.
+ */
+export function plaintextOpenOf(
+  views: readonly PluginViewRow[],
+  file: PlaintextFile | string,
+  opts?: PlaintextOpenOptions | null,
+): PlaintextOpen {
+  const f: PlaintextFile = typeof file === 'string' ? { name: file } : file;
+  const kind = extensionOf(f.name ?? '');
+  const apps = plaintextApps(views, f, kind);
+  const handlers: OpenHandlers =
+    apps.length === 0
+      ? { on: [{ id: BUILTIN_VIEWER, view: null }], off: [], custom: false }
+      : ruled([...apps.map((v) => ({ id: openHandlerId(v), view: v })), { id: BUILTIN_VIEWER, view: null }], opts?.rules?.[kind]);
+  const personal = typeof opts?.personal === 'function' ? opts.personal(kind) : opts?.personal;
+  return { ...handlers, kind, handler: chosen(handlers.on, opts?.choice, personal) };
+}
+
+/**
+ * The host can hand this file to an app in the clear (`e2ePlaintext`) and its
+ * name is known here: never a vault's file (handsOverVault's) or a `.fxe`,
+ * whatever the host says, and never a row whose name this tab could not decrypt (a locked
+ * folder's placeholder, an unreadable name) - the kind would be a guess.
+ */
+function handsOverPlaintext(node: NonNullable<NodeLike>, opts?: OpenHandlerOptions | null): boolean {
+  if (!opts?.e2ePlaintext || node.type !== 'file') return false;
+  if (node.encrypted === 'vault' || node.encrypted === 'file') return false;
+  const state = node.e2e_name_state;
+  return state === undefined || state === 'enc' || state === 'plain';
+}
+
+/** A row as the browser's kind rule reads it: its plaintext name. */
+function plaintextFileOf(node: NonNullable<NodeLike>): PlaintextFile {
+  return { name: String(node.basename ?? ''), ...(Array.isArray(node.app_state) ? { app_state: node.app_state } : {}) };
+}
+
+/**
+ * The server cannot read this row's name: it sits in a folder whose names
+ * are encrypted (level 2) and the row carries the stored, encrypted one apart
+ * (`e2e_stored`, lib/useE2eNames). Its kind is the browser's alone, and
+ * nothing that names the kind is sent from it - "Always use this app for
+ * .<ext> files" (lib/openWith, the account's choices) is not offered there.
+ */
+export function nameHiddenFromServer(node: NodeLike): boolean {
+  return !!node && typeof node.e2e_stored === 'string';
+}
+
+/**
+ * The app interfaces that may open an encrypted file in the clear (filex
+ * 0.56): granted `files:e2e-plaintext`, and only where the host can hand it
+ * over (`e2ePlaintext`) - never a vault's file or a `.fxe`, whatever the host
+ * says - chosen by its plaintext name (`plaintextOpenOf`).
+ */
+export function plaintextViewersFor(views: readonly PluginViewRow[], node: NodeLike, opts?: OpenHandlerOptions | null): PluginViewRow[] {
+  if (!node || !handsOverPlaintext(node, opts)) return [];
+  const f = plaintextFileOf(node);
+  return plaintextApps(views, f, extensionOf(f.name));
+}
+
+/**
+ * filex 0.56 (task #189) - the app interfaces that may open a VAULT's file
+ * in the clear: granted `files:e2e-plaintext`, and only where the host can
+ * hand it over (`e2ePlaintext`: the vault open in this tab, the server's
+ * switch on). The kind rule (each app's `applies`) is applied here, in the
+ * browser, to the file's extension - and the type it implies - as this tab
+ * read the name from the vault's encrypted index: the server never learns a
+ * vault's names, so it cannot pick the app. Nothing of the file is sent to
+ * decide it.
+ */
+export function vaultPlaintextViewersFor(views: readonly PluginViewRow[], node: NodeLike, opts?: OpenHandlerOptions | null): PluginViewRow[] {
+  if (!node || !handsOverVault(node, opts)) return [];
+  const f = plaintextFileOf(node);
+  return plaintextApps(views, f, extensionOf(f.name));
+}
+
+/**
+ * The host can hand this VAULT's file to an app in the clear (`e2ePlaintext`:
+ * the vault open in this tab, the server's switch on). Its name is the one
+ * this tab read in the vault's index - a vault's rows never carry a stored,
+ * encrypted name - so the browser's kind rule reads it as it is.
+ */
+function handsOverVault(node: NonNullable<NodeLike>, opts?: OpenHandlerOptions | null): boolean {
+  return !!opts?.e2ePlaintext && node.type === 'file' && node.encrypted === 'vault';
+}
+
 /** The handlers of a file, ordered and switched off by the rule for its kind. */
 export function openHandlersFor(
   views: readonly PluginViewRow[],
@@ -137,13 +342,27 @@ export function openHandlersFor(
   opts?: OpenHandlerOptions | null,
 ): OpenHandlers {
   if (!node || node.type !== 'file') return { on: [], off: [], custom: false };
-  if (onlyBuiltinOpens(node, opts)) return { on: [{ id: BUILTIN_VIEWER, view: null }], off: [], custom: false };
+  if (onlyBuiltinOpens(node, opts)) {
+    // A vault's file goes its own way (handsOverVault); every other
+    // encrypted file the encrypted folders' (handsOverPlaintext). Either
+    // way the browser's kind rule picks the app, by the plaintext name.
+    const handed = node.encrypted === 'vault' ? handsOverVault(node, opts) : handsOverPlaintext(node, opts);
+    if (!handed) return { on: [{ id: BUILTIN_VIEWER, view: null }], off: [], custom: false };
+    const { on, off, custom } = plaintextOpenOf(views, plaintextFileOf(node), { rules });
+    return { on, off, custom };
+  }
   const avail: OpenHandler[] = [
     ...(opts?.onlyOffice && officeOpensKind(openKindOf(node)) ? [{ id: ONLYOFFICE_VIEWER, view: null }] : []),
     ...appViewersFor(views, node).map((v) => ({ id: openHandlerId(v), view: v })),
     { id: BUILTIN_VIEWER, view: null },
   ];
-  const rule = rules?.[openKindOf(node)];
+  return ruled(avail, rules?.[openKindOf(node)]);
+}
+
+/** The administrator's rule for a kind over the handlers available for it
+ *  (backend assoc.Apply): its order first, its switched-off ones out, the
+ *  rest in the default order. */
+function ruled(avail: OpenHandler[], rule: OpenRule | null | undefined): OpenHandlers {
   if (!rule) return { on: avail, off: [], custom: false };
   const isOff = new Set(rule.off ?? []);
   const byId = new Map(avail.map((h) => [h.id, h]));
@@ -173,7 +392,11 @@ export function pickOpenHandler(
   opts?: OpenHandlerOptions | null,
 ): OpenHandler | null {
   if (!node || node.type !== 'file') return null;
-  const { on } = openHandlersFor(views, node, rules, opts);
+  return chosen(openHandlersFor(views, node, rules, opts).on, choice, personal);
+}
+
+/** The handler among those on: the choice, else the person's, else the first. */
+function chosen(on: OpenHandler[], choice?: string | null, personal?: string | null): OpenHandler | null {
   const find = (id: string | null) => (id ? (on.find((h) => h.id === id) ?? null) : null);
   return find(normalizeOpenChoice(choice)) ?? find(normalizeOpenChoice(personal)) ?? on[0] ?? null;
 }

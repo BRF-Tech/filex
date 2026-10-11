@@ -113,7 +113,10 @@ export class VaultWriteError extends Error {
       | 'too_many_entries'
       | 'index_too_large'
       | 'newer_format'
-      | 'size_mismatch',
+      | 'size_mismatch'
+      /** filex 0.56: an app's save over a file that changed in the vault
+       *  since the app read it (composables/e2eVaultEngine `saveForApp`). */
+      | 'changed',
     public readonly path = '',
   ) {
     super(`vault: ${code}${path ? ` (${path})` : ''}`);

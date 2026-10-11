@@ -40,6 +40,8 @@ const props = defineProps<{
   node?: FileNode;
   /** This person may change the selected row (the explorer's write gate). */
   writable?: boolean;
+  /** Who is looking, for the app's own interface (`session.user.name`; never an e-mail). */
+  userName?: string;
 }>();
 
 const emit = defineEmits<{
@@ -167,6 +169,7 @@ watch(
         :locale="locale"
         :theme="theme"
         :title="label"
+        :user-name="userName"
         @toast="(m) => emit('toast', m.text)"
         @op="(op) => emit('op', op)"
       />

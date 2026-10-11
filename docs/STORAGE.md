@@ -791,7 +791,7 @@ point the storage at the new server.
 ```bash
 kubectl annotate deployment/<release>-minio service/<release>-minio \
   pvc/<release>-minio-data helm.sh/resource-policy=keep
-helm upgrade <release> ./deploy/helm/filex --reuse-values \
+helm upgrade <release> brf-tech/filex --reuse-values \
   --set minio.enabled=false --set versitygw.enabled=true \
   --set versitygw.secretKey=<a new secret>
 kubectl run rclone --rm -it --restart=Never --image=rclone/rclone:1.75.1 -- sync \

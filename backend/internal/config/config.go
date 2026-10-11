@@ -191,6 +191,9 @@ type Config struct {
 	// administrator before it expires (internal/pluginreq, docs/APP-PLUGINS.md
 	// → Install requests).
 	PluginRequestTTLDays int `yaml:"plugin_request_ttl_days"`
+	// CoEdit is the relay apps edit a file together through (internal/coedit,
+	// task #189, docs/CONFIGURATION.md → Editing together).
+	CoEdit CoEditConfig `yaml:"coedit"`
 	// SecretKey (FILEX_SECRET_KEY) encrypts the secrets filex has to be able to
 	// read back rather than merely compare — today the S3 access keys, because
 	// SigV4 derives an HMAC chain from the secret and so cannot work off a
@@ -1006,6 +1009,13 @@ func Default() Config {
 		},
 		AppPluginUpdateCheck: true,
 		PluginRequestTTLDays: 14,
+		CoEdit: CoEditConfig{
+			Enabled:     true,
+			MaxMembers:  20,
+			MaxLogMB:    64,
+			MaxBlobMB:   256,
+			UnsavedDays: 30,
+		},
 		Upload: UploadConfig{
 			ChunkSize:     8 << 20,
 			StagingTTL:    24 * time.Hour,
@@ -1166,6 +1176,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Archive.WorkDir == "" {
 		cfg.Archive.WorkDir = filepath.Join(cfg.DataDir, "archive-work")
+	}
+	if cfg.CoEdit.Dir == "" {
+		cfg.CoEdit.Dir = filepath.Join(cfg.DataDir, "coedit")
 	}
 	if cfg.Upload.ChunkSize <= 0 {
 		cfg.Upload.ChunkSize = 8 << 20
@@ -1374,6 +1387,27 @@ func applyEnv(c *Config) {
 		{"FILEX_APP_PLUGIN_MAX_WASM_MB", &c.AppPluginMaxWasmMB},
 		{"FILEX_APP_PLUGIN_MAX_UI_MB", &c.AppPluginMaxUIMB},
 		{"FILEX_PLUGIN_REQUEST_TTL_DAYS", &c.PluginRequestTTLDays},
+	} {
+		if v := os.Getenv(kv.env); v != "" {
+			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+				*kv.dst = n
+			}
+		}
+	}
+	if v := os.Getenv("FILEX_COEDIT"); v != "" {
+		c.CoEdit.Enabled = v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "on")
+	}
+	if v := os.Getenv("FILEX_COEDIT_DIR"); v != "" {
+		c.CoEdit.Dir = v
+	}
+	for _, kv := range []struct {
+		env string
+		dst *int
+	}{
+		{"FILEX_COEDIT_MAX_MEMBERS", &c.CoEdit.MaxMembers},
+		{"FILEX_COEDIT_MAX_LOG_MB", &c.CoEdit.MaxLogMB},
+		{"FILEX_COEDIT_MAX_BLOB_MB", &c.CoEdit.MaxBlobMB},
+		{"FILEX_COEDIT_UNSAVED_DAYS", &c.CoEdit.UnsavedDays},
 	} {
 		if v := os.Getenv(kv.env); v != "" {
 			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
@@ -1991,3 +2025,27 @@ type TLSConfig struct {
 
 // ACME reports whether filex issues certificates itself.
 func (t TLSConfig) ACME() bool { return t.Mode == TLSModeACME }
+
+// CoEditConfig is the editing-together relay (internal/coedit, task #189):
+// the server half of an app interface's coedit.* bridge methods, for an app
+// granted files:co-edit.
+type CoEditConfig struct {
+	// Enabled (FILEX_COEDIT, default on). Off: every coedit.* call answers
+	// `unavailable` and an app edits alone.
+	Enabled bool `yaml:"enabled"`
+	// Dir (FILEX_COEDIT_DIR, default <data_dir>/coedit) keeps the sessions'
+	// sealed blobs (the base document, images added while editing). Several
+	// instances on one database must share it, like the upload staging dir.
+	Dir string `yaml:"dir"`
+	// MaxMembers (FILEX_COEDIT_MAX_MEMBERS, default 20) per session.
+	MaxMembers int `yaml:"max_members"`
+	// MaxLogMB (FILEX_COEDIT_MAX_LOG_MB, default 64): a session's sealed log.
+	// Past it a member has to save, and the next opening starts afresh.
+	MaxLogMB int `yaml:"max_log_mb"`
+	// MaxBlobMB (FILEX_COEDIT_MAX_BLOB_MB, default 256): a session's blobs.
+	MaxBlobMB int `yaml:"max_blob_mb"`
+	// UnsavedDays (FILEX_COEDIT_UNSAVED_DAYS, default 30): how long a session
+	// nobody is in keeps its unsaved changes for the next person who opens
+	// the file.
+	UnsavedDays int `yaml:"unsaved_days"`
+}

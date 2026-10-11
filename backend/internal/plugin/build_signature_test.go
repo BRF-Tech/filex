@@ -21,7 +21,8 @@ import (
 // sec055 S5 and S12: a storage plugin build's signature names the build -
 // its plugin, version, platform and sha256 - and is checked as the build the
 // install path says it is; a build a store signed passes the build gate; an
-// old (sha256-only) signature is still taken during 0.55, said to be old; an
+// old (sha256-only) signature is still taken during its compatibility
+// window, said to be old, with the window's end named; an
 // upgrade that lands held keeps the previous binary until the new one comes
 // up.
 
@@ -94,7 +95,7 @@ func TestInstall_AnOldFormSignatureIsTakenWithAWarning(t *testing.T) {
 	ctx := context.Background()
 
 	st, err := m.InstallFromURLVersion(ctx, "oldfs", base+"/build", sum, old, "")
-	require.NoError(t, err, "the old form is still taken during 0.55")
+	require.NoError(t, err, "the old form is still taken during its window")
 	require.True(t, st.LegacySignature, "the plugin's row does not say its signature is the old form")
 	lines, _, err := m.Logs(ctx, st.ID, 0)
 	require.NoError(t, err)
@@ -102,9 +103,15 @@ func TestInstall_AnOldFormSignatureIsTakenWithAWarning(t *testing.T) {
 	for _, l := range lines {
 		if l.Level == "warn" && strings.Contains(l.Msg, "sha256 alone") {
 			found = true
+			require.Equal(t, plugin.LegacySignatureLog(), l.Msg)
 		}
 	}
 	require.True(t, found, "the plugin's log does not warn about the old form: %+v", lines)
+	// The warning names the end of the window from windows.json, not a
+	// literal release (0.55 promised a refusal in 0.56, one release later;
+	// the window rule replaced that promise).
+	version, date := plugin.LegacySignatureWindow.Until()
+	require.Contains(t, plugin.LegacySignatureLog(), "filex "+version+" and "+date)
 
 	got, err := m.Get(ctx, st.ID)
 	require.NoError(t, err)

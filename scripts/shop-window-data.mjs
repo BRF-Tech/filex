@@ -356,9 +356,10 @@ export const SCREENSHOTS = [
     depicts: ['web/src/components/plugins/AppPluginsTab.vue', 'web/src/components/plugins/AppPluginLanguages.vue'],
   },
   {
-    // Two kinds of tag, under their own headings, with one opened.
+    // The explorer: two kinds of tag under their own headings in the
+    // navigation panel, a team tag opened, its files from every folder.
     name: 'tags/tags-kinds-1440.png',
-    depicts: ['web/src/views/TaggedFiles.vue', 'packages/core/src/components/TagKindIcon.vue', 'web/src/api/tags.ts'],
+    depicts: ['packages/core/src/components/SideNav.vue', 'packages/core/src/components/TagKindIcon.vue', 'packages/core/src/components/ListView.vue'],
   },
   {
     // Trash: deleted-from, deleted-on and how long is left are columns of the
@@ -449,5 +450,17 @@ export const SCREENSHOTS = [
     // A license the store revoked: the app held, the band on an admin page.
     name: 'store/store-license-held-1440.png',
     depicts: ['web/src/components/AppLicenseAlert.vue', 'web/src/components/plugins/AppPluginsTab.vue'],
+  },
+  // ── v0.56.0: editing together, an encrypted folder's file in an app
+  //    (e2e/shots/officeapp.mjs, e2e/shots/e2eapp.mjs + office-app/) ──
+  {
+    // Two people in one document: one editing, one who may only read watching.
+    name: 'officeapp/coedit-watcher-1280.png',
+    depicts: ['packages/core/src/components/plugin/AppFrame.vue', 'packages/core/src/lib/coeditSession.ts', 'e2e/shots/office-app'],
+  },
+  {
+    // A file of an encrypted folder in an app, decrypted by the browser.
+    name: 'e2eapp/app-encrypted-folder-1280.png',
+    depicts: ['packages/core/src/components/plugin/AppFrame.vue', 'packages/core/src/lib/appPlaintext.ts', 'e2e/shots/office-app'],
   },
 ];

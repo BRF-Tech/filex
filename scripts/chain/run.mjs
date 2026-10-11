@@ -51,8 +51,8 @@ import {
   readPressure,
 } from './host.mjs';
 import { S3_LIVE_KEYS, STALL, hostLine, pauseWords, s3LiveFile, stallWords } from './nightly-lib.mjs';
-import { CHAIN_DIR, PROFILES, WEIGHTS, buildPlan, expectedMinutes, loadLists, trackWeight } from './plan.mjs';
-import { hostBudget, pickJobs, poolBudget, poolCeiling, readyJobs, simulate } from './schedule.mjs';
+import { CHAIN_DIR, PROFILES, WEIGHTS, argsEnv, argsShown, buildPlan, expectedMinutes, loadLists, trackWeight } from './plan.mjs';
+import { hostBudget, ioWaits, pickJobs, poolBudget, poolCeiling, readyJobs, simulate } from './schedule.mjs';
 
 const REPO = path.resolve(CHAIN_DIR, '..', '..');
 
@@ -180,6 +180,12 @@ function settings(env, args) {
       waitMin: num('CHAIN_PSI_WAIT_MIN', 5),
     },
     startGapS: num('CHAIN_START_GAP_S', 20),
+    // At most this many jobs that write heavily (plan.mjs ioOf) run at once,
+    // the browser round's line included (0: no limit, as before #194's second
+    // part); a heavy line of the round waits at most ioWaitMin minutes for
+    // the heavy pool jobs running, then starts anyway.
+    ioHeavyMax: num('CHAIN_IO_HEAVY_MAX', 1),
+    ioWaitMin: num('CHAIN_IO_WAIT_MIN', 45),
     // The disk whose write latency the run records (/proc/diskstats name);
     // default: the one CHAIN_ROOT is on.
     disk: env.CHAIN_DISK || '',
@@ -189,6 +195,9 @@ function settings(env, args) {
     // may hold, in GiB: tmpfs (KIND `tmp`, `results`; 0: on the disk, as
     // before #194).
     tmpfsGb: num('CHAIN_TMPFS_GB', 3),
+    // The most a Playwright line's /tmp may hold, in GiB: tmpfs (KIND
+    // `browserTmp`; 0: on the disk, as before #194's third part).
+    browserTmpGb: num('CHAIN_BROWSER_TMPFS_GB', 6),
     cpus: num('CHAIN_CPUS', Math.min(12, os.cpus().length)),
     goUser: { uid, gid },
     images: {
@@ -298,7 +307,7 @@ function git(src, args) {
 function budgetOf(cfg, plan, memGb = cfg.memGb) {
   const trackGb = trackWeight(plan.track);
   const dbGb = plan.pool.some((j) => j.db) ? WEIGHTS.db : 0;
-  return { memGb, trackGb, dbGb, poolMax: cfg.poolMax };
+  return { memGb, trackGb, dbGb, poolMax: cfg.poolMax, ioMax: cfg.ioHeavyMax };
 }
 
 function hm(minutes) {
@@ -330,21 +339,23 @@ function printPlan(cfg, plan) {
         `at most ${cfg.hooks.timeoutS ? `${cfg.hooks.timeoutS} s` : 'any time'} each`,
     );
   }
-  out.push('', `${'pool'.padEnd(w + 2)}${'needs'.padEnd(needsW)}GiB   ~min  expected`);
+  const io = (j) => (j.io === 'heavy' ? 'heavy' : '');
+  out.push('', `${'pool'.padEnd(w + 2)}${'needs'.padEnd(needsW)}GiB   ~min  disk   expected`);
   for (const j of plan.pool) {
-    out.push(`  ${j.name.padEnd(w)}${j.needs.join(',').padEnd(needsW)}${String(j.weight).padEnd(6)}${String(expectedMinutes(j)).padEnd(6)}${when.get(j.name) ?? ''}`);
+    out.push(`  ${j.name.padEnd(w)}${j.needs.join(',').padEnd(needsW)}${String(j.weight).padEnd(6)}${String(expectedMinutes(j)).padEnd(6)}${io(j).padEnd(7)}${when.get(j.name) ?? ''}`);
   }
-  out.push('', `${'browser round, in order'.padEnd(w + 2)}kind     engines                  ds GiB   ~min  expected`);
+  out.push('', `${'browser round, in order'.padEnd(w + 2)}kind     engines                  ds GiB   ~min  disk   expected`);
   for (const t of plan.track) {
     out.push(
       `  ${t.name.padEnd(w)}${t.kind.padEnd(9)}${(t.engines.join(',') || '-').padEnd(25)}${(t.ds ? '1' : '0').padEnd(3)}` +
-        `${String(t.weight).padEnd(6)}${String(expectedMinutes(t)).padEnd(6)}${when.get(t.name) ?? ''}${t.args.length ? `  ${t.args.join(' ')}` : ''}`,
+        `${String(t.weight).padEnd(6)}${String(expectedMinutes(t)).padEnd(6)}${io(t).padEnd(7)}${when.get(t.name) ?? ''}${t.args.length ? `  ${argsShown(t.args)}` : ''}`,
     );
   }
   out.push(
     '',
     `expected wall time ${hm(sim.wall)} (the minutes above through the same scheduler; ` +
-      `at most ${sim.maxRunning} pool jobs at once, ${sim.peakGb.toFixed(2)} GiB held at the peak)`,
+      `at most ${sim.maxRunning} pool jobs at once, ${sim.peakGb.toFixed(2)} GiB held at the peak, ` +
+      `at most ${sim.maxHeavy} heavy writer(s) at once - CHAIN_IO_HEAVY_MAX ${cfg.ioHeavyMax || 'off'}, the round waited ${Math.round(sim.ioWait)} min for the disk)`,
   );
   console.log(out.join('\n'));
 }
@@ -372,8 +383,38 @@ function docker(args, opts = {}) {
  * stores - waited on every fsync for a disk that stopped for seconds at a
  * time (lesson #1232: a queue test and a storage stall test red on it). The
  * build directory stays on the disk (GOTMPDIR): a test binary per package at
- * -p 6 would take memory the budget does not count. Not the browser lines'
- * /tmp: spec 173 writes a 1.1 GB file and a 207 MB one there.
+ * -p 6 would take memory the budget does not count. The browser lines' /tmp
+ * is `browserTmp`, below, larger.
+ *
+ * ⚠ `browserTmp`: a Playwright line's /tmp is a tmpfs of its own size
+ * (CHAIN_BROWSER_TMPFS_GB, 6). Everything such a line wrote to the disk went
+ * there: the browser's profile, the filex server's data directory (e2e/run.mjs
+ * mkdtemp: its SQLite, search index, log and storages) and the storages the
+ * specs make, and Chromium's shared memory - Playwright starts it with
+ * --disable-dev-shm-usage, so its shared memory is files in /tmp. Measured
+ * on the build host's night of 2026-10-09 (task #194; bpftrace on the line's
+ * cgroup): the Firefox line wrote 11.8 GB, three quarters and more of it its
+ * contexts' Cache API storage - the panel's service worker precaches the app
+ * into every context, 15 MB of writes a context and 50 fsyncs a second - and the rest
+ * its profile, the server's index, database and compiled plugins and the
+ * specs' storages. On the stalling disk a closed context's storage stayed
+ * (one profile grew to 1.3 GB); the Chromium (4.0 GB) and WebKit (3.1 GB)
+ * lines wrote the server's data directory, the specs' storages and, for
+ * Chromium, its shared memory, with the server fsyncing 10-25 times a
+ * second. The same 125 Firefox tests (00-117, 2026-10-10): /tmp on the disk
+ * wrote 2.11 GiB in 7 min 51 s, its storage at 328 MB for 66 contexts; on
+ * this tmpfs 0.00 GiB in 4 min 19 s, the closed contexts emptied (64 MB for
+ * 71), /tmp at most 241 MB, the line's memory 2.30 GiB against 2.13. A tmpfs
+ * takes memory only for what it holds: the server's data (about 0.5 GB by
+ * the end of a line), the profile, and for a minute spec 173's 1.1 GB file
+ * and its 207 MB one.
+ * The shots job is the same harness (Playwright's Chromium, a filex server a
+ * scene) and wrote 1.3-1.43 GiB a night; what it writes besides its
+ * pictures goes under /tmp - its run directory (scripts/shots.mjs mkdtemp:
+ * the stamped binary it runs from there, each scene's server data), the
+ * browser's profile, Chromium's shared memory - and gets the same tmpfs
+ * (task #194). The pictures and the contact sheet stay in the tree, on the
+ * disk: the job copies them to the run.
  *
  * ⚠ `results`: Playwright's output directory (e2e/test-results, a part's
  * shard-i-of-N under it) is a tmpfs of the same size. With trace and video
@@ -399,15 +440,16 @@ export const KIND = {
   'race-build': { image: 'go', script: 'race-build.sh', mem: '6g', user: true },
   race: { image: 'go', script: 'race.sh', mem: '6g', user: true, tmp: true },
   cypress: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true },
-  local: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true },
-  nopub: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true },
-  s3: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true },
+  local: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true, browserTmp: true },
+  nopub: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true, browserTmp: true },
+  s3: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true, browserTmp: true },
   // The nightly extras (plan.mjs NIGHTLY_EXTRAS). ds-go runs as root: the
   // Document Server's secret file is root's, 0600; so does s3-live, for the
   // bucket's key (etc/s3-live.env, 0600 - never a `-e` argument).
   'ds-go': { image: 'go', script: 'ds-go.sh', mem: '6g', apps: true, dsEnv: true, tmp: true },
   's3-live': { image: 'go', script: 's3-live.sh', mem: '6g', s3Live: true, tmp: true },
-  shots: { image: 'pw', script: 'shots.sh', mem: '9g', shares: 4096, browser: true, goroot: true },
+  // browserTmp as a Playwright line: the same harness (`browserTmp` above).
+  shots: { image: 'pw', script: 'shots.sh', mem: '9g', shares: 4096, browser: true, goroot: true, browserTmp: true },
   // ⚠ A host job is no container: e2e/realenv/run.sh starts containers of its
   // own with this host's Docker, and mounts the tree by its path HERE.
   realenv: { host: true, script: 'realenv.sh' },
@@ -446,7 +488,9 @@ export function hostJobEnv(base, { job, dir, src, prefix, images, realenv = {} }
   };
 }
 
-const FONTS_CONF = `<?xml version="1.0"?>
+// Exported: scripts/ci/browser-prep.mjs gives every CI browser part (GitHub's
+// and CircleCI's) this same map, so the layout checks see one face everywhere.
+export const FONTS_CONF = `<?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
 <!-- The Playwright image's sans-serif is a CJK face that sets Latin wide; the
      suite's layout checks are calibrated on a Latin one (e2e lesson, 0.50). -->
@@ -481,6 +525,9 @@ class Chain {
     this.vgwUp = false;
     this.trackDone = plan.track.length === 0;
     this.trackWaiting = false;
+    // The round's line writes heavily, or is about to start and will: the
+    // pool starts no heavy job meanwhile (runTrack, runPool).
+    this.trackIo = false;
     this.stopping = false;
     this.minAvailGb = memAvailableGb();
     this.peakHeldGb = 0;
@@ -495,7 +542,7 @@ class Chain {
     // running job's tally (`load`, kept in its record when it ends).
     this.hostState = {
       memFullMax: null, ioFullMax: null, diskWriteMsMax: null, stallSamples: 0,
-      poolHeldMs: 0, tempWaitMs: 0,
+      poolHeldMs: 0, tempWaitMs: 0, ioWaitMs: 0,
     };
     this.load = new Map();
     this.disk = null;
@@ -632,7 +679,8 @@ class Chain {
     this.diskPrev = this.disk ? { c: this.disk, t: Date.now() } : null;
     const why = hb.cut ? ` - CHAIN_MEM_GB is ${this.cfg.memGb}, but MemAvailable is ${avail.toFixed(1)} GiB, less the ${this.cfg.reserveGb} GiB reserve` : '';
     this.log(
-      `budget ${this.budget.memGb} GiB${why}: browser round ${this.budget.trackGb}, databases ${this.budget.dbGb}, pool max ${this.budget.poolMax}; ` +
+      `budget ${this.budget.memGb} GiB${why}: browser round ${this.budget.trackGb}, databases ${this.budget.dbGb}, pool max ${this.budget.poolMax}, ` +
+        `heavy writers at once ${this.budget.ioMax || 'any'}; ` +
         `MemAvailable now ${Number.isFinite(avail) ? avail.toFixed(1) : '?'} of ${(os.totalmem() / 2 ** 30).toFixed(1)} GiB`,
     );
     if (outside) this.log(`outside the chain: ${outside}`);
@@ -824,7 +872,8 @@ class Chain {
         KIND: job.kind,
         ENGINES: job.engines.join(','),
         DS: job.ds ? '1' : '0',
-        ARGS: job.args.join(' '),
+        // One argument a line (plan.mjs argsEnv): e2e.sh reads them back with mapfile.
+        ARGS: argsEnv(job.args, job.name),
         // One port per line of the list: a part never waits on another's.
         PORT: String(c.e2ePort + (job.index ?? 0)),
         DS_URL: `http://${ds}`,
@@ -848,6 +897,8 @@ class Chain {
     const tmp = [];
     // exec: a Go test runs what it writes there (a fake virus scanner, a plugin binary).
     if (k.tmp && c.tmpfsGb > 0) tmp.push('--tmpfs', `/tmp:rw,exec,nosuid,nodev,size=${c.tmpfsGb}g,mode=1777`);
+    // exec, as the container's own /tmp was: the line keeps everything it could do there.
+    if (k.browserTmp && c.browserTmpGb > 0) tmp.push('--tmpfs', `/tmp:rw,exec,nosuid,nodev,size=${c.browserTmpGb}g,mode=1777`);
     // Over the tree's own e2e/test-results: Playwright empties it at its start
     // and, finding a mount point (EBUSY), removes what is in it instead.
     if (k.results && c.tmpfsGb > 0) tmp.push('--tmpfs', `/w/src/e2e/test-results:rw,nosuid,nodev,size=${c.tmpfsGb}g,mode=1777`);
@@ -922,7 +973,7 @@ class Chain {
     const load = tally ? loadRecord(tally) : null;
     this.status[job.name] = rc === 0 && !this.stopping ? 'passed' : 'failed';
     this.records[job.name] = {
-      name: job.name, lane, kind: job.kind, weight_gb: job.weight, status: this.status[job.name], exit: rc,
+      name: job.name, lane, kind: job.kind, weight_gb: job.weight, io: job.io, status: this.status[job.name], exit: rc,
       start: new Date(start).toISOString(), end: iso(), secs, log: logFile, out: path.join(this.dir, 'out', job.name), summary,
       ...(load ? { load } : {}),
       ...(warnings.length ? { warnings } : {}),
@@ -939,7 +990,7 @@ class Chain {
     return this.runJob(job, lane).catch((e) => {
       this.running.delete(job.name);
       this.status[job.name] = 'failed';
-      this.records[job.name] = { name: job.name, lane, kind: job.kind, weight_gb: job.weight, status: 'failed', exit: null, summary: `chain error: ${e.message}` };
+      this.records[job.name] = { name: job.name, lane, kind: job.kind, weight_gb: job.weight, io: job.io, status: 'failed', exit: null, summary: `chain error: ${e.message}` };
       this.log(`JOBEXIT ${job.name} chain error: ${e.message}`);
       return 1;
     });
@@ -1037,7 +1088,7 @@ class Chain {
 
   skip(job, why) {
     this.status[job.name] = 'skipped';
-    this.records[job.name] = { name: job.name, lane: job.lane, kind: job.kind, weight_gb: job.weight, status: 'skipped', exit: null, summary: why };
+    this.records[job.name] = { name: job.name, lane: job.lane, kind: job.kind, weight_gb: job.weight, io: job.io, status: 'skipped', exit: null, summary: why };
     this.log(`SKIP ${job.name}: ${why}`);
   }
 
@@ -1086,6 +1137,32 @@ class Chain {
     this.log(`${job.name}: MemAvailable ${memAvailableGb().toFixed(1)} GiB, starting`);
   }
 
+  /**
+   * Before a line that writes heavily (plan.mjs ioOf): wait while
+   * CHAIN_IO_HEAVY_MAX heavy pool jobs run, at most CHAIN_IO_WAIT_MIN. The
+   * pool already starts no heavy job (this.trackIo). ⚠ Task #194: Chromium
+   * beside race-db-io and race-rest held writes of 1-3.6 s for 14 minutes of
+   * a run; a test that waits a fixed time goes red in such a minute.
+   */
+  async trackDisk(job) {
+    const max = this.cfg.ioHeavyMax;
+    const poolJobs = () => [...this.running.values()].map((r) => r.job).filter((j) => this.plan.pool.includes(j));
+    if (!ioWaits(job, poolJobs(), max)) return;
+    const t0 = Date.now();
+    const deadline = t0 + this.cfg.ioWaitMin * 60_000;
+    const heavy = () => poolJobs().filter((j) => j.io === 'heavy').map((j) => j.name).join(',');
+    this.log(`${job.name} waits for the disk: ${heavy()} write heavily (CHAIN_IO_HEAVY_MAX ${max}); the pool starts no heavy job meanwhile`);
+    while (ioWaits(job, poolJobs(), max) && Date.now() < deadline && !this.stopping) await sleep(5000);
+    const waited = Date.now() - t0;
+    this.hostState.ioWaitMs += waited;
+    const still = ioWaits(job, poolJobs(), max);
+    this.log(
+      still
+        ? `${job.name} waited CHAIN_IO_WAIT_MIN (${this.cfg.ioWaitMin} min) for the disk: starting beside ${heavy()}`
+        : `${job.name}: the disk is free after ${Math.round(waited / 1000)}s, starting`,
+    );
+  }
+
   async runTrack() {
     while (['pending', 'running'].includes(this.status.build) && !this.stopping) await sleep(1000);
     const track = this.plan.track;
@@ -1111,15 +1188,19 @@ class Chain {
         this.skip({ ...job, lane: 'e2e' }, `chain error: ${e.message}`);
         continue;
       }
+      this.trackIo = job.io === 'heavy';
       if (!['cypress', 'ds-go', 's3-live'].includes(job.kind)) await this.cool(job);
       await this.trackMemory(job);
+      await this.trackDisk(job);
       await this.startJob(job, 'e2e');
+      this.trackIo = false;
       if (this.vgwUp && !later.some((t) => t.kind === 's3')) {
         docker(['rm', '-f', `${this.P}-vgw`]);
         this.vgwUp = false;
       }
     }
     if (this.dsUp) this.dsStop();
+    this.trackIo = false;
     this.trackDone = true;
   }
 
@@ -1141,7 +1222,8 @@ class Chain {
       let avail = memAvailableGb();
       const holding = runningPool.reduce((s, j) => s + j.weight, 0) + (trackActive ? this.budget.trackGb : 0) + (this.dbUp ? this.budget.dbGb : 0);
       this.peakHeldGb = Math.max(this.peakHeldGb, holding);
-      const picks = this.trackWaiting ? [] : pickJobs({ ready, running: runningPool, budget, ceiling, maxJobs: this.cfg.poolMax });
+      const ioHeld = this.trackIo ? 1 : 0;
+      const picks = this.trackWaiting ? [] : pickJobs({ ready, running: runningPool, budget, ceiling, maxJobs: this.cfg.poolMax, ioMax: this.cfg.ioHeavyMax, ioHeld });
       if (picks.length && this.admit()) {
         for (const job of picks) {
           if ((runningPool.length > 0 || this.running.size > 0) && avail - job.weight < this.cfg.reserveGb) {
@@ -1228,6 +1310,10 @@ class Chain {
       stalled_secs: h.stallSamples * 5,
       pool_held_secs: Math.round((h.poolHeldMs + heldNow) / 1000),
       temp_wait_secs: Math.round(h.tempWaitMs / 1000),
+      // The browser round's heavy lines waiting for the pool's (#194), and the
+      // most heavy writers the run allowed at once (0: any).
+      io_wait_secs: Math.round(h.ioWaitMs / 1000),
+      io_heavy_max: this.cfg.ioHeavyMax,
     };
   }
 

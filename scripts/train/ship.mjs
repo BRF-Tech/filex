@@ -24,7 +24,9 @@
 //   desktop    the release's desktop packages and feeds onto the feed host
 //   purge      those files out of the CDN's cache (the names never change)
 //   releases   the Releases page regenerated; committed when it changed
-//   docs       docs.filex.sh: the snapshot copied, the public pages in, rebuilt
+//   helm       the Helm chart: the charts repository's publishing started,
+//              then its index.yaml read until it lists the release
+//   docs      docs.filex.sh: the snapshot copied, the public pages in, rebuilt
 //   npm        waits until npm serves every package of the release
 //   embeds     the vendored explorer moved to the release (and deployed)
 //   verify     pnpm release X.Y.Z --resume --only deploy - the release tool's
@@ -84,7 +86,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
 const REMOTE = path.join(HERE, 'remote');
 
-export const STEPS = ['preflight', 'backup', 'proxies', 'deploy', 'manifest', 'desktop', 'purge', 'releases', 'docs', 'npm', 'embeds', 'verify'];
+export const STEPS = ['preflight', 'backup', 'proxies', 'deploy', 'manifest', 'desktop', 'purge', 'releases', 'helm', 'docs', 'npm', 'embeds', 'verify'];
 /** Run again together while `deploy` has not passed: a backup per attempt. */
 export const SERVER_STEPS = ['backup', 'proxies', 'deploy'];
 
@@ -98,6 +100,9 @@ export const AFTER = {
   desktop: ['deploy'],
   purge: ['desktop'],
   releases: ['preflight'],
+  // Not the Releases page: a red page (a summary not written yet) must not
+  // hold back the chart. The GitHub Release exists once the tag run is green.
+  helm: ['preflight'],
   docs: ['releases'],
   npm: ['preflight'],
   embeds: ['npm', 'deploy'],
@@ -119,6 +124,10 @@ export const DESKTOP_ASSETS = [
   'filex-desktop-*.zip',
   'filex-desktop-*.blockmap',
 ];
+
+/** The chart the helm step waits for (deploy/helm/filex), and how often it reads the index. */
+export const HELM_CHART = 'filex';
+export const HELM_POLL_SECS = 30;
 
 /**
  * A value that goes into a command as it is: no space, no quote, nothing a
@@ -195,6 +204,10 @@ export function shipSettings(env) {
   if (docsSrc && !docsSrc.startsWith('/')) problems.push('SHIP_DOCS_SRC: an absolute directory on the server');
   const npmWait = Number(str('SHIP_NPM_WAIT', '20'));
   if (!Number.isFinite(npmWait) || npmWait < 0) problems.push('SHIP_NPM_WAIT: minutes');
+  const helmIndex = str('SHIP_HELM_INDEX');
+  if (helmIndex && !/^https?:\/\/\S+$/.test(helmIndex)) problems.push('SHIP_HELM_INDEX: the URL of the Helm repository\'s index.yaml');
+  const helmWait = Number(str('SHIP_HELM_WAIT', '15'));
+  if (!Number.isFinite(helmWait) || helmWait < 0) problems.push('SHIP_HELM_WAIT: minutes');
   const cfg = {
     host,
     sshOpts: str('SHIP_SSH_OPTS', '-o BatchMode=yes -o ConnectTimeout=20').split(/\s+/).filter(Boolean),
@@ -213,6 +226,9 @@ export function shipSettings(env) {
     exportDir: str('SHIP_EXPORT_DIR'),
     githubRepo: safe('SHIP_GITHUB_REPO', str('SHIP_GITHUB_REPO', 'BRF-Tech/filex')),
     npmWait,
+    helmCmd: str('SHIP_HELM_CMD'),
+    helmIndex,
+    helmWait,
     revendorCmd: str('SHIP_REVENDOR_CMD'),
     embedsDeployCmd: str('SHIP_EMBEDS_DEPLOY_CMD'),
   };
@@ -273,7 +289,7 @@ export function buildSteps(cfg, ctx) {
   const bk = `${cfg.backupRoot}/pre-${tag}-${stamp}`;
   const dl = `${posixPath(runDir)}/desktop`;
   const steps = [];
-  const add = (id, title, spec) => steps.push({ id, title, gate: { cwd: runDir, env, ...spec } });
+  const add = (id, title, spec, extra = {}) => steps.push({ id, title, gate: { cwd: runDir, env, ...spec }, ...extra });
   const person = (id, title, lines) => steps.push({ id, title, person: lines });
 
   add('preflight', 'the tag, the public checkout, the release record, the server', { check: ctx.preflight });
@@ -313,6 +329,22 @@ export function buildSteps(cfg, ctx) {
   }
 
   add('releases', 'the Releases page', { cwd: repo, check: ctx.releases });
+
+  // The charts repository publishes on a schedule too, but a scheduled
+  // GitHub workflow can start late or not at all (on a new repository it did
+  // not start for hours): the ship starts the publishing itself and reads
+  // the index back, so a release has its chart without anybody looking.
+  if (cfg.helmCmd && cfg.helmIndex) {
+    add('helm', 'the Helm chart', { check: ctx.helm }, {
+      plan: `${cfg.helmCmd}; then ${cfg.helmIndex} every ${HELM_POLL_SECS} s until it lists ${HELM_CHART} ${tag} (at most ${cfg.helmWait} min)`,
+    });
+  } else {
+    const missing = [!cfg.helmCmd && 'SHIP_HELM_CMD', !cfg.helmIndex && 'SHIP_HELM_INDEX'].filter(Boolean).join(', ');
+    person('helm', 'the Helm chart', [
+      `not set up (${missing}): start the Helm charts repository's publishing by hand and see its index.yaml list ${HELM_CHART} ${tag} -`,
+      'CONTRIBUTING, Release process, step 5',
+    ]);
+  }
 
   if (cfg.docsSrc && cfg.docsRefresh) {
     const src = cfg.docsSrc;
@@ -415,6 +447,111 @@ async function waitForNpm(packages, version, minutes, log) {
   }
 }
 
+/**
+ * The appVersions a Helm repository's index.yaml lists for `chart`, in the
+ * index's order. Read line by line in the shape `helm repo index` writes
+ * (entries -> chart name -> a list of versions; a value quoted or not), so no
+ * YAML library is needed.
+ */
+export function indexAppVersions(text, chart) {
+  const out = [];
+  let inEntries = false;
+  let nameIndent = -1;
+  let current = null;
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    if (!line.trim() || /^\s*#/.test(line)) continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent === 0) {
+      inEntries = /^entries:\s*$/.test(line);
+      nameIndent = -1;
+      current = null;
+      continue;
+    }
+    if (!inEntries) continue;
+    if (nameIndent < 0) nameIndent = indent;
+    if (indent === nameIndent) {
+      const key = /^\s*([^\s:#-][^:#]*?):\s*$/.exec(line);
+      if (key) {
+        current = key[1].replace(/^["']|["']$/g, '');
+        continue;
+      }
+    }
+    const m = /^\s*(?:-\s+)?appVersion:\s*(["']?)([^"'\s#]+)\1\s*(?:#.*)?$/.exec(line);
+    if (m && current === chart) out.push(m[2]);
+  }
+  return out;
+}
+
+async function fetchIndex(url) {
+  const res = await fetch(url, { headers: { 'cache-control': 'no-cache' }, signal: AbortSignal.timeout(20_000) });
+  if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+  return res.text();
+}
+
+/**
+ * The helm step. The index is read first: a release the charts repository
+ * already published (its own schedule got there) is green without starting
+ * anything. Otherwise `cmd` (SHIP_HELM_CMD) starts the publishing and the
+ * index is read every HELM_POLL_SECS until it lists `chart` at `appVersion`,
+ * for at most `minutes`. `runCmd`, `fetchText`, `sleep` and `now` are the
+ * outside world, passed in so a test needs no network and no clock.
+ */
+export async function publishHelm({
+  cmd,
+  index,
+  appVersion,
+  minutes,
+  runCmd,
+  chart = HELM_CHART,
+  fetchText = fetchIndex,
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  now = Date.now,
+  progress = () => {},
+}) {
+  const lines = [];
+  const say = (m) => {
+    lines.push(m);
+    progress(m);
+  };
+  const read = async () => {
+    try {
+      return { versions: indexAppVersions(await fetchText(index), chart) };
+    } catch (e) {
+      return { error: String(e?.message ?? e) };
+    }
+  };
+  const seen = (r) => (r.error ? `could not be read (${r.error})` : r.versions.length ? `lists ${chart} ${r.versions.slice(0, 3).join(', ')}` : `lists no ${chart} chart`);
+  const done = (detail, ok) => ({ ok, detail, log: lines.join('\n') });
+
+  let r = await read();
+  if (r.versions?.includes(appVersion)) return done(`${index} already lists ${chart} ${appVersion}: nothing started`, true);
+  say(`helm: the index ${seen(r)}; starting: ${cmd}`);
+  const c = await runCmd(cmd);
+  const out = `${c.stdout ?? ''}\n${c.stderr ?? ''}`.trim();
+  if (out) lines.push(out);
+  if (c.status !== 0) {
+    return done(`SHIP_HELM_CMD exited ${c.status}: ${cmd}\n${out.split('\n').slice(-8).join('\n')}`, false);
+  }
+  const until = now() + minutes * 60_000;
+  for (;;) {
+    await sleep(HELM_POLL_SECS * 1000);
+    r = await read();
+    if (r.versions?.includes(appVersion)) return done(`${index} lists ${chart} ${appVersion}`, true);
+    if (now() >= until) {
+      return done(
+        [
+          `after ${minutes} min ${index} still does not list ${chart} ${appVersion} (it ${seen(r)}).`,
+          `The run SHIP_HELM_CMD started (${cmd}) publishes the chart within a few minutes. A red run says why - a chart version already`,
+          `published with another appVersion is refused (raise version in deploy/helm/${chart}/Chart.yaml) - and a green one reaches`,
+          `the index once its host has pulled the published branch. Look at that run, then: bash scripts/train/filex-ship.sh ${appVersion.replace(/^v/, '')} --only helm`,
+        ].join('\n'),
+        false,
+      );
+    }
+    say(`helm: the index ${seen(r)}; waiting for ${appVersion}`);
+  }
+}
+
 async function main(argv) {
   let o;
   try {
@@ -470,6 +607,15 @@ async function main(argv) {
     preflight: () => preflight({ cfg, repo, exp, tag, gitDir, want, runDir, bash }),
     releases: () => releasesPage({ repo, tag, version, bash, releases }),
     npm: () => waitForNpm(npmPackages(repo), version, cfg.npmWait, log),
+    helm: () =>
+      publishHelm({
+        cmd: cfg.helmCmd,
+        index: cfg.helmIndex,
+        appVersion: tag,
+        minutes: cfg.helmWait,
+        runCmd: (c) => run(bash ?? 'bash', ['-c', c], { cwd: runDir, env: { FILEX_SHIP_TAG: tag, FILEX_SHIP_VERSION: version, FILEX_SHIP_REPO: repo } }),
+        progress: log,
+      }),
   };
   const steps = buildSteps(cfg, ctx);
 
@@ -477,7 +623,7 @@ async function main(argv) {
     console.log('');
     for (const s of steps) {
       const g = s.gate;
-      const what = s.person ? yellow('a person') : g.check ? dim('(checked here)') : dim(typeof g.sh === 'function' ? '(built when it runs)' : g.sh ?? (g.cmd ?? []).join(' '));
+      const what = s.person ? yellow('a person') : g.check ? dim(s.plan ?? '(checked here)') : dim(typeof g.sh === 'function' ? '(built when it runs)' : g.sh ?? (g.cmd ?? []).join(' '));
       console.log(`  ${s.id.padEnd(14)} ${s.title}\n  ${''.padEnd(14)} ${what}${AFTER[s.id]?.length ? dim(`  after ${AFTER[s.id].join(', ')}`) : ''}`);
       if (s.person) for (const l of s.person) console.log(`  ${''.padEnd(14)} ${dim(l)}`);
     }

@@ -81,9 +81,12 @@ export const VIEWER_MATRIX: Record<string, ExtMatch> = {
   drawio: { primary: '.filex-viewer-drawio__frame, iframe[src*="diagrams.net"]', fallback: '.filex-viewer-drawio' },
   dio:    { primary: '.filex-viewer-drawio__frame, iframe[src*="diagrams.net"]', fallback: '.filex-viewer-drawio' },
 
-  // Mermaid — rendered SVG inside `.filex-viewer-mermaid`.
+  // Mermaid — rendered SVG inside `.filex-viewer-mermaid`, when LOOKED at
+  // (mode=view). ⚠ Edit opens the diagram's source in the text editor, saved
+  // as text (#216 - the viewer only draws and has no save): `mmd@edit`.
   mmd:     { primary: '.filex-viewer-mermaid svg', fallback: '.filex-viewer-mermaid' },
   mermaid: { primary: '.filex-viewer-mermaid svg', fallback: '.filex-viewer-mermaid' },
+  'mmd@edit': { primary: '.fe-preview__code-editor, .fe-preview__pre' },
 
   // Epub — epubjs rendition mount.
   epub: { primary: '.filex-viewer-epub__rendition, .filex-viewer-epub iframe', fallback: '.filex-viewer-epub' },

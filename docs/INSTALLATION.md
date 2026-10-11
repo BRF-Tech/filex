@@ -1,6 +1,7 @@
 # Installation
 
-Pick the path that matches how far you want to go:
+Pick the path that matches how far you want to go. Trying it out?
+[**Minimal**](#minimal) is one command, and you are signed in five minutes later.
 
 | Path | What you get | Best for |
 |---|---|---|
@@ -136,25 +137,56 @@ OnlyOffice is already connected - open any Office file to edit it. See
 
 ## Kubernetes (Helm)
 
-A Helm chart lives at [`deploy/helm/filex/`](../deploy/helm/filex/). It deploys
-filex with a PVC for `/data` and an Ingress, and can pull in PostgreSQL, Redis,
-OnlyOffice and an S3 server (Versity S3 Gateway) as optional dependencies.
+The chart is in the BRF-Tech Helm repository, published with every release. It
+deploys filex with a PVC for `/data` and an Ingress, and can pull in PostgreSQL,
+Redis, OnlyOffice and an S3 server (Versity S3 Gateway) as optional dependencies.
 
 ```bash
-# Minimal: filex + SQLite + a local PVC.
-helm install filex ./deploy/helm/filex \
-  --set ingress.host=files.example.com
+helm repo add brf-tech https://helm.brf.sh
+helm repo update
 
-# Full: enable the bundled dependencies.
-helm install filex ./deploy/helm/filex -f deploy/helm/filex/values-full.yaml \
+# Minimal: filex + SQLite + a local PVC.
+helm install filex brf-tech/filex \
+  --set ingress.host=files.example.com
+```
+
+The same chart is on the GitHub Container Registry, with no `helm repo add`:
+
+```bash
+helm install filex oci://ghcr.io/brf-tech/charts/filex \
+  --set ingress.host=files.example.com
+```
+
+**Full stack.** `values-full.yaml`, shipped inside the chart, turns on the
+bundled dependencies:
+
+```bash
+helm pull brf-tech/filex --untar          # writes ./filex/values-full.yaml
+helm install filex brf-tech/filex -f filex/values-full.yaml \
   --set ingress.host=files.example.com \
   --set onlyoffice.ingress.host=office.example.com
 ```
 
-Key `values.yaml` toggles: `postgresql.enabled`, `redis.enabled`,
-`onlyoffice.enabled`, `versitygw.enabled`, `persistence.size`, `ingress.*`,
-`basePath`, `trustedProxies`, `resources`. See the chart's `values.yaml` for the
-full list.
+**Versions.** The chart has its own version; its `APP VERSION` is the filex
+release it installs (the image tag follows it unless you set `image.tag`).
+Without `--version` you get the newest. To pin one, and to upgrade later with
+your settings kept in a values file:
+
+```bash
+helm search repo brf-tech/filex --versions      # CHART VERSION and APP VERSION
+helm install filex brf-tech/filex --version <chart version> -f my-values.yaml
+helm repo update
+helm upgrade filex brf-tech/filex --version <chart version> -f my-values.yaml
+```
+
+With OCI, `--version` takes the same chart version.
+
+`helm show values brf-tech/filex` prints every setting with its comment. Key
+toggles: `postgresql.enabled`, `redis.enabled`, `onlyoffice.enabled`,
+`versitygw.enabled`, `persistence.size`, `ingress.*`, `basePath`,
+`trustedProxies`, `resources`. The chart's source is
+[`deploy/helm/filex/`](../deploy/helm/filex/); from a checkout,
+`./deploy/helm/filex` works wherever these examples say `brf-tech/filex`.
 
 `trustedProxies` sets `FILEX_TRUSTED_PROXIES`, the proxies whose
 `X-Forwarded-For` filex believes. Empty, it is `auto`: in a pod, the pod's own
@@ -173,7 +205,7 @@ unchanged - don't add a rewrite/strip annotation
 ([Serving filex under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path)):
 
 ```bash
-helm install filex ./deploy/helm/filex \
+helm install filex brf-tech/filex \
   --set ingress.host=files.example.com \
   --set basePath=/filex \
   --set publicURL=https://files.example.com/filex
@@ -266,8 +298,8 @@ sudo apt install ffmpeg ghostscript poppler-utils \
 Office documents are not a program here: their previews, and the apps' office
 conversions (the Convert app's Word/Excel/PowerPoint/OpenDocument targets),
 come from the ONLYOFFICE Document Server you connect under **External
-services** ([ONLYOFFICE.md](ONLYOFFICE.md)). Since 0.50 filex runs no
-LibreOffice, even one installed on this machine.
+services** ([ONLYOFFICE.md](ONLYOFFICE.md)). filex runs no LibreOffice, even
+one installed on this machine.
 
 ⚠ `libheif-plugin-libde265` is the HEVC decoder a HEIC photo needs. Ubuntu
 24.04's `libheif1` only *suggests* it, so `apt install imagemagick` alone
@@ -291,6 +323,29 @@ pnpm run build:all      # packages -> admin UI -> embed -> Go binary
 
 `CGO_ENABLED=0` means you can cross-compile without a C toolchain
 (`GOOS=linux GOARCH=arm64 go build ./backend/cmd/filex`).
+
+---
+
+## ARM (arm64)
+
+Every release builds these and runs them on arm64 machines before publishing:
+
+| | arm64 |
+|---|---|
+| Server + CLI binary | Linux, macOS and Windows: `filex-<os>-arm64` and the `.tar.gz` / `.zip` archives |
+| Docker images (`ghcr.io/brf-tech/filex`, full and slim) | multi-arch - `docker pull` picks arm64 by itself |
+| Desktop app - Linux | `filex-desktop-arm64.AppImage`, `filex-desktop-arm64.deb`, `filex-desktop-aarch64.rpm`, and the Snap Store (`sudo snap install filex-app` picks arm64) |
+| Desktop app - Windows on Arm | `filex-desktop-arm64.exe` (installer) and `filex-desktop-portable-arm64.exe`; the app updates itself to the arm64 build |
+| Desktop app - macOS | Apple Silicon only (no Intel build) |
+| Homebrew | the CLI (`filex`) on Apple Silicon and on Linux on Arm; the desktop app (`filex-app`) on Apple Silicon |
+| winget | the CLI (`BRFTech.filex`) on Windows on Arm - winget picks the arm64 build by itself |
+
+On an Arm machine the app's *Get the desktop app* offer (and its copy in
+Settings) leads with the arm64 file and the download list on
+[filex.sh](https://filex.sh/#downloads) highlights it, from what the browser
+reports (Chromium's client hints, Firefox's `aarch64`). A browser that does not
+say (Safari, Firefox on Windows) is offered the x64 file with the arm64 one
+beside it. The desktop downloads, with their links: [DESKTOP.md → Download](DESKTOP.md#download).
 
 ---
 

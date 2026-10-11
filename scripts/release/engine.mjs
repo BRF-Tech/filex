@@ -114,6 +114,21 @@ export function docker(args, opts = {}) {
   return run(bin, argv, { ...opts, env: { MSYS_NO_PATHCONV: '1', MSYS2_ARG_CONV_EXCL: '*', ...(opts.env ?? {}) } });
 }
 
+/**
+ * The id of the image under `tag` in the local daemon, or null. The whole
+ * `inspect`, no --format: an argument with quotes may not survive the way to a
+ * daemon in WSL (dockerArgv).
+ */
+export function dockerImageId(tag) {
+  const r = docker(['image', 'inspect', tag]);
+  if (r.status !== 0) return null;
+  try {
+    return JSON.parse(r.stdout)[0]?.Id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ── output ──────────────────────────────────────────────────────────────────
 
 const tty = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -158,6 +173,14 @@ const lastLines = (s, n) => String(s ?? '').replace(/\s+$/, '').split(/\r?\n/).s
  *                 make what later gates use)
  *   `cacheExtra`  (ctx) => what else it reads, outside this repository, as
  *                 a string; null means "could not tell", and the gate runs
+ *   `cacheRecipe` (ctx) => what the gate does, for the key, in place of its
+ *                 resolved command: for a command that carries a value which
+ *                 must not split the cache (an image build stamps the commit
+ *                 and the date into a throwaway image; task #165)
+ *   `cacheProof`  (ctx) => what the green run left behind that later gates
+ *                 use, as a string (an image's id under its tag), or null.
+ *                 Kept with the entry; a hit holds only while it is the same,
+ *                 so a cached build never passes once its output is gone
  *
  * The runner never decides a gate may be skipped: a gate either ran and
  * passed, passed on exactly these inputs before (and says so), or the
@@ -279,6 +302,18 @@ export class Gates {
         cached = null;
       }
     }
+    if (cached && spec.cacheProof) {
+      let now = null;
+      try {
+        now = await spec.cacheProof(ctx);
+      } catch {
+        now = null;
+      }
+      if (!now || now !== cached.proof) {
+        console.log(`  ${yellow('note  ')}  ${spec.name}: what its green run left behind is ${now ? 'not the same any more' : 'gone'}; the gate runs`);
+        cached = null;
+      }
+    }
     if (cached) {
       const note = log.replace(/\.log$/, '.cached.log');
       res = { ok: true, detail: `from the cache: green on exactly these inputs at ${cached.at}${cached.head ? ` (${String(cached.head).slice(0, 10)})` : ''}` };
@@ -299,7 +334,16 @@ export class Gates {
     const rec = { stage, name: spec.name, ok: !!res.ok, detail: res.detail ?? '', log: slash(log), secs, at: new Date().toISOString() };
     // Only for the HEAD the key was made from: a commit during the run makes
     // the key describe something else.
-    if (rec.ok && key && this.cache?.write && revParse(this.repo, 'HEAD') === this.tree?.head) await this.#cacheStore(spec.name, key, { at: rec.at, head: this.tree?.head ?? null, secs, log: rec.log });
+    if (rec.ok && key && this.cache?.write && revParse(this.repo, 'HEAD') === this.tree?.head) {
+      let proof = null;
+      try {
+        proof = spec.cacheProof ? await spec.cacheProof(ctx) : null;
+      } catch {
+        proof = null;
+      }
+      if (spec.cacheProof && !proof) console.log(`  ${yellow('note  ')}  ${spec.name}: green, but what it left behind cannot be read back, so the gate cache does not keep it`);
+      else await this.#cacheStore(spec.name, key, { at: rec.at, head: this.tree?.head ?? null, secs, log: rec.log, ...(proof ? { proof } : {}) });
+    }
     this.results.push(rec);
     this.onRecord(rec);
     const time = dim(`(${secs < 10 ? secs.toFixed(1) : Math.round(secs)}s)`);
@@ -428,7 +472,7 @@ export class Gates {
     const extra = spec.cacheExtra ? spec.cacheExtra(ctx) : undefined;
     if (extra === null) return null;
     const v = spec.vitest;
-    const recipe = {
+    const recipe = spec.cacheRecipe ? { custom: spec.cacheRecipe(ctx), extra } : {
       sh: spec.sh ? val(spec.sh) : undefined,
       cmd: spec.cmd ? val(spec.cmd) : undefined,
       vitest: v ? { cwd: val(v.cwd), files: val(v.files), env: val(v.env), mustPass: val(v.mustPass) } : undefined,
