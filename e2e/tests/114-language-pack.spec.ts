@@ -234,48 +234,54 @@ test.describe.serial('Language pack — install, every surface, uninstall', () =
     for (const width of [958, 1280, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await page.waitForTimeout(150);
-      for (const pack of [PACK.name, LONG.name]) {
-        /* ⚠ Scoped to the ROW, not to the cell's wrapper: a wrapper is what
-           this test is checking FOR, and a measurement that can only find the
-           parts when they are already wrapped cannot see the bug. */
-        const row = page.locator('.fe-list__row').filter({ has: page.getByTestId(`app-plugin-${pack}`) });
-        await expect(row, `${pack} @${width}`).toBeVisible();
-        const label = await row.getByTestId(`app-plugin-label-${pack}`).boundingBox();
-        const badge = await row.getByTestId(`app-plugin-kind-${pack}`).boundingBox();
-        const langs = await row.getByTestId('app-plugin-languages').boundingBox();
-        expect(label && badge && langs, `${pack} @${width}: a part of the cell is not drawn`).toBeTruthy();
+      /* Measured until the table has laid itself out for the new width: the
+         one table decides whether to stack its rows a frame after the pane
+         changes (0.56.1), and WebKit was read mid-change at 1280 (0.56.0 and
+         0.56.1 gates). An overlap that stays is still a failure. */
+      await expect(async () => {
+        for (const pack of [PACK.name, LONG.name]) {
+          /* ⚠ Scoped to the ROW, not to the cell's wrapper: a wrapper is what
+             this test is checking FOR, and a measurement that can only find the
+             parts when they are already wrapped cannot see the bug. */
+          const row = page.locator('.fe-list__row').filter({ has: page.getByTestId(`app-plugin-${pack}`) });
+          await expect(row, `${pack} @${width}`).toBeVisible();
+          const label = await row.getByTestId(`app-plugin-label-${pack}`).boundingBox();
+          const badge = await row.getByTestId(`app-plugin-kind-${pack}`).boundingBox();
+          const langs = await row.getByTestId('app-plugin-languages').boundingBox();
+          expect(label && badge && langs, `${pack} @${width}: a part of the cell is not drawn`).toBeTruthy();
 
-        expect(overlaps(label!, badge!), `${pack} @${width}: the badge covers the label`).toBe(false);
-        expect(overlaps(label!, langs!), `${pack} @${width}: the coverage line covers the label`).toBe(false);
-        expect(overlaps(badge!, langs!), `${pack} @${width}: the coverage line covers the badge`).toBe(false);
+          expect(overlaps(label!, badge!), `${pack} @${width}: the badge covers the label`).toBe(false);
+          expect(overlaps(label!, langs!), `${pack} @${width}: the coverage line covers the label`).toBe(false);
+          expect(overlaps(badge!, langs!), `${pack} @${width}: the coverage line covers the badge`).toBe(false);
 
-        /* The shape, not only the absence of a collision.
-           ⚠ The badge follows the label in READING ORDER — beside it when both
-           fit the column, on the line under it when they do not. It used to be
-           pinned beside it ("badge.x >= label right edge"), which was the right
-           assertion while the row could not wrap; the row wraps now, so that
-           spelling failed for exactly the labels this test was added for and
-           would have been "fixed" by taking the wrap out again. What must
-           never happen is the badge starting before the label on the label's
-           own line — that is the smear this whole test exists for, and it is
-           still caught. */
-        const sameLine = Math.abs(badge!.y - label!.y) < Math.max(label!.height, badge!.height) / 2;
-        if (sameLine) {
-          expect(badge!.x, `${pack} @${width}: the badge is not after the label`).toBeGreaterThanOrEqual(label!.x + label!.width - 1);
-        } else {
-          expect(badge!.y, `${pack} @${width}: the badge is above the label`).toBeGreaterThanOrEqual(label!.y + label!.height - 1);
+          /* The shape, not only the absence of a collision.
+             ⚠ The badge follows the label in READING ORDER — beside it when both
+             fit the column, on the line under it when they do not. It used to be
+             pinned beside it ("badge.x >= label right edge"), which was the right
+             assertion while the row could not wrap; the row wraps now, so that
+             spelling failed for exactly the labels this test was added for and
+             would have been "fixed" by taking the wrap out again. What must
+             never happen is the badge starting before the label on the label's
+             own line — that is the smear this whole test exists for, and it is
+             still caught. */
+          const sameLine = Math.abs(badge!.y - label!.y) < Math.max(label!.height, badge!.height) / 2;
+          if (sameLine) {
+            expect(badge!.x, `${pack} @${width}: the badge is not after the label`).toBeGreaterThanOrEqual(label!.x + label!.width - 1);
+          } else {
+            expect(badge!.y, `${pack} @${width}: the badge is above the label`).toBeGreaterThanOrEqual(label!.y + label!.height - 1);
+          }
+          expect(langs!.y, `${pack} @${width}: the coverage line is not on its own line`).toBeGreaterThanOrEqual(
+            Math.max(label!.y + label!.height, badge!.y + badge!.height) - 1,
+          );
+          // And the cell keeps its own track: nothing bleeds into Version.
+          const track = await row.getByTestId(`app-plugin-cell-label-${pack}`).boundingBox();
+          expect(langs!.x, `${pack} @${width}: the coverage line starts outside its cell`).toBeGreaterThanOrEqual(track!.x - 1);
+          expect(
+            langs!.x + langs!.width,
+            `${pack} @${width}: the coverage line runs past its column`,
+          ).toBeLessThanOrEqual(track!.x + track!.width + 1);
         }
-        expect(langs!.y, `${pack} @${width}: the coverage line is not on its own line`).toBeGreaterThanOrEqual(
-          Math.max(label!.y + label!.height, badge!.y + badge!.height) - 1,
-        );
-        // And the cell keeps its own track: nothing bleeds into Version.
-        const track = await row.getByTestId(`app-plugin-cell-label-${pack}`).boundingBox();
-        expect(langs!.x, `${pack} @${width}: the coverage line starts outside its cell`).toBeGreaterThanOrEqual(track!.x - 1);
-        expect(
-          langs!.x + langs!.width,
-          `${pack} @${width}: the coverage line runs past its column`,
-        ).toBeLessThanOrEqual(track!.x + track!.width + 1);
-      }
+      }).toPass({ timeout: 5_000 });
     }
     await page.setViewportSize({ width: 1280, height: 900 });
     await removeByName(api, LONG.name);

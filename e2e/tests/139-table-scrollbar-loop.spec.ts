@@ -111,21 +111,22 @@ async function loopsIn(page: Page, w1: number, w2: number, stopAtFirst = false) 
       const frames = async (n: number) => {
         for (let i = 0; i < n; i++) await raf();
       };
-      // The rows' own height, where the table is a table: since 0.56.1 a pane
-      // narrower than the lead and three columns stacks the rows (300px did),
-      // and stacked rows are taller and raise no horizontal bar.
+      // The rows' own height and the horizontal bar's thickness, both on the
+      // table's own box where the table is a table: since 0.56.1 a pane
+      // narrower than the lead and three columns stacks the rows (300px
+      // did), and stacked rows are taller and raise no horizontal bar. The
+      // bar is read with a wide child making the box run over sideways for
+      // the one synchronous read, as the rows did at 300px before.
       el.style.width = `${w1}px`;
       el.style.height = '120px';
       await frames(3);
       const content = el.scrollHeight;
-      // The horizontal bar's thickness, from a scroll box of the table's own
-      // class that always shows its bars.
-      const box = document.createElement('div');
-      box.className = el.className;
-      box.style.cssText = 'position:absolute;visibility:hidden;width:100px;height:100px;overflow:scroll';
-      document.body.appendChild(box);
-      const bar = box.offsetHeight - box.clientHeight;
-      box.remove();
+      const wide = document.createElement('div');
+      wide.style.cssText = 'width:4000px;height:1px';
+      el.appendChild(wide);
+      const bar = el.offsetHeight - el.clientHeight;
+      wide.remove();
+      await frames(3);
       const found: string[] = [];
       let tried = 0;
       const heights = [...new Set([content, content + Math.max(bar, 1) - 1])];
