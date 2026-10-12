@@ -65,6 +65,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"sync"
 	"time"
@@ -349,6 +350,26 @@ func (s *Source) CanRange() bool {
 	// Ready() takes a short soft pin, so the entry that made this answer true
 	// cannot be evicted before the ReadRange that follows it.
 	return s.cacheKnown && s.cacheKey != "" && s.cache().Ready(s.cacheKey)
+}
+
+// LocalFile returns the file itself when the body is a regular file on this
+// machine - a local storage's file that is not staged - and nil, nil when it
+// is not (an object store, a remote share, a staged upload, a storage behind
+// a wrapper): read those through Open. The caller closes the file.
+//
+// It exists for a program filex runs on the bytes (ffmpeg, ghostscript):
+// handed the file, the program reads the few megabytes it needs; handed a
+// copy, filex first writes the whole file out (issue #114). A staged body is
+// never answered from the driver, for the reason Open gives.
+func (s *Source) LocalFile(ctx context.Context) (*os.File, error) {
+	if s.Staged {
+		return nil, nil
+	}
+	lo, ok := s.drv.(storage.LocalOpener)
+	if !ok {
+		return nil, nil
+	}
+	return lo.OpenLocal(ctx, s.rel)
 }
 
 // ReadRange returns a window of the body, with the same contract as

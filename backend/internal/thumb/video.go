@@ -3,9 +3,7 @@ package thumb
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -51,37 +49,27 @@ const (
 // Both are why every ffmpeg run here is followed by wroteFrame(): ffmpeg's
 // exit code does not tell you whether a frame came out, so the file itself is
 // the only honest answer.
+//
+// The video is read in place when it is a local file (source_file.go, issue
+// #114): ffmpeg reads the opening seconds, not the whole film.
 func (p *Pipeline) generateVideo(ctx context.Context, node *model.Node, drv storage.Driver) error {
-	tmp, err := os.CreateTemp("", "filex-vid-*.bin")
+	in, err := p.sourceInput(ctx, drv, node, "filex-vid-*.bin")
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
-
-	rc, err := p.openSource(ctx, drv, node)
-	if err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := io.Copy(tmp, rc); err != nil {
-		rc.Close()
-		tmp.Close()
-		return err
-	}
-	rc.Close()
-	tmp.Close()
+	defer in.close()
 
 	if err := os.MkdirAll(p.cacheDir, 0o755); err != nil {
 		return err
 	}
-	return extractFirstFrame(ctx, tmp.Name(), filepath.Join(p.cacheDir, fmt.Sprintf("%d.jpg", node.ID)))
+	return extractFirstFrame(ctx, in, filepath.Join(p.cacheDir, fmt.Sprintf("%d.jpg", node.ID)))
 }
 
-// extractFirstFrame writes the opening frame of the video at `srcPath` to
+// extractFirstFrame writes the opening frame of the video `src` to
 // `outPath`. Split out from generateVideo so the decision it makes — which
 // frame, and what to do when there is none — can be measured against real
 // clips without a store, a driver or a node behind it.
-func extractFirstFrame(ctx context.Context, srcPath, outPath string) error {
+func extractFirstFrame(ctx context.Context, src input, outPath string) error {
 	_ = os.Remove(outPath)
 
 	// Pass 1 — the first frame that is not black. signalstats publishes each
@@ -92,10 +80,10 @@ func extractFirstFrame(ctx context.Context, srcPath, outPath string) error {
 		"signalstats,metadata=mode=select:key=lavfi.signalstats.YAVG:value=%d:function=greater,scale=%d:-1",
 		minFrameLuma, thumbMaxWidth,
 	)
-	first := exec.CommandContext(ctx, "ffmpeg",
+	first := src.command(ctx, "ffmpeg",
 		"-y",
 		"-t", firstFrameWindowSeconds,
-		"-i", srcPath,
+		"-i", src.path,
 		"-vf", selectBright,
 		"-frames:v", "1",
 		"-q:v", "5",
@@ -114,9 +102,9 @@ func extractFirstFrame(ctx context.Context, srcPath, outPath string) error {
 	// dark (an all-black clip, a night shot) or when signalstats is not
 	// available in this ffmpeg build.
 	_ = os.Remove(outPath)
-	second := exec.CommandContext(ctx, "ffmpeg",
+	second := src.command(ctx, "ffmpeg",
 		"-y",
-		"-i", srcPath,
+		"-i", src.path,
 		"-vf", fmt.Sprintf("scale=%d:-1", thumbMaxWidth),
 		"-frames:v", "1",
 		"-q:v", "5",

@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-10-11",
+  "generatedAt": "2026-10-12",
   "releases": [
+    {
+      "tag": "v0.56.1",
+      "date": "2026-10-12T00:02:59Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.56.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Changed\n\n- **A release can be cut off Windows: the Store copy's check waits for a\n  Windows machine, on a person's word.** `pnpm release` on Linux or macOS\n  stopped red at the pretag's Store gate, which installs and activates an\n  MSIX and so needs Windows. It now names the gate as deferred and waits for\n  `--ack store-deferred`, bound to the release commit; the run's record,\n  `--status`, the deploy stage and the ship list the steps a Windows machine\n  takes until `--ack store-checked` records that they ran green. The Store\n  still gets the bundle the release workflow checks and submits, and on\n  Windows the gate runs as before\n  ([CONTRIBUTING.md](docs/CONTRIBUTING.md), Release process, step 6).\n- **The docs say which permissions the protocols share.** They are filex's own, per\n  person, group and folder; the POSIX bits and ACLs on the disk are not mapped to filex\n  users ([PROTOCOLS.md](docs/PROTOCOLS.md)).\n\n### Fixed\n\n- **A table in a narrow place lays each row out under its name instead of\n  cutting it.** In the 300px details panel the e-Signature signer table\n  showed State and When at their 56px minimums, as \"Invited ...\" and\n  \"until S...\". Every table in the product (the one table, `DataTable`) now\n  measures its own pane: narrower than the lead and the first three columns\n  side by side at their minimums (`TableLayout.stackBelow`), each row is its\n  tick, its lead and its Actions on one line and every other value after\n  them on one line under the lead that wraps only when it must, each with\n  its column's name small in front of it and \" · \" between them (\"Type\n  Plain text · Owner You · Size 10 B\"), whole - the details panel, the\n  explorer's listing on a phone or in a narrow pane, an admin page on a\n  phone. Selection, the right-click menu, the Actions control, sorting and\n  the column menu work as before, the cells keep their roles and their\n  column headers, and a pane that holds the lead and three columns is still\n  a table that scrolls sideways to the rest (a wide spreadsheet preview\n  stays a table).\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0561---2026-10-11)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.56.1",
+        "ghcr.io/brf-tech/filex:full-v0.56.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
     {
       "tag": "v0.56.0",
       "date": "2026-10-11T12:07:14Z",

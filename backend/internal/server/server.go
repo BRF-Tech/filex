@@ -557,6 +557,8 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// decode probe, so this is its cached answer.
 	logThumbCapabilities(pipelineCaps, enginebin.HEIC())
 	pipeline := thumb.New(store, cfg.Thumbs.CacheDir, pipelineCaps)
+	// Before the first thumbnail: copies a killed process left behind (#114).
+	pipeline.ClearWork()
 	pipeline.AttachBody(bgBody)
 	pipeline.AttachSettings(store)
 	// Listings and the storage sync hand it what is missing or stale; it

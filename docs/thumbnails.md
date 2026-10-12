@@ -607,6 +607,18 @@ Generation is triggered four ways:
 4. **`filex thumb backfill`** and `FILEX_THUMB_BACKFILL_ON_BOOT`: the same walk
    the repair tool runs, from the command line.
 
+**What the tools read (0.56.2).** ffmpeg, Ghostscript and pdftoppm read a
+path. A file on a **local** storage (a disk, or a share mounted into the
+container) is handed to them **in place**: filex opens it through the storage's
+own checks and the tool inherits it, so drawing a film's first frame reads the
+opening seconds, not the film. Anything else (an object store, an SMB, SFTP,
+WebDAV or FTP storage, a file still being transferred) is copied first, into
+`<cache_dir>/.work/`, and the copy is removed when the tool is done. filex
+empties that directory at startup, and removes the `filex-vid-*`,
+`filex-aud-*`, `filex-pdf-*` and `filex-zip-*` copies older than an hour that
+versions before 0.56.2 left in the system temp directory when the process was
+killed ([#114](https://github.com/BRF-Tech/filex/issues/114)).
+
 Cached JPEGs are released two ways, both described in
 [Reclaiming the cache](#reclaiming-the-cache).
 

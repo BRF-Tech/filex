@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"time"
 )
 
@@ -153,6 +154,16 @@ type Writer interface {
 // The returned ReadCloser must be closed by the caller.
 type RangeReader interface {
 	ReadRange(ctx context.Context, path string, off, length int64) (io.ReadCloser, error)
+}
+
+// LocalOpener is implemented by a driver whose files are regular files on
+// this machine. OpenLocal returns the file itself, opened read-only through
+// the same root, symlink and regular-file checks as Read, so a program filex
+// runs (ffmpeg, ghostscript) can be handed the file in place instead of a
+// copy of it (issue #114: a 7 GB film copied to /tmp to draw one frame).
+// A missing path returns ErrNotFound, exactly like Read.
+type LocalOpener interface {
+	OpenLocal(ctx context.Context, path string) (*os.File, error)
 }
 
 // LimitReadCloser caps rc at n bytes while still closing the underlying

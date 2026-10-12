@@ -19,14 +19,66 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.56.0, 11 October 2026
-Apps can edit a file of an end-to-end encrypted folder, or of a vault: the browser decrypts it for an app the person allowed, seals what the app keeps while it edits and encrypts what it saves before it leaves the browser, so the server still holds only ciphertext. Several people can edit one file together through filex's own relay, in ordinary and encrypted folders alike, with watchers and nothing lost to a dropped connection; the office editor app edits Word, Excel and PowerPoint that way with no document server. The Helm chart installs from a Helm repository (helm repo add brf-tech https://helm.brf.sh). The installed web app, its install offer and its notifications wear the instance's own name and logo. Storage plugins and apps get a compatibility window: an old form stays accepted for at least six minor releases or twelve months, so the checksum-only plugin signature 0.55 meant to refuse is still accepted. Fixed: a folder dropped from the desktop arrives as a folder in every browser, an app's interface knows who is looking, and a file of an encrypted folder no longer gives its name away on hover or leaves through a drag out of Cmd+K or Recent.
+::: tip Latest - v0.56.1, 12 October 2026
+Every table in the product lays each row out under its name when its pane is too narrow to be a table - the details panel, the explorer on a phone or in a narrow pane, an admin page on a phone - instead of cutting the values to their minimum width; selection, the right-click menu, Actions, sorting and the column menu work as before. The protocol docs now say whose permissions WebDAV, SFTP, FTPS, NFS and the S3 endpoint share: filex's own grants per person, group and folder, not the disk's POSIX bits or ACLs. For maintainers, a release can be cut off Windows: the Store copy's check waits for a Windows machine, on a person's word.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.56.0
-docker pull ghcr.io/brf-tech/filex:full-v0.56.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.56.1
+docker pull ghcr.io/brf-tech/filex:full-v0.56.1
 ```
+
+## v0.56.1
+
+<span class="filex-release-date">12 October 2026</span>
+
+Every table in the product lays each row out under its name when its pane is too narrow to be a table - the details panel, the explorer on a phone or in a narrow pane, an admin page on a phone - instead of cutting the values to their minimum width; selection, the right-click menu, Actions, sorting and the column menu work as before. The protocol docs now say whose permissions WebDAV, SFTP, FTPS, NFS and the S3 endpoint share: filex's own grants per person, group and folder, not the disk's POSIX bits or ACLs. For maintainers, a release can be cut off Windows: the Store copy's check waits for a Windows machine, on a person's word.
+
+## What changed
+
+### Changed
+
+- **A release can be cut off Windows: the Store copy's check waits for a
+  Windows machine, on a person's word.** `pnpm release` on Linux or macOS
+  stopped red at the pretag's Store gate, which installs and activates an
+  MSIX and so needs Windows. It now names the gate as deferred and waits for
+  `--ack store-deferred`, bound to the release commit; the run's record,
+  `--status`, the deploy stage and the ship list the steps a Windows machine
+  takes until `--ack store-checked` records that they ran green. The Store
+  still gets the bundle the release workflow checks and submits, and on
+  Windows the gate runs as before
+  ([CONTRIBUTING.md](./CONTRIBUTING.md), Release process, step 6).
+- **The docs say which permissions the protocols share.** They are filex's own, per
+  person, group and folder; the POSIX bits and ACLs on the disk are not mapped to filex
+  users ([PROTOCOLS.md](./PROTOCOLS.md)).
+
+### Fixed
+
+- **A table in a narrow place lays each row out under its name instead of
+  cutting it.** In the 300px details panel the e-Signature signer table
+  showed State and When at their 56px minimums, as "Invited ..." and
+  "until S...". Every table in the product (the one table, `DataTable`) now
+  measures its own pane: narrower than the lead and the first three columns
+  side by side at their minimums (`TableLayout.stackBelow`), each row is its
+  tick, its lead and its Actions on one line and every other value after
+  them on one line under the lead that wraps only when it must, each with
+  its column's name small in front of it and " · " between them ("Type
+  Plain text · Owner You · Size 10 B"), whole - the details panel, the
+  explorer's listing on a phone or in a narrow pane, an admin page on a
+  phone. Selection, the right-click menu, the Actions control, sorting and
+  the column menu work as before, the cells keep their roles and their
+  column headers, and a pane that holds the lead and three columns is still
+  a table that scrolls sideways to the rest (a wide spreadsheet preview
+  stays a table).
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0561---2026-10-11)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.56.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.56.1`
 
 ## v0.56.0
 
@@ -3636,88 +3688,13 @@ screen.
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.42.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.42.2`
 
-## v0.42.1
-
-<span class="filex-release-date">19 September 2026</span>
-
-A fix release for four reports on 0.42.0. A bucket with several top-level folders is one form now, not one per folder: Storages → Add lists the folders under the root you typed and creates one storage per ticked folder with the same credentials (#31) - the bucket root itself is still never mounted. A read-only storage looks read-only to the people using it: a tag on its row, no + New menu, no New folder or Upload on it (#30). A scan of a large S3 storage is one listing instead of one request per folder, only one run per storage walks at a time, and the per-storage scan interval is on the form (#33). And when FILEX_PUBLIC_URL was never set, administrators see a banner instead of finding out from a share link to localhost (#32).
-
-Upgrade notes: no migrations. POST /api/admin/storages/{id}/sync answers status "running" instead of starting a second scan while one is in flight; GET /api/files/capabilities gains public_url_configured; POST /api/admin/storages/discover is new.
-
-## What changed
-
-A fix release for four reports on 0.42.0.
-
-### Added
-
-- **Mount several folders at once** (#31). *Storages → Add* lists the folders
-  directly under the root you typed - the bucket root included - and creates
-  one storage per ticked folder with the same credentials, so a bucket with
-  N top-level folders is one form, not N. The bucket root itself is still
-  never mounted (`ROOT_PATH_FORBIDDEN`); this is how "the whole bucket" is
-  offered instead. Behind it: `POST /api/admin/storages/discover`
-  `{driver, config}` → `{ok, root_key, folders:[{name, root}]}`. Every driver
-  with a root field (s3, local, sftp, ftp, webdav, smb).
-- **Scan every (minutes)** on the storage form (#33). The per-storage poll
-  cadence (`sync_interval_s`) existed on the row and in the API and was
-  reachable from no form; empty = the server default (15 min).
-- **A sign when `FILEX_PUBLIC_URL` is unset** (#32). Administrators see a
-  banner in the panel until it is set: every share link, file-request link
-  and mailed link is otherwise built on `http://localhost:5212`. The API says
-  the same as `public_url_configured` on `GET /api/files/capabilities`. The
-  report had set `FILEX_APPLICATION_URL`, a variable filex has never read;
-  [CONFIGURATION.md → Public URL](./CONFIGURATION.md#public-url) now says
-  so in as many words.
-
-### Changed
-
-- **One sync run per storage at a time** (#33). "Scan now" while a run is
-  walking starts no second full walk over the same rows - it answers **202**
-  with `status: "running"`, the scan asked for being the one in progress; a
-  poll tick that finds the previous run still in flight is skipped and logged
-  at INFO, not counted as a failure.
-- **An S3 scan is one listing, not one request per folder** (#33). The S3
-  driver hands the sync worker the whole tree in a single un-delimited
-  `ListObjectsV2` pass (`storage.TreeWalker`), so 150,000 objects in a few
-  thousand prefixes cost ~150 calls instead of a few thousand; the walk then
-  reads directories out of memory. Over two million objects the worker falls
-  back to the per-directory walk. Same rows, same order guarantees, measured
-  against the per-directory walk.
-
-### Fixed
-
-- **A read-only storage looks read-only to its users** (#30). The navigation
-  panel's storage row carries a *Read-only* tag and its Home card says so; on
-  such a storage the panel's **+ New** menu, the toolbar's New folder / Upload
-  and the write entries of the context menu are not offered. Before, only
-  the admin list had an "RO" badge and every attempt ended in the server's
-  403. Sharing a read-only file is still allowed - the ACL level is unchanged,
-  only the write affordances go (`@brftech/filex-core` `permCanEdit` folds the
-  listing's `read_only` in, so every embed gets the same).
-
-### Upgrade notes
-
-- No migrations. `POST /api/admin/storages/{id}/sync` answers 202 with
-  `status: "running"` (instead of `"started"`) while a run is already in
-  flight; nothing is started twice.
-- A client that reads `GET /api/files/capabilities` sees one more boolean,
-  `public_url_configured`.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0421---2026-09-19)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.42.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.42.1`
-
 ## Earlier releases
 
-The 117 releases before v0.42.1, in brief. Full notes are on GitHub.
+The 118 releases before v0.42.2, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.42.1](https://github.com/BRF-Tech/filex/releases/tag/v0.42.1) | 19 September 2026 | A fix release for four reports on 0.42.0. A bucket with several top-level folders is one form now, not one per folder: Storages → Add lists the folders under the root you typed and creates one storage per ticked folder with the… |
 | [v0.42.0](https://github.com/BRF-Tech/filex/releases/tag/v0.42.0) | 16 September 2026 | gesture is now the classic desktop file-manager one - a single click selects a |
 | [v0.41.4](https://github.com/BRF-Tech/filex/releases/tag/v0.41.4) | 15 September 2026 | A fix release that carries 0.41.3, whose release build never finished. Only the checkbox selects now, and any other click or tap on a file or folder opens it - beside the name, on the size and date cells, with a selection, with… |
 | [v0.41.2](https://github.com/BRF-Tech/filex/releases/tag/v0.41.2) | 15 September 2026 | A fix release for four reports on 0.41.1. A press on a file or folder name now opens it on every device - a tap on a phone, a click on a desktop - even while something is selected; the checkbox selects, and a right click or a… |
@@ -3838,4 +3815,4 @@ The 117 releases before v0.42.1, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-10-11 from 137 published releases.</small>
+<small>Last refreshed 2026-10-12 from 138 published releases.</small>

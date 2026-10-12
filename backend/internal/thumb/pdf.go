@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,32 +15,20 @@ import (
 
 // generatePDF renders page 1 of a PDF into the cache as a thumbnail.
 func (p *Pipeline) generatePDF(ctx context.Context, node *model.Node, drv storage.Driver) error {
-	tmp, err := os.CreateTemp("", "filex-pdf-*.pdf")
+	in, err := p.sourceInput(ctx, drv, node, "filex-pdf-*.pdf")
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
-	rc, err := p.openSource(ctx, drv, node)
-	if err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := io.Copy(tmp, rc); err != nil {
-		rc.Close()
-		tmp.Close()
-		return err
-	}
-	rc.Close()
-	tmp.Close()
+	defer in.close()
 
 	if err := os.MkdirAll(p.cacheDir, 0o755); err != nil {
 		return err
 	}
 	out := filepath.Join(p.cacheDir, fmt.Sprintf("%d.jpg", node.ID))
-	return renderPDFPage1(ctx, tmp.Name(), out)
+	return renderPDFPage1(ctx, in, out)
 }
 
-// renderPDFPage1 rasterises the first page of `pdfPath` into `out` and scales
+// renderPDFPage1 rasterises the first page of the PDF `src` into `out` and scales
 // it to thumbnail size. Ghostscript first, poppler's pdftoppm as the fallback
 // — the two renderers this project's images ship (docker/Dockerfile).
 //
@@ -57,7 +44,7 @@ func (p *Pipeline) generatePDF(ctx context.Context, node *model.Node, drv storag
 // 184×108 card, for every PDF and every office document in a folder. The
 // card cannot show more detail than its own width carries, so the bytes
 // bought nothing at all.
-func renderPDFPage1(ctx context.Context, pdfPath, out string) error {
+func renderPDFPage1(ctx context.Context, src input, out string) error {
 	_ = os.Remove(out)
 
 	// ⚠ Why ghostscript's complaint is carried rather than dropped: the
@@ -68,14 +55,14 @@ func renderPDFPage1(ctx context.Context, pdfPath, out string) error {
 	// needs both to know what is wrong with the file.
 	gsWhy := "not installed"
 	if gs, _ := exec.LookPath("gs"); gs != "" {
-		cmd := exec.CommandContext(ctx, gs,
+		cmd := src.command(ctx, gs,
 			"-sDEVICE=jpeg",
 			"-dFirstPage=1", "-dLastPage=1",
 			"-r96",
 			"-dJPEGQ=80",
 			"-dNOPAUSE", "-dBATCH", "-dSAFER",
 			"-o", out,
-			pdfPath,
+			src.path,
 		)
 		gsOut, gsErr := cmd.CombinedOutput()
 		switch {
@@ -94,10 +81,10 @@ func renderPDFPage1(ctx context.Context, pdfPath, out string) error {
 		return fmt.Errorf("thumb: no PDF renderer left (gs: %s; pdftoppm: not installed)", gsWhy)
 	}
 	prefix := out[:len(out)-len(filepath.Ext(out))]
-	cmd := exec.CommandContext(ctx, pp,
+	cmd := src.command(ctx, pp,
 		"-jpeg", "-f", "1", "-l", "1",
 		"-r", "96",
-		pdfPath, prefix,
+		src.path, prefix,
 	)
 	if ppOut, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("thumb: pdftoppm: %w (%s) [gs: %s]", err, tail(string(ppOut)), gsWhy)

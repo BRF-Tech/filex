@@ -2,12 +2,10 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.56.1"
+version: "0.56.2"
 releaseNotes: |-
-  filex v0.56.1 - 2026-10-11
-  • A release can be cut off Windows: the Store copy's check waits for a Windows machine, on a person's word.
-  • The docs say which permissions the protocols share.
-  • A table in a narrow place lays each row out under its name instead of cutting it.
+  filex v0.56.2 - 2026-10-12
+  • A video thumbnail no longer copies the whole film first, and no copy outlives a restart.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.56.2] - 2026-10-12
+
+### Fixed
+
+- **A video thumbnail no longer copies the whole film first, and no copy
+  outlives a restart.** To draw one frame, filex copied every video, audio
+  file and PDF whole into the system temp directory before ffmpeg or
+  Ghostscript ran: on a folder of films on a CIFS mount, a 7 GB copy within
+  17 s of opening the folder and 75% iowait, and a killed process left the
+  copy in `/tmp` (14 GB of them on one install). A file on a local storage (a
+  disk, or a share mounted into the container) is now handed to the tool in
+  place, and ffmpeg reads only the opening seconds. Other storages still
+  copy, into `<cache_dir>/.work/`, which filex empties at startup together
+  with the copies older versions left in the temp directory
+  ([thumbnails.md](docs/thumbnails.md#how-it-works)). Reported by @eLeKaeMe
+  ([GitHub #114](https://github.com/BRF-Tech/filex/issues/114)).
+
 ## [0.56.1] - 2026-10-11
 
 ### Changed

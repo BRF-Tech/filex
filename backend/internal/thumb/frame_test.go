@@ -175,7 +175,7 @@ func TestExtractFirstFrame_ClipShorterThanASecond(t *testing.T) {
 	src := makeClip(t, dir, "tiny.mp4", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=30", "-t", "0.4")
 	out := filepath.Join(dir, "tiny.jpg")
 
-	require.NoError(t, extractFirstFrame(context.Background(), src, out))
+	require.NoError(t, extractFirstFrame(context.Background(), pathInput(src), out))
 	require.True(t, wroteFrame(out), "a real video ended up with no thumbnail at all")
 	require.Greater(t, meanLuma(t, out), 20.0, "the frame is black")
 }
@@ -195,7 +195,7 @@ func TestExtractFirstFrame_SkipsABlackOpening(t *testing.T) {
 		"-filter_complex", "[0:v][1:v]concat=n=2:v=1[v]", "-map", "[v]")
 	out := filepath.Join(dir, "fade.jpg")
 
-	require.NoError(t, extractFirstFrame(context.Background(), src, out))
+	require.NoError(t, extractFirstFrame(context.Background(), pathInput(src), out))
 	require.True(t, wroteFrame(out))
 	require.Greater(t, meanLuma(t, out), 20.0,
 		"the card shows the fade-in rather than the video — a black rectangle says no more than the type tile it replaced")
@@ -211,7 +211,7 @@ func TestExtractFirstFrame_AllBlackClipStillGetsAFrame(t *testing.T) {
 	src := makeClip(t, dir, "black.mp4", "-f", "lavfi", "-i", "color=c=black:s=320x180:r=30:d=2")
 	out := filepath.Join(dir, "black.jpg")
 
-	require.NoError(t, extractFirstFrame(context.Background(), src, out))
+	require.NoError(t, extractFirstFrame(context.Background(), pathInput(src), out))
 	require.True(t, wroteFrame(out), "the fallback pass wrote nothing")
 	require.Less(t, meanLuma(t, out), 25.0, "an all-black clip should produce a black frame, not something invented")
 }
@@ -226,7 +226,7 @@ func TestExtractFirstFrame_NotAVideoFails(t *testing.T) {
 	require.NoError(t, os.WriteFile(junk, []byte("this is not a video"), 0o600))
 	out := filepath.Join(dir, "junk.jpg")
 
-	err := extractFirstFrame(context.Background(), junk, out)
+	err := extractFirstFrame(context.Background(), pathInput(junk), out)
 	require.Error(t, err, "a 19-byte file called .mp4 must not be reported as a successful thumbnail")
 	require.False(t, wroteFrame(out))
 }
@@ -279,7 +279,7 @@ func TestRenderPDFPage1_WritesAThumbnailSizedPage(t *testing.T) {
 	pdf := makePDF(t, dir, 12)
 	out := filepath.Join(dir, "page.jpg")
 
-	require.NoError(t, renderPDFPage1(context.Background(), pdf, out))
+	require.NoError(t, renderPDFPage1(context.Background(), pathInput(pdf), out))
 	require.True(t, wroteFrame(out), "the renderer reported success and wrote nothing")
 
 	w, h := decodeSize(t, out)
@@ -307,6 +307,6 @@ func TestRenderPDFPage1_NotAPDFFails(t *testing.T) {
 	require.NoError(t, os.WriteFile(junk, []byte("%PDF-1.4 and then nothing at all"), 0o600))
 	out := filepath.Join(dir, "out.jpg")
 
-	require.Error(t, renderPDFPage1(context.Background(), junk, out))
+	require.Error(t, renderPDFPage1(context.Background(), pathInput(junk), out))
 	require.False(t, wroteFrame(out))
 }

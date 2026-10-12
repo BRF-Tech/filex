@@ -524,7 +524,17 @@ func openRead(abs string) (*os.File, error) {
 }
 
 // Read implements storage.Driver.
-func (d *Driver) Read(_ context.Context, p string) (io.ReadCloser, error) {
+func (d *Driver) Read(ctx context.Context, p string) (io.ReadCloser, error) {
+	f, err := d.OpenLocal(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// OpenLocal implements storage.LocalOpener: the file Read would stream,
+// opened, for a program that reads it in place.
+func (d *Driver) OpenLocal(_ context.Context, p string) (*os.File, error) {
 	abs, err := d.resolveDeref(p)
 	if err != nil {
 		return nil, err

@@ -262,14 +262,6 @@ const KNOWN_DUPLICATION: Debt[] = [
     maxTokens: 175,
   },
   {
-    files: ['backend/internal/thumb/'],
-    reason:
-      'Every thumbnailer opens with the same preamble — binary-not-in-PATH error, ' +
-      'MkdirTemp, defer RemoveAll, derive a source filename, create it — and only ' +
-      'then differs in which command it runs. That preamble is one helper.',
-    maxTokens: 200,
-  },
-  {
     files: ['backend/internal/s3api/'],
     reason:
       'The write-permission preamble (read-only check, ACL lookup, WriteError with ' +

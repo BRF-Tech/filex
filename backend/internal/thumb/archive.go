@@ -182,7 +182,7 @@ func (p *Pipeline) zipEntries(ctx context.Context, node *model.Node, drv storage
 		if size > archiveCopyLimit {
 			return nil, errArchiveLimits
 		}
-		f, err := os.CreateTemp("", "filex-zip-*")
+		f, err := p.workTemp("filex-zip-*")
 		if err != nil {
 			return nil, err
 		}
