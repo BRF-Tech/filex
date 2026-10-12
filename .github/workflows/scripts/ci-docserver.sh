@@ -18,7 +18,12 @@
 set -euo pipefail
 port="${1:?usage: ci-docserver.sh <filex port> <go test port>}"
 goport="${2:?usage: ci-docserver.sh <filex port> <go test port>}"
-image="${DS_IMAGE:-onlyoffice/documentserver:latest}"
+# The image is pinned to the last 9.x (Docs 9.4.0.1, what `latest` was until
+# 2026-10-12). Docs 10.0 keeps a CSV file's own delimiter when it saves, and
+# filex's CSV save (internal/onlyoffice/csv.go) is written for 9.x, which
+# always wrote commas: on 10.0 the 199-csv-onlyoffice spec fails. Docs 10 is
+# not supported yet, so the gate tests the server filex was written for.
+image="${DS_IMAGE:-onlyoffice/documentserver:9.4.0.1}"
 secret=$(openssl rand -hex 24)
 echo "::add-mask::$secret"
 gw=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
