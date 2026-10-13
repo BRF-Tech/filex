@@ -14,6 +14,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/protoperm"
+	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -482,6 +483,7 @@ func (f *davFS) rootDir(ctx context.Context) (webdav.File, error) {
 	}
 	scope := scopeOf(ctx)
 	infos := make([]os.FileInfo, 0, len(storages))
+	visible := make([]*model.Storage, 0, len(storages))
 	for _, st := range storages {
 		// ListEnabledStorages is already tenant-confined when the store is
 		// the scoped one; re-checking here keeps the root correct even if
@@ -494,8 +496,12 @@ func (f *davFS) rootDir(ctx context.Context) (webdav.File, error) {
 			continue
 		}
 		infos = append(infos, syntheticDirInfo(st.Name))
+		visible = append(visible, st)
 	}
-	return newDirFile(syntheticDirInfo("/"), infos), nil
+	// A drive mapped to /dav itself asks the root: the storages added up.
+	return withQuota(ctx, newDirFile(syntheticDirInfo("/"), infos), func() space.Figures {
+		return f.h.cfg.Space.Root(ctx, visible)
+	}), nil
 }
 
 // storageDir lists one directory of a storage, filtered by ACL visibility
@@ -526,7 +532,9 @@ func (f *davFS) storageDir(ctx context.Context, st *model.Storage, set *acl.Set,
 	if rel != "" {
 		fiName = path.Base(rel)
 	}
-	return newDirFile(syntheticDirInfo(fiName), infos), nil
+	return withQuota(ctx, newDirFile(syntheticDirInfo(fiName), infos), func() space.Figures {
+		return f.h.cfg.Space.Storage(ctx, st, rel)
+	}), nil
 }
 
 // ────────────────────────────── helpers ───────────────────────────────────

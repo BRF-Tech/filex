@@ -65,6 +65,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/sftpsrv"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
+	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -106,6 +107,7 @@ type Server struct {
 	ops             *ops.Service
 	queue           queue.Driver
 	qpool           *queue.Pool
+	contentPool     *queue.Pool // the content_index job alone (queue.ContentIndexWorkers)
 	notify          notify.Service
 	replicaSvc      *replica.Service
 	replicaCron     *replica.CronScheduler
@@ -946,7 +948,13 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	if idx != nil && srvObj.qpool != nil && cfg.Search.Content {
 		contentIdx := queue.NewContentIndexer(store, resolver, idx, cfg.Search.ContentMaxBytes)
 		contentIdx.AttachBody(bgBody)
-		srvObj.qpool.Register(queue.TypeContentIndex, contentIdx.Handle)
+		// Its own pool, so the texts the index writes together can be more
+		// than the shared pool's few workers; extraction itself stays at
+		// that many at once (queue.ContentIndexWorkers, issue #115).
+		contentIdx.LimitExtraction(srvObj.qpool.Workers())
+		srvObj.contentPool = queue.NewPool(srvObj.queue, queue.ContentIndexWorkers,
+			queue.WithPollInterval(queue.ContentIndexPoll))
+		srvObj.contentPool.Register(queue.TypeContentIndex, contentIdx.Handle)
 		qd := srvObj.queue
 		idx.SetContentHook(func(ctx context.Context, n *model.Node) {
 			// WithoutCancel: a client disconnect right after a write must
@@ -969,6 +977,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// reporting needs_rebuild and an operator can POST
 	// /api/admin/search/rebuild?content=1 when it suits them.
 	if idx != nil {
+		setSearchMemoryBudget(idx, cfg.Search.MemoryPercent)
 		idx.AutoRebuildIfStale(store, cfg.Search.AutoRebuild)
 	}
 
@@ -1389,6 +1398,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Ops:                      opsSvc,
 		Trash:                    trashSvc,
 		Quota:                    quotaSvc,
+		Space:                    space.New(resolver, quotaSvc),
 		Versions:                 versionsSvc,
 		Queue:                    srvObj.queue,
 		Notify:                   srvObj.notify,
@@ -1539,6 +1549,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			Resolver:    deps.StorageResolver,
 			Body:        deps.Body,
 			Quota:       deps.Quota,
+			Space:       deps.Space,
 			Index:       deps.Index,
 			Thumbs:      deps.Thumbs,
 			SpoolDir:    cfg.Upload.StagingDir,
@@ -1584,6 +1595,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			Resolver:       deps.StorageResolver,
 			Body:           deps.Body,
 			Quota:          deps.Quota,
+			Space:          deps.Space,
 			Index:          deps.Index,
 			Thumbs:         deps.Thumbs,
 			SpoolDir:       cfg.Upload.StagingDir,
@@ -1611,6 +1623,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			Resolver:    deps.StorageResolver,
 			Body:        deps.Body,
 			Quota:       deps.Quota,
+			Space:       deps.Space,
 			Index:       deps.Index,
 			Thumbs:      deps.Thumbs,
 			SpoolDir:    cfg.Upload.StagingDir,
@@ -1910,6 +1923,9 @@ func (s *Server) Start(ctx context.Context) error {
 		// owns copy/move/delete via its own goroutine.
 		s.qpool.Start(ctx)
 	}
+	if s.contentPool != nil {
+		s.contentPool.Start(ctx)
+	}
 	if s.zipWarmer != nil {
 		s.zipWarmer.Start(ctx)
 	}
@@ -2060,6 +2076,9 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		if s.qpool != nil {
 			s.qpool.Stop()
+		}
+		if s.contentPool != nil {
+			s.contentPool.Stop()
 		}
 		if s.queue != nil {
 			_ = s.queue.Close()

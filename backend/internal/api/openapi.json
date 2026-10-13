@@ -4722,10 +4722,11 @@
                 "changes",
                 "search",
                 "preview",
-                "download"
+                "download",
+                "space"
               ]
             },
-            "description": "index (default), subfolders, changes, search, preview, download"
+            "description": "index (default), subfolders, changes, search, preview, download, space"
           },
           {
             "name": "path",
@@ -4733,7 +4734,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "The folder (index, subfolders, changes, search) or the file (preview, download), `<storage>://<path>`."
+            "description": "The folder (index, subfolders, changes, search, space) or the file (preview, download), `<storage>://<path>`. space without a path answers for the storage list."
           },
           {
             "name": "since",
@@ -4754,7 +4755,7 @@
         ],
         "responses": {
           "200": {
-            "description": "index: the listing. preview/download: the bytes (`Range` honoured: `206`). changes: `{cursor, changed}`.",
+            "description": "index: the listing. preview/download: the bytes (`Range` honoured: `206`). changes: `{cursor, changed}`. space: `{total, used, free, known}` in bytes, the figures `df` shows over SFTP, NFS, /dav and `filex mount`.",
             "content": {
               "application/json": {
                 "schema": {

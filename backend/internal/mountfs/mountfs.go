@@ -45,6 +45,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/cliclient"
+	"github.com/brf-tech/filex/backend/internal/space"
 )
 
 // ErrUnsupported is what Mount returns where there is no FUSE driver.
@@ -126,6 +127,14 @@ type FS struct {
 
 	mu    sync.Mutex
 	attrs map[string]attrEntry
+	// spaces is the server's last answer about the drive's size, per remote
+	// path (spaceTTL).
+	spaces map[string]spaceEntry
+}
+
+type spaceEntry struct {
+	fig space.Figures
+	at  time.Time
 }
 
 type attrEntry struct {
@@ -153,7 +162,7 @@ func New(cfg Config) (*FS, error) {
 		cfg.AttrTTL = defaultAttrTTL
 	}
 
-	f := &FS{cfg: cfg, attrs: map[string]attrEntry{}}
+	f := &FS{cfg: cfg, attrs: map[string]attrEntry{}, spaces: map[string]spaceEntry{}}
 	f.blocks = newBlockCache(cfg.CacheBlocks)
 
 	if strings.TrimSpace(cfg.Remote) != "" {
@@ -168,6 +177,45 @@ func New(cfg Config) (*FS, error) {
 
 // ReadOnly reports whether writes are refused.
 func (f *FS) ReadOnly() bool { return f.cfg.ReadOnly }
+
+const (
+	// spaceTTL is how long the drive's size is trusted. Explorer and `df` ask
+	// on every folder they show, and the server keeps its own answer as long.
+	spaceTTL = 30 * time.Second
+	// spaceAsk bounds asking: a drive's properties must not hang Explorer.
+	spaceAsk = 10 * time.Second
+)
+
+// Space is the room at the mount-relative path p as the server measures it
+// (internal/space: the storage's disk, or the storages added up at the
+// storage list, capped by the account's quota). A server that cannot say, or
+// that is older than the question (501), gets the stand-in: a large empty
+// drive, never a full one, which would make the file manager refuse to copy.
+func (f *FS) Space(ctx context.Context, p string) space.Figures {
+	remote, _ := f.remoteOf(p)
+	f.mu.Lock()
+	if e, ok := f.spaces[remote]; ok && time.Since(e.at) < spaceTTL {
+		f.mu.Unlock()
+		return e.fig
+	}
+	f.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(ctx, spaceAsk)
+	defer cancel()
+	var fig space.Figures
+	if sp, err := f.cfg.Client.Space(ctx, remote); err == nil {
+		fig = space.Figures(*sp)
+	}
+	fig = fig.OrStandIn()
+
+	f.mu.Lock()
+	if len(f.spaces) >= 256 {
+		clear(f.spaces)
+	}
+	f.spaces[remote] = spaceEntry{fig: fig, at: time.Now()}
+	f.mu.Unlock()
+	return fig
+}
 
 // remoteOf maps a mount-relative path onto a remote path.
 //

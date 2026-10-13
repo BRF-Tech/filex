@@ -68,6 +68,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/secretbox"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
+	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
@@ -118,6 +119,10 @@ type Deps struct {
 	// through the connection built from the configuration it had at boot.
 	// Nil is legal: it means nothing is cached (tests, embedders).
 	ForgetStorage func(int64)
+	// Space answers "how much room is there" for /dav and the manager API's
+	// action=space, and the server hands the same one to SFTP, FTP and NFS so
+	// they share its cache. Constructed in BuildRouter when nil.
+	Space *space.Service
 	// ReplicaLinks is told when a storage's replication link or a
 	// replication target changes, so the drivers are rebuilt around it and
 	// the initial copy starts, restarts or stops (internal/server
@@ -326,6 +331,7 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.External == nil {
 		d.External = external.New(d.Store)
 	}
+	d.Space = space.Ensure(d.Space, d.StorageResolver, d.Quota)
 	if d.LoginGuard == nil && d.Store != nil {
 		d.LoginGuard = loginguard.New(d.Store)
 	}
@@ -484,6 +490,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// path checks at `begin`; before this, everything below the staging
 	// threshold had no ceiling at all.
 	mh.Quota = d.Quota
+	mh.Space = d.Space
 	mh.AppDocs = d.AppPlugins
 	// The lazy catalogue (sync_mode lazy, docs/LAZY-CATALOGUE.md): a listing
 	// asks whether the catalogue vouches for the folder, and on a lazy storage
@@ -2709,7 +2716,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// client then needs /s3 in its endpoint URL and cannot use virtual-hosted
 	// addressing — which is why the host route above is the real answer.
 	r.Mount(s3api.Prefix, s3h)
-	r.Mount("/dav", dav.NewHandler(dav.Config{Enabled: d.Cfg.DAV.Enabled, Store: d.Store, Resolver: d.StorageResolver, ACL: d.ACL, E2EPolicy: d.E2EPolicy, Index: d.Index, Thumbs: d.Thumbs, Body: d.Body, Quota: d.Quota, MultiTenant: d.Cfg.MultiTenant, Auth: d.ProtocolAuth, LockDir: filepath.Join(d.Cfg.DataDir, "dav")}))
+	r.Mount("/dav", dav.NewHandler(dav.Config{Enabled: d.Cfg.DAV.Enabled, Store: d.Store, Resolver: d.StorageResolver, ACL: d.ACL, E2EPolicy: d.E2EPolicy, Index: d.Index, Thumbs: d.Thumbs, Body: d.Body, Quota: d.Quota, Space: d.Space, MultiTenant: d.Cfg.MultiTenant, Auth: d.ProtocolAuth, LockDir: filepath.Join(d.Cfg.DataDir, "dav")}))
 
 	// ────── healthz ──────
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {

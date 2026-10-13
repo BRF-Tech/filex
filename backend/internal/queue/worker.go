@@ -82,6 +82,9 @@ func (p *Pool) Register(opType string, h Handler) {
 	p.mu.Unlock()
 }
 
+// Workers is how many goroutines the pool runs.
+func (p *Pool) Workers() int { return p.workers }
+
 // Types returns the list of currently registered op types — used to
 // filter Dequeue so workers don't pick up an op they can't dispatch.
 func (p *Pool) Types() []string {

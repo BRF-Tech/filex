@@ -1199,6 +1199,7 @@ configuration. See [thumbnails.md](thumbnails.md).
 | `FILEX_SEARCH_ENABLED` | `true` | Embedded Bleve full-text index. |
 | `FILEX_SEARCH_CONTENT` | `true` | Extract text from files into the index (content search). `0` stops enqueueing extraction; text already indexed keeps matching. |
 | `FILEX_SEARCH_CONTENT_MAX` | `5242880` | Source files larger than this are never content-extracted. |
+| `FILEX_SEARCH_MEMORY_PERCENT` | `25` | Share, in percent (1-50), of the memory filex was given - the container's limit, or the machine's RAM - that indexing may take on top of what filex holds at startup. Over it, content extraction and a rebuild wait for the index to give memory back. |
 | `FILEX_SEARCH_AUTO_REBUILD` | `true` | Rebuild the index in the background at startup when it was written by an older document schema. The replacement is built alongside the live index and swapped in, so search never goes dark. `0` leaves the index alone and reports `needs_rebuild` instead. |
 | `FILEX_TESSERACT_BIN` | unset (`tesseract` on `$PATH`) | Path to the `tesseract` binary used to OCR images (png/jpg/webp/tiff) into the content index. **When set it is authoritative:** a value that does not resolve turns OCR *off* rather than falling back to `$PATH`. Unset, filex looks for `tesseract` on `$PATH`; if there is none, images are skipped silently and the capabilities endpoint reports `ocr: false`. |
 

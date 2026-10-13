@@ -55,6 +55,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/writehook"
@@ -97,6 +98,9 @@ type Config struct {
 	Body *filebody.Resolver
 	// Quota is the per-user ceiling, checked before bytes land.
 	Quota *quota.Service
+	// Space answers statvfs (internal/space), shared with every other surface.
+	// nil: New builds one over Resolver and Quota.
+	Space *space.Service
 	// Index and Thumbs feed the shared post-write bookkeeping.
 	Index  *search.Index
 	Thumbs *thumb.Pipeline
@@ -161,6 +165,7 @@ func New(cfg Config) (*Server, error) {
 	// Who may encrypt: the router's rule, or one built over this server's own
 	// store — never none (protoperm.EncryptionPolicy).
 	cfg.E2EPolicy = protoperm.EncryptionPolicy(cfg.E2EPolicy, cfg.Store, cfg.ACL, cfg.MultiTenant)
+	cfg.Space = space.Ensure(cfg.Space, cfg.Resolver, cfg.Quota)
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr
 	}

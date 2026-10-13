@@ -17,6 +17,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/protoperm"
+	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -539,26 +540,33 @@ func (f *fs) TempFile(string, string) (billy.File, error) {
 
 // ─────────────────────────── free space ───────────────────────────
 
-// fsStat fills in what a file manager shows in its status bar.
+// fsStat fills in what `df` and a file manager's status bar show.
 //
-// ⚠ An unlimited account still needs a plausible number: zero makes clients
-// report a full disk and refuse to copy anything.
-func (f *fs) fsStat(ctx context.Context, st *nfs.FSStat) error {
-	const unlimited = uint64(1) << 45 // 32 TiB
-	st.TotalSize, st.FreeSize, st.AvailableSize = unlimited, unlimited, unlimited
+// The figures are internal/space's, the ones every surface gives: an export
+// rooted in one storage is that storage's disk, an export of the storage list
+// is the storages added up; either capped by the account's quota. Only a
+// location nothing could measure gets the stand-in, a large empty disk: zero
+// makes clients report a full disk and refuse to copy anything.
+//
+// The mount's own context carries the account; the call's only its deadline.
+func (f *fs) fsStat(_ context.Context, st *nfs.FSStat) error {
+	t, err := f.resolve("/")
+	if err != nil {
+		return err
+	}
+	var fig space.Figures
+	if t.isRoot() {
+		fig = f.srv.cfg.Space.Root(f.ctx, f.visibleStorages())
+	} else {
+		fig = f.srv.cfg.Space.Storage(f.ctx, t.Storage, t.Rel)
+	}
+	fig = fig.OrStandIn()
+	st.TotalSize, st.AvailableSize = fig.Total, fig.Free
+	// FSSTAT's "free" counts what root could still write; df's Used column is
+	// Total minus it.
+	st.FreeSize = max(fig.Total-min(fig.Used, fig.Total), fig.Free)
 	st.TotalFiles, st.FreeFiles, st.AvailableFiles = 1<<30, 1<<30, 1<<30
 	st.CacheHint = 0
-
-	if u := auth.UserFrom(f.ctx); u != nil && f.srv.cfg.Quota != nil {
-		if snap, err := f.srv.cfg.Quota.Get(ctx, u.ID); err == nil && !snap.Unlimited && snap.QuotaBytes > 0 {
-			free := snap.QuotaBytes - snap.UsedBytes
-			if free < 0 {
-				free = 0
-			}
-			st.TotalSize = uint64(snap.QuotaBytes)
-			st.FreeSize, st.AvailableSize = uint64(free), uint64(free)
-		}
-	}
 	return nil
 }
 

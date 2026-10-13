@@ -30,6 +30,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -80,6 +81,10 @@ type Manager struct {
 	// this the small-file path had no ceiling at all, and a user could sail
 	// past their limit a few megabytes at a time. nil disables enforcement.
 	Quota *quota.Service
+	// Space answers action=space (internal/space): what `filex mount` shows
+	// as the size of the drive, the same figures SFTP, NFS, FTP and /dav give.
+	// nil answers "unknown", and the client falls back to its stand-in.
+	Space *space.Service
 	// AppDocs makes the rows apps add to the "New" menu (new_documents).
 	// Nil = only the built-in kinds.
 	AppDocs *wasmplugin.Registry
@@ -307,9 +312,9 @@ func dispatchThumb(p ThumbPipeline, n *model.Node) {
 //  2. Vuefinder/FileExplorer SFC: ?action=<verb>&path=<adapter://rel>
 //     (?q=<verb> is also accepted as a legacy alias.) Returns the
 //     {adapter, storages, dirname, read_only, files:[FileNode]} shape
-//     that @brftech/filex-core expects. Only `index`, `search`,
-//     `subfolders` are wired today — other actions return 501 so the
-//     UI can still render and warn rather than 404.
+//     that @brftech/filex-core expects. `space` answers the room at the
+//     path instead ({total, used, free, known}). An unknown action returns
+//     501, which is also how a client tells an older server apart.
 //
 // Keeping both behind one route avoids breaking the existing Explore
 // page contract while letting the SFC mount unchanged.
@@ -479,6 +484,12 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	// The storage list has a size too: the storages added up. `filex mount`
+	// without --remote maps exactly that.
+	if adapter == "" && action == "space" {
+		writeJSON(w, http.StatusOK, h.Space.Root(r.Context(), storages))
+		return
+	}
 	if adapter == "" {
 		if len(storages) == 0 {
 			writeJSON(w, http.StatusOK, map[string]any{
@@ -538,6 +549,9 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 		return
 	case "download":
 		h.vfStream(w, r, current, rel, true)
+		return
+	case "space":
+		writeJSON(w, http.StatusOK, h.Space.Storage(r.Context(), current, rel))
 		return
 	default:
 		// Mutating verbs (newfolder/rename/move/delete/upload) live in

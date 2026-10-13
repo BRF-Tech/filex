@@ -204,6 +204,13 @@ func (p *Process) runOnce(ctx context.Context) error {
 	if err := os.MkdirAll(p.SockDir, 0o700); err != nil {
 		return fmt.Errorf("plugin socket dir: %w", err)
 	}
+	// What the plugin is told: SockDir, or a short link to it when a socket
+	// in SockDir would not fit the platform's limit (sockdir.go).
+	sockDir, releaseSockDir, err := shortSocketDir(p.SockDir)
+	if err != nil {
+		return fmt.Errorf("plugin socket dir: %w", err)
+	}
+	defer releaseSockDir()
 	// ⚠⚠ Verified at THIS start, not once: the supervisor restarts what died,
 	// and a file replaced on disk since the last start - by the plugin itself,
 	// which runs as filex's user, or by anything else that can write there -
@@ -219,7 +226,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 			defer done()
 		}
 	}
-	cmd, stdout, stderr, err := p.spawn(exe)
+	cmd, stdout, stderr, err := p.spawn(exe, sockDir)
 	if err != nil {
 		return fmt.Errorf("start %s: %w", p.Binary, err)
 	}
@@ -294,6 +301,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 		<-waitCh
 		return fmt.Errorf("%w: %v", ErrRefused, err)
 	}
+	addr = dialThrough(addr, p.SockDir, sockDir)
 	client := NewClient(addr, p.Token)
 	if p.OnUp != nil {
 		upCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -339,7 +347,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 // busy"): another goroutine's fork, made while the copy was still open for
 // writing, holds that descriptor until its own exec. The answer is to try
 // again a few times, with a fresh Cmd each time.
-func (p *Process) spawn(exe string) (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
+func (p *Process) spawn(exe, sockDir string) (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
 	var lastErr error
 	for attempt := 0; attempt < 5; attempt++ {
 		if attempt > 0 {
@@ -350,7 +358,7 @@ func (p *Process) spawn(exe string) (*exec.Cmd, io.ReadCloser, io.ReadCloser, er
 		cmd.Dir = filepath.Dir(p.Binary)
 		cmd.Env = buildEnv(os.Environ(), []string{
 			"FILEX_PLUGIN_TOKEN=" + p.Token,
-			"FILEX_PLUGIN_SOCKET_DIR=" + p.SockDir,
+			"FILEX_PLUGIN_SOCKET_DIR=" + sockDir,
 			"FILEX_PLUGIN_NAME=" + p.Name,
 			"FILEX_PLUGIN_PROTOCOL=1",
 		})

@@ -226,16 +226,12 @@ func (n *node) Setattr(ctx context.Context, fh fs.FileHandle, in *fuse.SetAttrIn
 	return n.Getattr(ctx, fh, out)
 }
 
-// Statfs answers `df`.
-func (n *node) Statfs(_ context.Context, out *fuse.StatfsOut) syscall.Errno {
+// Statfs answers `df`, with the server's figures (FS.Space).
+func (n *node) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
 	const blockSize = 4096
 	out.Bsize = blockSize
 	out.Frsize = blockSize
-	// A large-but-finite figure: zero makes tools report a full disk and refuse
-	// to copy, and the real ceiling lives on the server (quota, backend).
-	out.Blocks = 1 << 38
-	out.Bfree = 1 << 38
-	out.Bavail = 1 << 38
+	out.Blocks, out.Bfree, out.Bavail = n.fs.Space(ctx, n.path).Blocks(blockSize)
 	out.Files = 1 << 30
 	out.Ffree = 1 << 30
 	out.NameLen = 255

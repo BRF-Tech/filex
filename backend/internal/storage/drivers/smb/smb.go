@@ -434,6 +434,35 @@ func (d *Driver) SetMtime(ctx context.Context, p string, mtime time.Time) error 
 	})
 }
 
+// Space implements storage.SpaceReporter: the volume behind the share as the
+// server reports it to this account (FileFsFullSizeInformation, which honours
+// a per-user quota on the server). Asked at the storage's root whatever p is:
+// the query has to open a folder, and a share is one volume.
+func (d *Driver) Space(ctx context.Context, _ string) (storage.Space, error) {
+	var info smb2.FileFsInfo
+	if err := d.run(ctx, readWork, func(fs *smb2.Share) error {
+		var err error
+		info, err = fs.Statfs(d.join(""))
+		return err
+	}); err != nil {
+		return storage.Space{}, err
+	}
+	// go-smb2 names the two factors oddly: BlockSize is the sector size and
+	// FragmentSize the sectors in one allocation unit, the unit every count is
+	// in.
+	unit := info.BlockSize() * info.FragmentSize()
+	total := info.TotalBlockCount() * unit
+	sp := storage.Space{
+		Total:  total,
+		Free:   info.AvailableBlockCount() * unit,
+		Volume: "smb://" + d.addr() + "/" + strings.ToLower(d.share),
+	}
+	if free := info.FreeBlockCount() * unit; free < total {
+		sp.Used = total - free
+	}
+	return sp, nil
+}
+
 // Close releases the session - called on shutdown. It logs off within the
 // attempt timeout and then closes the connection, so a silent server cannot
 // hold the shutdown.

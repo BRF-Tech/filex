@@ -19,14 +19,46 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.56.1, 12 October 2026
-Every table in the product lays each row out under its name when its pane is too narrow to be a table - the details panel, the explorer on a phone or in a narrow pane, an admin page on a phone - instead of cutting the values to their minimum width; selection, the right-click menu, Actions, sorting and the column menu work as before. The protocol docs now say whose permissions WebDAV, SFTP, FTPS, NFS and the S3 endpoint share: filex's own grants per person, group and folder, not the disk's POSIX bits or ACLs. For maintainers, a release can be cut off Windows: the Store copy's check waits for a Windows machine, on a person's word.
+::: tip Latest - v0.56.2, 12 October 2026
+Video, audio and PDF thumbnails read a file on a local storage in place instead of copying it whole to the temp directory first, so a folder of films no longer fills /tmp, and the copies a killed process left behind are removed at startup.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.56.1
-docker pull ghcr.io/brf-tech/filex:full-v0.56.1
+docker pull ghcr.io/brf-tech/filex:slim-v0.56.2
+docker pull ghcr.io/brf-tech/filex:full-v0.56.2
 ```
+
+## v0.56.2
+
+<span class="filex-release-date">12 October 2026</span>
+
+Video, audio and PDF thumbnails read a file on a local storage in place instead of copying it whole to the temp directory first, so a folder of films no longer fills /tmp, and the copies a killed process left behind are removed at startup.
+
+## What changed
+
+### Fixed
+
+- **A video thumbnail no longer copies the whole film first, and no copy
+  outlives a restart.** To draw one frame, filex copied every video, audio
+  file and PDF whole into the system temp directory before ffmpeg or
+  Ghostscript ran: on a folder of films on a CIFS mount, a 7 GB copy within
+  17 s of opening the folder and 75% iowait, and a killed process left the
+  copy in `/tmp` (14 GB of them on one install). A file on a local storage (a
+  disk, or a share mounted into the container) is now handed to the tool in
+  place, and ffmpeg reads only the opening seconds. Other storages still
+  copy, into `<cache_dir>/.work/`, which filex empties at startup together
+  with the copies older versions left in the temp directory
+  ([thumbnails.md](./thumbnails.md#how-it-works)). Reported by @eLeKaeMe
+  ([GitHub #114](https://github.com/BRF-Tech/filex/issues/114)).
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0562---2026-10-12)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.56.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.56.2`
 
 ## v0.56.1
 
@@ -3609,91 +3641,13 @@ entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.43.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.43.0`
 
-## v0.42.2
-
-<span class="filex-release-date">19 September 2026</span>
-
-A fix release for the issue 32 follow-up and three things that were wrong on screen. The context menu is now the same on Recent, Starred, Shared with me, tag views, the Home cards and the Recently-opened tray as in a folder - rows carry their own permission level, so Rename, Move, Delete and Share no longer vanish there (or leak in from the last folder). Every admin table pins its actions column to the right edge and scrolls sideways instead of squeezing it off screen. The admin Shares page copies the link the server builds from the configured public URL, not the browser's address. And presigned URLs are off by default on S3 storages: downloads and share links stream through filex, so a LAN-only MinIO no longer turns share downloads into dead links - set disable_presign: false to get the redirect back.
-
-Upgrade notes: no migrations. S3 storages saved without disable_presign now stream downloads. GET /api/admin/shares rows gain url; recent/starred/tagged rows gain perm and read_only. The search placeholder now names the storage it searches.
-
-## What changed
-
-A fix release for the issue 32 follow-up and three things that were wrong on
-screen.
-
-### Changed
-
-- **Presigned URLs are off by default on S3 storages** (`disable_presign: true`). A presigned link hands the browser the bucket's endpoint, which on
-  the LAN-only MinIO most self-hosters run turned every share download into a
-  dead link (#32). Uploads and the downloads behind public share links now
-  stream through filex unless the operator sets `disable_presign: false` -
-  worth it only when the endpoint is reachable from users' browsers and
-  accepts SDK-signed URLs. ⚠ A storage saved without the key streams from now
-  on; set `false` explicitly to get the redirect back.
-- **The top search field says what it searches.** It searches the whole
-  storage (every storage at the root), never the open folder, so the
-  placeholder now names the storage - "Search in Photos storage" - and
-  "Search all storages" on Home, the root and the Recent/Starred/Shared/tag
-  views. The folder-scoped box is still the filter bar's "Filter in this
-  folder…".
-
-### Fixed
-
-- **The context menu is the same everywhere.** On Recent, Starred, Shared with
-  me, tag views, the Home cards and the Recently-opened tray a row offered only
-  Open/Download/Copy/Star - no Rename, Move, Delete or Share - or, if a
-  writable folder had been opened first, all of them plus a meaningless Paste.
-  Rows in those views never carried their own permission level and the
-  folder's level leaked in. Every listed row now carries `perm` and
-  `read_only` from the server, the views forget the previous folder's level on
-  entry, and the menu is built per row; only New folder/Upload/Paste stay out
-  where there is no folder to put things in.
-- **Admin tables keep their actions column in view.** Every admin table - and
-  the token/key panels in the explorer - now scrolls sideways when it is wider
-  than the page and pins the actions column to the right edge, the way the
-  explorer's list view pins its ⋮ menu; the column no longer squeezes off
-  screen on narrow windows. One shared stylesheet (`web/src/styles/table.css`)
-  and `ui/Table.vue`'s `pinned` column option.
-- **The admin Shares page copies the right link.** It built the link from the
-  browser's own address, so an administrator signed in on localhost or through
-  a proxy copied a link nobody else could open (#32). `GET /api/admin/shares`
-  rows now carry the canonical `url` from the configured public origin - the
-  same one the share dialog has always used - and the page prefers it.
-- The S3 "Disable presigned URLs" help text, `STORAGE.md` and `SHARING.md` say
-  the switch governs share downloads too; the minimal compose example warns
-  that `http://localhost:5212` is only right on the machine running it.
-- **The admin sidebar no longer opens over the page on a phone.** Below
-  1024px the sidebar is a drawer with a backdrop, and it started open on every
-  admin page, so the first tap went to the backdrop instead of the page. It now
-  starts closed there, closes when a page is chosen, and comes back as the
-  column when the window is widened.
-- The search field said "Search all storages" on every admin folder: the
-  scope check looked at the multi-storage *mode* (which the admin explorer is
-  always in) rather than at whether a storage was open. It now names the open
-  storage.
-
-### Upgrade notes
-
-- No migrations. S3 storages without `disable_presign` now stream downloads
-  (see Changed). `GET /api/admin/shares` rows gain `url`; the recent/starred/
-  tagged listing rows gain `perm` and `read_only`.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0422---2026-09-19)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.42.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.42.2`
-
 ## Earlier releases
 
-The 118 releases before v0.42.2, in brief. Full notes are on GitHub.
+The 119 releases before v0.43.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.42.2](https://github.com/BRF-Tech/filex/releases/tag/v0.42.2) | 19 September 2026 | A fix release for the issue 32 follow-up and three things that were wrong on screen. The context menu is now the same on Recent, Starred, Shared with me, tag views, the Home cards and the Recently-opened tray as in a folder -… |
 | [v0.42.1](https://github.com/BRF-Tech/filex/releases/tag/v0.42.1) | 19 September 2026 | A fix release for four reports on 0.42.0. A bucket with several top-level folders is one form now, not one per folder: Storages → Add lists the folders under the root you typed and creates one storage per ticked folder with the… |
 | [v0.42.0](https://github.com/BRF-Tech/filex/releases/tag/v0.42.0) | 16 September 2026 | gesture is now the classic desktop file-manager one - a single click selects a |
 | [v0.41.4](https://github.com/BRF-Tech/filex/releases/tag/v0.41.4) | 15 September 2026 | A fix release that carries 0.41.3, whose release build never finished. Only the checkbox selects now, and any other click or tap on a file or folder opens it - beside the name, on the size and date cells, with a selection, with… |
@@ -3815,4 +3769,4 @@ The 118 releases before v0.42.2, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-10-12 from 138 published releases.</small>
+<small>Last refreshed 2026-10-12 from 139 published releases.</small>

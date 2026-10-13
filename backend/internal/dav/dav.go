@@ -52,6 +52,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
@@ -103,6 +104,10 @@ type Config struct {
 	// Quota enforces the account's storage ceiling. Nil disables the check,
 	// which is right for a test and wrong for the server — see preGate.
 	Quota *quota.Service
+	// Space answers the RFC 4331 quota properties (internal/space, quota.go),
+	// shared with every other surface. nil: NewHandler builds one over
+	// Resolver and Quota.
+	Space *space.Service
 	// MultiTenant mirrors config.MultiTenant for the login policy check.
 	MultiTenant bool
 	// Auth is the shared protocol credential resolver. Nil builds a private
@@ -140,6 +145,7 @@ func NewHandler(cfg Config) *Handler {
 	// Who may encrypt: the router's rule, or one built over this handler's
 	// own store — never none (protoperm.EncryptionPolicy).
 	cfg.E2EPolicy = protoperm.EncryptionPolicy(cfg.E2EPolicy, cfg.Store, cfg.ACL, cfg.MultiTenant)
+	cfg.Space = space.Ensure(cfg.Space, cfg.Resolver, cfg.Quota)
 	// protocolauth's zero ConfinePolicy is ConfineRefuse, which is the right
 	// one here: /dav has no confine middleware, so accepting a `root:`-scoped
 	// token would silently promote a subtree-limited credential to whole-tree
@@ -230,6 +236,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(r.Context())
 		r.URL = &u
 	}
+	r = noteQuotaAsked(r)
 	dh := &webdav.Handler{
 		Prefix:     base + Prefix,
 		FileSystem: newFS(h, p),

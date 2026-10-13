@@ -3,6 +3,7 @@ package ftpsrv
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/protoperm"
+	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -484,21 +486,25 @@ func (f *fs) GetHandle(name string, flags int, offset int64) (ftpserver.FileTran
 	return f.openRead(name, offset)
 }
 
-// GetAvailableSpace answers AVBL from the account's quota, so a client can see
-// before a transfer what it would otherwise learn at the end of one.
-func (f *fs) GetAvailableSpace(string) (int64, error) {
-	if u := userFrom(f.ctx); u != nil && f.srv.cfg.Quota != nil {
-		if snap, err := f.srv.cfg.Quota.Get(f.ctx, u.ID); err == nil && !snap.Unlimited && snap.QuotaBytes > 0 {
-			free := snap.QuotaBytes - snap.UsedBytes
-			if free < 0 {
-				free = 0
-			}
-			return free, nil
-		}
+// GetAvailableSpace answers AVBL, so a client can see before a transfer what it
+// would otherwise learn at the end of one.
+//
+// The figure is internal/space's, the one every surface gives: the storage's
+// own disk (the storages added up, at the root), capped by the account's
+// quota. Only a location nothing could measure gets the stand-in: zero would
+// make clients report a full disk and refuse to start.
+func (f *fs) GetAvailableSpace(dirName string) (int64, error) {
+	t, err := f.resolve(dirName)
+	if err != nil {
+		return 0, err
 	}
-	// Unlimited as far as the quota is concerned. ⚠ Zero would make clients
-	// report a full disk and refuse to start.
-	return 1 << 40, nil
+	var fig space.Figures
+	if t.isRoot() {
+		fig = f.srv.cfg.Space.Root(f.ctx, f.visibleStorages())
+	} else {
+		fig = f.srv.cfg.Space.Storage(f.ctx, t.Storage, t.Rel)
+	}
+	return int64(min(fig.OrStandIn().Free, math.MaxInt64)), nil
 }
 
 // ─────────────────────────── afero leftovers ───────────────────────────

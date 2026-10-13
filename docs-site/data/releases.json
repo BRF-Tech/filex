@@ -3,6 +3,21 @@
   "generatedAt": "2026-10-12",
   "releases": [
     {
+      "tag": "v0.56.2",
+      "date": "2026-10-12T17:49:13Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.56.2",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Fixed\n\n- **A video thumbnail no longer copies the whole film first, and no copy\n  outlives a restart.** To draw one frame, filex copied every video, audio\n  file and PDF whole into the system temp directory before ffmpeg or\n  Ghostscript ran: on a folder of films on a CIFS mount, a 7 GB copy within\n  17 s of opening the folder and 75% iowait, and a killed process left the\n  copy in `/tmp` (14 GB of them on one install). A file on a local storage (a\n  disk, or a share mounted into the container) is now handed to the tool in\n  place, and ffmpeg reads only the opening seconds. Other storages still\n  copy, into `<cache_dir>/.work/`, which filex empties at startup together\n  with the copies older versions left in the temp directory\n  ([thumbnails.md](docs/thumbnails.md#how-it-works)). Reported by @eLeKaeMe\n  ([GitHub #114](https://github.com/BRF-Tech/filex/issues/114)).\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0562---2026-10-12)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.56.2",
+        "ghcr.io/brf-tech/filex:full-v0.56.2"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
+    {
       "tag": "v0.56.1",
       "date": "2026-10-12T00:02:59Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.56.1",

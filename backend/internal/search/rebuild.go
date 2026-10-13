@@ -344,6 +344,12 @@ func (i *Index) rebuild(ctx context.Context, store NodeLister, opts RebuildOptio
 		if len(chunk) == 0 {
 			return nil
 		}
+		// A rebuild writes the whole corpus: it waits for room like any
+		// content write (content_batch.go), so it cannot run the process
+		// out of memory either.
+		if err := i.waitForRoom(ctx); err != nil {
+			return err
+		}
 		b := fresh.NewBatch()
 		for id, d := range chunk {
 			// Re-checked here, not only when the entry was added: a write

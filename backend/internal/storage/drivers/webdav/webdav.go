@@ -229,6 +229,86 @@ func (d *Driver) Stat(ctx context.Context, p string) (storage.Object, error) {
 	return obj, nil
 }
 
+// quotaBody asks for RFC 4331's two quota properties and nothing else.
+const quotaBody = `<?xml version="1.0" encoding="utf-8" ?>
+<D:propfind xmlns:D="DAV:">
+  <D:prop>
+    <D:quota-available-bytes/>
+    <D:quota-used-bytes/>
+  </D:prop>
+</D:propfind>`
+
+// quotaMultistatus is the answer to quotaBody. A server that knows one of the
+// two properties and not the other answers them in separate propstats (200 and
+// 404), hence the slice.
+type quotaMultistatus struct {
+	Responses []struct {
+		Propstat []struct {
+			Prop struct {
+				Available string `xml:"quota-available-bytes"`
+				Used      string `xml:"quota-used-bytes"`
+			} `xml:"prop"`
+		} `xml:"propstat"`
+	} `xml:"response"`
+}
+
+// Space implements storage.SpaceReporter through RFC 4331's quota properties,
+// which Nextcloud, ownCloud, Apache mod_dav, IIS and filex's own /dav answer.
+// The server says what the account has left and what it has used; the size is
+// the two added, which is how Windows draws a mapped WebDAV drive as well.
+//
+// Asked at the storage's root whatever p is: a server keeps one quota per
+// account, and Volume says so, so two storages on one account are counted
+// once.
+func (d *Driver) Space(ctx context.Context, _ string) (storage.Space, error) {
+	c := propfind("", "0")
+	c.xml = quotaBody
+	resp, err := d.exchange(ctx, c, true)
+	if err != nil {
+		return storage.Space{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return storage.Space{}, storage.ErrNotFound
+	}
+	if resp.StatusCode != http.StatusMultiStatus {
+		return storage.Space{}, fmt.Errorf("webdav: quota http %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	var ms quotaMultistatus
+	if err := xml.Unmarshal(body, &ms); err != nil {
+		return storage.Space{}, fmt.Errorf("webdav: parse: %w", err)
+	}
+	var availText, usedText string
+	if len(ms.Responses) > 0 {
+		for _, ps := range ms.Responses[0].Propstat {
+			if ps.Prop.Available != "" {
+				availText = ps.Prop.Available
+			}
+			if ps.Prop.Used != "" {
+				usedText = ps.Prop.Used
+			}
+		}
+	}
+	// Missing, or one of the negative markers some servers send instead of a
+	// number (Nextcloud: -3 for no quota, -2 for not computed yet): the server
+	// cannot tell, which is not the same as a full disk.
+	avail, err := strconv.ParseInt(strings.TrimSpace(availText), 10, 64)
+	if err != nil || avail < 0 {
+		return storage.Space{}, storage.ErrUnsupported
+	}
+	used, err := strconv.ParseInt(strings.TrimSpace(usedText), 10, 64)
+	if err != nil || used < 0 {
+		used = 0
+	}
+	return storage.Space{
+		Total:  uint64(avail) + uint64(used),
+		Used:   uint64(used),
+		Free:   uint64(avail),
+		Volume: "webdav://" + d.user + "@" + d.endpoint.Host,
+	}, nil
+}
+
 // Read implements storage.Driver.
 func (d *Driver) Read(ctx context.Context, p string) (io.ReadCloser, error) {
 	resp, err := d.exchange(ctx, call{method: http.MethodGet, path: p}, false)

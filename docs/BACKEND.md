@@ -619,6 +619,22 @@ through the log, which is why sync clients keep a slower full walk as a safety
 net. `403` when the caller cannot see the folder; `400` on a `..` segment;
 `501` on servers without the log.
 
+### `GET /api/files/manager?action=space` ![user](https://img.shields.io/badge/-user-blue)
+How much room is there at a path? What `filex mount` shows as the drive's size.
+
+| Param  | Notes |
+|--------|-------|
+| `path` | `<storage>://<folder>`; empty = the storage list, the caller's storages added up |
+
+**Response 200** `{ "total": 4000787030016, "used": 1203982176256, "free": 2593416052736, "known": true }` (bytes)
+
+The same figures SFTP, FTPS, NFS and WebDAV give
+([PROTOCOLS.md → Free space](PROTOCOLS.md#free-space)): the storage's own disk,
+share or server, capped by the caller's quota. `known: false` means nothing
+could be measured and there is no quota; the client picks its own stand-in. A
+storage the caller cannot see answers `404` like its listing. An older server
+answers `501`.
+
 ### Filenames in `Content-Disposition`
 
 Every endpoint that serves bytes (`action=download` / `preview`, share

@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.56.3] - 2026-10-13
+
+### Fixed
+
+- **`df` and a mapped drive show the real disk, not 1 PB.** A client that asked
+  how much room there was got a made-up figure unless the account had a quota,
+  and a different one on every surface: `sftp df` and the Linux `filex mount`
+  said 1 PiB with nothing used, NFS 32 TiB, FTPS 1 TiB, the Windows mount 4 TiB
+  half full, and WebDAV nothing at all. Every surface now gives one answer:
+  inside a storage, the disk it is on (a local disk, an SMB share's volume, an
+  SFTP server that answers `statvfs`, a WebDAV server's quota); at the root
+  that lists the storages, those storages added up, a disk two of them share
+  counted once; either capped by the account's quota. SFTP's `statvfs`, FTPS's
+  `AVBL`, NFS's `FSSTAT`, WebDAV's RFC 4331 quota properties (Windows' mapped
+  drive) and `filex mount` (through the new `GET /api/files/manager?action=space`)
+  all read it. Only a location nothing can measure, such as an S3 bucket, still
+  answers a large empty disk
+  ([PROTOCOLS.md](docs/PROTOCOLS.md#free-space)). Reported by @gguglietti
+  ([GitHub #116](https://github.com/BRF-Tech/filex/issues/116)).
+
+- **Indexing a large existing tree no longer eats the server's memory.** Every
+  extracted text was written to the search index on its own, so the index made
+  one segment per file and spent its time merging them: measured on 13,500
+  files, about 5 GB resident and 6.5 GB of index files mid-merge after fifteen
+  minutes, rising with every file, where the settled index needed a fraction of
+  that. On a large RAID volume it took 63 GB and the host with it. Texts that
+  are ready together are now written together, and indexing keeps to a memory
+  budget: `FILEX_SEARCH_MEMORY_PERCENT` (default 25, at most 50) percent of the
+  memory filex was given - the container's limit, or the machine's RAM - above
+  which extraction and rebuilds wait for the index to give memory back
+  ([SEARCH.md](docs/SEARCH.md#content-search)). Reported by @gguglietti
+  ([GitHub #115](https://github.com/BRF-Tech/filex/issues/115)).
+
+- **A plugin in a long data directory starts.** A storage or app plugin talks
+  to filex over a Unix socket under `<data>/plugins/<name>/run/`, and a
+  socket's path may not be longer than about 108 characters (104 on macOS):
+  with a data directory longer than about 48 characters, such as a container
+  volume's host path, the plugin could not open its socket and the log said
+  only that it "did not print its handshake line". When the real path is too
+  long, filex now reaches the socket through a short private link in the temp
+  directory; the socket stays where it was, with its owner and permissions.
+
 ## [0.56.2] - 2026-10-12
 
 ### Fixed

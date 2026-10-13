@@ -49,6 +49,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/writehook"
@@ -78,6 +79,9 @@ type Config struct {
 	// nil: New builds one over Store (protoperm.EncryptionPolicy), so a
 	// lost wiring line never switches the rule off.
 	E2EPolicy *e2epolicy.Service
+	// Space answers FSSTAT (internal/space), shared with every other surface.
+	// nil: New builds one over Resolver and Quota.
+	Space *space.Service
 	// SpoolDir is where in-flight writes are spooled.
 	SpoolDir string
 	// MaxSpool caps one file's spool. 0 uses the package default.
@@ -119,6 +123,7 @@ func New(cfg Config) (*Server, error) {
 	// Who may encrypt: the router's rule, or one built over this server's own
 	// store — never none (protoperm.EncryptionPolicy).
 	cfg.E2EPolicy = protoperm.EncryptionPolicy(cfg.E2EPolicy, cfg.Store, cfg.ACL, cfg.MultiTenant)
+	cfg.Space = space.Ensure(cfg.Space, cfg.Resolver, cfg.Quota)
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr
 	}

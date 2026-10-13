@@ -353,7 +353,12 @@ func TestPool_RoundTrip(t *testing.T) {
 	// the counter and reads Stats on the next line is racing that write. It
 	// passed alone and failed under `go test ./...`, where the other packages
 	// competing for cores widen the gap: 4 of 5 done, every time.
-	deadline := time.Now().Add(5 * time.Second)
+	//
+	// The deadline only stops a hung test; a healthy run leaves the loop as
+	// soon as the database says so. Five seconds was a guess about the
+	// machine, and the 0.56.3 release check ran next to docker builds (load
+	// 16-23, SQLite commits waiting on the disk): 4 of 5 done, 2 pending.
+	deadline := time.Now().Add(2 * time.Minute)
 	var stats queue.Stats
 	var err error
 	for time.Now().Before(deadline) {

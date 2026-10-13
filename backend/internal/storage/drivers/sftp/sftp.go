@@ -295,6 +295,41 @@ func kindOf(mode fs.FileMode) storage.ObjectKind {
 	}
 }
 
+// Space implements storage.SpaceReporter through statvfs@openssh.com, which
+// OpenSSH, sftpgo and most NAS servers answer. A server that does not is
+// unknown, not empty. A path that does not exist yet is answered for the
+// storage's root.
+func (d *Driver) Space(ctx context.Context, p string) (storage.Space, error) {
+	var vfs *sftp.StatVFS
+	ask := func(abs string) error {
+		return d.run(ctx, readWork, func(cl *sftp.Client) error {
+			var err error
+			vfs, err = cl.StatVFS(abs)
+			return err
+		})
+	}
+	err := ask(d.join(p))
+	if errors.Is(err, storage.ErrNotFound) && d.join(p) != d.join("") {
+		err = ask(d.join(""))
+	}
+	if err != nil {
+		return storage.Space{}, err
+	}
+	unit := vfs.Frsize
+	if unit == 0 {
+		unit = vfs.Bsize
+	}
+	sp := storage.Space{
+		Total:  vfs.Blocks * unit,
+		Free:   vfs.Bavail * unit,
+		Volume: fmt.Sprintf("sftp://%s#%d", d.addr(), vfs.Fsid),
+	}
+	if vfs.Bfree < vfs.Blocks {
+		sp.Used = (vfs.Blocks - vfs.Bfree) * unit
+	}
+	return sp, nil
+}
+
 // Stat implements storage.Driver.
 func (d *Driver) Stat(ctx context.Context, p string) (storage.Object, error) {
 	var info os.FileInfo

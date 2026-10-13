@@ -308,14 +308,12 @@ func (w *winFS) Readdir(
 	return 0
 }
 
-func (w *winFS) Statfs(_ string, stat *fuse.Statfs_t) int {
-	// A plausible, large volume. filex reports a quota through its own
-	// surfaces; inventing a number here that Explorer would draw as a nearly
-	// full disk is worse than a round one.
+// Statfs is the drive's size and free space in Explorer, with the server's
+// figures (FS.Space).
+func (w *winFS) Statfs(p string, stat *fuse.Statfs_t) int {
 	const block = 4096
 	stat.Bsize, stat.Frsize = block, block
-	stat.Blocks = 1 << 30
-	stat.Bfree, stat.Bavail = 1<<29, 1<<29
+	stat.Blocks, stat.Bfree, stat.Bavail = w.fs.Space(context.Background(), p).Blocks(block)
 	stat.Files, stat.Ffree = 1<<20, 1<<19
 	stat.Namemax = 255
 	return 0

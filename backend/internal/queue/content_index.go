@@ -10,6 +10,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/filebody"
@@ -27,6 +29,22 @@ const TypeContentIndex = "content_index"
 // DefaultContentMaxBytes is the source-size ceiling for extraction when
 // FILEX_SEARCH_CONTENT_MAX is unset (5 MiB — frozen v0.2 contract).
 const DefaultContentMaxBytes int64 = 5 << 20
+
+// The content_index job has a pool of its own (issue #115).
+//
+// A job returns only once its text is in the search index, and the index
+// writes the texts that are waiting together, as one batch
+// (search/content_batch.go). With the shared pool's four workers a batch could
+// never hold more than four documents; ContentIndexWorkers jobs can wait for
+// the same write. Reading and extracting the files is still limited to the
+// shared pool's worker count (LimitExtraction), so the work done at once is
+// what it was; only the waiting is wider. An idle pool polls every
+// ContentIndexPoll, slower than the shared one, as sixteen workers polling
+// every half second would be a steady load on the database for nothing.
+const (
+	ContentIndexWorkers = 16
+	ContentIndexPoll    = 2 * time.Second
+)
 
 // NodeGetter is the slim store contract the content job needs.
 type NodeGetter interface {
@@ -49,6 +67,8 @@ type ContentIndexer struct {
 	body     *filebody.Resolver
 	index    *search.Index
 	maxBytes int64
+	// slots bounds how many jobs read and extract at once (nil: no bound).
+	slots chan struct{}
 }
 
 // NewContentIndexer wires the job. maxBytes <= 0 falls back to
@@ -63,6 +83,31 @@ func NewContentIndexer(store NodeGetter, resolver func(int64) (storage.Driver, e
 // AttachBody wires the byte-source resolver so a re-queued extraction of a file
 // that is still being transferred reads the staged bytes.
 func (c *ContentIndexer) AttachBody(b *filebody.Resolver) { c.body = b }
+
+// LimitExtraction lets at most n jobs read and extract a file at the same
+// time. n < 1 removes the limit.
+func (c *ContentIndexer) LimitExtraction(n int) {
+	if n < 1 {
+		c.slots = nil
+		return
+	}
+	c.slots = make(chan struct{}, n)
+}
+
+// extractSlot takes one of the extraction slots and returns its release,
+// safe to call more than once.
+func (c *ContentIndexer) extractSlot(ctx context.Context) (func(), error) {
+	if c.slots == nil {
+		return func() {}, nil
+	}
+	select {
+	case c.slots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	var once sync.Once
+	return func() { once.Do(func() { <-c.slots }) }, nil
+}
 
 // Eligible reports whether n qualifies for content extraction: a live file
 // within the size cap whose mime/extension has a registered extractor.
@@ -131,6 +176,11 @@ func (c *ContentIndexer) Handle(ctx context.Context, op Op) error {
 		return c.index.IndexNodeContent(ctx, n, "")
 	}
 	/* /wiring:e2 */
+	release, err := c.extractSlot(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	drv, err := c.resolver(n.StorageID)
 	if err != nil {
 		return fmt.Errorf("content-index: resolve storage %d: %w", n.StorageID, err)
@@ -168,6 +218,9 @@ func (c *ContentIndexer) Handle(ctx context.Context, op Op) error {
 			slog.Int64("node", n.ID), slog.String("path", n.Path), slog.String("err", err.Error()))
 		text = ""
 	}
+	// The slot is for reading and extracting; waiting for the index write is
+	// not work, and holding the slot through it would keep the batch small.
+	release()
 	if c.index == nil {
 		return nil
 	}

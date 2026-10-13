@@ -2,10 +2,12 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.56.2"
+version: "0.56.3"
 releaseNotes: |-
-  filex v0.56.2 - 2026-10-12
-  • A video thumbnail no longer copies the whole film first, and no copy outlives a restart.
+  filex v0.56.3 - 2026-10-13
+  • df and a mapped drive show the real disk, not 1 PB.
+  • Indexing a large existing tree no longer eats the server's memory.
+  • A plugin in a long data directory starts.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

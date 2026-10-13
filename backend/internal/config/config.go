@@ -931,7 +931,21 @@ type SearchConfig struct {
 	// endpoint nobody reads, and the issue reporter upgraded and correctly
 	// said nothing had changed.
 	AutoRebuild bool `yaml:"auto_rebuild"`
+	// MemoryPercent is the share of the memory filex was given (the
+	// container's limit, or the machine's RAM) that indexing may take on top
+	// of what filex holds when it starts: over it, content extraction and a
+	// rebuild wait for the index's merges to give memory back
+	// (FILEX_SEARCH_MEMORY_PERCENT). Clamped to [MinMemoryPercent,
+	// MaxMemoryPercent]; DefaultMemoryPercent when unset.
+	MemoryPercent int `yaml:"memory_percent"`
 }
+
+// The bounds and default of SearchConfig.MemoryPercent.
+const (
+	DefaultMemoryPercent = 25
+	MinMemoryPercent     = 1
+	MaxMemoryPercent     = 50
+)
 
 // CORSConfig — origin allowlist.
 type CORSConfig struct {
@@ -980,6 +994,7 @@ func Default() Config {
 			Content:         true,
 			ContentMaxBytes: 5 << 20,
 			AutoRebuild:     true,
+			MemoryPercent:   DefaultMemoryPercent,
 		},
 		Queue: QueueConfig{
 			// Empty, not "sqlite": the driver follows the database unless an
@@ -1657,6 +1672,14 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_SEARCH_CONTENT_MAX"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
 			c.Search.ContentMaxBytes = n
+		}
+	}
+	if v := os.Getenv("FILEX_SEARCH_MEMORY_PERCENT"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(v), "%"))); err == nil {
+			c.Search.MemoryPercent = n
+		} else {
+			slog.Warn("config: FILEX_SEARCH_MEMORY_PERCENT is not a whole number; keeping the default",
+				slog.String("value", v), slog.Int("default", DefaultMemoryPercent))
 		}
 	}
 	if v := os.Getenv("FILEX_CORS_ALLOWED_ORIGINS"); v != "" {

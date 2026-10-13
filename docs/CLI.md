@@ -607,6 +607,13 @@ upload committed under the real name would replace a good file with a torn one.
 Editing a very large file in place is therefore slower here than on a local
 disk; copying it in and out is not.
 
+The drive's size and free space (`df`, Explorer) are the server's figures for the
+mounted path: the storage's disk, or your storages added up when the whole list is
+mounted, capped by your quota
+([PROTOCOLS.md → Free space](PROTOCOLS.md#free-space)). They are asked at most
+every 30 seconds. A server that does not answer the question yet shows a large
+empty drive.
+
 Full protocol picture: [PROTOCOLS.md](PROTOCOLS.md).
 
 ## `filex decrypt` - an encrypted folder, offline

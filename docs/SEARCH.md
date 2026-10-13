@@ -597,6 +597,19 @@ working".
 **200 KiB** per file. Corrupt or unextractable files index as "no content" -
 never as job failures.
 
+**Memory.** Extracted texts that are ready at the same time are written to the
+index together, in one batch. Indexing also has a memory budget:
+`FILEX_SEARCH_MEMORY_PERCENT` (default **25**, between **1** and **50**) percent
+of the memory filex was given - the container's limit when it has one, the
+machine's RAM otherwise - on top of what filex holds when it starts. Over it,
+extraction and a [rebuild](#post-apiadminsearchrebuild) wait until the index's
+background merges give the memory back; nothing is dropped and nothing is
+stopped. The startup log says what it read:
+
+```
+level=INFO msg="search: indexing memory budget" percent=25 budget_mb=1024 given_mb=4096 from="cgroup v2 memory.max"
+```
+
 **Query surface.** Search endpoints take a `scope` parameter -
 `name` | `content` | `all` (default `all`) - and every hit carries two new
 fields: `matched` (`"name"` / `"content"` / `"both"`) and `snippet`, a short
@@ -609,6 +622,7 @@ clients see the ordering they always did.
 ```bash
 FILEX_SEARCH_CONTENT=0        # kill-switch: no extraction jobs are enqueued (default: on)
 FILEX_SEARCH_CONTENT_MAX=5242880  # per-file source-size cap in bytes (default 5 MiB)
+FILEX_SEARCH_MEMORY_PERCENT=25    # share of the given memory indexing may take (1-50, default 25)
 ```
 
 ```yaml
@@ -616,6 +630,7 @@ FILEX_SEARCH_CONTENT_MAX=5242880  # per-file source-size cap in bytes (default 5
 search:
   content: true
   content_max_bytes: 5242880
+  memory_percent: 25
 ```
 
 Content extraction also requires the persistent **queue** to be enabled (it is
@@ -647,6 +662,7 @@ Search is **on by default**:
 | `search.index_path` | `config.yaml` **only** | `<data_dir>/search.bleve` | Where the Bleve directory lives. **No env override** - set it in the file if you want the index somewhere else (e.g. a faster disk). |
 | `FILEX_SEARCH_CONTENT` / `search.content` | env / yaml | `true` | [Content search](#content-search) kill-switch - `0` stops enqueueing extraction jobs (already-indexed content keeps matching). |
 | `FILEX_SEARCH_CONTENT_MAX` / `search.content_max_bytes` | env / yaml | `5242880` (5 MiB) | Source files above this size are never content-extracted. |
+| `FILEX_SEARCH_MEMORY_PERCENT` / `search.memory_percent` | env / yaml | `25` | Share, in percent (1-50), of the memory filex was given (container limit, else machine RAM) that indexing may take on top of what filex holds at startup. Over it, extraction and a rebuild wait. See [Content search](#content-search). |
 | `FILEX_SEARCH_AUTO_REBUILD` / `search.auto_rebuild` | env / yaml | `true` | Repair an index written by an older document schema, in the background, at startup. `0` leaves it alone - the index keeps reporting `needs_rebuild` and you rebuild when it suits you. See [Upgrading an existing index](#upgrading-an-existing-index). |
 
 ```yaml
@@ -1087,6 +1103,18 @@ exists (`GET /api/files/manager/tags?storage_id=…`, or the **Tagged files**
 page) and remember that several tags in one query are ANDed - and that the
 filter sees only tags **you** can see: another person's personal tag, or
 another tenant's team tag, is not there for you to filter by.
+
+### filex takes a lot of memory while it indexes
+
+Indexing keeps to its budget (see **Memory** under
+[Content search](#content-search)), so first read the
+`search: indexing memory budget` line in the startup log: `from` says whether
+filex saw the container's limit or only the machine's RAM. Without a container
+limit the budget is a share of the whole machine; set one, or lower
+`FILEX_SEARCH_MEMORY_PERCENT`. While indexing is held the log says
+`search: over the memory budget` - that is the budget working, and the backlog
+drains as the merges finish. `FILEX_SEARCH_CONTENT=0` stops content extraction
+altogether and leaves name search as it is.
 
 ### After a bulk import, lots of files are unsearchable
 Bulk imports that bypass filex's write path (rsync into a local mount, mass S3

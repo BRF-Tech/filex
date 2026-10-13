@@ -14,7 +14,6 @@ import (
 	ftpserver "github.com/fclairamb/ftpserverlib"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
-	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -350,6 +349,3 @@ func mimeOf(rel string) string {
 	}
 	return "application/octet-stream"
 }
-
-// userFrom is a thin accessor so fs.go does not import auth for one call.
-func userFrom(ctx context.Context) *model.User { return auth.UserFrom(ctx) }

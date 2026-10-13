@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/diskfree"
 	"github.com/brf-tech/filex/backend/internal/regfile"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -540,6 +541,35 @@ func (d *Driver) OpenLocal(_ context.Context, p string) (*os.File, error) {
 		return nil, err
 	}
 	return openRead(abs)
+}
+
+// Space implements storage.SpaceReporter: the filesystem p is on. That is the
+// root's disk, or another disk mounted on a folder inside the root.
+//
+// A path that does not exist yet is measured at the nearest folder above it,
+// inside the root. A path the other verbs refuse (`..`, a link that leaves the
+// root) is refused here too: the size of a disk outside the root is not the
+// storage's to tell.
+func (d *Driver) Space(_ context.Context, p string) (storage.Space, error) {
+	abs, err := d.resolveDeref(p)
+	if err != nil {
+		return storage.Space{}, err
+	}
+	for abs != d.root {
+		if _, err := os.Stat(abs); err == nil {
+			break
+		}
+		up := filepath.Dir(abs)
+		if up == abs {
+			break
+		}
+		abs = up
+	}
+	u, err := diskfree.Measure(abs)
+	if err != nil {
+		return storage.Space{}, err
+	}
+	return storage.Space{Total: u.Total, Used: u.Used, Free: u.Free, Volume: u.Volume}, nil
 }
 
 // ReadRange implements storage.RangeReader — a plain seek on the open

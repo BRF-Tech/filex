@@ -81,6 +81,11 @@ type Index struct {
 	// index. Swapped in tests to exercise the guard without filling a
 	// disk (same shape as staging.Area.FreeBytes).
 	FreeBytes func(dir string) (uint64, error)
+
+	// cq groups content writes into shared batches and mem holds them while
+	// the process is over the search memory budget (content_batch.go).
+	cq  contentQueue
+	mem memoryGate
 }
 
 // Open returns an Index ready to use. Pass empty path to disable.
@@ -266,33 +271,14 @@ func (i *Index) IndexNodes(ctx context.Context, nodes []*model.Node) error {
 		i.mu.RUnlock()
 		return nil
 	}
-	b := bx.NewBatch()
-	var err error
 	for k, n := range nodes {
 		ids[k] = strconv.FormatInt(n.ID, 10)
 		docs[k] = docFor(n)
 		// Preserve content across metadata reindexes: Bleve replaces the
 		// whole document on Index(), so re-supply what the doc already holds.
 		docs[k].Content, docs[k].ContentSig = storedContent(bx, ids[k])
-		if err = b.Index(ids[k], docs[k]); err != nil {
-			break
-		}
 	}
-	if err == nil {
-		err = bx.Batch(b)
-	}
-	if err == nil && pending != nil {
-		i.dualWrite(ids[0], pending, func() error {
-			pb := pending.NewBatch()
-			for k := range ids {
-				i.markDirty(ids[k])
-				if err := pb.Index(ids[k], docs[k]); err != nil {
-					return err
-				}
-			}
-			return pending.Batch(pb)
-		})
-	}
+	err := i.writeDocsLocked(bx, pending, ids, docs)
 	i.mu.RUnlock()
 	if err != nil {
 		return err
@@ -345,30 +331,6 @@ func (i *Index) dualWrite(id string, pending bleve.Index, apply func() error) {
 		slog.Warn("search: write to the index being rebuilt failed",
 			slog.String("doc", id), slog.String("err", err.Error()))
 	}
-}
-
-// IndexNodeContent updates the node's document with extracted content. The
-// metadata fields are re-supplied from n (the authoritative row) so the
-// content update never clobbers them — Bleve has no partial update, the
-// whole doc is replaced. Metadata indexing stays synchronous elsewhere;
-// this lands later, from the content_index queue job.
-func (i *Index) IndexNodeContent(_ context.Context, n *model.Node, content string) error {
-	d := docFor(n)
-	d.Content = content
-	d.ContentSig = ContentFingerprint(n)
-	id := strconv.FormatInt(n.ID, 10)
-
-	i.mu.RLock()
-	defer i.mu.RUnlock()
-	if i.bleve == nil {
-		return nil
-	}
-	if err := i.bleve.Index(id, d); err != nil {
-		return err
-	}
-	pending := i.pending
-	i.dualWrite(id, pending, func() error { return pending.Index(id, d) })
-	return nil
 }
 
 // storedContent reads the content + fingerprint currently stored on a doc

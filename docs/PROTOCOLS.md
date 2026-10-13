@@ -205,6 +205,28 @@ bucket over S3 - and every one accepts either the storage's **name** or its immu
 (`internal/storageref`) rather than five, so there is no protocol where only one of the
 two works. See [STORAGE.md](STORAGE.md#editing-a-storage-afterwards).
 
+### Free space
+
+Every surface that can be asked how much room there is gives the same answer: SFTP's
+`statvfs` (`df`, WinSCP, Mountain Duck), FTPS's `AVBL`, NFS's `FSSTAT`, WebDAV's quota
+properties (the free space of a mapped Windows drive) and `filex mount`.
+
+- **Inside a storage** it is what that storage is on: the disk of a local storage (or
+  another disk mounted on a folder inside it), an SMB share's volume, the disk of an SFTP
+  server that answers `statvfs`, the quota a WebDAV server reports. *Used* is the disk's
+  own, other programs' files included, because they take the same room.
+- **At the root**, the folder that lists the storages, it is those storages added up,
+  with a disk two of them share counted once. A client that maps the whole server as a
+  drive asks about the root.
+- **Your quota**, when you have one, caps both: you can write the smaller of what your
+  quota has left and what the disk has free.
+- A storage nothing can measure (an S3 bucket, a server that does not say) is left out of
+  the sum. When nothing at all can be measured and you have no quota, the answer is a
+  large empty disk, never zero: clients read zero as full and refuse to copy.
+
+The figures are kept for 30 seconds, so a client that asks on every folder it opens does
+not reach a remote share each time.
+
 ---
 
 ## S3
@@ -267,7 +289,7 @@ both use it, while 2222 means "SSH in a container"), not a route.
   shell - so keys are pasted at *Connections → SFTP*.
 - `exit-status` is sent on the subsystem channel, so **`scp` reports success correctly**
   (OpenSSH 9+ speaks SFTP for `scp`).
-- posix-rename, `statvfs` (your quota is what `df` shows), permission bits synthesised
+- posix-rename, `statvfs` (what `df` shows: [free space](#free-space)), permission bits synthesised
   from your filex ACL level, resumable reads and writes.
 - Tested with **OpenSSH, sshfs, WinSCP, FileZilla, rclone**.
 
@@ -343,6 +365,9 @@ map natively.
   their tokens intact, so a restart or a deploy does not silently drop a lock a client
   still believes it holds.
 - Quota enforced with a proper **507 Insufficient Storage** before the upload starts.
+- RFC 4331 quota properties, which Windows shows as a mapped drive's free space
+  ([free space](#free-space)). They are answered when a client asks for them by name,
+  never in an `allprop` listing.
 
 > ⚠ Locks are per-process, not distributed. One filex process per deployment is the
 > assumption; two processes serving the same storage would each grant locks the other does
@@ -363,6 +388,10 @@ fusermount -u ~/filex        # ⚠ unmount this way, not by killing the process
 It is the only option here that works from anywhere: no LAN, no extra port, no
 third-party client, and it reaches the server through whatever proxy or tunnel the
 browser goes through.
+
+The drive's size and free space (`df`, Explorer's bar) are the server's
+[free space](#free-space) for the mounted path. A server that does not answer that question
+yet shows a large empty drive.
 
 **It is not a sync.** Nothing is copied to the machine except a bounded read cache, so it
 opens one file out of a hundred thousand without downloading the rest. If you want the

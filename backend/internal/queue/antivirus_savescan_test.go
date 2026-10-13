@@ -204,6 +204,9 @@ func TestEnqueueAfterSave_SurvivesRestart(t *testing.T) {
 	assert.Equal(t, scheduledID, got[0].ID)
 	require.NotNil(t, got[0].NotBefore)
 
+	// The window is 150 ms; the limit only stops a hung test. On a loaded
+	// machine reopening the database and the first dequeues can take seconds
+	// (the 0.56.3 release check, next to docker builds).
 	var claimed queue.Op
 	require.Eventually(t, func() bool {
 		op, err := q2.Dequeue(ctx, []string{queue.TypeAntivirusScan})
@@ -212,7 +215,7 @@ func TestEnqueueAfterSave_SurvivesRestart(t *testing.T) {
 		}
 		claimed = op
 		return true
-	}, 5*time.Second, 20*time.Millisecond)
+	}, 2*time.Minute, 20*time.Millisecond)
 
 	require.NoError(t, job2.Handle(ctx, claimed))
 	assert.Len(t, store2.retags, 1, "the scan the dead process scheduled still ran")

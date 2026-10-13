@@ -174,6 +174,10 @@ you do not know about them. All three live under
 - A slow first connection is usually proxy auto-detection: untick **Automatically
   detect settings** in Internet Options → Connections → LAN settings.
 
+- **The drive's size and free space** are the disk behind the storage (for
+  `/dav/` itself, your storages added up), capped by your quota - the same
+  figures SFTP and NFS give ([PROTOCOLS.md → Free space](PROTOCOLS.md#free-space)).
+
 ### macOS (Finder)
 
 1. Finder → **Go → Connect to Server…** (⌘K)

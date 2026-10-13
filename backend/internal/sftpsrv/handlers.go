@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/protoperm"
+	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -590,39 +591,34 @@ func mapStorageErr(err error) error {
 // principalOf is a small accessor used by the file handles.
 func (f *fs) principal() *protocolauth.Principal { return f.sess.principal }
 
-// StatVFS answers `statvfs@openssh.com`.
+// StatVFS answers `statvfs@openssh.com`: `sftp df`, WinSCP's free-space
+// indicator and the size of a drive Mountain Duck or SFTP Drive maps.
 //
-// It is optional in the protocol and worth having: it lights up WinSCP's
-// free-space indicator and `sftp df`, and the numbers come from the same quota
-// the web app shows. A client that cannot see the space left is a client whose
-// user finds out at the end of a large upload.
-//
-// ⚠ An unlimited account still needs a plausible answer — reporting zero blocks
-// makes WinSCP show a full disk and refuse to start the transfer. It reports a
-// large-but-finite figure in that case, which is the truth as far as the quota
-// is concerned; the storage behind it has its own limits filex cannot see.
+// The figures are internal/space's, the ones every surface gives: inside a
+// storage, the storage's own disk; at the root, the storages added up (a
+// client that maps the server as a drive asks about the root); either capped by
+// the account's quota. Only a location nothing could measure gets the
+// stand-in, a large empty disk: zero blocks make WinSCP show a full disk and
+// refuse to start the transfer.
 func (f *fs) StatVFS(r *sftp.Request) (*sftp.StatVFS, error) {
 	const blockSize = 4096
-	// A ceiling for the unlimited case: 1 PiB in 4 KiB blocks.
-	const unlimitedBlocks = uint64(1) << 38
-
-	total, free := unlimitedBlocks, unlimitedBlocks
-	if u := auth.UserFrom(f.ctx); u != nil && f.srv.cfg.Quota != nil {
-		if snap, err := f.srv.cfg.Quota.Get(f.ctx, u.ID); err == nil && !snap.Unlimited && snap.QuotaBytes > 0 {
-			total = uint64(snap.QuotaBytes) / blockSize
-			remaining := snap.QuotaBytes - snap.UsedBytes
-			if remaining < 0 {
-				remaining = 0
-			}
-			free = uint64(remaining) / blockSize
-		}
+	t, err := f.resolve(r.Filepath)
+	if err != nil {
+		return nil, err
 	}
+	var fig space.Figures
+	if t.isRoot() {
+		fig = f.srv.cfg.Space.Root(f.ctx, f.visibleStorages())
+	} else {
+		fig = f.srv.cfg.Space.Storage(f.ctx, t.Storage, t.Rel)
+	}
+	blocks, bfree, bavail := fig.OrStandIn().Blocks(blockSize)
 	return &sftp.StatVFS{
 		Bsize:   blockSize,
 		Frsize:  blockSize,
-		Blocks:  total,
-		Bfree:   free,
-		Bavail:  free,
+		Blocks:  blocks,
+		Bfree:   bfree,
+		Bavail:  bavail,
 		Files:   1 << 30,
 		Ffree:   1 << 30,
 		Favail:  1 << 30,
