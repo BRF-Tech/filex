@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 )
 
@@ -94,7 +95,8 @@ type LanguageRow struct {
 	// only meaningful when Total > 0.
 	Translated int `json:"translated"`
 	Unknown    int `json:"unknown"`
-	// Total is the size of the current catalogue; 0 means this binary was
+	// Total counts current catalogue keys applicable to this language, excluding
+	// plural forms its CLDR rules never select; 0 means this binary was
 	// built without one (a development build), and coverage is unknown.
 	Total int `json:"total"`
 	// Percent is floor(100 × Translated / Total): 100 only when nothing is
@@ -171,6 +173,17 @@ func (r *Registry) LanguageRows(m *Manifest) []LanguageRow {
 	out := make([]LanguageRow, 0, len(m.UILocales))
 	for _, code := range sortedTags(m.UILocales) {
 		row := LanguageRow{Code: code, RTL: wire.IsRTL(code), Total: len(cat)}
+		categories := make(map[string]bool)
+		for _, category := range srvtext.Categories(code) {
+			categories[category] = true
+		}
+		unusedForms := make(map[string]bool)
+		for k := range cat {
+			if base, isForm := pluralFormBase(k); isForm && cat.has(base) && !categories[k[len(base)+1:]] {
+				unusedForms[k] = true
+				row.Total--
+			}
+		}
 		for k, v := range m.UILocales[code] {
 			if strings.TrimSpace(v) == "" {
 				// An empty value is untranslated: the browser skips it and
@@ -182,7 +195,9 @@ func (r *Registry) LanguageRows(m *Manifest) []LanguageRow {
 				continue
 			}
 			if _, ok := cat[k]; ok {
-				row.Translated++
+				if !unusedForms[k] {
+					row.Translated++
+				}
 			} else if base, isForm := pluralFormBase(k); isForm && cat.has(base) {
 				// A plural form the catalogue does not list — `x_few`, `x_two`
 				// for a language with more categories than English (the CLDR
