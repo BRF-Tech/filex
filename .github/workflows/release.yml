@@ -1949,9 +1949,18 @@ jobs:
       # the CLI's name. Straight to `stable`: the snap
       # is the same build the .deb is, and the Store's own review runs first.
       # Each Linux row uploads its own architecture's revision to the same
-      # channel: amd64 from `linux`, arm64 from `linux-arm64` (with
+      # channels: amd64 from `linux`, arm64 from `linux-arm64` (with
       # only=snap-arm64, that one alone; with only=stores, the amd64 snap the
       # Release has).
+      # ⚠ The same revision to stable, candidate, beta AND edge (#265). Up to
+      # 0.56.3 a release went to stable alone, and the three preview channels
+      # stayed on 0.52.0 for four minor releases - amd64 only, the arm64 ones
+      # never had a revision - so `snap install filex-app --candidate` (or
+      # --beta, --edge) installed a release a month old. A release is the
+      # newest build there is on the day it ships; the nightly run puts a
+      # newer amd64 build on edge after it (docs/DESKTOP.md, "The Snap Store's
+      # channels"). The release tool reads stable, candidate and beta back
+      # (scripts/release/plan.mjs) and says so when one lags.
       - name: Upload to the Snap Store
         if: startsWith(matrix.label, 'linux') && env.PUBLISH == 'true'
         shell: bash
@@ -1980,13 +1989,13 @@ jobs:
           # review, the upload is done and the release is not failed: the run
           # says so and carries on. Any other failure fails.
           set +e
-          out=$(snapcraft upload --release=stable "$snap" 2>&1)
+          out=$(snapcraft upload --release=stable,candidate,beta,edge "$snap" 2>&1)
           rc=$?
           set -e
           printf '%s\n' "$out"
           if [ "$rc" -ne 0 ]; then
             if printf '%s' "$out" | grep -qi 'manual review'; then
-              msg="$(basename "$snap") is uploaded and waits for the Snap Store's manual review; it reaches stable once the review passes. Since 0.52 the snap asks for nothing the Store reviews by hand: read the reason the Store gives."
+              msg="$(basename "$snap") is uploaded and waits for the Snap Store's manual review; it reaches stable, candidate, beta and edge once the review passes. Since 0.52 the snap asks for nothing the Store reviews by hand: read the reason the Store gives."
               echo "::warning title=Snap Store: manual review::$msg"
               echo "### Snap Store: waiting for manual review" >> "$GITHUB_STEP_SUMMARY"
               echo "$msg" >> "$GITHUB_STEP_SUMMARY"
@@ -1994,7 +2003,7 @@ jobs:
             fi
             exit "$rc"
           fi
-          echo "### Snap Store: $(basename "$snap") uploaded to stable" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Snap Store: $(basename "$snap") uploaded to stable, candidate, beta and edge" >> "$GITHUB_STEP_SUMMARY"
 
   # ── The arm64 packages, on arm64 machines (and Linux x64) ─────────────
   #
