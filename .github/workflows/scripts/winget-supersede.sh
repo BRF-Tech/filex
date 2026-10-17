@@ -18,7 +18,13 @@
 #     names exactly <id> — BRFTech.filex never matches BRFTech.filex-app;
 #   - only versions strictly LOWER than <version>, compared as semver (a
 #     pre-release sorts below its release, 0.10.0 above 0.9.0);
-#   - each is closed with "Superseded by #<new>".
+#   - each is closed with "Superseded by #<new>";
+#   - ⚠ nothing is closed while the package is not on winget-pkgs yet (or
+#     whether it is cannot be told). Its first submission waits in the
+#     moderators' queue, and a closed one put the package back at the end of
+#     it: BRFTech.filex-app had ten closed unmerged from 0.50 to 0.56.3, none
+#     ever reviewed (task #68). Until it is accepted, the release does not
+#     touch the package at all (winget-pending.sh).
 # Nothing here fails the release: a pull request left open is a warning.
 set -uo pipefail
 
@@ -66,6 +72,18 @@ ver="${2:?the version the release just submitted}"
 repo=microsoft/winget-pkgs
 wait="${WINGET_SUPERSEDE_WAIT:-15}"
 tries="${WINGET_SUPERSEDE_TRIES:-20}"
+
+publisher="${id%%.*}"
+name="${id#*.}"
+first=$(printf '%s' "${id:0:1}" | tr '[:upper:]' '[:lower:]')
+if ! answer=$(gh api "repos/$repo/contents/manifests/$first/$publisher/$name" --jq 'length' 2>&1); then
+  if grep -q 'HTTP 404' <<< "$answer"; then
+    echo "winget: $id is not on winget yet: its first pull request keeps its place in the queue, and nothing is closed"
+  else
+    echo "::warning title=winget::could not ask whether $id is on winget yet ($answer); nothing is closed."
+  fi
+  exit 0
+fi
 
 title="New version: $id $ver"
 new=""

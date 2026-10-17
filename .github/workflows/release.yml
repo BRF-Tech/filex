@@ -1881,8 +1881,24 @@ jobs:
           # line the tolerated warning code above still fails the step (v0.45.1,
           # run 36182595696 — the desktop winget PR was never opened).
           exit 0
-      - name: Submit to winget
+      # ⚠ Until winget has the desktop app, the release does not touch it
+      # (task #68, the owner's decision of 2026-10-16): while its first
+      # submission waits for a moderator, no new pull request, no update of
+      # the open one, no CLA comment, no closing - each new pull request put
+      # the package back at the end of the queue, and none of fourteen was
+      # ever approved. This step only asks (scripts/winget-pending.sh) and
+      # says "skipped: BRFTech.filex-app waits for a moderator on #<number>";
+      # WINGET_DESKTOP_SKIP then skips the three after it. Once winget has
+      # the package, every release submits a new version, as the CLI's.
+      - name: Does the desktop app wait for a winget moderator?
         if: matrix.label == 'windows' && env.PUBLISH == 'true' && (env.FULL == 'true' || env.ONLY == 'stores') && env.WINGET_TOKEN != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          bash "$CI_SCRIPTS"/winget-pending.sh BRFTech.filex-app "${VER}"
+      - name: Submit to winget
+        if: matrix.label == 'windows' && env.PUBLISH == 'true' && (env.FULL == 'true' || env.ONLY == 'stores') && env.WINGET_TOKEN != '' && env.WINGET_DESKTOP_SKIP == ''
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -1892,7 +1908,7 @@ jobs:
       # The CLA bot asks on every pull request, not once per account
       # (scripts/winget-cla.sh). Same script as the CLI's step.
       - name: Sign the CLA on the winget pull request
-        if: matrix.label == 'windows' && env.PUBLISH == 'true' && (env.FULL == 'true' || env.ONLY == 'stores') && env.WINGET_TOKEN != ''
+        if: matrix.label == 'windows' && env.PUBLISH == 'true' && (env.FULL == 'true' || env.ONLY == 'stores') && env.WINGET_TOKEN != '' && env.WINGET_DESKTOP_SKIP == ''
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
@@ -1900,9 +1916,11 @@ jobs:
         run: |
           bash "$CI_SCRIPTS"/winget-cla.sh "New version: BRFTech.filex-app ${VER}"
       # Only the newest version's pull request stays open (the maintainer, 2026-09-28),
-      # and only once it exists (scripts/winget-supersede.sh).
+      # and only once it exists - and none is closed while the package is not
+      # on winget yet (scripts/winget-supersede.sh, task #68), nor run at all
+      # while its first submission waits.
       - name: Close the superseded winget pull requests
-        if: matrix.label == 'windows' && env.PUBLISH == 'true' && (env.FULL == 'true' || env.ONLY == 'stores') && env.WINGET_TOKEN != ''
+        if: matrix.label == 'windows' && env.PUBLISH == 'true' && (env.FULL == 'true' || env.ONLY == 'stores') && env.WINGET_TOKEN != '' && env.WINGET_DESKTOP_SKIP == ''
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
