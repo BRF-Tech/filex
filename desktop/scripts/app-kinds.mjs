@@ -194,8 +194,28 @@ export function renderSnap(types) {
   return ['    mimeTypes:', ...types.map((t) => `      - ${t}`)];
 }
 
+/**
+ * The file types Windows keeps for itself: a package that registers one is
+ * refused ("Applications can't register for the ".ttf" file type
+ * association" - makeappx, 0.57.0's dry run, when a store app opened fonts).
+ * Microsoft's list of reserved file names
+ * (learn.microsoft.com/windows/apps/develop/launch/reserved-uri-scheme-names).
+ * The Store package leaves them out; macOS and the snap still declare them.
+ */
+export const APPX_RESERVED = new Set([
+  'accountpicture-ms', 'ad', 'ade', 'adp', 'app', 'appcontent-ms', 'application', 'appref-ms', 'appx', 'appxbundle',
+  'asp', 'bas', 'bat', 'cer', 'chm', 'cmd', 'cnt', 'com', 'cpl', 'crt', 'csh', 'der', 'diagcab', 'dll', 'drv',
+  'exe', 'fon', 'fxp', 'gadget', 'grp', 'hlp', 'hpj', 'hta', 'htc', 'inf', 'ins', 'isp', 'its', 'js', 'jse',
+  'ksh', 'lnk', 'mad', 'maf', 'mag', 'mam', 'maq', 'mar', 'mas', 'mat', 'mau', 'mav', 'maw', 'mcf', 'mda', 'mdb',
+  'mde', 'mdt', 'mdw', 'mdz', 'msc', 'msh', 'msh1', 'msh1xml', 'msh2', 'msh2xml', 'mshxml', 'msi', 'msp', 'mst',
+  'ocx', 'ops', 'pcd', 'pif', 'plg', 'prf', 'prg', 'ps1', 'ps1xml', 'ps2', 'ps2xml', 'psc1', 'psc2', 'pst',
+  'reg', 'scf', 'scr', 'sct', 'shb', 'shs', 'sys', 'theme', 'tmp', 'ttf', 'url', 'vb', 'vbe', 'vbp', 'vbs',
+  'vsmacros', 'vsw', 'webpnp', 'website', 'ws', 'wsc', 'wsf', 'wsh', 'xbap', 'xll', 'xnk',
+]);
+
 /** The Store package's second file-type association. ⚠ No double hyphen in it: makeappx refuses the manifest. */
-export function renderStore(kinds) {
+export function renderStore(all) {
+  const kinds = all.filter((k) => !APPX_RESERVED.has(String(k).toLowerCase()));
   if (!kinds.length) return [];
   return [
     '        <uap3:Extension Category="windows.fileTypeAssociation">',

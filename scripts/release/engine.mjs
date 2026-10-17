@@ -377,8 +377,14 @@ export class Gates {
       const json = log.replace(/\.log$/, '.json');
       fs.rmSync(json, { force: true });
       const files = val(v.files) ?? [];
+      // A cap on vitest's forks (`maxWorkers`): the pretag runs its lanes side
+      // by side, and a suite taking every core beside a docker build timed
+      // out 6-23 of its tests at 5 s (0.57.0, load 30 on 20 cores). --minWorkers
+      // with it: vitest keeps its default minimum otherwise (chain/job/web.sh).
+      const workers = Number(val(v.maxWorkers)) || 0;
+      const cap = workers > 0 ? ` --maxWorkers=${workers} --minWorkers=1` : '';
       bin = this.bash;
-      args = ['-c', `npx vitest run ${files.map(shq).join(' ')} --reporter=default --reporter=json --outputFile.json=${shq(slash(json))}`];
+      args = ['-c', `npx vitest run ${files.map(shq).join(' ')} --reporter=default --reporter=json --outputFile.json=${shq(slash(json))}${cap}`];
       Object.assign(env, val(v.env) ?? {});
       const vcwd = path.resolve(this.repo, val(v.cwd) ?? '.');
       after = async (status) => {

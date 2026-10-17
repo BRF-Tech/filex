@@ -645,7 +645,9 @@ describe('filex.sh/nightly on the site host (#266)', () => {
     expect(install).toMatch(/for f in nightly\.mjs nightly-lib\.mjs report\.mjs env\.mjs nightly-site\.sh nightly-site-remote\.sh; do/);
   });
 
-  it('is never deleted by a deploy of the site', () => {
+  // sync-site.sh is withheld from the public export (it names our host): in
+  // the public tree, where GitHub runs this suite, there is nothing to read.
+  it.runIf(fs.existsSync(path.join(REPO, 'scripts', 'export-public.sh')))('is never deleted by a deploy of the site', () => {
     const sync = fs.readFileSync(path.join(REPO, 'scripts', 'sync-site.sh'), 'utf8');
     expect(sync).toMatch(/--exclude=\/nightly --exclude=\/\.nightly\//);
     expect(sync).toMatch(/grep -qi 'deleting\.\*\\\(desktop\\\|updates\\\|shots\\\|nightly\\\)'/);

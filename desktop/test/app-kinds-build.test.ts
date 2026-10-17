@@ -14,6 +14,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  APPX_RESERVED,
   REGIONS,
   catalogVersions,
   render,
@@ -71,7 +72,7 @@ test('a package declares the store\'s kinds beside the office documents, never t
     return [...m[0].matchAll(/<uap:FileType>\.([^<]+)<\/uap:FileType>/g)].map((x) => x[1]);
   };
   assert.deepEqual(assoc('filex.office').sort(), [...OFFICE_EXTENSIONS].sort());
-  assert.deepEqual(assoc('filex.apps'), kinds);
+  assert.deepEqual(assoc('filex.apps'), kinds.filter((k) => !APPX_RESERVED.has(k)), 'every kind but those Windows keeps');
   // An MSIX association takes at most 1000 file types (uap:SupportedFileTypes).
   assert.ok(kinds.length <= 1000);
 });
@@ -102,6 +103,16 @@ test('the Store association: no double hyphen anywhere (makeappx refuses the who
   for (const m of xml.matchAll(/<!--([\s\S]*?)-->/g)) assert.ok(!m[1]!.includes('--'), m[1]!.slice(0, 60));
   assert.ok(!renderStore(['psd']).join('\n').includes('--'));
   assert.deepEqual(renderStore([]), []);
+});
+
+test('the Store association leaves out the file types Windows keeps (makeappx refused .ttf, 0.57.0)', () => {
+  const lines = renderStore(['otf', 'ttf', 'TTF', 'exe', 'psd']).join('\n');
+  assert.ok(lines.includes('<uap:FileType>.otf</uap:FileType>'));
+  assert.ok(lines.includes('<uap:FileType>.psd</uap:FileType>'));
+  for (const k of ['ttf', 'TTF', 'exe']) assert.ok(!lines.includes(`<uap:FileType>.${k}</uap:FileType>`), k);
+  assert.deepEqual(renderStore(['ttf', 'lnk']), [], 'only reserved kinds: no association at all');
+  const xml = read('build/appx-extensions.xml');
+  for (const m of xml.matchAll(/<uap:FileType>\.([^<]+)<\/uap:FileType>/g)) assert.ok(!APPX_RESERVED.has(m[1]!.toLowerCase()), `.${m[1]} is reserved`);
 });
 
 test('a region whose markers are missing is an error, not a silent append', () => {

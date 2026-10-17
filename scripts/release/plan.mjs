@@ -12,6 +12,7 @@
 // must say what it ran (`vitest.mustPass`, `expect`), or it proves nothing.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -22,6 +23,13 @@ import { docker, dockerImageId, run, shq, slash } from './engine.mjs';
 import { circleciPipelines } from './circleci.mjs';
 import { githubActions } from './github.mjs';
 import { ALL_SURFACES, publishes } from './surfaces.mjs';
+
+/**
+ * vitest's forks for the unit suites run here, beside the other lanes of the
+ * pretag (a docker build among them): a third of the cores, or
+ * FILEX_RELEASE_VITEST_WORKERS (engine.mjs, the vitest gate).
+ */
+const vitestWorkers = () => Number(process.env.FILEX_RELEASE_VITEST_WORKERS) || Math.max(2, Math.floor(os.cpus().length / 3));
 import { SNAP_CHECKED_CHANNELS, desktopFeeds, docsSite, readmePictures, runningRelease, snapChannel, storeListing, updateManifest, windowsFeedArches } from './verify.mjs';
 
 // The Store's version for a release (0.52.0 -> 1.0.5200.0), the same function the
@@ -752,7 +760,7 @@ export default function plan({ repo, version, tag, platform = process.platform }
         after: [BUILD_UI],
         inputs: ALL,
         cacheExtra: (c) => workflowsTree(c.exportDir),
-        vitest: { cwd: 'web', files: [], env: (c) => ({ TZ: 'UTC', FILEX_WORKFLOWS_DIR: workflowsOf(c.exportDir) }), mustPass: WORKFLOW_GUARDS },
+        vitest: { cwd: 'web', files: [], env: (c) => ({ TZ: 'UTC', FILEX_WORKFLOWS_DIR: workflowsOf(c.exportDir) }), mustPass: WORKFLOW_GUARDS, maxWorkers: vitestWorkers },
       },
       { name: 'packages unit (TZ=UTC)', lane: 'web', after: [BUILD_UI], inputs: ALL, serverSkip: 'a server patch publishes no package', sh: "pnpm --filter './packages/*' test", env: { TZ: 'UTC' } },
       // 0.43.x shipped a desktop window whose script never parsed (#52).
@@ -906,7 +914,7 @@ export default function plan({ repo, version, tag, platform = process.platform }
         inputs: ALL,
         cacheExtra: (c) => workflowsTree(c.exportDir),
         patchSkip: 'a patch runs the unit suite once, in UTC',
-        vitest: { cwd: 'web', files: [], env: (c) => ({ FILEX_WORKFLOWS_DIR: workflowsOf(c.exportDir) }), mustPass: WORKFLOW_GUARDS },
+        vitest: { cwd: 'web', files: [], env: (c) => ({ FILEX_WORKFLOWS_DIR: workflowsOf(c.exportDir) }), mustPass: WORKFLOW_GUARDS, maxWorkers: vitestWorkers },
       },
       // The suite release.yml waits for, and the journeys it does not walk.
       { name: 'e2e: Cypress (whole)', lane: 'e2e', github: 'ci.yml', githubJobs: (c) => gateParts(c.repo).cypress, after: [BUILD_BIN], inputs: E2E_INPUTS, cmd: ['node', 'e2e/run.mjs', 'cypress', '--binary', bin] },
