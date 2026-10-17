@@ -173,6 +173,28 @@ name: Release
 # builds - or, when GitHub lacks them, a commit CircleCI's `ci` workflow
 # passed, and then its own builds (#181).
 #
+# ── A server patch (task #252) ───────────────────────────────────────────
+#
+# A tag whose message carries the line `surfaces: server` is a SERVER patch:
+# X.Y.Z+1, its changes reaching the server alone (scripts/release/surfaces.mjs
+# in the private tree says which files do). Its run publishes the server's
+# surface and nothing else, ~30 minutes after its code was done instead of
+# two hours:
+#   - `verify` asks for ci.yml's push run on the commit to have built it
+#     ("Go vet + build" green, waited for while it runs) and no dry run; the
+#     rest of the full matrix runs on behind the release, and the update
+#     manifest offers the patch to automatic updates only once it passed;
+#   - `docker` builds both images in this run (nothing to promote) and
+#     `promote-check` / `docker-manifest` tag them as for any release;
+#   - `binaries` makes the Release with the server archives and the CLI
+#     binaries, without the CLI's Homebrew cask and winget pull request (the
+#     CLI's package managers are another surface), and does not mark it the
+#     latest release: GitHub's "latest" stays on the last release with every
+#     file, so every releases/latest/download link keeps working;
+#   - `desktop` (with desktop-arm64-check and aur) and `npm` do not run.
+# The release tool writes the line into both tags and refuses it on any other
+# release (its sign stage).
+
 # ⚠ In a run on a tag the workflow file comes from the branch it was started
 # on and the code from the tag. The tag's tree has the tag's
 # .github/workflows/scripts, not these; every job that runs a script from there
@@ -252,6 +274,8 @@ jobs:
   #            nothing published, on a version no tag has yet. It stamps
   #            v<version> (not -dryrun), pushes its images by digest and keeps
   #            its desktop files for the tag run of the same commit.
+  #   surfaces all, or server: a tag push whose tag message says
+  #            `surfaces: server` (#252, see "A server patch" above)
   plan:
     name: Plan
     runs-on: ubuntu-latest
@@ -265,6 +289,7 @@ jobs:
       only: ${{ steps.p.outputs.only }}
       desktop: ${{ steps.p.outputs.desktop }}
       candidate: ${{ steps.p.outputs.candidate }}
+      surfaces: ${{ steps.p.outputs.surfaces }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -372,6 +397,24 @@ jobs:
           # no tag has yet. It stamps the version itself, so what it builds is
           # what the tag run of the same commit promotes. A version that is
           # tagged already makes a plain dry run (-dryrun) that keeps nothing.
+          # #252: a tag push reads its tag's message. `surfaces: server` is a
+          # server patch; no line is a release of every surface; anything else
+          # stops here, before anything is published. A lightweight tag has
+          # no message (the release tool tags with -s, never one).
+          surfaces=all
+          if [ "$EVENT" = push ]; then
+            obj=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.type + " " + .object.sha')
+            msg=""
+            case "$obj" in
+              "tag "*) msg=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/${obj#tag }" --jq .message) ;;
+            esac
+            line=$(printf '%s\n' "$msg" | grep -m1 '^surfaces:' || true)
+            case "$line" in
+              "" | "surfaces: all") surfaces=all ;;
+              "surfaces: server") surfaces=server ;;
+              *) echo "::error::$tag says \"$line\": a tag's surfaces are all (no line) or server"; exit 1 ;;
+            esac
+          fi
           candidate=false
           if [ "$EVENT" != push ] && [ -z "$tag" ] && [ "$only" = all ] && [ "$publish" != true ]; then
             if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$version" --silent 2>/dev/null; then
@@ -391,12 +434,16 @@ jobs:
             echo "only=$only"
             echo "desktop=$(echo "$desktop" | jq -c .)"
             echo "candidate=$candidate"
+            echo "surfaces=$surfaces"
           } >> "$GITHUB_OUTPUT"
           {
             echo "### ${tag:-dry run of $GITHUB_REF_NAME} — $([ "$publish" = true ] && echo PUBLISHES || echo publishes nothing)"
             echo "version $version, only=$only$([ "$macos" = false ] && echo ', without the macOS packages')"
             if [ "$candidate" = true ]; then
               echo "release candidate of v$version: its images go to ghcr.io by digest (untagged) and its desktop files are kept for the tag run to promote"
+            fi
+            if [ "$surfaces" = server ]; then
+              echo "a SERVER patch: the images, the server archives and the CLI binaries alone; no desktop package, npm or package manager, and not the latest release"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -507,6 +554,7 @@ jobs:
           PUBLISH: ${{ needs.plan.outputs.publish }}
           TAG: ${{ needs.plan.outputs.tag }}
           DESKTOP: ${{ needs.plan.outputs.desktop }}
+          SURFACES: ${{ needs.plan.outputs.surfaces }}
           GH_TOKEN: ${{ github.token }}
           # #181: a CircleCI personal API token, read by circleci-green.mjs
           # alone and never printed; and the project's slug, gh/<org>/<repo>
@@ -525,6 +573,53 @@ jobs:
             SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
           fi
           export SHA
+          # #252: a server patch is published once GitHub has BUILT its
+          # commit - ci.yml's "Go vet + build" part of the push run, green -
+          # and before the rest of the matrix: that runs on behind the
+          # release, and the update manifest offers the patch to automatic
+          # updates only once it passed. No dry run ran (nothing to promote):
+          # `docker` builds the images here. A red or missing part, or GitHub
+          # not answering, and nothing is published.
+          if [ "$EVENT" = push ] && [ "${SURFACES:-all}" = server ]; then
+            export PART="Go vet + build"
+            poll="${VERIFY_POLL_SECS:-30}"
+            max="${VERIFY_SERVER_WAIT_SECS:-2700}"
+            runs="https://github.com/$GITHUB_REPOSITORY/actions/runs"
+            waited=0
+            while :; do
+              ci=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+                -f head_sha="$SHA" -f event=push -f per_page=100 \
+                --jq '[.workflow_runs[] | select(.head_sha == env.SHA and .event == "push")][0].id // empty')
+              state=""
+              if [ -n "$ci" ]; then
+                state=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs/$ci/jobs" -f filter=latest -f per_page=100 --paginate \
+                  --jq '.jobs[] | select(.name == env.PART) | "\(.status) \(.conclusion // "")"' | head -1)
+              fi
+              case "$state" in
+                "completed success") break ;;
+                completed*)
+                  echo "::error::$TAG publishes nothing: \"$PART\" of ci.yml run $runs/$ci on $SHA ended ${state#completed }"
+                  exit 1 ;;
+              esac
+              if [ "$waited" -ge "$max" ]; then
+                echo "::error::$TAG publishes nothing: ci.yml on $SHA did not build it within $((max / 60)) min (${ci:+run $runs/$ci, }\"$PART\": ${state:-no such part yet})"
+                exit 1
+              fi
+              sleep "$poll"
+              waited=$((waited + poll))
+            done
+            {
+              echo "evidence=github-server"
+              echo "promote=false"
+            } >> "$GITHUB_OUTPUT"
+            {
+              echo "### $TAG ($SHA) is a server patch"
+              echo "- GitHub built it: \"$PART\" of $runs/$ci"
+              echo "- the rest of the full matrix runs behind it; the update manifest offers it to automatic updates once that passed"
+              echo "- no dry run: this run builds the images, and publishes no desktop package, npm package or package manager"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           export WANT="dry run all $SHA"
           # The last job of ci.yml's full matrix (scripts/ci-parts.mjs, completeName).
           export COMPLETE="All tests (full)"
@@ -663,6 +758,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PUBLISH: ${{ needs.plan.outputs.publish }}
+      SURFACES: ${{ needs.plan.outputs.surfaces }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -743,8 +839,14 @@ jobs:
           # over this deploy key) and winget (`BRFTech.filex`, a PR to
           # microsoft/winget-pkgs from brkfun's fork). Each block skips itself
           # when its secret is absent.
-          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          # #252: a server patch publishes neither (the CLI's package managers
+          # are another surface): each block skips itself without its secret.
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ needs.plan.outputs.surfaces != 'server' && secrets.HOMEBREW_TAP_DEPLOY_KEY || '' }}
+          WINGET_TOKEN: ${{ needs.plan.outputs.surfaces != 'server' && secrets.WINGET_TOKEN || '' }}
+          # #252: .goreleaser.yml's release.make_latest reads it - a server
+          # patch is not GitHub's "latest" release, whose files every
+          # releases/latest/download link names.
+          FILEX_SURFACES: ${{ needs.plan.outputs.surfaces }}
           # ⚠ The release's own tag, named. The commit also carries the Go
           # module's tag (backend/vX), and a dry run of a branch found that
           # one first: "current tag is not semver … tag=backend/v0.48.1", and
@@ -780,7 +882,7 @@ jobs:
       # ("will not fail the pipeline"), so a release could miss both stores and
       # still show green. This step makes that visible.
       - name: Did the CLI reach winget and Homebrew?
-        if: env.PUBLISH == 'true'
+        if: env.PUBLISH == 'true' && env.SURFACES != 'server'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1223,7 +1325,7 @@ jobs:
   # (PUT 404). There is no secret here to run out.
   npm:
     needs: [plan, verify]
-    if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.full == 'true'
+    if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.full == 'true' && needs.plan.outputs.surfaces != 'server'
     runs-on: ubuntu-latest
     # id-token: write lets the job ask GitHub for its identity, which npm
     # trades for a short-lived publish token per package. Nothing else is
@@ -1355,7 +1457,7 @@ jobs:
   desktop:
     name: Desktop packages (${{ matrix.label }})
     needs: [plan, verify, binaries]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.verify.result == 'success' && (needs.plan.outputs.full != 'true' || needs.binaries.result == 'success') }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.verify.result == 'success' && needs.plan.outputs.surfaces != 'server' && (needs.plan.outputs.full != 'true' || needs.binaries.result == 'success') }}
     strategy:
       fail-fast: false
       # A tag run: the rows its dry run kept files for (verify). Otherwise
