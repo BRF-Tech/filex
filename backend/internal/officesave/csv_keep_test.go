@@ -271,7 +271,8 @@ func assertKept(t testing.TB, original, saved, out []byte, d CSVDialect, kept CS
 }
 
 // sameRow: every cell written is the saved one, or what ONLYOFFICE writes
-// that way; a cell one side does not have is an empty one.
+// that way, or (in a file not separated by commas) the saved number with a
+// decimal comma; a cell one side does not have is an empty one.
 func sameRow(wrote, saved []string, comma byte) bool {
 	for j := 0; j < len(wrote) || j < len(saved); j++ {
 		var o, s string
@@ -281,7 +282,10 @@ func sameRow(wrote, saved []string, comma byte) bool {
 		if j < len(saved) {
 			s = saved[j]
 		}
-		if !csvSame([]byte(o), []byte(s), comma != '\t') {
+		if csvSame([]byte(o), []byte(s), comma != '\t') {
+			continue
+		}
+		if c, ok := appendCSVCommaDecimal(nil, []byte(s)); !ok || comma == ',' || string(c) != o {
 			return false
 		}
 	}
@@ -709,17 +713,17 @@ func TestRewriteCSV_AWideLineIsNotHeldFieldByField(t *testing.T) {
 // that is wrong on purpose: the two originals written on each other's row.
 func TestCSVKeepCheck_RefusesAWrongPairing(t *testing.T) {
 	saved := []byte("kod,ad\n7,elma\n42,armut\n")
-	assert.True(t, csvKeepCheck([]byte("kod;ad\n007;elma\n042;armut\n"), saved, ';', ',', 0, 0))
-	assert.False(t, csvKeepCheck([]byte("kod;ad\n042;elma\n007;armut\n"), saved, ';', ',', 0, 0),
+	assert.True(t, csvKeepCheck([]byte("kod;ad\n007;elma\n042;armut\n"), saved, ';', ',', 0, 0, nil))
+	assert.False(t, csvKeepCheck([]byte("kod;ad\n042;elma\n007;armut\n"), saved, ';', ',', 0, 0, nil),
 		"042 is not what ONLYOFFICE writes as 7")
-	assert.False(t, csvKeepCheck([]byte("kod;ad\n007;elma\n"), saved, ';', ',', 0, 0), "a record short")
-	assert.False(t, csvKeepCheck([]byte("kod;ad\n007;elma\n042;armut\nx;y\n"), saved, ';', ',', 0, 0), "a record too many")
-	assert.False(t, csvKeepCheck([]byte("kod;ad\n007;elma;x\n042;armut\n"), saved, ';', ',', 0, 0), "a cell too many")
-	assert.False(t, csvKeepCheck([]byte("kod;ad\n007\n042;armut\n"), saved, ';', ',', 0, 0), "a cell short")
-	assert.True(t, csvKeepCheck([]byte("kod;ad;\n007;elma\n042;armut;;\n"), saved, ';', ',', 0, 0), "empty cells at a row's end aside")
-	assert.True(t, csvKeepCheck([]byte("sep=;\nkod;ad\n007;elma\n042;armut\n\n;\n"), saved, ';', ',', 1, 2),
+	assert.False(t, csvKeepCheck([]byte("kod;ad\n007;elma\n"), saved, ';', ',', 0, 0, nil), "a record short")
+	assert.False(t, csvKeepCheck([]byte("kod;ad\n007;elma\n042;armut\nx;y\n"), saved, ';', ',', 0, 0, nil), "a record too many")
+	assert.False(t, csvKeepCheck([]byte("kod;ad\n007;elma;x\n042;armut\n"), saved, ';', ',', 0, 0, nil), "a cell too many")
+	assert.False(t, csvKeepCheck([]byte("kod;ad\n007\n042;armut\n"), saved, ';', ',', 0, 0, nil), "a cell short")
+	assert.True(t, csvKeepCheck([]byte("kod;ad;\n007;elma\n042;armut;;\n"), saved, ';', ',', 0, 0, nil), "empty cells at a row's end aside")
+	assert.True(t, csvKeepCheck([]byte("sep=;\nkod;ad\n007;elma\n042;armut\n\n;\n"), saved, ';', ',', 1, 2, nil),
 		"a kept sep= line and kept empty lines at the end are not in the save")
-	assert.False(t, csvKeepCheck([]byte("kod;ad\n007;elma\n042;armut\n\nx\n"), saved, ';', ',', 0, 2),
+	assert.False(t, csvKeepCheck([]byte("kod;ad\n007;elma\n042;armut\n\nx\n"), saved, ';', ',', 0, 2, nil),
 		"a kept line at the end is empty")
 }
 
@@ -911,6 +915,9 @@ func FuzzKeepCSV(f *testing.F) {
 	f.Add([]byte("k;v\r\n007;\"x\"y\r\n"), []byte("k,v\n7,xy\n\n"))
 	f.Add([]byte("kod;ad;not\n007;elma;y\n"), []byte("\xEF\xBB\xBF"+ds("kod,not,yeni", "7,elma,y,1")))
 	f.Add([]byte(strings.Repeat(";", 20000)+"\nkod;ad\n"), []byte(ds("kod,ad")))
+	for _, c := range keepCommaCases {
+		f.Add([]byte(c.original), []byte(c.saved))
+	}
 	f.Fuzz(func(t *testing.T, original, saved []byte) {
 		d := SniffCSV(original[:min(len(original), CSVSniffBytes)])
 		out, kept := KeepCSV(original, saved, d)

@@ -38,3 +38,15 @@ func TestCSVCallback_TheFixtureOfTheReleaseGateKeepsItsCells(t *testing.T) {
 		})
 	}
 }
+
+// Through the callback: 0.56.3 wrote the first of these with `4.5`.
+func TestCSVCallback_AnEditedDecimalKeepsTheFilesComma(t *testing.T) {
+	for lang, c := range officesavetest.Docs94CommaSaved {
+		t.Run(lang, func(t *testing.T) {
+			h := newCSVHarness(t, officesavetest.Docs94CommaOriginal)
+			resp := h.save(t, c.Saved, "csv", "7")
+			assert.Equal(t, 0, resp["error"])
+			assert.Equal(t, c.Want, h.disk(t))
+		})
+	}
+}

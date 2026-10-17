@@ -2087,6 +2087,50 @@ pinned by the bytes a Docs 9.4.0 saved
   rows that now read the same is the file's: the first of them in the save
   gets the file's text, `05`.
 
+#### ONLYOFFICE CSV: a decimal typed, as measured
+
+[ONLYOFFICE.md → A decimal you type keeps the file's comma](ONLYOFFICE.md#a-decimal-you-type-keeps-the-files-comma)
+gives the rule. Measured on Docs 9.4.0.1 (2026-10-17) in two sessions, each a
+semicolon file whose `value` column said `3,5` in every row, each `3,5` typed
+over through the cell name box. The first: two rows `1250,75` and `0,25`
+nobody touched and a row added with `2,75`, the editor in Turkish (`tr`,
+region `tr-TR`), English (`en-US`) and German (`de-DE`). The second (`1,1`,
+`2,675`, `99999999999999,9`, `0,000001`, `'4.5`, `=7/2` below): one row
+`1250,75` nobody touched, no row added, Turkish and English only. What the
+save held (the file then gets the comma wherever the save has a number with
+a point and digits):
+
+| Typed | Turkish | English | German |
+|---|---|---|---|
+| `4,5` | `4.5` | `4,5` (text) | `4.5` |
+| `-4,5` | `-4.5` | `-4,5` (text) | `-4.5` |
+| `1.250,75` | `1250.75` | `1.250,75` (text) | `1250.75` |
+| `4,50` | `4.5` | `4,50` (text) | `4.5` |
+| `,5` | `0.5` | `,5` (text) | `0.5` |
+| `4,` | `4` | `4,` (text) | `4` |
+| `1,1` | `1.1000000000000001` | `1,1` (text) | |
+| `2,675` | `2.6749999999999998` | `2675` | |
+| `12345678,123456` | `12345678.123455999` | `12345678123456` | `12345678.123455999` |
+| `99999999999999,9` | `99999999999999.906` | `99999999999999,9` (text) | |
+| `0,000001` | `9.9999999999999995e-07` | `0,000001` (text) | |
+| `1,5E+20` | `1.50e+20` | `1,5E+20` (text) | `1.50e+20` |
+| `4,5%` | `4.50%` | `4,5%` (text) | `4.50%` |
+| `4.5` | `4.May` | `4.5` | `04.Mai` |
+| `4.50` | `Nis.50` | `4.5` | `Apr.50` |
+| `-4.5` | `-4.5` | `-4.5` | `-4.5` |
+| `'4.5` | `4.5` | `4.5` | |
+| `=7/2` | `3.5` | `3.5` | |
+| `1 250,75` | `1 250,75` (text) | `1 250,75` (text) | `1 250,75` (text) |
+
+The untouched `1250,75` and `0,25` came back as they were in every editor.
+The English editor reads a comma as a thousands separator when a whole part
+other than `0` stands before it (`2,675` as `2675`, `12345678,123456` as
+`12345678123456`), and keeps `0,0001` or `0,000001` as text: such a typed
+number is whole, and nothing puts a comma back. The saved bytes are in
+`backend/internal/officesave/csv_keep_comma_test.go`, and the file of the
+report (`3,5` typed over as `4,5` in Turkish, saved `4.5`) in
+`backend/internal/officesave/officesavetest/docs94_comma.go`.
+
 ### Apps background
 
 Notes behind [APP-PLUGINS.md](APP-PLUGINS.md).

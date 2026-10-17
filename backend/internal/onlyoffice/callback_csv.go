@@ -96,7 +96,8 @@ func (s *Service) csvSave(ctx context.Context, drv storage.Driver, node *model.N
 		slog.Int64("storage", node.StorageID), slog.String("path", node.Path),
 		slog.String("saved_delimiter", officesave.DelimiterName(res.Saved.Comma)),
 		slog.Int("records", res.Records), slog.Int("unchanged", res.Unchanged),
-		slog.Int("restored", res.Restored), slog.Int("new", res.New), slog.Int("deleted", res.Deleted))
+		slog.Int("restored", res.Restored), slog.Int("new", res.New), slog.Int("deleted", res.Deleted),
+		slog.Int("commas", res.Commas))
 	return out, nil
 }
 
