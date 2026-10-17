@@ -893,10 +893,12 @@ a quoted cell comes back as it was.
 
 ⚠ What is still written as ONLYOFFICE writes it:
 
-- **The cell you edit** - type `007` and the file gets `7`. A retype that only
-  writes the same value another way cannot be told from no edit (ONLYOFFICE
-  shows `007` as `7` already), so the file keeps `007`; edit the file as text
-  for that.
+- **The cell you edit** - type `007` and the file gets `7` (a decimal is the
+  one exception:
+  [A decimal you type keeps the file's comma](#a-decimal-you-type-keeps-the-files-comma)).
+  A retype that only writes the same value another way cannot be told from no
+  edit (ONLYOFFICE shows `007` as `7` already), so the file keeps `007`; edit
+  the file as text for that.
 - **What ONLYOFFICE changes in a way no rule puts back**, edited or not: a
   time (`00:13` as `0:12`, a minute short), a percent, a number with an
   exponent, `5.` as `5`, a date with a time, a two-digit year, a year before
@@ -945,6 +947,77 @@ and `panic` (its comparison failed; the line carries what failed and where,
 never a cell's text). The file is compared as it is on the storage when the
 save arrives, and the revision the save replaces stays in the file's history
 ([What a save does](#what-a-save-does)).
+
+### A decimal you type keeps the file's comma
+
+In an editor whose language writes decimals with a comma (Turkish, German), a
+decimal typed with a comma is a number, and ONLYOFFICE saves every number
+with a point: `3,5` typed over as `4,5` came back as `4.5`, and up to 17
+significant digits of it, `1,1` as `1.1000000000000001` (Docs 9.4.0). The
+file's own decimal commas that nobody touched are text to ONLYOFFICE and come
+back as they were, so a semicolon file could end up with `4.5` in a column of
+`3,5` and `1250,75`. filex writes a decimal somebody typed, or put in a row
+they added, the way its column writes one:
+
+- in a file not separated by commas (in a comma-separated one a comma is the
+  delimiter, and nothing says it is a decimal mark);
+- in a column of the file that holds a number with a decimal comma (`3,5`,
+  `-0,25`, `1.250,75`) and none with a point or an exponent (`3.5`, `1.250`,
+  `1e3`) or with commas
+  between thousands (`1,250,000`): a column of both has no way of writing a
+  decimal to follow. `1,250` alone says nothing either way (a thousand and
+  more, written the English way, which the English editor reads it as);
+- while that column still stands where it stood: the save must hold one of
+  its decimal commas as the file had it, in a row filex lined up with the
+  file's;
+- and for a number the file does not hold in any of its cells, however it
+  writes it there (`1.5 `, `03.50`, `1e3`, which ONLYOFFICE saves as `1.50`,
+  `3.50`, `1000.00000`). After a column was deleted, added or moved, or cells
+  were shifted along a row, the numbers that moved to the column's place are
+  the file's own, not ones somebody typed, and they keep their point. So does
+  a number typed that happens to be one the file holds elsewhere.
+
+There `4.5` is written `4,5`, `-0.5` as `-0,5`, `0.1234567` as `0,1234567`,
+with the digits the save has. ONLYOFFICE writes a number with up to 17
+significant digits; one saved with 16 or 17, exactly as ONLYOFFICE writes
+that number, is written as the shortest decimal that is the same number,
+which is what was typed: `1.1000000000000001` as `1,1`, `12345678.123455999`
+as `12345678,123456`. Other digits are kept as saved, and a number longer
+than 17 digits is no number ONLYOFFICE wrote but a text, written as saved.
+Digit grouping is not added back (`1.250,75` typed is written `1250,75`).
+
+Two more kinds of cell in such a column get the comma, though nobody typed
+them: a formula nobody touched, whose value is all the save holds (`=7/2` is
+saved `3.5` and written `3,5`), and a number that moved there from another
+column and that ONLYOFFICE kept to six decimals on the way, so that no cell
+of the file holds it (`0.1234567` is saved `0.1234570` and written
+`0,1234570`). In both the value is the one ONLYOFFICE saved, and only its
+decimal mark is the column's.
+
+⚠ The save does not say which language typed a number: `4,5` typed in the
+Turkish editor and `4.5` typed in the English one save the same `4.5`, and
+people in both may edit one file. So in such a column the comma is written
+whoever typed the number, and so is text typed with an apostrophe that reads
+like one (`'4.5`, saved `4.5`). The English editor keeps a typed `4,5` as text,
+and the file gets it as typed.
+
+⚠ Only a number written with a point and digits gets the comma. A whole
+number (`4,` typed is saved `4`), a number with an exponent (`1,5E+20` as
+`1.50e+20`, and anything below 0.0001, `0,000001` as
+`9.9999999999999995e-07`), a percent (`4,5%` as `4.50%`) and what ONLYOFFICE
+reads as a date (`4.5` typed in Turkish is saved `4.May`) are written as
+ONLYOFFICE saved them. So is every decimal in a file whose cells cannot be
+kept (`not_utf8`, `too_large` and the others above), and in a column whose
+every decimal comma was typed over in the same save, which leaves nothing to
+show the column is still there.
+
+A CSV saved from the Office editor app is written by the same rules: its
+editor is ONLYOFFICE's too, and filex writes its save the way it writes the
+Document Server's ([The Office editor app](#the-office-editor-app)).
+
+The log line `onlyoffice callback: CSV cells kept` counts these cells in the
+Document Server's saves as `commas`. Every value measured, editor by editor,
+is in [CONTRIBUTING.md → ONLYOFFICE CSV: a decimal typed, as measured](CONTRIBUTING.md#onlyoffice-csv-a-decimal-typed-as-measured).
 
 ### What a CSV cannot keep
 

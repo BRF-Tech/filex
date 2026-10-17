@@ -40,7 +40,17 @@ afterEach(() => {
   for (const d of temps.splice(0)) fs.rmSync(d, { recursive: true, force: true });
 });
 
-function goTargeted(dirs: string | undefined) {
+// The race profile's shards as scripts/test-shards.mjs gives them: two split
+// internal/c by -run, one splits internal/x (not a target below), one is a
+// list of packages (never split).
+const SHARDS = {
+  'c-1': ['-run', '^(TestOne)$', './internal/c'],
+  'c-2': ['-run', '^(TestTwo)$', './internal/c'],
+  'x-1': ['-run', '^(TestX)$', './internal/x'],
+  pkgs: ['./internal/a', './internal/e'],
+};
+
+function goTargeted(dirs: string | undefined, opts: { race?: boolean } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-go-targeted-'));
   temps.push(dir);
   const bin = path.join(dir, 'bin');
@@ -51,8 +61,10 @@ function goTargeted(dirs: string | undefined) {
     [
       '#!/usr/bin/env bash',
       'case "$1" in',
+      '  env) echo true ;;',
       '  list)',
       '    shift',
+      `    if [ "$1" = -m ]; then echo "${M}"; exit 0; fi`,
       '    [ "$1" = -e ] && shift',
       '    if [ "$1" = -f ]; then cat "$GO_GRAPH"; exit 0; fi',
       `    for d in "$@"; do echo "${M}/\${d#./}"; done`,
@@ -60,6 +72,19 @@ function goTargeted(dirs: string | undefined) {
       '  vet|test) echo "$*" >> "$GO_LOG" ;;',
       '  *) echo "unexpected: go $*" >&2; exit 2 ;;',
       'esac',
+      '',
+    ].join('\n'),
+  );
+  fs.mkdirSync(path.join(dir, 'checkout', 'scripts'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'checkout', 'scripts', 'test-shards.mjs'),
+    [
+      `const shards = ${JSON.stringify(SHARDS)};`,
+      'const a = process.argv.slice(2);',
+      "const at = (k) => a[a.indexOf(k) + 1];",
+      "if (at('--profile') !== 'race') process.exit(2);",
+      "if (at('--format') === 'matrix') console.log(JSON.stringify({ include: Object.keys(shards).map((shard) => ({ shard })) }));",
+      "else if (at('--format') === 'args') console.log(shards[at('--shard')].join('\\n'));",
       '',
     ].join('\n'),
   );
@@ -73,6 +98,11 @@ function goTargeted(dirs: string | undefined) {
   const log = path.join(dir, 'go.log');
   const env: NodeJS.ProcessEnv = { ...base, PATH: `${bin}${path.delimiter}${searchPath}`, GO_GRAPH: slash(path.join(dir, 'graph.txt')), GO_LOG: slash(log) };
   if (dirs !== undefined) env.FILEX_GO_DIRS = dirs;
+  delete env.FILEX_GO_RACE;
+  if (opts.race) {
+    env.FILEX_GO_RACE = '1';
+    env.FILEX_CHECKOUT = slash(path.join(dir, 'checkout'));
+  }
   const r = spawnSync(bash!, [slash(SCRIPT)], { cwd: dir, encoding: 'utf8', env });
   const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').filter(Boolean) : [];
   return { status: r.status, out: `${r.stdout}${r.stderr}`, calls };
@@ -93,6 +123,22 @@ describe.runIf(!!bash)("a patch's Go gate: the changed packages and their import
     expect(r.status, r.out).toBe(0);
     const want = [`${M}/cmd/filex`, `${M}/internal/c`, `${M}/internal/d`, `${M}/internal/e`, `${M}/internal/x`].join(' ');
     expect(r.calls).toEqual([`vet ${want}`, `test -timeout 30m ${want}`]);
+  });
+
+  it('under -race runs a package CI splits by -run as CI does, its shards side by side, and the rest together', { timeout: TIMEOUT }, () => {
+    const r = goTargeted('./internal/a', { race: true });
+    expect(r.status, r.out).toBe(0);
+    const all = [`${M}/cmd/filex`, `${M}/internal/a`, `${M}/internal/b`, `${M}/internal/c`, `${M}/internal/d`].join(' ');
+    const rest = [`${M}/cmd/filex`, `${M}/internal/a`, `${M}/internal/b`, `${M}/internal/d`].join(' ');
+    expect(r.calls[0]).toBe(`vet ${all}`);
+    const tests = r.calls.slice(1).sort();
+    expect(tests).toHaveLength(3);
+    expect(tests).toContain('test -race -timeout 60m -run ^(TestOne)$ ./internal/c');
+    expect(tests).toContain('test -race -timeout 60m -run ^(TestTwo)$ ./internal/c');
+    expect(tests.find((t) => t.includes(rest))).toMatch(/^test -race -timeout 60m -p \d+ /);
+    // x is not a target, and a shard that lists packages is never a split.
+    expect(r.calls.join('\n')).not.toContain('TestX');
+    expect(r.out).toContain('=== c-1: exit 0');
   });
 
   it.each([

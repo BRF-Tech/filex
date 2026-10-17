@@ -35,6 +35,9 @@
 //   FIXTURE_GH_ERRORS     the first N questions about runs are answered with
 //                         FIXTURE_GH_ERROR_TEXT (default "gh: Server Error
 //                         (HTTP 502)"), as GitHub not answering
+//   FIXTURE_GH_PULLS      the pull requests GitHub knows (--merge-pr), as JSON:
+//                         { "<n>": { state, merged, base, label, title, head } };
+//                         a head left out is the public remote's refs/pull/<n>/head
 //
 // CircleCI is a stand-in too (`circleci` below, task #181), for
 // `--gate circleci`, answering with the real circleci.mjs's mapping:
@@ -215,6 +218,17 @@ function github() {
     artifacts() {
       asked('github');
       return { names: (env.FIXTURE_GH_ARTIFACTS ?? [...KEPT, 'release-files-macos'].join(',')).split(',').filter(Boolean) };
+    },
+    // FIXTURE_GH_PULLS: { "<n>": { state, merged, base, label, title, head } } -
+    // the head, unless given, is the public remote's refs/pull/<n>/head, as
+    // GitHub's API and that ref agree once a push to the pull request is in.
+    pull({ number }) {
+      asked('github');
+      const all = JSON.parse(env.FIXTURE_GH_PULLS || '{}');
+      const p = all[String(number)];
+      if (!p) return { error: `gh: Not Found (HTTP 404): pull ${number}` };
+      const head = p.head ?? execFileSync('git', ['-C', env.FIXTURE_EXPORT, 'ls-remote', 'origin', `refs/pull/${number}/head`], { encoding: 'utf8' }).split(/\s+/)[0];
+      return { pull: { number, state: p.state ?? 'open', merged: !!p.merged, base: p.base ?? 'main', head, label: p.label ?? `someone:pr-${number}`, title: p.title ?? '' } };
     },
   };
 }

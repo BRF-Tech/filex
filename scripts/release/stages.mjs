@@ -26,10 +26,13 @@ import path from 'node:path';
 import { announce } from '../lib/notify.mjs';
 import { loadSettings } from '../lib/settings.mjs';
 import {
+  addedLines,
   bumpKind,
   chainVerdict,
   classifyDeletions,
   closingKeywords,
+  commitTreeArgs,
+  coverageProblems,
   dateChangelog,
   deferredWork,
   dryRunTitle,
@@ -37,6 +40,8 @@ import {
   globMatch,
   hasContent,
   hasSection,
+  landMessage,
+  linesMissing,
   localDate,
   newestTag,
   packageVersion,
@@ -87,7 +92,13 @@ export const STAGES = [
   },
   {
     id: 'land', title: 'land', what: 'the export commit, then both mains pushed WITHOUT a tag — a person',
-    builtin: ['public commit: exactly the exported tree, one commit, no closing keywords', 'private remote: main is the release commit', 'public remote: main is the export commit', '(no tag yet: the tag goes on what GitHub tested)'],
+    builtin: [
+      'each pull request --merge-pr names: open on main, its head fetched, every file it touches and every line it adds in the export (or confirmed: --ack merge-pr)',
+      'public commit: exactly the exported tree, no closing keywords; its parents the public main the export ran on and the head of each pull request named, no other (GitHub marks them merged)',
+      'private remote: main is the release commit',
+      'public remote: main is the export commit',
+      '(no tag yet: the tag goes on what GitHub tested)',
+    ],
   },
   {
     id: 'gate', title: 'gate', what: 'GitHub tests the export commit before anything is tagged',
@@ -107,7 +118,7 @@ export const STAGES = [
     id: 'sign', title: 'sign', what: 'signed tags on the commits that were tested — a person',
     builtin: [
       'private tag: annotated, good signature by the release key, on the release commit',
-      'public tag: signed, on the export commit GitHub tested, not the private one',
+      'public tag: signed, on the export commit GitHub tested, not the private one, and that commit holds exactly the export tree',
       "a server patch's public tag says `surfaces: server`, and no other release's says any surfaces (#252)",
       'backend/ tag (optional): signed, backend/ identical',
     ],
@@ -125,9 +136,11 @@ export const STAGES = [
 /**
  * The acknowledgements a person may give, one per human-only judgement. A
  * plan's deferred gates add two each (checks.mjs → deferredSpecs): their
- * `ack` and their `checkedAck`.
+ * `ack` and their `checkedAck`. `merge-pr`: the export carries a pull
+ * request it merges in another form (a reworded CHANGELOG entry, a fix on
+ * top) - bound to exactly the differences the land listed.
  */
-export const ACKS = ['audit', 'export-withheld', 'deploy'];
+export const ACKS = ['audit', 'export-withheld', 'deploy', 'merge-pr'];
 
 /**
  * #248: records `--ack <checkedAck>` - a check the pretag deferred, since run
@@ -1016,53 +1029,254 @@ function exportCommitOf(R) {
   return { commit: null, made: false };
 }
 
+/** The ref a pull request's head is fetched to in the public checkout (never pushed: the land pushes main alone). */
+export const pullRef = (remote, n) => `refs/remotes/${remote}/pull/${n}`;
+
+/**
+ * What the export does with each file a pull request touches, from where the
+ * pull request branched off the public main (`base`) to its head, against
+ * the export's tree: the facts checks.mjs → coverageProblems judges.
+ * Returns { files } or { error }.
+ */
+function pullFiles(dir, base, headSha, tree) {
+  const ns = git(dir, 'diff', '--name-status', '--no-renames', '-z', base, headSha);
+  if (ns.status !== 0) return { error: `git diff --name-status ${short(base)} ${short(headSha)}: ${(ns.stderr || ns.stdout).trim()}` };
+  const parts = ns.stdout.split('\0').filter(Boolean);
+  const files = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const status = parts[i][0];
+    const p = parts[i + 1];
+    const inExport = revParse(dir, `${tree}:${p}`);
+    const inHead = status === 'D' ? null : revParse(dir, `${headSha}:${p}`);
+    const f = { path: p, status, inExport: !!inExport, sameBlob: !!inExport && inExport === inHead, binary: false, missing: [] };
+    if (status !== 'D' && inExport && !f.sameBlob) {
+      const num = git(dir, 'diff', '--numstat', '--no-renames', '--no-ext-diff', '--no-textconv', base, headSha, '--', p);
+      f.binary = /^-\t-\t/.test(num.stdout);
+      if (!f.binary) {
+        const d = git(dir, 'diff', '-U0', '--no-renames', '--no-color', '--no-ext-diff', '--no-textconv', base, headSha, '--', p);
+        const text = git(dir, 'cat-file', 'blob', inExport);
+        if (d.status !== 0 || text.status !== 0) return { error: `could not read ${p}: ${(d.stderr || text.stderr).trim()}` };
+        f.missing = linesMissing(addedLines(d.stdout), text.stdout);
+      }
+    }
+    files.push(f);
+  }
+  return { files };
+}
+
+/**
+ * The pull requests the export commit merges (`--merge-pr`, the record's
+ * `mergePrs`), one gate each: open on GitHub and asking for main, its head
+ * fetched from GitHub's refs/pull/N/head and the very commit the API names,
+ * not on the public main yet, of the public history - and every file it
+ * touches, every line it adds, in the export (checks.mjs → coverageProblems).
+ * What the export carries in another form, a person confirms (--ack
+ * merge-pr), bound to exactly that list. Each pull request that passes is
+ * pushed to `out`: { number, head, label }, with `onMain` when its head is
+ * on the public main already (nothing left to merge). `found`: the export
+ * commit as exportCommitOf reads it - one that merges a head already is
+ * read back without asking that the pull request still be open (GitHub
+ * closes it, merged, the moment that main is pushed).
+ *
+ * ⚠ Named, never guessed: a pull request merged here is history that goes
+ * public with the release, under its author's name. Fetching it changes no
+ * file and no branch of the public checkout.
+ */
+function pullRequestSpecs(R, out, found) {
+  const S = R.state;
+  const exp = R.exp;
+  const gh = R.plan.github;
+  const remote = R.plan.exportRemote;
+  // What an earlier run of this land checked (the record it left).
+  const prevMerge = S.stages.land?.merge;
+  return (S.mergePrs ?? []).map((n) => ({
+    name: `pull request #${n}: open on ${R.plan.branch}, its change in the export`,
+    check: () => {
+      if (typeof gh?.pull !== 'function') return { ok: false, detail: "the plan's github cannot read a pull request (github.pull): --merge-pr cannot be checked, and unchecked is not a pass" };
+      const a = gh.pull({ number: n });
+      if (a.error) return { ok: false, detail: `could not ask GitHub about #${n} (${a.error}): unknown is not a pass` };
+      const p = a.pull;
+      const drop = `drop it: pnpm release ${R.version} --resume --merge-pr <the others, or none>`;
+      const ref = pullRef(remote, n);
+      const f = git(exp, 'fetch', '--quiet', '--no-tags', remote, `+refs/pull/${n}/head:${ref}`);
+      if (f.status !== 0) return { ok: false, detail: `git fetch ${remote} refs/pull/${n}/head in ${slash(exp)}: ${(f.stderr || f.stdout).trim()}` };
+      let h = revParse(exp, `${ref}^{commit}`);
+      if (h !== p.head) return { ok: false, detail: `GitHub says #${n}'s head is ${short(p.head)}, and refs/pull/${n}/head is ${short(h)}: GitHub has not caught up with a push to it yet; resume in a minute` };
+      if (out.some((o) => o.head === h)) return { ok: false, detail: `#${n}'s head ${short(h)} is another pull request's head too` };
+      // Already on the public main (an earlier land of this release merged
+      // it, and a fix to a workflow went on top since): nothing to merge,
+      // and GitHub marked it merged when that main was pushed.
+      if (git(exp, 'merge-base', '--is-ancestor', h, S.exportBase).status === 0) {
+        out.push({ number: n, head: h, label: p.label, onMain: true });
+        return { ok: true, detail: `its head ${short(h)} is on the public main already: merged` };
+      }
+      // The export commit made here may merge it already: at its head (once
+      // that main is pushed GitHub says "merged", and the land is read back
+      // after it), or at the head an earlier run of this land checked, the
+      // pull request having moved on since - that commit is a person's, maybe
+      // public already, and what it merges is what was checked.
+      const parents = found?.made && found.commit ? git(exp, 'show', '-s', '--format=%P', found.commit).stdout.trim().split(/\s+/).filter(Boolean) : [];
+      const checked = prevMerge && prevMerge.base === S.exportBase && prevMerge.tree === S.exportTree ? prevMerge.prs?.find((q) => q.number === n)?.head : undefined;
+      let use = h;
+      let moved = null;
+      if (!parents.includes(h) && checked && checked !== h && parents.includes(checked)) {
+        use = checked;
+        moved = h;
+      }
+      const merged = parents.includes(use);
+      if (!merged && (p.merged || p.state !== 'open')) return { ok: false, detail: `#${n} is ${p.merged ? 'merged' : p.state} on GitHub, and its head ${short(h)} is not on the public main: ${drop}` };
+      if (!merged && p.base !== R.plan.branch) return { ok: false, detail: `#${n} asks to go into ${p.base}, not ${R.plan.branch}: ${drop}` };
+      const mb = git(exp, 'merge-base', use, S.exportBase);
+      if (mb.status !== 0 || !mb.stdout.trim()) return { ok: false, detail: `#${n}'s head ${short(use)} shares no history with the public main ${short(S.exportBase)}` };
+      const read = pullFiles(exp, mb.stdout.trim(), use, S.exportTree);
+      if (read.error) return { ok: false, detail: read.error };
+      const problems = coverageProblems(read.files);
+      // The first 110 characters are what the gate's line shows.
+      const said = moved
+        ? `merged at ${short(use)} as checked; #${n} moved on to ${short(moved)} since and stays open (name it again next release); ${p.label || 'no label'}, ${read.files.length} file(s)`
+        : `${short(use)} (${p.label || 'no label'}), ${read.files.length} file(s)${merged ? `, merged by the export commit ${short(found.commit)}` : ''}`;
+      h = use;
+      if (problems.length) {
+        // Bound to the pull request's head, the export tree and the very list.
+        const key = [`#${n} ${h} ${S.exportTree}`, ...problems].join('\n');
+        S.acks['merge-pr'] = S.acks['merge-pr'] ?? {};
+        if (R.acks.has('merge-pr')) S.acks['merge-pr'][n] = { list: key, at: new Date().toISOString() };
+        if (S.acks['merge-pr'][n]?.list !== key) {
+          R.mergeAsk = true;
+          return {
+            ok: false,
+            detail:
+              `the export does not carry all of #${n} (${said}):\n${problems.slice(0, 20).join('\n')}\n` +
+              `If it carries that change in another form on purpose (a reworded CHANGELOG entry, a fix on top), confirm exactly this list:  pnpm release ${R.version} --resume --ack merge-pr\n` +
+              `If it does not carry it, ${drop}`,
+          };
+        }
+        out.push({ number: n, head: h, label: p.label });
+        return { ok: true, detail: `${said}; ${problems.length} difference(s) confirmed by a person` };
+      }
+      out.push({ number: n, head: h, label: p.label });
+      return { ok: true, detail: `${said}, all of it in the export` };
+    },
+  }));
+}
+
+/**
+ * What a person runs at the land. With pull requests to merge, the export
+ * commit is made with `git commit-tree` - the staged export's tree, the public
+ * main and each head as parents - and the branch moved onto it with `reset
+ * --soft`: `git merge -s ours` refuses a checkout whose index holds the
+ * export, and `git commit` makes one parent.
+ */
+function landCommands(R, pulls) {
+  const S = R.state;
+  const exp = slash(R.exp);
+  const { remote, exportRemote, branch } = R.plan;
+  const line = '<one line: what this release is>';
+  const wanted = S.mergePrs ?? [];
+  // The heads to merge: those checked (less any on the public main already),
+  // or, before they are, a placeholder for each pull request named.
+  const known = pulls && pulls.length === wanted.length ? pulls.filter((p) => !p.onMain) : wanted.map((n) => ({ number: n, head: `<head of #${n}>`, label: '<owner>:<branch>' }));
+  let commit;
+  if (!known.length) {
+    commit = [
+      `# the public checkout: commit exactly what the export staged`,
+      `git -C ${exp} commit -m "${R.tag} - ${line}"     # no "Fixes #N": it closes issues`,
+    ];
+  } else {
+    const args = commitTreeArgs({
+      tree: !R.dry && S.exportTree ? S.exportTree : `$(git -C ${exp} write-tree)`,
+      base: !R.dry && S.exportBase ? S.exportBase : 'HEAD',
+      heads: known.map((p) => p.head),
+      message: landMessage(R.tag, line, known),
+    }).map((a) => (/\s/.test(a) && !a.startsWith('$(') ? `"${a}"` : a));
+    commit = [
+      `# the public checkout: the export commit, as a MERGE of ${known.map((p) => `#${p.number}`).join(', ')}: its tree exactly what`,
+      `# the export staged, its parents the public main and each pull request's head, so GitHub marks them merged.`,
+      `# Write the one line (no "Fixes #N": it closes issues), then run both lines as they are:`,
+      `c="$(git -C ${exp} ${args.join(' ')})"`,
+      `git -C ${exp} reset --soft "$c"     # main moves onto it; the index already holds its tree`,
+    ];
+  }
+  return [
+    ...commit,
+    ``,
+    `# both mains, WITHOUT a tag: the tags go on the commits GitHub has tested, after the gate`,
+    `git -C ${slash(R.repo)} push ${remote} ${branch}`,
+    `git -C ${exp} push ${exportRemote} ${branch}     # to the terminal or a file, never into a pipe (lessons #722/#726)`,
+    ``,
+    `then:  pnpm release ${R.version} --resume     (it starts release.yml's dry run on that commit and waits for GitHub)`,
+  ];
+}
+
+const sameNumbers = (a = [], b = []) => a.length === b.length && a.every((n, i) => n === b[i]);
+
 export async function land(R) {
   const S = R.state;
   const exp = R.exp;
   const tag = R.tag;
   const { remote, exportRemote, branch } = R.plan;
-  const commands = [
-    `# the public checkout — commit exactly what the export staged:`,
-    `git -C ${slash(exp)} commit -m "${tag} - <one line: what this release is>"     # no "Fixes #N" — it closes issues`,
-    ``,
-    `# both mains, WITHOUT a tag: the tags go on the commits GitHub has tested, after the gate`,
-    `git -C ${slash(R.repo)} push ${remote} ${branch}`,
-    `git -C ${slash(exp)} push ${exportRemote} ${branch}     # to the terminal or a file, never into a pipe (lessons #722/#726)`,
-    ``,
-    `then:  pnpm release ${R.version} --resume     (it starts release.yml's dry run on that commit and waits for GitHub)`,
-  ];
-  if (R.dry) return waiting(commands, { dry: true });
+  const wanted = S.mergePrs ?? [];
+  if (R.dry) {
+    return waiting([...landCommands(R, null), ...(wanted.length ? ['', `(a real run reads ${wanted.map((n) => `#${n}`).join(', ')} on GitHub first: open, on ${branch}, its change in the export)`] : [])], { dry: true });
+  }
 
-  // Landed already, for this release commit and this export: what the mains
-  // hold now no longer matters (they move on once the tags are out).
+  // Landed already, for this release commit, this export and these pull
+  // requests: what the mains hold now no longer matters (they move on once
+  // the tags are out).
   const prevRun = S.stages.land;
-  if (prevRun?.status === 'done' && prevRun.releaseCommit === S.releaseCommit && prevRun.exportTree === S.exportTree && prevRun.exportHead) {
+  if (prevRun?.status === 'done' && prevRun.releaseCommit === S.releaseCommit && prevRun.exportTree === S.exportTree && prevRun.exportHead && sameNumbers(prevRun.mergePrs ?? [], wanted)) {
     S.exportHead = prevRun.exportHead;
     return done({ ...prevRun, note: `landed as ${short(prevRun.exportHead)}` });
   }
 
   const found = exportCommitOf(R);
+  // The export commit the remote's main is judged against: none yet when
+  // HEAD holds the export's tree but not every pull request it merges.
+  let exportCommit = found.commit;
+  const pulls = [];
   const pr = remoteRefs(R.repo, remote);
   const er = remoteRefs(exp, exportRemote);
   const todo = [];
   const specs = [
+    ...pullRequestSpecs(R, pulls, found),
     {
       name: 'public commit: exactly the export, nothing more',
       check: () => {
+        if (pulls.length !== wanted.length) {
+          if (!found.commit) todo.push('the export commit');
+          return { ok: !found.commit || !found.made, detail: 'judged once every pull request it merges is green' };
+        }
+        const merging = pulls.filter((p) => !p.onMain);
+        const heads = merging.map((p) => p.head);
+        if (found.commit && !found.made && heads.length) {
+          exportCommit = null;
+          todo.push(`the export commit (a merge of ${merging.map((p) => `#${p.number}`).join(', ')})`);
+          return { ok: true, detail: `${short(found.commit)} holds the export's tree, and none of the pull requests it merges: not made yet` };
+        }
         if (!found.commit) {
           todo.push('the export commit');
           return { ok: true, detail: 'not made yet' };
         }
         if (!found.made) return { ok: true, detail: `the export added nothing: ${short(found.commit)} already holds its tree` };
         const problems = [];
-        const parent = revParse(exp, 'HEAD^');
-        if (parent !== S.exportBase) problems.push(`HEAD's parent is ${short(parent)}, not ${short(S.exportBase)} — one commit on top of the checkout the export ran in`);
+        const parents = git(exp, 'show', '-s', '--format=%P', 'HEAD').stdout.trim().split(/\s+/).filter(Boolean);
+        if (parents[0] !== S.exportBase) problems.push(`HEAD's parent is ${short(parents[0])}, not ${short(S.exportBase)} — one commit on top of the checkout the export ran in`);
+        const extra = parents.slice(1);
+        const missing = heads.filter((h) => !extra.includes(h));
+        const unknown = extra.filter((h) => !heads.includes(h));
+        if (missing.length || unknown.length) {
+          problems.push(
+            heads.length
+              ? `HEAD's other parents are ${extra.map(short).join(', ') || 'none'}; the export commit merges exactly the heads of ${merging.map((p) => `#${p.number} ${short(p.head)}`).join(', ')}. Undo it (git -C ${slash(exp)} reset --soft HEAD^) and make it as the land says`
+              : `HEAD merges ${extra.map(short).join(', ')} as well: the export commit is one commit on the public main, and a pull request it merges is named with --merge-pr and checked first (pnpm release ${R.version} --resume --merge-pr N)`,
+          );
+        }
         if (revParse(exp, 'HEAD^{tree}') !== S.exportTree) problems.push('the committed tree is not the tree the export produced and the gates checked');
         const dirty = git(exp, 'status', '--porcelain', '--untracked-files=all').stdout.trim();
         if (dirty) problems.push(`the checkout still has changes:\n${dirty}`);
         const kw = closingKeywords(git(exp, 'log', '-1', '--format=%B').stdout);
         if (kw.length) problems.push(`the message says ${kw.map((k) => `"${k}"`).join(', ')} — on GitHub that CLOSES the issue (lesson #163). Amend it: write "(#N)" instead.`);
-        return problems.length ? { ok: false, detail: problems.join('\n') } : { ok: true, detail: short(found.commit) };
+        return problems.length ? { ok: false, detail: problems.join('\n') } : { ok: true, detail: `${short(found.commit)}${heads.length ? `, merging ${merging.map((p) => `#${p.number} ${short(p.head)}`).join(', ')}, its tree the export's` : ''}` };
       },
     },
     {
@@ -1082,17 +1296,18 @@ export async function land(R) {
       name: `${exportRemote}: ${branch} is the export commit`,
       check: () => {
         if (er.error) return { ok: false, detail: `could not ask ${exportRemote}: ${er.error}` };
-        if (!found.commit) return { ok: true, detail: 'once the export commit is made' };
+        if (!exportCommit) return { ok: true, detail: 'once the export commit is made' };
         const main = er.map.get(`refs/heads/${branch}`);
-        if (main === found.commit) return { ok: true, detail: short(main) };
-        if (main && git(exp, 'merge-base', '--is-ancestor', main, found.commit).status === 0) {
+        if (main === exportCommit) return { ok: true, detail: short(main) };
+        if (main && git(exp, 'merge-base', '--is-ancestor', main, exportCommit).status === 0) {
           todo.push(`${exportRemote} ${branch}`);
           return { ok: true, detail: 'not pushed yet' };
         }
-        return { ok: false, detail: `${exportRemote}'s ${branch} is ${short(main)}, not the export commit ${short(found.commit)}` };
+        return { ok: false, detail: `${exportRemote}'s ${branch} is ${short(main)}, not the export commit ${short(exportCommit)}` };
       },
     },
   ];
+  R.mergeAsk = false;
   const ok = await R.gates.all('land', specs, R.ctx());
   if (!er.error && er.map.get(`refs/tags/${tag}`)) {
     console.log(
@@ -1100,10 +1315,18 @@ export async function land(R) {
         `When the gate is green, re-run that run's failed jobs (gh run rerun <id> --failed).`,
     );
   }
-  if (!ok) return red();
-  if (todo.length) return waiting([`Still to do: ${todo.join(', ')}.`, '', ...commands]);
-  S.exportHead = found.commit;
-  return done({ exportHead: found.commit, releaseCommit: S.releaseCommit, exportTree: S.exportTree });
+  // What the round (scripts/train/auto.mjs) merges, recorded with the stage:
+  // the pull requests checked here, on this export.
+  const merge = wanted.length && pulls.length === wanted.length ? { base: S.exportBase, tree: S.exportTree, prs: pulls.filter((p) => !p.onMain).map(({ number, head: h, label }) => ({ number, head: h, label })) } : undefined;
+  // A red run keeps what was checked on this export (its own, or an earlier
+  // run's): a commit made from those heads is read back against it.
+  const prevMerge = S.stages.land?.merge;
+  const kept = merge ?? (wanted.length && prevMerge?.base === S.exportBase && prevMerge?.tree === S.exportTree ? prevMerge : undefined);
+  // A difference only a person can confirm: the round stops for a person.
+  if (!ok) return red({ ...(R.mergeAsk ? { ask: 'merge-pr' } : {}), ...(kept ? { merge: kept } : {}) });
+  if (todo.length) return waiting([`Still to do: ${todo.join(', ')}.`, '', ...landCommands(R, pulls)], { merge });
+  S.exportHead = exportCommit;
+  return done({ exportHead: exportCommit, releaseCommit: S.releaseCommit, exportTree: S.exportTree, ...(wanted.length ? { mergePrs: wanted, merge } : {}) });
 }
 
 // ── 8. gate: GitHub tests the export commit ─────────────────────────────────
@@ -1879,6 +2102,9 @@ export async function sign(R) {
         }
         if (exportTag === S.releaseCommit) return { ok: false, detail: `${tag} in the public checkout names the PRIVATE release commit — that is the leak of lesson #55` };
         if (exportTag !== S.exportHead) return { ok: false, detail: `${tag} is on ${short(exportTag)}, not the export commit ${tester} tested, ${short(S.exportHead)}. Delete the LOCAL tag (git -C ${slash(exp)} tag -d ${tag}) and tag ${short(S.exportHead)}.` };
+        // The export commit may merge pull requests (--merge-pr): whatever
+        // its parents, its tree is the export the gates checked, byte for byte.
+        if (S.exportTree && revParse(exp, `${exportTag}^{tree}`) !== S.exportTree) return { ok: false, detail: `${short(exportTag)} does not hold the export tree the gates checked (${short(S.exportTree)}): the land judges that tree; resume from the land` };
         const bad = verifyTag(exp, `refs/tags/${tag}`, R.plan.signingKeys);
         if (bad) return { ok: false, detail: bad };
         // #252: the line release.yml reads. A server patch's tag without it

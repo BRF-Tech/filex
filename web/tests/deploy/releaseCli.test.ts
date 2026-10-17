@@ -38,6 +38,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { findBash } from '../../../scripts/release/engine.mjs';
+
 const REPO = path.resolve(__dirname, '..', '..', '..');
 const FIXTURE_FILES = path.join(REPO, 'web', 'tests', 'fixtures', 'release');
 const VERSION = '0.2.0';
@@ -83,6 +85,8 @@ function findSshKeygen(): string | null {
   return null;
 }
 const SSH_KEYGEN = findSshKeygen();
+/** The bash the release tool runs its shell gates in (Git Bash on Windows, never WSL's). */
+const BASH = findBash();
 
 interface Fixture {
   root: string;
@@ -352,7 +356,7 @@ describe.concurrent('pnpm release — options', () => {
     }
     const ack = await release(fx, [VERSION, '--ack', 'pretag']);
     expect(ack.code).toBe(2);
-    expect(ack.out).toContain('a person can confirm only audit, export-withheld, deploy');
+    expect(ack.out).toContain('a person can confirm only audit, export-withheld, deploy, merge-pr');
     expect((await release(fx, [`v${VERSION}`])).code).toBe(2);
     expect((await release(fx, ['1.0.4'])).out).toContain('there is no 1.0.x');
   });
@@ -666,8 +670,115 @@ describe.concurrent('pnpm release — a gate this machine cannot run (#248)', ()
     for (const ack of ['store-deferred', 'store-checked']) {
       const r = await release(fx, [VERSION, '--ack', ack]);
       expect(r.code, r.out).toBe(2);
-      expect(r.out).toContain(`--ack ${ack}: a person can confirm only audit, export-withheld, deploy (this machine defers no gate: it runs them all)`);
+      expect(r.out).toContain(`--ack ${ack}: a person can confirm only audit, export-withheld, deploy, merge-pr (this machine defers no gate: it runs them all)`);
     }
+  });
+});
+
+// The export commit merges the outside pull requests --merge-pr names: its
+// tree is the export, its other parents their heads, so GitHub marks them
+// merged once main is pushed. 0.57.0's export commit had one parent, and
+// #120 stayed open although its change shipped.
+describe.skipIf(!BASH)('pnpm release --merge-pr', () => {
+  it('checks each pull request, prints the merge, refuses any other export commit, and puts the head on the public main', { timeout: TIMEOUT }, async () => {
+    const fx = fixture();
+    const git = (dir: string, ...args: string[]) => gitIn(fx, dir, ...args);
+    // Two pull requests on the public repository's v0.1.0, under
+    // refs/pull/N/head as GitHub keeps them: #7 adds a section to the guide,
+    // #8 a page the maintainer did not take.
+    const fork = path.join(fx.root, 'fork');
+    run(fx.env, 'git', ['clone', '-q', fx.publicRemote, fork]);
+    write(path.join(fork, 'docs/GUIDE.md'), '# Guide\n\n## Getting started\n\nOpen it.\n\n## Contributing\n\nSend a pull request.\n');
+    git(fork, 'commit', '-q', '-am', 'docs: how to contribute');
+    git(fork, 'push', '-q', 'origin', 'HEAD:refs/pull/7/head');
+    const head7 = git(fork, 'rev-parse', 'HEAD');
+    git(fork, 'checkout', '-q', '-b', 'extra', 'HEAD^');
+    write(path.join(fork, 'docs/EXTRA.md'), '# Extra\n\nA page nobody took.\n');
+    git(fork, 'add', '-A');
+    git(fork, 'commit', '-q', '-m', 'docs: an extra page');
+    git(fork, 'push', '-q', 'origin', 'HEAD:refs/pull/8/head');
+    const head8 = git(fork, 'rev-parse', 'HEAD');
+    // The maintainer took #7 into the private tree, beside the release's own section.
+    commitAndPush(fx, fx.src, { 'docs/GUIDE.md': '# Guide\n\n## Getting started\n\nOpen it.\n\n## Sharing a folder with a team\n\nPick the team.\n\n## Contributing\n\nSend a pull request.\n' }, 'docs: how to contribute (#7)');
+    const gh = { FIXTURE_GH_PULLS: JSON.stringify({ 7: { label: 'alice:docs/contributing' }, 8: { label: 'bob:docs/extra' } }) };
+
+    let r = await release(fx, [VERSION, '--merge-pr', '7,8'], gh);
+    expect(r.code, r.out).toBe(3);
+    expect(r.out).toContain('merge   #7, #8');
+    // #8's page is not in the export: the land stops, and says how a person goes on.
+    r = await release(fx, [VERSION, '--resume', '--ack', 'audit'], gh);
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toContain('STOPPED at land');
+    expect(r.out).toMatch(/ok +pull request #7/);
+    expect(r.out).toContain('docs/EXTRA.md: the pull request adds it, and the export has no such file');
+    expect(r.out).toContain(`pnpm release ${VERSION} --resume --ack merge-pr`);
+    expect(recordOf(fx).stages.land).toMatchObject({ status: 'red', ask: 'merge-pr' });
+
+    // #8 dropped: the land prints the merge of #7, over the export's tree.
+    r = await release(fx, [VERSION, '--resume', '--merge-pr', '7'], gh);
+    expect(r.code, r.out).toBe(3);
+    expect(r.out).toContain('WAITING at land');
+    const rec = recordOf(fx);
+    expect(rec.mergePrs).toEqual([7]);
+    expect(rec.stages.land.merge).toEqual({ base: rec.exportBase, tree: rec.exportTree, prs: [{ number: 7, head: head7, label: 'alice:docs/contributing' }] });
+    const printed = r.out.split('\n').map((l) => l.trim());
+    const make = printed.filter((l) => l.startsWith('c="$(git -C') || l.includes('reset --soft "$c"'));
+    expect(make).toHaveLength(2);
+    expect(make[0]).toContain(`commit-tree ${rec.exportTree} -p ${rec.exportBase} -p ${head7}`);
+    expect(make[0]).toContain('-m "Merge pull request #7 from alice/docs/contributing"');
+
+    // A plain commit has one parent: refused.
+    git(fx.exp, 'commit', '-q', '-m', `${TAG} - folders shared with a team (#12)`);
+    r = await release(fx, [VERSION, '--resume'], gh);
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toContain("HEAD's other parents are none; the export commit merges exactly the heads of #7");
+    git(fx.exp, 'reset', '-q', '--soft', 'HEAD^');
+    // A merge of a pull request nobody named: refused.
+    const wrongTree = git(fx.exp, 'write-tree');
+    git(fx.exp, 'reset', '-q', '--soft', git(fx.exp, 'commit-tree', wrongTree, '-p', 'HEAD', '-p', head7, '-p', head8, '-m', `${TAG} - folders shared with a team (#12)`));
+    r = await release(fx, [VERSION, '--resume'], gh);
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toContain(`HEAD's other parents are ${head7.slice(0, 10)}, ${head8.slice(0, 10)}`);
+    git(fx.exp, 'reset', '-q', '--soft', 'HEAD^');
+
+    // The two lines the land printed, as a person runs them.
+    const script = make.join('\n').replace('<one line: what this release is>', 'folders shared with a team (#12)');
+    run(fx.env, BASH as string, ['-c', script]);
+    const exportCommit = git(fx.exp, 'rev-parse', 'HEAD');
+    expect(git(fx.exp, 'show', '-s', '--format=%P', 'HEAD').split(' ')).toEqual([rec.exportBase, head7]);
+    expect(git(fx.exp, 'rev-parse', 'HEAD^{tree}')).toBe(rec.exportTree);
+    expect(git(fx.exp, 'status', '--porcelain')).toBe('');
+    // The contributor pushes to #7 after the commit was made: the commit
+    // merges the head the land checked, and that is what is read back.
+    git(fork, 'checkout', '-q', '--detach', head7);
+    write(path.join(fork, 'docs/GUIDE.md'), '# Guide\n\n## Getting started\n\nOpen it.\n\n## Contributing\n\nSend a pull request, with a test.\n');
+    git(fork, 'commit', '-q', '-am', 'docs: and a test');
+    git(fork, 'push', '-q', 'origin', 'HEAD:refs/pull/7/head');
+    const moved = git(fork, 'rev-parse', 'HEAD');
+    r = await release(fx, [VERSION, '--resume'], gh);
+    expect(r.code, r.out).toBe(3);
+    expect(r.out).toContain(`#7 moved on to ${moved.slice(0, 10)} since and stays open`);
+    expect(r.out).toContain('Still to do: origin main, origin main');
+    git(fx.src, 'push', '-q', 'origin', 'main');
+    git(fx.exp, 'push', '-q', 'origin', 'main');
+
+    // GitHub marked #7 merged when main was pushed; the land reads that back
+    // as the export commit's own doing. GitHub tests that commit; the tags go on it.
+    const merged = { FIXTURE_GH_PULLS: JSON.stringify({ 7: { label: 'alice:docs/contributing', state: 'closed', merged: true } }) };
+    r = await release(fx, [VERSION, '--resume'], merged);
+    expect(r.code, r.out).toBe(3);
+    expect(r.out).toMatch(/ok +pull request #7/);
+    expect(r.out).toContain(`${exportCommit.slice(0, 10)}, merging #7 ${head7.slice(0, 10)}, its tree the export's`);
+    expect(r.out).toContain('WAITING at sign');
+    expect(r.out).toContain(`tag -s ${TAG} -m "${TAG}" ${exportCommit}`);
+    expect(dispatched(fx).map((d) => d.sha)).toEqual([exportCommit]);
+    expect(recordOf(fx).stages.land).toMatchObject({ status: 'done', exportHead: exportCommit, mergePrs: [7] });
+    // What GitHub reads: #7's head is on the public main, so it shows merged.
+    expect(spawnSync('git', [`--git-dir=${fx.publicRemote}`, 'merge-base', '--is-ancestor', head7, 'main'], { env: fx.env }).status).toBe(0);
+    // The export commit is public: the list cannot change any more.
+    r = await release(fx, [VERSION, '--resume', '--merge-pr', '7,8'], gh);
+    expect(r.code, r.out).toBe(2);
+    expect(r.out).toContain(`--merge-pr: the land of ${TAG} is done`);
   });
 });
 

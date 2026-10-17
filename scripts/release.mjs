@@ -6,7 +6,8 @@
 //                                          or at the first step that is a person's)
 //   pnpm release 0.45.0 --resume           carry on from where it stopped
 //   pnpm release 0.45.0 --resume --ack audit     a person confirms a step only a
-//                                          person can do (audit | export-withheld | deploy)
+//                                          person can do (audit | export-withheld | deploy |
+//                                          merge-pr)
 //   pnpm release 0.45.0 --resume --ack store-deferred
 //                                          off Windows: the Store copy's check is left
 //                                          for a Windows machine (#248); the record and
@@ -46,6 +47,14 @@
 //                                          when GitHub Actions is down - no dry
 //                                          run then; kept for later resumes
 //   --export <dir>                         the public checkout (default: the plan's)
+//   --merge-pr 120,121                     the outside pull requests the export commit
+//                                          merges: it is made a merge whose tree is the
+//                                          export and whose other parents are their
+//                                          heads, so GitHub marks them merged. The land
+//                                          checks each first (open, on main, its change
+//                                          in the export; --ack merge-pr confirms one it
+//                                          carries in another form). Kept for later
+//                                          resumes; `none` drops the list
 //
 // ⚠⚠ The order (task #76): stamp → pretag → export → a person commits the
 // export and pushes BOTH mains WITHOUT a tag → the gate starts release.yml's
@@ -98,7 +107,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { GATE_SOURCES, PROFILES, deferredSpecs, deferredWork, newestTag, selectGates, versionProblems } from './release/checks.mjs';
+import { GATE_SOURCES, PROFILES, deferredSpecs, deferredWork, newestTag, parseMergePrs, selectGates, versionProblems } from './release/checks.mjs';
 import { Gates, banner, bold, dim, findBash, gitOut, green, loadState, lsRemote, red, revParse, saveState, slash, stateFile, takeLock, yellow } from './release/engine.mjs';
 import { ACKS, RUNNERS, STAGES, closeDeferred, forgetRemotes } from './release/stages.mjs';
 import { affectedSurfaces, releaseSurfaces, serverPatch } from './release/surfaces.mjs';
@@ -120,7 +129,7 @@ function usage(msg) {
 // option it does not know as absent — a filter silently drops, a "skip" flag
 // silently "works". Every option is on this table; anything else stops.
 const argv = process.argv.slice(2);
-const opts = { dry: false, resume: false, plan: false, status: false, until: null, only: null, exportDir: null, acks: new Set(), profile: null, noCache: false, chain: null, gate: null };
+const opts = { dry: false, resume: false, plan: false, status: false, until: null, only: null, exportDir: null, acks: new Set(), profile: null, noCache: false, chain: null, gate: null, mergePrs: null };
 const positional = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -144,6 +153,10 @@ for (let i = 0; i < argv.length; i++) {
     const v = next();
     if (!GATE_SOURCES.includes(v)) usage(`--gate ${v}: the gate reads ${GATE_SOURCES.join(' or ')}`);
     opts.gate = v;
+  } else if (a === '--merge-pr') {
+    const p = parseMergePrs(next());
+    if (p.problem) usage(p.problem);
+    opts.mergePrs = p.prs;
   } else if (a === '--no-cache') opts.noCache = true;
   else if (a === '--chain') opts.chain = path.resolve(next());
   else if (a === '--ack') opts.acks.add(next());
@@ -172,6 +185,7 @@ if (opts.only !== null) {
   if (!opts.resume) usage('--only deploy reads back a release that is under way: use it with --resume');
   if (opts.acks.size || opts.until) usage('--only deploy confirms nothing and stops nowhere else: drop --ack and --until');
   if (opts.profile || opts.chain || opts.noCache || opts.gate) usage('--only deploy runs no test gate: drop --profile, --chain, --no-cache and --gate');
+  if (opts.mergePrs) usage('--only deploy lands nothing: drop --merge-pr');
 }
 const tag = `v${version}`;
 
@@ -255,7 +269,7 @@ if (opts.status) {
     console.log(`no recorded run of ${tag} in ${slash(stFile)}`);
     process.exit(0);
   }
-  console.log(`${bold(`filex release ${tag}`)} — ${recorded.complete ? green('released') : 'in progress'}, profile ${recorded.profile ?? 'full'}, gate ${recorded.gateSource ?? 'github'}  ${dim(slash(stFile))}`);
+  console.log(`${bold(`filex release ${tag}`)} — ${recorded.complete ? green('released') : 'in progress'}, profile ${recorded.profile ?? 'full'}, gate ${recorded.gateSource ?? 'github'}${recorded.mergePrs?.length ? `, merges ${recorded.mergePrs.map((n) => `#${n}`).join(', ')}` : ''}  ${dim(slash(stFile))}`);
   for (const s of STAGES) {
     const st = recorded.stages[s.id];
     console.log(`  ${(st?.status ?? '—').padEnd(8)} ${s.title.padEnd(10)} ${st?.at ? dim(st.at) : ''}${st?.note ? `  ${dim(st.note)}` : ''}`);
@@ -332,6 +346,17 @@ if (state.stages?.push?.status !== 'done') state.surfaces = profile === 'server'
 // Where the gate stage reads the export commit's suites (#181). Kept like the
 // profile: a resume after `--gate circleci` reads CircleCI again unless it
 // names GitHub (Actions is back). The stage records which one passed it.
+// The pull requests the export commit merges (--merge-pr): kept like the
+// profile, until a resume names others (or none). Once the land is done the
+// export commit is public, and what it merges with it.
+if (opts.mergePrs) {
+  const was = state.mergePrs ?? [];
+  const same = was.length === opts.mergePrs.length && was.every((n, i) => n === opts.mergePrs[i]);
+  if (!same && state.stages?.land?.status === 'done') {
+    usage(`--merge-pr: the land of ${tag} is done - its export commit is public${was.length ? ` and merges ${was.map((n) => `#${n}`).join(', ')}` : ''}. A pull request left out merges with the next release.`);
+  }
+  state.mergePrs = opts.mergePrs.length ? opts.mergePrs : undefined;
+}
 const gateSource = opts.gate ?? state.gateSource ?? 'github';
 const gateChanged = !!(opts.gate && opts.gate !== (state.gateSource ?? 'github'));
 state.gateSource = gateSource;
@@ -409,6 +434,7 @@ console.log(`  repo    ${slash(REPO)}  (${branchName} @ ${revParse(REPO, 'HEAD')
 console.log(`  export  ${slash(exp)}`);
 console.log(`  profile ${profile}${profileChanged ? ` ${yellow(`(was ${profileWas}: changed by --profile)`)}` : ''}${opts.noCache ? ' · every gate runs (--no-cache)' : ''}${opts.chain ? ` · chain ${slash(opts.chain)}` : ''}`);
 if (chosen && profile === chosen.profile) console.log(`  ${yellow('server')}  a server patch: ${chosen.why}`);
+if (state.mergePrs?.length) console.log(`  merge   ${state.mergePrs.map((n) => `#${n}`).join(', ')} ${dim('(the export commit merges their heads: GitHub marks them merged)')}`);
 if (gateSource !== 'github' || gateChanged) {
   console.log(`  gate    ${gateSource === 'circleci' ? yellow('circleci') : gateSource}${gateChanged ? ` ${yellow('(changed by --gate)')}` : ''}${gateSource === 'circleci' ? dim(' - CircleCI stands in for GitHub Actions: no dry run of the release') : ''}`);
 }

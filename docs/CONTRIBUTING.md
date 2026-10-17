@@ -71,7 +71,11 @@ pnpm run dev
 4. **Test locally**: `pnpm run test` and `cd backend && go test -race -timeout 30m ./...`.
 5. **Open MR** against `main`. CI runs lint + test + build.
 6. **Address review** + squash if asked.
-7. **Merge** - maintainer squashes; commit message becomes a CHANGELOG line.
+7. **Merge** - the maintainers take your commits into their tree with your
+   authorship kept, and the change reaches `main` with the next release: its
+   export commit merges your pull request's head, so GitHub shows it merged
+   then ([Release process](#release-process), step 7). Until that release is
+   out the pull request stays open. The CHANGELOG says what it changed.
 
 ---
 
@@ -2087,6 +2091,54 @@ pinned by the bytes a Docs 9.4.0 saved
   rows that now read the same is the file's: the first of them in the save
   gets the file's text, `05`.
 
+#### ONLYOFFICE CSV: a decimal typed, as measured
+
+[ONLYOFFICE.md → A decimal you type keeps the file's comma](ONLYOFFICE.md#a-decimal-you-type-keeps-the-files-comma)
+gives the rule. Measured on Docs 9.4.0.1 (2026-10-17) in two sessions, each a
+semicolon file whose `value` column said `3,5` in every row, each `3,5` typed
+over through the cell name box. The first: two rows `1250,75` and `0,25`
+nobody touched and a row added with `2,75`, the editor in Turkish (`tr`,
+region `tr-TR`), English (`en-US`) and German (`de-DE`). The second (`1,1`,
+`2,675`, `99999999999999,9`, `0,000001`, `'4.5`, `=7/2` below): one row
+`1250,75` nobody touched, no row added, Turkish and English only. What the
+save held (the file then gets the comma wherever the save has a number with
+a point and digits):
+
+| Typed | Turkish | English | German |
+|---|---|---|---|
+| `4,5` | `4.5` | `4,5` (text) | `4.5` |
+| `-4,5` | `-4.5` | `-4,5` (text) | `-4.5` |
+| `1.250,75` | `1250.75` | `1.250,75` (text) | `1250.75` |
+| `4,50` | `4.5` | `4,50` (text) | `4.5` |
+| `,5` | `0.5` | `,5` (text) | `0.5` |
+| `4,` | `4` | `4,` (text) | `4` |
+| `1,1` | `1.1000000000000001` | `1,1` (text) | |
+| `2,675` | `2.6749999999999998` | `2675` | |
+| `12345678,123456` | `12345678.123455999` | `12345678123456` | `12345678.123455999` |
+| `99999999999999,9` | `99999999999999.906` | `99999999999999,9` (text) | |
+| `0,000001` | `9.9999999999999995e-07` | `0,000001` (text) | |
+| `1,5E+20` | `1.50e+20` | `1,5E+20` (text) | `1.50e+20` |
+| `4,5%` | `4.50%` | `4,5%` (text) | `4.50%` |
+| `4.5` | `4.May` | `4.5` | `04.Mai` |
+| `4.50` | `Nis.50` | `4.5` | `Apr.50` |
+| `-4.5` | `-4.5` | `-4.5` | `-4.5` |
+| `'4.5` | `4.5` | `4.5` | |
+| `=7/2` | `3.5` | `3.5` | |
+| `1 250,75` | `1 250,75` (text) | `1 250,75` (text) | `1 250,75` (text) |
+
+The untouched `1250,75` and `0,25` came back as they were in every editor.
+The English editor reads a comma as a thousands separator when a whole part
+other than `0` stands before it and three digits or more follow it: `2,675`
+is saved as `2675`, `12345678,123456` as `12345678123456` and
+`1,23456789012345` as `123456789012345`. Such a typed number is whole, and
+nothing puts a comma back. Otherwise it keeps what was typed as text: with
+fewer than three digits after the comma (`4,`, `4,5`, `-4,5`, `4,50`,
+`1250,75`, `99999999999999,9`), or with no whole part other than `0` before
+it (`,5`, `0,25`, `0,1234567`, `0,0001`, `0,000001`). The saved bytes are in
+`backend/internal/officesave/csv_keep_comma_test.go`, and the file of the
+report (`3,5` typed over as `4,5` in Turkish, saved `4.5`) in
+`backend/internal/officesave/officesavetest/docs94_comma.go`.
+
 ### Apps background
 
 Notes behind [APP-PLUGINS.md](APP-PLUGINS.md).
@@ -2567,7 +2619,9 @@ thing it starts on GitHub is a dry run of `release.yml`, which publishes nothing
 README, screenshot and documentation audit (steps 1-3, `--ack audit`) and the
 parts of the deploy nothing can read back (`--ack deploy`). Off Windows there
 is a third: leaving the Store copy's check for a Windows machine
-(`--ack store-deferred`, step 6).
+(`--ack store-deferred`, step 6). And when the export commit merges an outside
+pull request that the export carries in another form, a fourth: those
+differences (`--ack merge-pr`, step 7).
 
 **The tag comes last.** Both `main` branches are pushed without a tag, GitHub
 tests that very commit, and only a commit that passed is tagged (steps 7-8). A
@@ -2594,6 +2648,8 @@ pnpm release 0.45.0 --resume --gate circleci   # GitHub Actions is down: the
 pnpm release 0.45.0 --resume --ack store-deferred   # off Windows: the Store
                                 # copy's check is left for a Windows machine (step 6)
 pnpm release 0.45.0 --resume --ack store-checked    # it ran green there since
+pnpm release 0.45.1 --merge-pr 120,121   # the export commit merges these outside
+                                # pull requests, so GitHub marks them merged (step 7)
 ```
 
 > ⚠ The gates live in `scripts/release/plan.mjs` (this repository's list,
@@ -3040,9 +3096,10 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
 
 7. **Push both `main` branches without a tag, and let GitHub test that
    commit.** Commit the export in the public checkout - one commit, exactly
-   what the export staged, no `Fixes #N` (it would close the issue) - then
-   push the private `main` and the public `main`, and no tag. On `--resume`
-   the tool starts
+   what the export staged, no `Fixes #N` (it would close the issue); a merge
+   when the release carries outside pull requests (below) - then push the
+   private `main` and the public `main`, and no tag. On `--resume` the tool
+   starts
 
    ```bash
    gh workflow run release.yml -R BRF-Tech/filex --ref main -f publish=false
@@ -3056,6 +3113,50 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    `run-name`): GitHub's API does not give a run's inputs, so the name is how
    the tool, and later the tag run, tell the dry run of everything from any
    other run started by hand.
+
+   **An outside pull request is merged by the export commit.** A contribution
+   reaches the public repository through the maintainers' tree: its commits
+   are taken there with the author kept, and the export brings the change
+   out. An export commit with one parent left the pull request's head off
+   the public `main`, so GitHub kept the pull request open although its
+   change had shipped (#120 after 0.57.0). Name the pull requests a release
+   carries, `pnpm release X.Y.Z --merge-pr 120,121` (kept for every resume;
+   `--merge-pr none` drops the list), and the land makes the export commit a
+   merge: its tree is exactly what the export staged, its first parent the
+   public `main` the export ran on, its other parents the head of each pull
+   request named. GitHub marks a pull request merged once its head is on
+   `main`. Before anything is committed, the land checks each one: open and
+   asking for `main` on GitHub (`gh api repos/BRF-Tech/filex/pulls/N`), its
+   head fetched from `refs/pull/N/head` and the very commit the API names,
+   not on the public `main` yet, and every file it touches and every line it
+   adds present in the export. When the export carries a change in another
+   form on purpose (a reworded CHANGELOG entry, a fix on top),
+   `--ack merge-pr` confirms exactly the differences the land listed; when it
+   does not carry it, drop that pull request from the list. Then the tool
+   prints the commit, with every id filled in:
+
+   ```bash
+   c="$(git -C ../filex-export commit-tree <export tree> -p <public main> -p <head of #120> -p <head of #121> \
+     -m "vX.Y.Z - <one line>" -m "Merge pull request #120 from <owner>/<branch>" -m "Merge pull request #121 from <owner>/<branch>")"
+   git -C ../filex-export reset --soft "$c"     # main moves onto it; the index already holds its tree
+   ```
+
+   (`git merge -s ours` refuses a checkout whose index holds the export, and
+   `git commit` makes one parent.) On `--resume` the land reads it back: the
+   tree is the export's, byte for byte, and the parents are the public
+   `main` and exactly the heads named. An export commit with one parent, or
+   with a parent nobody named or the land never checked, is refused. A pull
+   request that moves on after its head was checked stays open on GitHub:
+   the commit merges what was checked, the land says so, and the next release
+   can name it again. The gate tests that commit and the tags go on it; the
+   sign stage checks its tree once more. A pull request whose head
+   is on the public `main` already counts as merged and is no parent again,
+   and one a release carried without merging it (0.57.0 and #120) can be
+   named by the next release: while its head has not moved, the next export
+   commit merges it. The public checkout's pre-push gate scans the merge
+   against its first parent, which is exactly the export; the pull requests'
+   own commits are on GitHub already (`refs/pull/N/head`), so the gate counts
+   them as public and does not scan them again.
 
    **The test is the push run: `ci.yml`'s full matrix** (#173). Every heavy
    suite is a set of jobs that run side by side on GitHub's runners, each part
@@ -3864,12 +3965,15 @@ not after):
 ```bash
 node scripts/train/auto.mjs request 0.57.0 --summary "one line: what this release is" \
   [--commit <the audited commit; default: the private remote's main>] \
-  [--profile minor|patch|full|server] [--task <work task the signing is recorded on>]
+  [--profile minor|patch|full|server] [--task <work task the signing is recorded on>] \
+  [--merge-pr <the outside pull requests the release carries: 120,121>]
 ```
 
 It refuses a version that is not after the newest tag, a summary that says
 "Fixes #N" (on GitHub that closes the issue), and a commit without the
-release's summary. `auto.mjs status` shows the request and the last rounds,
+release's summary. `--merge-pr` goes to the release tool's first run, which
+keeps it: the export commit merges those pull requests (step 7), named,
+never guessed. `auto.mjs status` shows the request and the last rounds,
 `auto.mjs cancel` drops it.
 
 **The round** (`auto.mjs run`, every half hour; nothing queued, nothing
@@ -3882,11 +3986,11 @@ then runs `pnpm release` and does what the tool leaves to a person:
 | audit | confirms it (`--ack audit`) only on the commit the request names |
 | pretag, a check deferred to another machine | confirms the deferral (`--ack store-deferred`); the record keeps it owed |
 | export, withheld files | stops: only a person confirms that list |
-| land | commits the export (`vX.Y.Z - <summary>`) and pushes both mains |
+| land | commits the export (`vX.Y.Z - <summary>`) and pushes both mains. With `--merge-pr`, the export commit is the merge of the pull requests the land checked (step 7): `git commit-tree` over the staged export with the public `main` and each head as parents, then `reset --soft` onto it. An export that does not carry all of one stops the round for a person (`--ack merge-pr`, or drop it) |
 | gate, ci | asks again, `FILEX_AUTO_WAITS` (8) times at most |
 | sign | signs both tags (with `surfaces: server` for a server patch) under `FILEX_AUTO_SIGN_CMD`, which opens the signing key for that command alone |
 | push | pushes the two tags, one ref at a time |
-| deploy | runs the ship (`filex-ship.sh`), pushes its Releases-page commit, then `--ack deploy` - which the release tool takes only once its own read-back is green |
+| deploy | runs the ship (`filex-ship.sh`), pushes its Releases-page commit, then `--ack deploy` - which the release tool takes only once its own read-back is green. Before the ship the deploy checks are red by nature (they read what the ship deploys), so a red deploy starts the ship too; red again after the ship, the round stops |
 
 The stages that build (up to the export) hold `CHAIN_LOCK`; from the land on
 it holds nothing, since it waits for GitHub. A server patch's round then runs

@@ -2,14 +2,10 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.57.0"
+version: "0.57.1"
 releaseNotes: |-
-  filex v0.57.0 - 2026-10-17
-  • A picture from another server in a file's preview waits for you.
-  • A Mermaid diagram and an EPUB book ask no other server either.
-  • Give a whole storage to people and groups.
-  • Nightly builds of the desktop app, every night: on filex.sh/nightly and the Snap Store's edge channel.
-  • What a nightly image is, read off the image.
+  filex v0.57.1 - 2026-10-17
+  • A decimal typed into a CSV in ONLYOFFICE keeps the file's comma.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

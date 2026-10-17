@@ -21,6 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { landMessage } from '../../../scripts/release/checks.mjs';
 import { SURFACES_LINE, tagMessages } from '../../../scripts/release/surfaces.mjs';
 import { downVerdict, hostCommand } from '../../../scripts/train/auto-host.mjs';
 import {
@@ -28,6 +29,8 @@ import {
   LOCK_BUSY,
   decide,
   hasHighlight,
+  landMerge,
+  mergeOf,
   morningReport,
   nextVersion,
   owed,
@@ -144,6 +147,25 @@ describe('what the round does after each run of the release tool', () => {
     expect(decide({ code: 1, state: held, request: REQ })).toEqual({ do: 'ship', held: ['the Snap Store'] });
     expect(decide({ code: 1, state: held, request: REQ, done: new Set(['ship']) })).toEqual({ do: 'held', held: ['the Snap Store'] });
     expect(decide({ code: 1, state: record('ci', 'red'), request: REQ })).toMatchObject({ do: 'red', stage: 'ci' });
+  });
+
+  // v0.57.0 (2026-10-17): the deploy checks read what the ship deploys, so
+  // before the ship the release tool stops RED at deploy (exit 1), not
+  // waiting (exit 3); the round stopped there and the ship was started by hand.
+  it('ships when the deploy checks are red before the ship, and stops when they are red after it', () => {
+    const red = record('deploy', 'red');
+    expect(decide({ code: 1, state: red, request: REQ })).toEqual({ do: 'ship' });
+    const after = decide({ code: 1, state: red, request: REQ, done: new Set(['ship']) });
+    expect(after).toMatchObject({ do: 'red', stage: 'deploy' });
+    expect(after.why).toMatch(/red after the ship/);
+    // A red stage before the deploy is never a ship.
+    for (const stage of ['land', 'gate', 'sign', 'push']) {
+      expect(decide({ code: 1, state: record(stage, 'red'), request: REQ }), stage).toMatchObject({ do: 'red', stage });
+    }
+    // The stage itself: red, not waiting, while its checks are red.
+    const src = read('scripts/release/stages.mjs');
+    const deployFn = src.slice(src.indexOf('export async function deploy(R)'), src.indexOf('export const RUNNERS'));
+    expect(deployFn).toMatch(/if \(!ok\) \{[\s\S]*?return red\(\);/);
   });
 
   it('rolls back only the stages before the land', () => {
@@ -286,6 +308,105 @@ describe('the round on a checkout', () => {
       const idle = auto('run');
       expect(idle.status).toBe(0);
       expect(idle.stdout).toMatch(/nothing queued: nothing to do/);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+// The outside pull requests the export commit merges (--merge-pr): GitHub
+// marks a pull request merged once its head is on main, and the export
+// commit used to have one parent (#120 stayed open after 0.57.0).
+describe('the pull requests the land merges', () => {
+  const HEAD121 = 'c'.repeat(40);
+  const merge = { base: 'B', tree: 'T', prs: [{ number: 121, head: HEAD121, label: 'berkbasarir:fix/csv-edited-decimal-comma' }] };
+  const state = { mergePrs: [120, 121], exportTree: 'T', exportBase: 'B', stages: { land: { status: 'waiting', merge } } };
+
+  it('are named in the request, and read back from the land stage that checked them, never guessed', () => {
+    expect(parseArgs(['request', '0.57.1', '--summary', 'x', '--merge-pr', '120,121'])).toMatchObject({ mergePrs: [120, 121] });
+    expect(() => parseArgs(['request', '0.57.1', '--merge-pr', '12x'])).toThrow(/not a pull request number/);
+    expect(requestProblems({ ...REQ, mergePrs: [120, 121] })).toEqual([]);
+    expect(requestProblems({ ...REQ, mergePrs: [] }).join()).toMatch(/pull request numbers/);
+    expect(requestProblems({ ...REQ, mergePrs: [7, 7] }).join()).toMatch(/named twice/);
+    // #120's head on the public main already leaves #121 alone to merge.
+    expect(mergeOf(state)).toEqual(merge);
+    expect(mergeOf({ stages: {} })).toEqual({ prs: [] });
+    expect(mergeOf({ ...state, stages: { land: { status: 'waiting' } } }).error).toMatch(/recorded no check/);
+    expect(mergeOf({ ...state, exportTree: 'T2' }).error).toMatch(/another export/);
+    expect(mergeOf({ ...state, stages: { land: { merge: { ...merge, prs: [{ number: 9, head: HEAD121 }] } } } }).error).toMatch(/names/);
+    // The round passes the list on to the release tool's fresh start.
+    const src = read('scripts/train/auto.mjs');
+    expect(src).toMatch(/if \(req\.mergePrs\?\.length\) args\.push\('--merge-pr', req\.mergePrs\.join\(','\)\);/);
+  });
+
+  it("stops for a person when the export carries one in another form; any other red at the land is red", () => {
+    const d = decide({ code: 1, state: record('land', 'red', { ask: 'merge-pr' }), request: REQ });
+    expect(d).toMatchObject({ do: 'person', stage: 'land' });
+    expect(d.why).toMatch(/--ack merge-pr/);
+    expect(decide({ code: 1, state: record('land', 'red'), request: REQ })).toMatchObject({ do: 'red', stage: 'land' });
+  });
+
+  // A real repository: the public remote holds a pull request's head under
+  // refs/pull/N/head, as GitHub does; the export is staged in the public
+  // checkout; the land makes the merge and main is pushed.
+  it("makes the export commit a merge whose tree is the export's, byte for byte, and puts the head on main (what GitHub reads)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-land-merge-'));
+    const env = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(tmp, 'gitconfig') };
+    fs.writeFileSync(env.GIT_CONFIG_GLOBAL, '[user]\n\tname = Release Test\n\temail = release@test.invalid\n[init]\n\tdefaultBranch = main\n[commit]\n\tgpgSign = false\n[core]\n\tautocrlf = false\n');
+    const g = (dir: string, ...args: string[]) => {
+      const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', env });
+      if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+      return r.stdout.trim();
+    };
+    const put = (dir: string, file: string, text: string) => {
+      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, file), text);
+    };
+    try {
+      const remote = path.join(tmp, 'public.git').split(path.sep).join('/');
+      g(tmp, 'init', '-q', '--bare', remote);
+      const pub = path.join(tmp, 'pub');
+      fs.mkdirSync(pub);
+      g(pub, 'init', '-q');
+      g(pub, 'remote', 'add', 'origin', remote);
+      put(pub, 'csv_keep.go', 'package officesave\n\nfunc Keep() {}\n');
+      g(pub, 'add', '-A');
+      g(pub, 'commit', '-q', '-m', 'v0.57.0 - the last release');
+      g(pub, 'push', '-q', 'origin', 'main');
+      // The contributor's pull request, on the public main.
+      const fork = path.join(tmp, 'fork');
+      g(tmp, 'clone', '-q', remote, fork);
+      put(fork, 'csv_keep.go', 'package officesave\n\nfunc Keep() {}\n\nfunc KeepComma() {}\n');
+      g(fork, 'commit', '-q', '-am', 'fix(onlyoffice): a decimal typed into a CSV keeps the comma');
+      g(fork, 'push', '-q', 'origin', 'HEAD:refs/pull/121/head');
+      const prHead = g(fork, 'rev-parse', 'HEAD');
+      // The export: the pull request's change and the rest of the release, staged.
+      g(pub, 'fetch', '-q', 'origin', '+refs/pull/121/head:refs/remotes/origin/pull/121');
+      put(pub, 'csv_keep.go', 'package officesave\n\nfunc Keep() {}\n\nfunc KeepComma() {}\n\nfunc KeepQuote() {}\n');
+      put(pub, 'CHANGELOG.md', '## [0.57.1]\n');
+      g(pub, 'add', '-A');
+      const base = g(pub, 'rev-parse', 'HEAD');
+      const tree = g(pub, 'write-tree');
+      const pulls = [{ number: 121, head: prHead, label: 'berkbasarir:fix/csv-edited-decimal-comma' }];
+      const message = landMessage('v0.57.1', 'a decimal typed into a CSV keeps its comma (#121)', pulls);
+
+      // Refused: a checkout off the public main, or an index that is not the export.
+      expect(landMerge({ exp: pub, base: prHead, tree, heads: [prHead], message }).error).toMatch(/not the public main the export ran on/);
+      expect(landMerge({ exp: pub, base, tree: base, heads: [prHead], message }).error).toMatch(/index is not the export/);
+
+      const made = landMerge({ exp: pub, base, tree, heads: [prHead], message });
+      expect(made.error).toBeUndefined();
+      expect(g(pub, 'rev-parse', 'HEAD')).toBe(made.commit);
+      expect(g(pub, 'show', '-s', '--format=%P', 'HEAD').split(' ')).toEqual([base, prHead]);
+      expect(g(pub, 'rev-parse', 'HEAD^{tree}')).toBe(tree);
+      expect(g(pub, 'status', '--porcelain')).toBe('');
+      expect(g(pub, 'log', '-1', '--format=%B')).toBe(`${message[0]}\n\n${message[1]}`);
+      // The first parent's diff is exactly the export (what the public
+      // pre-push gate scans), and the pull request's commit is history.
+      expect(g(pub, 'diff', '--name-only', 'HEAD^1', 'HEAD').split('\n')).toEqual(['CHANGELOG.md', 'csv_keep.go']);
+      g(pub, 'push', '-q', 'origin', 'main');
+      const reachable = spawnSync('git', [`--git-dir=${remote}`, 'merge-base', '--is-ancestor', prHead, 'main'], { env });
+      expect(reachable.status, 'the head is on the public main: GitHub marks the pull request merged').toBe(0);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

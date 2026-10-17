@@ -288,6 +288,119 @@ export function closingKeywords(message) {
   return [...String(message).matchAll(/\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s+(?:[\w.-]+\/[\w.-]+)?#\d+/gi)].map((m) => m[0]);
 }
 
+// ── pull requests the export commit merges ──────────────────────────────────
+//
+// An outside pull request is taken into the private tree with its author
+// kept, and comes back out in the export - but the export commit used to
+// have one parent, so the public main never held the pull request's head
+// and GitHub kept it "open" (#120 after 0.57.0). The land makes the export
+// commit a merge instead: its tree is exactly the export, its parents the
+// public main the export ran on and the head of each pull request named, and
+// GitHub marks a pull request merged once its head is on main. Named, never
+// guessed (--merge-pr), and checked before the commit is made (stages.mjs →
+// land): open, on main, and its change carried by the export.
+
+/**
+ * `--merge-pr` as a list: "120,121" → { prs: [120, 121] }, "none" → { prs: [] }
+ * (a resume drops the list), anything else → { problem }.
+ */
+export function parseMergePrs(value) {
+  const v = String(value ?? '').trim();
+  if (v === 'none') return { prs: [] };
+  const parts = v.split(',').map((s) => s.trim());
+  if (!v || parts.some((p) => !p)) return { problem: `--merge-pr "${v}": pull request numbers, comma-separated (120,121), or none` };
+  const prs = [];
+  for (const p of parts) {
+    if (!/^[1-9]\d*$/.test(p)) return { problem: `--merge-pr: "${p}" is not a pull request number` };
+    const n = Number(p);
+    if (prs.includes(n)) return { problem: `--merge-pr: #${n} is named twice` };
+    prs.push(n);
+  }
+  return { prs };
+}
+
+/**
+ * The export commit's message, as paragraphs (one `-m` each): the release
+ * line, then GitHub's own "Merge pull request #N from owner/branch" for each
+ * pull request it merges. No title of a pull request goes in: a title may
+ * say "Fixes #N", and on main that closes the issue (lesson #163).
+ */
+export function landMessage(tag, summary, pulls = []) {
+  return [`${tag} - ${summary}`, ...pulls.map((p) => `Merge pull request #${p.number} from ${String(p.label ?? '').replace(':', '/')}`)];
+}
+
+/**
+ * `git commit-tree` for the export commit: `tree` the export, `base` the
+ * public main it ran on (first parent: the side a push adds to, and the one
+ * the public pre-push gate scans), then each pull request's head; `message`
+ * the paragraphs of landMessage. The arguments after `git -C <checkout>`.
+ */
+export function commitTreeArgs({ tree, base, heads = [], message = [] }) {
+  return ['commit-tree', tree, '-p', base, ...heads.flatMap((h) => ['-p', h]), ...message.flatMap((m) => ['-m', m])];
+}
+
+/**
+ * The lines a `git diff -U0` (one file, or several) adds: the `+` lines of
+ * its hunks, not the `+++` header before the first hunk.
+ */
+export function addedLines(diff) {
+  const out = [];
+  let inHunk = false;
+  for (const line of String(diff).split('\n')) {
+    if (line.startsWith('diff --git ')) inHunk = false;
+    else if (line.startsWith('@@')) inHunk = true;
+    else if (inHunk && line.startsWith('+')) out.push(line.slice(1).replace(/\r$/, ''));
+  }
+  return out;
+}
+
+/**
+ * The lines of `added` that `text` does not have, each compared as a whole
+ * line without its trailing whitespace; a blank line is never asked for.
+ */
+export function linesMissing(added, text) {
+  const have = new Set(String(text).split('\n').map((l) => l.replace(/\s+$/, '')));
+  const out = [];
+  for (const l of added) {
+    const k = l.replace(/\s+$/, '');
+    if (k.trim() && !have.has(k) && !out.includes(k)) out.push(k);
+  }
+  return out;
+}
+
+/**
+ * Whether the export carries a pull request's change, from what the land
+ * read of each file the pull request touches (`git diff --name-status` from
+ * where it branched off the public main to its head, renames as a deletion
+ * and an addition):
+ *   { path, status: 'A'|'M'|'D'|'T', inExport, sameBlob, binary, missing }
+ * `missing`: the lines it adds that the export's copy lacks (linesMissing).
+ * Returns the problems, [] when the export carries all of it.
+ */
+export function coverageProblems(files) {
+  const out = [];
+  for (const f of files) {
+    if (f.status === 'D') {
+      if (f.inExport) out.push(`${f.path}: the pull request deletes it, and the export keeps it`);
+      continue;
+    }
+    if (!f.inExport) {
+      out.push(`${f.path}: the pull request ${f.status === 'A' ? 'adds' : 'changes'} it, and the export has no such file`);
+      continue;
+    }
+    if (f.sameBlob) continue;
+    if (f.binary) {
+      out.push(`${f.path}: a binary file, and the export's copy is not the pull request's`);
+      continue;
+    }
+    const missing = f.missing ?? [];
+    if (missing.length) {
+      out.push(`${f.path}: ${missing.length} line(s) the pull request adds are not in the export's copy, e.g.\n      ${missing.slice(0, 3).map((l) => JSON.stringify(l.length > 120 ? `${l.slice(0, 117)}...` : l)).join('\n      ')}`);
+    }
+  }
+  return out;
+}
+
 // ── vitest ──────────────────────────────────────────────────────────────────
 
 /**

@@ -215,6 +215,27 @@ func TestSaveCSV_ADeclarationTheBytesAgreeWithIsTaken(t *testing.T) {
 	assert.Equal(t, "a;b\r\n", string(out))
 }
 
+// The Office editor app's save (api/handlers UISave → csvSaveOver) is the
+// app's own semicolons with the delimiter it declared, and a decimal typed in
+// its Turkish or German editor gets the file's comma there as it does in the
+// Document Server's callback (csv_keep.go → csvDecimalCommas): `3,5` typed
+// over as `4,5` is saved `4.5` and written `4,5`. The text typed in another
+// row is written as typed, and every cell nobody changed keeps its text.
+func TestSaveCSV_TheAppsSaveKeepsTheFilesDecimalComma(t *testing.T) {
+	original := crlf("ad;kod;tutar", "elma;007;3,5", "armut;042;1250,75", "nar;000;0,25")
+	saved := lf("ad;kod;tutar", "elma;7;4.5", "armut kg;42;1250,75", "nar;0;0,25")
+	out, res, err := SaveCSV(whole(t, original), []byte(saved), &Declared{Delimiter: ';'})
+	require.NoError(t, err)
+	assert.Equal(t, crlf("ad;kod;tutar", "elma;007;4,5", "armut kg;042;1250,75", "nar;000;0,25"), string(out))
+	assert.True(t, res.Applied)
+	assert.Empty(t, res.Panic)
+	assert.Equal(t, 1, res.Commas, "the typed decimal, and only it")
+	assert.Equal(t, byte(';'), res.Saved.Comma)
+	assert.Equal(t, byte(';'), res.File.Comma)
+	assert.Equal(t, 2, res.Unchanged, "the header and `nar`, byte for byte")
+	assert.Equal(t, 2, res.Restored, "`007` and `042` in the rows edited")
+}
+
 // Bytes that are not UTF-8, with no mark and nothing said, over a UTF-8 file:
 // nothing to read them in, and nothing is guessed.
 func TestSaveCSV_UnreadableBytesAreRefused(t *testing.T) {

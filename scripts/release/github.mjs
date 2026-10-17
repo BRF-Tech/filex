@@ -1,6 +1,7 @@
 // What the release asks GitHub Actions, through the `gh` CLI: the runs of a
 // workflow on one commit, the jobs of a run (ci.yml's matrix, read part by
-// part), the artifacts a run kept, and starting a workflow by hand.
+// part), the artifacts a run kept, starting a workflow by hand, and the pull
+// requests the export commit merges (--merge-pr).
 //
 // The gate stage (stages.mjs → gate) takes this from the plan as
 // `plan.github`, so the release's own test (web/tests/deploy/releaseCli.test.ts)
@@ -89,6 +90,30 @@ export function githubActions(repo) {
       ]);
       if (r.status !== 0) return { error: (r.stderr || r.stdout).trim() || `gh exited ${r.status}` };
       return { names: String(r.stdout).split(/\r?\n/).map((s) => s.trim()).filter(Boolean) };
+    },
+
+    /**
+     * One pull request, as the land reads it before the export commit merges
+     * it (stages.mjs → land, --merge-pr): { number, state, merged, base,
+     * head, label, title } - `base` the branch it asks to go into, `head` its
+     * head commit, `label` GitHub's "owner:branch" of that head.
+     */
+    pull({ number }) {
+      const r = run('gh', [
+        'api', '-X', 'GET', `repos/${repo}/pulls/${number}`,
+        '--jq', '{number, state, merged, base: .base.ref, head: .head.sha, label: .head.label, title} | @json',
+      ]);
+      if (r.status !== 0) return { error: (r.stderr || r.stdout).trim() || `gh exited ${r.status}` };
+      let p;
+      try {
+        p = JSON.parse(String(r.stdout).trim());
+      } catch {
+        return { error: `gh api .../pulls/${number} did not answer JSON: ${String(r.stdout).slice(0, 200)}` };
+      }
+      if (p?.number !== number || !/^[0-9a-f]{40}$/.test(String(p.head ?? '')) || !p.state || !p.base) {
+        return { error: `gh api .../pulls/${number} did not answer its number, state, base and head: ${String(r.stdout).slice(0, 200)}` };
+      }
+      return { pull: { number: p.number, state: p.state, merged: !!p.merged, base: p.base, head: p.head, label: p.label ?? '', title: p.title ?? '' } };
     },
 
     /** Starts `workflow` on `ref` with `inputs`. */

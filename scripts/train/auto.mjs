@@ -7,9 +7,12 @@
 //
 //   node scripts/train/auto.mjs request X.Y.Z --summary "one line" [--commit SHA]
 //                                   [--profile minor|patch|full|server] [--task N]
+//                                   [--merge-pr 120,121]
 //        queue a release of the commit a person audited (the README, the
 //        screenshots, every page that describes the product: the audit stage
-//        of `pnpm release`); --commit defaults to the private remote's main
+//        of `pnpm release`); --commit defaults to the private remote's main;
+//        --merge-pr names the outside pull requests the export commit merges
+//        (`pnpm release --merge-pr`: GitHub marks them merged)
 //   node scripts/train/auto.mjs run [--dry-run]
 //        one round: nothing queued is nothing done (exit 0); --dry-run says
 //        what the round would do now and runs nothing
@@ -51,7 +54,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { announce } from '../lib/notify.mjs';
 import { loadSettings } from '../lib/settings.mjs';
-import { PROFILES, closingKeywords, compareVersions, deferredSpecs, newestTag, parseVersion, versionProblems } from '../release/checks.mjs';
+import { PROFILES, closingKeywords, commitTreeArgs, compareVersions, deferredSpecs, landMessage, newestTag, parseMergePrs, parseVersion, versionProblems } from '../release/checks.mjs';
 import { git, gitOut, loadState, lsRemote, revParse, saveState, slash, stateFile, takeLock } from '../release/engine.mjs';
 import { STAGES } from '../release/stages.mjs';
 import { tagMessages } from '../release/surfaces.mjs';
@@ -117,6 +120,10 @@ export function requestProblems(req) {
   if (kw.length) out.push(`the summary says ${kw.map((k) => `"${k}"`).join(', ')}: on GitHub that CLOSES the issue - write "(#N)"`);
   if (req.profile && !PROFILES.includes(req.profile)) out.push(`profile "${req.profile}": one of ${PROFILES.join(', ')}`);
   if (req.task !== undefined && req.task !== null && req.task !== '' && !/^\d+$/.test(String(req.task))) out.push(`task "${req.task}" is not a task number`);
+  if (req.mergePrs !== undefined && req.mergePrs !== null) {
+    const p = Array.isArray(req.mergePrs) && req.mergePrs.length ? parseMergePrs(req.mergePrs.join(',')) : { problem: 'mergePrs: the pull request numbers the export commit merges' };
+    if (p.problem) out.push(p.problem);
+  }
   return out;
 }
 
@@ -165,7 +172,9 @@ const isDone = (state, id) => state?.stages?.[id]?.status === 'done';
  *   { do: 'person', stage, why }         a step the round does not take
  * `done` is what the round already did this round (each person step once:
  * a second time the stage still waits is for a person), `waited` how often
- * it ran again for a wait.
+ * it ran again for a wait. The deploy stage is red, not waiting, until the
+ * ship ran (its checks read what the ship deploys), so a red deploy is a
+ * ship too, once a round.
  */
 export function decide({ code, state, request, head, deferredAcks = [], done = new Set(), waited = 0, waits = 8 }) {
   const at = stageAt(state);
@@ -175,7 +184,19 @@ export function decide({ code, state, request, head, deferredAcks = [], done = n
     if (at?.id === 'ci' && ci?.status === 'red' && Array.isArray(ci.held) && ci.held.length) {
       return done.has('ship') ? { do: 'held', held: ci.held } : { do: 'ship', held: ci.held };
     }
-    return { do: 'red', stage: at?.id ?? '?', why: 'a gate is red' };
+    // The deploy checks read what the ship deploys (the servers, the feeds,
+    // docs.filex.sh), so before the ship they are red by nature: the release
+    // tool stops red at deploy, not waiting (stages.mjs → deploy). The ship
+    // goes first, then the tool runs again; red after the ship is red.
+    // v0.57.0 (2026-10-17): the round stopped "red at deploy" here and the
+    // ship was started by hand.
+    if (at?.id === 'deploy' && !done.has('ship')) return { do: 'ship' };
+    // A pull request the export commit merges, carried by the export in
+    // another form: only a person confirms that (--ack merge-pr) or drops it.
+    if (at?.id === 'land' && state?.stages?.land?.ask === 'merge-pr') {
+      return { do: 'person', stage: 'land', why: `the export does not carry all of a pull request it merges: a person confirms the differences (pnpm release ${request?.version ?? 'X.Y.Z'} --resume --ack merge-pr) or drops it (--merge-pr <the others, or none>), then queues it again` };
+    }
+    return { do: 'red', stage: at?.id ?? '?', why: done.has('ship') && at?.id === 'deploy' ? 'the deploy checks are red after the ship' : 'a gate is red' };
   }
   if (code !== 3) return { do: 'red', stage: at?.id ?? '?', why: `the release tool exited ${code}` };
   if (!at) return { do: 'red', stage: '?', why: 'the release tool waits, and every stage is done' };
@@ -226,6 +247,48 @@ export function signScript({ repo, exp, tag, releaseCommit, exportCommit, server
   if (!have.exp) lines.push(`git -C '${slash(exp)}' tag -s '${tag}' ${msgs} ${exportCommit}`);
   lines.push(`git -C '${slash(exp)}' tag -v '${tag}'`);
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * What the land merges, read from the release's record: { base, tree, prs }
+ * - `prs` the pull requests the land stage checked on this very export, less
+ * any whose head is on the public main already ([] when the request names
+ * none) - or { error } when the record names pull requests the land stage
+ * did not check on this export. Never a guess: an unchecked head is never
+ * made a parent.
+ */
+export function mergeOf(state) {
+  const wanted = state?.mergePrs ?? [];
+  if (!wanted.length) return { prs: [] };
+  const named = wanted.map((n) => `#${n}`).join(', ');
+  const m = state?.stages?.land?.merge;
+  if (!m || !Array.isArray(m.prs)) return { error: `the release merges ${named}, and its land stage recorded no check of them` };
+  if (!m.tree || m.tree !== state.exportTree || !m.base || m.base !== state.exportBase) return { error: `the land stage checked ${named} on another export than the one staged` };
+  for (const p of m.prs) {
+    if (!wanted.includes(p?.number) || !/^[0-9a-f]{40}$/.test(String(p?.head ?? ''))) return { error: `the land stage's record of ${named} names ${JSON.stringify(p)}` };
+  }
+  return { base: m.base, tree: m.tree, prs: m.prs };
+}
+
+/**
+ * The export commit as a merge, in the public checkout: `git commit-tree`
+ * over the export's tree with the public main (`base`) and each pull
+ * request's head as parents, then main moved onto it (`reset --soft`; the
+ * index already holds that tree). Refuses a checkout that is not on `base`
+ * with exactly the export staged. Returns { commit } or { error }.
+ */
+export function landMerge({ exp, base, tree, heads, message }) {
+  const h = revParse(exp, 'HEAD');
+  if (h !== base) return { error: `the public checkout is on ${String(h).slice(0, 10)}, not the public main the export ran on, ${String(base).slice(0, 10)}` };
+  const staged = git(exp, 'write-tree');
+  if (staged.status !== 0 || staged.stdout.trim() !== tree) return { error: `the public checkout's index is not the export the land checked (${String(tree).slice(0, 10)})` };
+  const c = git(exp, ...commitTreeArgs({ tree, base, heads, message }));
+  if (c.status !== 0) return { error: `git commit-tree: ${(c.stderr || c.stdout).trim()}` };
+  const commit = c.stdout.trim();
+  const r = git(exp, 'reset', '--quiet', '--soft', commit);
+  if (r.status !== 0) return { error: `git reset --soft ${commit.slice(0, 10)}: ${(r.stderr || r.stdout).trim()}` };
+  if (revParse(exp, 'HEAD') !== commit || revParse(exp, 'HEAD^{tree}') !== tree) return { error: `main did not move onto ${commit.slice(0, 10)} with the export's tree` };
+  return { commit };
 }
 
 /**
@@ -385,6 +448,7 @@ async function round(ctx) {
     const args = [path.join(repo, 'scripts', 'release.mjs'), version];
     if (fresh) {
       if (req.profile) args.push('--profile', req.profile);
+      if (req.mergePrs?.length) args.push('--merge-pr', req.mergePrs.join(','));
     } else args.push('--resume');
     for (const a of acks) args.push('--ack', a);
     for (const a of acks) done.add(`ack:${a}`);
@@ -414,8 +478,18 @@ async function round(ctx) {
     }
     if (d.do === 'land') {
       done.add('land');
-      const c = step(log, 'git', ['-C', exp, 'commit', '--quiet', '-m', `${tag} - ${req.summary}`]);
-      if (c.code !== 0 && !/nothing to commit/.test(c.tail)) return { ...record, result: 'red', stage: 'land', why: `the export commit: ${lastLine(c.tail)}` };
+      const m = mergeOf(state);
+      if (m.error) return { ...record, result: 'red', stage: 'land', why: m.error };
+      if (m.prs.length) {
+        // A merge of the pull requests the land checked: the export's tree,
+        // the public main and each head (pnpm release --merge-pr).
+        const c = landMerge({ exp, base: m.base, tree: m.tree, heads: m.prs.map((p) => p.head), message: landMessage(tag, req.summary, m.prs) });
+        if (c.error) return { ...record, result: 'red', stage: 'land', why: `the export commit: ${c.error}` };
+        note(`the export commit ${c.commit.slice(0, 10)} merges ${m.prs.map((p) => `#${p.number}`).join(', ')}`);
+      } else {
+        const c = step(log, 'git', ['-C', exp, 'commit', '--quiet', '-m', `${tag} - ${req.summary}`]);
+        if (c.code !== 0 && !/nothing to commit/.test(c.tail)) return { ...record, result: 'red', stage: 'land', why: `the export commit: ${lastLine(c.tail)}` };
+      }
       for (const [d2, remote] of [[repo, plan.remote], [exp, plan.exportRemote]]) {
         const p = step(log, 'git', ['-C', d2, 'push', remote, plan.branch]);
         if (p.code !== 0) return { ...record, result: 'red', stage: 'land', why: `git push ${remote} ${plan.branch} in ${slash(d2)}: ${lastLine(p.tail)}` };
@@ -523,7 +597,7 @@ function rollBack({ state, req, repo, exp, plan, stFile, log }) {
 // ── the commands ─────────────────────────────────────────────────────────────
 
 export function parseArgs(argv) {
-  const o = { cmd: argv[0] ?? '', version: null, summary: '', commit: '', profile: '', task: '', bump: '', env: '', dry: false };
+  const o = { cmd: argv[0] ?? '', version: null, summary: '', commit: '', profile: '', task: '', bump: '', env: '', dry: false, mergePrs: null };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
@@ -536,6 +610,11 @@ export function parseArgs(argv) {
     else if (a === '--profile') o.profile = next();
     else if (a === '--task') o.task = next();
     else if (a === '--bump') o.bump = next();
+    else if (a === '--merge-pr') {
+      const p = parseMergePrs(next());
+      if (p.problem) throw new Error(p.problem);
+      o.mergePrs = p.prs;
+    }
     else if (a === '--env') o.env = next();
     else if (a === '--dry-run') o.dry = true;
     else if (a === '-h' || a === '--help') o.help = true;
@@ -575,7 +654,7 @@ async function main(argv) {
       gitOut(repo, 'fetch', '--quiet', 'origin', 'main');
       commit = gitOut(repo, 'rev-parse', 'origin/main');
     } else commit = revParse(repo, `${commit}^{commit}`) ?? commit;
-    const req = { version, commit, summary: o.summary.trim(), profile: o.profile || undefined, task: o.task || undefined, at: new Date().toISOString(), by: os.userInfo().username, status: 'queued' };
+    const req = { version, commit, summary: o.summary.trim(), profile: o.profile || undefined, task: o.task || undefined, mergePrs: o.mergePrs?.length ? o.mergePrs : undefined, at: new Date().toISOString(), by: os.userInfo().username, status: 'queued' };
     const problems = requestProblems(req);
     const hl = git(repo, 'show', `${commit}:${RELEASE_HIGHLIGHTS}`);
     if (hl.status !== 0 || !hasHighlight(hl.stdout, `v${version}`)) problems.push(`${RELEASE_HIGHLIGHTS} on ${commit.slice(0, 10)} has no "v${version}" summary: write it (CONTRIBUTING, Release process, step 10) and audit that commit`);
@@ -587,7 +666,7 @@ async function main(argv) {
       return 2;
     }
     writeJson(reqFile, req);
-    console.log(`queued v${version} on ${commit.slice(0, 10)}: the next round releases it (${slash(reqFile)})`);
+    console.log(`queued v${version} on ${commit.slice(0, 10)}${req.mergePrs ? `, merging ${req.mergePrs.map((n) => `#${n}`).join(', ')}` : ''}: the next round releases it (${slash(reqFile)})`);
     return 0;
   }
 
@@ -645,7 +724,7 @@ async function main(argv) {
   const tag = `v${req.version}`;
   if (o.dry) {
     const st = loadState(stateFile(gitDir, tag));
-    console.log(`would release ${tag} (${req.profile ?? 'the profile pnpm release picks'}) from ${req.commit.slice(0, 10)}: ${st ? `resume at ${stageAt(st)?.id ?? 'the end'}` : 'a fresh start'}`);
+    console.log(`would release ${tag} (${req.profile ?? 'the profile pnpm release picks'}) from ${req.commit.slice(0, 10)}${req.mergePrs?.length ? `, merging ${req.mergePrs.map((n) => `#${n}`).join(', ')}` : ''}: ${st ? `resume at ${stageAt(st)?.id ?? 'the end'}` : 'a fresh start'}`);
     if (missing.length) console.log(`missing here: ${missing.join(', ')}`);
     return missing.length ? 2 : 0;
   }

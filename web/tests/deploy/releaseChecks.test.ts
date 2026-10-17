@@ -8,10 +8,13 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  addedLines,
   capabilitiesBuild,
   classifyDeletions,
   closingKeywords,
+  commitTreeArgs,
   compareVersions,
+  coverageProblems,
   dateChangelog,
   dockerfileSources,
   dockerignoreExcludes,
@@ -24,10 +27,13 @@ import {
   headingsOf,
   htmlText,
   infraFailure,
+  landMessage,
+  linesMissing,
   manifestNewest,
   newestTag,
   newHeadings,
   parseFeed,
+  parseMergePrs,
   partsLine,
   partsVerdict,
   privateHostLines,
@@ -142,6 +148,79 @@ describe('the public export', () => {
     expect(closingKeywords('v0.41.2 - Fixes #26, #27')).toEqual(['Fixes #26']);
     expect(closingKeywords('closes BRF-Tech/filex#3 and resolved: #9')).toHaveLength(2);
     expect(closingKeywords('v0.45.0 - teams (#12), issue 12, see #7, prefix #3')).toEqual([]);
+  });
+});
+
+// The export commit merges the outside pull requests --merge-pr names, so
+// GitHub marks them merged (#120 stayed open after 0.57.0: one parent).
+describe('the pull requests the export commit merges', () => {
+  it('reads --merge-pr as numbers, named once each; none drops the list', () => {
+    expect(parseMergePrs('120,121')).toEqual({ prs: [120, 121] });
+    expect(parseMergePrs(' 121 ')).toEqual({ prs: [121] });
+    expect(parseMergePrs('none')).toEqual({ prs: [] });
+    expect(parseMergePrs('').problem).toMatch(/comma-separated/);
+    expect(parseMergePrs('120,').problem).toMatch(/comma-separated/);
+    expect(parseMergePrs('#120').problem).toMatch(/"#120" is not a pull request number/);
+    expect(parseMergePrs('0').problem).toMatch(/not a pull request number/);
+    expect(parseMergePrs('120,120').problem).toMatch(/#120 is named twice/);
+  });
+
+  it("writes GitHub's own merge line for each, and no title (a title may close an issue)", () => {
+    const pulls = [{ number: 121, label: 'berkbasarir:fix/csv-edited-decimal-comma', title: 'Fixes #99' }];
+    const msg = landMessage('v0.57.1', 'a decimal typed into a CSV keeps its comma (#121)', pulls);
+    expect(msg).toEqual(['v0.57.1 - a decimal typed into a CSV keeps its comma (#121)', 'Merge pull request #121 from berkbasarir/fix/csv-edited-decimal-comma']);
+    expect(closingKeywords(msg.join('\n\n'))).toEqual([]);
+    expect(landMessage('v0.57.1', 'x')).toEqual(['v0.57.1 - x']);
+  });
+
+  it('makes the commit from the export tree: the public main first, then each head', () => {
+    expect(commitTreeArgs({ tree: 'T', base: 'B', heads: ['H1', 'H2'], message: ['line', 'Merge pull request #1 from a/b'] })).toEqual([
+      'commit-tree', 'T', '-p', 'B', '-p', 'H1', '-p', 'H2', '-m', 'line', '-m', 'Merge pull request #1 from a/b',
+    ]);
+  });
+
+  it('reads the lines a diff adds, not its header', () => {
+    const diff = [
+      'diff --git a/x.go b/x.go',
+      'index 1..2 100644',
+      '--- a/x.go',
+      '+++ b/x.go',
+      '@@ -1,0 +2,2 @@',
+      '+func A() {}',
+      '++counter',
+      '@@ -9 +10 @@',
+      '-old',
+      '+new\r',
+      '\\ No newline at end of file',
+    ].join('\n');
+    expect(addedLines(diff)).toEqual(['func A() {}', '+counter', 'new']);
+  });
+
+  it('finds the added lines a file lacks, whole lines, trailing blanks aside, blank lines never', () => {
+    const text = 'package x\n\nfunc A() {}   \nfunc B() {}\n';
+    expect(linesMissing(['func A() {}', 'func B() {}', '', '   '], text)).toEqual([]);
+    expect(linesMissing(['func C() {}', 'func C() {}', 'func A'], text)).toEqual(['func C() {}', 'func A']);
+  });
+
+  it('says what of a pull request the export does not carry', () => {
+    const files = [
+      { path: 'same.go', status: 'M', inExport: true, sameBlob: true },
+      { path: 'lines.go', status: 'M', inExport: true, sameBlob: false, binary: false, missing: [] },
+      { path: 'gone.md', status: 'D', inExport: false },
+    ];
+    expect(coverageProblems(files)).toEqual([]);
+    const bad = coverageProblems([
+      { path: 'new.go', status: 'A', inExport: false },
+      { path: 'kept.md', status: 'D', inExport: true },
+      { path: 'logo.png', status: 'M', inExport: true, sameBlob: false, binary: true },
+      { path: 'CHANGELOG.md', status: 'M', inExport: true, sameBlob: false, binary: false, missing: ['- **A reworded entry.**'] },
+    ]);
+    expect(bad).toHaveLength(4);
+    expect(bad[0]).toBe('new.go: the pull request adds it, and the export has no such file');
+    expect(bad[1]).toBe('kept.md: the pull request deletes it, and the export keeps it');
+    expect(bad[2]).toMatch(/logo\.png: a binary file/);
+    expect(bad[3]).toMatch(/CHANGELOG\.md: 1 line\(s\) the pull request adds are not in the export's copy/);
+    expect(bad[3]).toContain('"- **A reworded entry.**"');
   });
 });
 

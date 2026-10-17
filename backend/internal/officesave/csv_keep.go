@@ -80,6 +80,10 @@ type CSVKept struct {
 	New int
 	// Deleted records: the file's, with no saved record.
 	Deleted int
+	// Commas: cells somebody typed or added, numbers ONLYOFFICE wrote with a
+	// decimal point, written with the decimal comma of their column
+	// (csvDecimalCommas).
+	Commas int
 }
 
 // KeepMaxBytes bounds both the file and the save KeepCSV compares: each is
@@ -191,6 +195,7 @@ func keepCSVAs(body, saved []byte, d CSVDialect, as csvKeepAs) ([]byte, CSVKept)
 	}
 	tabs := comma != '\t'
 	var o, s csvSide
+	o.wantNumbers = comma != ','
 	if why := o.index(body, comma, tabs); why != "" {
 		return nil, CSVKept{Why: why}
 	}
@@ -208,57 +213,71 @@ func keepCSVAs(body, saved []byte, d CSVDialect, as csvKeepAs) ([]byte, CSVKept)
 	}
 	from, taken := csvLineUp(&o, &s, first, tabs)
 
-	kept := CSVKept{Applied: true}
-	w := csvOut{eol: []byte("\n"), comma: comma}
-	if d.CRLF {
-		w.eol = []byte("\r\n")
-	}
-	w.buf.Grow(len(utf8BOM) + len(body) + len(saved)/8)
-	if as.bom {
-		w.buf.Write(utf8BOM)
-	}
-	head := w.buf.Len()
-	if first == 1 {
-		w.own(&o, 0)
-	}
-	lastSaved, lastOwn := -1, int32(first-1)
-	for i := range s.recs {
-		m := from[i]
-		if m < 0 {
-			kept.New++
-			w.fresh(s.fields(i), o.width)
-			continue
+	dec := csvDecimalCommas(&o, &s, from, comma)
+
+	// write writes the kept file once. It may be written twice: a number
+	// given a decimal comma that the file holds is one that moved
+	// (csvMovedNumbers), and the file is written again without it.
+	write := func() (w *csvOut, kept CSVKept, head, trail int) {
+		kept = CSVKept{Applied: true}
+		w = &csvOut{eol: []byte("\n"), comma: comma, dec: dec}
+		if d.CRLF {
+			w.eol = []byte("\r\n")
 		}
-		lastSaved, lastOwn = i, max(lastOwn, m)
-		of, sf := o.fields(int(m)), s.fields(i)
-		if csvSameRecord(of, sf, tabs) {
-			kept.Unchanged++
-			w.own(&o, int(m))
-			continue
+		w.buf.Grow(len(utf8BOM) + len(body) + len(saved)/8)
+		if as.bom {
+			w.buf.Write(utf8BOM)
 		}
-		kept.Restored += w.changed(&o, int(m), of, sf, tabs)
-	}
-	kept.Deleted = len(o.recs) - first - (len(s.recs) - kept.New)
-	// Empty lines at the end of the file. ONLYOFFICE stops writing at the
-	// last row that has a cell, so nobody deleted them: they are kept, unless
-	// rows were added where they stood.
-	trail := 0
-	if lastSaved == len(s.recs)-1 {
-		for i := int(lastOwn) + 1; i < len(o.recs); i++ {
-			if !taken[i] && o.recs[i].empty {
-				w.own(&o, i)
-				trail++
+		head = w.buf.Len()
+		if first == 1 {
+			w.own(&o, 0)
+		}
+		lastSaved, lastOwn := -1, int32(first-1)
+		for i := range s.recs {
+			m := from[i]
+			if m < 0 {
+				kept.New++
+				w.fresh(s.fields(i), o.width)
+				continue
+			}
+			lastSaved, lastOwn = i, max(lastOwn, m)
+			of, sf := o.fields(int(m)), s.fields(i)
+			if csvSameRecord(of, sf, tabs) {
+				kept.Unchanged++
+				w.own(&o, int(m))
+				continue
+			}
+			kept.Restored += w.changed(&o, int(m), of, sf, tabs)
+		}
+		kept.Deleted = len(o.recs) - first - (len(s.recs) - kept.New)
+		// Empty lines at the end of the file. ONLYOFFICE stops writing at the
+		// last row that has a cell, so nobody deleted them: they are kept,
+		// unless rows were added where they stood.
+		if lastSaved == len(s.recs)-1 {
+			for i := int(lastOwn) + 1; i < len(o.recs); i++ {
+				if !taken[i] && o.recs[i].empty {
+					w.own(&o, i)
+					trail++
+				}
 			}
 		}
+		kept.Deleted -= trail
+		kept.Records, kept.Commas = w.n, w.commas
+		// The file ends with a line end if and only if it did (ONLYOFFICE
+		// always writes one, which says nothing).
+		w.finish(o.recs[len(o.recs)-1].term > 0)
+		return w, kept, head, trail
 	}
-	kept.Deleted -= trail
-	kept.Records = w.n
-	// The file ends with a line end if and only if it did (ONLYOFFICE always
-	// writes one, which says nothing).
-	w.finish(o.recs[len(o.recs)-1].term > 0)
+	w, kept, head, trail := write()
+	if dec != nil && len(dec.used) > 0 {
+		if dec.moved = csvMovedNumbers(&o, dec.used); len(dec.moved) > 0 {
+			dec.used = map[float64]bool{}
+			w, kept, head, trail = write()
+		}
+	}
 
 	out := w.buf.Bytes()
-	if !csvKeepCheck(out[head:], s.in, comma, sep, first, trail) {
+	if !csvKeepCheck(out[head:], s.in, comma, sep, first, trail, dec) {
 		return nil, CSVKept{Why: "check_failed"}
 	}
 	// A first cell that starts with the three bytes of a byte order mark, at
@@ -273,11 +292,12 @@ func keepCSVAs(body, saved []byte, d CSVDialect, as csvKeepAs) ([]byte, CSVKept)
 // csvKeepCheck is P2, read from the bytes about to be written (both without
 // a byte order mark): out, in the file's dialect (its delimiter comma), has
 // the saved records (separated by from) in their order, every cell the saved
-// one or a text ONLYOFFICE writes that way - after lead records of the file's
-// own in front (a `sep=` line) and before trail empty ones at the end. Both
-// are read a field at a time: what is written is checked whatever its records
-// hold.
-func csvKeepCheck(out, saved []byte, comma, from byte, lead, trail int) bool {
+// one or a text ONLYOFFICE writes that way - or the saved number with a
+// decimal comma where dec gives it one (csvCommas.spell) - after lead records
+// of the file's own in front (a `sep=` line) and before trail empty ones at
+// the end. Both are read a field at a time: what is written is checked
+// whatever its records hold.
+func csvKeepCheck(out, saved []byte, comma, from byte, lead, trail int, dec *csvCommas) bool {
 	tabs := comma != '\t'
 	w := csvReader{in: out, comma: comma}
 	s := csvReader{in: saved, comma: from}
@@ -292,7 +312,7 @@ func csvKeepCheck(out, saved []byte, comma, from byte, lead, trail int) bool {
 			return false
 		}
 		// A cell one of the two records does not have is an empty one.
-		for wl, sl := false, false; !wl || !sl; {
+		for j, wl, sl := 0, false, false; !wl || !sl; j++ {
 			var wf, sf csvField
 			if !wl {
 				wf, wl, _, _ = w.field()
@@ -300,7 +320,7 @@ func csvKeepCheck(out, saved []byte, comma, from byte, lead, trail int) bool {
 			if !sl {
 				sf, sl, _, _ = s.field()
 			}
-			if !csvSame(wf.val, sf.val, tabs) {
+			if !csvSame(wf.val, sf.val, tabs) && !csvCommaSame(dec, j, wf.val, sf.val) {
 				return false
 			}
 		}
@@ -331,6 +351,11 @@ type csvOut struct {
 	buf   bytes.Buffer
 	eol   []byte
 	comma byte
+	// dec: what csvDecimalCommas found (nil: no decimal comma is written);
+	// commas, the cells written with one.
+	dec    *csvCommas
+	commas int
+	num    [32]byte
 	// n records started; at is where the last one's bytes start, term its own
 	// line end (none: the dialect's).
 	n    int
@@ -393,7 +418,7 @@ func (w *csvOut) changed(o *csvSide, i int, of, sf []csvField, tabs bool) (resto
 			}
 			continue
 		}
-		writeCSVField(&w.buf, sv, w.comma)
+		w.theirs(j, sv)
 	}
 	r := o.recs[i]
 	w.term = o.in[r.end : r.end+uint32(r.term)]
@@ -418,8 +443,21 @@ func (w *csvOut) fresh(sf []csvField, width int) {
 		if j > 0 {
 			w.buf.WriteByte(w.comma)
 		}
-		writeCSVField(&w.buf, sf[j].val, w.comma)
+		w.theirs(j, sf[j].val)
 	}
+}
+
+// theirs writes the saved value v of cell j where no text of the file is
+// kept: as saved, but for a number ONLYOFFICE wrote with a decimal point in a
+// column whose decimals the file writes with a comma, which gets the comma.
+func (w *csvOut) theirs(j int, v []byte) {
+	if c, val, ok := w.dec.spell(w.num[:0], j, v); ok {
+		w.commas++
+		w.dec.used[val] = true
+		writeCSVField(&w.buf, c, w.comma)
+		return
+	}
+	writeCSVField(&w.buf, v, w.comma)
 }
 
 // csvFilled is the number of fields up to the last one that is not empty.
@@ -475,6 +513,11 @@ type csvSide struct {
 	// width is the number of fields of its widest record.
 	width int
 	rd    csvReader
+	// numbers, when index is asked for it (wantNumbers), says for each
+	// column how it writes a decimal: 1, a number with a decimal comma; -1, a
+	// number with a point or with commas between thousands (csvDecimalCommas).
+	wantNumbers bool
+	numbers     []int8
 }
 
 const (
@@ -512,6 +555,9 @@ func (c *csvSide) index(in []byte, comma byte, tabs bool) (why string) {
 			}
 			if len(f.val) > 0 {
 				empty = false
+				if c.wantNumbers {
+					c.number(n-1, f.val)
+				}
 			}
 			if last {
 				c.width = max(c.width, n)
@@ -521,6 +567,23 @@ func (c *csvSide) index(in []byte, comma byte, tabs bool) (why string) {
 		}
 	}
 	return ""
+}
+
+// number notes how cell v of column j writes a decimal, if it is a number.
+func (c *csvSide) number(j int, v []byte) {
+	for len(c.numbers) <= j {
+		c.numbers = append(c.numbers, 0)
+	}
+	// A number starts with a digit, a sign, a point or a space: a text is
+	// told at its first byte.
+	switch b := v[0]; {
+	case c.numbers[j] < 0:
+	case !csvDigit(b) && b != '-' && b != '+' && b != '.' && b != ' ':
+	case csvPointNumber(v), csvThousands(v):
+		c.numbers[j] = -1
+	case csvCommaNumber(v):
+		c.numbers[j] = 1
+	}
 }
 
 // fields splits record i (at most csvKeepMaxFields: index saw to it). Valid
@@ -1481,4 +1544,294 @@ func csvText(o []byte, tabs bool) (t []byte, ok bool) {
 		}
 	}
 	return t, !bytes.Equal(t, o)
+}
+
+// -------------------------------------------- a decimal comma somebody typed
+//
+// In an editor whose language writes decimals with a comma (Turkish, German),
+// a decimal comma typed is a number, and the save writes every number with a
+// point: `4,5` typed over a `3,5` came back as `4.5` (measured, Docs 9.4.0.1;
+// csv_keep_comma_test.go). The file's own decimal commas nobody touched are
+// text to ONLYOFFICE and come back as they were (R2), so the column a person
+// typed into says how the file writes a decimal, and the typed number is
+// written that way.
+//
+// ⚠ Only on evidence, and never the other way:
+//
+//   - a file whose delimiter is not a comma (a comma cannot be a decimal mark
+//     there without quotes, and nothing says it is one);
+//   - a column of the file that holds a number with a decimal comma
+//     (csvCommaNumber) and none with a point (csvPointNumber) or with commas
+//     between thousands (csvThousands): a column of both is no convention to
+//     follow;
+//   - in the save, a cell of that column that holds such a number exactly as
+//     the file did, in a record lined up with the file's: the column still
+//     stands where it stood;
+//   - and a number whose value the file holds in none of its cells, however
+//     it writes it (csvMovedNumbers). A column deleted, added or moved, or
+//     cells shifted along a row, put the file's own numbers at the column's
+//     place, and a cell or two the columns share can make it look as if
+//     nothing moved (found in review): those numbers are not ones somebody
+//     typed.
+//
+// The save does not say which language typed a number: `4,5` in the Turkish
+// editor and `4.5` in the English one save the same bytes (measured), and
+// people in both may edit one file. So a number written with a point in such
+// a column gets the comma whoever typed it; text typed with an apostrophe
+// that reads like one (`'4.5`, saved `4.5`) gets it too. What is no number
+// with a point and digits - a whole number, an exponent, a percent, a date,
+// a text - is written as ONLYOFFICE saved it.
+
+// csvCommas is what csvDecimalCommas found.
+type csvCommas struct {
+	// cols: the columns whose decimals the file writes with a comma.
+	cols []bool
+	// used: the values of the numbers given a decimal comma, as the writer
+	// wrote them. moved: those of them the file holds as a number in a cell
+	// (csvMovedNumbers), which are written as saved.
+	used, moved map[float64]bool
+}
+
+// spell answers the saved value v of cell j with a decimal comma, and the
+// number's value, when it gets one: a number with a point and digits
+// (appendCSVCommaDecimal), in a column whose decimals the file writes with a
+// comma, and not a value the file holds as a number.
+func (c *csvCommas) spell(dst []byte, j int, v []byte) (out []byte, val float64, ok bool) {
+	if c == nil || j >= len(c.cols) || !c.cols[j] {
+		return dst, 0, false
+	}
+	if out, ok = appendCSVCommaDecimal(dst, v); !ok {
+		return dst, 0, false
+	}
+	val, err := strconv.ParseFloat(string(v), 64)
+	if err != nil || c.moved[val] {
+		return dst, 0, false
+	}
+	return out, val, true
+}
+
+// csvDecimalCommas answers which columns of the file write their decimals
+// with a comma (o.numbers, read when the file was indexed, is spent): nil
+// when none does.
+func csvDecimalCommas(o, s *csvSide, from []int32, comma byte) *csvCommas {
+	if comma == ',' || bytes.IndexByte(o.in, ',') < 0 {
+		return nil
+	}
+	// How each column writes a decimal, read when the file was indexed.
+	seen := o.numbers
+	left := 0
+	for _, v := range seen {
+		if v > 0 {
+			left++
+		}
+	}
+	if left == 0 {
+		return nil
+	}
+	var dec *csvCommas
+	for i := 0; i < len(from) && left > 0; i++ {
+		if from[i] < 0 {
+			continue
+		}
+		of, sf := o.fields(int(from[i])), s.fields(i)
+		for j := 0; j < len(of) && j < len(sf) && j < len(seen); j++ {
+			if seen[j] > 0 && bytes.Equal(of[j].val, sf[j].val) && csvCommaNumber(sf[j].val) {
+				if dec == nil {
+					dec = &csvCommas{cols: make([]bool, len(seen)), used: map[float64]bool{}}
+				}
+				dec.cols[j], seen[j] = true, 0
+				left--
+			}
+		}
+	}
+	return dec
+}
+
+// csvMovedNumbers answers which of the values given a decimal comma (used)
+// the file holds as a number in any cell, however it writes it (`1.5 `,
+// `03.50`, `1.5e3`, which ONLYOFFICE saves as `1.50`, `3.50`,
+// `1500.00000`): a number that stands in a decimal-comma column of the save
+// but was the file's own - a column deleted, added or moved, cells shifted
+// in a row, a row pasted, an exponent nobody touched that ONLYOFFICE wrote
+// out - is not one somebody typed, and keeps its point. A number typed that
+// happens to be one the file holds keeps it too. By value, so that no
+// spelling of it is missed; only cells that start like a number are read.
+func csvMovedNumbers(o *csvSide, used map[float64]bool) map[float64]bool {
+	var moved map[float64]bool
+	for i := range o.recs {
+		for _, f := range o.fields(i) {
+			v := csvTrimNumber(f.val)
+			if len(v) == 0 || len(v) > 64 || (!csvDigit(v[0]) && v[0] != '-' && v[0] != '+' && v[0] != '.') {
+				continue
+			}
+			x, err := strconv.ParseFloat(string(v), 64)
+			if err != nil || !used[x] {
+				continue
+			}
+			if moved == nil {
+				moved = map[float64]bool{}
+			}
+			moved[x] = true
+		}
+	}
+	return moved
+}
+
+// csvCommaNumber reports whether v is a number written with a decimal comma:
+// digits, a comma, digits, with a minus sign in front; the digits before the
+// comma may be grouped in threes with points (`1.250,75`). ⚠ Not one or two
+// or three digits, a comma and three digits (`1,250`): in the English way of
+// writing numbers that is a thousand and more (the English editor reads a
+// typed `2,675` as 2675, measured), and it says nothing about the column.
+func csvCommaNumber(v []byte) bool {
+	if len(v) > 0 && v[0] == '-' {
+		v = v[1:]
+	}
+	c := bytes.IndexByte(v, ',')
+	if c <= 0 || c == len(v)-1 || !csvDigits(v[c+1:]) {
+		return false
+	}
+	whole := v[:c]
+	if csvDigits(whole) {
+		return len(whole) > 3 || len(v)-c-1 != 3
+	}
+	// Grouped: one to three digits, then a point and three digits, and again.
+	head := bytes.IndexByte(whole, '.')
+	if head < 1 || head > 3 || !csvDigits(whole[:head]) {
+		return false
+	}
+	for g := whole[head:]; len(g) > 0; g = g[4:] {
+		if len(g) < 4 || g[0] != '.' || !csvDigits(g[1:4]) {
+			return false
+		}
+	}
+	return true
+}
+
+// csvThousands reports whether v is a whole number with commas between its
+// thousands, twice or more (`1,250,000`): a column that holds one writes its
+// numbers the English way.
+func csvThousands(v []byte) bool {
+	if len(v) > 0 && v[0] == '-' {
+		v = v[1:]
+	}
+	head := bytes.IndexByte(v, ',')
+	if head < 1 || head > 3 || !csvDigits(v[:head]) || bytes.Count(v, []byte{','}) < 2 {
+		return false
+	}
+	for g := v[head:]; len(g) > 0; g = g[4:] {
+		if len(g) < 4 || g[0] != ',' || !csvDigits(g[1:4]) {
+			return false
+		}
+	}
+	return true
+}
+
+// csvDigits reports whether v is digits, and at least one.
+func csvDigits(v []byte) bool {
+	for _, c := range v {
+		if !csvDigit(c) {
+			return false
+		}
+	}
+	return len(v) > 0
+}
+
+// csvPointNumber reports whether ONLYOFFICE may read v as a number with a
+// decimal point or an exponent (`3.5`, `.5`, `-1.250`, `1.5e3`, `1e3`):
+// after the spaces around it and a sign, digits with a point among them, or
+// digits and an exponent. Wider than what R2 writes, so that a column with
+// any of them is no decimal-comma column.
+func csvPointNumber(v []byte) bool {
+	_, t := csvSign(csvTrimNumber(v))
+	// One pass: digits and one point, then an exponent or not.
+	digits, point, i := 0, false, 0
+	for ; i < len(t) && (csvDigit(t[i]) || (t[i] == '.' && !point)); i++ {
+		if t[i] == '.' {
+			point = true
+		} else {
+			digits++
+		}
+	}
+	if digits == 0 {
+		return false
+	}
+	if i == len(t) {
+		return point
+	}
+	if t[i] != 'e' && t[i] != 'E' {
+		return false
+	}
+	x := t[i+1:]
+	if len(x) > 0 && (x[0] == '+' || x[0] == '-') {
+		x = x[1:]
+	}
+	return csvDigits(x)
+}
+
+// appendCSVCommaDecimal appends the number s with a decimal comma, when s is
+// a number as ONLYOFFICE's writer prints one with a point: a minus sign or
+// not, digits, a point, digits, nothing else. The writer prints up to 17
+// significant digits (C's %.17g; `1,1` typed is saved `1.1000000000000001`,
+// measured): a number of 16 or 17 that is exactly what %.17g prints for its
+// double is written as the shortest decimal that is the same double, which is
+// what was typed; any other keeps its digits, the point made a comma. More
+// than 17 is no number the writer printed (a text that reads like one): no
+// comma.
+func appendCSVCommaDecimal(dst, s []byte) ([]byte, bool) {
+	_, t := csvSign(s)
+	if len(s) > 0 && s[0] == '+' {
+		return dst, false
+	}
+	p := bytes.IndexByte(t, '.')
+	if p <= 0 || p == len(t)-1 {
+		return dst, false
+	}
+	significant := 0
+	for i, c := range t {
+		switch {
+		case i == p:
+		case !csvDigit(c):
+			return dst, false
+		case c != '0' || significant > 0:
+			significant++
+		}
+	}
+	start := len(dst)
+	switch {
+	case significant > 17:
+		return dst, false
+	case significant > 15:
+		// Only what the writer printed for a double: another text of 16 or 17
+		// digits keeps them.
+		f, err := strconv.ParseFloat(string(s), 64)
+		var g [32]byte
+		if err != nil || !bytes.Equal(strconv.AppendFloat(g[:0], f, 'g', 17, 64), s) {
+			dst = append(dst, s...)
+			break
+		}
+		dst = strconv.AppendFloat(dst, f, 'f', -1, 64)
+		if bytes.IndexByte(dst[start:], '.') < 0 {
+			return dst[:start], false
+		}
+	default:
+		dst = append(dst, s...)
+	}
+	if i := bytes.IndexByte(dst[start:], '.'); i >= 0 {
+		dst[start+i] = ','
+	}
+	return dst, true
+}
+
+// csvCommaSame is csvKeepCheck's side of the comma: w is the saved cell s of
+// column j with the decimal comma dec gives it, and read with that comma as
+// the decimal mark it is the number s is.
+func csvCommaSame(dec *csvCommas, j int, w, s []byte) bool {
+	var b [32]byte
+	c, val, ok := dec.spell(b[:0], j, s)
+	if !ok || !bytes.Equal(c, w) {
+		return false
+	}
+	x, err := strconv.ParseFloat(string(bytes.Replace(w, []byte{','}, []byte{'.'}, 1)), 64)
+	return err == nil && x == val
 }

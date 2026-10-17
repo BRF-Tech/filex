@@ -196,8 +196,12 @@ describe('a server patch', () => {
     expect(sh).toMatch(/if \[ "\$\{FILEX_GO_RACE:-\}" = 1 \]; then/);
     expect(sh).toMatch(/race=\(-race\)/);
     // ${race[@]+...}: an empty array under set -u is "unbound" in bash 4.3 and older.
-    expect(sh).toMatch(/go test \$\{race\[@\]\+"\$\{race\[@\]\}"\} -timeout 30m \$targets/);
-    expect(sh).toMatch(/exec go test \$\{race\[@\]\+"\$\{race\[@\]\}"\} -timeout "\$whole_timeout" \.\/\.\.\./);
+    expect(sh).toMatch(/go test \$\{race\[@\]\+"\$\{race\[@\]\}"\} \$\{par\[@\]\+"\$\{par\[@\]\}"\} -timeout "\$timeout" \$targets/);
+    expect(sh).toMatch(/exec go test \$\{race\[@\]\+"\$\{race\[@\]\}"\} \$\{par\[@\]\+"\$\{par\[@\]\}"\} -timeout "\$timeout" \.\/\.\.\./);
+    // Under -race the targeted run gets the whole run's hour and half the cores
+    // (v0.57.1: the handlers package rang a 30-minute alarm beside the image builds).
+    expect(sh).toMatch(/race=\(-race\)[\s\S]*timeout=60m[\s\S]*par=\(-p /);
+    expect(sh).not.toMatch(/-timeout 30m \$targets/);
     expect(sh).toMatch(/-race needs a C compiler/);
     const p = plan({ repo: REPO, version: '9.9.9', tag: 'v9.9.9' });
     const gate = p.heavy.find((g: Gate) => g.serverOnly);

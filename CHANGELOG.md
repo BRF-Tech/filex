@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.57.1] - 2026-10-17
+
+### Fixed
+
+- **A decimal typed into a CSV in ONLYOFFICE keeps the file's comma.** In the
+  Turkish or the German editor a decimal typed with a comma is a number, and
+  the save wrote it with a point: `3,5` typed over as `4,5` in a semicolon
+  file went to the file as `4.5`, and `1,1` as `1.1000000000000001`, in a
+  column of `3,5` and `1250,75` that ONLYOFFICE kept as they were (measured on
+  Docs 9.4.0). A number written with a point that somebody typed, or put in a
+  row they added, is now written with a decimal comma where its column writes
+  one - a file not separated by commas, a column with decimal commas and no
+  decimal point, still standing where it stood, and a number that did not
+  move there from elsewhere in the file - with 16 or 17 significant digits as
+  the shortest decimal that is the same number (`1,1`). An exponent, a
+  percent and a date are written as before. A CSV saved from the Office
+  editor app gets the same rule
+  ([ONLYOFFICE.md → A decimal you type keeps the file's comma](docs/ONLYOFFICE.md#a-decimal-you-type-keeps-the-files-comma)).
+
 ## [0.57.0] - 2026-10-17
 
 ### Added
