@@ -1,0 +1,282 @@
+# The nightly desktop packages (task #266): every desktop package of the
+# newest nightly - Windows (x64, arm64), macOS, Linux (x64, arm64) - and the
+# arm64 snap for the Snap Store's edge channel, made on GitHub's runners from
+# the source the build host pushes to ghcr every night its nightly run makes
+# a build (scripts/chain/nightly.mjs: ghcr.io/<owner>/filex-nightly-src:nightly,
+# the public tree of the night's commit).
+#
+# ⚠ Not a release. Nothing is signed; nothing goes to a GitHub Release, to a
+# store's stable channel or to a package manager. The packages go to ghcr as
+# ONE OCI artifact - filex-desktop-nightly:nightly-YYYYMMDD and :nightly, the
+# last NIGHTLY_KEEP nights - the arm64 snap to edge alone, and the build host
+# puts the newest night on filex.sh/nightly in the morning
+# (scripts/chain/nightly-site.sh). The amd64 snap is the build host's.
+#
+# Every hour it asks whether the source is newer than the last packages and
+# than the last attempt: when it is not, it ends in seconds. A source that
+# failed is not tried again every hour (the `attempted` tag); `force` builds
+# it again by hand.
+name: Nightly desktop packages
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build the current nightly source again, even when it was built or tried"
+        type: boolean
+        default: false
+
+concurrency:
+  group: nightly-desktop
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  NIGHTLY_KEEP: "7"
+  ORAS_VERSION: "1.2.2"
+
+jobs:
+  source:
+    name: A new nightly source?
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.s.outputs.build }}
+      version: ${{ steps.s.outputs.version }}
+      revision: ${{ steps.s.outputs.revision }}
+      date: ${{ steps.s.outputs.date }}
+    steps:
+      - uses: oras-project/setup-oras@v1
+        with:
+          version: ${{ env.ORAS_VERSION }}
+      - name: The source and the last packages
+        id: s
+        shell: bash
+        env:
+          FORCE: ${{ inputs.force }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | oras login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          src="ghcr.io/$owner/filex-nightly-src:nightly"
+          out="ghcr.io/$owner/filex-desktop-nightly"
+          ann() { oras manifest fetch "$1" 2>/dev/null | jq -r --arg k "$2" '.annotations[$k] // empty' || true; }
+          rev=$(ann "$src" org.opencontainers.image.revision)
+          if [ -z "$rev" ]; then
+            echo "no nightly source at $src yet"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          built=$(ann "$out:nightly" org.opencontainers.image.revision)
+          tried=$(ann "$out:attempted" org.opencontainers.image.revision)
+          echo "source $rev; packages of ${built:-nothing yet}; last attempt ${tried:-none}"
+          if [ "$FORCE" != true ] && { [ "$rev" = "$built" ] || [ "$rev" = "$tried" ]; }; then
+            echo "nothing new: $rev was built or tried (to build it again: run this workflow by hand with force)"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version=$(ann "$src" sh.filex.nightly.desktop-version)
+          date=$(ann "$src" sh.filex.nightly.date)
+          if [ -z "$version" ] || [ -z "$date" ]; then
+            echo "::error::$src carries no sh.filex.nightly.desktop-version or sh.filex.nightly.date"
+            exit 1
+          fi
+          mkdir -p src
+          (cd src && oras pull "$src")
+          ls -la src
+          # The attempt, before anything is built.
+          echo '{}' > attempt.json
+          oras push "$out:attempted" --annotation "org.opencontainers.image.revision=$rev" attempt.json:application/json
+          {
+            echo "build=true"
+            echo "version=$version"
+            echo "revision=$rev"
+            echo "date=$date"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: steps.s.outputs.build == 'true'
+        with:
+          name: nightly-src
+          path: src/filex-nightly-src.tar.gz
+          retention-days: 3
+
+  desktop:
+    name: Desktop packages (${{ matrix.label }})
+    needs: source
+    if: needs.source.outputs.build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, label: linux-x64, targets: "linux-x64" }
+          - { os: ubuntu-24.04-arm, label: linux-arm64, targets: "linux-arm64,snap-arm64" }
+          - { os: windows-latest, label: windows, targets: "windows" }
+          - { os: macos-15, label: macos, targets: "mac" }
+    runs-on: ${{ matrix.os }}
+    env:
+      ND_VERSION: ${{ needs.source.outputs.version }}
+      ND_TARGETS: ${{ matrix.targets }}
+      LABEL: ${{ matrix.label }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-src
+      - name: The source
+        shell: bash
+        run: mkdir src && tar -xzf filex-nightly-src.tar.gz -C src
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      # ⚠ 22: electron-builder 26 loads @electron/rebuild 4 (ESM only, Node 22.12+).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/backend/go.mod
+          cache-dependency-path: src/backend/go.sum
+      - name: rpmbuild for the .rpm
+        if: startsWith(matrix.label, 'linux')
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rpm
+      # electron-builder's own fpm is an x86-64 bundle: on arm64 it cannot start.
+      - name: fpm for the arm64 .deb and .rpm
+        if: matrix.label == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq ruby ruby-dev build-essential
+          sudo gem install --no-document fpm
+          echo "USE_SYSTEM_FPM=true" >> "$GITHUB_ENV"
+      # A target that fails is a row of the night's manifest, not the end of
+      # this job: the others are kept, and the snap is packed when its app was.
+      - name: The packages
+        continue-on-error: true
+        shell: bash
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: ND_JOB_SRC="$PWD/src" ND_JOB_OUT="$PWD/out" bash src/scripts/chain/nightly-desktop-job.sh
+      - name: snapcraft + LXD for the arm64 snap
+        if: matrix.label == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          sudo snap install snapcraft --classic --channel=8.x/stable
+          sudo snap install lxd 2>/dev/null || sudo snap refresh lxd
+          sudo lxd waitready
+          sudo lxd init --auto
+          sudo usermod -aG lxd "$USER"
+          sudo chmod 666 /var/snap/lxd/common/lxd/unix.socket
+          sudo iptables -P FORWARD ACCEPT
+          snapcraft --version
+          echo "SNAPCRAFT_BUILD_ENVIRONMENT=lxd" >> "$GITHUB_ENV"
+      - name: The arm64 snap
+        id: snap
+        if: matrix.label == 'linux-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx 'snap-arm64 built' out/targets.txt || { echo "::error::the arm64 app was not built, so there is no snap"; exit 1; }
+          (cd src/desktop && pnpm exec electron-builder --linux snap --arm64 --publish never --prepackaged release/linux-arm64-unpacked)
+          cp src/desktop/release/filex-desktop-arm64.snap out/
+      - name: The arm64 snap to edge
+        if: matrix.label == 'linux-arm64' && steps.snap.outcome == 'success'
+        shell: bash
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: node src/scripts/chain/nightly-snap-edge.mjs out/filex-desktop-arm64.snap out/snap-arm64.json
+      - name: Keep the packages
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-desktop-${{ matrix.label }}
+          path: |
+            out/files/
+            out/targets.txt
+            out/snap-arm64.json
+          if-no-files-found: ignore
+          retention-days: 3
+
+  publish:
+    name: The night's packages to ghcr
+    needs: [source, desktop]
+    if: ${{ !cancelled() && needs.source.outputs.build == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.source.outputs.version }}
+      REVISION: ${{ needs.source.outputs.revision }}
+      DATE: ${{ needs.source.outputs.date }}
+      ROWS: ${{ needs.desktop.result }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-src
+      - name: The source (the manifest script is in it)
+        shell: bash
+        run: mkdir src && tar -xzf filex-nightly-src.tar.gz -C src
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nightly-desktop-*
+          path: out
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: oras-project/setup-oras@v1
+        with:
+          version: ${{ env.ORAS_VERSION }}
+      - name: The night's manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          node src/scripts/chain/nightly-desktop-manifest.mjs --dir out --version "$VERSION" --revision "$REVISION" \
+            --date "$DATE" --expect linux-x64,linux-arm64,snap-arm64,windows,mac \
+            --run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          cat out/nightly.json
+      - name: To ghcr.io, as nightly-<date> and nightly
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | oras login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/filex-desktop-nightly"
+          day="${DATE//-/}"
+          cd out
+          files=(nightly.json:application/json SHA256SUMS:text/plain)
+          for f in filex-desktop-*; do files+=("$f"); done
+          oras push "$repo:nightly-$day" \
+            --annotation "org.opencontainers.image.revision=$REVISION" \
+            --annotation "org.opencontainers.image.version=$VERSION" \
+            --annotation "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --annotation "sh.filex.nightly.date=$DATE" \
+            "${files[@]}"
+          oras tag "$repo:nightly-$day" nightly
+          echo "### $repo:nightly-$day (and :nightly), ${#files[@]} files" >> "$GITHUB_STEP_SUMMARY"
+      # The newest NIGHTLY_KEEP nights stay; older ones and the attempts
+      # before the last go. A token that may not delete them leaves a warning,
+      # never a red night.
+      - name: The nights before the last ones
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="/orgs/$GITHUB_REPOSITORY_OWNER/packages/container/filex-desktop-nightly/versions"
+          gh api "$api?per_page=1" >/dev/null 2>&1 || api="/users/$GITHUB_REPOSITORY_OWNER/packages/container/filex-desktop-nightly/versions"
+          gh api --paginate "$api?per_page=100" --jq '.[] | [.id, .created_at, ((.metadata.container.tags // []) | join(","))] | @tsv' |
+            sort -t "$(printf '\t')" -k2,2r |
+            awk -F '\t' -v keep="$NIGHTLY_KEEP" '{ if ($3 ~ /(^|,)(nightly|attempted)(,|$)/) next; if ($3 ~ /nightly-[0-9]{8}/) { n++; if (n <= keep) next } print $1 }' > old.txt
+          while read -r id; do
+            [ -n "$id" ] || continue
+            gh api -X DELETE "$api/$id" || echo "::warning::could not delete version $id"
+          done < old.txt
+          echo "removed $(wc -l < old.txt) old version(s)"
+      - name: Red when a row failed
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=$(jq -r '.rows | to_entries[] | select(.value != "built") | .key' out/nightly.json | paste -sd, -)
+          if [ -n "$failed" ] || [ "$ROWS" != success ]; then
+            echo "::error::not built this night: ${failed:-none} (the desktop job: $ROWS) - the night's manifest and filex.sh/nightly say which"
+            exit 1
+          fi
