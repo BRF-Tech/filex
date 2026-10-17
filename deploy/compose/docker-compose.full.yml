@@ -1,18 +1,28 @@
 # filex — full stack (production-shaped) with toggleable integrations.
 #
 # Always-on core:  filex + PostgreSQL (DB) + Redis (queue) + Caddy (HTTPS proxy)
-# Opt-in add-ons:  ONLYOFFICE · draw.io · S3 server (Versity S3 Gateway)
+# Opt-in add-ons:  draw.io · S3 server (Versity S3 Gateway)
 #                  · ClamAV (antivirus — this image ships no scanner)
+#                  · ONLYOFFICE Document Server (optional, see below)
+#
+# Office documents: install the Office editor app (Admin -> Plugins -> Apps,
+# or the App store). It edits Word, Excel and PowerPoint in the browser, alone
+# or together, and needs no container in this file. The ONLYOFFICE Document
+# Server stays an option (profile `onlyoffice`, not in the default
+# COMPOSE_PROFILES): today it is what draws office thumbnails and runs the
+# apps' office conversions (docs/ONLYOFFICE.md).
 #
 # ── Toggling add-ons ────────────────────────────────────────────────────
 # Every add-on is a Compose *profile*. Turn one on/off in your .env by editing
 # COMPOSE_PROFILES (comma list) together with the matching FILEX_*_URL:
 #
-#   COMPOSE_PROFILES=onlyoffice,drawio,versitygw,clamav
+#   COMPOSE_PROFILES=drawio,versitygw,clamav,onlyoffice
 #
-# To drop ONLYOFFICE tomorrow: remove `onlyoffice` from COMPOSE_PROFILES and
-# blank FILEX_ONLYOFFICE_URL, then:
+# To drop an add-on: remove it from COMPOSE_PROFILES and blank its
+# FILEX_*_URL, then:
 #   docker compose -f docker-compose.full.yml --env-file .env up -d --remove-orphans
+# ⚠ `--remove-orphans` removes a running Document Server whose profile you
+# left out of COMPOSE_PROFILES (its onlyoffice-data volume stays).
 #
 # Mermaid needs no service — filex renders .mmd / .mermaid in the browser.
 #
@@ -109,8 +119,12 @@ services:
       # ⚠ A proxy on the HOST instead of the caddy service reaches filex
       # through a published port and arrives from this network's gateway: list
       # it ("auto, <gateway>") only with the port published on 127.0.0.1.
-      # The Sign-in security admin page names such a peer, offers to add it,
-      # and wins once it saves a list. docs/CONFIGURATION.md -> "Trusted proxies".
+      # The Sign-in security admin page names such a peer and offers to add it.
+      # ⚠ A SEED since 0.57: the first start writes this list into the setting,
+      # and from then on it is kept on Admin -> Settings -> Sign-in security; a
+      # changed value here is not read again (a start says so in its log) until
+      # `filex settings reseed login.trusted_proxies` writes it over the saved one.
+      # docs/CONFIGURATION.md -> "Trusted proxies".
       FILEX_TRUSTED_PROXIES: ${FILEX_TRUSTED_PROXIES:-}
       # SFTP / FTPS / NFS each open a LISTENER, so they stay off until asked
       # for — and each needs its port published below and opened on the
@@ -131,6 +145,8 @@ services:
       # filex offers an integration as soon as its URL is set; it does not hide
       # one that is down. Settings -> External services -> Test says whether
       # filex AND your browser can actually reach it.
+      # The ONLYOFFICE lines matter only with the onlyoffice profile (or a
+      # Document Server of your own); the Office editor app needs none of them.
       FILEX_ONLYOFFICE_URL: ${FILEX_ONLYOFFICE_URL:-}
       FILEX_ONLYOFFICE_JWT: ${ONLYOFFICE_JWT_SECRET:-}
       # Only when the document server cannot reach FILEX_PUBLIC_URL (a public
@@ -251,12 +267,18 @@ services:
     restart: unless-stopped
 
   # ── Opt-in add-ons (Compose profiles) ──────────────────────────────────
+  # ONLYOFFICE Document Server: optional (see the header). Pinned to the
+  # version filex is tested against - never `latest`, which moves under you
+  # (Docs 10.0 changed how a CSV is saved). ONLYOFFICE_IMAGE in .env picks
+  # another one on purpose.
   onlyoffice:
-    image: onlyoffice/documentserver:latest
+    image: ${ONLYOFFICE_IMAGE:-onlyoffice/documentserver:9.4.0.1}
     profiles: ["onlyoffice"]
     environment:
       JWT_ENABLED: "true"
-      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET}     # must match FILEX_ONLYOFFICE_JWT
+      # Must match FILEX_ONLYOFFICE_JWT: set ONLYOFFICE_JWT_SECRET in .env
+      # with the profile (filex refuses a Document Server without a secret).
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-}
     volumes:
       - onlyoffice-data:/var/www/onlyoffice/Data
     restart: unless-stopped

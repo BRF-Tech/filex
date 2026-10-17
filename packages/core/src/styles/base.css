@@ -1591,6 +1591,91 @@ filex-explorer {
 .fe-preview__md th { background: var(--fe-bg-elev); }
 .fe-preview__md img { max-width: 100%; }
 
+/* A picture from another server, held back (lib/sanitizeHtml, RemoteImages):
+   where it would be, its alt text, and whose server it is on. A click asks
+   before it is loaded (RemoteImageDialog). Wherever a file's markup is drawn:
+   the preview, a notebook, an app's release notes. */
+.fe-remote-img {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px dashed var(--fe-border-strong);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+  line-height: 1.4;
+  vertical-align: middle;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.fe-remote-img[data-remote-image] {
+  cursor: pointer;
+}
+.fe-remote-img[data-remote-image]:hover {
+  border-color: var(--fe-primary);
+  color: var(--fe-text);
+}
+.fe-remote-img:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 2px;
+}
+/* The image icon (lucide "image", ISC), drawn in the text's color. */
+.fe-remote-img__icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.fe-remote-img__alt {
+  color: var(--fe-text);
+  font-weight: 500;
+}
+/* A server's name reads left to right in every interface. */
+.fe-remote-img__host,
+.fe-remote-ask__host {
+  font-family: var(--fe-font-mono);
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+/* The same, in a diagram (lib/sanitizeHtml, the diagram kind): a dashed box
+   where the picture would be, with the label. */
+.fe-remote-svgimg[data-remote-image] {
+  cursor: pointer;
+}
+.fe-remote-svgimg__box {
+  fill: var(--fe-bg-elev);
+  stroke: var(--fe-border-strong);
+  stroke-width: 1px;
+  stroke-dasharray: 4 3;
+}
+.fe-remote-svgimg[data-remote-image]:hover .fe-remote-svgimg__box,
+.fe-remote-svgimg:focus-visible .fe-remote-svgimg__box {
+  stroke: var(--fe-primary);
+}
+.fe-remote-svgimg:focus-visible {
+  outline: none;
+}
+.fe-remote-svgimg__label {
+  fill: var(--fe-text-muted);
+  font-size: 11px;
+}
+.fe-remote-ask__host {
+  margin: 8px 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.fe-remote-ask__hint {
+  margin: 8px 0 0;
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+}
+
 /* ---------- Toast ---------- */
 
 .fe-toast {
@@ -2631,6 +2716,385 @@ filex-explorer {
   width: auto;
   border-inline-start: none;
 }
+
+/* === the AI assistant's panel (task #269) ================================
+   Docked where the details panel docks, a little wider: a conversation reads
+   better at 360px. Narrow: the same full-size overlay. */
+.fe-assistant {
+  flex: 0 0 360px;
+  width: 360px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-inline-start: 1px solid var(--fe-border);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+}
+.fe-assistant--overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  width: auto;
+  border-inline-start: none;
+}
+.fe-assistant__head {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--fe-border);
+  flex: 0 0 auto;
+}
+.fe-assistant__mark {
+  width: 18px;
+  height: 18px;
+  color: var(--fe-primary);
+  flex: 0 0 auto;
+}
+.fe-assistant__head-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fe-assistant__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fe-assistant__provider {
+  margin: 0;
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
+.fe-assistant__iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--fe-radius-sm);
+  background: none;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.fe-assistant__iconbtn svg {
+  width: 16px;
+  height: 16px;
+}
+.fe-assistant__iconbtn:hover:not(:disabled),
+.fe-assistant__iconbtn.is-active {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-assistant__iconbtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.fe-assistant__scroll,
+.fe-assistant__history {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-sm);
+}
+.fe-assistant__intro,
+.fe-assistant__muted {
+  margin: 0;
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text-muted);
+  line-height: 1.5;
+}
+.fe-assistant__inline-icon {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+  margin-inline-end: var(--fe-gap-xs);
+}
+.fe-assistant__msg {
+  max-width: 100%;
+  border-radius: var(--fe-radius);
+  padding: 8px 10px;
+  font-size: var(--fe-text-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.fe-assistant__msg--user {
+  align-self: flex-end;
+  max-width: 88%;
+  background: var(--fe-primary-soft);
+  color: var(--fe-primary-ink);
+}
+.fe-assistant__msg--bot {
+  align-self: stretch;
+  background: var(--fe-bg-elev);
+  border: 1px solid var(--fe-border-soft);
+}
+.fe-assistant__text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.fe-assistant__md > :first-child {
+  margin-top: 0;
+}
+.fe-assistant__md > :last-child {
+  margin-bottom: 0;
+}
+.fe-assistant__md pre {
+  overflow-x: auto;
+  font-family: var(--fe-font-mono);
+  font-size: var(--fe-text-xs);
+}
+/* Where a link of the answer goes, written out after its words; a picture
+   from elsewhere is such a link too (lib/sanitizeHtml, assistant policy). */
+.fe-assistant__md .fe-md-href {
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+  overflow-wrap: anywhere;
+}
+.fe-assistant__chips {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fe-gap-xs);
+}
+.fe-assistant__chip {
+  padding: 1px 6px;
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg);
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-assistant__note {
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+  text-align: center;
+  padding: 2px 8px;
+}
+.fe-assistant__step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--fe-gap-sm);
+  padding: 6px 8px;
+  border: 1px solid var(--fe-border-soft);
+  border-radius: var(--fe-radius-sm);
+  font-size: var(--fe-text-xs);
+}
+.fe-assistant__step-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--fe-text-muted);
+}
+.fe-assistant__step.is-done .fe-assistant__step-icon {
+  color: var(--fe-ok);
+}
+.fe-assistant__step.is-failed .fe-assistant__step-icon {
+  color: var(--fe-danger);
+}
+.fe-assistant__step.is-denied .fe-assistant__step-icon,
+.fe-assistant__step.is-not_run .fe-assistant__step-icon {
+  color: var(--fe-warning);
+}
+.fe-assistant__step-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--fe-gap-xs);
+}
+.fe-assistant__step-label {
+  font-weight: 600;
+}
+.fe-assistant__step-target,
+.fe-assistant__step-to {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-assistant__step-to::before {
+  content: "\2192";
+  margin-inline-end: var(--fe-gap-xs);
+  color: var(--fe-text-muted);
+}
+[dir="rtl"] .fe-assistant__step-to::before {
+  content: "\2190";
+}
+.fe-assistant__step-status {
+  color: var(--fe-text-muted);
+}
+.fe-assistant__step-error {
+  flex-basis: 100%;
+  color: var(--fe-danger);
+}
+.fe-assistant__undo {
+  flex: 0 0 auto;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font-size: var(--fe-text-xs);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.fe-assistant__undo:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+}
+.fe-assistant__card {
+  border: 1px solid var(--fe-warning);
+  border-radius: var(--fe-radius);
+  padding: 10px 12px;
+  background: var(--fe-bg-elev);
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-sm);
+}
+.fe-assistant__card-question {
+  margin: 0;
+  font-weight: 600;
+  font-size: var(--fe-text-sm);
+}
+.fe-assistant__card-note {
+  margin: 0;
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
+.fe-assistant__card-args {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--fe-gap-sm);
+  font-size: var(--fe-text-xs);
+}
+.fe-assistant__card-args dt {
+  color: var(--fe-text-muted);
+}
+.fe-assistant__card-args dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--fe-font-mono);
+}
+.fe-assistant__card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--fe-gap-sm);
+}
+.fe-assistant__error {
+  margin: 0;
+  font-size: var(--fe-text-sm);
+  color: var(--fe-danger);
+}
+.fe-assistant__convs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fe-assistant__conv {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+}
+.fe-assistant__conv-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border: none;
+  background: none;
+  color: var(--fe-text);
+  text-align: start;
+  padding: 6px 8px;
+  border-radius: var(--fe-radius-sm);
+  cursor: pointer;
+}
+.fe-assistant__conv-open:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-assistant__conv-title {
+  max-width: 100%;
+  font-size: var(--fe-text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-assistant__conv-date {
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
+.fe-assistant__foot {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--fe-border);
+  padding: 8px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fe-assistant__with {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
+.fe-assistant__compose {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--fe-gap-sm);
+}
+.fe-assistant__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: none;
+  max-height: 160px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font: inherit;
+  font-size: var(--fe-text-sm);
+  padding: 6px 8px;
+}
+.fe-assistant__input:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+.fe-assistant__send svg {
+  width: 16px;
+  height: 16px;
+}
+.fe-assistant__spin {
+  animation: fe-assistant-spin 0.9s linear infinite;
+}
+@keyframes fe-assistant-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fe-assistant__spin {
+    animation: none;
+  }
+}
+/* === /the AI assistant's panel === */
 
 .fe-inspector__head {
   display: flex;
@@ -5803,15 +6267,67 @@ filex-explorer {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  /* Scrolls sideways ON ITSELF at 390px rather than widening the explorer:
-     three chips and a clear button do not fit a phone, and the alternative is
-     a horizontal scrollbar on everything. */
+  overflow: hidden;
+}
+/* Everything but the "⋮" scrolls sideways ON ITSELF at 390px rather than
+   widening the explorer: four chips, the name box and the sort do not fit a
+   phone, and the alternative is a horizontal scrollbar on everything.
+
+   ⚠⚠ The TRACK scrolls, not the row (task #264). The row used to scroll with
+   the "⋮" pinned over it (`position: sticky`), and on a phone the ⋮ came to
+   rest in the middle of a chip: the chip's rounded start edge and the stem of
+   its first letter on one side of it, its caret on the other through the
+   row's end padding (sticky stops at the CONTENT edge, so the padding is a
+   channel the scrolled chips show through). The owner read it as "an empty
+   box: a stray divider and a ⋮" (340px, Turkish, "Boyut" under the ⋮). Now
+   the ⋮ is the row's last item OUTSIDE the scroller: nothing slides under it
+   and nothing is beside it, and the track fades out at the edge where more
+   of it is waiting (FilterBar `is-more-start` / `is-more-end`). */
+.fe-filterbar__track {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: inherit;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
+  /* A scroller clips at its padding box, and the chips' focus ring stands
+     3px outside them (2px + 1px offset): room for it, taken back from the
+     row, so nothing moves. */
+  padding: 3px;
+  margin: -3px;
 }
-.fe-filterbar::-webkit-scrollbar {
+.fe-filterbar__track::-webkit-scrollbar {
   display: none;
+}
+/* The fade, on the side(s) where the track goes on. ⚠ RTL: the gradient's
+   angle turns with the line (`--filex-dir-x`, top of file), so "the end" is
+   the left edge in a right-to-left row. Alpha masks, so the chips fade into
+   whatever ground the row has (the selection tint, a theme's own). */
+.fe-filterbar__track.is-more-end {
+  -webkit-mask-image: linear-gradient(calc(90deg * var(--filex-dir-x, 1)), black calc(100% - 28px), transparent);
+  mask-image: linear-gradient(calc(90deg * var(--filex-dir-x, 1)), black calc(100% - 28px), transparent);
+}
+.fe-filterbar__track.is-more-start {
+  -webkit-mask-image: linear-gradient(calc(90deg * var(--filex-dir-x, 1)), transparent, black 28px);
+  mask-image: linear-gradient(calc(90deg * var(--filex-dir-x, 1)), transparent, black 28px);
+}
+.fe-filterbar__track.is-more-start.is-more-end {
+  -webkit-mask-image: linear-gradient(
+    calc(90deg * var(--filex-dir-x, 1)),
+    transparent,
+    black 28px,
+    black calc(100% - 28px),
+    transparent
+  );
+  mask-image: linear-gradient(
+    calc(90deg * var(--filex-dir-x, 1)),
+    transparent,
+    black 28px,
+    black calc(100% - 28px),
+    transparent
+  );
 }
 .fe-filterbar__chip {
   flex: 0 0 auto;
@@ -8197,39 +8713,6 @@ filex-explorer {
   color: var(--fe-primary-ink);
 }
 
-/* ── "coming soon" ────────────────────────────────────────────────────── */
-/* The AI assistant is drawn and disabled. ⚠ It must not read as BROKEN: the
-   glyph keeps a legible weight (0.55, not the 0.5 a plain `:disabled` would
-   give a control nobody meant to announce) and carries a small caption, so
-   the row says "not yet" rather than "not working". The caption is hidden
-   below 900px, where the tooltip and the aria-label still carry it — six
-   words in a 390px header would push the search field off the row. */
-.fe-toolbar__soon.fe-btn:disabled {
-  opacity: 0.55;
-  cursor: default;
-  gap: var(--fe-gap-xs);
-}
-.fe-toolbar__soon-tag {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  line-height: 1;
-  padding: 2px 5px;
-  border-radius: var(--fe-radius-sm);
-  background: var(--fe-primary-soft);
-  color: var(--fe-primary-ink);
-  white-space: nowrap;
-}
-@media (max-width: 900px) {
-  .fe-toolbar__soon-tag {
-    display: none;
-  }
-}
-.fe--narrow .fe-toolbar__soon-tag {
-  display: none;
-}
-
 /* ── the breadcrumb row ───────────────────────────────────────────────── */
 /* The row is now the crumbs' row in every profile (it used to be
    `display: contents` outside the drive shell, with the view switcher and the
@@ -8601,6 +9084,13 @@ filex-explorer {
 .fe-share__sections {
   margin-top: var(--fe-gap-lg);
   border-top: 1px solid var(--fe-border-soft);
+}
+/* ⚠ The gap and the rule part the sections from the link above them. Where
+   there is no link (a whole storage, #117: people and groups only) they
+   opened the dialog on an empty band with a line under it (0.57 shots). */
+.fe-share__sections:first-child {
+  margin-top: 0;
+  border-top: 0;
 }
 .fe-share__section + .fe-share__section {
   border-top: 1px solid var(--fe-border-soft);
@@ -10133,24 +10623,16 @@ filex-explorer {
   border-top: 1px solid var(--fe-border-soft);
 }
 
-/* ⚠ Pinned to the row's trailing edge while the row scrolls.
-   Measured at 390px: the filter row overflows by 260px and scrolls on itself
-   (the page does not), which left this button — and with it "Select all", the
-   only door that verb has on a phone — 260px off screen behind a scrollbar
-   that is deliberately invisible. `sticky` costs nothing at a width where the
-   row does not scroll, and the background is what stops the chips sliding
-   under a transparent button. */
+/* ⚠ Always on screen, at the row's trailing edge, whatever the chips do.
+   Measured at 390px: the filter row overflows by 260px, which once left this
+   button — and with it "Select all", the only door that verb has on a phone —
+   260px off screen behind a scrollbar that is deliberately invisible. It was
+   pinned over the scrolling row (`sticky`) and came to rest on top of a chip
+   (task #264); it is now OUTSIDE the scroller (`.fe-filterbar__track`), the
+   row's last item, with nothing under it and so no ground of its own to
+   carry. It never shrinks: the track gives way first. */
 .fe-filterbar__actions {
-  position: sticky;
-  inset-inline-end: 0;
-  background: var(--fe-bg);
-  /* The fade falls on the START side of this end-pinned cell, where the chips
-     slide under it. */
-  box-shadow: calc(-8px * var(--filex-dir-x, 1)) 0 8px -6px var(--fe-bg);
-}
-.fe-filterbar__actions:hover,
-.fe-filterbar__actions[aria-expanded='true'] {
-  background: var(--fe-bg-hover);
+  flex: 0 0 auto;
 }
 
 /* ═══ surucu:d1-sort — the sort control over a RANKED listing ═══════════════
@@ -10250,35 +10732,17 @@ filex-explorer {
  * Two decisions from 2026-09-13, in the header. Appended as one marked block
  * because the file above is being edited by other hands tonight.
  *
- * ── the AI mark's words, on hover ──────────────────────────────────────────
- * The mark used to carry a permanent `COMING SOON` pill (`.fe-toolbar__soon-tag`,
- * defined further up and no longer rendered by Toolbar.vue — its rules are
- * dead and should be swept by whoever next owns that region of this file).
- * A caption that is always on screen spends header width on a promise; the
- * words now arrive when the pointer does.
- *
- * ⚠ The tip is drawn by the WRAPPER's `:hover`, not the button's. The button
- * is `disabled`, and a disabled control does not receive mouse events in
- * Chromium — the hit test falls through it, so a rule hung on the button
- * itself is a rule that fires only sometimes. The wrapper always gets it.
+ * ── the hover tip ──────────────────────────────────────────────────────────
+ * The header's AI mark carried its words on hover while the assistant was not
+ * built; 0.57 made it a real button (task #269). The tip's look stayed, as a
+ * segmented ChoiceButtons cell's meaning (#160: the sharing dialog's access
+ * levels): one look for a hover tip in the product. Its show rules sit with
+ * ChoiceButtons' (hover AND keyboard focus).
  *
  * ⚠ `pointer-events: none` on the tip: it is painted UNDER the pointer's path
  * to the rest of the row, and a tooltip that can itself be hovered is a
  * tooltip that flickers as the cursor crosses its own edge.
- *
- * ⚠ `right: 0`, never `left`: this control sits at the end of the row, and a
- * left-anchored box the width of a sentence hangs off the viewport at 390px.
  */
-.fe-toolbar__soon-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-}
-/* The same tip is a segmented ChoiceButtons cell's meaning (#160: the
-   sharing dialog's access levels): one look for a hover tip in the product.
-   Its own show rules sit with ChoiceButtons' (hover AND keyboard focus). */
-.fe-toolbar__soon-tip,
 .fe-choice__tip {
   position: absolute;
   top: calc(100% + var(--fe-gap-xs));
@@ -10297,13 +10761,9 @@ filex-explorer {
   pointer-events: none;
   transition: opacity 0.12s ease;
 }
-.fe-toolbar__soon-wrap:hover .fe-toolbar__soon-tip {
-  opacity: 1;
-}
-/* Someone who asked not to be moved at. The words are still in the button's
-   accessible name, which is the door this rule cannot take away. */
+/* Someone who asked not to be moved at. The words are still in the cell's
+   accessible description, which is the door this rule cannot take away. */
 @media (prefers-reduced-motion: reduce) {
-  .fe-toolbar__soon-tip,
   .fe-choice__tip {
     transition: none;
   }
@@ -11567,8 +12027,8 @@ filex-explorer {
 /* === /pane:p1 === */
 
 /* pane:p1 — the filter row already says it "scrolls sideways ON ITSELF at 390px
-   rather than widening the explorer" (`overflow-x: auto`, mid-file), and it does
-   — visually. What it does NOT do is stop its content being counted in an
+   rather than widening the explorer" (`overflow-x: auto`, mid-file; since task
+   #264 on its `.fe-filterbar__track`, inside the row), and it does — visually. What it does NOT do is stop its content being counted in an
    ANCESTOR's scrollable overflow: measured 2026-09-13 at 390px with a real
    folder open, the row's own box was 388px wide with 648px of content, and
    `.fe` reported `scrollWidth` 513 against `clientWidth` 388. `overflow: hidden`
@@ -11579,8 +12039,8 @@ filex-explorer {
    horizontally", measured on `.fe`), and a number that says the shell scrolls
    sideways when it visibly does not is a gate nobody will trust for long.
    ⚠ Safe here specifically because the row's popover is teleported to <body>:
-   `contain: paint` clips painting to the padding box (which `overflow-x: auto`
-   already did) and makes the row a containing block for fixed descendants —
+   `contain: paint` clips painting to the padding box (which `overflow: hidden`
+   already does) and makes the row a containing block for fixed descendants —
    and it has none. */
 .fe-pane > .fe-filterbar {
   contain: paint;
@@ -13985,7 +14445,7 @@ filex-explorer {
   }
 }
 /* A cell's tip shows on a resting pointer and on keyboard focus (its look is
-   the header's hover tip, `.fe-toolbar__soon-tip`, further down: one rule
+   the product's hover tip, `.fe-choice__tip`, further down: one rule
    for both). `:focus-visible`, not `:focus`: a click focuses the button too,
    and a tip that stays up after the click is one nobody asked for. */
 .fe-choice__cell:hover .fe-choice__tip,
@@ -15747,3 +16207,119 @@ filex-explorer {
   background: none;
 }
 /* === /fix/narrow-table-stack === */
+
+/* === fix/264-stacked-table — a stacked header that reads as one, and a ⋮
+   whose ground is its row's ===============================================
+   Appended at the END, like every wave's block.
+
+   The owner, 2026-10-15, on a 340px phone (task #264): under the filter row
+   "Ad Tür ↑ Sahibi Değiştirilme Boyut ⋮" ran on one line like plain text -
+   "neither a header nor a row". It IS the header: stacked, it is the table's
+   row of sort buttons with the column menu at its end (fix/narrow-table-stack
+   above). It read as text because it was drawn like the rows' facts under it
+   ("Tür Markdown · Sahibi Sistem"): the same words, the same grey, the same
+   size, no ground of its own. So, stacked, it is a BAND:
+     · its own ground and a full border under it, the line every row ends with;
+     · "Sort by" at its start (DataTable `data-sort-label`, drawn here with
+       empty alternative text: a screen reader hears each button by its own
+       name, as before), only while a button in it can sort;
+     · each key a button that looks like one, the active key filled (the
+       filter row's chosen chip, `primary-soft`) with its arrow; a column
+       that cannot sort leaves the band (its header stays for a screen
+       reader);
+     · the tick's empty header gives up its 28px, so the band fits one line
+       on a 340px phone in English and in Turkish ("Sırala  Ad ↑  Tür
+       Değiştirilme  Boyut"); a narrower pane wraps it inside the band.
+   Nothing it can do changes: every key still sorts, the ⋮ still opens the
+   column menu, and the tick's empty header is still a header for the ticks
+   below it (zero-width, not removed: a removed one would pair every column
+   name with the cell before its own). */
+.fe-list.is-stacked .fe-list__head {
+  align-items: center;
+  column-gap: var(--fe-gap-xs);
+  row-gap: var(--fe-gap-xs);
+  min-height: var(--fe-h-md);
+  padding-block: calc((var(--fe-h-md) - var(--fe-h-sm)) / 2);
+  background: var(--fe-bg-elev);
+  border-bottom: 1px solid var(--fe-border);
+  font-size: var(--fe-text-xs);
+}
+.fe-list.is-stacked .fe-list__head > .fe-list__col--check {
+  order: -2;
+  flex: 0 0 0;
+  min-width: 0;
+  overflow: hidden;
+  /* Its gap too: the band's first word starts at the row's own inset. */
+  margin-inline-end: calc(-1 * var(--fe-gap-xs));
+}
+.fe-list.is-stacked .fe-list__head[data-sort-label]::before {
+  content: attr(data-sort-label);
+  /* Empty alternative text: the buttons name themselves. A browser that does
+     not know the syntax keeps the line above. */
+  content: attr(data-sort-label) / '';
+  order: -1;
+  flex: 0 0 auto;
+  margin-inline-end: var(--fe-gap-xs);
+  color: var(--fe-text-muted);
+  font-weight: 400;
+  white-space: nowrap;
+}
+.fe-list.is-stacked .fe-list__head .fe-list__sort {
+  min-height: calc(var(--fe-h-sm) - var(--fe-gap-xs));
+  padding-block: 0;
+  padding-inline: calc(var(--fe-gap-sm) - 2px);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+  font-weight: 500;
+}
+.fe-list.is-stacked .fe-list__head .fe-list__sort:not(:disabled):hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-list.is-stacked .fe-list__head :is([aria-sort='ascending'], [aria-sort='descending']) > .fe-list__sort {
+  background: var(--fe-primary-soft);
+  border-color: var(--fe-primary);
+  color: var(--fe-primary-ink);
+  font-weight: 600;
+}
+.fe-list.is-stacked .fe-list__head .fe-list__head-label {
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+}
+/* A column that cannot sort (the explorer's Owner) has nothing to offer in a
+   band of sort keys: its name, between two buttons, was the one piece of
+   plain text left in it. Its header stays in the row for a screen reader -
+   it still names the cells below it - and leaves the band. While NOTHING can
+   sort (no "Sort by") the names stay: a band of names is a header too. */
+.fe-list.is-stacked .fe-list__head[data-sort-label]
+  > .fe-list__col:not(.fe-list__col--check):not(.fe-list__col--menu):not(:has(> .fe-list__sort)) {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The ⋮'s ground is the FROZEN cell's (rule 2 of tablo:t2: a sticky cell must
+   paint over what slides under it). A ⋮ that is not frozen - a stacked row, a
+   table that fits - has nothing under it, and its ground was a box of the
+   page's colour on a row of another: on a hovered or focused row, and for the
+   80ms the row's own ground takes to fade back, a square around the ⋮ (the
+   vault's 390px picture, task #249). Not frozen, it carries none; frozen, it
+   fades with its row. */
+.fe-list:not(.is-pin-menu) .fe-list__head .fe-list__col--menu,
+.fe-list:not(.is-pin-menu) .fe-list__row .fe-list__col--menu {
+  background: transparent;
+}
+.fe-list.is-pin-menu .fe-list__row .fe-list__col--menu {
+  transition: background 0.08s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fe-list.is-pin-menu .fe-list__row .fe-list__col--menu {
+    transition: none;
+  }
+}
+/* === /fix/264-stacked-table === */

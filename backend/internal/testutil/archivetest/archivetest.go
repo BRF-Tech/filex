@@ -47,3 +47,32 @@ func LyingZip(t *testing.T, size int) []byte {
 	}
 	return buf.Bytes()
 }
+
+// RawMember is one member of RawNameZip: its name as raw BYTES, and its body.
+type RawMember struct {
+	Name string
+	Body string
+}
+
+// RawNameZip builds a ZIP whose members carry their names as raw bytes with
+// the UTF-8 flag (general purpose bit 11) CLEAR - the shape of an archive
+// Windows' "Compressed folder" writes in the machine's DOS code page (IBM
+// 857 on a Turkish Windows, 437 by the ZIP specification).
+func RawNameZip(t *testing.T, members ...RawMember) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, m := range members {
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: m.Name, Method: zip.Deflate, NonUTF8: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(m.Body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}

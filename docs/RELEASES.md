@@ -19,14 +19,71 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.56.2, 12 October 2026
-Video, audio and PDF thumbnails read a file on a local storage in place instead of copying it whole to the temp directory first, so a folder of films no longer fills /tmp, and the copies a killed process left behind are removed at startup.
+::: tip Latest - v0.56.3, 13 October 2026
+df, Explorer and Mountain Duck show the real disk instead of a made-up 1 PB: every surface that is asked how much room there is - SFTP, FTPS, NFS, WebDAV and filex mount - gives the same answer, the storage's own disk (or the storages added up at the root), capped by the account's quota. Indexing a large existing tree no longer eats the server's memory: extracted texts are written to the search index together, and indexing keeps to a memory budget, by default 25 percent of the memory filex was given (FILEX_SEARCH_MEMORY_PERCENT).
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.56.2
-docker pull ghcr.io/brf-tech/filex:full-v0.56.2
+docker pull ghcr.io/brf-tech/filex:slim-v0.56.3
+docker pull ghcr.io/brf-tech/filex:full-v0.56.3
 ```
+
+## v0.56.3
+
+<span class="filex-release-date">13 October 2026</span>
+
+df, Explorer and Mountain Duck show the real disk instead of a made-up 1 PB: every surface that is asked how much room there is - SFTP, FTPS, NFS, WebDAV and filex mount - gives the same answer, the storage's own disk (or the storages added up at the root), capped by the account's quota. Indexing a large existing tree no longer eats the server's memory: extracted texts are written to the search index together, and indexing keeps to a memory budget, by default 25 percent of the memory filex was given (FILEX_SEARCH_MEMORY_PERCENT).
+
+## What changed
+
+### Fixed
+
+- **`df` and a mapped drive show the real disk, not 1 PB.** A client that asked
+  how much room there was got a made-up figure unless the account had a quota,
+  and a different one on every surface: `sftp df` and the Linux `filex mount`
+  said 1 PiB with nothing used, NFS 32 TiB, FTPS 1 TiB, the Windows mount 4 TiB
+  half full, and WebDAV nothing at all. Every surface now gives one answer:
+  inside a storage, the disk it is on (a local disk, an SMB share's volume, an
+  SFTP server that answers `statvfs`, a WebDAV server's quota); at the root
+  that lists the storages, those storages added up, a disk two of them share
+  counted once; either capped by the account's quota. SFTP's `statvfs`, FTPS's
+  `AVBL`, NFS's `FSSTAT`, WebDAV's RFC 4331 quota properties (Windows' mapped
+  drive) and `filex mount` (through the new `GET /api/files/manager?action=space`)
+  all read it. Only a location nothing can measure, such as an S3 bucket, still
+  answers a large empty disk
+  ([PROTOCOLS.md](./PROTOCOLS.md#free-space)). Reported by @gguglietti
+  ([GitHub #116](https://github.com/BRF-Tech/filex/issues/116)).
+
+- **Indexing a large existing tree no longer eats the server's memory.** Every
+  extracted text was written to the search index on its own, so the index made
+  one segment per file and spent its time merging them: measured on 13,500
+  files, about 5 GB resident and 6.5 GB of index files mid-merge after fifteen
+  minutes, rising with every file, where the settled index needed a fraction of
+  that. On a large RAID volume it took 63 GB and the host with it. Texts that
+  are ready together are now written together, and indexing keeps to a memory
+  budget: `FILEX_SEARCH_MEMORY_PERCENT` (default 25, at most 50) percent of the
+  memory filex was given - the container's limit, or the machine's RAM - above
+  which extraction and rebuilds wait for the index to give memory back
+  ([SEARCH.md](./SEARCH.md#content-search)). Reported by @gguglietti
+  ([GitHub #115](https://github.com/BRF-Tech/filex/issues/115)).
+
+- **A plugin in a long data directory starts.** A storage or app plugin talks
+  to filex over a Unix socket under `<data>/plugins/<name>/run/`, and a
+  socket's path may not be longer than about 108 characters (104 on macOS):
+  with a data directory longer than about 48 characters, such as a container
+  volume's host path, the plugin could not open its socket and the log said
+  only that it "did not print its handshake line". When the real path is too
+  long, filex now reaches the socket through a short private link in the temp
+  directory; the socket stays where it was, with its owner and permissions.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0563---2026-10-13)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.56.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.56.3`
 
 ## v0.56.2
 
@@ -3353,300 +3410,13 @@ private CA.
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.43.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.43.2`
 
-## v0.43.0
-
-<span class="filex-release-date">24 September 2026</span>
-
-Apps. filex gains a second kind of plugin: a sandboxed WebAssembly app that adds actions to the file menu, screens filex draws for it, and public pages for people without an account - installed from a GitHub repository, a file or a URL, and always through a review of every permission it asks for. Two ship alongside this release, each as a public repository you can read and fork: e-Signature (filex-sign) sends a document round for signature - the boxes defined, then placed, a PIN-protected link for a signer without an account, the document frozen for everyone while it is out if you ask for it, a PAdES signature from the instance’s own signing authority, and a final seal by filex itself whose SHA-256 goes to every party - and Convert (filex-convert) turns a file into another format with the engines the server has, asking where to put the result when the file sits on a storage it cannot write to. An app can lock a file until it lifts the lock, keep per-file state and list its own work, fetch a pinned asset once, share the file its own job is writing, send addressed notifications and mail, open a home page of its own under Apps, and be woken on the hour to act at the minute it named; the SDK ships a test kit that runs before the module is built.
-
-Language packs. A manifest with nothing that runs adds a language to filex - no module, no Go, no release - and translates the explorer, the admin panel and the public pages alike, with its coverage of this version shown beside it. The text filex’s server writes goes through the same catalogue: e-mails, notification phrases, the no-JavaScript pages behind a link and the install review all answer in the reader’s language. Plural forms follow CLDR, so a pack may write the forms its language actually has. And the interface lays itself out right to left for Arabic, Hebrew, Persian and Urdu - mirrored where mirroring is right, never in document space or in machine text. A template repository walks a translator from export to install, and Spanish, German and French ship as examples.
-
-Around them: a download share, a file request and an app’s page are one branded shell with one PIN gate, and five wrong PINs shut any of them for ten minutes. People see the links they created under My shares and can read their PINs back. The Appearance screen composes themes for the whole instance, sign-in page and share visitors included. Admin → Identity providers now really drives sign-in, with a Test now that tests it. Tags are personal or shared with the team. Preferences follow the person rather than the browser, and a folder can remember the view and sort you left it in. Desktop folder sync is live in both directions - an edit on either side arrives in about a second instead of on the next 30-second lap - with bandwidth limits, a sync window, and a first run that holds back a re-upload and asks. The bell carries its count, and everybody can read all of their notifications. Symlinked folders inside a local storage open, a link that cannot is badged with the reason, and follow_symlinks decides where the storage ends. Every table in filex is the explorer’s table, in the admin panel too, each row ending in one pinned Actions menu.
-
-Security - upgrade promptly. With ONLYOFFICE configured, the save callback was accepted without a JWT even when filex held a secret, so anybody who could reach the server could have a file overwritten; it is now refused. A Document Server running with JWT_ENABLED off must have it turned on, or its saves will fail. Separately, every door that issues a credential - desktop pairing, self-service API tokens, S3 access keys, NFS exports, SSH keys - trusted the account behind the caller rather than the caller, so a read-only or folder-confined token could mint a full-rights one; they all refuse now with 403 token_ceiling, and desktop pairing takes a signed-in browser only. An API token with no scopes no longer means every scope. Tags were visible to every account on the server, an app’s freeze held only in the explorer, anybody who could write could write into filex’s own folders, a local storage could be escaped on Windows with a backslash path, and symlinks leaving a local storage were followed by everything including recursive delete - all fixed.
-
-Upgrade notes: migrations 00042-00055 run on the first start. Tokens created with no scopes are rewritten to an explicit list that includes admin - review and narrow them. Identity providers saved on the admin page before this release come back switched off, marked for review. Existing tags become team tags, and a client that sends no kind makes personal ones. Custom CSS stays off until you switch it on again under Appearance, and custom_css is gone from GET /api/branding. Live desktop sync needs the new desktop build, and a reverse proxy must pass WebSocket upgrades on /api/ws. A rename onto a taken name answers 409 instead of replacing the file; an agent’s move still takes a free name. A program that wants the 202 “preparing” answer must ask for it with X-Filex-Accept-Prepare: 1. Symlinks already inside a local storage are re-catalogued on the next scan: an in-root link gains its contents, an out-of-root one stops being indexed, scanned and counted against quota unless follow_symlinks is on.
-
-> [!WARNING]
-> **The v0.43.0 container images were not published** - the image build failed on this tag. If you run filex in Docker, use **v0.43.2**, which carries the same changes with working images (v0.43.1 was tagged but never published). The binaries, desktop packages and npm packages on this page are complete.
-
-## What changed
-
-The release that makes filex extensible. **Apps** are a second kind of
-plugin - a sandboxed WebAssembly module that adds things to *do* with
-files - and two ship alongside it as public repositories: **e-Signature**
-and **Convert**.
-
-A **language pack** is an app with nothing that runs, so filex can be
-translated without waiting for a release; the text the server writes - mail,
-notifications, the pages behind a link - comes from the same catalogue; and
-the interface lays itself out **right to left** for the languages that read
-that way.
-
-Alongside them: desktop folder sync is now **live** in both directions, the
-explorer's table is the only table left in the product, an operator composes
-the instance's **theme**, tags are personal or shared with the team, and
-every door that issues a credential refuses to issue one wider than the
-caller.
-
-> ⚠⚠ **Security - upgrade promptly.** Every filex up to v0.42.2 with ONLYOFFICE
-> configured accepts an unsigned save callback, which lets anybody who can
-> reach the server overwrite a file (Security). filex has never
-> enabled the editor without a JWT secret - an install with no secret has
-> editing off and is unaffected - so the one thing to check is the other
-> side: a Document Server running with `JWT_ENABLED` off sends unsigned
-> callbacks, and after this upgrade its saves fail. Turn JWT on there, with
-> the same secret filex holds.
->
-> ⚠⚠ **A narrow API token could mint a wide one.** Every door that issues
-> a credential - the desktop pairing endpoint, self-service API tokens, S3
-> access keys, NFS exports and SSH keys - measured the account behind the
-> caller instead of the caller itself, so a token restricted to reading, or
-> confined to one folder, could create a full-rights credential for the same
-> account and then use it (Security). Every one of them now
-> refuses with `403 token_ceiling`. The desktop door was found and fixed by
-> Berk Başarır ([#35](https://github.com/BRF-Tech/filex/pull/35)).
->
-> ⚠⚠ **Desktop sync could replace real files - upgrade the server AND the
-> desktop app.** A field report, traced and fixed by Berk Başarır
-> ([#35](https://github.com/BRF-Tech/filex/pull/35)), found filex's own sync client writing a server's
-> `202 "preparing"` status report to disk as the file and uploading it over
-> the original, conflict copies nesting by the thousand, a stale mirror
-> re-uploaded over a cleaned-up server, and a rename onto a taken name
-> destroying the file that had it (Fixed). The server fix protects
-> every client already installed; the new desktop build carries the rest.
->
-> ⚠⚠ **A cache in front of filex could hand one person's answers to
-> everybody.** API answers carried no `Cache-Control`, so a CDN rule that
-> caches everything kept `GET /api/auth/me` for two hours and served one
-> administrator's identity to every visitor. Every `/api` answer is now
-> `no-store` unless it is one of the four answers that say who the instance
-> is (Security). Found and fixed by Berk Başarır
-> ([#41](https://github.com/BRF-Tech/filex/pull/41)).
->
-> ⚠⚠ **The notification bell named files its reader could not open.** Queued
-> copies, moves and deletes were announced to every account, a member of an
-> RBAC storage read the names of files in folders they have no grant on, one
-> person's "mark all read" read everybody's alerts, and a tenant admin could
-> read every tenant's notification history (Security). Found and
-> fixed by Berk Başarır ([#42](https://github.com/BRF-Tech/filex/pull/42), [#43](https://github.com/BRF-Tech/filex/pull/43)).
->
-> ⚠ **Before upgrading, read Upgrade notes**: API/MCP tokens
-> created with no scopes are rewritten to an explicit list that includes
-> `admin` - review and narrow them; identity providers saved on the admin
-> page come back switched off; existing tags become team tags, and a client
-> that sends no kind now makes personal ones; custom CSS is off until
-> switched on (see *Changed*); live desktop sync needs the new desktop build;
-> a desktop pairing needs a signed-in browser, and existing pairings keep
-> their old token until paired again; a rename onto a taken name answers
-> `409`; a program that wants the `202` "preparing" answer must now ask for
-> it (`X-Filex-Accept-Prepare: 1`); with SSO, sign-out now ends the identity
-> provider's session too, and the provider must allow filex's sign-in pages
-> as a post-logout return address; `POST /api/admin/trash/empty` answers
-> `202` while a large trash is still being emptied, and `400` for a value it
-> cannot read.
-
-### Added
-
-- **Apps (app plugins) - a sandboxed plugin that adds things to *do* with
-  files.** A WebAssembly module that adds actions to the file menu, screens
-  filex draws for it, and public pages for outside participants. Install from a GitHub repository
-  URL, a file upload or a URL, always through a permission review; the grant
-  is exactly the manifest's list and an upgrade that asks for more stops at
-  the review again. Actions run as ops-queue jobs (progress, cancel, open the
-  output), write through the same path as every other write, and are gated
-  by ACL, read-only storages and encrypted folders at submit. Host functions
-  under one permission each: files, per-file state, settings (secrets sealed),
-  the server's engines (ffmpeg, ImageMagick, LibreOffice, Ghostscript, poppler,
-  rsvg) with bare-token arguments, directory lookup, notifications (new
-  `plugin.notice` event), mail (60/hour), guarded outbound HTTP, public links
-  for outside participants (PIN with lock-out, exposed copies, jobs as the
-  link's creator) and host-held signing (per-tenant CA, certificates,
-  `host_sign`, admin CA download/rotate). Admin: **Plugins → Apps** tab with
-  the install wizard, settings, per-action overrides and logs. Explorer:
-  menu rows, ops-tray jobs, surface screens (form, steps, list, progress,
-  people picker, PIN, file chooser, preview, PDF fields, signature pad),
-  details-panel sections and an **Apps** side-bar section. Guest SDK
-  `pkg/pluginkit` (stock Go, `GOOS=wasip1`). Docs: `APP-PLUGINS.md`,
-  `PLUGIN-KIT.md`. Off in demo mode (`FILEX_APP_PLUGINS_DISABLED`).
-- **Language packs - filex can be translated without a release.** An app can
-  add a language to filex, and it now does so end to end. A manifest that only carries `ui_locales` is a *language pack*:
-  it installs from the manifest alone (upload, GitHub repository or URL - no
-  module, no Go, no release), never starts a runtime, and is listed in
-  **Plugins → Apps** as a *Language pack* with each language's coverage of the
-  running version's catalogue (*Español - 97% translated · the rest shows in
-  English*). Its language joins every picker - the settings dialog, the admin
-  header, public share pages - and translates the explorer, the admin panel
-  and the public pages alike; anything it lacks shows in English. Integrity
-  moves to the manifest (the sha256 pin and, with `FILEX_PLUGIN_TRUSTED_KEYS`,
-  the signature are over the manifest). A right-to-left language lays the
-  interface out right to left (see *Right-to-left layout*). Format, grammar and limits:
-  `PLUGIN-KIT.md` → *Writing a language pack*; a template repository,
-  `BRF-Tech/filex-lang-template`, walks a translator from export to install.
-- **Right-to-left layout.** Arabic, Hebrew, Persian, Urdu and every other
-  right-to-left language a language pack adds now lays the whole interface
-  out right to left - the explorer, the admin panel, the public share, PIN
-  and file-request pages, the signing wizard and the embeddable components.
-  Whether a language is right to left is the server's one list
-  (`wire.IsRTL`, the `rtl` flag on the offered-language rows); a page's `dir`
-  is derived from its `lang`, and an embedded explorer takes its direction
-  from its OWN `locale`, not the host page's (menus drawn under `<body>`
-  carry it too). The stylesheets are written in logical properties and the
-  admin panel in Tailwind's logical utilities (`ms-`, `pe-`, `start-`,
-  `text-end`, …), so English and Turkish draw the same pixels as before.
-  Gestures turn with the layout: a column's edge grows the way the pointer
-  drags it, a dragged column lands on the side of its neighbour the pointer
-  is on, the arrow keys move things the way they point, menus open toward the
-  line's end and flip at the screen's edge, and the frozen Name and Actions
-  columns draw their edges while a right-to-left table scrolls. Icons that
-  mean a direction (back/forward, breadcrumb and disclosure chevrons, undo,
-  sign-out, send, the panel icons) are mirrored; "open in a new tab",
-  refresh, media controls and **document space** - a PDF page's signature
-  boxes, images - never are. Commands, paths and URLs stay left to right;
-  file names, paths and people are isolated (`<bdi>`), and number pairs,
-  `tag:…` tokens and names inside a right-to-left sentence are isolated so
-  they keep their order. List fields (recipients, extensions, tags,
-  identities) accept the Arabic `،`, ideographic `、` and fullwidth `，`
-  commas. A source check (`web/tests/quality/rtlLogical.test.ts`) keeps
-  physical `left`/`right` from coming back. Docs: `docs/RTL.md`.
-- **Appearance: the instance can wear your colours.** A new admin screen
-  (**Appearance**, `/admin/appearance`) where an operator composes
-  named themes - twelve colours per light/dark variant, a corner radius and a
-  font stack - and picks one as the instance default. Ten more tokens are
-  derived server-side and stored with the theme, so the browser does no colour
-  maths at paint time, and the text colour on a coloured button is chosen by
-  WCAG contrast rather than assumed to be white. Served to the login page and
-  to anonymous share visitors as well, because a palette that stops at the
-  sign-in screen is not branding. Themes export and import as one JSON
-  document - the exported file *is* the upload body (migration 00051).
-- **Desktop sync is live: an edit on either side arrives in about a second.**
-  A save in the web app's text editor, an ONLYOFFICE save, an upload or a
-  delete now reaches the synced folder on the desktop as it happens, and a
-  save on the desktop reaches the server just as fast - instead of waiting for
-  the engine's next 30-second lap. Measured on one Windows machine against a
-  local server, six edits each at random moments: browser text save → file on
-  disk 6.2-24.8 s (median 15.2 s) before, 0.19-0.22 s (median 0.20 s) now;
-  ONLYOFFICE callback → disk 0.5-25.9 s before, 0.19-0.21 s now; local save →
-  server 9.4-29.0 s (median 25.3 s) before, 0.43-0.61 s (median 0.46 s) now.
-  `filex sync run --watch` subscribes to the server's change stream (the same
-  WebSocket the web explorer uses, authenticated with the engine's own token
-  through a ws-ticket) and watches the local folders with file-system events;
-  a change reconciles just the folder it happened in (one listing, not a walk
-  of the tree), and the `--watch` interval is the safety net - it no longer
-  walks every pair, see *Changed*. `--live=false` leaves only the interval. The
-  engine prints `live: connected|polling|offline - …` and the desktop app
-  shows it as one word under each synced folder (*Live* / *Polling* /
-  *Offline*). A newly paired folder starts syncing at once instead of on the
-  next lap. See [Folder sync](./SYNC.md#how-fast-a-change-arrives).
-- **Realtime: recursive, presence-less `watch` subscriptions.**
-  `{"type":"watch","paths":[…]}` registers any number of roots per socket,
-  authorised exactly like a room subscribe (confinement, RBAC, tenant), always
-  acknowledged with `watching` (the capability probe for older servers), and
-  delivered as `tree_change` frames with root-relative folders, coalesced like
-  rooms and never dropped on a full queue. Folder-size refresh frames are not
-  delivered to watches. See [Realtime](./REALTIME.md#watching-a-whole-tree-sync-clients).
-- **Conditional uploads.** The multipart upload and the staged commit accept
-  `expect` (`none`, or the `<size>:<last_modified>` a listing showed) and
-  answer `412 PRECONDITION_FAILED` without writing when the file changed in
-  between. The sync engine sends it on every upload, so a browser save that
-  lands in the same second as a desktop save is kept beside it instead of
-  being replaced. See [Uploads](./UPLOADS.md#conditional-uploads-expect).
-- **A first sync that would re-upload a stale copy holds it and asks.** With no
-  history, "new here" and "deleted on the server" look the same, and one client
-  put 9,665 cleaned-up files back on a server. A first run that would upload
-  more than 100 local-only files into a server folder that already has files
-  holds them (and any file that differs) and runs the rest: `filex sync confirm <pair>` sends them, `filex sync discard <pair>` moves them to the local sync
-  trash so the folder matches the server. `sync list --json` carries `hold_new`
-  / `held`; the desktop app shows the count with **Upload them** and **Move to
-  local trash**. ([#35](https://github.com/BRF-Tech/filex/pull/35))
-- **Bandwidth limits and a sync window.** `filex sync run --limit-down` /
-  `--limit-up <KiB/s>` cap all transfers of a run together (the bodies are
-  paced, never the connection), and `--window HH:MM-HH:MM` only syncs in that
-  part of the day - outside it nothing talks to the server, not even the change
-  stream, and a pass still busy when it closes stops cleanly and continues in
-  the next window. The desktop app offers both as presets in Settings. ([#35](https://github.com/BRF-Tech/filex/pull/35))
-- **Transfer progress in bytes, with an estimate:** `transfer: 120/11704 (1.2 GiB of 52.6 GiB, about 8h 10m left)`, printed at least every 5 seconds. The desktop
-  app shows it on each folder's line, in its own language. ([#35](https://github.com/BRF-Tech/filex/pull/35))
-- **`GET /api/files/manager?action=changes&path=…&since=<cursor>`** answers "has
-  anything under this folder changed since my cursor?" as `{ cursor, changed }`,
-  from an in-memory change log fed by every write surface. Every doubt - no
-  cursor, a restart, a cursor older than the log - is `changed`, and a change
-  counts only if the caller can see what it touched. ([#35](https://github.com/BRF-Tech/filex/pull/35))
-- **Rescan one folder: `POST /api/admin/storages/{id}/sync?path=<folder>`.** The
-  same walk over one catalogued folder, synchronously, answering `{path, scanned, added, updated, removed, reconciled}` (504 after ten minutes). Only
-  rows inside the folder can be removed, a listing that failed part-way removes
-  nothing, and no sync-run row is written. ([#35](https://github.com/BRF-Tech/filex/pull/35))
-- **Scan exclusions: tell a storage what not to catalogue.** A new storage
-  setting, *Paths to exclude from scanning* (`config.scan_exclude`, on every
-  driver), takes glob patterns relative to the storage root, one per line:
-  `*` within a name, `**` across folders, and a pattern without a `/` names an
-  entry at any depth (`.*` skips every hidden file and folder, `@eaDir` every
-  Synology thumbnail folder, `*.tmp` every temp file), while `/build` or
-  `downloads/incomplete/**` is anchored at the root. The scan does not go
-  **into** a matching folder - a `.git`, a `.snapshots` or a download client's
-  `incomplete/` costs nothing - and nothing matching is catalogued, indexed,
-  thumbnailed or virus-scanned. One rule decides every walk that catalogues
-  (the full scan, the one-pass object-store listing, a folder rescan - which
-  refuses an excluded folder with 400 - the catalogue of a copied folder) and
-  the `fsnotify` watcher, where a change to an excluded path no longer starts
-  a scan. **A cost control, not an access control:** the files stay on the
-  storage and are still served by path, over the file protocols and to the AI
-  tools. Rows catalogued before a pattern was added stay as they are and are
-  never moved to the trash for being unseen; filex's own names (`.filex-open`,
-  `.keepdir`, an encrypted folder's marker) are outside the patterns; a pattern
-  that would exclude everything, a `!`, a `..` or a broken glob is refused on
-  save with `SCAN_EXCLUDE_INVALID` and a sentence naming the pattern in the
-  reader's language - as is an empty or `/` storage root (`ROOT_PATH_FORBIDDEN`,
-  which used to answer one English sentence in `error`; the code stays there
-  and the sentence moved to `message`). Docs: [STORAGE.md → Scan exclusions](./STORAGE.md#scan-exclusions).
-  ([#44](https://github.com/BRF-Tech/filex/issues/44))
-- **Desktop: Pause sync,** in the tray menu and Settings, remembered across
-  restarts, reboots and the hidden start at sign-in. ([#35](https://github.com/BRF-Tech/filex/pull/35))
-- **Desktop: the computer stays awake while sync moves files** (the screen still
-  locks); an overnight first sync lost 1 h 40 min to idle sleep. ([#35](https://github.com/BRF-Tech/filex/pull/35))
-- **The access log says who asked:** `user_id`, `token_id` (the row id, never the
-  secret) and, in multi-tenant mode, `tenant` on every `msg=http` line, plus
-  `action` for `/api/files/manager` (one of its own verbs, or `other`). The
-  query string is still never logged. ([#35](https://github.com/BRF-Tech/filex/pull/35))
-- **A cut search result says so:** both search responses carry `truncated`, and
-  the explorer shows "More results than shown - narrow your search". ([#35](https://github.com/BRF-Tech/filex/pull/35))
-
-- **Apps: the platform seal.** `cert_issue {purpose: "platform"}` hands an app
-  with `sign` the installation's own seal: one key per tenant and app, kept by
-  the host (never destroyed - `key_destroy` refuses it), CN *filex document
-  seal*, OU the app's name, issued by the live authority and re-issued by the
-  next one after a rotation; it signs through `host_sign` from jobs only. The
-  signing app seals every completed request with it (the owner, 2026-09-22:
-  "the final bytes are sealed by filex itself"). SDK: `pluginkit.PlatformSeal`,
-  `plugintest.Host.PlatformSeal`.
-- **Apps: a lock until lifted, and a lock on the job's own output.**
-  `file_lock` takes `ttl_days: -1` (`pluginkit.LockUntilLifted`) - no end,
-  until the app or an administrator (audited) lifts it - and a `ref` naming one
-  of the job's OWN outputs, which is promised and taken when the output is
-  committed (never when the job fails). How the signing app keeps a finished
-  document locked for good, when the request asks for it.
-
-**This release has more to it than fits on one page.** The rest of the
-entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0430---2026-09-24).
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-## Security advisories
-
-- [GHSA-gj84-9xx7-2g9f](https://github.com/BRF-Tech/filex/security/advisories/GHSA-gj84-9xx7-2g9f) - an unsigned ONLYOFFICE save callback was accepted (High, 7.5)
-- [GHSA-55vh-f285-5wv3](https://github.com/BRF-Tech/filex/security/advisories/GHSA-55vh-f285-5wv3) - a restricted API token could issue credentials wider than itself (High, 8.8)
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.43.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.43.0`
-
 ## Earlier releases
 
-The 119 releases before v0.43.0, in brief. Full notes are on GitHub.
+The 120 releases before v0.43.2, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.43.0](https://github.com/BRF-Tech/filex/releases/tag/v0.43.0) | 24 September 2026 | Apps. filex gains a second kind of plugin: a sandboxed WebAssembly app that adds actions to the file menu, screens filex draws for it, and public pages for people without an account - installed from a GitHub repository, a file or… |
 | [v0.42.2](https://github.com/BRF-Tech/filex/releases/tag/v0.42.2) | 19 September 2026 | A fix release for the issue 32 follow-up and three things that were wrong on screen. The context menu is now the same on Recent, Starred, Shared with me, tag views, the Home cards and the Recently-opened tray as in a folder -… |
 | [v0.42.1](https://github.com/BRF-Tech/filex/releases/tag/v0.42.1) | 19 September 2026 | A fix release for four reports on 0.42.0. A bucket with several top-level folders is one form now, not one per folder: Storages → Add lists the folders under the root you typed and creates one storage per ticked folder with the… |
 | [v0.42.0](https://github.com/BRF-Tech/filex/releases/tag/v0.42.0) | 16 September 2026 | gesture is now the classic desktop file-manager one - a single click selects a |
@@ -3769,4 +3539,4 @@ The 119 releases before v0.43.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-10-12 from 139 published releases.</small>
+<small>Last refreshed 2026-10-13 from 140 published releases.</small>

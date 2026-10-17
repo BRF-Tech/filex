@@ -1302,6 +1302,18 @@ func (s *Service) executeJob(ctx context.Context, op *Op) {
 				StatusCancelled, op.ID)
 			return
 		}
+		// A job that finished and left some of its members out on purpose
+		// (an archive member whose name no door accepts or the storage cannot
+		// hold, task #238) is partial, not failed: what could land, landed,
+		// and the error names what did not.
+		var partial interface{ Skips() int }
+		if errors.As(err, &partial) {
+			progress(op.Total)
+			_, _ = s.db.ExecContext(ctx, s.q(
+				`UPDATE pending_ops SET status=?, error=?, skipped=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`),
+				StatusPartial, err.Error(), partial.Skips(), op.ID)
+			return
+		}
 		op.Failed = 1
 		_, _ = s.db.ExecContext(ctx, s.q(
 			`UPDATE pending_ops SET status=?, error=?, failed=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`),

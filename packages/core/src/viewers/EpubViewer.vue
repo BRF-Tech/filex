@@ -13,18 +13,59 @@ import { requestFailure } from '../lib/errorWords';
  *   - collapsible TOC sidebar (built from `book.loaded.navigation`)
  *   - font size +/- (Themes API)
  *   - graceful fallback if peer not installed
+ *
+ * A chapter asks no other server for anything until the person says so
+ * (lib/epubRemote): before epub.js draws it, its head gets a policy that lets
+ * its frame load only the book's own files, and no referrer. When it names
+ * something from elsewhere the reader says so, and the question
+ * (composables/useRemoteImages, about the whole book: one frame, one answer)
+ * or the person's setting draws the chapters again under the allowed policy.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
+import { allowChapter, remoteReferencesOf, sealChapter } from '../lib/epubRemote';
+import { injectRemoteImages, useRemoteImages } from '../composables/useRemoteImages';
+import RemoteImageDialog from '../modals/RemoteImageDialog.vue';
 
 const props = defineProps<{
   url: string;
   mime?: string;
   ext: string;
   t?: (key: string) => string;
+  /** The reader's language, for the question held pictures ask on their own. */
+  locale?: string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
 }>();
+
+/* Pictures from elsewhere (lib/epubRemote): inside the preview its gate
+   asks, on its own this viewer asks itself. */
+const parentGate = injectRemoteImages();
+const remoteImages = parentGate ?? useRemoteImages(() => props.locale);
+const ownGate = !parentGate;
+/** The addresses from elsewhere the chapters drawn so far name, while held. */
+const heldRemote = ref<string[]>([]);
+/** The held policies of the chapters epub.js keeps, to switch once allowed. */
+const sealed = new Set<Element>();
+
+/** epub.js's content hook: every chapter, before it is drawn. */
+function onChapter(doc: Document): void {
+  const allowed = remoteImages.allLoaded.value;
+  const remote = allowed ? [] : remoteReferencesOf(doc);
+  const csp = sealChapter(doc, allowed);
+  if (csp && !allowed) sealed.add(csp);
+  if (remote.length) heldRemote.value = [...new Set([...heldRemote.value, ...remote])];
+}
+
+const RENDITION_OPTS = {
+  width: '100%',
+  height: '100%',
+  flow: 'paginated',
+  manager: 'default',
+  // epub.js draws each chapter in a sandboxed frame; scripts in a book
+  // stay off (its default, said out loud so it cannot drift).
+  allowScriptedContent: false,
+};
 
 interface TocNode {
   href: string;
@@ -95,18 +136,13 @@ async function load(): Promise<void> {
       source = await res.arrayBuffer();
     }
     book = Epub(source);
+    heldRemote.value = [];
+    sealed.clear();
+    book.spine?.hooks?.content?.register?.(onChapter);
     if (!containerRef.value) {
       throw new Error('EPUB mount target missing');
     }
-    rendition = book.renderTo(containerRef.value, {
-      width: '100%',
-      height: '100%',
-      flow: 'paginated',
-      manager: 'default',
-      // epub.js draws each chapter in a sandboxed frame; scripts in a book
-      // stay off (its default, said out loud so it cannot drift).
-      allowScriptedContent: false,
-    });
+    rendition = book.renderTo(containerRef.value, RENDITION_OPTS);
     // ⚠⚠ Both of these have to be raced against a clock. epub.js resolves
     // `display()` and `loaded.navigation` from its own internal promises, and
     // when the archive is not a readable EPUB it simply NEVER settles —
@@ -129,6 +165,37 @@ async function load(): Promise<void> {
     loading.value = false;
   }
 }
+
+/**
+ * The person allowed the book's pictures from elsewhere (the question, or
+ * their setting): the chapters epub.js keeps get the allowed policy, and the
+ * one on screen is drawn again, where it was.
+ */
+async function drawAgain(): Promise<void> {
+  if (!book || !rendition || !containerRef.value) return;
+  for (const el of sealed) allowChapter(el);
+  sealed.clear();
+  heldRemote.value = [];
+  const where = rendition.location?.start?.cfi ?? rendition.currentLocation?.()?.start?.cfi;
+  try {
+    rendition.destroy();
+  } catch {
+    /* ignore */
+  }
+  rendition = book.renderTo(containerRef.value, RENDITION_OPTS);
+  try {
+    await withTimeout(rendition.display(where), 'display');
+    rendition.themes.fontSize(fontSize.value + '%');
+  } catch (err) {
+    console.warn('[filex] EPUB redraw failed:', err);
+  }
+}
+watch(
+  () => remoteImages.allLoaded.value,
+  (now) => {
+    if (now && sealed.size) void drawAgain();
+  },
+);
 
 function next(): void {
   rendition?.next?.();
@@ -220,6 +287,17 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
       <p>{{ error }}</p>
     </div>
     <template v-else>
+      <div
+        v-if="heldRemote.length && !remoteImages.allLoaded.value"
+        class="filex-viewer-epub__held"
+        role="status"
+        data-testid="epub-remote-notice"
+      >
+        <span>{{ tt('viewer.remote_image.book_held', 'Pictures from other servers in this book are not loaded.') }}</span>
+        <button type="button" class="filex-viewer-btn" data-testid="epub-remote-load" @click="remoteImages.askWhole(heldRemote)">
+          {{ tt('viewer.remote_image.book_load', 'Load remote images…') }}
+        </button>
+      </div>
       <div ref="containerRef" class="filex-viewer-epub__rendition" />
       <div v-if="ready" class="filex-viewer-epub__nav">
         <button type="button" class="filex-viewer-btn" @click="prev" :disabled="!ready">‹</button>
@@ -229,6 +307,7 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
         {{ tt('viewer.loading', 'Loading…') }}
       </div>
     </template>
+    <RemoteImageDialog v-if="ownGate" :gate="remoteImages" :locale="locale" />
   </div>
 </template>
 
@@ -241,6 +320,17 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
    unstyled HTML, in EVERY embedded surface.
    Safe to drop: every selector below is prefixed (fx-/fe-/filex-), so
    there is nothing here that can leak into a host page. */
+.filex-viewer-epub__held {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--fe-bg-elev, #f7f8fa);
+  border-bottom: 1px solid var(--fe-border, #e2e6ed);
+  color: var(--fe-text-muted, #5b6474);
+  font-size: 13px;
+}
 .filex-viewer-epub__nav {
   position: absolute;
   bottom: 12px;

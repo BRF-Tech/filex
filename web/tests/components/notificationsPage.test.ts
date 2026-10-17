@@ -76,6 +76,11 @@ vi.mock('@/api/notifications', () => ({
   },
 }));
 
+// The server's defaults card (components/settings/InstanceSettingsCard, #258)
+// shares the page: it reads its group as it mounts and draws a <form> of its
+// own. It is not what this file tests.
+vi.mock('@/components/settings/InstanceSettingsCard.vue', () => ({ default: { template: '<div />' } }));
+
 import Notifications from '@/views/Notifications.vue';
 
 function mountPage(locale = 'tr') {

@@ -205,3 +205,16 @@ func TestBuildConfigForNode_TheEditorSpeaksThePersonsLanguage(t *testing.T) {
 	assert.Equal(t, "no", ec["lang"])
 	assert.NotContains(t, ec, "region", "no regional setting of its own: ONLYOFFICE derives one")
 }
+
+// filex 0.57: the language the administrator fixed is handed to an app's
+// editor too (UIRef.EditorLang); "auto", or a language ONLYOFFICE does not
+// offer, fixes nothing.
+func TestFixedEditorLang(t *testing.T) {
+	for setting, want := range map[string]string{"DE": "de", "pt_pt": "pt-PT", "auto": "", "": "", "xx-YY": ""} {
+		s := &Service{LiveEditorLang: func(context.Context) string { return setting }}
+		assert.Equal(t, want, s.FixedEditorLang(context.Background()), setting)
+	}
+	var none *Service
+	assert.Empty(t, none.FixedEditorLang(context.Background()))
+	assert.Empty(t, (&Service{}).FixedEditorLang(context.Background()))
+}

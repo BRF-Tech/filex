@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/brf-tech/filex/backend/internal/basepath"
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
@@ -84,6 +85,12 @@ func (h *Share) renderAppPage(w http.ResponseWriter, r *http.Request, token stri
 	// plugin runtime is unavailable. The registry is consulted only for the
 	// page's own title, which is the one thing the row does not carry.
 	files := wasmplugin.ExposedFiles(sh)
+	// …unless its creator may no longer download the page's document: then
+	// the copies made from it are not listed (appLinkCopiesServed, which the
+	// file route asks too). The page itself still renders.
+	if len(files) > 0 && !appLinkCopiesServed(r.Context(), h.ACL, h.Store, sh) {
+		files = nil
+	}
 	if title == "" && h.Apps != nil && h.Apps.Registry != nil {
 		if p, ok := h.Apps.Registry.ByID(sh.PluginID); ok {
 			if info := h.Apps.Registry.PageInfo(sh, p, true); info != nil {
@@ -98,7 +105,7 @@ func (h *Share) renderAppPage(w http.ResponseWriter, r *http.Request, token stri
 	for _, f := range files {
 		// ?download=1: a link a person follows to take the file is a
 		// download, and counted as one (PublicAPI.serveExposed).
-		rows = append(rows, appPageFile{Name: f.Name, URL: basepath.Path(r.Context(), "/api/public/s/"+token+"/file/"+f.Ref+"?download=1")})
+		rows = append(rows, appPageFile{Name: leafname.Visible(f.Name), URL: basepath.Path(r.Context(), "/api/public/s/"+token+"/file/"+f.Ref+"?download=1")})
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

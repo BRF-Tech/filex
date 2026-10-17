@@ -47,7 +47,7 @@ const PACK = packManifest();
 
 /**
  * The admin panel speaks the pack: the top bar's Dashboard link, and the
- * Plugins page in the System panel. ⚠ Since 0.51 every page name sits in a
+ * Plugins page in the Settings panel. ⚠ Since 0.51 every page name sits in a
  * mega menu panel that is hidden until it opens, so a bare getByText finds
  * the hidden entry; the panel is opened, after the 120 ms cross-fade between
  * two admin layouts has left one menu (lesson #994).
@@ -55,7 +55,7 @@ const PACK = packManifest();
 async function panelSpeaks(page: Page) {
   await expect(page.getByTestId('mega-menu')).toHaveCount(1, { timeout: 15_000 });
   await expect(page.getByTestId('nav-dashboard')).toContainText(PACK.es['nav.dashboard'], { timeout: 15_000 });
-  await page.getByTestId('nav-top-system').click();
+  await page.getByTestId('nav-top-settings').click();
   await expect(page.getByTestId('nav-plugins')).toBeVisible();
   await expect(page.getByTestId('nav-plugins')).toContainText(PACK.es['nav.plugins']);
   await page.keyboard.press('Escape');

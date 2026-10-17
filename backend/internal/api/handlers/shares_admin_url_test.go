@@ -51,8 +51,7 @@ func TestAdminShares_RowsCarryTheCanonicalURL(t *testing.T) {
 
 	// Ask from a host that is NOT the configured one: the link must still be
 	// the configured origin, never the request's.
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/admin/shares?limit=10", nil)
-	req.Host = "localhost:5212"
+	req := testutil.RequestAsHost(t, srv, client, http.MethodGet, "/api/admin/shares?limit=10", "localhost:5212", nil)
 	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()

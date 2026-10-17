@@ -234,9 +234,9 @@ const GLYPHS: Record<string, string> = {
     '<path d="M9.5 20.5H6a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h3.5"/>' +
     '<path d="M15.5 16.5L20 12l-4.5-4.5"/>' +
     '<path d="M20 12H9"/>',
-  /* The AI assistant, drawn but not yet wired — a spark, the mark every
-     assistant in this class of product wears, so the day it does something
-     the icon does not have to change under people's fingers. */
+  /* The AI assistant (task #269) - a spark, the mark every assistant in this
+     class of product wears; it is the same glyph the "coming soon" button
+     wore, so it did not change under people's fingers when it came alive. */
   ai:
     '<path d="M12 3.2l1.75 4.3 4.3 1.75-4.3 1.75L12 15.3l-1.75-4.3L5.95 9.25l4.3-1.75z"/>' +
     '<path d="M18.2 15.1l.8 1.95 1.95.8-1.95.8-.8 1.95-.8-1.95-1.95-.8 1.95-.8z"/>',
@@ -268,7 +268,7 @@ const GLYPHS: Record<string, string> = {
   link:
     '<path d="M10 13.5a4.5 4.5 0 0 0 6.8.5l2.7-2.7a4.5 4.5 0 0 0-6.36-6.36L11.6 6.5"/>' +
     '<path d="M14 10.5a4.5 4.5 0 0 0-6.8-.5l-2.7 2.7a4.5 4.5 0 0 0 6.36 6.36l1.53-1.53"/>',
-  /* baglan:b1 — "How to connect". A PLUG, deliberately not the chain above:
+  /* baglan:b1 — "Connections". A PLUG, deliberately not the chain above:
      the empty screen's account menu draws both rows one under the other
      ("Paylaştıklarım", then "Bağlantılar"), and one mark on two adjacent rows
      is the misreading this set exists to stop. It is also the mark the admin

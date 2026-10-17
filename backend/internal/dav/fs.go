@@ -42,16 +42,10 @@ func newFS(h *Handler, p *principal) *davFS {
 }
 
 // split normalizes a webdav path into (storage-name, rel). Empty name means
-// the /dav virtual root.
+// the /dav virtual root. ⚠ The pre-gate's own split (splitStoragePath): the
+// two must never disagree about which storage and path a request is.
 func (f *davFS) split(name string) (string, string) {
-	rest := strings.Trim(path.Clean("/"+name), "/")
-	if rest == "" || rest == "." {
-		return "", ""
-	}
-	if i := strings.IndexByte(rest, '/'); i >= 0 {
-		return rest[:i], acl.CleanRel(rest[i+1:])
-	}
-	return rest, ""
+	return splitStoragePath(name)
 }
 
 // storageByName resolves an enabled storage the caller may see, plus its ACL
@@ -168,7 +162,7 @@ func (f *davFS) Mkdir(ctx context.Context, name string, _ os.FileMode) error {
 		return os.ErrExist
 	}
 	if err := mk.Mkdir(ctx, rel); err != nil {
-		return mapErr(err)
+		return noteMapErr(ctx, err)
 	}
 	f.h.syncMkdir(ctx, st, rel)
 	return nil
@@ -409,7 +403,7 @@ func (f *davFS) Rename(ctx context.Context, oldName, newName string) error {
 	// it got here (free, or removed for Overwrite: T): asked again under the
 	// gate, with the source, a MOVE that waited refuses a file that landed on
 	// the name meanwhile instead of replacing it (sec055).
-	return mapErr(f.h.sync.Relocate(ctx, st, relSrc, relDst, func(ctx context.Context) error {
+	return noteMapErr(ctx, f.h.sync.Relocate(ctx, st, relSrc, relDst, func(ctx context.Context) error {
 		err := mv.Move(ctx, relSrc, relDst)
 		if err == nil {
 			return nil
@@ -468,7 +462,7 @@ func (f *davFS) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 	}
 	obj, err := src.Stat(ctx)
 	if err != nil {
-		return nil, mapErr(err)
+		return nil, noteMapErr(ctx, err)
 	}
 	return newFileInfo(obj), nil
 }

@@ -208,6 +208,15 @@ func (r *Registry) keptInput(name string, v *model.AppPluginVersion) (*InstallIn
 			}
 		}
 	}
+	// The office engine it brought (office_engine_app.go), held to the pin in
+	// its own manifest when it is staged.
+	if m, err := ParseManifest(manifest); err == nil && officeEngineOf(m) != nil {
+		engine, err := os.ReadFile(filepath.Join(dir, engineZipName))
+		if err != nil {
+			return nil, installErr(ErrCodeNotFound, "the kept version's office engine is gone: "+err.Error())
+		}
+		in.Engine = strings.NewReader(string(engine))
+	}
 	return in, nil
 }
 

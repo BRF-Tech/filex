@@ -47,6 +47,7 @@ import type { AddressInfo } from 'node:net';
 import { ADMIN_EMAIL, ADMIN_PASSWORD, apiLogin, dismissInstallBanner, loginAs } from '../helpers/auth';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage, storageRoot } from '../helpers/seed';
 import { zip } from '../helpers/zip';
+import { APP_INSTALL_ALLOWANCE_MS, APP_REVIEW_ALLOWANCE_MS } from '../helpers/appPlugin';
 
 const GH_DIR = process.env.E2E_FAKE_GITHUB_DIR ?? '';
 
@@ -283,8 +284,12 @@ test.describe.serial('Installing from a store, and a paid app’s license', () =
    * backdrop. The review stays, and says what the server answered.
    */
   async function closeWhileInstalling(page: Page) {
+    // The allowances below need the test's own time to hold them, as
+    // installThroughWizard gives it (helpers/appPlugin.ts).
+    test.info().setTimeout(test.info().timeout + APP_REVIEW_ALLOWANCE_MS + APP_INSTALL_ALLOWANCE_MS);
     const wizard = page.getByTestId('app-plugin-wizard');
-    await expect(wizard).toBeVisible();
+    // The review's time: see the test after the untrusted store's.
+    await expect(wizard).toBeVisible({ timeout: APP_REVIEW_ALLOWANCE_MS });
     await page.locator('input[name="app-plugin-understand"]').check();
     verifyDelayMs = 6_000;
     const before = checks.length;
@@ -320,12 +325,25 @@ test.describe.serial('Installing from a store, and a paid app’s license', () =
   });
 
   test('trusting it opens the review from the store; Install installs, the store is told, the license holds', async ({ page }) => {
+    test.info().setTimeout(test.info().timeout + APP_REVIEW_ALLOWANCE_MS + APP_INSTALL_ALLOWANCE_MS);
     await loginAs(page);
     await page.goto(link('tok-install-0001', '1.0.0', manifestBytes));
     await page.locator('input[name="store-trust-compared"]').check();
     await page.getByTestId('store-trust-approve').click();
     const wizard = page.getByTestId('app-plugin-wizard');
-    await expect(wizard).toBeVisible();
+    // The wizard opens when the server's review is in: the store's keys and
+    // the link, the manifest and the interface from the repository (at the
+    // commit, and the manifest at the tag), then a dry run - five requests
+    // to the two stand-ins here and about a millisecond of the server's own
+    // work. Measured on main and on 0.57 alike (20 runs each, one
+    // container): 52 and 71 ms median, under 0.2 s at most. On the build
+    // host the first review of a run took 4.3 s and more than 5 s (two 0.57
+    // chains, 2026-10-16) while the e2e container had 0.2-0.45 GiB of its
+    // memory in swap on a saturated disk (its processes stalled on I/O a
+    // third of the time, 11-23 major page faults a second); in the chain
+    // without that pressure it took 21 ms. Hence the review allowance every
+    // app spec gives (helpers/appPlugin.ts).
+    await expect(wizard).toBeVisible({ timeout: APP_REVIEW_ALLOWANCE_MS });
     await expect(page.getByTestId('app-plugin-from-store')).toContainText(origin);
     await expect(page.getByTestId('app-plugin-store-license-prefix')).toContainText('FXL-E2…');
     await expect(wizard).not.toContainText(LICENSE_KEY);

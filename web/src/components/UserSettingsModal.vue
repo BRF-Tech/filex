@@ -24,6 +24,8 @@ import { useI18n } from 'vue-i18n';
 import {
   UserSettingsDialog,
   setThemeMode as setCoreThemeMode,
+  type AssistantMe,
+  type AssistantPrefs,
   type PluginActionsResponse,
   type SettingsUser,
   type UserSettingsHost,
@@ -136,6 +138,12 @@ const host: UserSettingsHost = {
     vaultIdle: async () => (await api.get<{ idle_minutes: number }>('/files/e2e/vault/prefs')).data.idle_minutes,
     setVaultIdle: async (minutes) =>
       (await api.put<{ idle_minutes: number }>('/files/e2e/vault/prefs', { idle_minutes: minutes })).data.idle_minutes,
+    // The AI assistant (task #269): the person's state, choice and history.
+    assistant: async () => (await api.get<AssistantMe>('/files/assistant')).data,
+    setAssistantPrefs: async (prefs) => (await api.put<AssistantPrefs>('/files/assistant/prefs', prefs)).data,
+    clearAssistantHistory: async () => {
+      await api.delete('/files/assistant/conversations');
+    },
   },
   setUser(u: SettingsUser) {
     auth.user = u as User;

@@ -82,6 +82,11 @@ const config = {
 
   locale: 'tr',            // 'tr' | 'en' | any language a pack adds; sets this
   theme: 'auto',           // 'light' | 'dark' | 'auto'
+  // The signed-in person's display name, else their username - never their
+  // e-mail. An app's interface is told it (`session.user.name`): the office
+  // editor writes it as the author of comments and tracked changes. Left
+  // out, every edit is signed "filex".
+  userName: 'Alice Example',
   // ⚠ Show a "drives" root listing every storage - and PAIR IT WITH `storages`.
   // The explorer MIRRORS the list you hand it; it does not go and discover the
   // server's storages by itself. Set this to true without `storages` and the
@@ -121,7 +126,7 @@ const config = {
   // it is kept on their account - else in `storages[].sortOrder`, the
   // administrator's order, else in the order of `storages`; STORAGE.md →
   // Ordering storages), an "Apps" section when an installed app has a home screen
-  // (docs/APP-PLUGINS.md), then "How to connect" + "API keys".
+  // (docs/APP-PLUGINS.md), then "Connections" + "API keys".
   // ON by default on every surface. The viewer collapses it to a 56px
   // icon rail from the control at the FAR LEFT OF THE TOP BAR - above the
   // panel, not inside it, so it is still there when the panel is a rail - and
@@ -131,7 +136,7 @@ const config = {
   // list, and its views would name files outside the folder you confined it to.
   sideNav: true,
 
-  // The panel's "How to connect" (WebDAV · SFTP · FTPS · S3 · NFS · filex
+  // The panel's "Connections" (WebDAV · SFTP · FTPS · S3 · NFS · filex
   // mount guides, built from THIS deployment) and "API keys" (mint/revoke the
   // token three of those protocols sign in with). Default on, except under
   // `uiProfile: 'simple'` where it is off.
@@ -144,7 +149,7 @@ const config = {
   // Is a PERSON behind this explorer, or an integration?
   // 'app' drops the surfaces that belong to one identity - API keys, Recent,
   // Starred, Shared with me - and keeps Upload, the storages, Trash and
-  // "How to connect". Read from GET /api/files/capabilities (`caller_kind`)
+  // "Connections". Read from GET /api/files/capabilities (`caller_kind`)
   // when you omit it; set it only to answer before that request lands.
   // ⚠ Proxying with one shared token (below) is exactly the 'app' case.
   callerKind: 'app',
@@ -167,7 +172,8 @@ const config = {
   // double click opens (Enter opens the selection). 'single' - the first click
   // opens. ⚠ TOUCH is not governed by this: a tap always opens (there is no
   // hover-to-select), and the checkbox always selects, in either mode. A
-  // per-viewer preference; the desktop app exposes it as Settings → Open files with.
+  // per-viewer preference; the web and desktop apps expose it as User settings →
+  // Preferences → This device → Open files with.
   openTrigger: 'double',
 
   // Hand the OPEN of a file to the HOST. When true, opening a file emits the
@@ -218,7 +224,7 @@ const config = {
 `<filex-connections>` has always been a registerable element - but nothing in
 the explorer opened either, so an embedder's users had no path to a protocol
 guide or to the API token those guides tell them to use. The navigation panel's
-last section is that path: **How to connect** opens the guides in an overlay
+last section is that path: **Connections** opens the guides in an overlay
 inside the explorer, **API keys** opens the full self-service key manager
 (scopes, folder confinement, expiry). Both are `config.connections`.
 
@@ -226,7 +232,7 @@ inside the explorer, **API keys** opens the full self-service key manager
 are Recent / Starred / Shared with me. That token is `kind: "app"`
 ([docs/MCP.md](MCP.md#token-kinds---user-vs-app)), every visitor authenticates as
 its owner, and "your keys" would have meant the credential your embed itself
-runs on. "How to connect" stays - mount instructions belong to nobody in
+runs on. "Connections" stays - mount instructions belong to nobody in
 particular, and your users may still need them - but the credential forms
 *inside* it (S3 access keys, SSH keys, NFS exports) are replaced by a line
 saying this session cannot mint them, because those are bound to a person too.
@@ -773,6 +779,15 @@ Pick the confinement strength in §4b: the `X-Filex-Root` header alone is enough
 when filex is reachable ONLY through your proxy; a root-scoped token adds
 defense-in-depth (the token itself can't escape its folder).
 
+The **AI assistant** ([AI-ASSISTANT.md](AI-ASSISTANT.md)) lives under
+`/api/files/assistant`, so the files rule already carries it; its replies are
+server-sent events, so the proxy must not buffer that route. The explorer draws
+its button only when the server says so (`GET /api/capabilities` →
+`assistant.button`), and the server never says so for an **app** token: the
+assistant works as a person, and an app's shared token has none behind it. A
+proxy that injects a person's own `user` token gives that person the
+assistant, inside the same root.
+
 
 ## 4d. Dragging files out (host hook)
 
@@ -924,19 +939,32 @@ config.notifications = {
 config.account = {
   // The person's own settings - the admin app's user settings dialog, opened
   // IN the explorer from a "User settings" row it puts first. It talks to the
-  // account's own endpoints with the explorer's credential; the rows only some
-  // hosts have (language, start page, one click or two, desktop-app downloads,
-  // browser notifications) are not drawn. With it, the "⋯" rows the dialog
-  // carries (theme, compact view, time zone) leave the menu.
-  settings: true,
-  // The host's rows above the explorer's own settings rows (shortcuts, the
-  // tour - they fold in from the "⋯", as on the web). A function receives who
-  // is signed in (/api/auth/me).
+  // account's own endpoints with the explorer's credential. With it, the "⋯"
+  // rows the dialog carries (theme, compact view, time zone, keyboard
+  // shortcuts - SETTINGS_DIALOG_ROWS) leave the menu.
+  //   true    the dialog with the rows every host has;
+  //   {...}   the same dialog, plus the rows only this host can carry out
+  //           (ExplorerAccountSettings) - each one given is drawn:
+  settings: {
+    // Preferences → Account → Language. The host applies the pick (its own
+    // window, menus...); the dialog also writes it to the account.
+    language: { pick: (code) => host.setLanguage(code) },
+    // Preferences → This device → Open files with. Apply it by handing the
+    // explorer a new config with `openTrigger` - do not remount it, the
+    // dialog is open inside it.
+    openTrigger: { get: () => host.openTrigger, set: (v) => host.setOpenTrigger(v) },
+    // Notifications → This device → Desktop notifications: the operating
+    // system's own, while the host runs.
+    deviceNotifications: { enabled: () => host.toasts, setEnabled: (on) => host.setToasts(on) },
+  },
+  // The host's rows above the explorer's own settings rows (the tour - it
+  // folds in from the "⋯", as on the web). A function receives who is signed
+  // in (/api/auth/me).
   actions: (person) =>
     person?.role === 'admin' ? [{ key: 'admin', label: 'Admin panel', icon: 'admin' }] : [],
   // Rows below the explorer's - where a host that wants one puts Sign out.
   // The desktop app gives none: signing an account out of the app is an app
-  // setting (Settings → Accounts), not an interface one.
+  // setting (App settings → Accounts), not an interface one.
   tail: () => [],
   // Explorer rows the host has another door for. The ones the explorer draws
   // itself (view switcher, details toggle, panel toggle - EXPLORER_DRAWN_ROWS)
@@ -947,6 +975,16 @@ config.account = {
   // server with the explorer's own credential when absent.
 };
 ```
+
+The rows the admin app alone has - the start page, the desktop-app downloads,
+the browser's own notifications - are never drawn in an explorer.
+
+**The person's look on their account.** `config.accountPrefs: { surface }`
+keeps light / dark, the palette and density in the account's document for
+that surface (`GET/PUT /api/me/prefs?surface=…`, read with the explorer's
+credential once it mounts, written back when they change), as the web app does
+for `web`. The server keeps one document per surface, `web` or `desktop`; the desktop app sets `{ surface: 'desktop' }`. Without it the look
+stays in this browser, as before. One explorer per page may set it.
 
 The bell reads the **user-scoped** endpoints only (`GET /api/notifications`,
 `…/unread-count`, `POST …/{id}/read`, `POST …/read-all`) with the explorer's

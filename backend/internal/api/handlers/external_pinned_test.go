@@ -14,13 +14,14 @@ import (
 
 // OnlyOffice configured by FILEX_ONLYOFFICE_URL / _JWT and switched off on
 // External services: off for the editor right away, and the answer and the
-// audit row say how long (until the next start writes the environment back)
-// and how to switch it off for good (remove the variable).
+// audit row say that it stands (task #258: the variable seeds the service, the
+// next start no longer writes it back) and how to take the environment's
+// value again (filex settings reseed --external).
 //
 // ⚠ Red before 0.50's fix: the editor kept answering 200 - the OnlyOffice
 // service fell back to its boot-time values when the row said "off" - while
 // capabilities and the card said it was off.
-func TestExternalAdmin_SwitchingOffAnEnvPinnedOnlyOfficeIsOffAndSaysUntilWhen(t *testing.T) {
+func TestExternalAdmin_SwitchingOffAnEnvSeededOnlyOfficeIsOffAndSaysItStands(t *testing.T) {
 	h, nodeID := liveExternalServer(t, func(c *config.Config) {
 		c.ExternalServices.OnlyOffice.URL = "https://docs.env"
 		c.ExternalServices.OnlyOffice.JWTSecret = "env-secret"
@@ -45,8 +46,8 @@ func TestExternalAdmin_SwitchingOffAnEnvPinnedOnlyOfficeIsOffAndSaysUntilWhen(t 
 	resp.Body.Close()
 	require.True(t, out.EnvManaged)
 	require.Equal(t, "FILEX_ONLYOFFICE_URL", out.EnvVar)
-	require.Contains(t, out.Note, "until filex restarts")
-	require.Contains(t, out.Note, "remove FILEX_ONLYOFFICE_URL")
+	require.Contains(t, out.Note, "stands across restarts")
+	require.Contains(t, out.Note, "filex settings reseed --external")
 
 	resp = h.Get(t, "/api/files/onlyoffice/config?id="+itoa(nodeID)+"&mode=edit")
 	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode,

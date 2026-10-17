@@ -4,11 +4,14 @@
 //
 // Writes e2e/.artifacts/shots/capture/megamenu/ (or SHOTS_OUT):
 //
-//   people-panel-1440.png     the top bar with People & security open over
-//                             Admin → Users: two sections, a short line under
-//                             every page, the page you are on marked
-//   system-dark-tr-1440.png   the System panel in Turkish, in the dark theme -
-//                             the same menu, translated, three sections
+//   people-panel-1440.png     the top bar with People open over Admin → Users:
+//                             a short line under every page, the page you are
+//                             on marked
+//   settings-panel-1440.png   the Settings panel (task #258) open over Admin →
+//                             Settings → General: General / Security & data /
+//                             File processing & integrations
+//   settings-dark-tr-1440.png the Settings panel in Turkish, in the dark theme -
+//                             the same menu, translated, three columns
 //   drawer-390.png            a phone: the Menu button's drawer, every page as
 //                             a list under its panel and section headings
 //   search-ldap-1440.png      the panel's search (task #168) for "ldap": the
@@ -51,7 +54,11 @@ async function settled(page) {
   await sleep(300);
 }
 
-/** Opens the panel `id` (files | people | system) and returns it, measured. */
+/** The four top entries, in the bar's order (task #258): the bar reads
+ *  Dashboard, Files & storage, People, Settings, Maintenance & records. */
+const ENTRIES = ['files', 'people', 'settings', 'maintenance'];
+
+/** Opens the panel `id` (one of ENTRIES) and returns it, measured. */
 async function openPanel(page, id, what) {
   await settled(page);
   await page.getByTestId(`nav-top-${id}`).click();
@@ -96,7 +103,7 @@ async function main() {
         await page.setViewportSize({ width, height: 900 });
         await page.goto(`${inst.url}/admin/users`);
         await page.getByTestId('mega-menu').first().waitFor({ timeout: 20_000 });
-        for (const id of ['files', 'people', 'system']) {
+        for (const id of ENTRIES) {
           try {
             await openPanel(page, id, `${locale} ${width}px ${id}`);
           } catch (err) {
@@ -111,39 +118,52 @@ async function main() {
     if (problems.length) throw new Error(`layout problems:\n  ${problems.join('\n  ')}`);
     log('every panel fits at 1024 and 1440 px, in English and Turkish');
 
-    // ── 1. People & security over Admin → Users, English, light ──────────
+    // ── 1. People over Admin → Users, English, light ─────────────────────
     await setLanguage(admin, page, 'en');
     await page.setViewportSize({ width: 1440, height: 760 });
     await page.goto(`${inst.url}/admin/users`);
     await page.getByTestId('mega-menu').first().waitFor({ timeout: 20_000 });
     await page.getByText('Deniz Kaya').first().waitFor({ timeout: 20_000 });
-    const people = await openPanel(page, 'people', 'People & security');
-    await mustSay(people, 'the People & security panel', [
-      'People & access', 'Security', 'Users', 'Groups', 'Roles', 'Folder access',
-      'Identity providers', 'Sign-in security', 'Encryption', 'Protection', 'API / MCP',
-    ]);
+    const people = await openPanel(page, 'people', 'People');
+    await mustSay(people, 'the People panel', ['People & access', 'Users', 'Groups', 'Roles', 'Folder access']);
     await page.mouse.move(1300, 700);
     await sleep(300);
     await shot(page, SET, 'people-panel-1440.png');
     await page.keyboard.press('Escape');
+
+    // ── 2. Settings over Admin → Settings → General, English, light ──────
+    await page.goto(`${inst.url}/admin/settings`);
+    await page.getByTestId('mega-menu').first().waitFor({ timeout: 20_000 });
+    const settingsPanel = await openPanel(page, 'settings', 'Settings');
+    await mustSay(settingsPanel, 'the Settings panel', [
+      'General', 'Security & data', 'File processing & integrations',
+      'Branding', 'Appearance', 'Identity providers', 'Sign-in security', 'Encryption', 'Protection',
+      'Archives', 'Plugins', 'External services', 'Webhooks', 'Notifications', 'API / MCP',
+    ]);
+    await page.mouse.move(1300, 700);
+    await sleep(300);
+    await shot(page, SET, 'settings-panel-1440.png');
+    await page.keyboard.press('Escape');
     await ctx.close();
 
-    // ── 2. System in Turkish, dark ────────────────────────────────────────
+    // ── 3. Settings in Turkish, dark ──────────────────────────────────────
     const dark = await newContext(browser, { scheme: 'dark', width: 1440, height: 900 });
     const dpage = await dark.newPage();
     await signIn(dpage, inst.url, ADMIN);
     await setLanguage(admin, dpage, 'tr');
     await dpage.goto(`${inst.url}/admin/dashboard`);
     await dpage.getByTestId('mega-menu').first().waitFor({ timeout: 20_000 });
-    const system = await openPanel(dpage, 'system', 'Sistem');
-    await mustSay(system, 'the Turkish System panel', ['Eklentiler ve entegrasyonlar', 'Özelleştirme', 'Bakım ve kayıtlar', 'Eklentiler', 'Ayarlar', 'Denetim kaydı']);
+    const ayarlar = await openPanel(dpage, 'settings', 'Ayarlar');
+    await mustSay(ayarlar, 'the Turkish Settings panel', [
+      'Genel', 'Güvenlik ve veri', 'Dosya işleme ve entegrasyonlar', 'Kurumsal kimlik', 'Görünüm', 'Eklentiler', 'Bildirimler',
+    ]);
     await dpage.mouse.move(1300, 700);
     await sleep(300);
-    await shot(dpage, SET, 'system-dark-tr-1440.png');
+    await shot(dpage, SET, 'settings-dark-tr-1440.png');
     await setLanguage(admin, dpage, 'en');
     await dark.close();
 
-    // ── 3. A phone: the drawer ────────────────────────────────────────────
+    // ── 4. A phone: the drawer ────────────────────────────────────────────
     const phone = await newContext(browser, { width: 390, height: 844 });
     const ppage = await phone.newPage();
     await signIn(ppage, inst.url, ADMIN);
@@ -157,7 +177,7 @@ async function main() {
     const drawer = ppage.getByTestId('nav-drawer');
     await drawer.waitFor({ state: 'visible', timeout: 10_000 });
     await sleep(500);
-    await mustSay(drawer, 'the drawer', ['Files & storage', 'People & security', 'Users', 'Groups']);
+    await mustSay(drawer, 'the drawer', ['Files & storage', 'People', 'Users', 'Groups', 'Settings']);
     const box = await drawer.boundingBox();
     if (!box || box.x < -0.5 || box.x + box.width > 390.5) throw new Error(`the drawer does not fit a 390 px phone: ${JSON.stringify(box)}`);
     const sideways = await layoutProblems(ppage);
@@ -165,7 +185,7 @@ async function main() {
     await shot(ppage, SET, 'drawer-390.png');
     await phone.close();
 
-    // ── 4. The panel's search (task #168): it fits, then "ldap" at 1440 ──
+    // ── 5. The panel's search (task #168): it fits, then "ldap" at 1440 ──
     const sctx = await newContext(browser, { width: 1440, height: 900 });
     const spage = await sctx.newPage();
     await signIn(spage, inst.url, ADMIN);
@@ -208,7 +228,7 @@ async function main() {
     await shot(spage, SET, 'search-ldap-1440.png');
     await sctx.close();
 
-    // ── 5. A phone, in Turkish: the search over the whole window ─────────
+    // ── 6. A phone, in Turkish: the search over the whole window ─────────
     const sphone = await newContext(browser, { width: 390, height: 844 });
     const sppage = await sphone.newPage();
     await signIn(sppage, inst.url, ADMIN);
@@ -232,7 +252,7 @@ async function main() {
     await shot(sppage, SET, 'search-tr-390.png');
     await setLanguage(admin, sppage, 'en');
     await sphone.close();
-    log('People & security over Users, System in Turkish dark, the phone drawer, the search at 1440 and on a phone');
+    log('People over Users, Settings over General in English and in Turkish dark, the phone drawer, the search at 1440 and on a phone');
   } finally {
     await browser.close();
     await inst.stop();

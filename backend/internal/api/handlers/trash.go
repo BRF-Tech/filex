@@ -4,6 +4,7 @@
 //
 //	GET  /api/files/manager/trash                          (auth)  list trashed (+ totals)
 //	POST /api/files/manager/restore                        (auth)  body {node_id} or {node_ids}
+//	POST /api/files/manager/trash/same                     (auth)  body {items:[{id, sha256}]}: same bytes? (trash_same.go)
 //	DELETE /api/admin/trash/{id}                           (admin) immediate single purge
 //	POST /api/admin/trash/purge                            (admin) body {node_ids}: purge a batch
 //	POST /api/admin/trash/empty?older_than_days=N          (admin) start a batch purge

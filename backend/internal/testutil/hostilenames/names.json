@@ -1,0 +1,344 @@
+{
+  "_doc": [
+    "The hostile file names every surface of filex is tested with (task #238).",
+    "ONE list: Go tests read it through package hostilenames (go:embed); the e2e specs, the web unit tests and the desktop scripts through ONE JavaScript reader, e2e/helpers/hostile-names.mjs. Never copy a name into a second list; add it here.",
+    "A name is `parts` joined: a string is itself, a number is ONE code point, {\"repeat\": <string or code point>, \"times\": n} is that many copies. Invisible, combining and emoji characters are ALWAYS written as code points, never typed: an editor shows nothing for them, and a tool that turns an escape into the character writes something nobody can review.",
+    "`refused`: no filex surface may create this name. `windows`: \"invalid\" when the name cannot exist as a file name on Windows. `twin`: the id of another name that is the same name to a case-insensitive or normalisation-insensitive file system (`twin_kind`: case | nfc-nfd).",
+    "`paths` are whole relative paths (a deep one) rather than names."
+  ],
+  "names": [
+    {
+      "id": "turkish",
+      "parts": ["Bütçe ğüşıöç İ.xlsx"],
+      "why": "Turkish letters: two-byte UTF-8, and the four i's (I ı İ i) that a default case fold gets wrong",
+      "tags": ["unicode"]
+    },
+    {
+      "id": "german-eszett",
+      "parts": ["Straße.txt"],
+      "why": "ß upper-cases to SS: a full case fold calls Straße and STRASSE one name",
+      "tags": ["unicode"]
+    },
+    {
+      "id": "cjk-japanese",
+      "parts": ["報告書.pdf"],
+      "why": "three-byte UTF-8 and no spaces between words: tokenisers and byte-length limits",
+      "tags": ["unicode", "cjk"]
+    },
+    {
+      "id": "korean-hangul",
+      "parts": ["한국어.txt"],
+      "why": "Hangul syllables decompose into jamo under NFD: a macOS client sends a different byte string",
+      "tags": ["unicode", "cjk"]
+    },
+    {
+      "id": "arabic",
+      "parts": ["تقرير مالي.pdf"],
+      "why": "right-to-left script with a left-to-right extension: the visual order differs from the logical one",
+      "tags": ["unicode", "rtl"]
+    },
+    {
+      "id": "hebrew",
+      "parts": ["דוח שנתי.docx"],
+      "why": "right-to-left script with a space and a left-to-right extension",
+      "tags": ["unicode", "rtl"]
+    },
+    {
+      "id": "emoji",
+      "parts": [128512, " rapor.txt"],
+      "why": "four-byte UTF-8, a surrogate pair in UTF-16: length and cutting by UTF-16 unit or byte splits it",
+      "tags": ["unicode", "emoji"]
+    },
+    {
+      "id": "emoji-zwj-skin-tone",
+      "parts": [128105, 127997, 8205, 128187, " notes.md"],
+      "why": "one visible glyph made of four code points (skin tone modifier and zero-width joiner): any cut by code point splits the person",
+      "tags": ["unicode", "emoji"]
+    },
+    {
+      "id": "nfc-butce",
+      "parts": ["Bütçe.txt"],
+      "why": "composed (NFC), the way a keyboard types it",
+      "tags": ["unicode"],
+      "twin": "nfd-butce",
+      "twin_kind": "nfc-nfd"
+    },
+    {
+      "id": "nfd-butce",
+      "parts": ["Bu", 776, "tc", 807, "e.txt"],
+      "why": "the same name decomposed (NFD), the way macOS hands it over: different bytes, same text",
+      "tags": ["unicode", "nfd"],
+      "twin": "nfc-butce",
+      "twin_kind": "nfc-nfd"
+    },
+    {
+      "id": "leading-space",
+      "parts": [" leading.txt"],
+      "why": "a leading space is trimmed by careless parsers (FTP command lines, form fields)",
+      "tags": ["space"]
+    },
+    {
+      "id": "trailing-space",
+      "parts": ["trailing.txt "],
+      "why": "Windows drops a trailing space silently, so the file it writes has another name",
+      "tags": ["space"],
+      "windows": "invalid"
+    },
+    {
+      "id": "double-space",
+      "parts": ["double  space.txt"],
+      "why": "two spaces in a row are collapsed by HTML rendering and by some normalisers",
+      "tags": ["space"]
+    },
+    {
+      "id": "trailing-dot",
+      "parts": ["report."],
+      "why": "Windows drops a trailing dot silently: report. and report become one file",
+      "tags": ["dots"],
+      "windows": "invalid"
+    },
+    {
+      "id": "percent-20",
+      "parts": ["100%20off.txt"],
+      "why": "a URL decoded twice turns %20 into a space",
+      "tags": ["url"]
+    },
+    {
+      "id": "percent-alone",
+      "parts": ["50% done.txt"],
+      "why": "a lone % is an invalid escape: a decoder that is handed the raw name fails",
+      "tags": ["url"]
+    },
+    {
+      "id": "percent-2f",
+      "parts": ["a%2Fb.txt"],
+      "why": "decoded once too often %2F becomes a path separator",
+      "tags": ["url"]
+    },
+    {
+      "id": "plus",
+      "parts": ["C++ notes+draft.txt"],
+      "why": "+ means a space in a query string and a form body",
+      "tags": ["url"]
+    },
+    {
+      "id": "hash",
+      "parts": ["issue #42.txt"],
+      "why": "# starts a URL fragment: an unescaped link loses the rest of the name",
+      "tags": ["url"]
+    },
+    {
+      "id": "question-mark",
+      "parts": ["why?.txt"],
+      "why": "? starts a query string, and Windows forbids it",
+      "tags": ["url", "win-forbidden"],
+      "windows": "invalid"
+    },
+    {
+      "id": "semicolon",
+      "parts": ["a;b.txt"],
+      "why": "; separates path parameters (some servers cut ;jsessionid) and Content-Disposition parameters",
+      "tags": ["url"]
+    },
+    {
+      "id": "ampersand-equals",
+      "parts": ["a&b=c.txt"],
+      "why": "& and = split a query string; & also starts an HTML entity",
+      "tags": ["url", "html"]
+    },
+    {
+      "id": "single-quote",
+      "parts": ["it's mine.txt"],
+      "why": "an apostrophe closes a single-quoted shell, JavaScript or HTML attribute string",
+      "tags": ["quote"]
+    },
+    {
+      "id": "double-quote",
+      "parts": ["say \"hi\".txt"],
+      "why": "a double quote closes a header parameter, an HTML attribute or a JSON string, and Windows forbids it",
+      "tags": ["quote", "win-forbidden"],
+      "windows": "invalid"
+    },
+    {
+      "id": "backslash",
+      "parts": ["back", 92, "slash.txt"],
+      "why": "the Windows path separator: a client or an unzip on Windows writes a folder named back",
+      "tags": ["separator", "win-forbidden"],
+      "windows": "invalid",
+      "refused": true
+    },
+    {
+      "id": "dot-dot",
+      "parts": [".."],
+      "why": "the parent folder: joined onto a path it walks out of it",
+      "tags": ["dots"],
+      "windows": "invalid",
+      "refused": true
+    },
+    {
+      "id": "three-dots",
+      "parts": ["..."],
+      "why": "only dots: Windows trims trailing dots, so on a Windows host it names the folder it sits in; the read side refuses it, so no door may create it",
+      "tags": ["dots"],
+      "windows": "invalid",
+      "refused": true
+    },
+    {
+      "id": "dots-spaced",
+      "parts": [" . . . "],
+      "why": "only dots and spaces with no .. in it: Windows trims the trailing dots and spaces, so on a Windows host it names the folder it sits in, like ... (the owner's decision for 0.57: refused)",
+      "tags": ["dots", "space"],
+      "windows": "invalid",
+      "refused": true
+    },
+    {
+      "id": "dot-space-dot",
+      "parts": [". ."],
+      "why": "two dots a space apart: not .., and still the folder it sits in once Windows has trimmed it",
+      "tags": ["dots", "space"],
+      "windows": "invalid",
+      "refused": true
+    },
+    {
+      "id": "dots-inside",
+      "parts": ["a..b.txt"],
+      "why": "holds .. without being the parent: a guard that searches the text for .. refuses a good name",
+      "tags": ["dots"]
+    },
+    {
+      "id": "win-con",
+      "parts": ["CON"],
+      "why": "a Windows device name: opening it opens the console",
+      "tags": ["win-reserved"],
+      "windows": "invalid"
+    },
+    {
+      "id": "win-prn",
+      "parts": ["PRN"],
+      "why": "a Windows device name (the printer)",
+      "tags": ["win-reserved"],
+      "windows": "invalid"
+    },
+    {
+      "id": "win-aux-ext",
+      "parts": ["aux.txt"],
+      "why": "a device name stays reserved with any extension and in lower case",
+      "tags": ["win-reserved"],
+      "windows": "invalid"
+    },
+    {
+      "id": "win-com1-ext",
+      "parts": ["com1.log"],
+      "why": "a numbered device name with an extension",
+      "tags": ["win-reserved"],
+      "windows": "invalid"
+    },
+    {
+      "id": "colon",
+      "parts": ["10:30 notes.txt"],
+      "why": "Windows forbids it, and on NTFS name:stream opens an alternate data stream",
+      "tags": ["win-forbidden"],
+      "windows": "invalid"
+    },
+    {
+      "id": "asterisk",
+      "parts": ["a*b.txt"],
+      "why": "a wildcard to shells and Windows APIs, forbidden in Windows names",
+      "tags": ["win-forbidden"],
+      "windows": "invalid"
+    },
+    {
+      "id": "angle-brackets",
+      "parts": ["<img src=x onerror=alert(1)>.txt"],
+      "why": "markup: a name written into a page unescaped runs as script; Windows forbids < and >",
+      "tags": ["win-forbidden", "html"],
+      "windows": "invalid"
+    },
+    {
+      "id": "pipe",
+      "parts": ["a|b.txt"],
+      "why": "a shell pipe, and forbidden in Windows names",
+      "tags": ["win-forbidden"],
+      "windows": "invalid"
+    },
+    {
+      "id": "bytes-255",
+      "parts": ["a", {"repeat": "ğ", "times": 125}, ".txt"],
+      "why": "exactly 255 bytes of UTF-8 (130 characters): the most ext4, XFS and APFS hold in one name; must be accepted",
+      "tags": ["long"]
+    },
+    {
+      "id": "bytes-256",
+      "parts": ["ab", {"repeat": "ğ", "times": 125}, ".txt"],
+      "why": "one byte over the 255-byte limit of a local disk, still only 131 characters",
+      "tags": ["long", "over-255-bytes"]
+    },
+    {
+      "id": "chars-under-bytes-over",
+      "parts": [{"repeat": "ğ", "times": 200}, ".txt"],
+      "why": "204 characters but 404 bytes: a limit counted in characters lets it through, the disk refuses it",
+      "tags": ["long", "over-255-bytes"]
+    },
+    {
+      "id": "zero-width-space",
+      "parts": ["zero", 8203, "width.txt"],
+      "why": "looks exactly like zerowidth.txt: two different files nobody can tell apart",
+      "tags": ["invisible"]
+    },
+    {
+      "id": "rlo-extension",
+      "parts": ["invoice", 8238, "fdp.exe"],
+      "why": "RIGHT-TO-LEFT OVERRIDE: displays as invoiceexe.pdf while the file is an .exe; the true extension must stay visible",
+      "tags": ["invisible", "bidi-control"]
+    },
+    {
+      "id": "control-tab",
+      "parts": ["tab", 9, "name.txt"],
+      "why": "a control character: forbidden on Windows, invisible in a listing; no door may create it",
+      "tags": ["control"],
+      "windows": "invalid",
+      "refused": true
+    },
+    {
+      "id": "control-newline",
+      "parts": ["line", 10, "break.txt"],
+      "why": "a line break inside a name breaks line-based protocols (FTP listings), logs and headers; no door may create it",
+      "tags": ["control"],
+      "windows": "invalid",
+      "refused": true
+    },
+    {
+      "id": "nul",
+      "parts": ["nul", 0, "byte.txt"],
+      "why": "no file system stores a NUL in a name; C strings end there",
+      "tags": ["control"],
+      "windows": "invalid",
+      "refused": true
+    },
+    {
+      "id": "case-upper",
+      "parts": ["Rapor.docx"],
+      "why": "with case-lower: two files on Linux and S3, one file on Windows and macOS",
+      "tags": ["case"],
+      "twin": "case-lower",
+      "twin_kind": "case"
+    },
+    {
+      "id": "case-lower",
+      "parts": ["rapor.docx"],
+      "why": "the case twin of case-upper",
+      "tags": ["case"],
+      "twin": "case-upper",
+      "twin_kind": "case"
+    }
+  ],
+  "paths": [
+    {
+      "id": "deep",
+      "segment": ["derin klasör"],
+      "depth": 64,
+      "leaf": ["son.txt"],
+      "why": "64 folders deep, about 900 bytes: past the 260 characters of a classic Windows path, inside the 1024 bytes of an S3 key"
+    }
+  ]
+}

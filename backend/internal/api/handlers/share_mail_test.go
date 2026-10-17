@@ -297,3 +297,34 @@ func TestShareMail_ALinkSomebodyElseMadeIsRefused(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, code, string(raw))
 	assert.True(t, strings.Contains(string(raw), "not_configured"), string(raw))
 }
+
+// Task #258: the mails name the instance by its Display name (branding.name,
+// Admin → Settings → Branding) - the name every page shows - and no longer by
+// the old Settings page's "Site name", which nothing else showed.
+func TestShareMail_NamesTheInstanceByItsDisplayName(t *testing.T) {
+	m := newMailFix(t)
+	ctx := context.Background()
+	require.NoError(t, m.f.store.UpsertSetting(ctx, "branding.name", "Acme Cloud"))
+	m.g.AttachBranding(handlers.NewBrandingSource(m.f.store, false))
+	sh := m.link(t, share.CreateOpts{NodeID: m.file.ID})
+
+	rec := m.send(t, map[string]any{"share": sh.Token, "email": "amigo@example.test", "locale": "en"})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	_, body := mailParts(t, m.sink.only(t))
+	assert.Contains(t, body, "A file has been shared with you via Acme Cloud:")
+}
+
+// The old key alone names nothing any more: an install that still has a
+// `site_name` row and no Display name gets it carried over at boot
+// (server.upgradeSiteName), so the mail never has to read it.
+func TestShareMail_TheOldSiteNameIsNotRead(t *testing.T) {
+	m := newMailFix(t)
+	require.NoError(t, m.f.store.UpsertSetting(context.Background(), "site_name", "Old Name"))
+	sh := m.link(t, share.CreateOpts{NodeID: m.file.ID})
+
+	rec := m.send(t, map[string]any{"share": sh.Token, "email": "amigo@example.test", "locale": "en"})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	_, body := mailParts(t, m.sink.only(t))
+	assert.NotContains(t, body, "Old Name")
+	assert.Contains(t, body, "A file has been shared with you:")
+}

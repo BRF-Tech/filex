@@ -1,0 +1,25 @@
+# The autonomous release round (scripts/train/auto.mjs, task #165), run in
+# the release workspace by scripts/train/auto-host.mjs. A template:
+# scripts/train/install-auto.sh fills @NODE@, @BIN@ and @ENV@ and installs it
+# as /etc/systemd/system/filex-release-auto.service. Started by
+# filex-release-auto.timer; `systemctl start filex-release-auto.service` runs
+# a round by hand (nothing queued: it ends at once).
+[Unit]
+Description=filex autonomous release round (scripts/train/auto.mjs)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=HOME=/root
+ExecStart=@NODE@ @BIN@/train/auto-host.mjs run --env @ENV@
+# 1 a red round, 3 a round stopped for a person: both told to a person by the
+# round itself, not a failed unit. 2 (the workspace is down, or a setting is
+# missing) fails the unit; a workspace that is down is told as well.
+SuccessExitStatus=1 3
+# A round waits for GitHub and the stores; a timer does not start a second
+# one while this runs.
+TimeoutStartSec=14h
+KillSignal=SIGTERM
+TimeoutStopSec=5min

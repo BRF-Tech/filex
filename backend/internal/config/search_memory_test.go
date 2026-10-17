@@ -3,8 +3,10 @@ package config
 import "testing"
 
 // FILEX_SEARCH_MEMORY_PERCENT (issue #115): the share of the memory filex was
-// given that indexing may take. Its bounds are applied where the budget is
-// set (server.setSearchMemoryBudget); here it is read as the operator wrote it.
+// given that indexing may take. It is the first value of the setting
+// search.memory_percent (internal/search settings.go), whose bounds apply where
+// the budget is set (Index.ApplyMemoryPercent); here it is read as the
+// operator wrote it.
 func TestSearchMemoryPercent(t *testing.T) {
 	if got := Default().Search.MemoryPercent; got != 25 {
 		t.Fatalf("default = %d, want 25", got)

@@ -38,6 +38,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DIR,
   KEYS,
+  WINGET_PUBLISHING,
   bash,
   code,
   desktopEnv,
@@ -128,12 +129,7 @@ describe('a run that adds the macOS desktop packages to a release (only=macos)',
     const full = { publish: true, full: true, only: 'all' };
     expect(desktopRuns(release, desktopEnv(full, MAC, KEYS), MAC).publishing).toEqual(['Attach to the release', 'Commit the cask to the tap']);
     const win = { os: 'windows-latest', label: 'windows', script: 'dist:win', arches: 'x64 arm64' };
-    expect(desktopRuns(release, desktopEnv(full, win, KEYS), win).publishing).toEqual([
-      'Attach to the release',
-      'Submit to winget',
-      'Sign the CLA on the winget pull request',
-      'Close the superseded winget pull requests',
-    ]);
+    expect(desktopRuns(release, desktopEnv(full, win, KEYS), win).publishing).toEqual(['Attach to the release', ...WINGET_PUBLISHING]);
     const armWin = { os: 'windows-latest', label: 'windows', script: '', arches: 'arm64' };
     const arm = desktopRuns(release, desktopEnv({ publish: true, full: false, only: 'arm64' }, armWin, KEYS), armWin);
     expect(arm.publishing).toEqual(['Attach to the release']);

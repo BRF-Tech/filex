@@ -20,6 +20,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/stall"
+	"github.com/brf-tech/filex/backend/internal/testutil/refusedport"
 )
 
 // Issue #75 (the rest of #73): the SFTP driver bounded only the TCP connect
@@ -294,13 +295,7 @@ func (k *knob) Write(p []byte) (int, error) {
 
 func refusedAddr(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := l.Addr().String()
-	_ = l.Close()
-	return addr
+	return refusedport.Addr(t)
 }
 
 type sftpCall struct {

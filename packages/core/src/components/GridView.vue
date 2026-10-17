@@ -650,7 +650,7 @@ function snippetTitle(snippet: string): string {
           </span>
         </span>
         <div class="fe-grid__main">
-          <div class="fe-grid__label" :title="n.basename">
+          <div class="fe-grid__label" :title="nodeDisplayName(n)">
             <bdi>{{ nodeDisplayName(n) }}</bdi>
             <span
               v-if="keepBadgeFor && keepBadgeFor(n)"

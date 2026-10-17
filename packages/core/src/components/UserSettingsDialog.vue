@@ -43,15 +43,16 @@
  *   • Active sessions — there is no session list endpoint. `/api/auth/*`
  *     offers me / profile / password / totp and nothing else; sessions are
  *     cookies the server does not enumerate.
- *   • AI assistant — the per-user half of that surface does not exist; the
- *     AI settings that do exist are instance-wide and admin-only. The rail
- *     DOES carry the item (the reference shell has five, and a missing one is
- *     read as a missing feature rather than as a deliberate absence), and the
- *     pane behind it says exactly the sentence above instead of drawing a
- *     switch. It promises nothing and offers nothing to press.
+ *
+ * The AI assistant's pane (task #269) is real since 0.57: the assistant's
+ * state as the server says it (on, off, not set up by the administrator, not
+ * in the person's role), who reads what they write, how long a conversation
+ * is kept, their one choice (approve every change) and the button that
+ * deletes their history.
  */
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import type { AssistantMe } from '../lib/assistant';
 import { Bell, ShieldCheck, SlidersHorizontal, Sparkles, User as UserIcon, X } from 'lucide-vue-next';
 import ChoiceButtons, { type ChoiceOption } from './ChoiceButtons.vue';
 import ChoiceSelect, { type SelectOption } from './ChoiceSelect.vue';
@@ -65,6 +66,7 @@ import Modal from '../modals/Modal.vue';
 import ProductVersion from './ProductVersion.vue';
 import ThemePalette from './ThemePalette.vue';
 import TimeZonePicker from './TimeZonePicker.vue';
+import ShortcutSettings from './ShortcutSettings.vue';
 import { formatInstant, localeTag, useLocale } from '../composables/useLocale';
 import { useSystemDark } from '../composables/useSystemDark';
 import { DEFAULT_BRAND_NAME } from '../composables/usePublicBranding';
@@ -98,6 +100,7 @@ import { useThemeState, setTheme as setCorePalette } from '../lib/themes';
 import { deviceTimeZone, resolvedTimeZone } from '../lib/timezone';
 import { personInitial, personName } from '../lib/personName';
 import { getDensity, setDensity, type Density } from '../lib/density';
+import { remoteImagesOn, setRemoteImages } from '../lib/remoteImages';
 import { downscaleImageToDataURL } from '../lib/imageDownscale';
 import { DIGEST_EVENT, WEBHOOK_EVENTS, userEventKey } from '../lib/webhookEvents';
 import type {
@@ -128,22 +131,77 @@ type Section = 'profile' | 'preferences' | 'notifications' | 'security' | 'ai';
 
 const section = ref<Section>(props.initialSection ?? 'profile');
 /**
- * ⚠ `ai` is listed, and it is listed as NOT HERE YET — the rail carries it so
- * the shape matches the reference shell, and the pane behind it says in one
- * sentence that there is nothing to set, because there is not: the AI settings
- * this server has are instance-wide and admin-only (see the header). Owner's
- * call, 2026-09-12: it shows as coming soon rather than as a feature, and it
- * promises nothing. The moment a per-user assistant setting exists, the
- * `soon` flag comes off and the pane fills; until then a rail item that
- * pretended to have controls would be the worse half of both options.
+ * The AI assistant's row is always there: its pane says the state as the
+ * server gives it (on, off, not set up by the administrator, not in the
+ * person's role), so an installation where it is off still tells the person
+ * why there is no button - and a server that says nothing about it reads as
+ * off.
  */
-const sections: { key: Section; icon: typeof UserIcon; soon?: boolean }[] = [
+const sections: { key: Section; icon: typeof UserIcon }[] = [
   { key: 'profile', icon: UserIcon },
   { key: 'preferences', icon: SlidersHorizontal },
   { key: 'notifications', icon: Bell },
   { key: 'security', icon: ShieldCheck },
-  { key: 'ai', icon: Sparkles, soon: true },
+  { key: 'ai', icon: Sparkles },
 ];
+
+/* ── the AI assistant (task #269) ───────────────────────────────────── */
+const assistantMe = ref<AssistantMe | null>(null);
+const assistantBusy = ref(false);
+const assistantConfirmClear = ref(false);
+/** The pane's one sentence about the state - "not in your role" when the
+ *  assistant is on and the person may not use it. */
+const assistantStateKey = computed(() => {
+  const st = assistantMe.value?.state ?? props.host.capabilities?.assistant?.state ?? 'off';
+  const permitted = assistantMe.value?.permitted ?? props.host.capabilities?.assistant?.permitted ?? false;
+  if (st === 'on' && !permitted) return 'userSettings.ai.state.not_permitted';
+  return `userSettings.ai.state.${st}`;
+});
+const assistantProvider = computed(() => {
+  const m = assistantMe.value;
+  if (!m?.provider || !m.model) return '';
+  const names: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', ollama: 'Ollama' };
+  return `${names[m.provider] ?? m.provider} · ${m.model}`;
+});
+function loadAssistant() {
+  const api = props.host.api;
+  if (!api.assistant || !props.host.capabilities?.assistant) return;
+  api
+    .assistant()
+    .then((m) => (assistantMe.value = m))
+    .catch(() => (assistantMe.value = null));
+}
+async function setConfirmAll(on: boolean) {
+  const api = props.host.api;
+  if (!api.setAssistantPrefs || !assistantMe.value) return;
+  assistantBusy.value = true;
+  try {
+    const prefs = await api.setAssistantPrefs({ confirm_all: on });
+    assistantMe.value = { ...assistantMe.value, prefs };
+  } catch (e) {
+    props.host.toast('error', props.host.errorText(e, t('userSettings.ai.saveFailed')));
+  } finally {
+    assistantBusy.value = false;
+  }
+}
+async function clearAssistantHistory() {
+  const api = props.host.api;
+  if (!api.clearAssistantHistory) return;
+  if (!assistantConfirmClear.value) {
+    assistantConfirmClear.value = true;
+    return;
+  }
+  assistantBusy.value = true;
+  try {
+    await api.clearAssistantHistory();
+    props.host.toast('success', t('userSettings.ai.cleared'));
+  } catch (e) {
+    props.host.toast('error', props.host.errorText(e, t('userSettings.ai.saveFailed')));
+  } finally {
+    assistantBusy.value = false;
+    assistantConfirmClear.value = false;
+  }
+}
 
 /** The heading that names the dialog (Modal `labelledby`). */
 const headingId = `fx-us-title-${Math.random().toString(36).slice(2, 9)}`;
@@ -547,6 +605,15 @@ function pickDensity(compact: boolean) {
   setDensity(density.value);
 }
 
+/* 0.57 - pictures from other servers in a file's preview (lib/remoteImages).
+ * Off by default: each one waits behind a placeholder and asks first, because
+ * loading it tells that server the file was opened. Kept on the account. */
+const remoteImages = ref(false);
+function pickRemoteImages(on: boolean) {
+  remoteImages.value = on;
+  setRemoteImages(on);
+}
+
 // How a mouse opens a file: 'double' (single click selects, double opens) or
 // 'single' (first click opens). Touch always taps-to-open regardless. The HOST
 // owns where that lives — absent (the desktop app, whose own Settings carries
@@ -633,6 +700,15 @@ function pickStartPage(v: string) {
 
 const permission = ref<BrowserNotifyPermission>('unsupported');
 const browserOn = ref(true);
+/** The operating system's own notifications on this device (the desktop
+ *  app's, `host.deviceNotifications`), task #258. */
+const deviceNotifyOn = ref(true);
+/** The Notifications pane's "This device" part has a row to show. */
+const deviceNotifyRows = computed(
+  () => !!(props.host.browserNotifications || props.host.webPush || props.host.deviceNotifications),
+);
+/** The keyboard shortcuts' editor is open over this dialog. */
+const shortcutsOpen = ref(false);
 const savingNotif = ref(false);
 const notifPrefs = ref<SettingsNotificationPrefs | null>(null);
 
@@ -730,6 +806,18 @@ function setEventOn(event: string, on: boolean) {
 function setBrowser(v: boolean) {
   browserOn.value = v;
   props.host.browserNotifications?.setEnabled(v);
+}
+
+async function setDeviceNotify(v: boolean) {
+  const d = props.host.deviceNotifications;
+  if (!d) return;
+  deviceNotifyOn.value = v;
+  try {
+    await d.setEnabled(v);
+  } catch {
+    // The host could not store it: show what is in force.
+    deviceNotifyOn.value = d.enabled();
+  }
 }
 
 /** ⚠ From a click and from nowhere else — see the admin app's lib/browserNotify. */
@@ -971,12 +1059,14 @@ function sync(open: boolean) {
     hydrateProfile();
     theme.value = h.mode.get();
     density.value = getDensity();
+    remoteImages.value = remoteImagesOn();
     openTrigger.value = h.openTrigger?.get() ?? 'double';
     timeZone.value = h.zone.get();
     startPage.value = h.startPage?.get() ?? null;
     refreshTzNow();
     permission.value = h.browserNotifications?.permission() ?? 'unsupported';
     browserOn.value = h.browserNotifications?.enabled() ?? false;
+    deviceNotifyOn.value = h.deviceNotifications?.enabled() ?? false;
     void loadPush();
     resetTotp();
     // Both are best-effort: a dialog that will not open because one GET
@@ -990,6 +1080,10 @@ function sync(open: boolean) {
       .then((q) => (quota.value = q))
       .catch(() => (quota.value = null));
     loadVaultIdle();
+    loadAssistant();
+  } else {
+    // The editor over this dialog goes with it.
+    shortcutsOpen.value = false;
   }
 }
 
@@ -1079,7 +1173,6 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
         >
           <component :is="s.icon" class="fx-us__rail-icon" aria-hidden="true" />
           <span class="fx-us__rail-label">{{ t(`userSettings.tabs.${s.key}`) }}</span>
-          <span v-if="s.soon" class="fx-us__rail-soon">{{ t('userSettings.ai.soon') }}</span>
         </button>
       </nav>
 
@@ -1201,414 +1294,474 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
                  language ever ships, measure the strip before adding a fourth
                  button — a segmented control stops being readable somewhere
                  around four, and that is the point to go back to a select. -->
-            <div v-if="host.language" class="fx-us__field">
-              <span class="fx-us__label">{{ t('profile.locale') }}</span>
-              <div
-                class="fx-us__segmented"
-                role="group"
-                :aria-label="t('profile.locale')"
-                data-testid="user-settings-locale"
-              >
-                <button
-                  v-for="o in localeOptions"
-                  :key="o.value"
-                  type="button"
-                  class="fx-us__seg"
-                  :class="{ 'is-active': currentLocale === o.value }"
-                  :aria-pressed="currentLocale === o.value"
-                  :data-testid="`user-settings-locale-${o.value}`"
-                  @click="pickLocale(o.value)"
-                >
-                  {{ o.label }}
-                </button>
+            <!-- ⚠ Two parts, said out loud (task #258, the owner's grouping of
+                 2026-10-15): what the ACCOUNT keeps, the same wherever the
+                 person signs in, and what THIS DEVICE keeps. A row belongs to
+                 the part that says the truth about where it is saved; a row
+                 that moves from one store to the other moves part with it. -->
+            <div class="fx-us__part" data-testid="user-settings-prefs-account">
+              <div class="fx-us__part-head">
+                <h4 class="fx-us__part-title">{{ t('userSettings.scope.account') }}</h4>
+                <p class="fx-us__hint">{{ t('userSettings.scope.accountHint') }}</p>
               </div>
-              <span class="fx-us__hint">{{ t('userSettings.prefs.languageHint') }}</span>
-            </div>
-
-            <!-- ── time zone ─────────────────────────────
-                 core's TimeZonePicker — the same combobox the embed's own
-                 "⋯ → Time zone" dialog mounts. What a pick WRITES is this
-                 modal's business (`pickTimeZone`: the account, and this
-                 browser's copy of it); the control is shared. -->
-            <div class="fx-us__field">
-              <label class="fx-us__label" :for="tzInputId">
-                {{ t('userSettings.prefs.timezone') }}
-              </label>
-              <TimeZonePicker
-                data-testid="user-settings-timezone"
-                testid="user-settings-tz"
-                :input-id="tzInputId"
-                :locale="currentLocale"
-                :model-value="timeZone"
-                :fallback="tzFallback"
-                :label="t('userSettings.prefs.timezone')"
-                :disabled="savingTz"
-                @update:model-value="pickTimeZone"
-              />
-              <span class="fx-us__hint">
-                {{ t('userSettings.prefs.timezoneHint') }}
-              </span>
-              <span class="fx-us__readout" data-testid="user-settings-tz-now">
-                {{ t('userSettings.prefs.timezoneNow', { zone: tzInForce, time: tzNow }) }}
-              </span>
-            </div>
-
-            <div v-if="host.startPage" class="fx-us__field">
-              <span class="fx-us__label">{{ t('userSettings.prefs.startPage') }}</span>
-              <div
-                class="fx-us__segmented"
-                role="group"
-                :aria-label="t('userSettings.prefs.startPage')"
-              >
-                <button
-                  v-for="o in host.startPage.options"
-                  :key="o"
-                  type="button"
-                  class="fx-us__seg"
-                  :class="{ 'is-active': startPage === o }"
-                  :aria-pressed="startPage === o"
-                  :data-testid="`user-settings-start-${o}`"
-                  @click="pickStartPage(o)"
+              <div v-if="host.language" class="fx-us__field">
+                <span class="fx-us__label">{{ t('profile.locale') }}</span>
+                <div
+                  class="fx-us__segmented"
+                  role="group"
+                  :aria-label="t('profile.locale')"
+                  data-testid="user-settings-locale"
                 >
-                  {{ t(`userSettings.prefs.startPage_${o}`) }}
-                </button>
-              </div>
-              <span class="fx-us__hint">{{ t('userSettings.prefs.startPageHint') }}</span>
-            </div>
-
-            <!-- Appearance: two axes, one heading. The strip answers WHICH
-                 VARIANT paints, the grid answers WHICH COLOURS it is made of,
-                 and they compose — so they are drawn as two labelled rows of
-                 one group rather than as two controls that look alike. -->
-            <div class="fx-us__group" data-testid="user-settings-appearance">
-              <span class="fx-us__group-title">{{ t('userSettings.prefs.appearance') }}</span>
-
-              <div class="fx-us__field">
-                <span class="fx-us__label">{{ t('userSettings.prefs.mode') }}</span>
-                <div class="fx-us__segmented" role="group" :aria-label="t('userSettings.prefs.mode')">
                   <button
-                    v-for="o in themeOptions"
+                    v-for="o in localeOptions"
                     :key="o.value"
                     type="button"
                     class="fx-us__seg"
-                    :class="{ 'is-active': theme === o.value }"
-                    :aria-pressed="theme === o.value"
-                    :data-testid="`user-settings-theme-${o.value}`"
-                    @click="pickTheme(o.value)"
+                    :class="{ 'is-active': currentLocale === o.value }"
+                    :aria-pressed="currentLocale === o.value"
+                    :data-testid="`user-settings-locale-${o.value}`"
+                    @click="pickLocale(o.value)"
+                  >
+                    {{ o.label }}
+                  </button>
+                </div>
+                <span class="fx-us__hint">{{ t('userSettings.prefs.languageHint') }}</span>
+              </div>
+
+              <!-- ── time zone ─────────────────────────────
+                   core's TimeZonePicker — the same combobox the embed's own
+                   "⋯ → Time zone" dialog mounts. What a pick WRITES is this
+                   modal's business (`pickTimeZone`: the account, and this
+                   browser's copy of it); the control is shared. -->
+              <div class="fx-us__field">
+                <label class="fx-us__label" :for="tzInputId">
+                  {{ t('userSettings.prefs.timezone') }}
+                </label>
+                <TimeZonePicker
+                  data-testid="user-settings-timezone"
+                  testid="user-settings-tz"
+                  :input-id="tzInputId"
+                  :locale="currentLocale"
+                  :model-value="timeZone"
+                  :fallback="tzFallback"
+                  :label="t('userSettings.prefs.timezone')"
+                  :disabled="savingTz"
+                  @update:model-value="pickTimeZone"
+                />
+                <span class="fx-us__hint">
+                  {{ t('userSettings.prefs.timezoneHint') }}
+                </span>
+                <span class="fx-us__readout" data-testid="user-settings-tz-now">
+                  {{ t('userSettings.prefs.timezoneNow', { zone: tzInForce, time: tzNow }) }}
+                </span>
+              </div>
+
+              <!-- Appearance: two axes, one heading. The strip answers WHICH
+                   VARIANT paints, the grid answers WHICH COLOURS it is made of,
+                   and they compose — so they are drawn as two labelled rows of
+                   one group rather than as two controls that look alike. -->
+              <div class="fx-us__group" data-testid="user-settings-appearance">
+                <span class="fx-us__group-title">{{ t('userSettings.prefs.appearance') }}</span>
+
+                <div class="fx-us__field">
+                  <span class="fx-us__label">{{ t('userSettings.prefs.mode') }}</span>
+                  <div class="fx-us__segmented" role="group" :aria-label="t('userSettings.prefs.mode')">
+                    <button
+                      v-for="o in themeOptions"
+                      :key="o.value"
+                      type="button"
+                      class="fx-us__seg"
+                      :class="{ 'is-active': theme === o.value }"
+                      :aria-pressed="theme === o.value"
+                      :data-testid="`user-settings-theme-${o.value}`"
+                      @click="pickTheme(o.value)"
+                    >
+                      {{ t(o.label) }}
+                    </button>
+                  </div>
+                  <span class="fx-us__hint">{{ t('userSettings.prefs.modeHint') }}</span>
+                </div>
+
+                <div class="fx-us__field">
+                  <span class="fx-us__label">{{ t('userSettings.prefs.palette') }}</span>
+                  <ThemePalette
+                    :locale="currentLocale"
+                    :dark="resolvedDark"
+                    :current="paletteId"
+                    :hint="false"
+                    @select="pickPalette"
+                  />
+                  <span class="fx-us__hint">{{ t('userSettings.prefs.paletteHint') }}</span>
+                </div>
+              </div>
+
+              <div class="fx-us__switch-row">
+                <button
+                  type="button"
+                  role="switch"
+                  class="fx-us__switch"
+                  :class="{ 'is-on': density === 'compact' }"
+                  :aria-checked="density === 'compact'"
+                  data-testid="user-settings-density"
+                  @click="pickDensity(density !== 'compact')"
+                >
+                  <span class="fx-us__switch-knob" />
+                </button>
+                <div class="fx-us__switch-text">
+                  <span class="fx-us__label">{{ t('userSettings.prefs.compact') }}</span>
+                  <span class="fx-us__hint">{{ t('userSettings.prefs.compactHint') }}</span>
+                </div>
+              </div>
+
+              <!-- tablo:t3 — the default folder view. Every choice has an
+                   "inherit" option that NAMES what it inherits, because the
+                   operator's default can change underneath a person who never
+                   picked one, and they should be able to see that it did. -->
+              <div class="fx-us__field" data-testid="user-settings-folder-view">
+                <span class="fx-us__label">{{ t('userSettings.prefs.folderView') }}</span>
+                <span class="fx-us__hint">{{ t('userSettings.prefs.folderViewHint') }}</span>
+
+                <span class="fx-us__label fx-us__label--sub">{{ t('userSettings.prefs.fvMode') }}</span>
+                <div class="fx-us__segmented" role="group" :aria-label="t('userSettings.prefs.fvMode')">
+                  <button
+                    type="button"
+                    class="fx-us__seg"
+                    :class="{ 'is-active': !fvPerson.v }"
+                    :aria-pressed="!fvPerson.v"
+                    data-testid="user-settings-fv-view-inherit"
+                    @click="pickFolderView('')"
+                  >
+                    {{ t('userSettings.prefs.fvInherit', { value: t(`userSettings.prefs.fvView_${fvInheritView}`) }) }}
+                  </button>
+                  <button
+                    v-for="v in FV_VIEWS"
+                    :key="v"
+                    type="button"
+                    class="fx-us__seg"
+                    :class="{ 'is-active': fvPerson.v === v }"
+                    :aria-pressed="fvPerson.v === v"
+                    :data-testid="`user-settings-fv-view-${v}`"
+                    @click="pickFolderView(v)"
+                  >
+                    {{ t(`userSettings.prefs.fvView_${v}`) }}
+                  </button>
+                </div>
+
+                <span class="fx-us__label fx-us__label--sub">{{ t('userSettings.prefs.fvSort') }}</span>
+                <div class="fx-us__segmented" role="group" :aria-label="t('userSettings.prefs.fvSort')">
+                  <button
+                    type="button"
+                    class="fx-us__seg"
+                    :class="{ 'is-active': !fvPerson.k }"
+                    :aria-pressed="!fvPerson.k"
+                    data-testid="user-settings-fv-sort-inherit"
+                    @click="pickFolderSort('')"
+                  >
+                    {{ t('userSettings.prefs.fvInherit', { value: fvInheritSort }) }}
+                  </button>
+                  <button
+                    v-for="k in FV_SORTS"
+                    :key="k"
+                    type="button"
+                    class="fx-us__seg"
+                    :class="{ 'is-active': fvPerson.k === k }"
+                    :aria-pressed="fvPerson.k === k"
+                    :data-testid="`user-settings-fv-sort-${k}`"
+                    @click="pickFolderSort(k)"
+                  >
+                    {{ t(`userSettings.prefs.fvSort_${k}`) }}
+                  </button>
+                </div>
+                <div
+                  v-if="fvPerson.k"
+                  class="fx-us__segmented"
+                  role="group"
+                  :aria-label="t('userSettings.prefs.fvDir')"
+                >
+                  <button
+                    v-for="d in (['asc', 'desc'] as const)"
+                    :key="d"
+                    type="button"
+                    class="fx-us__seg"
+                    :class="{ 'is-active': (fvPerson.d ?? (fvPerson.k === 'modified' ? 'desc' : 'asc')) === d }"
+                    :aria-pressed="(fvPerson.d ?? (fvPerson.k === 'modified' ? 'desc' : 'asc')) === d"
+                    :data-testid="`user-settings-fv-dir-${d}`"
+                    @click="pickFolderDir(d)"
+                  >
+                    {{ t(`userSettings.prefs.fvDir_${d}`) }}
+                  </button>
+                </div>
+
+                <span v-if="fvPerson.c" class="fx-us__hint">
+                  {{ t('userSettings.prefs.fvColumns') }}
+                  <button type="button" class="fx-us__link" data-testid="user-settings-fv-columns-reset" @click="resetDefaultColumns">
+                    {{ t('userSettings.prefs.fvColumnsReset') }}
+                  </button>
+                </span>
+                <span v-if="fvFoldersKept > 0" class="fx-us__hint">
+                  {{ t('userSettings.prefs.fvKeptCount', { count: fvFoldersKept }) }}
+                  <button type="button" class="fx-us__link" data-testid="user-settings-fv-forget" @click="forgetAllFolders()">
+                    {{ t('userSettings.prefs.fvForget') }}
+                  </button>
+                </span>
+              </div>
+
+              <!-- 0.57: pictures from other servers in a file's preview. A
+                   switch, off by default (lib/remoteImages); thumbnails never
+                   load them, whatever it says. -->
+              <div class="fx-us__switch-row" data-testid="user-settings-remote-images-row">
+                <button
+                  type="button"
+                  role="switch"
+                  class="fx-us__switch"
+                  :class="{ 'is-on': remoteImages }"
+                  :aria-checked="remoteImages"
+                  :aria-label="t('userSettings.prefs.remoteImages')"
+                  data-testid="user-settings-remote-images"
+                  @click="pickRemoteImages(!remoteImages)"
+                >
+                  <span class="fx-us__switch-knob" />
+                </button>
+                <div class="fx-us__switch-text">
+                  <span class="fx-us__label">{{ t('userSettings.prefs.remoteImages') }}</span>
+                  <span class="fx-us__hint">{{ t('userSettings.prefs.remoteImagesHint') }}</span>
+                </div>
+              </div>
+
+              <!-- wiring:e2 vault - the person's idle time for a vault's write
+                   lock (1-10 minutes): ten answers, so a list, not a strip. -->
+              <div v-if="vaultIdleShown" class="fx-us__field" data-testid="user-settings-vault-idle">
+                <span id="fx-us-vault-idle-label" class="fx-us__label">{{ t('userSettings.vault.idle') }}</span>
+                <ChoiceSelect
+                  :model-value="vaultIdle"
+                  :options="vaultIdleOptions"
+                  :disabled="vaultIdleBusy || host.demoReadOnly"
+                  aria-labelledby="fx-us-vault-idle-label"
+                  testid="user-settings-vault-idle-select"
+                  @update:model-value="(v) => pickVaultIdle(Number(v))"
+                />
+                <span class="fx-us__hint">{{ t('userSettings.vault.idle_help') }}</span>
+              </div>
+
+              <!-- ── Default apps (0.50): a part of Preferences ── -->
+              <div class="fx-us__field fx-us__apps-part" data-testid="user-settings-apps">
+                <span class="fx-us__label">{{ t('userSettings.apps.title') }}</span>
+                <p class="fx-us__hint">{{ t('userSettings.apps.lead') }}</p>
+                <p v-if="!appChoiceRows.length" class="fx-us__apps-empty" data-testid="user-settings-apps-empty">
+                  {{ t('userSettings.apps.empty') }}
+                </p>
+                <ul v-else class="fx-us__apps" data-testid="user-settings-apps-list">
+                  <li
+                    v-for="row in appChoiceRows"
+                    :key="row.ext"
+                    class="fx-us__app"
+                    :class="{ 'is-gone': !row.available }"
+                    :data-testid="`user-settings-app-${row.ext}`"
+                  >
+                    <div class="fx-us__app-head">
+                      <span class="fx-us__app-kind" dir="ltr">.{{ row.ext }}</span>
+                      <span class="fx-us__app-name">{{ row.name }}</span>
+                      <button
+                        type="button"
+                        class="fx-us__btn fx-us__btn--quiet"
+                        :data-testid="`user-settings-app-reset-${row.ext}`"
+                        @click="setOpenWithChoice(row.ext, null)"
+                      >
+                        {{ t('userSettings.apps.reset') }}
+                      </button>
+                    </div>
+                    <p
+                      v-if="!row.available"
+                      class="fx-us__app-gone"
+                      role="status"
+                      :data-testid="`user-settings-app-gone-${row.ext}`"
+                    >
+                      {{ t('userSettings.apps.unavailable', { app: row.instead }) }}
+                    </p>
+                    <ChoiceButtons
+                      v-if="appsKnown && row.options.length > 1"
+                      :model-value="row.available ? row.id : null"
+                      :options="row.options"
+                      :aria-label="t('userSettings.apps.change', { ext: '.' + row.ext })"
+                      :testid-prefix="`user-settings-app-choice-${row.ext}`"
+                      @update:model-value="(v: string | string[]) => changeAppChoice(row.ext, v)"
+                    />
+                  </li>
+                </ul>
+                <div v-if="appChoiceRows.length > 1" class="fx-us__apps-foot">
+                  <button
+                    type="button"
+                    class="fx-us__btn fx-us__btn--quiet"
+                    data-testid="user-settings-apps-reset-all"
+                    @click="clearOpenWithChoices()"
+                  >
+                    {{ t('userSettings.apps.resetAll') }}
+                  </button>
+                </div>
+              </div>
+              <div class="fx-us__field">
+                <span class="fx-us__label">{{ t('quota.title') }}</span>
+                <p class="fx-us__readout" data-testid="user-settings-quota">
+                  {{ quotaLine || t('common.loading') }}
+                </p>
+              </div>
+
+            </div>
+
+            <div class="fx-us__part" data-testid="user-settings-prefs-device">
+              <div class="fx-us__part-head">
+                <h4 class="fx-us__part-title">{{ t('userSettings.scope.device') }}</h4>
+                <p class="fx-us__hint">{{ t('userSettings.scope.deviceHint') }}</p>
+              </div>
+              <div v-if="host.startPage" class="fx-us__field">
+                <span class="fx-us__label">{{ t('userSettings.prefs.startPage') }}</span>
+                <div
+                  class="fx-us__segmented"
+                  role="group"
+                  :aria-label="t('userSettings.prefs.startPage')"
+                >
+                  <button
+                    v-for="o in host.startPage.options"
+                    :key="o"
+                    type="button"
+                    class="fx-us__seg"
+                    :class="{ 'is-active': startPage === o }"
+                    :aria-pressed="startPage === o"
+                    :data-testid="`user-settings-start-${o}`"
+                    @click="pickStartPage(o)"
+                  >
+                    {{ t(`userSettings.prefs.startPage_${o}`) }}
+                  </button>
+                </div>
+                <span class="fx-us__hint">{{ t('userSettings.prefs.startPageHint') }}</span>
+              </div>
+
+              <div v-if="host.openTrigger" class="fx-us__field">
+                <span class="fx-us__label">{{ t('userSettings.prefs.openTrigger') }}</span>
+                <div class="fx-us__segmented" role="group" :aria-label="t('userSettings.prefs.openTrigger')">
+                  <button
+                    v-for="o in openTriggerOptions"
+                    :key="o.value"
+                    type="button"
+                    class="fx-us__seg"
+                    :class="{ 'is-active': openTrigger === o.value }"
+                    :aria-pressed="openTrigger === o.value"
+                    :data-testid="`user-settings-opentrigger-${o.value}`"
+                    @click="pickOpenTrigger(o.value)"
                   >
                     {{ t(o.label) }}
                   </button>
                 </div>
-                <span class="fx-us__hint">{{ t('userSettings.prefs.modeHint') }}</span>
+                <span class="fx-us__hint">{{ t('userSettings.prefs.openTriggerHint') }}</span>
               </div>
 
-              <div class="fx-us__field">
-                <span class="fx-us__label">{{ t('userSettings.prefs.palette') }}</span>
-                <ThemePalette
-                  :locale="currentLocale"
-                  :dark="resolvedDark"
-                  :current="paletteId"
-                  :hint="false"
-                  @select="pickPalette"
-                />
-                <span class="fx-us__hint">{{ t('userSettings.prefs.paletteHint') }}</span>
-              </div>
-            </div>
-
-            <div class="fx-us__switch-row">
-              <button
-                type="button"
-                role="switch"
-                class="fx-us__switch"
-                :class="{ 'is-on': density === 'compact' }"
-                :aria-checked="density === 'compact'"
-                data-testid="user-settings-density"
-                @click="pickDensity(density !== 'compact')"
-              >
-                <span class="fx-us__switch-knob" />
-              </button>
-              <div class="fx-us__switch-text">
-                <span class="fx-us__label">{{ t('userSettings.prefs.compact') }}</span>
-                <span class="fx-us__hint">{{ t('userSettings.prefs.compactHint') }}</span>
-              </div>
-            </div>
-
-            <!-- tablo:t3 — the default folder view. Every choice has an
-                 "inherit" option that NAMES what it inherits, because the
-                 operator's default can change underneath a person who never
-                 picked one, and they should be able to see that it did. -->
-            <div class="fx-us__field" data-testid="user-settings-folder-view">
-              <span class="fx-us__label">{{ t('userSettings.prefs.folderView') }}</span>
-              <span class="fx-us__hint">{{ t('userSettings.prefs.folderViewHint') }}</span>
-
-              <span class="fx-us__label fx-us__label--sub">{{ t('userSettings.prefs.fvMode') }}</span>
-              <div class="fx-us__segmented" role="group" :aria-label="t('userSettings.prefs.fvMode')">
-                <button
-                  type="button"
-                  class="fx-us__seg"
-                  :class="{ 'is-active': !fvPerson.v }"
-                  :aria-pressed="!fvPerson.v"
-                  data-testid="user-settings-fv-view-inherit"
-                  @click="pickFolderView('')"
-                >
-                  {{ t('userSettings.prefs.fvInherit', { value: t(`userSettings.prefs.fvView_${fvInheritView}`) }) }}
-                </button>
-                <button
-                  v-for="v in FV_VIEWS"
-                  :key="v"
-                  type="button"
-                  class="fx-us__seg"
-                  :class="{ 'is-active': fvPerson.v === v }"
-                  :aria-pressed="fvPerson.v === v"
-                  :data-testid="`user-settings-fv-view-${v}`"
-                  @click="pickFolderView(v)"
-                >
-                  {{ t(`userSettings.prefs.fvView_${v}`) }}
-                </button>
-              </div>
-
-              <span class="fx-us__label fx-us__label--sub">{{ t('userSettings.prefs.fvSort') }}</span>
-              <div class="fx-us__segmented" role="group" :aria-label="t('userSettings.prefs.fvSort')">
-                <button
-                  type="button"
-                  class="fx-us__seg"
-                  :class="{ 'is-active': !fvPerson.k }"
-                  :aria-pressed="!fvPerson.k"
-                  data-testid="user-settings-fv-sort-inherit"
-                  @click="pickFolderSort('')"
-                >
-                  {{ t('userSettings.prefs.fvInherit', { value: fvInheritSort }) }}
-                </button>
-                <button
-                  v-for="k in FV_SORTS"
-                  :key="k"
-                  type="button"
-                  class="fx-us__seg"
-                  :class="{ 'is-active': fvPerson.k === k }"
-                  :aria-pressed="fvPerson.k === k"
-                  :data-testid="`user-settings-fv-sort-${k}`"
-                  @click="pickFolderSort(k)"
-                >
-                  {{ t(`userSettings.prefs.fvSort_${k}`) }}
-                </button>
-              </div>
-              <div
-                v-if="fvPerson.k"
-                class="fx-us__segmented"
-                role="group"
-                :aria-label="t('userSettings.prefs.fvDir')"
-              >
-                <button
-                  v-for="d in (['asc', 'desc'] as const)"
-                  :key="d"
-                  type="button"
-                  class="fx-us__seg"
-                  :class="{ 'is-active': (fvPerson.d ?? (fvPerson.k === 'modified' ? 'desc' : 'asc')) === d }"
-                  :aria-pressed="(fvPerson.d ?? (fvPerson.k === 'modified' ? 'desc' : 'asc')) === d"
-                  :data-testid="`user-settings-fv-dir-${d}`"
-                  @click="pickFolderDir(d)"
-                >
-                  {{ t(`userSettings.prefs.fvDir_${d}`) }}
-                </button>
-              </div>
-
-              <span v-if="fvPerson.c" class="fx-us__hint">
-                {{ t('userSettings.prefs.fvColumns') }}
-                <button type="button" class="fx-us__link" data-testid="user-settings-fv-columns-reset" @click="resetDefaultColumns">
-                  {{ t('userSettings.prefs.fvColumnsReset') }}
-                </button>
-              </span>
-              <span v-if="fvFoldersKept > 0" class="fx-us__hint">
-                {{ t('userSettings.prefs.fvKeptCount', { count: fvFoldersKept }) }}
-                <button type="button" class="fx-us__link" data-testid="user-settings-fv-forget" @click="forgetAllFolders()">
-                  {{ t('userSettings.prefs.fvForget') }}
-                </button>
-              </span>
-            </div>
-
-            <div v-if="host.openTrigger" class="fx-us__field">
-              <span class="fx-us__label">{{ t('userSettings.prefs.openTrigger') }}</span>
-              <div class="fx-us__segmented" role="group" :aria-label="t('userSettings.prefs.openTrigger')">
-                <button
-                  v-for="o in openTriggerOptions"
-                  :key="o.value"
-                  type="button"
-                  class="fx-us__seg"
-                  :class="{ 'is-active': openTrigger === o.value }"
-                  :aria-pressed="openTrigger === o.value"
-                  :data-testid="`user-settings-opentrigger-${o.value}`"
-                  @click="pickOpenTrigger(o.value)"
-                >
-                  {{ t(o.label) }}
-                </button>
-              </div>
-              <span class="fx-us__hint">{{ t('userSettings.prefs.openTriggerHint') }}</span>
-            </div>
-
-            <!-- wiring:e2 vault - the person's idle time for a vault's write
-                 lock (1-10 minutes): ten answers, so a list, not a strip. -->
-            <div v-if="vaultIdleShown" class="fx-us__field" data-testid="user-settings-vault-idle">
-              <span id="fx-us-vault-idle-label" class="fx-us__label">{{ t('userSettings.vault.idle') }}</span>
-              <ChoiceSelect
-                :model-value="vaultIdle"
-                :options="vaultIdleOptions"
-                :disabled="vaultIdleBusy || host.demoReadOnly"
-                aria-labelledby="fx-us-vault-idle-label"
-                testid="user-settings-vault-idle-select"
-                @update:model-value="(v) => pickVaultIdle(Number(v))"
-              />
-              <span class="fx-us__hint">{{ t('userSettings.vault.idle_help') }}</span>
-            </div>
-
-            <!-- The downloads, permanently. The corner reminder is dismissible
-                 for good; this is where it goes on living. -->
-            <div
-              v-if="host.desktopApp?.platform"
-              class="fx-us__group"
-              data-testid="user-settings-desktop-app"
-            >
-              <span class="fx-us__group-title">{{ t('userSettings.prefs.desktopApp') }}</span>
-              <p class="fx-us__readout">
-                {{ t('install.desktopSubtitle', { platform: host.desktopApp.platformLabel }) }}
-              </p>
-              <div class="fx-us__dl-list">
-                <!-- The file for this machine's processor, and under it the
-                     same file for the other one: two links, so the row is a
-                     box holding both (a link inside a link is not HTML). -->
-                <div
-                  v-for="d in host.desktopApp.downloads"
-                  :key="d.href"
-                  class="fx-us__dl"
-                  :data-arch="d.arch"
-                >
-                  <a
-                    :href="d.href"
-                    class="fx-us__dl-main"
-                    data-testid="user-settings-desktop-download"
+              <!-- Keyboard shortcuts (task #258): the explorer's own editor
+                   (components/ShortcutSettings), opened over this dialog - the
+                   modal stack (lib/modalStack) gives Escape and the focus trap to
+                   the one on top. Its keys are kept in this browser or app
+                   (composables/useKeyboardShortcuts), so the row is a device's. -->
+              <div class="fx-us__field" data-testid="user-settings-shortcuts">
+                <span class="fx-us__label">{{ t('userSettings.prefs.shortcuts') }}</span>
+                <div class="fx-us__inline">
+                  <span class="fx-us__hint">{{ t('userSettings.prefs.shortcutsHint') }}</span>
+                  <button
+                    type="button"
+                    class="fx-us__btn fx-us__btn--sm"
+                    data-testid="user-settings-shortcuts-edit"
+                    @click="shortcutsOpen = true"
                   >
-                    <span class="fx-us__dl-text">
-                      <span class="fx-us__label">{{ d.label }}</span>
-                      <span class="fx-us__hint">{{ d.hint }}</span>
-                    </span>
-                    <span aria-hidden="true" class="fx-us__dl-arrow">↓</span>
-                  </a>
-                  <a
-                    v-if="d.other"
-                    :href="d.other.href"
-                    class="fx-us__dl-other"
-                    :data-arch="d.other.arch"
-                    data-testid="user-settings-desktop-download-other"
-                  >
-                    {{ d.other.label }}
-                  </a>
+                    {{ t('userSettings.prefs.shortcutsEdit') }}
+                  </button>
                 </div>
               </div>
-              <a
-                :href="host.desktopApp.releasesUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="fx-us__dl-all"
+
+              <!-- The downloads, permanently. The corner reminder is dismissible
+                   for good; this is where it goes on living. -->
+              <div
+                v-if="host.desktopApp?.platform"
+                class="fx-us__group"
+                data-testid="user-settings-desktop-app"
               >
-                {{ t('install.desktopAllDownloads') }}
-              </a>
-              <span class="fx-us__hint">{{ t('userSettings.prefs.desktopAppHint') }}</span>
-            </div>
-
-            <!-- The web app itself, installed on a phone or a tablet (#190) -
-                 the same permanent home the desktop downloads have above. -->
-            <div
-              v-if="host.installApp?.state"
-              class="fx-us__group"
-              data-testid="user-settings-install-app"
-              :data-state="host.installApp.state"
-            >
-              <span class="fx-us__group-title">{{ t('userSettings.prefs.installApp') }}</span>
-              <p class="fx-us__readout">{{ t('userSettings.prefs.installAppLead', { name: appName }) }}</p>
-              <div v-if="host.installApp.state === 'prompt'" class="fx-us__install-foot">
-                <button
-                  type="button"
-                  class="fx-us__btn fx-us__btn--primary"
-                  data-testid="user-settings-install-app-button"
-                  :disabled="installingApp"
-                  @click="installApp"
-                >
-                  {{ t('install.install') }}
-                </button>
-              </div>
-              <p
-                v-else-if="host.installApp.state === 'ios'"
-                class="fx-us__hint"
-                data-testid="user-settings-install-app-ios"
-              >
-                {{ t('install.iosInstructions') }}
-              </p>
-              <p v-else class="fx-us__hint" data-testid="user-settings-install-app-menu">
-                {{ t('install.menuInstructions') }}
-              </p>
-            </div>
-
-            <div class="fx-us__field">
-              <span class="fx-us__label">{{ t('quota.title') }}</span>
-              <p class="fx-us__readout" data-testid="user-settings-quota">
-                {{ quotaLine || t('common.loading') }}
-              </p>
-            </div>
-
-            <!-- ── Default apps (0.50): a part of Preferences ── -->
-            <div class="fx-us__field fx-us__apps-part" data-testid="user-settings-apps">
-              <span class="fx-us__label">{{ t('userSettings.apps.title') }}</span>
-              <p class="fx-us__hint">{{ t('userSettings.apps.lead') }}</p>
-              <p v-if="!appChoiceRows.length" class="fx-us__apps-empty" data-testid="user-settings-apps-empty">
-                {{ t('userSettings.apps.empty') }}
-              </p>
-              <ul v-else class="fx-us__apps" data-testid="user-settings-apps-list">
-                <li
-                  v-for="row in appChoiceRows"
-                  :key="row.ext"
-                  class="fx-us__app"
-                  :class="{ 'is-gone': !row.available }"
-                  :data-testid="`user-settings-app-${row.ext}`"
-                >
-                  <div class="fx-us__app-head">
-                    <span class="fx-us__app-kind" dir="ltr">.{{ row.ext }}</span>
-                    <span class="fx-us__app-name">{{ row.name }}</span>
-                    <button
-                      type="button"
-                      class="fx-us__btn fx-us__btn--quiet"
-                      :data-testid="`user-settings-app-reset-${row.ext}`"
-                      @click="setOpenWithChoice(row.ext, null)"
-                    >
-                      {{ t('userSettings.apps.reset') }}
-                    </button>
-                  </div>
-                  <p
-                    v-if="!row.available"
-                    class="fx-us__app-gone"
-                    role="status"
-                    :data-testid="`user-settings-app-gone-${row.ext}`"
+                <span class="fx-us__group-title">{{ t('userSettings.prefs.desktopApp') }}</span>
+                <p class="fx-us__readout">
+                  {{ t('install.desktopSubtitle', { platform: host.desktopApp.platformLabel }) }}
+                </p>
+                <div class="fx-us__dl-list">
+                  <!-- The file for this machine's processor, and under it the
+                       same file for the other one: two links, so the row is a
+                       box holding both (a link inside a link is not HTML). -->
+                  <div
+                    v-for="d in host.desktopApp.downloads"
+                    :key="d.href"
+                    class="fx-us__dl"
+                    :data-arch="d.arch"
                   >
-                    {{ t('userSettings.apps.unavailable', { app: row.instead }) }}
-                  </p>
-                  <ChoiceButtons
-                    v-if="appsKnown && row.options.length > 1"
-                    :model-value="row.available ? row.id : null"
-                    :options="row.options"
-                    :aria-label="t('userSettings.apps.change', { ext: '.' + row.ext })"
-                    :testid-prefix="`user-settings-app-choice-${row.ext}`"
-                    @update:model-value="(v: string | string[]) => changeAppChoice(row.ext, v)"
-                  />
-                </li>
-              </ul>
-              <div v-if="appChoiceRows.length > 1" class="fx-us__apps-foot">
-                <button
-                  type="button"
-                  class="fx-us__btn fx-us__btn--quiet"
-                  data-testid="user-settings-apps-reset-all"
-                  @click="clearOpenWithChoices()"
+                    <a
+                      :href="d.href"
+                      class="fx-us__dl-main"
+                      data-testid="user-settings-desktop-download"
+                    >
+                      <span class="fx-us__dl-text">
+                        <span class="fx-us__label">{{ d.label }}</span>
+                        <span class="fx-us__hint">{{ d.hint }}</span>
+                      </span>
+                      <span aria-hidden="true" class="fx-us__dl-arrow">↓</span>
+                    </a>
+                    <a
+                      v-if="d.other"
+                      :href="d.other.href"
+                      class="fx-us__dl-other"
+                      :data-arch="d.other.arch"
+                      data-testid="user-settings-desktop-download-other"
+                    >
+                      {{ d.other.label }}
+                    </a>
+                  </div>
+                </div>
+                <a
+                  :href="host.desktopApp.releasesUrl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="fx-us__dl-all"
                 >
-                  {{ t('userSettings.apps.resetAll') }}
-                </button>
+                  {{ t('install.desktopAllDownloads') }}
+                </a>
+                <span class="fx-us__hint">{{ t('userSettings.prefs.desktopAppHint') }}</span>
               </div>
+
+              <!-- The web app itself, installed on a phone or a tablet (#190) -
+                   the same permanent home the desktop downloads have above. -->
+              <div
+                v-if="host.installApp?.state"
+                class="fx-us__group"
+                data-testid="user-settings-install-app"
+                :data-state="host.installApp.state"
+              >
+                <span class="fx-us__group-title">{{ t('userSettings.prefs.installApp') }}</span>
+                <p class="fx-us__readout">{{ t('userSettings.prefs.installAppLead', { name: appName }) }}</p>
+                <div v-if="host.installApp.state === 'prompt'" class="fx-us__install-foot">
+                  <button
+                    type="button"
+                    class="fx-us__btn fx-us__btn--primary"
+                    data-testid="user-settings-install-app-button"
+                    :disabled="installingApp"
+                    @click="installApp"
+                  >
+                    {{ t('install.install') }}
+                  </button>
+                </div>
+                <p
+                  v-else-if="host.installApp.state === 'ios'"
+                  class="fx-us__hint"
+                  data-testid="user-settings-install-app-ios"
+                >
+                  {{ t('install.iosInstructions') }}
+                </p>
+                <p v-else class="fx-us__hint" data-testid="user-settings-install-app-menu">
+                  {{ t('install.menuInstructions') }}
+                </p>
+              </div>
+
             </div>
           </section>
 
@@ -1618,243 +1771,277 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
             class="fx-us__pane"
             data-testid="user-settings-notifications"
           >
-            <div class="fx-us__switch-row">
-              <button
-                type="button"
-                role="switch"
-                class="fx-us__switch"
-                :class="{ 'is-on': inAppOn }"
-                :aria-checked="inAppOn"
-                :disabled="savingNotif"
-                data-testid="user-settings-inapp"
-                @click="setInApp(!inAppOn)"
-              >
-                <span class="fx-us__switch-knob" />
-              </button>
-              <div class="fx-us__switch-text">
-                <span class="fx-us__label">{{ t('notifications.prefs.inApp') }}</span>
-                <span class="fx-us__hint">{{ t('notifications.prefs.inAppHint') }}</span>
+            <div class="fx-us__part" data-testid="user-settings-notify-account">
+              <div class="fx-us__part-head">
+                <h4 class="fx-us__part-title">{{ t('userSettings.scope.myAccount') }}</h4>
+                <p class="fx-us__hint">{{ t('userSettings.scope.myAccountHint') }}</p>
               </div>
-            </div>
+              <div class="fx-us__switch-row">
+                <button
+                  type="button"
+                  role="switch"
+                  class="fx-us__switch"
+                  :class="{ 'is-on': inAppOn }"
+                  :aria-checked="inAppOn"
+                  :disabled="savingNotif"
+                  data-testid="user-settings-inapp"
+                  @click="setInApp(!inAppOn)"
+                >
+                  <span class="fx-us__switch-knob" />
+                </button>
+                <div class="fx-us__switch-text">
+                  <span class="fx-us__label">{{ t('notifications.prefs.inApp') }}</span>
+                  <span class="fx-us__hint">{{ t('notifications.prefs.inAppHint') }}</span>
+                </div>
+              </div>
 
-            <div v-if="host.browserNotifications" class="fx-us__switch-row">
-              <button
-                type="button"
-                role="switch"
-                class="fx-us__switch"
-                :class="{ 'is-on': browserOn }"
-                :aria-checked="browserOn"
-                :disabled="host.browserNotifications.desktopShell || permission === 'unsupported'"
-                data-testid="user-settings-browser"
-                @click="setBrowser(!browserOn)"
-              >
-                <span class="fx-us__switch-knob" />
-              </button>
-              <div class="fx-us__switch-text">
-                <span class="fx-us__label">{{ t('notifications.prefs.browser') }}</span>
-                <span class="fx-us__hint">{{ t('notifications.prefs.browserHint') }}</span>
-                <div class="fx-us__chips">
-                  <span v-if="host.browserNotifications.desktopShell" class="fx-us__chip">
-                    {{ t('notifications.prefs.desktopHandled') }}
-                  </span>
-                  <template v-else>
-                    <span v-if="permission === 'granted'" class="fx-us__chip fx-us__chip--ok">
-                      {{ t('notifications.prefs.permGranted') }}
-                    </span>
-                    <span v-else-if="permission === 'denied'" class="fx-us__chip fx-us__chip--bad">
-                      {{ t('notifications.prefs.permDenied') }}
-                    </span>
-                    <span v-else-if="permission === 'unsupported'" class="fx-us__chip">
-                      {{ t('notifications.prefs.permUnsupported') }}
-                    </span>
-                    <span v-else class="fx-us__chip">{{ t('notifications.prefs.permDefault') }}</span>
+              <div class="fx-us__field">
+                <span class="fx-us__label">{{ t('userSettings.notifications.eventsTitle') }}</span>
+                <span class="fx-us__hint">{{ t('userSettings.notifications.eventsHint') }}</span>
+                <span v-if="digest && anyHeld" class="fx-us__hint" data-testid="user-settings-digest-hint">{{
+                  t('userSettings.notifications.digestHint', { minutes: digest.window_minutes })
+                }}</span>
+                <span v-else-if="digest" class="fx-us__hint" data-testid="user-settings-digest-off-hint">{{
+                  t('userSettings.notifications.digestOffHint')
+                }}</span>
+                <div class="fx-us__events">
+                  <div
+                    v-for="row in offeredEvents"
+                    :key="row.ev"
+                    class="fx-us__switch-row"
+                    :class="{ 'is-off': row.gate.disabled }"
+                    :title="row.gate.title"
+                  >
                     <button
-                      v-if="permission === 'default'"
                       type="button"
-                      class="fx-us__btn fx-us__btn--sm"
-                      data-testid="user-settings-browser-ask"
-                      @click="askPermission"
+                      role="switch"
+                      class="fx-us__switch"
+                      :class="{ 'is-on': !row.gate.disabled && !mutedEvents.includes(row.ev) }"
+                      :aria-checked="!row.gate.disabled && !mutedEvents.includes(row.ev)"
+                      :disabled="savingNotif || row.gate.disabled"
+                      :data-testid="`user-settings-event-${row.ev}`"
+                      @click="setEventOn(row.ev, mutedEvents.includes(row.ev))"
                     >
-                      {{ t('notifications.prefs.enableBrowser') }}
+                      <span class="fx-us__switch-knob" />
                     </button>
-                    <span v-if="permission === 'denied'" class="fx-us__hint">
-                      {{ t('notifications.prefs.permDeniedHint') }}
+                    <span class="fx-us__event-label">
+                      {{ t(userEventKey(row.ev)) }}
+                      <span
+                        v-if="row.gate.disabled"
+                        class="fx-us__event-off"
+                        :data-testid="`user-settings-event-off-${row.ev}`"
+                      >{{ row.gate.title }}</span>
                     </span>
-                    <!-- #190 - an iPhone's browser tab has no notifications at
-                         all; the app added to the Home Screen has them (iOS
-                         16.4+). Said here, because "this browser cannot" reads
-                         as "never" otherwise. -->
-                    <span
-                      v-if="permission === 'unsupported' && host.installApp?.state === 'ios'"
-                      class="fx-us__hint"
-                      data-testid="user-settings-browser-ios"
-                    >
-                      {{ t('notifications.prefs.iosHomeScreen', { name: appName }) }}
-                    </span>
-                  </template>
-                </div>
-              </div>
-            </div>
-
-            <!-- #191 - push notifications on THIS device: what the bell tells
-                 the person reaches this phone or browser while filex is
-                 closed. The host's row (lib/webPush); the server decides what
-                 is pushed, by the person's bell. -->
-            <div v-if="host.webPush" class="fx-us__switch-row" data-testid="user-settings-push-row">
-              <button
-                type="button"
-                role="switch"
-                class="fx-us__switch"
-                :class="{ 'is-on': pushOn }"
-                :aria-checked="pushOn"
-                :disabled="pushBusy || !pushCanSwitch"
-                data-testid="user-settings-push"
-                @click="togglePush"
-              >
-                <span class="fx-us__switch-knob" />
-              </button>
-              <div class="fx-us__switch-text">
-                <span class="fx-us__label">{{ t('notifications.prefs.push') }}</span>
-                <span class="fx-us__hint">{{ t('notifications.prefs.pushHint', { name: appName }) }}</span>
-                <div v-if="pushChip || pushOn" class="fx-us__chips">
-                  <span
-                    v-if="pushChip"
-                    class="fx-us__chip"
-                    :class="{ 'fx-us__chip--ok': pushChip.tone === 'ok', 'fx-us__chip--bad': pushChip.tone === 'bad' }"
-                    data-testid="user-settings-push-state"
-                  >
-                    {{ pushChip.text }}
-                  </span>
-                  <button
-                    v-if="pushOn"
-                    type="button"
-                    class="fx-us__btn fx-us__btn--sm"
-                    :disabled="pushBusy"
-                    data-testid="user-settings-push-test"
-                    @click="testPush"
-                  >
-                    {{ t('notifications.prefs.pushTest') }}
-                  </button>
-                </div>
-                <span v-if="pushWhy" class="fx-us__hint" data-testid="user-settings-push-why">{{ pushWhy }}</span>
-                <div v-if="pushDevices.length" class="fx-us__devices" data-testid="user-settings-push-devices">
-                  <span class="fx-us__hint">{{ t('notifications.prefs.pushDevices') }}</span>
-                  <ul class="fx-us__device-list">
-                    <li
-                      v-for="d in pushDevices"
-                      :key="d.id"
-                      class="fx-us__device"
-                      :data-testid="`user-settings-push-device-${d.id}`"
-                    >
-                      <span class="fx-us__device-text">
-                        <span class="fx-us__device-name">{{ d.label || d.service || t('notifications.prefs.pushUnnamed') }}</span>
-                        <span class="fx-us__hint">{{ pushAdded(d) }}</span>
-                      </span>
-                      <span v-if="d.id === pushState?.thisDevice" class="fx-us__chip fx-us__chip--ok">
-                        {{ t('notifications.prefs.pushThisDevice') }}
-                      </span>
+                    <!-- The digest: told at once, or held for the summary. A
+                         muted kind is told never, so it has nothing to choose. -->
+                    <span v-if="hasUrgentSwitch(row.ev)" class="fx-us__urgent">
                       <button
                         type="button"
-                        class="fx-us__btn fx-us__btn--sm"
-                        :disabled="pushBusy"
-                        :aria-label="t('notifications.prefs.pushRemoveLabel', { device: d.label || d.service || '' })"
-                        :data-testid="`user-settings-push-remove-${d.id}`"
-                        @click="removePushDevice(d.id)"
+                        role="switch"
+                        class="fx-us__switch"
+                        :class="{ 'is-on': urgentSet.has(row.ev) }"
+                        :aria-checked="urgentSet.has(row.ev)"
+                        :aria-label="t('userSettings.notifications.urgentFor', { event: t(userEventKey(row.ev)) })"
+                        :title="t('userSettings.notifications.urgentFor', { event: t(userEventKey(row.ev)) })"
+                        :disabled="savingNotif || row.gate.disabled || mutedEvents.includes(row.ev)"
+                        :data-testid="`user-settings-urgent-${row.ev}`"
+                        @click="setUrgent([row.ev], !urgentSet.has(row.ev))"
                       >
-                        {{ t('notifications.prefs.pushRemove') }}
+                        <span class="fx-us__switch-knob" />
                       </button>
-                    </li>
-                  </ul>
+                      <span class="fx-us__urgent-label" aria-hidden="true">{{ t('userSettings.notifications.urgent') }}</span>
+                    </span>
+                  </div>
+                  <!-- The administrator alerts, one switch: an administrator's
+                       bell is the only one they reach. -->
+                  <div
+                    v-if="digest && host.isAdmin && adminEvents.length"
+                    class="fx-us__switch-row"
+                    data-testid="user-settings-urgent-admin-row"
+                  >
+                    <span class="fx-us__switch-spacer" aria-hidden="true" />
+                    <span class="fx-us__event-label">
+                      {{ t('userSettings.notifications.adminAlerts') }}
+                      <span class="fx-us__event-off">{{ t('userSettings.notifications.adminAlertsHint') }}</span>
+                    </span>
+                    <span class="fx-us__urgent">
+                      <button
+                        type="button"
+                        role="switch"
+                        class="fx-us__switch"
+                        :class="{ 'is-on': adminUrgent }"
+                        :aria-checked="adminUrgent"
+                        :aria-label="t('userSettings.notifications.urgentFor', { event: t('userSettings.notifications.adminAlerts') })"
+                        :title="t('userSettings.notifications.urgentFor', { event: t('userSettings.notifications.adminAlerts') })"
+                        :disabled="savingNotif"
+                        data-testid="user-settings-urgent-admin"
+                        @click="setUrgent(adminEvents, !adminUrgent)"
+                      >
+                        <span class="fx-us__switch-knob" />
+                      </button>
+                      <span class="fx-us__urgent-label" aria-hidden="true">{{ t('userSettings.notifications.urgent') }}</span>
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div class="fx-us__field">
-              <span class="fx-us__label">{{ t('userSettings.notifications.eventsTitle') }}</span>
-              <span class="fx-us__hint">{{ t('userSettings.notifications.eventsHint') }}</span>
-              <span v-if="digest && anyHeld" class="fx-us__hint" data-testid="user-settings-digest-hint">{{
-                t('userSettings.notifications.digestHint', { minutes: digest.window_minutes })
-              }}</span>
-              <span v-else-if="digest" class="fx-us__hint" data-testid="user-settings-digest-off-hint">{{
-                t('userSettings.notifications.digestOffHint')
-              }}</span>
-              <div class="fx-us__events">
-                <div
-                  v-for="row in offeredEvents"
-                  :key="row.ev"
-                  class="fx-us__switch-row"
-                  :class="{ 'is-off': row.gate.disabled }"
-                  :title="row.gate.title"
+            <div v-if="deviceNotifyRows" class="fx-us__part" data-testid="user-settings-notify-device">
+              <div class="fx-us__part-head">
+                <h4 class="fx-us__part-title">{{ t('userSettings.scope.device') }}</h4>
+                <p class="fx-us__hint">{{ t('userSettings.scope.deviceNotifyHint') }}</p>
+              </div>
+              <div v-if="host.browserNotifications" class="fx-us__switch-row">
+                <button
+                  type="button"
+                  role="switch"
+                  class="fx-us__switch"
+                  :class="{ 'is-on': browserOn }"
+                  :aria-checked="browserOn"
+                  :disabled="host.browserNotifications.desktopShell || permission === 'unsupported'"
+                  data-testid="user-settings-browser"
+                  @click="setBrowser(!browserOn)"
                 >
-                  <button
-                    type="button"
-                    role="switch"
-                    class="fx-us__switch"
-                    :class="{ 'is-on': !row.gate.disabled && !mutedEvents.includes(row.ev) }"
-                    :aria-checked="!row.gate.disabled && !mutedEvents.includes(row.ev)"
-                    :disabled="savingNotif || row.gate.disabled"
-                    :data-testid="`user-settings-event-${row.ev}`"
-                    @click="setEventOn(row.ev, mutedEvents.includes(row.ev))"
-                  >
-                    <span class="fx-us__switch-knob" />
-                  </button>
-                  <span class="fx-us__event-label">
-                    {{ t(userEventKey(row.ev)) }}
-                    <span
-                      v-if="row.gate.disabled"
-                      class="fx-us__event-off"
-                      :data-testid="`user-settings-event-off-${row.ev}`"
-                    >{{ row.gate.title }}</span>
-                  </span>
-                  <!-- The digest: told at once, or held for the summary. A
-                       muted kind is told never, so it has nothing to choose. -->
-                  <span v-if="hasUrgentSwitch(row.ev)" class="fx-us__urgent">
-                    <button
-                      type="button"
-                      role="switch"
-                      class="fx-us__switch"
-                      :class="{ 'is-on': urgentSet.has(row.ev) }"
-                      :aria-checked="urgentSet.has(row.ev)"
-                      :aria-label="t('userSettings.notifications.urgentFor', { event: t(userEventKey(row.ev)) })"
-                      :title="t('userSettings.notifications.urgentFor', { event: t(userEventKey(row.ev)) })"
-                      :disabled="savingNotif || row.gate.disabled || mutedEvents.includes(row.ev)"
-                      :data-testid="`user-settings-urgent-${row.ev}`"
-                      @click="setUrgent([row.ev], !urgentSet.has(row.ev))"
-                    >
-                      <span class="fx-us__switch-knob" />
-                    </button>
-                    <span class="fx-us__urgent-label" aria-hidden="true">{{ t('userSettings.notifications.urgent') }}</span>
-                  </span>
+                  <span class="fx-us__switch-knob" />
+                </button>
+                <div class="fx-us__switch-text">
+                  <span class="fx-us__label">{{ t('notifications.prefs.browser') }}</span>
+                  <span class="fx-us__hint">{{ t('notifications.prefs.browserHint') }}</span>
+                  <div class="fx-us__chips">
+                    <span v-if="host.browserNotifications.desktopShell" class="fx-us__chip">
+                      {{ t('notifications.prefs.desktopHandled') }}
+                    </span>
+                    <template v-else>
+                      <span v-if="permission === 'granted'" class="fx-us__chip fx-us__chip--ok">
+                        {{ t('notifications.prefs.permGranted') }}
+                      </span>
+                      <span v-else-if="permission === 'denied'" class="fx-us__chip fx-us__chip--bad">
+                        {{ t('notifications.prefs.permDenied') }}
+                      </span>
+                      <span v-else-if="permission === 'unsupported'" class="fx-us__chip">
+                        {{ t('notifications.prefs.permUnsupported') }}
+                      </span>
+                      <span v-else class="fx-us__chip">{{ t('notifications.prefs.permDefault') }}</span>
+                      <button
+                        v-if="permission === 'default'"
+                        type="button"
+                        class="fx-us__btn fx-us__btn--sm"
+                        data-testid="user-settings-browser-ask"
+                        @click="askPermission"
+                      >
+                        {{ t('notifications.prefs.enableBrowser') }}
+                      </button>
+                      <span v-if="permission === 'denied'" class="fx-us__hint">
+                        {{ t('notifications.prefs.permDeniedHint') }}
+                      </span>
+                      <!-- #190 - an iPhone's browser tab has no notifications at
+                           all; the app added to the Home Screen has them (iOS
+                           16.4+). Said here, because "this browser cannot" reads
+                           as "never" otherwise. -->
+                      <span
+                        v-if="permission === 'unsupported' && host.installApp?.state === 'ios'"
+                        class="fx-us__hint"
+                        data-testid="user-settings-browser-ios"
+                      >
+                        {{ t('notifications.prefs.iosHomeScreen', { name: appName }) }}
+                      </span>
+                    </template>
+                  </div>
                 </div>
-                <!-- The administrator alerts, one switch: an administrator's
-                     bell is the only one they reach. -->
-                <div
-                  v-if="digest && host.isAdmin && adminEvents.length"
-                  class="fx-us__switch-row"
-                  data-testid="user-settings-urgent-admin-row"
+              </div>
+
+              <!-- #191 - push notifications on THIS device: what the bell tells
+                   the person reaches this phone or browser while filex is
+                   closed. The host's row (lib/webPush); the server decides what
+                   is pushed, by the person's bell. -->
+              <div v-if="host.webPush" class="fx-us__switch-row" data-testid="user-settings-push-row">
+                <button
+                  type="button"
+                  role="switch"
+                  class="fx-us__switch"
+                  :class="{ 'is-on': pushOn }"
+                  :aria-checked="pushOn"
+                  :disabled="pushBusy || !pushCanSwitch"
+                  data-testid="user-settings-push"
+                  @click="togglePush"
                 >
-                  <span class="fx-us__switch-spacer" aria-hidden="true" />
-                  <span class="fx-us__event-label">
-                    {{ t('userSettings.notifications.adminAlerts') }}
-                    <span class="fx-us__event-off">{{ t('userSettings.notifications.adminAlertsHint') }}</span>
-                  </span>
-                  <span class="fx-us__urgent">
-                    <button
-                      type="button"
-                      role="switch"
-                      class="fx-us__switch"
-                      :class="{ 'is-on': adminUrgent }"
-                      :aria-checked="adminUrgent"
-                      :aria-label="t('userSettings.notifications.urgentFor', { event: t('userSettings.notifications.adminAlerts') })"
-                      :title="t('userSettings.notifications.urgentFor', { event: t('userSettings.notifications.adminAlerts') })"
-                      :disabled="savingNotif"
-                      data-testid="user-settings-urgent-admin"
-                      @click="setUrgent(adminEvents, !adminUrgent)"
+                  <span class="fx-us__switch-knob" />
+                </button>
+                <div class="fx-us__switch-text">
+                  <span class="fx-us__label">{{ t('notifications.prefs.push') }}</span>
+                  <span class="fx-us__hint">{{ t('notifications.prefs.pushHint', { name: appName }) }}</span>
+                  <div v-if="pushChip || pushOn" class="fx-us__chips">
+                    <span
+                      v-if="pushChip"
+                      class="fx-us__chip"
+                      :class="{ 'fx-us__chip--ok': pushChip.tone === 'ok', 'fx-us__chip--bad': pushChip.tone === 'bad' }"
+                      data-testid="user-settings-push-state"
                     >
-                      <span class="fx-us__switch-knob" />
+                      {{ pushChip.text }}
+                    </span>
+                    <button
+                      v-if="pushOn"
+                      type="button"
+                      class="fx-us__btn fx-us__btn--sm"
+                      :disabled="pushBusy"
+                      data-testid="user-settings-push-test"
+                      @click="testPush"
+                    >
+                      {{ t('notifications.prefs.pushTest') }}
                     </button>
-                    <span class="fx-us__urgent-label" aria-hidden="true">{{ t('userSettings.notifications.urgent') }}</span>
-                  </span>
+                  </div>
+                  <span v-if="pushWhy" class="fx-us__hint" data-testid="user-settings-push-why">{{ pushWhy }}</span>
+                  <div v-if="pushDevices.length" class="fx-us__devices" data-testid="user-settings-push-devices">
+                    <span class="fx-us__hint">{{ t('notifications.prefs.pushDevices') }}</span>
+                    <ul class="fx-us__device-list">
+                      <li
+                        v-for="d in pushDevices"
+                        :key="d.id"
+                        class="fx-us__device"
+                        :data-testid="`user-settings-push-device-${d.id}`"
+                      >
+                        <span class="fx-us__device-text">
+                          <span class="fx-us__device-name">{{ d.label || d.service || t('notifications.prefs.pushUnnamed') }}</span>
+                          <span class="fx-us__hint">{{ pushAdded(d) }}</span>
+                        </span>
+                        <span v-if="d.id === pushState?.thisDevice" class="fx-us__chip fx-us__chip--ok">
+                          {{ t('notifications.prefs.pushThisDevice') }}
+                        </span>
+                        <button
+                          type="button"
+                          class="fx-us__btn fx-us__btn--sm"
+                          :disabled="pushBusy"
+                          :aria-label="t('notifications.prefs.pushRemoveLabel', { device: d.label || d.service || '' })"
+                          :data-testid="`user-settings-push-remove-${d.id}`"
+                          @click="removePushDevice(d.id)"
+                        >
+                          {{ t('notifications.prefs.pushRemove') }}
+                        </button>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <!-- The operating system's own notifications while the app runs
+                   (the desktop app's toasts, task #258): given by a host that
+                   has them (ExplorerConfig.account.settings.deviceNotifications),
+                   not drawn anywhere else. -->
+              <div v-if="host.deviceNotifications" class="fx-us__switch-row" data-testid="user-settings-device-notify-row">
+                <button
+                  type="button"
+                  role="switch"
+                  class="fx-us__switch"
+                  :class="{ 'is-on': deviceNotifyOn }"
+                  :aria-checked="deviceNotifyOn"
+                  data-testid="user-settings-device-notify"
+                  @click="setDeviceNotify(!deviceNotifyOn)"
+                >
+                  <span class="fx-us__switch-knob" />
+                </button>
+                <div class="fx-us__switch-text">
+                  <span class="fx-us__label">{{ t('userSettings.notifications.device') }}</span>
+                  <span class="fx-us__hint">{{ t('userSettings.notifications.deviceHint') }}</span>
                 </div>
               </div>
             </div>
@@ -2006,14 +2193,50 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
                  or revokes a session; drawing "2 sessions" would be a number
                  with nothing behind it. -->
           </section>
-          <!-- ── AI assistant ───────────────────────── -->
-          <!-- Deliberately empty. One sentence saying there is nothing to set
-               and why; no switch, no field, no "enable" nobody reads. -->
+          <!-- ── AI assistant (task #269) ─────────────── -->
+          <!-- The state as the server says it, who reads what the person
+               writes, how long it is kept, their one choice, and their
+               history - gone with one confirmed click. -->
           <section v-else class="fx-us__pane" data-testid="user-settings-ai">
-            <div class="fx-us__soon">
-              <Sparkles class="fx-us__soon-icon" aria-hidden="true" />
-              <p class="fx-us__soon-title">{{ t('userSettings.ai.soon') }}</p>
-              <p class="fx-us__soon-body">{{ t('userSettings.ai.body') }}</p>
+            <p class="fx-us__ai-state" data-testid="user-settings-ai-state">{{ t(assistantStateKey) }}</p>
+            <div v-if="assistantProvider" class="fx-us__field">
+              <span class="fx-us__label">{{ t('userSettings.ai.provider') }}</span>
+              <span class="fx-us__hint" data-testid="user-settings-ai-provider">{{ assistantProvider }}</span>
+              <span class="fx-us__hint">{{ t('userSettings.ai.providerHint') }}</span>
+            </div>
+            <div v-if="assistantMe" class="fx-us__switch-row">
+              <button
+                type="button"
+                role="switch"
+                class="fx-us__switch"
+                :class="{ 'is-on': assistantMe.prefs.confirm_all }"
+                :aria-checked="assistantMe.prefs.confirm_all"
+                :disabled="assistantBusy || host.demoReadOnly"
+                data-testid="user-settings-ai-confirm-all"
+                @click="setConfirmAll(!assistantMe.prefs.confirm_all)"
+              >
+                <span class="fx-us__switch-knob" />
+              </button>
+              <div class="fx-us__switch-text">
+                <span class="fx-us__label">{{ t('userSettings.ai.confirmAll') }}</span>
+                <span class="fx-us__hint">{{ t('userSettings.ai.confirmAllHint') }}</span>
+              </div>
+            </div>
+            <div v-if="host.api.clearAssistantHistory" class="fx-us__field">
+              <span class="fx-us__label">{{ t('userSettings.ai.history') }}</span>
+              <span v-if="assistantMe" class="fx-us__hint">{{ t('userSettings.ai.retention', { count: assistantMe.retention_days }) }}</span>
+              <div>
+                <button
+                  type="button"
+                  class="fe-btn"
+                  :class="{ 'fe-btn--danger': assistantConfirmClear }"
+                  :disabled="assistantBusy || host.demoReadOnly"
+                  data-testid="user-settings-ai-clear"
+                  @click="clearAssistantHistory"
+                >
+                  {{ assistantConfirmClear ? t('userSettings.ai.clearConfirm') : t('userSettings.ai.clear') }}
+                </button>
+              </div>
             </div>
           </section>
         </div>
@@ -2045,6 +2268,17 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
       </div>
     </div>
   </Modal>
+  <!-- The keyboard shortcuts' editor, over this dialog (Preferences → This
+       device → Keyboard shortcuts). A sibling of the Modal above, not inside
+       its card: the two backdrops are the same layer, so the later one in the
+       document is in front, and the modal stack hands it Escape and the focus
+       trap until it closes. -->
+  <ShortcutSettings
+    :open="shortcutsOpen"
+    :locale="currentLocale"
+    :theme="theme"
+    @close="shortcutsOpen = false"
+  />
 </template>
 
 <style>
@@ -2082,9 +2316,9 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
    stylesheet used to load after core's). */
 .fe.fx-us {
   display: grid;
-  /* 224, not 208: the assistant row carries a "coming soon" chip beside its
-     label and at 208 the label truncated to "AI assist…" — a rail item whose
-     own name is cut is worse than the extra 16px. */
+  /* 224, not 208: at 208 the assistant row's label truncated to
+     "AI assist…" - a rail item whose own name is cut is worse than the extra
+     16px. */
   grid-template-columns: 224px minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   width: min(800px, calc(100vw - 32px));
@@ -2142,21 +2376,6 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* The rail says "coming soon" before you click it. A row that looked like the
-   other four and then opened onto an apology is the thing this avoids. */
-.fx-us__rail-soon {
-  flex: 0 0 auto;
-  margin-inline-start: auto;
-  letter-spacing: 0.01em;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--fe-bg-hover);
-  color: var(--fe-text-muted);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 16px;
   white-space: nowrap;
 }
 
@@ -2291,9 +2510,6 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
   .fx-us__rail-item {
     flex: 0 0 auto;
   }
-  .fx-us__rail-soon {
-    margin-inline-start: var(--fe-gap-xs);
-  }
   .fx-us__main {
     grid-column: 1;
     grid-row: 3;
@@ -2335,6 +2551,37 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
   border-radius: var(--fe-radius);
   background: var(--fe-bg-elev);
   min-width: 0;
+}
+/* The two parts of Preferences and of Notifications (task #258): what the
+   account keeps and what this device keeps. A heading and a line that says
+   where the rows under it are saved; a rule between the two parts. */
+.fx-us__part {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-lg);
+  min-width: 0;
+}
+.fx-us__part + .fx-us__part {
+  padding-block-start: var(--fe-gap-lg);
+  border-block-start: 1px solid var(--fe-border);
+}
+.fx-us__part-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fx-us__part-title {
+  margin: 0;
+  font-size: var(--fe-text-sm);
+  font-weight: 700;
+  color: var(--fe-text);
+}
+.fx-us__inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fe-gap);
 }
 .fx-us__group-title {
   font-size: var(--fe-text-xs);
@@ -2840,34 +3087,15 @@ select.fx-us__input {
   margin-inline-start: auto;
 }
 
-/* ── the assistant pane, which has nothing in it on purpose ───────── */
-.fx-us__soon {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--fe-gap-sm);
-  padding: var(--fe-gap-lg);
+/* ── the assistant pane ───────────────────────────────────────────── */
+.fx-us__ai-state {
+  margin: 0;
+  padding: var(--fe-gap-sm) var(--fe-gap);
   border: 1px solid var(--fe-border);
   border-radius: var(--fe-radius-md);
   background: var(--fe-bg-elev);
-}
-.fx-us__soon-icon {
-  width: 20px;
-  height: 20px;
-  color: var(--fe-text-muted);
-}
-.fx-us__soon-title {
-  margin: 0;
-  font-size: var(--fe-text-md);
-  font-weight: 600;
-  color: var(--fe-text);
-}
-.fx-us__soon-body {
-  margin: 0;
-  max-width: 52ch;
   font-size: var(--fe-text-sm);
-  line-height: 1.55;
-  color: var(--fe-text-muted);
+  color: var(--fe-text);
 }
 
 /* ── avatar ───────────────────────────────────────────────────────── */

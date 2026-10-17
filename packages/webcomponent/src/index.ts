@@ -106,7 +106,7 @@ function buildConfig(
   if (attrs.sidenav !== undefined) {
     base.sideNav = attrs.sidenav === true || attrs.sidenav === 'true' || attrs.sidenav === '';
   }
-  // The panel's "How to connect" + "API keys" entries. Same `undefined` rule:
+  // The panel's "Connections" + "API keys" entries. Same `undefined` rule:
   // the core default depends on `uiProfile`, and an element that never mentions
   // the attribute must not overrule it.
   if (attrs.connections !== undefined) {
@@ -204,7 +204,7 @@ const FilexExplorerWrapper = defineCustomElement({
     trashVisible: { type: [Boolean, String], default: undefined },
     /** Shortcut attribute → config.sideNav (the navigation panel). */
     sidenav: { type: [Boolean, String], default: undefined },
-    /** Shortcut attribute → config.connections (How to connect + API keys). */
+    /** Shortcut attribute → config.connections (Connections + API keys). */
     connections: { type: [Boolean, String], default: undefined },
     /** Shortcut attribute → config.uiProfile ('standard' | 'simple'). */
     uiProfile: { type: String, default: '' },

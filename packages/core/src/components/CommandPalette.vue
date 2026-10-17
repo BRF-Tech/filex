@@ -45,6 +45,8 @@ import { groupHitsByAccount } from '../lib/searchHit';
 import { matchedInContent, snippetSegments } from '../lib/snippet';
 import { actionIconSvg } from '../lib/actionIcons';
 import { fileIconTile } from '../lib/fileIcons';
+import { foldText } from '../lib/fileFilters';
+import { visibleName } from '../lib/nameRule';
 import { useLocale } from '../composables/useLocale';
 import { sayFailure } from '../lib/errorWords';
 
@@ -175,8 +177,13 @@ function iconHtml(it: PaletteItem): string {
  */
 function matchScore(label: string, q: string): number {
   if (!q) return 0;
-  const n = label.toLocaleLowerCase();
-  const s = q.toLocaleLowerCase();
+  // The explorer's own folding (lib/fileFilters foldText, the rule its "Filter
+  // in this folder" answers with locally), not `toLocaleLowerCase` (task
+  // #238): a name a Mac uploaded DECOMPOSED never answered the composed word
+  // typed here, and a browser in Turkish lower-cased `FILE.txt` to `fıle.txt`,
+  // so "file" missed it.
+  const n = foldText(label);
+  const s = foldText(q);
   const i = n.indexOf(s);
   if (i === -1) return -1;
   let sc = 100 - Math.min(i, 50);
@@ -316,10 +323,12 @@ const hitItems = computed<HitItem[]>(() => {
         // The account is part of the key: two accounts can both hold node 7
         // at `a.txt` on storage 1.
         id: `hit:${h.account?.id ?? ''}:${h.storage_id ?? ''}:${h.path ?? ''}:${h.id ?? ''}`,
-        label: String(h.name ?? h.path ?? ''),
+        // Shown through `visibleName` (lib/nameRule, task #238): a bidi
+        // control in a found name cannot hide its extension here either.
+        label: visibleName(String(h.name ?? h.path ?? '')),
         icon: '', // hit rows draw their real tile — see iconHtml()
         hit: h,
-        crumb: hitCrumb(h),
+        crumb: visibleName(hitCrumb(h)),
         inContent: matchedInContent(h.matched),
         snippet: typeof h.snippet === 'string' ? h.snippet : '',
         groupHead: i === 0 ? group.account : undefined,

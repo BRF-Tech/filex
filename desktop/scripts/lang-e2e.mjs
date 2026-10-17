@@ -4,11 +4,16 @@
 // ⚠⚠ 0.54 (#191): the app has no language of its own any more. The window,
 // the tray menu, the file list inside the window and the sync engine's
 // messages follow the signed-in ACCOUNT's language (users.locale, read from
-// /api/auth/me), and Settings → Language writes the account on the server
+// /api/auth/me), and the language control writes the account on the server
 // (src/main.ts settings:set → writeAccountLocale), so the web panel and every
 // notification follow it too. There is no "System" choice: with nobody signed
 // in - or an account whose token the server no longer takes - the app speaks
-// the system's language and the two buttons are disabled.
+// the system's language and there is no control to pick another.
+//
+// ⚠ Task #258: the control is the user settings dialog's (the avatar → User
+// settings → Preferences → Language), the same one the web app draws; App
+// settings (⚙) carries no language row any more. The window carries the pick
+// out through the dialog's hook (ui/app.html pickLanguage).
 //
 // The whole window is affected, not one label — the shell, the file explorer
 // web component inside it (its own catalogue), and the tray menu built over in
@@ -40,12 +45,27 @@ async function serverLocale() {
   return typeof me?.user?.locale === 'string' ? me.user.locale.trim() : '';
 }
 
-const openSettings = (w) =>
-  w.evaluate(() => {
-    const gear = [...document.querySelectorAll('.rail-btn')].pop();
-    gear?.click();
+/** The user settings dialog on Preferences, opened the way a person does:
+ *  the avatar, then "User settings". */
+const openPreferences = (w) =>
+  w.evaluate(async () => {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    if (!document.querySelector('[data-testid="user-settings-dialog"]')) {
+      document.querySelector('[data-testid="explore-account"]')?.click();
+      await wait(400);
+      document.querySelector('[data-testid="explore-user-settings"]')?.click();
+      await wait(600);
+    }
+    document.querySelector('[data-testid="user-settings-tab-preferences"]')?.click();
+    await wait(300);
   });
-const pick = (w, code) => w.evaluate((c) => document.querySelector(`#settings [data-locale="${c}"]`)?.click(), code);
+const pick = async (w, code) => {
+  await openPreferences(w);
+  await w.evaluate((c) => document.querySelector(`[data-testid="user-settings-locale-${c}"]`)?.click(), code);
+};
+const localeButtons = (w) =>
+  w.evaluate(() =>
+    [...document.querySelectorAll('[data-testid^="user-settings-locale-"]')].map((b) => b.getAttribute('data-testid').slice('user-settings-locale-'.length)));
 
 // ── it starts in the account's language ──────────────────────────────
 const startLocale = await serverLocale();
@@ -56,14 +76,14 @@ check('the window draws the account’s language (the system’s when it holds n
   first.effectiveLocale === want, `account=${startLocale || '(none)'} effective=${first.effectiveLocale}`);
 check('the app keeps no language of its own', (first.locale ?? 'system') === 'system', String(first.locale));
 
-// ── open Settings the way a user does: the gear in the rail ──────────
-await openSettings(win);
+// ── open User settings the way a user does: the avatar ───────────────
+await openPreferences(win);
 await sleep(600);
-const choices = await win.evaluate(() =>
-  [...document.querySelectorAll('#settings [data-locale]')].map((b) => b.dataset.locale));
-check('Settings offers English / Türkçe and no "System"', choices.join(',') === 'en,tr', choices.join(',') || 'yok');
-check('…enabled while an account is signed in',
-  await win.evaluate(() => [...document.querySelectorAll('#settings [data-locale]')].every((b) => !b.disabled)));
+const choices = await localeButtons(win);
+check('User settings offers English / Türkçe and no "System"', choices.includes('en') && choices.includes('tr') && !choices.includes('system'),
+  choices.join(',') || 'yok');
+check('…and App settings (⚙) has no language row of its own any more',
+  await win.evaluate(() => !document.querySelector('#settings [data-locale]')));
 
 // Start from English, so the switch below is a real one.
 if (first.effectiveLocale !== 'en') {
@@ -86,8 +106,11 @@ check('the document declares the language it is in',
   (await win.evaluate(() => document.documentElement.lang)) === 'tr',
   await win.evaluate(() => document.documentElement.lang));
 
-const shell = await win.evaluate(() => document.querySelector('#settings')?.innerText ?? '');
-check('the shell is in Turkish', /Ayarlar/.test(shell) && /Dil/.test(shell),
+const shell = await win.evaluate(() => [
+  document.querySelector('[data-testid="user-settings-dialog"]')?.innerText ?? '',
+  [...document.querySelectorAll('.rail-btn')].pop()?.title ?? '',
+].join('\n'));
+check('the shell is in Turkish: the dialog, and the rail’s App settings', /Kullanıcı ayarları/.test(shell) && /Dil/.test(shell) && /Uygulama ayarları/.test(shell),
   shell.split('\n').slice(0, 3).join(' · '));
 
 // ⚠⚠ The explorer is a separate component with its own catalogue, and this
@@ -116,8 +139,8 @@ check('…without remounting the explorer',
 // ── back to English, and the window follows again ────────────────────
 await pick(win, 'en');
 await sleep(1200);
-const backEn = await win.evaluate(() => document.querySelector('#settings')?.innerText ?? '');
-check('switching back is just as complete', /Settings/.test(backEn) && /Language/.test(backEn),
+const backEn = await win.evaluate(() => document.querySelector('[data-testid="user-settings-dialog"]')?.innerText ?? '');
+check('switching back is just as complete', /User settings/.test(backEn) && /Language/.test(backEn),
   backEn.split('\n').slice(0, 3).join(' · '));
 check('…and the account follows it back', (await serverLocale()) === 'en', await serverLocale());
 
@@ -142,8 +165,7 @@ check('the account’s language survives a restart on an English machine',
   `account=${restored.accountLocale} effective=${restored.effectiveLocale}`);
 
 // ── the account gets back the language it had ────────────────────────
-await openSettings(win2);
-await sleep(600);
+await sleep(1500);
 if (startLocale === 'en' || startLocale === 'tr') {
   await pick(win2, startLocale);
   await sleep(1200);
@@ -177,19 +199,11 @@ await sleep(1500);
 const out = await win2.evaluate(() => window.filexApp.getState());
 const acc = (out.accounts ?? []).find((a) => a.id === out.activeId);
 check('the refused account is marked signed out', !!acc?.signedOut, JSON.stringify(acc?.signedOut ?? null));
-// Settings drawn again from the state as it is now: closed if it is open,
-// then opened with the gear (which toggles).
-await win2.evaluate(() => document.querySelector('#settings.open #close-settings')?.click());
-await sleep(300);
-await openSettings(win2);
-await sleep(800);
-const offered = await win2.evaluate(() =>
-  [...document.querySelectorAll('#settings [data-locale]')].map((b) => ({ code: b.dataset.locale, disabled: b.disabled })));
-check('…and both language buttons are disabled', offered.length === 2 && offered.every((b) => b.disabled),
-  JSON.stringify(offered));
-const why = await win2.evaluate(() => document.querySelector('#settings')?.innerText ?? '');
-check('…saying why: the language belongs to the account', /Sign in to choose|Seçmek için giriş yap/.test(why),
-  why.split('\n').find((l) => /Language|Dil/.test(l)) ?? '');
+// The language is the account's: a signed-out account has no file list, so
+// no avatar and no User settings to pick one in - and App settings never had
+// a language row of its own since task #258.
+const offered = await localeButtons(win2);
+check('…and nothing offers a language to pick', offered.length === 0, JSON.stringify(offered));
 
 await again.close();
 fs.rmSync(profile, { recursive: true, force: true });

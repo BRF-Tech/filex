@@ -301,13 +301,12 @@ func (h *ExternalAdmin) Update(w http.ResponseWriter, r *http.Request) {
 		note := envPinnedNote(name)
 		resp["note"] = note
 		resp["env_var"] = externalEnvVar[name]
-		// The audit row says it too: "switched off" in the trail of an
-		// env-pinned service is "switched off until the next restart".
+		// The audit row says it too: the environment named this service, and
+		// the change made here is the one that stands.
 		auth.AddAuditDetail(r.Context(), "env_managed", true)
 		auth.AddAuditDetail(r.Context(), "note", note)
 	}
-	// The editor language has a variable of its own: a change to a pinned one
-	// lasts until the next start, like the rest of a pinned row.
+	// The editor language has a variable of its own, seeding it the same way.
 	if req.EditorLang != nil && h.EnvManaged[external.EnvPinEditorLang] {
 		resp["editor_lang_env_managed"] = true
 		auth.AddAuditDetail(r.Context(), "editor_lang_env_managed", true)
@@ -324,17 +323,17 @@ var externalEnvVar = map[string]string{
 }
 
 // envPinnedNote is what the PATCH answer and the audit row say about an edit
-// to a service the environment pins: it applies now, the next start writes
-// the environment back (switching the service on again if it was switched
-// off here), and removing the variable is how it goes for good. The External
-// services card says the same (external.envManagedHint).
+// to a service the environment names (task #258: a SEED since 0.57, no
+// longer written back at every start): the change stands, and `filex settings
+// reseed --external` is how the environment's value is written again. The
+// External services card says the same (external.envManagedHint).
 func envPinnedNote(name string) string {
 	v := externalEnvVar[name]
 	if v == "" {
 		v = "an environment variable"
 	}
-	return "Applied now, until filex restarts: this service is pinned by " + v +
-		", and the next start writes the environment's value back, switching the service on again if it was switched off here. To switch it off for good, remove " + v + "."
+	return "Applied, and it stands across restarts: " + v + " only gave this service its first value. " +
+		"To write the environment's value again, run filex settings reseed --external and restart filex."
 }
 
 // Test runs an immediate health probe and returns the state.

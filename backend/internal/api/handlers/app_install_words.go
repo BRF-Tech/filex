@@ -33,7 +33,7 @@ func writeAppFailure(w http.ResponseWriter, lang string, err error) {
 	if errors.As(err, &ie) {
 		code := http.StatusBadRequest
 		switch ie.Code {
-		case wasmplugin.ErrCodeNameTaken, wasmplugin.ErrCodeDescribeMismatch, wasmplugin.ErrCodePermissionsChanged, wasmplugin.ErrCodeIncompatible:
+		case wasmplugin.ErrCodeNameTaken, wasmplugin.ErrCodeDescribeMismatch, wasmplugin.ErrCodeLoadFailed, wasmplugin.ErrCodePermissionsChanged, wasmplugin.ErrCodeIncompatible:
 			code = http.StatusConflict
 		case wasmplugin.ErrCodeNotFound:
 			code = http.StatusNotFound
@@ -45,6 +45,9 @@ func writeAppFailure(w http.ResponseWriter, lang string, err error) {
 			code = http.StatusConflict
 		case wasmplugin.ErrCodeFetch:
 			code = http.StatusBadGateway
+		case wasmplugin.ErrCodeLoadTimeout:
+			// The server was too busy to start the module in time: try again.
+			code = http.StatusServiceUnavailable
 		}
 		writeJSON(w, code, installErrorBody(lang, ie))
 		return

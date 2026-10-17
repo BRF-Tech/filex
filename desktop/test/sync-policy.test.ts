@@ -14,6 +14,8 @@ import {
   LIMIT_PRESETS_KIB,
   WINDOW_PRESETS,
   answerHold,
+  discardDetail,
+  discardOutcome,
   normLimit,
   engineLangTag,
   storedWindow,
@@ -469,4 +471,46 @@ test('"Stop syncing" and "Keep online only" both remove a folder through the one
     assert.doesNotMatch(body, /\bremovePair\(/, `${channel} removes the pair itself, without stopping its pass`);
     assert.match(body, /\bremoveSyncedFolder\(/, `${channel} does not go through removeSyncedFolder`);
   }
+});
+
+// ── discard: what stayed here, and why (task #259) ─────────────────────────
+//
+// Since 0.57 "Delete from this computer" deletes only the held files the
+// server still has an identical copy of; the engine says, file by file, why
+// the others stay. The dialog shows the engine's sentences as they came.
+
+const DISCARD_STREAM = [
+  '{"event":"hello","code":"hello","params":{"protocol":1,"version":"0.57.0","lang":"tr"},"message":"filex eşitleme motoru 0.57.0"}',
+  '{"event":"discard","pair":"pair-1","code":"discard.deleted","params":{"path":"a.txt","where":"trash: docs://work/a.txt"},"message":"a.txt: bu bilgisayardan silindi; sunucuda aynı dosya duruyor (trash: docs://work/a.txt)"}',
+  '{"event":"discard","pair":"pair-1","code":"discard.kept_no_copy","params":{"path":"b.txt","reason":"no_copy"},"message":"b.txt: burada kalıyor; sunucuda birebir aynı kopyası yok"}',
+  'not an event',
+  '{"event":"discard","pair":"pair-1","code":"discard.kept_changed","params":{"path":"c.txt","reason":"changed"},"message":"c.txt: burada kalıyor; bekletildikten sonra değişti"}',
+  '{"event":"discard","pair":"pair-1","code":"discard.done","params":{"deleted":1,"kept":2,"still_held":2},"message":"Bekleyen 1 dosya bu bilgisayardan silindi; her birinin birebir aynısı sunucuda duruyor. 2 öğe burada kalıyor ve karar beklemeye devam ediyor."}',
+].join('\n');
+
+test("discardOutcome: the files left here with the engine's reasons, and its summary", () => {
+  const o = discardOutcome(DISCARD_STREAM);
+  assert.equal(o.deleted, 1);
+  assert.equal(o.stillHeld, 2);
+  assert.deepEqual(
+    o.kept.map((k) => [k.path, k.code]),
+    [
+      ['b.txt', 'discard.kept_no_copy'],
+      ['c.txt', 'discard.kept_changed'],
+    ],
+  );
+  assert.match(o.message, /^Bekleyen 1 dosya/);
+  assert.deepEqual(discardOutcome(''), { deleted: 0, kept: [], stillHeld: 0, message: '' });
+});
+
+test('discardDetail: one sentence a line, the rest counted', () => {
+  const o = discardOutcome(DISCARD_STREAM);
+  assert.equal(
+    discardDetail(o, 12, (n) => `+${n}`),
+    'b.txt: burada kalıyor; sunucuda birebir aynı kopyası yok\nc.txt: burada kalıyor; bekletildikten sonra değişti',
+  );
+  assert.equal(
+    discardDetail(o, 1, (n) => `…ve ${n} tane daha`),
+    'b.txt: burada kalıyor; sunucuda birebir aynı kopyası yok\n…ve 1 tane daha',
+  );
 });

@@ -90,6 +90,27 @@ type File struct {
 	Mtime time.Time
 }
 
+// Keep is the rule a folder link's members answer before they go into its
+// archive (handlers.LinkMembers: what the link's creator may download), asked
+// with a member's driver path. nil keeps every member.
+type Keep func(path string) bool
+
+// Kept is files without the members keep refuses; files itself when keep is
+// nil. One filter for the cached archive (Plan) and the streamed one
+// (handlers streamFolderZip), so the two never disagree about what is in it.
+func Kept(files []File, keep Keep) []File {
+	if keep == nil {
+		return files
+	}
+	out := files[:0:0]
+	for _, f := range files {
+		if keep(f.Path) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // Gen tracks one in-flight (or just-finished) zip build so concurrent callers
 // can dedup and watch progress.
 type Gen struct {
@@ -174,13 +195,22 @@ func (c *Cache) Track(a *ActiveShares) {
 func (c *Cache) Enabled() bool { return c.dir != "" }
 
 // Plan walks the folder and returns the cache path it would occupy plus the
-// file list (no generation, no bytes read). The cache path is
-// <dir>/<nodeID>-<sig>.zip.
-func (c *Cache) Plan(ctx context.Context, drv storage.Driver, root string, nodeID int64) (string, []File, error) {
+// file list (no generation, no bytes read), without the members keep refuses
+// (Kept). The cache path is <dir>/<nodeID>-<sig>.zip, and the signature is
+// over the kept list: an archive built for one list is never served for
+// another.
+//
+// ⚠ One file per node: two links to the same folder whose creators keep
+// different lists replace each other's archive (pruneOld keeps the newest
+// <nodeID>-*.zip). Each still gets its own list - the signature differs - at
+// the price of a rebuild when the other link was asked last. Rare, and never
+// the wrong members.
+func (c *Cache) Plan(ctx context.Context, drv storage.Driver, root string, nodeID int64, keep Keep) (string, []File, error) {
 	files, err := CollectFiles(ctx, drv, root)
 	if err != nil {
 		return "", nil, err
 	}
+	files = Kept(files, keep)
 	cachePath := filepath.Join(c.dir, fmt.Sprintf("%d-%s.zip", nodeID, signature(files)))
 	return cachePath, files, nil
 }
@@ -227,11 +257,13 @@ func (c *Cache) StartOrGet(cachePath string, files []File, nodeID int64, drv sto
 // with the progress page. The ceiling is about not spending hours of object
 // storage reads on a link nobody may ever open — the 16.7 GB incident — not
 // about refusing anything.
-func (c *Cache) Warm(ctx context.Context, drv storage.Driver, root string, nodeID int64) (bool, error) {
+//
+// keep is the link's member rule (Plan); nil keeps every member.
+func (c *Cache) Warm(ctx context.Context, drv storage.Driver, root string, nodeID int64, keep Keep) (bool, error) {
 	if !c.Enabled() {
 		return false, nil
 	}
-	cachePath, files, err := c.Plan(ctx, drv, root, nodeID)
+	cachePath, files, err := c.Plan(ctx, drv, root, nodeID, keep)
 	if err != nil {
 		return false, err
 	}

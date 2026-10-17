@@ -6,11 +6,18 @@ import { sayFailure } from '../lib/errorWords';
  *
  * Lazy-imports the `mermaid` library (~150 KB gzipped). Source text is
  * fetched from `props.url` (with the auth headers from PreviewModal),
- * then rendered to SVG via `mermaid.render('id', src)`. The resulting
- * SVG node is inserted into a wrapper that supports pan + scale via
- * pure CSS transforms (no extra panzoom dep).
+ * then drawn by lib/mermaidRender - the one way a diagram is drawn, which
+ * asks no other server for anything while Mermaid lays it out - and its SVG
+ * goes through the diagram sanitizer, a picture from elsewhere held behind a
+ * placeholder (composables/useRemoteImages: inside the preview its gate
+ * asks, on its own this viewer asks itself). The SVG is inserted into a
+ * wrapper that supports pan + scale via pure CSS transforms (no extra
+ * panzoom dep).
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { renderMermaid, type MermaidApi } from '../lib/mermaidRender';
+import { injectRemoteImages, useRemoteImages } from '../composables/useRemoteImages';
+import RemoteImageDialog from '../modals/RemoteImageDialog.vue';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
 import { fetchViewerText } from '../composables/useViewerFetch';
@@ -20,11 +27,17 @@ const props = defineProps<{
   mime?: string;
   ext: string;
   t?: (key: string) => string;
+  /** The reader's language, for the question a held picture asks on its own. */
+  locale?: string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
 }>();
 
 const surface = ref<HTMLDivElement | null>(null);
+const parentGate = injectRemoteImages();
+const remoteImages = parentGate ?? useRemoteImages(() => props.locale);
+const ownGate = !parentGate;
+remoteImages.watchRoot(surface);
 const error = ref<string | null>(null);
 const loading = ref(true);
 const scale = ref(1);
@@ -35,19 +48,12 @@ let dragging = false;
 let dragStart: { x: number; y: number; tx: number; ty: number } | null = null;
 let renderToken = 0;
 
-let cachedMermaid: any = null;
-async function ensureMermaid(): Promise<any | null> {
+let cachedMermaid: MermaidApi | null = null;
+async function ensureMermaid(): Promise<MermaidApi | null> {
   if (cachedMermaid) return cachedMermaid;
   try {
-    const mod = await import(/* @vite-ignore */ 'mermaid');
+    const mod = (await import(/* @vite-ignore */ 'mermaid')) as { default?: MermaidApi } & MermaidApi;
     cachedMermaid = mod.default ?? mod;
-    cachedMermaid.initialize?.({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      theme: window.matchMedia?.('(prefers-color-scheme: dark)').matches
-        ? 'dark'
-        : 'default',
-    });
     return cachedMermaid;
   } catch {
     return null;
@@ -84,10 +90,11 @@ async function load(): Promise<void> {
 
   try {
     const id = `filex-mermaid-${Date.now()}`;
-    const { svg } = await mermaid.render(id, src);
+    const theme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'default';
+    const svg = await renderMermaid(mermaid, id, src, remoteImages.policy(), theme);
     if (myToken !== renderToken) return;
     if (surface.value) {
-      surface.value.innerHTML = sanitizeHtml(svg, 'diagram');
+      surface.value.innerHTML = sanitizeHtml(svg, 'diagram', { remoteImages: remoteImages.policy() });
       const svgEl = surface.value.querySelector('svg');
       if (svgEl) {
         svgEl.style.maxWidth = '100%';
@@ -123,13 +130,24 @@ function onWheel(ev: WheelEvent): void {
 
 function onPointerDown(ev: PointerEvent): void {
   dragging = true;
+  dragged = false;
   dragStart = { x: ev.clientX, y: ev.clientY, tx: tx.value, ty: ty.value };
   (ev.target as HTMLElement).setPointerCapture?.(ev.pointerId);
 }
 function onPointerMove(ev: PointerEvent): void {
   if (!dragging || !dragStart) return;
+  if (Math.abs(ev.clientX - dragStart.x) + Math.abs(ev.clientY - dragStart.y) > 4) dragged = true;
   tx.value = dragStart.tx + (ev.clientX - dragStart.x);
   ty.value = dragStart.ty + (ev.clientY - dragStart.y);
+}
+/** A click on a held picture asks - unless it ended a pan of the diagram. */
+let dragged = false;
+function onSurfaceClick(ev: MouseEvent): void {
+  if (dragged) {
+    dragged = false;
+    return;
+  }
+  remoteImages.onClick(ev);
 }
 function onPointerUp(): void {
   dragging = false;
@@ -190,8 +208,11 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
         ref="surface"
         class="filex-viewer-mermaid__surface"
         :style="{ transform: `translate(${tx}px, ${ty}px) scale(${scale})` }"
+        @click="onSurfaceClick"
+        @keydown="remoteImages.onKeydown"
       />
     </div>
+    <RemoteImageDialog v-if="ownGate" :gate="remoteImages" :locale="locale" />
   </div>
 </template>
 

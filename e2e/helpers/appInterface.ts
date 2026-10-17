@@ -5,7 +5,7 @@
  * (175 the sandbox, 228 a frame of its own package and blob:, 229 ui.print).
  */
 import { expect, type APIRequestContext, type Frame, type Page } from '@playwright/test';
-import { loginAs } from './auth';
+import { openSignedIn } from './auth';
 
 /** One row of the install review (wasmplugin.PermissionRow). */
 export interface ReviewRow {
@@ -50,12 +50,10 @@ export async function removeAppByName(api: APIRequestContext, name: string): Pro
  * The interface's own frame.
  */
 export async function openAppInterface(page: Page, store: string, fileName: string): Promise<Frame> {
-  await page.addInitScript(() => {
-    localStorage.setItem('filex.tourDone', '1');
-    localStorage.setItem('filex.installPrompt.dismissed', '1');
-  });
-  await loginAs(page);
-  await page.goto(`/admin/explore?storage=${encodeURIComponent(store)}`);
+  // Signed in through the API with the explorer as the tab's first page
+  // (helpers/auth openSignedIn, task #182: 175's row waited out its 10 s in
+  // WebKit after the form's start page was left mid-load).
+  await openSignedIn(page, `/admin/explore?storage=${encodeURIComponent(store)}`);
   const row = page.locator(`[data-fe-path="${store}://${fileName}"]`);
   await row.first().waitFor();
   await row.getByText(fileName, { exact: true }).dblclick();

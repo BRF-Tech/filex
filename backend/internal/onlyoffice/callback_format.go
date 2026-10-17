@@ -20,13 +20,13 @@ package onlyoffice
 // place (callback_csv.go).
 //
 // What is never written: a type the document server should not have sent for
-// a document (anything but the OOXML and ODF formats below), or bytes that are
+// a document (anything but the OOXML and ODF formats of
+// officesave.BesideFormats), or bytes that are
 // not the package the type names. Those are refused - logged, the server told
 // error 1, the editors told (`server.onlyoffice.save_refused_*`), an audit row.
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -34,16 +34,12 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/model"
-	"github.com/brf-tech/filex/backend/internal/ops"
-	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/officesave"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
-	"github.com/brf-tech/filex/backend/internal/syspath"
-	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -71,15 +67,12 @@ const (
 	refusedBadBytes     = "server.onlyoffice.refused_bad_bytes"
 	refusedNoCreate     = "server.onlyoffice.refused_no_create"
 	refusedNoEditor     = "server.onlyoffice.refused_no_editor"
-)
 
-// besideTypes are the formats a save may come back in that are kept, beside
-// the file: the document server's OOXML and ODF documents.
-var besideTypes = map[string]bool{
-	"docx": true, "xlsx": true, "pptx": true,
-	"docm": true, "xlsm": true, "pptm": true,
-	"odt": true, "ods": true, "odp": true,
-}
+	// A CSV save (officesave.Refusal): a character the file's encoding cannot
+	// hold; bytes that are not text in an encoding filex can read for it.
+	refusedCSVEncoding   = "server.onlyoffice.refused_csv_encoding"
+	refusedCSVUnreadable = "server.onlyoffice.refused_csv_unreadable"
+)
 
 // errNotWritten is a save that is not written, and why, as a catalogue key
 // and its values: the person reads it in their language, the log in English.
@@ -112,9 +105,6 @@ func srvtextVars(kv ...string) srvtext.Vars {
 	return v
 }
 
-// formatName is a type as a person reads it: "DOCX".
-func formatName(ext string) string { return strings.ToUpper(ext) }
-
 // editorIDs are the callback's `users` as filex account ids, each once.
 func editorIDs(users []string) []int64 {
 	var out []int64
@@ -128,19 +118,6 @@ func editorIDs(users []string) []int64 {
 		out = append(out, id)
 	}
 	return out
-}
-
-// noticeMeta is a notice's words in every built-in language
-// (`title_<lang>`, `body_<lang>`), and the row's own title and body in the
-// instance's language (the webhook and the admin history read those).
-func noticeMeta(titleKey, bodyKey string, vars srvtext.Vars) (meta map[string]any, title, body string) {
-	meta = map[string]any{}
-	for _, lang := range srvtext.BuiltinLanguages() {
-		meta["title_"+lang] = srvtext.Text(lang, titleKey, vars)
-		meta["body_"+lang] = srvtext.Text(lang, bodyKey, vars)
-	}
-	lang := srvtext.Pick()
-	return meta, srvtext.Text(lang, titleKey, vars), srvtext.Text(lang, bodyKey, vars)
 }
 
 // refusals is how many saves of the document were not written in place since
@@ -162,30 +139,13 @@ func (s *Service) newSessionKey(nodeID int64) {
 	s.refusedMu.Unlock()
 }
 
-// audit writes one row, best-effort: a row the store refuses is logged, never
-// a reason to undo what already happened.
+// audit writes one row, best-effort (officesave.Audit: the editors as the
+// callback named them).
 func (s *Service) audit(ctx context.Context, action string, users []int64, targetID int64, meta map[string]any) {
 	if s.Store == nil {
 		return
 	}
-	e := &model.AuditEntry{
-		Action: action, TargetType: "file", TargetID: strconv.FormatInt(targetID, 10),
-		Metadata: meta, CreatedAt: time.Now().UTC(),
-	}
-	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	// The editors as the callback named them; the row's user only when that
-	// account is still there (the column is a reference to it).
-	if len(users) > 0 {
-		meta["editors"] = users
-		if u, err := s.Store.GetUser(actx, users[0]); err == nil && u != nil {
-			uid := users[0]
-			e.UserID = &uid
-		}
-	}
-	if err := s.Store.InsertAuditEntry(actx, e); err != nil {
-		slog.Warn("onlyoffice callback: audit row not written", slog.String("action", action), slog.Any("err", err))
-	}
+	officesave.Audit(ctx, s.Store, action, users, targetID, meta)
 }
 
 // refuseSave records a save that was not written and tells the people who
@@ -220,38 +180,28 @@ func (s *Service) refuseSave(ctx context.Context, node *model.Node, editors []in
 	})
 }
 
-// besideTarget is the name the edit is written under: the file's own name
-// with the format's extension, or the next free `name (2).ext` beside it.
-func (s *Service) besideTarget(ctx context.Context, drv storage.Driver, node *model.Node, got string) (string, error) {
-	base := strings.TrimSuffix(node.Name, path.Ext(node.Name))
-	return s.freeBeside(ctx, drv, node, path.Join(path.Dir(node.Path), base+"."+got))
-}
-
-// freeBeside is want, or the next free `name (2).ext` beside it when want is
-// taken on the storage or in the catalogue.
-func (s *Service) freeBeside(ctx context.Context, drv storage.Driver, node *model.Node, want string) (string, error) {
-	taken := func(rel string) bool {
-		n, err := s.Store.GetNodeByPath(ctx, node.StorageID, pathkey.Hash(node.StorageID, rel))
-		return err == nil && n != nil
+// besideEnv is where the callback writes a save beside its document
+// (officesave.Write, the writer an app's save door shares): the shared
+// resolver's lock view, the document's editors who may create files there
+// (callback_identity.go mayCreate), the event as the Document Server's.
+func (s *Service) besideEnv(ctx context.Context, drv storage.Driver, writer storage.Writer, node *model.Node) officesave.Env {
+	return officesave.Env{
+		Store: s.Store, Driver: drv, Writer: writer,
+		Locks: s.aclResolver().Locks(ctx, node.StorageID),
+		MayCreate: func(ctx context.Context, uid int64, rel string) bool {
+			return s.mayCreate(ctx, node, uid, rel)
+		},
+		Sync: s.syncer(), Origin: writehook.OriginOnlyOffice,
 	}
-	return ops.UniqueDestNumbered(ctx, drv, want, taken)
 }
 
 // besideSave is one save written beside the document instead of over it:
-// where, in which format, what the editors are told and what the audit row
-// says. Two kinds: a save in another format (saveBeside) and a save of a
-// session the document moved on from (session_base.go saveConflict).
+// the shared writer's Save, and what the callback says when none of the
+// editors may create it there. Two kinds: a save in another format
+// (saveBeside) and a save of a session the document moved on from
+// (session_base.go saveConflict).
 type besideSave struct {
-	target string
-	// got is the format the bytes are in (the refusal's words).
-	got      string
-	mime     string
-	titleKey string
-	bodyKey  string
-	vars     srvtext.Vars
-	action   string
-	// why is the log line's reason.
-	why string
+	officesave.Save
 	// noCreate, when set, is the reason said instead of refusedNoCreate when
 	// none of the editors may create the file there.
 	noCreate string
@@ -266,82 +216,51 @@ func (s *Service) saveBeside(ctx context.Context, drv storage.Driver, writer sto
 	// The bytes are the package the type names, or nothing is written.
 	br := bufio.NewReader(src)
 	head, _ := br.Peek(4)
-	if !bytes.Equal(head, []byte("PK\x03\x04")) {
-		return nil, notWritten(refusedBadBytes, srvtext.Vars{"format": formatName(got)})
+	if !officesave.BesideBytesOK(head) {
+		return nil, notWritten(refusedBadBytes, srvtext.Vars{"format": officesave.FormatName(got)})
 	}
-	target, err := s.besideTarget(ctx, drv, node, got)
+	env := s.besideEnv(ctx, drv, writer, node)
+	target, err := env.BesideTarget(ctx, node, got)
 	if err != nil {
 		return map[string]any{"error": 1, "message": "no free name beside the document"}, nil
 	}
-	return s.writeBeside(ctx, drv, writer, node, br, length, key, users, besideSave{
-		target:   target,
-		got:      got,
-		mime:     assoc.MimeOf(got),
-		titleKey: savedBesideTitle,
-		bodyKey:  savedBesideBody,
-		vars:     srvtext.Vars{"name": node.Name, "saved": path.Base(target), "format": formatName(got), "ext": docExt(node.Name)},
-		action:   AuditActionSavedBeside,
-		why:      "saved in another format",
-	})
+	return s.writeBeside(ctx, env, node, br, length, key, users, besideSave{Save: officesave.Save{
+		Target:   target,
+		Format:   got,
+		Mime:     assoc.MimeOf(got),
+		TitleKey: savedBesideTitle,
+		BodyKey:  savedBesideBody,
+		Vars:     srvtext.Vars{"name": node.Name, "saved": path.Base(target), "format": officesave.FormatName(got), "ext": officesave.DocExt(node.Name)},
+		Action:   AuditActionSavedBeside,
+		Why:      "saved in another format",
+	}})
 }
 
-// writeBeside writes src at w.target, beside the document, which is left as it
-// was, for one of the session's editors who may create it there
-// (callback_identity.go), and tells them. The map is the callback's answer;
-// err an *errNotWritten for a save that must not be written.
-func (s *Service) writeBeside(ctx context.Context, drv storage.Driver, writer storage.Writer, node *model.Node, src io.Reader, length int64, key string, users []string, w besideSave) (map[string]any, error) {
-	target := w.target
-	// The same gate the document's own save went through, for the new name -
-	// with the shared resolver's lock view, so a name inside a vault is
-	// refused here too (Service.ACL).
-	gate := writegate.Writes(target).As(syspath.PutWorkCopy)
-	if owner, ok := syspath.DraftOwner(node.Path); ok {
-		gate = writegate.Writes(target).As(syspath.OwnDraft).By(owner)
-	}
-	if gerr := writegate.Check(s.aclResolver().Locks(ctx, node.StorageID), 0, gate); gerr != nil {
+// writeBeside writes src at w.Target, beside the document, which is left as
+// it was, for one of the session's editors who may create it there
+// (callback_identity.go), and tells them - through officesave.Write, the
+// writer an app's save door shares. The map is the callback's answer; err an
+// *errNotWritten for a save that must not be written.
+func (s *Service) writeBeside(ctx context.Context, env officesave.Env, node *model.Node, src io.Reader, length int64, key string, users []string, w besideSave) (map[string]any, error) {
+	editors := s.sessionEditors(key, users)
+	_, err := officesave.Write(ctx, env, node, src, length, editors, w.Save)
+	var gerr *officesave.GateError
+	switch {
+	case err == nil:
+	case errors.As(err, &gerr):
 		slog.Warn("onlyoffice callback refused: beside", slog.Int64("storage", node.StorageID),
-			slog.String("path", target), slog.String("why", gerr.Error()))
-		return gateRefusal(gerr), nil
-	}
-	// Who it is written for, and whether they may create it there - checked
-	// now, on the file's own name.
-	editors, why := s.creatorOf(ctx, node, key, users, target, w.got)
-	if why != nil {
-		if w.noCreate != "" && why.key == refusedNoCreate {
-			why = notWritten(w.noCreate, w.vars)
+			slog.String("path", w.Target), slog.String("why", gerr.Err.Error()))
+		return gateRefusal(gerr.Err), nil
+	case errors.Is(err, officesave.ErrNoEditor):
+		return nil, notWritten(refusedNoEditor, nil)
+	case errors.Is(err, officesave.ErrNoCreate):
+		if w.noCreate != "" {
+			return nil, notWritten(w.noCreate, w.Vars)
 		}
-		return nil, why
+		return nil, notWritten(refusedNoCreate, srvtext.Vars{"ext": officesave.DocExt(node.Name), "format": officesave.FormatName(w.Format)})
+	default:
+		return map[string]any{"error": 1, "message": err.Error()}, nil
 	}
-	if err := writer.Write(ctx, target, src, length); err != nil {
-		return map[string]any{"error": 1, "message": "write beside: " + err.Error()}, nil
-	}
-	mime := w.mime
-	var size int64
-	if obj, err := drv.Stat(ctx, target); err == nil {
-		size = obj.Size
-		if obj.Mime != "" {
-			mime = obj.Mime
-		}
-	}
-	meta, _, _ := noticeMeta(w.titleKey, w.bodyKey, w.vars)
-	meta["saved_beside"] = node.Path
-	meta["filetype"] = w.got
-	var saved *model.Node
-	if st, err := s.Store.GetStorage(ctx, node.StorageID); err == nil && st != nil {
-		sy := s.syncer()
-		sy.WriteWithoutNotification(ctx, st, target, size, mime)
-		saved, _ = s.Store.GetNodeByPath(ctx, node.StorageID, pathkey.Hash(node.StorageID, target))
-	}
-	if saved == nil {
-		saved = &model.Node{StorageID: node.StorageID, Name: path.Base(target), Path: target, Size: size, Mime: mime, Type: model.NodeTypeFile}
-	}
-	writehook.EmitWrittenFor(ctx, node.StorageID, saved, writehook.OriginOnlyOffice, writehook.Created, editors, meta)
 	s.newSessionKey(node.ID)
-	slog.Info("onlyoffice callback: saved beside the document",
-		slog.Int64("storage", node.StorageID), slog.String("path", node.Path),
-		slog.String("saved", target), slog.String("filetype", w.got), slog.String("why", w.why))
-	s.audit(ctx, w.action, editors, saved.ID, map[string]any{
-		"target_name": target, "storage_id": node.StorageID, "original": node.Path, "filetype": w.got,
-	})
 	return map[string]any{"error": 0}, nil
 }

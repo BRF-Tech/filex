@@ -362,7 +362,7 @@ func logAuto(prev, cur *autoSet) {
 	}
 	slog.Info(msg, attrs...)
 	if r.Warning != "" && (prev == nil || prev.res.Warning != r.Warning || prev.res.WarningDetail != r.WarningDetail || first) {
-		slog.Warn("clientip: could not tell where filex runs, so auto trusts loopback only - name your proxy in FILEX_TRUSTED_PROXIES or on the Sign-in security page",
+		slog.Warn("clientip: could not tell where filex runs, so auto trusts loopback only - name your proxy on the Sign-in security page (FILEX_TRUSTED_PROXIES gives the list only its first value)",
 			slog.String("warning", r.Warning), slog.String("detail", r.WarningDetail))
 	}
 }

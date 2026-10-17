@@ -33,6 +33,16 @@ export const { _electron } = await import(
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * The account's language, set the way the window's own control does it
+ * (task #258: User settings → Preferences → Language, ui/app.html
+ * pickLanguage): the main process writes it to the account and tells every
+ * window, which redraws. For a script whose subject is something ELSE seen in
+ * another language; lang-e2e.mjs drives the control itself.
+ */
+export const setAccountLanguage = (win, code) =>
+  win.evaluate((c) => window.filexApp.setSettings({ locale: c }), code);
+
 let failed = 0;
 export function check(name, ok, detail = '') {
   if (!ok) failed++;

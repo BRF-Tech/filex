@@ -12,6 +12,9 @@ import { sayFailure } from '../lib/errorWords';
  *
  * Every piece of markup (highlighted code, rendered Markdown, an HTML output)
  * goes through the one preview sanitizer (lib/sanitizeHtml.ts) before v-html.
+ * A picture from another server in a Markdown cell or an HTML output waits
+ * behind a placeholder (composables/useRemoteImages): inside the preview its
+ * gate asks, on its own this viewer asks itself.
  *
  * Source list / output count counters at the top so a 200-cell
  * notebook doesn't surprise the user.
@@ -22,14 +25,26 @@ import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
 import { fetchViewerText } from '../composables/useViewerFetch';
 import { sanitizeHtml } from '../lib/sanitizeHtml';
 import { ensureHighlight } from '../composables/useMonacoLoader';
+import { injectRemoteImages, useRemoteImages } from '../composables/useRemoteImages';
+import RemoteImageDialog from '../modals/RemoteImageDialog.vue';
 
 const props = defineProps<{
   url: string;
   ext: string;
   t?: (key: string) => string;
+  /** The reader's language, for the question a held picture asks on its own. */
+  locale?: string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
 }>();
+
+/* Inside the preview, the preview's gate (it asks above everything); on its
+   own, a gate and a dialog of this viewer's. */
+const parentGate = injectRemoteImages();
+const remoteImages = parentGate ?? useRemoteImages(() => props.locale);
+const ownGate = !parentGate;
+const rootEl = ref<HTMLElement | null>(null);
+remoteImages.watchRoot(rootEl);
 
 interface Cell {
   cell_type: 'code' | 'markdown' | 'raw' | string;
@@ -133,7 +148,10 @@ async function load(): Promise<void> {
     cells.value.forEach((cell, idx) => {
       if (cell.cell_type === 'markdown') {
         try {
-          renderedMarkdown.value.set(idx, sanitizeHtml(md.render(joinSource(cell.source)), 'document'));
+          renderedMarkdown.value.set(
+            idx,
+            sanitizeHtml(md.render(joinSource(cell.source)), 'document', { remoteImages: remoteImages.policy() }),
+          );
         } catch {
           /* leave plain */
         }
@@ -178,7 +196,7 @@ function outputHtml(out: any): string | null {
   if (out.data['text/html']) {
     // An output from an arbitrary notebook: drawn only after the document
     // sanitizer has taken out everything that could run, fetch or submit.
-    return sanitizeHtml(joinSource(out.data['text/html']), 'document');
+    return sanitizeHtml(joinSource(out.data['text/html']), 'document', { remoteImages: remoteImages.policy() });
   }
   return null;
 }
@@ -210,7 +228,12 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
 </script>
 
 <template>
-  <div class="filex-viewer-ipynb">
+  <div
+    ref="rootEl"
+    class="filex-viewer-ipynb"
+    @click="remoteImages.onClick"
+    @keydown="remoteImages.onKeydown"
+  >
     <div class="filex-viewer-ipynb__pane">
       <div v-if="error" class="filex-viewer-fallback">
         <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
@@ -279,6 +302,7 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
         </div>
       </div>
     </div>
+    <RemoteImageDialog v-if="ownGate" :gate="remoteImages" :locale="locale" />
   </div>
 </template>
 

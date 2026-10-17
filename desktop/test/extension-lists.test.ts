@@ -65,6 +65,10 @@ test('the NSIS installer claims and releases the same extensions', () => {
 
 test('the Microsoft Store package declares the same extensions', () => {
   const xml = read('build/appx-extensions.xml');
-  const types = [...xml.matchAll(/<uap:FileType>\.(\w+)<\/uap:FileType>/g)].map((m) => m[1]);
+  // The office association; the one beside it is the app store's kinds,
+  // generated (test/app-kinds-build.test.ts).
+  const office = /<uap3:FileTypeAssociation Name="filex\.office"[\s\S]*?<\/uap3:FileTypeAssociation>/.exec(xml);
+  assert.ok(office, 'no filex.office association');
+  const types = [...office[0].matchAll(/<uap:FileType>\.(\w+)<\/uap:FileType>/g)].map((m) => m[1]);
   assert.deepEqual(sorted(types), EXPECTED);
 });

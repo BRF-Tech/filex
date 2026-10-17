@@ -15,8 +15,10 @@ import (
 )
 
 // v049Standard is the built-in User role as v0.49.0 saved it: the Standard
-// preset of the day, before files.encrypt existed.
-func v049Standard() perm.Set { return perm.Standard.Without(perm.FilesEncrypt) }
+// preset of the day, before files.encrypt and ai.assistant existed.
+func v049Standard() perm.Set {
+	return perm.Standard.Without(perm.FilesEncrypt).Without(perm.AIAssistant)
+}
 
 // v049UploadOnly is the Upload-only preset as v0.49.0 saved it: files.create
 // and account.edit, before files.encrypt existed.
@@ -24,12 +26,12 @@ func v049UploadOnly() perm.Set { return perm.Of(perm.FilesCreate, perm.AccountEd
 
 // v049Pin is what pinning a person to a preset wrote under v0.49.0: an
 // exception for every permission an exception can name, allowing what the
-// preset allows and denying the rest. files.encrypt is not among them — it did
-// not exist.
+// preset allows and denying the rest. files.encrypt and ai.assistant are not
+// among them — they did not exist.
 func v049Pin(allowed perm.Set) map[string]string {
 	pin := map[string]string{}
 	for _, d := range perm.All() {
-		if d.RoleOnly || d.Key == perm.FilesEncrypt {
+		if d.RoleOnly || d.Key == perm.FilesEncrypt || d.Key == perm.AIAssistant {
 			continue
 		}
 		effect := model.PermDeny
@@ -102,7 +104,8 @@ func TestUpgradeCatalogue_NothingSavedChangesNothing(t *testing.T) {
 
 	rep, err := perm.UpgradeCatalogue(ctx, store)
 	require.NoError(t, err)
-	require.Equal(t, []perm.Perm{perm.FilesEncrypt}, rep.Added, "v0.49.0's catalogue is the baseline when none is recorded")
+	// ai.assistant (0.57) is given to every saved list - there is none here.
+	require.Equal(t, []perm.Perm{perm.FilesEncrypt, perm.AIAssistant}, rep.Added, "v0.49.0's catalogue is the baseline when none is recorded")
 	require.Zero(t, rep.RolesChanged)
 	require.False(t, rep.DefaultsChanged)
 	require.Zero(t, rep.ExceptionsChanged)
@@ -132,11 +135,12 @@ func TestUpgradeCatalogue_SavedUserRoleWithCreateGainsEncrypt(t *testing.T) {
 
 	defaults, err := perm.LoadDefaults(ctx, store)
 	require.NoError(t, err)
-	require.Equal(t, saved.With(perm.FilesEncrypt), defaults, "files.encrypt added; the administrator's narrowing kept")
+	require.Equal(t, saved.With(perm.FilesEncrypt).With(perm.AIAssistant), defaults,
+		"files.encrypt (it allows files.create) and ai.assistant (every role) added; the administrator's narrowing kept")
 }
 
 // A User role that could not add files could not encrypt either, and still
-// cannot.
+// cannot. ai.assistant, which every role is given, is all it gains.
 func TestUpgradeCatalogue_SavedUserRoleWithoutCreateStaysWithout(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
@@ -145,11 +149,12 @@ func TestUpgradeCatalogue_SavedUserRoleWithoutCreateStaysWithout(t *testing.T) {
 
 	rep, err := perm.UpgradeCatalogue(ctx, store)
 	require.NoError(t, err)
-	require.False(t, rep.DefaultsChanged)
+	require.True(t, rep.DefaultsChanged, "ai.assistant")
 
 	defaults, err := perm.LoadDefaults(ctx, store)
 	require.NoError(t, err)
-	require.Equal(t, saved, defaults)
+	require.Equal(t, saved.With(perm.AIAssistant), defaults)
+	require.False(t, defaults.Has(perm.FilesEncrypt))
 }
 
 // Custom roles: the own list and the folder part each get files.encrypt where
@@ -185,18 +190,18 @@ func TestUpgradeCatalogue_CustomRolesFollowCreate(t *testing.T) {
 
 	rep, err := perm.UpgradeCatalogue(ctx, store)
 	require.NoError(t, err)
-	require.Equal(t, 3, rep.RolesChanged, "editors, the drop box (switched off, still saved) and the archive keepers")
+	require.Equal(t, 5, rep.RolesChanged, "every role is given ai.assistant; editors, the drop box (switched off, still saved) and the archive keepers files.encrypt too")
 	require.False(t, rep.DefaultsChanged)
 
 	e := roleByID(t, store, editors.ID)
-	require.Equal(t, v049Standard().Without(perm.FilesDelete).With(perm.FilesEncrypt), perm.RoleSet(e))
+	require.Equal(t, v049Standard().Without(perm.FilesDelete).With(perm.FilesEncrypt).With(perm.AIAssistant), perm.RoleSet(e))
 	require.Equal(t, map[string]string{"tr": "Düzenleyiciler"}, e.Names, "the rest of the role is written back as it was")
 	require.Equal(t, []model.PermRuleTarget{{Kind: model.PermTargetSSOGroup, Value: "editors"}}, e.Targets)
 
-	require.Equal(t, perm.Of(perm.FilesDownload, perm.AccountEdit), perm.RoleSet(roleByID(t, store, readers.ID)), "never held files.create")
+	require.Equal(t, perm.Of(perm.FilesDownload, perm.AccountEdit, perm.AIAssistant), perm.RoleSet(roleByID(t, store, readers.ID)), "never held files.create")
 
 	d := roleByID(t, store, dropBox.ID)
-	require.Equal(t, perm.Of(perm.FilesDownload), perm.RoleSet(d), "its list adds nothing; its folder part does")
+	require.Equal(t, perm.Of(perm.FilesDownload, perm.AIAssistant), perm.RoleSet(d), "its list adds ai.assistant only; its folder part adds files.encrypt")
 	require.Equal(t, map[string]string{"files.create": model.PermAllow, "files.encrypt": model.PermAllow}, d.Effects)
 	require.Equal(t, []string{"Drop"}, d.Conditions.Paths)
 
@@ -337,7 +342,7 @@ func TestUpgradeCatalogue_ExceptionsFollowCreate(t *testing.T) {
 	rep, err := perm.UpgradeCatalogue(ctx, store)
 	require.NoError(t, err)
 	require.Equal(t, 2, rep.ExceptionsChanged, "ada and dee")
-	require.Zero(t, rep.RolesChanged, "Readers never held files.create")
+	require.Equal(t, 1, rep.RolesChanged, "Readers: ai.assistant only, it never held files.create")
 
 	own := func(u *model.User) map[string]string {
 		t.Helper()
@@ -381,7 +386,7 @@ func TestUpgradeCatalogue_AnUploadOnlyListKeepsItsPreset(t *testing.T) {
 	rep, err := perm.UpgradeCatalogue(ctx, store)
 	require.NoError(t, err)
 	require.True(t, rep.DefaultsChanged, "the User role")
-	require.Equal(t, 1, rep.RolesChanged, "the drop box; Readers never held files.create")
+	require.Equal(t, 2, rep.RolesChanged, "the drop box; Readers is given ai.assistant only, it never held files.create")
 	require.Equal(t, 1, rep.ExceptionsChanged, "ada's pin")
 
 	defaults, err := perm.LoadDefaults(ctx, store)
@@ -477,4 +482,118 @@ func TestUpgradeCatalogue_BuiltinRolesWithinWhatTheyCanHold(t *testing.T) {
 	raw, err := store.GetSetting(ctx, model.SettingPermissionViewerDefaults)
 	require.NoError(t, err)
 	require.NotContains(t, raw, string(perm.FilesEncrypt), "never written where a viewer cannot hold it")
+}
+
+// ai.assistant (0.57) is new ground meant for everyone: an install that ran
+// 0.56 - its recorded catalogue lacks the key - gives it at the first start
+// to every saved list: the User role an administrator narrowed, the Viewer
+// role, and every custom role whatever else it allows, switched off or not.
+// A Guest or Upload-only list is still that preset afterwards. A person's own
+// exceptions are left alone: without one for the key they follow their role.
+func TestUpgradeCatalogue_TheAssistantIsGivenToEveryRole(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	recordCatalogueWithout(t, store, perm.AIAssistant)
+	user := perm.Standard.Without(perm.AIAssistant).Without(perm.AccessSFTP)
+	require.NoError(t, perm.SaveDefaults(ctx, store, user))
+	viewer := perm.ReadOnly.Without(perm.AIAssistant)
+	require.NoError(t, perm.SaveRoleBase(ctx, store, model.RoleViewer, viewer))
+	guests := mustRole(t, store, &model.PermissionRule{Name: "Guests", Enabled: true, Permissions: []string{"files.download"}})
+	dropBox := mustRole(t, store, &model.PermissionRule{
+		Name: "Drop box", Enabled: false, Permissions: []string{"files.create", "files.encrypt", "account.edit"},
+		Effects:    map[string]string{"files.download": model.PermAllow},
+		Conditions: model.PermRuleConditions{Paths: []string{"Drop"}},
+	})
+	locked := mustRole(t, store, &model.PermissionRule{Name: "Locked", Enabled: true, Permissions: []string{}})
+	ada, err := store.CreateUser(ctx, "ada@example.test", "x", model.RoleUser, "en", "UTC")
+	require.NoError(t, err)
+	require.NoError(t, store.SetUserCustomRole(ctx, ada.ID, guests.ID))
+	own := map[string]string{"files.download": model.PermDeny}
+	require.NoError(t, store.SetUserPermissionOverrides(ctx, ada.ID, own, nil))
+
+	rep, err := perm.UpgradeCatalogue(ctx, store)
+	require.NoError(t, err)
+	require.Equal(t, []perm.Perm{perm.AIAssistant}, rep.Added)
+	require.True(t, rep.DefaultsChanged)
+	require.Equal(t, 3, rep.RolesChanged, "every custom role, switched off or not, whatever it allows")
+	require.Zero(t, rep.ExceptionsChanged, "a person's exceptions follow their role")
+
+	defaults, err := perm.LoadDefaults(ctx, store)
+	require.NoError(t, err)
+	require.Equal(t, user.With(perm.AIAssistant), defaults, "the administrator's narrowing kept")
+	v, err := perm.LoadRoleBase(ctx, store, model.RoleViewer)
+	require.NoError(t, err)
+	require.Equal(t, viewer.With(perm.AIAssistant), v, "a viewer may hold it")
+
+	g := perm.RoleSet(roleByID(t, store, guests.ID))
+	require.Equal(t, perm.Of(perm.FilesDownload, perm.AIAssistant), g)
+	require.Equal(t, perm.PresetGuest, perm.MatchPreset(g), "a Guest list is still Guest")
+	d := roleByID(t, store, dropBox.ID)
+	require.Equal(t, perm.PresetUploadOnly, perm.MatchPreset(perm.RoleSet(d)), "an Upload-only list is still Upload-only")
+	require.Equal(t, map[string]string{"files.download": model.PermAllow}, d.Effects,
+		"the folder part names what differs there, and ai.assistant is not path-checked")
+	require.Equal(t, perm.Of(perm.AIAssistant), perm.RoleSet(roleByID(t, store, locked.ID)))
+
+	got, err := store.GetUserPermissionOverrides(ctx, ada.ID)
+	require.NoError(t, err)
+	require.Equal(t, own, got)
+	res, err := perm.NewLoader(store).Load(ctx, ada)
+	require.NoError(t, err)
+	require.True(t, res.Can(perm.AIAssistant), "through her role")
+	require.False(t, res.Can(perm.FilesDownload), "her own exception still decides the rest")
+}
+
+// Once: an administrator who takes ai.assistant away from a role after the
+// upgrade has decided, and the next start does not give it back.
+func TestUpgradeCatalogue_TheAssistantTakenAwayStaysAway(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	recordCatalogueWithout(t, store, perm.AIAssistant)
+	require.NoError(t, perm.SaveDefaults(ctx, store, perm.Standard.Without(perm.AIAssistant)))
+	role := mustRole(t, store, &model.PermissionRule{Name: "Readers", Enabled: true, Permissions: []string{"files.download"}})
+
+	first, err := perm.UpgradeCatalogue(ctx, store)
+	require.NoError(t, err)
+	require.True(t, first.DefaultsChanged)
+	require.Equal(t, 1, first.RolesChanged)
+
+	r := roleByID(t, store, role.ID)
+	r.Permissions = perm.RoleSet(r).Without(perm.AIAssistant).Strings()
+	require.NoError(t, store.UpdatePermissionRule(ctx, r))
+	require.NoError(t, perm.SaveDefaults(ctx, store, perm.Standard.Without(perm.AIAssistant)))
+
+	second, err := perm.UpgradeCatalogue(ctx, store)
+	require.NoError(t, err)
+	require.Equal(t, perm.UpgradeReport{}, second)
+	require.False(t, perm.RoleSet(roleByID(t, store, role.ID)).Has(perm.AIAssistant), "taken away stays taken away")
+	defaults, err := perm.LoadDefaults(ctx, store)
+	require.NoError(t, err)
+	require.False(t, defaults.Has(perm.AIAssistant))
+	require.Contains(t, recordedCatalogue(t, store), string(perm.AIAssistant))
+}
+
+// The grant keeps to what each list may hold. share.links stands in for a
+// key given to everyone that a viewer can never hold: the User role and a
+// custom role are given it, the Viewer role is not written to.
+func TestUpgradeCatalogue_AGrantStaysWithinWhatARoleCanHold(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	recordCatalogueWithout(t, store, perm.ShareLinks)
+	require.NoError(t, perm.SaveDefaults(ctx, store, perm.Of(perm.FilesDownload)))
+	require.NoError(t, perm.SaveRoleBase(ctx, store, model.RoleViewer, perm.Of(perm.FilesDownload)))
+	role := mustRole(t, store, &model.PermissionRule{Name: "Readers", Enabled: true, Permissions: []string{"files.download"}})
+
+	rep, err := perm.UpgradeCatalogueGranting(ctx, store, perm.Of(perm.ShareLinks))
+	require.NoError(t, err)
+	require.Equal(t, []perm.Perm{perm.ShareLinks}, rep.Added)
+	require.True(t, rep.DefaultsChanged)
+	require.Equal(t, 1, rep.RolesChanged)
+
+	user, err := perm.LoadDefaults(ctx, store)
+	require.NoError(t, err)
+	require.Equal(t, perm.Of(perm.FilesDownload, perm.ShareLinks), user)
+	require.Equal(t, perm.Of(perm.FilesDownload, perm.ShareLinks), perm.RoleSet(roleByID(t, store, role.ID)))
+	raw, err := store.GetSetting(ctx, model.SettingPermissionViewerDefaults)
+	require.NoError(t, err)
+	require.NotContains(t, raw, string(perm.ShareLinks), "never written where a viewer cannot hold it")
 }

@@ -28,7 +28,7 @@ func TestWarm_SkipsAFolderOverTheCeilingButOnDemandStillBuildsIt(t *testing.T) {
 		"/big/b.bin": make([]byte, 8), // 16 bytes in total, over the 10-byte ceiling
 	}}
 
-	did, err := c.Warm(context.Background(), drv, "/big", 42)
+	did, err := c.Warm(context.Background(), drv, "/big", 42, nil)
 	if !errors.Is(err, ErrTooLargeToWarm) {
 		t.Fatalf("Warm over the ceiling: did=%v err=%v, want ErrTooLargeToWarm", did, err)
 	}
@@ -41,7 +41,7 @@ func TestWarm_SkipsAFolderOverTheCeilingButOnDemandStillBuildsIt(t *testing.T) {
 
 	// On demand — the path the download handler takes — the same folder
 	// builds: the ceiling refuses nothing a visitor asked for.
-	cachePath, files, err := c.Plan(context.Background(), drv, "/big", 42)
+	cachePath, files, err := c.Plan(context.Background(), drv, "/big", 42, nil)
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestWarm_SkipsAFolderOverTheCeilingButOnDemandStillBuildsIt(t *testing.T) {
 
 	// And a folder under the ceiling is still warmed.
 	small := &fakeDriver{root: "/small", files: map[string][]byte{"/small/a.bin": make([]byte, 4)}}
-	did, err = c.Warm(context.Background(), small, "/small", 43)
+	did, err = c.Warm(context.Background(), small, "/small", 43, nil)
 	if err != nil || !did {
 		t.Fatalf("Warm under the ceiling: did=%v err=%v, want a build", did, err)
 	}
@@ -65,7 +65,7 @@ func TestWarm_ZeroCeilingMeansUnlimited(t *testing.T) {
 	c := New(t.TempDir())
 	c.WarmMaxBytes = 0
 	drv := &fakeDriver{root: "/big", files: map[string][]byte{"/big/a.bin": make([]byte, 4096)}}
-	did, err := c.Warm(context.Background(), drv, "/big", 1)
+	did, err := c.Warm(context.Background(), drv, "/big", 1, nil)
 	if err != nil || !did {
 		t.Fatalf("unlimited Warm: did=%v err=%v", did, err)
 	}

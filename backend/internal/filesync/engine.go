@@ -13,7 +13,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	"github.com/brf-tech/filex/backend/internal/localname"
 	"github.com/brf-tech/filex/backend/internal/regfile"
 )
 
@@ -47,7 +49,7 @@ var ErrRemoteChanged = errors.New("changed on the server while it was being sync
 
 // ErrLocalChanged means a file on this computer changed after the run looked
 // at it, so the action planned for it (replace it with the server's copy, or
-// move it to the trash) was NOT carried out. Same consequence as
+// delete it) was NOT carried out. Same consequence as
 // ErrRemoteChanged, from the other side.
 var ErrLocalChanged = errors.New("changed on this computer while it was being synced")
 
@@ -61,7 +63,7 @@ type Pair struct {
 	Account string `json:"account,omitempty"`
 	Paused  bool   `json:"paused,omitempty"`
 	// File marks a single-file pair: Local is a file path and Remote names a
-	// file on the server. Same planner, same rules, same trash — the
+	// file on the server. Same planner, same rules — the
 	// snapshots just carry one entry.
 	File bool `json:"file,omitempty"`
 	// HoldNew says the pair holds this machine's unknown items for a decision
@@ -101,6 +103,10 @@ type Result struct {
 	// next pass at once instead of showing an error.
 	Raced    []string
 	FirstRun bool
+	// Full: the pass looked at the whole pair (Run), not some of its folders
+	// (RunDirs). What a full pass reports - Names above all - is the whole
+	// story; a targeted pass reports only the folders it looked at.
+	Full     bool
 	Duration time.Duration
 
 	// Identical counts conflicts that turned out to hold the same bytes on
@@ -112,6 +118,11 @@ type Result struct {
 	// an action that failed, so a caller can retry just those (RunDirs)
 	// instead of walking the whole pair again.
 	Retry []string
+	// Names lists the items whose names this pass could not use as they are
+	// (localnames.go): a server item synced here under another name, one not
+	// downloaded because that name is taken here, an item here the server
+	// would refuse. Reported on every pass for as long as they are there.
+	Names []NameReport
 	// LocalFingerprint digests the local side as a FULL pass left it: the
 	// snapshot the plan was made from, with what the pass itself wrote on
 	// this machine folded in. ⚠ Never a later walk — an edit made while the
@@ -126,9 +137,6 @@ type Engine struct {
 	Pair  Pair
 	API   RemoteFS
 	Store *Store
-	// TrashDays is how long locally-deleted files are kept before being
-	// dropped. Zero means the default (TrashRetentionDays).
-	TrashDays int
 	// Transfers caps how many uploads/downloads run at once. 0 means
 	// DefaultTransfers; 1 restores the fully serial engine.
 	Transfers int
@@ -160,6 +168,10 @@ type Engine struct {
 	StopOn func(error) bool
 	// Now is injectable for tests.
 	Now func() time.Time
+	// GOOS is the operating system whose names the local folder follows
+	// ("windows", "darwin", "linux"; empty: the one this runs on). A test sets
+	// it to hold the Windows and macOS rules on a Linux machine.
+	GOOS string
 	// Lock is the pair's lock (Store.LockPair) when the caller holds it
 	// across passes — `filex sync run --watch` does, for as long as it syncs
 	// the pair. nil: each pass takes the lock itself and gives it back when
@@ -174,6 +186,9 @@ type Engine struct {
 	beforeReplace func(dest string)
 
 	halt *passHalt
+	// names pairs the server's names with this computer's for the pass
+	// (localnames.go); read-only while actions run.
+	names *nameMap
 	// here is the count of the last `inventory` report, carried into the
 	// server listing's reports (ProgressEvent.Here) so a reader of the
 	// figures needs no memory of its own.
@@ -281,6 +296,7 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	defer done()
 	started := e.now()
 	var res Result
+	res.Full = true
 
 	base, hadBaseline, err := e.Store.LoadBaseline(e.Pair.ID)
 	if err != nil {
@@ -307,8 +323,18 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 		return res, err
 	}
 
+	// Before anything is planned: the server's items under the names they
+	// have on THIS computer (localnames.go). From here on every path is a
+	// path here; the server's is e.remotePath.
+	e.loadNames()
+	var named []NameReport
+	local, remote, base, named = e.mapNames(local, remote, base, true)
+	res.Names = named
+
 	led := e.newLedger(base)
 	actions := Plan(local, remote, base, Options{FirstRun: res.FirstRun, Now: e.now()})
+	actions, named = e.serverRefused(actions)
+	res.Names = append(res.Names, named...)
 	actions, holding, err := e.holdPass(actions, base, local, remote, res.FirstRun, true, &res)
 	if err != nil {
 		return res, err
@@ -326,7 +352,7 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	return res, nil
 }
 
-// finish writes the ledger and prunes the trash — the shared tail of every
+// finish writes the ledger and sweeps an older version's local trash — the shared tail of every
 // kind of pass.
 func (e *Engine) finish(ctx context.Context, led *ledger, res *Result) error {
 	// If the run was cancelled, the uploads still waiting for their server
@@ -346,10 +372,13 @@ func (e *Engine) finish(ctx context.Context, led *ledger, res *Result) error {
 	if err := led.save(); err != nil {
 		return err
 	}
-	if n, err := e.Store.PruneTrash(e.Pair.ID, e.trashDays(), e.now()); err != nil {
-		res.Errors = append(res.Errors, "prune trash: "+err.Error())
+	if err := e.saveNames(); err != nil {
+		res.Errors = append(res.Errors, "save name pairings: "+err.Error())
+	}
+	if n, err := e.Store.SweepLegacyTrash(e.Pair.ID, LegacyTrashDays, e.now()); err != nil {
+		res.Errors = append(res.Errors, "sweep the old local trash: "+err.Error())
 	} else if n > 0 {
-		e.logf("trash: removed %d expired item(s)", n)
+		e.logf("old local trash: removed %d expired run(s)", n)
 	}
 	res.Retry = cleanRetry(res.Retry)
 	return nil
@@ -545,17 +574,29 @@ func parentRemote(remote string) string {
 // runFile is Run for a single-file pair. The planner and apply() are reused
 // unchanged: both snapshots carry at most one entry, keyed by the file's
 // basename under its PARENT folders — so upload, download, conflict copies
-// and the local trash all work exactly as they do for a folder of one.
+// and deletion all work exactly as they do for a folder of one.
 func (e *Engine) runFile(ctx context.Context) (Result, error) {
 	ctx, done := e.beginPass(ctx)
 	defer done()
 	started := e.now()
 	var res Result
+	res.Full = true
 
 	name := filepath.Base(e.Pair.Local)
 	parent := *e
 	parent.Pair.Local = filepath.Dir(e.Pair.Local)
 	parent.Pair.Remote = parentRemote(e.Pair.Remote)
+	// The file here may be called otherwise than on the server: the app keeps
+	// a server file it cannot name here under a safe name (localname.Alias).
+	// The pair says both, so the file is looked up by its SERVER name and
+	// written to it - never uploaded as a second file under the local name.
+	remoteName := path.Base(strings.TrimPrefix(e.Pair.Remote, parent.Pair.Remote))
+	parent.names = newNameMap(nil)
+	if remoteName != name && remoteName != "" && remoteName != "." && remoteName != "/" {
+		parent.names = newNameMap(map[string]string{remoteName: name})
+	} else {
+		remoteName = name
+	}
 
 	statLocal := func() (Snapshot, error) {
 		out := Snapshot{}
@@ -587,7 +628,7 @@ func (e *Engine) runFile(ctx context.Context) (Result, error) {
 			}
 		}
 		for _, f := range listing.Files {
-			if f.Basename != name {
+			if f.Basename != remoteName {
 				continue
 			}
 			if f.IsDir {
@@ -709,13 +750,6 @@ func (e *Engine) transferWorkers() int {
 	return DefaultTransfers
 }
 
-func (e *Engine) trashDays() int {
-	if e.TrashDays > 0 {
-		return e.TrashDays
-	}
-	return TrashRetentionDays
-}
-
 // expectFor is the overwrite precondition an upload carries: the server copy
 // the plan saw, or "none" when the plan saw no server copy at all.
 func expectFor(a Action) string {
@@ -755,7 +789,7 @@ func (e *Engine) ensureRemoteParent(ctx context.Context, pc *passCtx, mu *sync.M
 		return
 	}
 	// The parent usually exists by now; only a real upload failure matters.
-	_ = e.API.Mkdir(ctx, joinRemote(e.Pair.Remote, dir))
+	_ = e.API.Mkdir(ctx, e.remotePath(dir))
 	mu.Lock()
 	pc.madeRemote[dir] = true
 	mu.Unlock()
@@ -766,7 +800,7 @@ func (e *Engine) apply(ctx context.Context, pc *passCtx, mu *sync.Mutex, a Actio
 	if err != nil {
 		return outcome{}, err
 	}
-	rp := joinRemote(e.Pair.Remote, a.Rel)
+	rp := e.remotePath(a.Rel)
 	dirRow := outcome{row: &BaselineEntry{Local: "dir", Remote: "dir", IsDir: true}}
 
 	switch a.Kind {
@@ -804,7 +838,11 @@ func (e *Engine) apply(ctx context.Context, pc *passCtx, mu *sync.Mutex, a Actio
 		if err := stillAsPlanned(lp, a.LocalSig); err != nil {
 			return outcome{}, err
 		}
-		if err := e.Store.TrashLocal(e.Pair.ID, e.Pair.Local, a.Rel, e.now()); err != nil {
+		// Deleted, not moved into a local trash (task #259, LegacyTrashDays):
+		// it was deleted on the server, so the server's trash holds it, and a
+		// second copy moved into a hidden folder of the profile is what an
+		// antivirus took for ransomware.
+		if err := RemoveLocal(lp); err != nil {
 			return outcome{}, err
 		}
 		res.DeletedLocal++
@@ -889,7 +927,11 @@ func (e *Engine) resolveConflict(ctx context.Context, pc *passCtx, a Action, lp,
 
 	e.logf("!! %s  (%s) - keeping both", a.Rel, a.Reason)
 	relDir := parentDir(a.Rel)
-	sideName := freeSideName(filepath.Dir(lp), relDir, a.ConflictName, pc.remote)
+	sideName, err := freeSideName(filepath.Dir(lp), relDir, a.ConflictName, pc.remote)
+	if err != nil {
+		os.Remove(tmp)
+		return outcome{}, err
+	}
 	sidePath := filepath.Join(filepath.Dir(lp), sideName)
 	if err := e.install(tmp, sidePath, a.RemoteMod); err != nil {
 		return outcome{}, err
@@ -913,7 +955,7 @@ func (e *Engine) resolveConflict(ctx context.Context, pc *passCtx, a Action, lp,
 	if !e.Pair.File {
 		// Create-only ("none"): two machines resolving the same conflict in the
 		// same minute must not write their copies over each other's.
-		got, err := e.API.Upload(ctx, sidePath, joinRemote(e.Pair.Remote, sideRel), "none")
+		got, err := e.API.Upload(ctx, sidePath, e.remotePath(sideRel), "none")
 		if err != nil {
 			// Not fatal: the copy is safe on this disk and goes up next pass
 			// as a new file. Failing here would re-conflict the original.
@@ -943,16 +985,36 @@ func (e *Engine) resolveConflict(ctx context.Context, pc *passCtx, a Action, lp,
 // MINUTE, and two conflicts on one file inside a minute are ordinary once
 // changes travel instantly (an autosaving editor on each side): the second
 // server version used to be written over the first.
-func freeSideName(localDir, relDir, name string, remote Snapshot) string {
+//
+// ⚠⚠ A candidate is shortened to fit one name's limit (fitName), and only
+// "not there" makes it free: any other answer from the disk is an error. The
+// loop used to read EVERY Lstat error as "taken", and a long name's copy -
+// the 255-byte hostile name plus the 31 characters of "(server copy …)" -
+// is ENAMETOOLONG on every candidate: the counter grew for ever, with the
+// pair's lock held and the pass never returning (task #238).
+func freeSideName(localDir, relDir, name string, remote Snapshot) (string, error) {
 	ext := path.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
-	for i := 1; ; i++ {
-		cand := name
+	// The copy's marker ("(server copy …)", conflictName) belongs to the tail
+	// fitName keeps, not to the stem it cuts: cut with the stem, a long
+	// name's copy came down as "<name> (2).txt", a second file nobody can
+	// tell for a conflict copy.
+	marker := ""
+	if loc := conflictMarkers.FindStringIndex(stem); loc != nil {
+		stem, marker = stem[:loc[0]], stem[loc[0]:]
+	}
+	for i := 1; i <= maxSideNames; i++ {
+		tail := marker + ext
 		if i > 1 {
-			cand = fmt.Sprintf("%s (%d)%s", stem, i, ext)
+			tail = fmt.Sprintf("%s (%d)%s", marker, i, ext)
 		}
-		if _, err := os.Lstat(filepath.Join(localDir, cand)); !errors.Is(err, os.ErrNotExist) {
+		cand := fitName(stem, tail)
+		_, err := os.Lstat(filepath.Join(localDir, cand))
+		if err == nil {
 			continue
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("no name for the server's copy of %s: %w", name, err)
 		}
 		rel := cand
 		if relDir != "" {
@@ -961,8 +1023,26 @@ func freeSideName(localDir, relDir, name string, remote Snapshot) string {
 		if _, taken := remote[rel]; taken {
 			continue
 		}
-		return cand
+		return cand, nil
 	}
+	return "", fmt.Errorf("no free name for the server's copy of %s after %d tries", name, maxSideNames)
+}
+
+// maxSideNames bounds freeSideName's counter: a folder with ten thousand
+// copies of one file is a loop, not a folder.
+const maxSideNames = 10000
+
+// fitName is stem+tail, the stem shortened (whole characters off its end)
+// until the name fits the 255 bytes one name may have on ext4 and APFS -
+// within NTFS's 255 UTF-16 units too, which a UTF-8 byte count never
+// undercounts. The tail (the copy's marker and the extension) is kept: it is
+// what says what the file is.
+func fitName(stem, tail string) string {
+	for len(stem)+len(tail) > localname.MaxLen && stem != "" {
+		_, size := utf8.DecodeLastRuneInString(stem)
+		stem = stem[:len(stem)-size]
+	}
+	return stem + tail
 }
 
 // sameFileContent reports whether two files hold exactly the same bytes.
@@ -1031,9 +1111,9 @@ func localSignature(p string) (string, error) {
 
 // stillAsPlanned checks that the local path is what the plan saw (want is the
 // plan-time Action.LocalSig). A folder additionally has to hold nothing sync
-// would track: its planned children were trashed before it (deepest first),
+// would track: its planned children were deleted before it (deepest first),
 // so anything still in it arrived after the plan — a file saved into it a
-// moment ago — and trashing the folder would take that file with it.
+// moment ago — and deleting the folder would take that file with it.
 func stillAsPlanned(p, want string) error {
 	got, err := localSignature(p)
 	if err != nil {

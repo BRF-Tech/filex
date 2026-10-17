@@ -35,6 +35,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
@@ -81,6 +82,16 @@ type AppPlugins struct {
 	// handlers/coedit.go): a save made in a session records what it holds.
 	// Nil: editing together is off.
 	CoEditRelay *coedit.Relay
+	// Body serves a file's bytes the way the preview does (the staged copy
+	// while an upload is still transferring): the .csv a save is written
+	// the way of, and the head its dialect is read from (app_ui_csv.go).
+	// Nil: the driver's bytes.
+	Body *filebody.Resolver
+	// EditorLang is the language the administrator fixed for document
+	// editors (#214; onlyoffice.Service.FixedEditorLang), "" while each
+	// person's own decides: the list hands it to the apps' interfaces
+	// (markEditorLang). Nil: never fixed.
+	EditorLang func(ctx context.Context) string
 }
 
 // NewAppPlugins constructs the handler and wires it as the registry's sink.
@@ -160,7 +171,32 @@ func (h *AppPlugins) Actions(w http.ResponseWriter, r *http.Request) {
 			ans.OpenRules = rules
 		}
 	}
+	h.markEditorLang(r.Context(), ans)
 	writeJSON(w, http.StatusOK, ans)
+}
+
+// markEditorLang puts the document editors' fixed language (#214) on every
+// interface the list offers (UIRef.EditorLang): an app's editor opens in
+// it as the Document Server's does. Nothing when each person's own language
+// decides.
+func (h *AppPlugins) markEditorLang(ctx context.Context, ans *wasmplugin.ActionsAnswer) {
+	if h.EditorLang == nil {
+		return
+	}
+	lang := h.EditorLang(ctx)
+	if lang == "" {
+		return
+	}
+	for i := range ans.Actions {
+		if ui := ans.Actions[i].UI; ui != nil {
+			ui.EditorLang = lang
+		}
+	}
+	for i := range ans.Views {
+		if ui := ans.Views[i].UI; ui != nil {
+			ui.EditorLang = lang
+		}
+	}
 }
 
 // openAllowed refuses an app's interface on a file of a kind the
@@ -509,6 +545,16 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 			writeErrorSaid(w, r, http.StatusForbidden, "permission_denied", "app_input_denied", apierr.Params{"name": rel})
 			return nil, false
 		}
+		// A result that lands as a NEW file (beside the input, or in the
+		// folder the person chose) carries what the input holds: an input
+		// the person may not download yields no file where they could
+		// (downloadLift, the rule copies and moves ask). Judged at the
+		// folder, since the result's name is the app's to choose. A new
+		// version of the input stays at its path.
+		if outStorage, outDir, ok := resultFolder(mode, dest, storageID, rel); ok &&
+			refuseDownloadLift(w, r, h.ACL, h.Store, nil, storageID, rel, outStorage, outDir) {
+			return nil, false
+		}
 		if refuseEncryptedAtDoor(w, r, encryptedAtDoor(r.Context(), h.Store, storageID, rel), rel, false) {
 			return nil, false
 		}
@@ -528,6 +574,20 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 		return nil, false
 	}
 	return c, true
+}
+
+// resultFolder is where a job's result lands as a new file, for input rel on
+// storageID: the input's own folder for a sibling, the chosen folder for
+// `folder`. ok is false for every mode that writes no new file (a version
+// of the input, or no output at all).
+func resultFolder(mode string, dest *outputFolder, storageID int64, rel string) (int64, string, bool) {
+	switch {
+	case mode == "sibling":
+		return storageID, aiParent(rel), true
+	case mode == "folder" && dest != nil && dest.storage != nil:
+		return dest.storage.ID, dest.rel, true
+	}
+	return 0, "", false
 }
 
 // appItemOf is one input as an app's `applies` rule sees it: its kind, mime
@@ -1078,12 +1138,16 @@ func (h *AppPlugins) CommitVersion(ctx context.Context, storageID int64, rel str
 	// document of a type the app edits lives in its owner's drafts area until
 	// its first save, and a new version of it is that person's own save
 	// (syspath.OwnDraft) — for the person who queued the job, nobody else.
+	// And the desktop's "open with filex" working copy (filex 0.57: its
+	// office documents open in the office editor app when no Document
+	// Server is set): `.filex-open/<session>-<name>` takes an editor's save
+	// as it takes the Document Server's (syspath.SaveVerb).
 	var person int64
 	if actor != nil {
 		person = *actor
 	}
 	if err := writegate.Check(h.ACL.Locks(ctx, storageID), writegate.AppFrom(ctx),
-		writegate.Writes(rel).As(syspath.OwnDraft).By(person)); err != nil {
+		writegate.Writes(rel).As(syspath.SaveVerb(rel)).By(person)); err != nil {
 		return err
 	}
 	if err := storage.EnsureFileTarget(ctx, drv, rel); err != nil {

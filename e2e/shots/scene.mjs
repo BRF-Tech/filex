@@ -697,9 +697,10 @@ export async function shootWhole(page, dialog, set, file, { restore = { width: 1
  * scroll inside their own frame, so the frame is what must fit.
  *
  * `scrollers` are selectors of rows that scroll sideways ON THEMSELVES by
- * design (the explorer's filter row at 390 px, `.fe-filterbar`): the row must
- * fit, what is inside it may run past the window and pass under its pinned
- * end (the sticky "Listing actions"). An element nobody can see (opacity 0 or
+ * design (the explorer's filter row at 390 px, `.fe-filterbar__track`): the
+ * row must fit, what is inside it may run past the window. (The "Listing
+ * actions" ⋮ is after the track, outside it, since task #264, and is measured
+ * like any other control.) An element nobody can see (opacity 0 or
  * visibility hidden - the explorer's off-screen upload input) is neither a
  * piece of content that sticks out nor a control on another.
  */

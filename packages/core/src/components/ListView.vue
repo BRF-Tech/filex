@@ -631,9 +631,12 @@ const columns = computed<DataColumn<FileNode>[]>(() => [
  * identical rows.
  */
 function nameTitle(n: FileNode): string {
-  if (!props.showParentPath || visibleCols.value.includes('location')) return n.basename;
+  // The name as the row draws it (nodeDisplayName, task #238): a hover must
+  // not show the bidi-controlled name the cell itself refuses to draw.
+  const name = nodeDisplayName(n);
+  if (!props.showParentPath || visibleCols.value.includes('location')) return name;
   const loc = locationLabel(n);
-  return loc ? `${n.basename} · ${loc}` : n.basename;
+  return loc ? `${name} · ${loc}` : name;
 }
 
 function rowAttrs(n: FileNode): Record<string, unknown> {

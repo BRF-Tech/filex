@@ -12,7 +12,10 @@
 // its log and the commits since it last passed, what the previous night had
 // red that passes now, the nightly build, and - when the night did not run -
 // why. A run still going is waited for, at most NIGHTLY_REPORT_WAIT_MIN
-// minutes; then it is reported as it stands.
+// minutes; then it is reported as it stands. Before it is composed, GitHub's
+// desktop packages of the last source are followed up and, built, put on
+// filex.sh/nightly (nightly.mjs followDesktop, #266); --dry-run makes the
+// page and publishes nothing.
 //
 // It posts to CHAIN_NOTIFY_URL (JSON: group, source, severity, title,
 // message) with the Bearer key in CHAIN_NOTIFY_KEY_FILE, which it never logs,
@@ -27,7 +30,7 @@ import { fileURLToPath } from 'node:url';
 
 import { mergeEnv } from './env.mjs';
 import { composeReport, nightlySettings } from './nightly-lib.mjs';
-import { alive, readHistory, readJson } from './nightly.mjs';
+import { alive, followDesktop, readHistory, readJson } from './nightly.mjs';
 
 const USAGE = `usage: node scripts/chain/report.mjs --env FILE [--dry-run] [--wait-min N]
 
@@ -112,7 +115,14 @@ async function main() {
     await sleep(60_000);
     tonight = readJson(tonightFile);
   }
+  let follow = null;
+  try {
+    follow = await followDesktop(cfg, { dry: !!args.dryRun });
+  } catch (e) {
+    follow = { state: 'unknown', why: `the follow-up of GitHub's desktop packages failed: ${e.message}` };
+  }
   const report = composeReport({
+    follow,
     tonight,
     result: tonight?.result ? readJson(tonight.result) : null,
     history: readHistory(cfg.state),

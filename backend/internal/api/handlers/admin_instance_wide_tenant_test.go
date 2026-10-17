@@ -37,6 +37,12 @@ var instanceWideRoutes = []struct {
 	// version retention — one global row each.
 	{"protection read", http.MethodGet, "/api/admin/protection", nil},
 	{"protection disable antivirus", http.MethodPatch, "/api/admin/protection", map[string]any{"av_enabled": false}},
+	// The settings that lived in the environment until 0.57 (task #258):
+	// the default language, the notifications switch, the apps' limits - one
+	// global row each.
+	{"instance settings read", http.MethodGet, "/api/admin/instance-settings", nil},
+	{"instance settings switch notifications off", http.MethodPatch, "/api/admin/instance-settings",
+		map[string]any{"notify.enabled": false}},
 	// What a folder opens as for every account with no view of its own — one
 	// global row, so a customer's admin must not choose it for everybody else
 	// (the boundary ui.default_theme has; settings.go allowSettingWrite).
@@ -89,7 +95,17 @@ var instanceWideRoutes = []struct {
 	{"default apps rewrite", http.MethodPut, "/api/admin/file-types/png",
 		map[string]any{"thumbnail": map[string]any{"order": []string{"builtin"}, "off": []string{}}}},
 	{"default apps reset", http.MethodDelete, "/api/admin/file-types/png", nil},
+	// And which back end runs the office engine (0.57).
+	{"office engine order", http.MethodPut, "/api/admin/file-types/engines/office", map[string]any{"order": []string{}, "off": []string{}}},
+	{"office engine reset", http.MethodDelete, "/api/admin/file-types/engines/office", nil},
 	{"app thumbnail limits", http.MethodPut, "/api/admin/app-plugins/1/thumbnails", map[string]any{"timeout_s": 60}},
+	// The files an administrator adds to an app (0.57): the platform's, like
+	// the app they are served to.
+	{"app extras read", http.MethodGet, "/api/admin/app-plugins/1/extras", nil},
+	{"app extra add", http.MethodPut, "/api/admin/app-plugins/1/extras/dictionaries/pl_PL/pl_PL.dic.txt", map[string]any{}},
+	{"app extra remove", http.MethodDelete, "/api/admin/app-plugins/1/extras/dictionaries/pl_PL/pl_PL.dic.txt", nil},
+	{"app extras catalog", http.MethodGet, "/api/admin/app-plugins/1/extras-catalog/dictionaries", nil},
+	{"app extra from the catalog", http.MethodPost, "/api/admin/app-plugins/1/extras-catalog/dictionaries/pl_PL", map[string]any{}},
 }
 
 // TestInstanceWideAdmin_TenantAdminIsRefused is the red proof: on the pre-fix

@@ -53,6 +53,10 @@ services:
       # A proxy on another machine, or over 100.64.0.0/10 (Tailscale,
       # Cloudflare WARP), is listed by its address. The Sign-in security page
       # names a peer that sends forwarded addresses without being trusted.
+      # ⚠ A SEED since 0.57: the first start writes this list into the setting,
+      # and from then on it is kept on Admin -> Settings -> Sign-in security; a
+      # changed value here is not read again (a start says so in its log) until
+      # `filex settings reseed login.trusted_proxies` writes it over the saved one.
       # docs/CONFIGURATION.md -> "Trusted proxies".
       # FILEX_TRUSTED_PROXIES: "auto, 172.18.0.1"
     volumes:

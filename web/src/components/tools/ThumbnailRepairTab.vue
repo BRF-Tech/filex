@@ -9,14 +9,16 @@
  * and the page follows it until it ends, then says what it did. The walk is
  * the one `filex thumb backfill` takes.
  *
- * Below it: the SVG limits (ThumbLimitsCard, the same card Settings shows),
- * who drew the thumbnails (0.50: filex's own drawer, or an app, counted) and
+ * Below it: a link to the thumbnail settings, whose one home is Admin →
+ * Settings → General (task #258: the card used to be drawn here too), who drew
+ * the thumbnails (0.50: filex's own drawer, or an app, counted) and
  * the files that have no thumbnail - or got one only after an earlier
  * handler failed - each with why and the handlers asked, in order. A row's
  * "Try again" repairs that one file.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { RouterLink } from 'vue-router';
 import { Play, RefreshCcw } from 'lucide-vue-next';
 import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
 
@@ -36,11 +38,15 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Badge from '@/components/ui/Badge.vue';
-import ThumbLimitsCard from './ThumbLimitsCard.vue';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 
 const { t, locale } = useI18n();
 const toast = useToastStore();
 const storages = useStoragesStore();
+const caps = useCapabilitiesStore();
+/* The settings are the instance's: the link is for whoever may open the
+   General page (a tenant's administrator may not - lib/adminNav). */
+const settingsReachable = computed(() => caps.data?.caller_platform !== false);
 
 /* ── the ask ─────────────────────────────────────────────────────────── */
 
@@ -416,7 +422,17 @@ onBeforeUnmount(() => {
       </ul>
     </div>
 
-    <ThumbLimitsCard @saved="loadProblems" />
+    <p
+      v-if="settingsReachable"
+      class="card card-body flex flex-wrap items-center justify-between gap-2 text-sm"
+      data-testid="thumb-limits-link"
+    >
+      <span class="text-zinc-500 dark:text-zinc-400">{{ t('tools.thumbs.limits.elsewhere') }}</span>
+      <RouterLink
+        :to="{ name: 'settings', hash: '#thumb-limits' }"
+        class="font-medium text-brand-600 hover:underline dark:text-brand-400"
+      >{{ t('tools.thumbs.limits.changeLimits') }}</RouterLink>
+    </p>
 
     <!-- Who drew the thumbnails (0.50): filex's own drawer, or an app. -->
     <div class="card card-body space-y-2" data-testid="thumb-generators">

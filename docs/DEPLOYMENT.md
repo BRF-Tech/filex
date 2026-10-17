@@ -47,6 +47,10 @@ it terminate TLS itself. Whatever proxy you pick must:
   `100.64.0.0/10` (Tailscale, Cloudflare WARP) and a CDN in front of your proxy
   must be listed (`auto, <address>`) - the **Sign-in security** page names such
   a peer and offers to add it ([Trusted proxies](CONFIGURATION.md#trusted-proxies)).
+  Since 0.57 the variable is a [seed](CONFIGURATION.md#variables-that-seed-a-stored-setting):
+  the first start writes it into that page's list, and from then on the saved
+  list is the one used - change it there, or run
+  `filex settings reseed login.trusted_proxies` after changing the variable.
 - **Allow large request bodies** (e.g. `5G`) and **long timeouts** (~600 s) for
   uploads. For **S3** storages the browser PUTs multipart chunks straight to the
   bucket and only the small init/finalize JSON transits the proxy - but
@@ -348,8 +352,9 @@ filex bakes this value into things it can't recompute from an incoming request:
 - **Share and file-drop links** (`/s/…`, `/d/…`) - the URLs handed to recipients.
 - **The OIDC redirect** - the callback is `<public>/api/auth/oidc/callback`; it
   must match what's registered at your IdP.
-- **OnlyOffice fetch/callback** - the Document Server fetches the file and posts
-  edits back **server-to-server** using filex's public URL.
+- **OnlyOffice fetch/callback** (with a Document Server connected) - the
+  Document Server fetches the file and posts edits back **server-to-server**
+  using filex's public URL.
 
 A wrong value fails quietly in production: share links point at `localhost` and
 404 for everyone else, SSO login bounces to an unreachable/invalid redirect, and
@@ -447,15 +452,14 @@ a lock one replica places is not seen by the others until they restart.
 
 ## What else runs beside filex
 
-filex is one process, but five optional things run **next to** it, each as its
+filex is one process, but four optional things run **next to** it, each as its
 own container or service, each reached over the network:
 
 | Service | What it gives you | Configured |
 |---|---|---|
 | **ClamAV** (`clamav/clamav`) | virus scanning of every file written | `FILEX_CLAMAV_ADDR=clamav:3310` seeds it; after the first boot, *Settings → Protection* |
-| **OnlyOffice Document Server** | in-browser Office editing, and since 0.50 the only office engine: office thumbnails and the apps' office conversions (no image carries LibreOffice) | *Settings → External services*, applies with no restart |
+| **ONLYOFFICE Document Server** | optional, and not in the default install since 0.57: an office engine (office thumbnails and the apps' office conversions; no image carries LibreOffice) and in-browser editing. The [Office editor app](ONLYOFFICE.md#the-office-editor-app) edits Word, Excel and PowerPoint - and from its 0.4.0 the older formats and `.csv` - in the browser and brings an [office engine](ONLYOFFICE.md#the-office-engine-without-a-document-server) of its own, so it needs none; connect one for what that engine does not do yet | *Settings → External services*, applies with no restart |
 | **drawio** | diagram editing | same |
-| **converter** side-car | format conversion from the UI | same |
 | **S3 server** (`versity/versitygw`) | an S3 storage on your own disk | the `versitygw` Compose profile or `versitygw.enabled` in Helm; [STORAGE.md → A local S3 server](STORAGE.md#a-local-s3-server) |
 
 ⚠ **The filex images ship no scanner.** ClamAV plus its signature database is
@@ -483,10 +487,10 @@ values file does nothing. Details, including what an unreachable daemon does
 
 ⚠ The three external services are read from the database **on every use**, so
 an edit in the admin UI reaches the running process. A service named in the
-environment or `config.yaml` is re-asserted onto that row at every boot and is
-labelled `env_managed` in the UI - an admin edit to one of those applies
-immediately and is reverted at the next restart. Pick one place per service and
-stay there.
+environment or `config.yaml` takes their values while nothing is configured in
+it (a seed, like every other setting a variable gives a first value to) and is
+labelled `env_managed` in the UI; an admin edit to it stands across restarts,
+and `filex settings reseed --external` writes the environment's values again.
 
 ---
 
@@ -579,8 +583,8 @@ filex migrate down       # roll back exactly one migration
 ## Hardening checklist
 
 - [ ] **Strong, unique secrets.** Generate them (`openssl rand -hex 24`) and keep
-      them out of version control - never commit `.env`. The
-      `ONLYOFFICE_JWT_SECRET` must be identical on filex and the Document Server;
+      them out of version control - never commit `.env`. With a Document
+      Server, `ONLYOFFICE_JWT_SECRET` must be identical on filex and on it;
       the OIDC client secret must match your IdP.
 - [ ] **HTTPS everywhere.** TLS terminated at the proxy, `FILEX_PUBLIC_URL` on
       `https://`.
@@ -632,7 +636,9 @@ filex migrate down       # roll back exactly one migration
       your proxy alone (`127.0.0.1:5212:5212`, or firewalled). Check
       **Sign-in security → Trusted proxies**: what `auto` resolved to, and any
       peer that sends forwarded addresses without being trusted
-      ([Trusted proxies](CONFIGURATION.md#trusted-proxies)).
+      ([Trusted proxies](CONFIGURATION.md#trusted-proxies)). The variable only
+      seeds that list at the first start (since 0.57): on a running install,
+      the list on the page is the one that counts.
 - [ ] **Put your own address on the sign-in allow-list.** The
       [sign-in attempt limit](CONFIGURATION.md#sign-in-attempt-limits) spares
       nobody, the first administrator included; an address on

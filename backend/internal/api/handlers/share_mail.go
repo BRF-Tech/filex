@@ -193,7 +193,7 @@ func (h *Grants) composeShareMail(ctx context.Context, r *http.Request, lang str
 	link := publicLinkOf(h.Tenants.FromRequest(r), sh)
 	days := linkDaysLeft(sh.ExpiresAt, time.Now())
 	withheld := sh.PinHash != "" || sh.HasPin
-	site := h.siteName(ctx)
+	site := h.siteName(r)
 	name := node.Name
 	if name == "" {
 		name = baseName(m.rel)

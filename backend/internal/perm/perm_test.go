@@ -9,9 +9,23 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
-func TestCatalogueIs29(t *testing.T) {
-	require.Len(t, All(), 29, "the agreed permission list is 29 entries; change this test on purpose")
-	require.Equal(t, 29, allSet.Len())
+func TestCatalogueIs30(t *testing.T) {
+	require.Len(t, All(), 30, "the agreed permission list is 30 entries; change this test on purpose")
+	require.Equal(t, 30, allSet.Len())
+}
+
+// The assistant (task #269) is in every preset - the tools ask the person's
+// own permissions and level, so a viewer's or a guest's assistant can only
+// read - and the version that adds it gives it to every saved role
+// (grantOnAdd), not through ai.use.
+func TestAIAssistantIsInEveryPreset(t *testing.T) {
+	for _, p := range Presets() {
+		require.True(t, p.Set.Has(AIAssistant), p.Name)
+	}
+	require.True(t, grantOnAdd.Has(AIAssistant), "given to every saved role when it first appears")
+	_, carved := inheritOnAdd[AIAssistant]
+	require.False(t, carved, "not carved out of ai.use: it does not follow that key")
+	require.True(t, viewerCeiling.Has(AIAssistant), "a viewer may hold it")
 }
 
 func TestSetRoundTripsThroughStrings(t *testing.T) {
@@ -31,7 +45,7 @@ func TestPresets(t *testing.T) {
 	require.False(t, Standard.Has(AdminUsers), "standard has no admin area")
 	require.True(t, Standard.Has(FilesPurge))
 	require.True(t, Standard.Has(AccessSFTP), "today's users can use every protocol")
-	require.Equal(t, 23, Standard.Len())
+	require.Equal(t, 24, Standard.Len())
 
 	// ReadOnly is today's viewer: no file mutation, no sharing, the rest kept.
 	for _, p := range []Perm{FilesCreate, FilesModify, FilesRename, FilesMove, FilesDelete, FilesPurge, FilesEncrypt, ShareLinks, ShareUploadLinks, ShareUsers} {
@@ -42,13 +56,14 @@ func TestPresets(t *testing.T) {
 	}
 
 	require.Equal(t, PresetStandard, MatchPreset(Standard))
-	require.Equal(t, PresetGuest, MatchPreset(Of(FilesDownload)))
-	require.Equal(t, "", MatchPreset(Of(FilesDownload, FilesTag)))
+	require.Equal(t, PresetGuest, MatchPreset(Of(FilesDownload, AIAssistant)))
+	require.Equal(t, "", MatchPreset(Of(FilesDownload)), "0.56's Guest; the upgrade gives its lists ai.assistant")
+	require.Equal(t, "", MatchPreset(Of(FilesDownload, FilesTag, AIAssistant)))
 
 	// Upload-only can encrypt, as it could before files.encrypt existed.
 	// v0.49.0's list — exactly the one the catalogue upgrade turns into this
 	// one — is no preset any more.
-	require.Equal(t, PresetUploadOnly, MatchPreset(Of(FilesCreate, FilesEncrypt, AccountEdit)))
+	require.Equal(t, PresetUploadOnly, MatchPreset(Of(FilesCreate, FilesEncrypt, AccountEdit, AIAssistant)))
 	require.Equal(t, "", MatchPreset(Of(FilesCreate, AccountEdit)))
 }
 

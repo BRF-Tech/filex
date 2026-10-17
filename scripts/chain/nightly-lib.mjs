@@ -17,7 +17,18 @@
 //          after it when NIGHTLY_PUBLISH=auto - what the build host's settings
 //          say (scripts/chain/nightly.env.example): every green change goes
 //          out as :nightly, the first one included (registryLogin).
-//   07:00  report.mjs: one notification for the night (composeReport).
+//   then   with a build made, the desktop side (#266, decideDesktop,
+//          scripts/chain/nightly-desktop.sh): the amd64 snap for the Snap
+//          Store's edge channel (NIGHTLY_SNAP=edge), and the public form of
+//          the commit to ghcr for GitHub's runners (NIGHTLY_DESKTOP=github),
+//          where .github/workflows/nightly-desktop.yml makes every desktop
+//          package - Windows, macOS, Linux - and the arm64 snap from it,
+//          every such night. An upload the Store holds for a review is said
+//          every morning until edge serves it (snapEdgeState).
+//   07:00  report.mjs: GitHub's desktop packages of the night followed up
+//          (followVerdict: built, still building, failed, never started),
+//          the filex.sh/nightly page made from them (renderNightlyPage), and
+//          one notification for the night (composeReport).
 
 import path from 'node:path';
 
@@ -292,6 +303,51 @@ export function nightlySettings(env) {
       keepImages: num('NIGHTLY_KEEP_IMAGES', 3),
       expectMin: num('NIGHTLY_BUILD_EXPECT_MIN', 25),
     },
+    // #266: the desktop side of a nightly build (decideDesktop). Off in the
+    // code, as publishing is: a checkout with no Snap Store credential and no
+    // snapcraft would turn every green night into a warning. The build
+    // host's settings switch them on (nightly.env.example).
+    snap: {
+      mode: oneOf('NIGHTLY_SNAP', 'off', ['edge', 'off']),
+      name: env.NIGHTLY_SNAP_NAME || 'filex-app',
+      // The output of `snapcraft export-login`, in a 0600 file: read when the
+      // upload runs, handed to snapcraft in its environment, never logged.
+      credentialsFile: env.NIGHTLY_SNAP_CREDENTIALS_FILE || '',
+      snapcraft: env.NIGHTLY_SNAPCRAFT || 'snapcraft',
+    },
+    desktop: {
+      // github: every night that makes a build, the public form of its commit
+      // goes to `srcRepo` (an OCI artifact), and GitHub's runners make the
+      // desktop packages from it (`workflow`, in `workflowRepo`) into `repo`.
+      mode: oneOf('NIGHTLY_DESKTOP', 'off', ['github', 'off']),
+      srcRepo: env.NIGHTLY_DESKTOP_SRC_REPO || 'ghcr.io/brf-tech/filex-nightly-src',
+      repo: env.NIGHTLY_DESKTOP_REPO || 'ghcr.io/brf-tech/filex-desktop-nightly',
+      workflowRepo: env.NIGHTLY_DESKTOP_WORKFLOW_REPO || 'BRF-Tech/filex',
+      workflow: env.NIGHTLY_DESKTOP_WORKFLOW || 'nightly-desktop.yml',
+      // The ORAS client, run as a container: it pushes and reads the OCI
+      // artifacts. Pinned, as every image the chain runs.
+      oras: env.NIGHTLY_ORAS_IMAGE || 'ghcr.io/oras-project/oras:v1.2.2',
+      // A command that publishes the filex.sh/nightly page and its packages,
+      // given a directory with index.html and nightly.json as its one
+      // argument (sh -c '<command> "$1"'), NIGHTLY_SITE_REF naming the
+      // artifact (scripts/chain/nightly-site.sh). Empty: the page is made and
+      // kept here, and the morning report says it was not published.
+      siteCmd: env.NIGHTLY_SITE_CMD || '',
+      // electron-builder's own image, for the app the amd64 snap is packed
+      // from. Pinned by date, as every image the chain runs.
+      image: env.NIGHTLY_DESKTOP_IMAGE || 'electronuserland/builder:22-wine-05.26',
+      publicDir: path.resolve(env.NIGHTLY_DESKTOP_PUBLIC_DIR || path.join(root, 'public-desktop')),
+      out: path.resolve(env.NIGHTLY_DESKTOP_DIR || path.join(root, 'desktop')),
+      keep: num('NIGHTLY_DESKTOP_KEEP', 4),
+      expectMin: num('NIGHTLY_DESKTOP_EXPECT_MIN', 30),
+      cache: {
+        goroot: path.resolve(env.CHAIN_GOROOT || path.join(root, 'cache', 'go-desktop')),
+        gomod: path.resolve(env.CHAIN_GOMODCACHE || path.join(root, 'cache', 'gomod')),
+        gocache: path.resolve(env.CHAIN_GOCACHE_ROOT || path.join(root, 'cache', 'gocache-root')),
+        pnpm: path.resolve(env.CHAIN_PNPM_STORE || path.join(root, 'cache', 'pnpm-store')),
+        electron: path.resolve(env.CHAIN_ELECTRON_CACHE || path.join(root, 'cache', 'electron')),
+      },
+    },
     notify: {
       url: env.CHAIN_NOTIFY_URL || '',
       keyFile: env.CHAIN_NOTIFY_KEY_FILE || '',
@@ -438,6 +494,284 @@ export function nightlyVersion(released, ymd, sha) {
 export function nightlyTags(ymd) {
   return ['nightly', `nightly-${ymd}`];
 }
+
+/**
+ * The labels a nightly image carries besides its version and commit (#266):
+ * where its source is, what it is, and the night's test result - so `docker
+ * inspect` on a pulled `:nightly` says which commit it is and whether its
+ * night was green, with no account and no other page. nightly-build.sh adds
+ * `sh.filex.nightly.public-base` itself, the public repository's main the
+ * export was staged on (the last release's public commit: a nightly is that
+ * plus the CHANGELOG's [Unreleased]), which it knows only once it fetched.
+ *
+ *   counts   result.json `counts` of the green night
+ *   runId    the chain run's id
+ *
+ * One `key=value` a label, as nightly-build.sh reads them (NB_LABELS_FILE).
+ */
+export function nightlyLabels({ counts = null, runId = '', source = 'https://github.com/BRF-Tech/filex' } = {}) {
+  const tests = counts && Number.isFinite(counts.total) ? `green: ${counts.passed} passed, ${counts.skipped ?? 0} skipped of ${counts.total} jobs${runId ? ` (${runId})` : ''}` : '';
+  const labels = {
+    'org.opencontainers.image.source': source,
+    'org.opencontainers.image.description': 'filex nightly build: the tip of main after a green nightly test run. Not a release and not supported - for trying what the next release brings.',
+    ...(tests ? { 'sh.filex.nightly.tests': tests } : {}),
+  };
+  for (const [k, v] of Object.entries(labels)) if (/[\r\n]/.test(v)) throw new Error(`label ${k} holds a line break`);
+  return labels;
+}
+
+// ── the nightly desktop packages and the snap on edge (#266) ───────────────
+
+/**
+ * The Snap Store refuses a version longer than 32 characters or with
+ * anything but letters, digits and `.+~-:` (and it must start and end with
+ * a letter or digit). A nightly's version (nightlyVersion) is 32 exactly
+ * while the minor has two digits: past that, the commit in the build
+ * metadata is cut to seven characters, then `nightly.` to `n.`. Every desktop
+ * package of a night carries this one version.
+ */
+export function desktopVersion(version) {
+  const ok = (v) => v.length <= 32 && /^[A-Za-z0-9](?:[A-Za-z0-9.+~:-]*[A-Za-z0-9])?$/.test(v);
+  let v = String(version ?? '');
+  if (ok(v)) return v;
+  v = v.replace(/\+([0-9a-f]{7})[0-9a-f]+$/, '+$1');
+  if (ok(v)) return v;
+  v = v.replace('-nightly.', '-n.');
+  if (ok(v)) return v;
+  throw new Error(`"${version}" cannot be made a snap version (32 characters, letters, digits and .+~-:)`);
+}
+
+/**
+ * What the night does for the desktop, after a nightly build (`built`: the
+ * image of a green change was made tonight):
+ *
+ *   snap    NIGHTLY_SNAP=edge: the amd64 snap, packed on this host, for the
+ *           Snap Store's edge channel
+ *   source  NIGHTLY_DESKTOP=github: the public form of the commit, pushed to
+ *           ghcr for GitHub's runners, which make every desktop package and
+ *           the arm64 snap from it (.github/workflows/nightly-desktop.yml)
+ *
+ * Both every night that makes a build. A night without one does nothing:
+ * there is nothing new to package (the nightly run itself runs only when
+ * main moved). Returns { targets: ['snap', 'source'], why }.
+ */
+export function decideDesktop({ built, snapMode = 'off', desktopMode = 'off' }) {
+  if (!built) return { targets: [], why: 'no nightly build tonight' };
+  const targets = [];
+  const why = [];
+  if (snapMode === 'edge') {
+    targets.push('snap');
+    why.push('the amd64 snap for edge');
+  }
+  if (desktopMode === 'github') {
+    targets.push('source');
+    why.push("the source of the desktop packages GitHub's runners make");
+  }
+  return { targets, why: why.length ? why.join(' and ') : 'no desktop target asked for' };
+}
+
+/**
+ * What `snapcraft upload --release=edge` answered: `released` (a revision,
+ * released to edge), `review` (uploaded, held for the Store's review - the
+ * channel keeps its old revision until the review passes, so the night's
+ * report warns, and so does every night after it until edge serves it) or
+ * `failed`. `revision` when the output names one.
+ */
+export function snapUploadVerdict(status, text) {
+  const out = String(text ?? '');
+  const revision = Number(/Revision\s+(\d+)/i.exec(out)?.[1] ?? NaN);
+  const rev = Number.isFinite(revision) ? { revision } : {};
+  if (/manual review|review(?:ed)? (?:is )?pending|waiting for (?:a )?review/i.test(out)) return { state: 'review', ...rev };
+  if (status === 0) return { state: 'released', ...rev };
+  return { state: 'failed', ...rev, why: out.trim().split('\n').filter(Boolean).slice(-3).join(' / ') || `exit ${status}` };
+}
+
+/**
+ * Whether the Snap Store's edge channel serves the nightly snap the last
+ * upload sent (`last`: state.json last_snap), read from the public channel
+ * map (api.snapcraft.io/v2/snaps/info). `live` when edge/<arch> carries that
+ * version; `held` when it does not - with how long since the upload - so a
+ * review that never ends is said every morning, not once.
+ */
+export function snapEdgeState(map, last, { arch = 'amd64', nowMs } = {}) {
+  if (!last?.version) return null;
+  const entry = (map ?? []).find((m) => m?.channel?.name === 'edge' && m?.channel?.architecture === arch);
+  if (entry && entry.version === last.version) return { state: 'live', version: entry.version, revision: entry.revision };
+  const days = last.at ? Math.floor((nowMs - Date.parse(last.at)) / DAY_MS) : null;
+  return {
+    state: 'held',
+    arch,
+    version: last.version,
+    revision: last.revision ?? null,
+    edge: entry ? `${entry.version} (revision ${entry.revision})` : 'no revision',
+    since: last.at ?? null,
+    days,
+  };
+}
+
+/** The local desktop runs to remove: every <ymd>-<sha8> directory but the newest `keep` and `protect`. */
+export function desktopDirsToPrune(names, keep, protect = []) {
+  return names.filter((n) => /^\d{8}-[0-9a-f]{8}$/.test(n)).sort().reverse().slice(keep).filter((n) => !protect.includes(n));
+}
+
+// ── the desktop packages GitHub's runners make (#266) ──────────────────────
+
+const ARCH_OF = { x64: 'x64', x86_64: 'x64', amd64: 'x64', arm64: 'arm64', aarch64: 'arm64' };
+
+/** The platforms of the nightly desktop packages, in the order the page shows them. */
+export const DESKTOP_PLATFORMS = [
+  { id: 'windows', label: 'Windows' },
+  { id: 'macos', label: 'macOS' },
+  { id: 'linux', label: 'Linux' },
+];
+
+const KIND_LABEL = {
+  installer: 'Installer (.exe)',
+  portable: 'Portable (.exe, nothing installed)',
+  dmg: 'Disk image (.dmg)',
+  zip: 'App (.zip)',
+  AppImage: 'AppImage',
+  deb: '.deb (Debian, Ubuntu)',
+  rpm: '.rpm (Fedora, openSUSE)',
+};
+
+/**
+ * What a desktop package is, from the name electron-builder gives it
+ * (desktop/electron-builder.yml: `filex-desktop-${arch}.${ext}`, the portable
+ * .exe `filex-desktop-portable-${arch}.exe`): { platform, arch, kind }, or
+ * null for anything else (a blockmap, a feed, a snap - the Snap Store serves
+ * those).
+ */
+export function classifyDesktopFile(name) {
+  const m = /^filex-desktop-(portable-)?([a-z0-9_]+)\.(exe|AppImage|deb|rpm|dmg|zip)$/.exec(String(name ?? ''));
+  if (!m) return null;
+  const arch = ARCH_OF[m[2]];
+  if (!arch) return null;
+  if (m[3] === 'exe') return { platform: 'windows', arch, kind: m[1] ? 'portable' : 'installer' };
+  if (m[1]) return null;
+  if (m[3] === 'dmg' || m[3] === 'zip') return { platform: 'macos', arch, kind: m[3] };
+  return { platform: 'linux', arch, kind: m[3] };
+}
+
+/**
+ * The night's desktop manifest, nightly.json - what the workflow pushes
+ * beside the packages and what the page is made from. `files`: { name, size,
+ * sha256 } of every file the rows made (anything that is no package is left
+ * out); `rows`: each row's outcome ({ 'linux-x64': 'built', ... }); `snap`:
+ * the arm64 snap's upload to edge ({ arm64: { state, revision?, why? } }).
+ */
+export function desktopManifest({ files = [], version, revision, date, run = '', rows = {}, snap = {}, builtAt = '' }) {
+  const rank = (f) => DESKTOP_PLATFORMS.findIndex((p) => p.id === f.platform) * 100 + (f.arch === 'x64' ? 0 : 50) + Object.keys(KIND_LABEL).indexOf(f.kind);
+  const out = files
+    .map((f) => ({ name: f.name, size: Number(f.size) || 0, sha256: String(f.sha256 ?? ''), ...classifyDesktopFile(f.name) }))
+    .filter((f) => f.platform)
+    .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  return { schema: 1, version, revision, date, run, built_at: builtAt, rows, snap, files: out };
+}
+
+/** The platform a row of the workflow makes packages for (nightly-desktop-job.sh targets), or null (the snap). */
+export const platformOfRow = (row) => (row === 'mac' ? 'macos' : row === 'windows' ? 'windows' : /^linux-/.test(row) ? 'linux' : null);
+
+const html = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** The markers site/nightly.src.html carries, each replaced by renderNightlyPage. */
+export const PAGE_MARKERS = ['version', 'date', 'commit', 'downloads', 'run'];
+
+/**
+ * The filex.sh/nightly page: site/nightly.src.html (the site's own page, its
+ * look the site's) with its markers (<!--nightly:NAME-->) filled from the
+ * night's manifest. A platform with no package says it was not built that
+ * night - an old night's package is never shown as tonight's. Every value is
+ * escaped. Throws when the template lacks a marker: a page that silently
+ * drops the downloads is worse than none.
+ */
+export function renderNightlyPage({ template, manifest }) {
+  for (const m of PAGE_MARKERS) if (!String(template).includes(`<!--nightly:${m}-->`)) throw new Error(`the page template has no <!--nightly:${m}--> marker`);
+  const mb = (n) => `${(n / 1048576).toFixed(n >= 10485760 ? 0 : 1)} MB`;
+  const blocks = DESKTOP_PLATFORMS.map((p) => {
+    const files = manifest.files.filter((f) => f.platform === p.id);
+    const failed = Object.entries(manifest.rows ?? {}).filter(([row, st]) => platformOfRow(row) === p.id && st !== 'built').map(([row]) => row);
+    const items = files.map((f) => `<li><a href="./${html(encodeURIComponent(f.name))}">${html(KIND_LABEL[f.kind] ?? f.kind)}</a> <span class="meta">${html(f.arch)} · ${html(mb(f.size))}</span></li>`);
+    const missing = !files.length ? '<p class="meta">Not built this night.</p>' : failed.length ? `<p class="meta">Not built this night: ${html(failed.join(', '))}.</p>` : '';
+    return `<h2>${html(p.label)}</h2>\n${items.length ? `<ul class="files">\n${items.join('\n')}\n</ul>\n` : ''}${missing}`;
+  }).join('\n');
+  const values = {
+    version: html(manifest.version),
+    date: html(manifest.date),
+    commit: html(String(manifest.revision ?? '').slice(0, 8)),
+    downloads: `${blocks}\n<p class="meta"><a href="./SHA256SUMS">SHA256SUMS</a> - every file's checksum</p>`,
+    run: manifest.run ? `<a href="${html(manifest.run)}">the build</a>` : 'the build',
+  };
+  let out = String(template);
+  for (const m of PAGE_MARKERS) out = out.split(`<!--nightly:${m}-->`).join(values[m]);
+  return out;
+}
+
+/**
+ * Where GitHub's desktop packages of the last pushed source stand, from what
+ * the registry and GitHub say: `source` (state.json last_source), `built` and
+ * `attempted` (the revision annotations of the artifact's `nightly` and
+ * `attempted` tags), `run` (the workflow's newest run: status, conclusion,
+ * url). Returns null with no source, else { state, ... }:
+ *   built        the packages of that revision are on ghcr
+ *   building     the workflow took it and runs
+ *   failed       the workflow took it and did not publish the packages
+ *   waiting      not taken yet, within `graceH` hours (it runs hourly)
+ *   not-started  not taken after `graceH` hours
+ */
+export function followVerdict({ source, built = null, attempted = null, run = null, nowMs, graceH = 3 }) {
+  if (!source?.revision) return null;
+  const base = { version: source.version, revision: source.revision };
+  if (built?.revision === source.revision) return { ...base, state: 'built' };
+  if (attempted?.revision === source.revision) {
+    if (run && run.status !== 'completed') return { ...base, state: 'building', url: run.url ?? '' };
+    return { ...base, state: 'failed', url: run?.url ?? '', conclusion: run?.conclusion ?? 'unknown', why: run?.conclusion === 'success' ? 'it ended green and published no packages' : '' };
+  }
+  const hours = source.at ? Math.floor((nowMs - Date.parse(source.at)) / 3_600_000) : null;
+  return { ...base, state: hours !== null && hours >= graceH ? 'not-started' : 'waiting', hours };
+}
+
+/**
+ * The morning report's lines for GitHub's desktop packages (followVerdict,
+ * with what the follow-up did: `site` - the page published, kept or failed -
+ * `rows` and `snapArm64` from the manifest, `edgeArm64` from the Store).
+ */
+export function followLines(f) {
+  if (!f) return [];
+  const lines = [];
+  if (f.state === 'built') {
+    const failed = Object.entries(f.rows ?? {}).filter(([, st]) => st !== 'built').map(([r]) => r);
+    lines.push(`desktop packages ${f.version}: built on GitHub's runners${f.platforms?.length ? ` (${f.platforms.join(', ')})` : ''}`);
+    if (failed.length) lines.push(`  WARNING not built this night: ${failed.join(', ')}${f.url ? ` - ${f.url}` : ''}`);
+    if (f.site?.state === 'published') lines.push(`  filex.sh/nightly: ${f.site.detail}`);
+    else if (f.site?.state === 'same') lines.push('  filex.sh/nightly already shows them');
+    else if (f.site?.state === 'kept') lines.push(`  filex.sh/nightly NOT updated: ${f.site.detail}`);
+    else if (f.site?.state === 'failed') lines.push(`  WARNING filex.sh/nightly NOT updated: ${f.site.detail}`);
+  } else if (f.state === 'building') lines.push(`desktop packages ${f.version}: still being built on GitHub (${f.url}); the next report publishes them`);
+  else if (f.state === 'failed') lines.push(`WARNING desktop packages ${f.version}: GitHub's build FAILED (${f.conclusion}${f.why ? `, ${f.why}` : ''})${f.url ? ` - ${f.url}` : ''}`);
+  else if (f.state === 'waiting') lines.push(`desktop packages ${f.version}: GitHub takes the source within the hour`);
+  else if (f.state === 'not-started') lines.push(`WARNING desktop packages ${f.version}: GitHub has not taken the source in ${f.hours} h (the workflow runs every hour; is it disabled?)`);
+  else if (f.state === 'unknown') lines.push(`WARNING desktop packages: ${f.why}`);
+  const s = f.snapArm64;
+  if (s) {
+    if (s.state === 'released') lines.push(`  snap ${f.version} on edge (arm64)${s.revision ? `: revision ${s.revision}` : ''}`);
+    else if (s.state === 'skipped') lines.push(`  snap arm64: ${s.why}`);
+    else if (s.state === 'review') lines.push(`  WARNING snap arm64: revision ${s.revision ?? '?'} uploaded and HELD for the Snap Store's review`);
+    else lines.push(`  WARNING snap arm64 upload to edge FAILED: ${s.why ?? 'see the run'}`);
+  }
+  const el = snapEdgeLine(f.edgeArm64);
+  if (el) lines.push(el);
+  return lines;
+}
+
+/** Whether the follow-up is worth a warning. */
+export const followTrouble = (f) =>
+  !!f &&
+  (['failed', 'not-started', 'unknown'].includes(f.state) ||
+    Object.values(f.rows ?? {}).some((st) => st !== 'built') ||
+    f.site?.state === 'failed' ||
+    (f.snapArm64 && !['released', 'skipped'].includes(f.snapArm64.state)) ||
+    f.edgeArm64?.state === 'held');
 
 /**
  * How a publish signs in to the registry: `own` - a Docker config of its own,
@@ -594,6 +928,10 @@ export function nightRecord(t) {
     build: b
       ? { decision: b.decision, why: b.why, image: b.image, version: b.version, tag: b.tag, sha: b.sha, published: b.published, publishError: b.publishError, log: b.log }
       : undefined,
+    desktop: t.desktop && t.desktop.decision !== 'skipped'
+      ? { decision: t.desktop.decision, version: t.desktop.version, targets: t.desktop.targets, dir: t.desktop.dir, snap: t.desktop.snap, source: t.desktop.source }
+      : undefined,
+    snapEdge: t.snapEdge?.state === 'held' ? { version: t.snapEdge.version, revision: t.snapEdge.revision, since: t.snapEdge.since } : undefined,
   };
 }
 
@@ -661,6 +999,49 @@ const SEVERITY_RANK = { info: 0, success: 1, warning: 2, danger: 3 };
 const worse = (a, b) => (SEVERITY_RANK[b] > SEVERITY_RANK[a] ? b : a);
 const buildTrouble = (b) => b?.decision === 'failed' || !!b?.publishError;
 
+/**
+ * The morning report's lines for the night's desktop side (#266): the amd64
+ * snap's upload to edge and the source pushed for GitHub's runners (what they
+ * made of it is followLines'). None when the night built nothing for the
+ * desktop because it made no nightly build (the build line already says
+ * why); one line saying why when a build was made and nothing was due
+ * (`asked`: the settings ask for a desktop side at all).
+ */
+export function desktopLines(d) {
+  if (!d || d.decision === 'skipped') return d?.decision === 'skipped' && d.asked ? [`desktop: none - ${d.why}`] : [];
+  const lines = [];
+  const targets = Object.entries(d.targets ?? {}).map(([t, s]) => `${t} ${s}`).join(', ');
+  if (d.decision === 'failed' && !Object.keys(d.targets ?? {}).length) {
+    lines.push(`desktop FAILED: ${d.why}${d.log ? ` (log ${d.log})` : ''}`);
+    return lines;
+  }
+  lines.push(`desktop ${d.version}: ${targets}${d.decision === 'built' ? '' : ` - ${d.why}${d.log ? ` (log ${d.log})` : ''}`}`);
+  if (d.source?.ref) lines.push(`  the source for GitHub's desktop packages: ${d.source.ref}`);
+  else if (d.source?.error) lines.push(`  WARNING the source for GitHub's desktop packages was NOT pushed: ${d.source.error}`);
+  const s = d.snap;
+  if (s) {
+    if (s.state === 'released') lines.push(`  snap ${d.version} on edge (amd64)${s.revision ? `: revision ${s.revision}` : ''}`);
+    else if (s.state === 'review') lines.push(`  WARNING snap: revision ${s.revision ?? '?'} uploaded and HELD for the Snap Store's review - edge keeps its old revision until it passes (snapcraft status ${s.name ?? 'filex-app'})`);
+    else if (s.state === 'skipped') lines.push(`  snap: not uploaded - ${s.why}`);
+    else lines.push(`  WARNING snap upload to edge FAILED: ${s.why ?? 'see the log'}`);
+  }
+  return lines;
+}
+
+/** The report's line on an earlier nightly snap edge still does not serve (snapEdgeState), or null. */
+export function snapEdgeLine(e) {
+  if (!e || e.state !== 'held') return null;
+  const ago = Number.isFinite(e.days) ? `${e.days} day(s) ago` : 'earlier';
+  return `WARNING snap: edge (${e.arch ?? 'amd64'}) serves ${e.edge}, not the nightly ${e.version} uploaded ${ago}${e.revision ? ` (revision ${e.revision})` : ''}: the Snap Store still holds it - snapcraft status filex-app`;
+}
+
+const desktopTrouble = (d) =>
+  !!d &&
+  (d.decision === 'failed' ||
+    d.decision === 'partial' ||
+    !!d.source?.error ||
+    (d.snap && !['released', 'skipped'].includes(d.snap.state)));
+
 /** The morning report's line for s3-live (decideS3Live), or null when there is none to say. */
 function s3LiveLine(s) {
   if (!s) return null;
@@ -696,6 +1077,7 @@ export function composeReport({
   maxAgeH = 20,
   maxCommits = 8,
   maxJobs = 25,
+  follow = null,
 }) {
   const lines = [];
   const at = tonight ? Date.parse(tonight.at) : NaN;
@@ -739,8 +1121,13 @@ export function composeReport({
     if (prev) lines.push(`last run: ${prev.night} on ${short(prev.sha)}, ${prev.ok ? 'green' : 'RED'}${prev.wall ? ` in ${prev.wall}` : ''}`);
     const bl = buildLine(tonight.build);
     if (bl) lines.push(bl);
+    // A snap the Store still holds is said every morning, a quiet one too.
+    const el = snapEdgeLine(tonight.snapEdge);
+    if (el) lines.push(el);
+    // So is GitHub's work on the last source (#266).
+    lines.push(...followLines(follow));
     return {
-      severity: buildTrouble(tonight.build) ? 'warning' : 'info',
+      severity: buildTrouble(tonight.build) || el || followTrouble(follow) ? 'warning' : 'info',
       title: `filex nightly ${night}: no run, main unchanged (${short(tonight.sha)})`,
       message: finish(lines),
     };
@@ -820,17 +1207,24 @@ export function composeReport({
   if (sl) lines.push(sl);
   const bl = buildLine(tonight.build);
   if (bl) lines.push(bl);
+  lines.push(...desktopLines(tonight.desktop));
+  const el = snapEdgeLine(tonight.snapEdge);
+  if (el) lines.push(el);
+  lines.push(...followLines(follow));
   if (tonight.result) lines.push(`result ${tonight.result}`);
   if (result.ok) lines.push(`release evidence: pnpm release <version> --resume --chain <a copy of ${tonight.latest ?? 'runs/latest-nightly.json'}>`);
 
   let severity = result.ok ? 'success' : result.stopped ? 'warning' : 'danger';
   if (buildTrouble(tonight.build)) severity = worse(severity, 'warning');
+  if (desktopTrouble(tonight.desktop) || el || followTrouble(follow)) severity = worse(severity, 'warning');
   if (s3LiveTrouble(tonight.s3live)) severity = worse(severity, 'warning');
   if (warned.length) severity = worse(severity, 'warning');
   const verdict = result.ok
     ? warned.length
       ? `green, ${warned.length} job(s) with a warning`
-      : 'green'
+      : desktopTrouble(tonight.desktop) || el || followTrouble(follow)
+        ? 'green, the desktop packages or the snap with a warning'
+        : 'green'
     : result.stopped
       ? 'stopped'
       : `RED ${bad.length} of ${c.total}`;

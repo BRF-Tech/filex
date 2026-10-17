@@ -229,6 +229,11 @@ func (h *Manager) vfNewFile(w http.ResponseWriter, r *http.Request) {
 			"suggested": suggested,
 		})
 		return
+	} else if storage.IsNameTooLong(err) {
+		// Longer than the storage holds (a local disk answers the Stat with
+		// ENAMETOOLONG): the name to change, not a check to retry (task #238).
+		writeNameRefusal(w, r, err)
+		return
 	} else if !errors.Is(err, storage.ErrNotFound) {
 		slog.Warn("newfile refused: existence check inconclusive",
 			slog.Int64("storage", current.ID),
@@ -269,7 +274,7 @@ func (h *Manager) vfNewFile(w http.ResponseWriter, r *http.Request) {
 			slog.String("path", fullRel),
 			slog.String("type", docType.Ext),
 			slog.String("reason", err.Error()))
-		writeJSON(w, mapDriverErr(err), map[string]string{"error": "write: " + err.Error()})
+		writeDriverErr(w, r, "write", err)
 		return
 	}
 	throughput.Observe(current.ID, throughput.Write, size, time.Since(started))

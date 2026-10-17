@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
@@ -76,6 +77,10 @@ func shareMailText(lang, siteName, name string, isDir bool, size int64, link, pi
 			name = srvtext.Text(lang, "server.notify.word.unnamed", nil)
 		}
 	}
+	// A bidi control in the name is shown, not obeyed (leafname.Visible): an
+	// RLO would reverse the subject line and the facts, `invoice` + U+202E +
+	// `fdp.exe` reading as `invoiceexe.pdf` (task #238).
+	name = leafname.Visible(name)
 	// ⚠ Two keys per sentence, not one with a "{kind}" in it: Turkish (and
 	// most languages) inflect the sentence around the noun — "x dosyası" /
 	// "x klasörü" — so the noun cannot be a value slotted into it.
@@ -112,6 +117,7 @@ func dropInviteMailText(lang, siteName, folder, link, pin string, pinWithheld bo
 	if folder == "" {
 		folder = "/"
 	}
+	folder = leafname.Visible(folder)
 	if maxFiles <= 0 {
 		maxFiles = dropDefaultMaxFiles
 	}
@@ -144,7 +150,7 @@ func dropInviteMailText(lang, siteName, folder, link, pin string, pinWithheld bo
 func itemGrantText(lang, item, exploreURL string) (string, string) {
 	return srvtext.Text(lang, "server.mail.grant.subject", nil), strings.TrimSuffix(mailLines(
 		srvtext.Text(lang, "server.mail.greeting", nil),
-		srvtext.Text(lang, "server.mail.grant.body", srvtext.Vars{"item": item}),
+		srvtext.Text(lang, "server.mail.grant.body", srvtext.Vars{"item": leafname.Visible(item)}),
 		exploreURL,
 	), "\n")
 }
@@ -181,7 +187,7 @@ func dropUploaderFallback(lang string) string {
 // dropUploaderFallback); `sub` is the submission subfolder.
 func dropNotifyText(lang, who, folder string, count int, sub string) (string, string) {
 	return srvtext.Text(lang, "server.mail.drop_received.subject", nil),
-		srvtext.Plural(lang, "server.mail.drop_received.body", count, srvtext.Vars{"who": who, "folder": folder, "submission": sub})
+		srvtext.Plural(lang, "server.mail.drop_received.body", count, srvtext.Vars{"who": who, "folder": leafname.Visible(folder), "submission": sub})
 }
 
 // dropNoteHeader prefixes the NOT.txt written beside a submission with the

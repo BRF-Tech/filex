@@ -237,6 +237,10 @@ export interface NewDocType {
 export type ArchiveCreateFormat = 'zip' | '7z' | 'tar' | 'tar.gz' | 'tar.bz2' | 'tar.xz';
 
 export interface Capabilities {
+  /** The AI assistant (task #269): its state for this caller and whether the
+   *  explorer draws its button. Absent (an older server, an anonymous
+   *  caller): no button. */
+  assistant?: { state: 'on' | 'off' | 'not_configured'; permitted: boolean; button: boolean };
   /** Folder previews are on (Settings; default on): pictures on folder
    *  cards and the list of what a folder holds when the pointer rests on it.
    *  Absent (an older server): on. */

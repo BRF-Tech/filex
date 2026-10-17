@@ -21,8 +21,9 @@ an admin console: the app opens your server's admin panel in your browser.
    ways under one filex folder on your disk; everything else stays online-only
    in the window ([Keeping folders on this computer](#keeping-folders-on-this-computer)).
 
-With ONLYOFFICE on your server, Office documents on your own disk open in its
-editor too ([Opening documents from your computer](#opening-documents-from-your-computer)).
+With the Office editor app (or an ONLYOFFICE Document Server) on your server,
+Office documents on your own disk open in it too
+([Opening documents from your computer](#opening-documents-from-your-computer)).
 
 ---
 
@@ -47,10 +48,10 @@ The desktop app is **`filex-app`** in every one of them; plain `filex` is the
 
 | Platform | Command | Notes |
 |---|---|---|
-| Ubuntu and other Linux with snapd | `sudo snap install filex-app` | The Snap Store build, for x64 and arm64 (snapd picks the one for the machine). To keep the sign-in in your keyring: `sudo snap connect filex-app:password-manager-service` (the app says when it is needed). See [the snap and the sandbox](#the-snap-and-the-sandbox). |
+| Ubuntu and other Linux with snapd | `sudo snap install filex-app` | The Snap Store build, for x64 and arm64 (snapd picks the one for the machine). To keep the sign-in in your keyring: `sudo snap connect filex-app:password-manager-service` (the app says when it is needed). See [the snap and the sandbox](#the-snap-and-the-sandbox), and for the nightly build [the Snap Store's channels](#the-snap-stores-channels). |
 | macOS 13+ (Apple Silicon) | `brew install brf-tech/filex/filex-app` | Homebrew tap [`BRF-Tech/homebrew-filex`](https://github.com/BRF-Tech/homebrew-filex); `brew upgrade` keeps it current (the Mac app does not update itself). The app is not signed with a Developer ID, so the first launch is blocked once, as below. |
-| Windows 10/11 | [Microsoft Store](https://apps.microsoft.com/detail/9PKXDJLVZWXW) - *filex File Manager* | **The one code-signed Windows build** (Microsoft signs it): no SmartScreen prompt, and the Store updates it. Beside the installer below, both read the same accounts and folders (Settings says so). |
-| Windows 10/11 | `winget install BRFTech.filex-app` - **not installable yet** | The same per-user installer as the download below, updating itself the same way. Every release submits it, and the desktop app's package is still waiting for its first review by the winget moderators: until that is approved, `winget` does not find it. The [CLI](CLI.md)'s package, `BRFTech.filex`, is on winget already. |
+| Windows 10/11 | [Microsoft Store](https://apps.microsoft.com/detail/9PKXDJLVZWXW) - *filex File Manager* | **The one code-signed Windows build** (Microsoft signs it): no SmartScreen prompt, and the Store updates it. Beside the installer below, both read the same accounts and folders (App settings says so). |
+| Windows 10/11 | `winget install BRFTech.filex-app` - **not installable yet** | The same per-user installer as the download below, updating itself the same way. The desktop app's package is still waiting for its first review by the winget moderators, and until it is approved no release touches it - a new submission would put it back at the end of their queue - so `winget` does not find it yet; once approved, every release updates it. The [CLI](CLI.md)'s package, `BRFTech.filex`, is on winget already. |
 
 ### Download
 
@@ -191,6 +192,34 @@ for x64 and arm64. Its first install also brings the GNOME 46 runtime
 (XWayland on a Wayland desktop). Every release installs the snap on x64 and
 arm64 Ubuntu 24.04 machines and checks this confinement before it publishes.
 
+### The Snap Store's channels
+
+`sudo snap install filex-app` follows `stable`. The other channels are there to
+try what comes next:
+
+| Channel | What it serves | What puts it there |
+|---|---|---|
+| `stable` | The release. | Every release, x64 and arm64. |
+| `candidate` | The release - the same revision as `stable`. | Every release, with `stable`. |
+| `beta` | The release - the same revision as `stable`. | Every release, with `stable`. |
+| `edge` | The newest build: the release on the day it ships, then the **nightly** build of each change that passed the nightly test run, x64 and arm64. | Every release, and every night that made a nightly build (x64 on the build host, arm64 on GitHub's arm64 runner). |
+
+```bash
+sudo snap install filex-app --edge              # a new install, on edge
+sudo snap refresh filex-app --channel=edge      # an installed copy, onto edge
+sudo snap refresh filex-app --channel=stable    # back to the release
+```
+
+> ⚠ A nightly build is **not supported**: it is the tip of the source after its
+> tests passed, nothing more. Its version says which commit it is
+> (`0.57.0-nightly.20261014+2ca25999`: the next minor, the night, the commit;
+> `snap info filex-app` lists it). Your settings and the folders you sync are
+> kept when you move between channels, but a nightly may change them in a way
+> the release cannot read back: try it on a copy of your data, not the only
+> one. The same night's desktop packages for Windows, macOS and Linux are on
+> [filex.sh/nightly](https://filex.sh/nightly/), and the server side has
+> nightly images too: [Installation → Nightly builds](INSTALLATION.md#nightly-builds).
+
 ### On a phone or a tablet: the web app
 
 There is no desktop app for a phone: on Android, an iPhone or an iPad, filex
@@ -220,7 +249,8 @@ screen will get.
   or the icon opens a Safari tab, which cannot show notifications.
 - **×** on the band closes it for good, on every device you sign in on; the
   desktop app's reminder on a computer is a separate one. The offer stays in
-  the account menu's **Settings → Preferences → Install as a web app** while
+  the account menu's **User settings → Preferences → This device → Install as
+a web app** while
   the browser can install.
 - **Once installed**, nothing is offered on that device, in the installed app
   or a browser tab (the browser stops offering it, and filex remembers the
@@ -228,7 +258,7 @@ screen will get.
 
 **Notifications on a phone.** While filex is open - a tab or the installed
 app - a new row in the bell raises a notification once you allow it in
-**Settings → Notifications** ([browser notifications](NOTIFICATIONS.md#browser-notifications)).
+**User settings → Notifications → This device** ([browser notifications](NOTIFICATIONS.md#browser-notifications)).
 With filex closed, **Push notifications on this device** in the same pane
 carries them on ([Web Push](NOTIFICATIONS.md#web-push)). On an iPhone or iPad
 both work only in the app added to the Home Screen (iOS 16.4 or later), never
@@ -272,7 +302,7 @@ that account's credential and keeps everything else - its synced folders, its
 filex folder, its place on the rail - and its sync restarts with the new
 credential.
 
-**Sign out** (*Settings → Accounts*) forgets the account on this computer and
+**Sign out** (*App settings → Accounts*) forgets the account on this computer and
 stops its sync at once; the files stay where they are, on both sides. Signing
 in afterwards makes a new account here, and you keep its folders again from the
 explorer. To get a working credential back, use **Reconnect** (below) instead.
@@ -289,7 +319,7 @@ notification; the rail shows a red dot on the account, and its file view reads
 - **Reconnect** opens the same browser sign-in for the same server. Sign in as
   the same person and the account gets its new credential and keeps its synced
   folders and its filex folder; sync picks up where it stopped. The same button
-  is on the account in *Settings → Accounts*.
+  is on the account in *App settings → Accounts*.
 - **Sign out** forgets the account, as above.
 
 ### The token the app is given
@@ -333,7 +363,7 @@ person's.
   person with no new sign-in (the command below).
 - **A viewer's pairing made before 0.49.0 holds a `read` token**: its account
   menu answers 403 on a save until the app signs in again - **Reconnect** on
-  the account in *Settings → Accounts*.
+  the account in *App settings → Accounts*.
 
 ```bash
 curl -X PATCH https://files.example.com/api/admin/ai-tokens/42 \
@@ -344,8 +374,9 @@ curl -X PATCH https://files.example.com/api/admin/ai-tokens/42 \
 
 ## Opening and previewing files
 
-**Office documents open in the app**, in the embedded OnlyOffice editor the web
-app uses, when your server has OnlyOffice configured ([OnlyOffice](ONLYOFFICE.md)).
+**Office documents open in the app**, in the editor the web app uses: the
+Office editor app, or ONLYOFFICE when your server has a Document Server
+([Office editing](ONLYOFFICE.md)).
 
 **Each document opens in its own window**, one per document, titled with the
 file's name; the explorer window stays where it is, and the documents are
@@ -353,8 +384,9 @@ separate windows in the taskbar.
 
 **Single click or double click.** By default a single click **selects** and a
 double click **opens** (Enter opens the selection), as in a desktop file
-manager; **Settings → Open files with** switches between *Double-click* and
-*Single-click*. A touchscreen tap always opens, and the checkbox always
+manager; **User settings → Preferences → This device → Open files with** (the
+avatar) switches between *Double-click* and *Single-click* - for this
+computer. A touchscreen tap always opens, and the checkbox always
 selects.
 
 **Open in new tab** opens the file in your **browser**, on your server's own
@@ -398,20 +430,107 @@ Recent and Starred are in the left panel, as on the web.
 
 ## Opening documents from your computer
 
-Double-click a Word, Excel or PowerPoint file **on your own disk** - or a CSV -
-and it opens in the editor your filex server runs, with no Office installed on
-this computer.
+Double-click a file **on your own disk** and it opens in an app one of your
+filex servers runs: a Word, Excel or PowerPoint file - or a CSV - in the office
+editor, with no Office installed on this computer, and every other kind an app
+on your servers opens, in that app. A server with an app that opens Photoshop
+files opens a `.psd` from your desktop.
 
-**Types filex will handle:** `.docx` `.doc` `.xlsx` `.xls` `.pptx` `.ppt`
-`.odt` `.ods` `.odp` `.rtf`, and `.csv`. Deliberately nothing else - images,
-PDFs and code already open in something on every OS. With ONLYOFFICE on the
-server a `.csv` opens in the spreadsheet editor, and a save as CSV comes back
-in the file's own dialect
-([ONLYOFFICE.md → CSV files](ONLYOFFICE.md#csv-files)).
+**The kinds filex handles** are not a list the app keeps:
 
-**Your server needs OnlyOffice** for the editing itself
-([OnlyOffice](ONLYOFFICE.md)). Without it the document opens in whatever viewer
-your server has for that type.
+- **Office documents** - `.docx` `.doc` `.xlsx` `.xls` `.pptx` `.ppt` `.odt`
+  `.ods` `.odp` `.rtf`, and `.csv` - which every install declares to the
+  operating system, and which open where a server has the Office editor app or
+  an ONLYOFFICE Document Server. A `.csv` opens in the spreadsheet editor, and
+  a save as CSV comes back in the file's own dialect
+  ([ONLYOFFICE.md → CSV files](ONLYOFFICE.md#csv-files)).
+- **Every kind an app on one of your servers opens** in its own interface
+  (its `viewer` views - what an administrator granted as `ui-viewer:.<ext>`,
+  [APP-PLUGINS-API.md](APP-PLUGINS-API.md)), unless an administrator switched
+  the app off for that kind in Default apps
+  ([APP-PLUGINS.md → Default apps](APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)).
+  An app installed on a server adds its kinds; one removed takes them away; an
+  account signed out or removed from this computer takes its server's with it
+  ([below](#which-kinds-open-with-filex-and-where)).
+
+**Which editor opens an office document** is your server's ([Office editing](ONLYOFFICE.md)):
+
+| The server has… | The window opens |
+|---|---|
+| an ONLYOFFICE Document Server that answers | what the web app opens for that type: its ONLYOFFICE editor, or the app an administrator put first ([APP-PLUGINS.md → Default apps](APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)) |
+| no Document Server, and the **Office editor app** | the app's editor, for every type in the list above (`/files/edit?…&app=office-editor/editor`) - even where a person or an administrator once picked filex's own viewer, which cannot edit an office document without a Document Server. An app an administrator switched off for a type stays off. |
+| neither | nothing: filex says that none of your servers opens that kind ([below](#which-kinds-open-with-filex-and-where)) |
+
+Any other kind opens in the app you chose for it - **Always open with** in the
+browser is your account's choice, and this app follows the same one - or,
+without a choice, in the first app the server's Default apps list for it
+(`/files/edit?…&app=<app>/<view>`). A choice of an app an administrator
+switched off for the kind, or of filex's own viewer (which edits nothing), is
+kept but not followed here. The round trip below is the same for every kind.
+
+### Which kinds open with filex, and where
+
+The app asks every server it is signed in to which kinds of file its apps open
+(`GET /api/files/plugins/actions`, with the capabilities), when it starts,
+when an account is added, removed or signed out, when its window comes to the
+front (at most every five minutes), every half hour, and right before a
+double-click of a kind it has not asked about in the last minute. A server
+that does not answer keeps what it said last - "could not ask" is not "opens
+nothing".
+
+| Your servers… | A double-click on such a file |
+|---|---|
+| one of them opens the kind | opens it there |
+| the file is inside a folder you keep on this computer | opens its twin, on the server that folder syncs with |
+| more than one opens it | asks where - one button per server (*Document Server on files.example.com*, *Design on files.example.com*) - with **Always open .psd files there**. The remembered answer is followed while that server still opens the kind the same way, and asked again once it does not. *App settings → Open documents with filex → Forget my answers* clears them. |
+| none opens it | says so: *None of your filex servers opens .psd files*, the kinds they do open, and a server that could not be asked. Nothing is copied anywhere. |
+
+**How the operating system learns the kinds** depends on what it lets a
+running app do. filex is only ever **added** to "Open with" - it never takes a
+kind from the app that opens it today, and becoming the default stays your
+choice ([below](#making-filex-the-app-that-opens-them)). On a desktop where
+nothing else opens a kind at all, filex is simply the only app offered for it.
+
+| | While the app runs | What is declared when the package is built |
+|---|---|---|
+| **Windows** (installer) | The kinds are added under your own registry hive - a ProgId of filex's own (`filex.AppDocument`), the kind's `OpenWithProgids` and `Applications\filex.exe\SupportedTypes` - and taken back when no server opens them; Explorer is told at once (`SHChangeNotify`). The first run after a start writes them again, so an update or a registry cleaner cannot leave them behind. Uninstalling filex removes them all. | The office documents |
+| **Windows** (portable `.exe`) | Nothing: the portable copy leaves no trace on the computer. A file dropped on it, or opened with it, still opens on the server that opens its kind. | - |
+| **Linux** (`.deb`, `.rpm`, AUR, AppImage) | A hidden entry in your own applications folder (`~/.local/share/applications/filex-app-openwith.desktop`; an AppImage's own `filex-appimage.desktop`) names the kinds' media types. An extension the system has no type for gets one of filex's own (`application/x-filex-<ext>`, in `~/.local/share/mime/packages/`), always at a lower weight than a system type, so no file the system already types changes hands. Removing the `.deb` or `.rpm` removes both files from every home. | The office documents |
+| **macOS** | Nothing - a Mac app's document types are fixed in the package. | The office documents, and every kind the app store's apps open, at rank *Alternate* |
+| **Microsoft Store** | Nothing - a Store package's registry writes are private to it. | The same |
+| **Snap** | Nothing - a strict snap writes nowhere outside its own folders. | The same, by the media types a desktop gives them. A kind the system has no type for (a snap cannot define one) is not in a snap's "Open with". |
+
+Where a Linux desktop gives an extension more than one media type - `.otf` is
+both a font and an OpenDocument formula template - filex is listed for the
+ones the app says it opens (its own `applies.mime`), so a font app is not
+offered for formula templates; an app that names no type gets every one, as
+nothing tells them apart. The snap's list follows the same rule.
+
+The kinds a package declares come from the app store's signed catalog
+(`apps.filex.sh`), read when the release is built: a kind of an app that is
+not in the store - one an administrator installed from its own repository -
+reaches "Open with" on Windows and Linux only, though a file of that kind
+opened with filex in any other way still opens on the server that has the app.
+
+**Known limits:**
+
+- Removing the `.deb` or `.rpm` cleans the default data folder of every home
+  (`~/.local/share`). Someone who moved theirs with `$XDG_DATA_HOME` keeps the
+  two files there - `applications/filex-app-openwith.desktop` and
+  `mime/packages/filex-app-openwith.xml` under it. The entry is ignored once
+  the app is gone (`TryExec`); remove both and run `update-mime-database` on
+  that `mime` folder to clear them.
+- An AppImage has no uninstaller. Deleting the image leaves its hidden entry
+  (`~/.local/share/applications/filex-appimage.desktop`, ignored from then on)
+  and, when it defined types of its own,
+  `~/.local/share/mime/packages/filex-appimage.xml`, until you remove them.
+- That a hidden entry is offered under "Open with" was measured with GLib
+  (GNOME Files, `gio mime`). KDE Plasma's dialog has not been measured.
+
+**What App settings shows:** *Open documents with filex* has a line *Kinds filex
+opens: N, from the apps on your servers*, the list behind it (*.psd - Design
+on files.example.com*), when the servers were last asked, any that did not
+answer, and **Refresh**, which asks them again and tells the system at once.
 
 ### What happens to the file
 
@@ -422,12 +541,31 @@ Two things can happen, and filex picks the right one per document:
 | inside a folder you **keep on this computer** | Opens its twin on the server directly. Nothing is copied. Saving goes to the server, and sync brings it back down to that same file - the one on your disk. |
 | anywhere else | Copies it to a hidden working folder on your account (`<storage>://.filex-open`), opens that, and **writes every save back over your original file** - as long as it is still the version filex last read or wrote ([below](#when-the-file-changes-while-it-is-open)); a save in another format - an old `.doc` saved as DOCX - goes beside it instead ([below](#a-save-in-another-format)). When you close the window the copy is deleted. (The server allows only this round trip's writes in that folder: [BACKEND.md → Names filex keeps for itself](BACKEND.md#names-filex-keeps-for-itself).) |
 
+**A large file** goes the way the explorer sends one: from 8 MiB up in parts,
+over the server's staged upload ([UPLOADS.md](UPLOADS.md)), and comes back in
+ranged parts. A dropped connection costs one part - the app asks the server
+where it got to and goes on from there - and a file saved again while it is
+coming back is taken whole, never half old and half new. The largest file is
+the server's own upload limit (`max_upload_size`, 5 GB unless an administrator changed it - `upload_limit_mb` in its
+capabilities); a bigger one is refused before anything is sent. Neither way
+holds the whole file in memory: it goes up read from your document one part
+at a time, and a save comes back written straight to a file in the app's own
+data folder (`openwith-spool`, emptied at every start - it needs free space
+for the file's size), checked against its SHA-256 as it replaces your
+document. If you save the document again while it is going up, that upload is
+dropped and the document is sent again, so the copy on the server is always
+one version of it, never half of each. A file of 8 MiB or less goes in one
+request.
+
 In the second case a strip along the bottom of the editor window names the file
 on your disk that saves are landing on, for as long as the window is open.
 
 **The copy is cleaned up** when the editor window closes, after a short wait:
-OnlyOffice writes its last save about ten seconds *after* the editor
-disconnects. Deleted copies land in your account's trash like anything else you
+ONLYOFFICE writes its last save about ten seconds *after* the editor
+disconnects. The Office editor app saves when you press Save (Ctrl+S, ⌘S on a
+Mac) and every ten minutes while there are changes; closing its window with
+changes it has not saved yet asks first: **Close without saving** drops them,
+**Keep editing** goes back to the document. Deleted copies land in your account's trash like anything else you
 delete, and age out under the same retention policy.
 
 **If filex is closed or crashes while a document is open**, the next start
@@ -441,10 +579,11 @@ and name the file that holds your edit. A save never fails silently.
 
 ### A save in another format
 
-ONLYOFFICE saves no Word 97, Excel 97 or PowerPoint 97 file: an edited
-`rapor.doc` comes back as **DOCX**, an `.xls` as XLSX, a `.ppt` as PPTX (and a
-Document Server set to `assemblyFormatAsOrigin: false` saves an ODF file as
-OOXML too; [ONLYOFFICE.md → A save in another format](ONLYOFFICE.md#a-save-in-another-format)).
+Neither ONLYOFFICE nor the Office editor app saves a Word 97, Excel 97 or
+PowerPoint 97 file: an edited `rapor.doc` comes back as **DOCX**, an `.xls` as
+XLSX, a `.ppt` as PPTX (and a Document Server set to
+`assemblyFormatAsOrigin: false` saves an ODF file as OOXML too;
+[ONLYOFFICE.md → A save in another format](ONLYOFFICE.md#a-save-in-another-format)).
 Your `rapor.doc` is **never written** with them - a DOCX under a `.doc` name is
 a file some programs open and some refuse. Instead:
 
@@ -460,9 +599,13 @@ beside it - go with the session; after a crash, a save that never came home is
 put beside the document as `rapor.filex-recovered-<time>.docx`.
 
 The server writes such a save beside its working copy
-(`.filex-open/<session>-rapor.docx`). A server older than 0.51 writes it over
-the working copy instead; the app tells it by its bytes (a zip under a `.doc`
-name) and puts it in the same place.
+(`.filex-open/<session>-rapor.docx`): a Document Server's every save as a new
+file there (`<session>-rapor (2).docx`, …), the Office editor app's later
+saves over the one its first save made. The desktop finds either in the
+working folder's listing and brings the newest home to the same `rapor.docx`.
+A server older than 0.51 writes it over the working copy instead; the app
+tells it by its bytes (a zip under a `.doc` name) and puts it in the same
+place.
 
 ### When the file changes while it is open
 
@@ -495,9 +638,11 @@ document, unless you chose to drop your changes. Working copies go with the
 session, and after a crash the next start recovers what is left (beside the
 document) and removes it.
 
-> A server older than this app serves an editor page that cannot say whether
-> it holds unsaved changes. With such a server the app asks the same question
-> in a dialog of its own, every time the file changes.
+> The Office editor app owns the document it has open and does not follow a
+> change made outside it, and a server older than this app serves an editor
+> page that cannot say whether it holds unsaved changes. In both, the desktop
+> app asks the same question in a dialog of its own, every time the file
+> changes; **Keep the outside version** loads it into the same editor.
 
 A document inside a folder you keep on this computer is the server's file: the
 change reaches the server through sync, and the editor hears it from the server
@@ -506,21 +651,26 @@ change reaches the server through sync, and the editor hears it from the server
 ### Making filex the app that opens them
 
 Installing filex makes it **available** under "Open with". It never takes a file
-type over by itself - that is your decision, and *Settings → Open documents with
+type over by itself - that is your decision, and *App settings → Open documents with
 filex* has the button that gets you to it.
 
 | | What the button does | What it cannot do |
 |---|---|---|
 | **Windows** | Opens the OS's own **Default apps** page, where you pick filex for the type. | Set the default for you: Windows protects that choice (the `UserChoice` key) so that no application can write it. |
-| **Linux** | Runs `xdg-mime default filex-app.desktop …` for these types - which genuinely sets the default. (A snap cannot reach your desktop's settings; Settings explains the file manager's *Open with* instead.) | - |
+| **Linux** | Runs `xdg-mime default filex-app.desktop …` for these types - which genuinely sets the default. (A snap cannot reach your desktop's settings; App settings explains the file manager's *Open with* instead.) | - |
 | **macOS** | Explains where: Finder → **Get Info** → *Open with* → filex → **Change All…** | Set it for you: Electron exposes no binding for the macOS call that does, and filex ships no native code. |
 
 On macOS filex registers with rank *Alternate* on purpose: it appears in the
 "Open with" list and never becomes the handler for a document type merely
 because nothing else has claimed it.
 
+The button is about the office documents. For a kind an app on your servers
+opens - a `.psd`, a `.drawio` - pick filex the same way the OS always lets you:
+*Open with → Choose another app → Always* on Windows, *Open With… → Set as
+default* in a Linux file manager, *Get Info → Change All…* in Finder.
+
 > A run from source (`electron .`) is registered with nothing - only an
-> installed copy is. Settings says so, rather than offering a button that would
+> installed copy is. App settings says so, rather than offering a button that would
 > point your OS at a copy of Electron.
 
 ---
@@ -547,33 +697,35 @@ read here too.
 **The native notification** (a Windows toast, macOS Notification Center, the
 Linux desktop's) still arrives for everything new, also with the window closed
 and filex in the tray. Clicking it opens the same place as its row in the bell
-does, **and marks it read**. *Settings → Notifications* turns the native ones
-off; the bell stays. The app reads the bell once every 15 seconds for the
+does, **and marks it read**. *User settings → Notifications → This device →
+Desktop notifications* turns the native ones off; the bell stays. The app reads the bell once every 15 seconds for the
 native notifications, the dock / taskbar badge (and the tray tooltip) and the
 bell in the window alike - the window adds no requests of its own.
 
 **The avatar** holds your settings as a person on this server - the
-interface's. The app's own settings are behind ⚙ at the bottom of the rail.
+interface's. The app's own, **App settings**, are behind ⚙ at the bottom of
+the rail.
 
 | Row | What it does |
 |-----|--------------|
-| **User settings** | Opens the web app's settings dialog **in this window** - the same dialog, not a copy: *Profile* (name, e-mail, username, picture), *Preferences* (time zone, light / automatic / dark and the palette, compact file list, how an untouched folder opens, your storage), *Notifications* (the bell on or off, which events reach you) and *Security* (password, two-factor sign-in). It saves to your account on the server, so a browser shows the same choices. |
+| **User settings** | Opens the web app's settings dialog **in this window** - the same dialog, not a copy: *Profile* (name, email, username, picture), *Preferences* in two parts - **Account** (language, time zone, light / automatic / dark and the palette, compact file list, how an untouched folder opens, whether previews load remote images, default apps, your storage) and **This device** (one click or two, the keyboard shortcuts) - *Notifications* in two parts - **My account** (the bell on or off, which events reach you) and **This device** (*Desktop notifications*, this app's own) - and *Security* (password, two-factor sign-in). What is the account's is saved on the server, so a browser shows the same choices. |
 | **Admin panel ↗** | Administrators only - the server's console, in the browser. |
-| *Shortcuts*, *Restart the tour* | The file list's own settings that are not in the dialog (a narrow window keeps a "..." for the folder's own verbs only). The view modes and the details panel are not here either: their switches are on screen at the end of the folder bar. |
+| *Restart the tour* | The file list's own row that is not in the dialog (a narrow window keeps a "..." for the folder's own verbs only). The view modes and the details panel are not here either: their switches are on screen at the end of the folder bar. |
 
 The server's version sits at the foot, as it does on the web.
 
 **Signing out is not in the avatar**: signing an account out of *this app* is
-done in *Settings → Accounts*, beside every other account on the rail.
+done in *App settings → Accounts*, beside every other account on the rail.
 
-What the avatar and its dialog do **not** repeat, because it has a home in this
-app already: the language and single-click opening, running in the background,
-native notifications and starting at sign-in (*Settings → This app* - the web
-dialog's own switches for them are left out here); synced folders, the filex
-folder, *Pause sync*, bandwidth and hours (*Settings → Synced folders*);
-storage connections and mounting as a drive (*Settings*); other accounts and
-signing out (the rail, and *Settings → Accounts*). The web dialog's start page
-and desktop-app downloads mean nothing in the app and are not drawn.
+**App settings** (⚙) keeps only what is this computer's alone: the accounts
+signed in on it and signing out (*App settings → Accounts*); storage
+connections and mounting as a drive; synced folders, the filex folder, *Pause
+sync*, bandwidth and hours (*App settings → Synced folders*); running in the
+background, starting at sign-in, a portable copy (*App settings → This app*);
+opening documents with filex; updates. The language, single-click opening and
+the native notifications are rows of *User settings*: one control each, in the
+one dialog every filex front door has. The web dialog's start page and
+desktop-app downloads mean nothing in the app and are not drawn.
 
 ### The App store
 
@@ -594,11 +746,12 @@ list inside the window, the notifications and the sync engine's messages all
 speak the language of the account on screen - the same one the web panel, your
 phone's push notifications and your emails use.
 
-*Settings → Language* - **English** or **Türkçe** - **changes your account's
-language** on the server, so the web panel follows too. With nobody signed in -
-or an account the server has signed out, until you reconnect it - there is
-no account to change: the app speaks your operating system's language (or the
-account's last known one) and the choice is greyed out. A language changed
+*User settings → Preferences → Language* (the avatar) - **English** or
+**Türkçe** - **changes your account's language** on the server, so the web
+panel follows too. With nobody signed in - or an account the server has signed
+out, until you reconnect it - there is no account to change: the app speaks
+your operating system's language (or the account's last known one) and there
+is no file list, so no avatar to pick another in. A language changed
 somewhere else (the web panel, another computer) reaches the app when you start
 it, switch accounts or bring the window forward.
 
@@ -616,19 +769,20 @@ English or Turkish (whichever of the two the operating system uses).
 
 ## How it looks
 
-There is no appearance setting in *Settings*: the theme and the palette are set
+There is no appearance setting in *App settings*: the theme and the palette are set
 where every other filex front door sets them - the **avatar** at the top right,
 *User settings → Preferences → Appearance* (and *Compact file list* beside it).
-The app's own chrome - the account rail, Settings, the boot and sign-in
+The app's own chrome - the account rail, App settings, the boot and sign-in
 screens, the dialogs - follows that choice in light, dark and every palette,
 and the window reopens on the colour it last painted, so a dark palette does
 not flash white first.
 
-⚠ This app remembers that choice **on this computer**, in its own window
-storage. The web app keeps it on your account
-([`/api/me/prefs`](BACKEND.md#interface-preferences)), so a palette picked in a
-browser is not carried into this app, and one picked here is not carried into
-a browser.
+This app keeps that choice **on your account**, as the web app does
+([`/api/me/prefs`](BACKEND.md#interface-preferences), in the account's
+*desktop* document): the app on another computer opens in the same light or
+dark, palette and density. The browser keeps its own (*web*) document, so a
+palette picked in a browser is not carried into this app, and one picked here
+is not carried into a browser.
 
 **The windows are frameless.** On **Windows and Linux** filex draws its own
 minimize / maximize / close - in a slim title bar on the main window, and in a
@@ -693,7 +847,7 @@ While the engine is working, a strip along the bottom of the window names the
 folder it is on and shows what it is doing - listing, or `12/345` with a
 progress bar. It disappears when the run settles.
 
-Under each folder in *Settings* the same line says what is true of it now:
+Under each folder in *App settings* the same line says what is true of it now:
 
 - the phase, with its figures ("listing the server - 48,211 items so far",
   "97 changes to make", "finishing up - 40/97");
@@ -726,7 +880,7 @@ count.
 
 ### The filex folder on this computer
 
-*Settings ⚙ → filex folder on this computer* names the root, opens it, and can
+*App settings ⚙ → filex folder on this computer* names the root, opens it, and can
 **change it**. Kept folders move with it: the account's watcher is stopped, each
 mirror is relocated under the new root and its pair is **repointed** there
 (`filex sync move`), history and all - so the pass that follows is an ordinary
@@ -749,21 +903,40 @@ server has, in a server folder that already has content - which is what an old
 copy of the folder (a restored backup, a machine that was away for months)
 looks like. The engine holds those items instead of uploading them
 ([the rule](SYNC.md#a-first-run-that-would-re-upload-a-stale-copy-asks-first)),
-and the folder's card in *Settings → Synced folders* says how many items on
+and the folder's card in *App settings → Synced folders* says how many items on
 this computer are not on the server or differ from it, with two buttons:
 
 - **Upload them** - they are wanted: they go to the server on the next run.
-- **Move to local trash** - they are not: after one more question they move into
-  this computer's sync trash, kept for 30 days (*Removed by sync*). Nothing on
-  the server changes.
+- **Delete from this computer** - they are not: after one more question, each
+  held file the server still has an identical copy of (in your trash there, or
+  elsewhere in the folder's storage) is deleted from this computer, so nothing is
+  lost. The others stay and keep waiting, and a dialog lists them with the
+  reason for each - the server has no copy, the file changed after it was held,
+  or the server could not be asked
+  ([SYNC.md](SYNC.md#a-first-run-that-would-re-upload-a-stale-copy-asks-first)).
+  Nothing on the server changes.
 
 Everything else in the folder keeps syncing while it waits, and after either
 answer the folder's sync restarts at once.
 
+### Names this computer cannot hold
+
+A server file this computer cannot name as it is (on Windows `CON`,
+`a:b.txt`, `report.`; a name longer than the disk holds; on Windows and macOS
+`Rapor.docx` beside `rapor.docx`) is synced under a safe name (`_CON`,
+`a_b.txt`, `report_`, `rapor (2).docx`) and listed on the folder's card as
+**Named differently on this computer**. A change you make to it goes back to
+the server's original name, and nothing on the server is renamed or deleted
+because of a name. A file that cannot be synced because of its name - its safe
+name is taken here by another file, or the server does not accept a name you
+gave a file here - stays listed under the folder until it is renamed. **Open
+with filex** on a file kept under a safe name opens the server's file. The
+rules: [Names your computer cannot hold](SYNC.md#names-your-computer-cannot-hold).
+
 ### Bandwidth and hours
 
 A first sync of a large store can fill the server's line for hours.
-*Settings → Synced folders* has three rows for the engine:
+*App settings → Synced folders* has three rows for the engine:
 
 - **Download limit** and **Upload limit** - Unlimited, 10, 5 or 1 MB/s, shared
   by all of one account's transfers (they run four at a time); each signed-in
@@ -779,7 +952,7 @@ A first sync of a large store can fill the server's line for hours.
   at start, with the engine's reason under the row.
 
 A change restarts the watchers at once, so it applies to a transfer already
-running. The line under each folder in Settings says what the engine is doing
+running. The line under each folder in App settings says what the engine is doing
 with it right now - listing the server, moving files, finishing up, waiting for
 the window - or the error from its last round. While files move it reads, for
 example, *moving files - 120/11,704, 1.2 GB of 52.6 GB - about 8 h 10 min
@@ -806,7 +979,7 @@ shows up in it).
 
 ## Syncing folders by hand
 
-**Settings ⚙ → Sync a folder…** picks a folder on the server by browsing it, then
+**App settings ⚙ → Sync a folder…** picks a folder on the server by browsing it, then
 asks which folder on this computer to keep it in step with. Use it when the
 local folder already exists somewhere else - a photo library, a project checkout -
 and should stay there instead of moving under the filex root.
@@ -819,8 +992,9 @@ short:
 - The **first sync deletes nothing** - both sides are merged.
 - A **delete never beats an edit**.
 - Changed in both places → **both are kept**.
-- Anything sync removes from this computer is **kept for 30 days**
-  (*Settings → Removed by sync*).
+- Anything sync deletes from this computer was deleted on the server, and is
+  restored from the server's **Trash** in the file list (since 0.57 there is no
+  local copy: see [SYNC.md](SYNC.md#deletions-are-restored-from-the-servers-trash)).
 
 ---
 
@@ -872,6 +1046,12 @@ travelling to this computer.
 
 Route 2 needs a recursive filesystem watch, which Windows and macOS have and
 Linux does not; on Linux the app stays on route 1 (prepared copies).
+
+A dragged file arrives under a name the computer can hold: a character Windows
+forbids, a control character, a bidi control and a trailing dot or space
+become `_`, a Windows device name gets a `_` in front, and two names that are
+one name on that computer (`Rapor.docx`, `rapor.docx`) both arrive, the second
+as `rapor (2).docx` ([File names](FILE-NAMES.md)).
 
 ### In a browser
 
@@ -931,7 +1111,7 @@ link.
 
 ## Mounting the server as a drive
 
-*Settings → Mount as a drive* attaches the server - every storage you can see -
+*App settings → Mount as a drive* attaches the server - every storage you can see -
 as a drive of the operating system over WebDAV, and **Detach** takes it off
 again. The credential is the account's own token, handed to the system's
 mounter on its input: it never appears on a command line or in the log. The
@@ -952,10 +1132,10 @@ are better synced than opened through the Windows drive. For mounting by hand,
 ## Running in the background
 
 Closing the window leaves filex in the tray and **sync keeps running**. Turn
-that off in *Settings → Keep running in the background*, and closing the window
+that off in *App settings → Keep running in the background*, and closing the window
 quits.
 
-*Start when I sign in* registers filex as a login item. Settings reports what
+*Start when I sign in* registers filex as a login item. App settings reports what
 the OS actually did with that request, not what was asked for, since policies
 and sandboxes often refuse it; on Windows an entry still in the registry but
 switched off in Task Manager's *Startup apps* reads as off.
@@ -974,7 +1154,7 @@ locks as usual, and a closed lid, the power button or a flat battery still put
 the machine to sleep. The hold is released the moment the round settles, and on
 quit.
 
-**Pause sync** - in the tray menu, and as a switch at the top of *Settings →
+**Pause sync** - in the tray menu, and as a switch at the top of *App settings →
 Synced folders* - stops every folder's sync, on every account, until you resume
 it, and stays paused across a restart, a reboot and the hidden start at
 sign-in. The window keeps working; only the background transfers stop, and the
@@ -999,7 +1179,7 @@ install also **waits for sync** - an idle machine with no window open is exactly
 what an overnight first sync looks like - so it installs only once no folder is
 being worked on (or when you quit).
 
-*Settings → Updates* shows what it is doing and offers **Install it now**.
+*App settings → Updates* shows what it is doing and offers **Install it now**.
 `FILEX_NO_UPDATE=1` turns the whole thing off.
 
 Every release is installed over the previous one on real Windows and Ubuntu
@@ -1016,7 +1196,7 @@ them.
 > ⚠ **The portable Windows copy does not update itself either**, for a
 > different reason: it is one self-extracting `.exe`, with no install directory
 > to patch and no installer to hand the running copy over to. As on macOS
-> (below), nothing is downloaded that could not be applied: *Settings →
+> (below), nothing is downloaded that could not be applied: *App settings →
 > Updates* says that this copy does not update itself and offers a
 > **Download** button. Updating is: fetch the new `.exe`, put it over the old
 > one. The `filex-data` folder beside it is untouched, so your accounts and
@@ -1025,7 +1205,7 @@ them.
 > ⚠ **On macOS the app does not update itself yet.** The updater refuses to
 > swap an unsigned app (Squirrel.Mac checks the signature of what it installs),
 > so until the build is signed a new version means downloading the new `.dmg`
-> yourself. A build that cannot swap itself downloads nothing, and *Settings →
+> yourself. A build that cannot swap itself downloads nothing, and *App settings →
 > Updates* shows the new version with a **Download** button instead.
 
 ---
@@ -1036,9 +1216,10 @@ them.
 |---|---|
 | Account tokens | Your OS keychain (Windows Credential Manager / macOS Keychain / libsecret). The app **refuses to store a token in plaintext** if the keychain is unavailable. |
 | Which folders are paired | `~/.filex/sync/pairs.json` - shared with the CLI |
-| Sync bookkeeping + local trash | `~/.filex/sync/` |
+| Sync bookkeeping (and an older version's local trash, swept after 30 days) | `~/.filex/sync/` |
 | Window state, account list | The app's own config directory |
 | Documents open through "Open with" | One small record per document in `openwith/` under the app's config directory - the note of which local file a working copy has to go home to. It is written before the editor opens, which is what makes a crash recoverable, and removed when the copy is cleaned up. |
+| The kinds your servers open | `openwith-apps.json` under the app's config directory: which kinds each server's apps open, the answers you asked filex to remember when more than one does, and what the system was told - so a kind is taken back from "Open with" even when its server is gone before the next start. Kinds and app names only; no token. |
 | An edit that could not be written back | `openwith-recovered/` under the app's config directory, when even the document's own folder refused the write. The dialog names the exact path. |
 
 **The portable copy moves every one of those rows into one folder beside the
@@ -1062,7 +1243,7 @@ software, and double-click it.
 account list, your settings, the log, the drag-out cache, the working copies of
 documents opened with *Open with filex*, and the sync engine's own bookkeeping.
 Delete the folder and nothing of yours is left on a machine that is not yours;
-*Settings* shows its exact path with a button that opens it.
+*App settings* shows its exact path with a button that opens it.
 
 ```
 D:\
@@ -1084,7 +1265,7 @@ Two things it does **not** do, on purpose:
 
 > ⚠ **If the `.exe` sits somewhere it cannot write** - `C:\Program Files`, a
 > read-only stick, a share mounted without write access - it still starts, falls
-> back to `%APPDATA%\@brftech\filex-desktop-portable` and **says so in Settings,
+> back to `%APPDATA%\@brftech\filex-desktop-portable` and **says so in App settings,
 > with the path**. That directory is deliberately not the installed app's own
 > profile: a copy carried in from outside must never read or write the accounts
 > of whoever owns the machine.
@@ -1115,7 +1296,7 @@ once it is back. (A server that answers but refuses the credential shows
 do not sign out first: signing out forgets which folders the account was
 keeping on this computer.)
 
-**Nothing syncs, and Settings says the engine is missing** - the package could
+**Nothing syncs, and App settings says the engine is missing** - the package could
 not find the `filex` binary it ships with. Reinstall, or point the app at a CLI
 you have with `FILEX_CLI=/path/to/filex`.
 
@@ -1126,20 +1307,31 @@ clears by itself (and the dot on the rail turns back) as soon as a later round
 of the same folder goes through.
 
 **An Office document will not open**, or the editor area stays blank - first
-check that your server has OnlyOffice configured at all
-([OnlyOffice](ONLYOFFICE.md)); the web app in your browser is the quickest test.
+check that your server has an office editor at all: the Office editor app
+installed, or an ONLYOFFICE Document Server configured
+([Office editing](ONLYOFFICE.md)); the web app in your browser is the quickest
+test.
 If it works there but not here, update the app: on v0.13.4 and older the
 editor's config request was answered `401` because the app's token never
 reached it, and **Open in new tab** did nothing. A build older than v0.13.0
 opens on an admin panel instead of your files.
 
 **Double-clicking a .docx still opens the old app** - installing filex adds it
-to the "Open with" list; it does not become the default. Pick it once: *Settings
+to the "Open with" list; it does not become the default. Pick it once: *App settings
 → Open documents with filex* takes you to the right place on your OS. On Windows
 that page is the only place the default can be set at all.
 
-**filex says it cannot open the file** - it opens office documents only (the
-list is in *Settings*). Anything else stays with the app you already use.
+**"None of your filex servers opens .psd files"** - no app on a server you are
+signed in to opens that kind (the message lists the kinds they do open). An
+administrator adds one from the app store; after that, *App settings → Open
+documents with filex → Refresh* (or the next double-click) finds it. A server
+named as "could not be asked" was not reachable: try again once it answers.
+
+**filex is not under "Open with" for a kind its apps open** - on macOS, in the
+Microsoft Store copy and in the snap the list is fixed when the package is
+built, from the app store's catalog: an app installed from elsewhere is not in
+it ([Which kinds open with filex](#which-kinds-open-with-filex-and-where)). The
+portable `.exe` registers nothing at all.
 
 **"Sign in to filex first"** - the app has no account yet, so there is no server
 to open the document on. Add one and try again.

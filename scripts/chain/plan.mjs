@@ -47,54 +47,88 @@ export const SHARD_LISTS = {
  * the databases, and the host stalled for a minute at the start of three of
  * five runs (PSI memory "full" 0.55-0.73) while the budget said 8 of 8 GiB.
  *
- * measured (the four 0.53 full runs of 2026-10-06/07 and the night of
- * 2026-10-07; min-max of the per-run peaks):
- *   build 3.44-4.72 · web 2.00-3.03 · docs 0.31 · shards-check 0.69-0.95 ·
- *   go 0.13-0.76, go-io-rest 0.57-1.22 · race-db-io/race-rest 0.34-1.22 ·
- *   race shard 0.12-0.86 · Cypress 0.85-1.39 · Playwright chromium 3.26-3.92,
- *   firefox 2.91-3.17, webkit 3.83-4.04, nopub 2.07-3.05, nods 1.35-1.45 ·
- *   Document Server 0.63-0.72 · MySQL 0.68-0.77 + PostgreSQL 0.14 + Redis and
- *   Samba 0.04 · shots 1.06 (one run)
- * e2etsc, migrate and race-build end before a sample catches them (4-28 s).
- * cAdvisor refreshes a container about once a minute, so these are floors:
- * the -race jobs keep 1.5 for the 1.22 seen (their cgroup's own peak, page
- * cache included, was 1.8). JOB_WEIGHTS holds the jobs measured above their kind.
+ * measured (result.json `load.mem_gb`, the job's cgroup sampled every 5 s:
+ * the nights of 2026-10-10, -12 and -13, 0.56; min-max of the per-run peaks):
+ *   build 4.75-4.84 · web 2.94-3.05 · docs 1.12-1.39 · shards-check
+ *   0.98-1.07 · e2etsc 0.03-0.41 · go 0.28-0.91, go-handlers-1-2 0.43-1.04,
+ *   go-io-rest 0.96-1.22 · race-build 0.25-1.11 · race-db-io 1.55-1.67,
+ *   race-rest 1.05-1.35, race-auth 0.64-0.74 · race shard 0.14-0.95 ·
+ *   Cypress 1.40-1.70 · Playwright chromium 6.62-6.85 (7.15 on its own,
+ *   2026-10-15; 4.15 recording nothing, below), firefox 5.52-5.64, webkit
+ *   4.98-5.31, nopub 1.66-1.74, nods 1.53-1.60, s3 0.46-0.71 ·
+ *   ds-go 0.87-1.01 · s3-live 0.29 (one night) · shots 2.28-2.52
+ * and before them (0.53, cAdvisor): Document Server 0.63-0.72, MySQL
+ * 0.68-0.77 + PostgreSQL 0.14 + Redis and Samba 0.04.
  *
- * The nightly extras until a night measures them: ds-go and s3-live are Go
- * test binaries (budgeted as a Go job), realenv a Playwright runner next to
- * Keycloak, OpenLDAP, Pebble and its own Document Server (as an engine);
- * shots held 1.06 in its one run and stays at an engine's 4.
+ * ⚠⚠ Task #194, third part (2026-10-15): until 0.57 a Playwright line was
+ * budgeted at 4.25 from the 0.53 runs, and the Chromium line held 6.62-6.85
+ * every night of 0.56. What it holds besides the browser: its /tmp, a tmpfs
+ * since 0.55 (the server's data and the specs' storages are memory: 173's
+ * 1 GiB file holds 1.5 GiB of it for a minute), and the one Playwright worker
+ * that runs every spec of a line. A Chromium line measured on its own on
+ * 2026-10-15 grew to its end: the worker 1.5 GiB resident seven minutes in,
+ * 3.4 fifteen minutes later, the line 7.15 GiB in its last minute with 0.6 in
+ * the tmpfs. The same line recording nothing: the worker 1.2 GiB at its end,
+ * the line 4.15 GiB (memory.peak 4.36), 23.5 minutes instead of 27.9 - the
+ * worker kept what recording every test (trace and video) left it. The chain
+ * records a test only when it fails, on its second attempt
+ * (CHAIN_E2E_RECORD=retry, e2e/helpers/record.ts), and Chromium is budgeted
+ * for that; Firefox, WebKit and the narrowed lines keep what they held
+ * recording until a night measures them without.
+ *
+ * The nights stayed calm only because CHAIN_MEM_GB (8) was itself 2 GiB short
+ * of what the host gave: the budget said 8 of 8 while the jobs held more. The
+ * weights say what the jobs hold again; the budget is what the host gives
+ * (CHAIN_MEM_GB 10, and less when MemAvailable is less); and the browser
+ * round holds only what its heaviest line STILL TO RUN needs (trackShare), so
+ * the pool gets an engine's share back once no line after it needs as much.
+ *
+ * realenv (a Playwright runner next to Keycloak, OpenLDAP, Pebble and its own
+ * Document Server) keeps an engine's 4 until a night measures it.
  */
 export const WEIGHTS = {
   build: 5,
   web: 3.25,
-  docs: 0.5,
+  docs: 1.5,
   e2etsc: 0.5,
-  'shards-check': 1,
+  'shards-check': 1.25,
   go: 1,
   migrate: 0.25,
-  'race-build': 1,
+  'race-build': 1.25,
   race: 1.5,
   'race-shard': 1,
-  cypress: 1.5,
-  e2e: 4.25,
+  cypress: 1.75,
+  // A Playwright line the plan does not name (a targeted run's line, a part
+  // of a split one): the heaviest engine line measured (Firefox).
+  e2e: 5.75,
   ds: 0.75,
   db: 1,
-  'ds-go': 1,
+  'ds-go': 1.25,
   's3-live': 1,
-  shots: 4,
+  shots: 2.75,
   realenv: 4,
 };
 
 /**
- * Jobs measured above their kind's weight, by job name (a shard of
- * scripts/test-shards.json): web/tests/deploy/chainSchedule.test.ts holds
- * that each still names a job of the full plan, so a renamed shard cannot
- * silently lose its weight.
+ * Jobs whose own measurement is not their kind's, by job name (a shard of
+ * scripts/test-shards.json, a line of scripts/chain/lists/e2e.txt):
+ * web/tests/deploy/chainSchedule.test.ts holds that each still names a job of
+ * the full plan, so a renamed shard or line cannot silently lose its weight.
  */
 export const JOB_WEIGHTS = {
-  // internal/io and the rest of the packages: 0.57-1.22 GiB against 0.2-0.76 for the other Go shards.
+  // internal/io and the rest of the packages: 0.96-1.22 GiB against 0.28-0.91 for most Go shards.
   'go-io-rest': 1.25,
+  'go-handlers-1-2': 1.25,
+  // sync, ops, dav, s3api and the database packages under -race: 1.55-1.67.
+  'race-db-io': 1.75,
+  // The engines: the suite's worker, the browser and the line's tmpfs together.
+  // Chromium recording only a failed test's second attempt (4.15 measured).
+  'e2e-chromium': 4.5,
+  'e2e-firefox': 5.75,
+  'e2e-webkit': 5.5,
+  'e2e-nopub': 1.75,
+  'e2e-nods': 1.75,
+  'e2e-s3': 0.75,
 };
 
 /** A job's weight: its own (JOB_WEIGHTS), else its kind's. */
@@ -599,4 +633,20 @@ function testEnv(row) {
 export function trackWeight(track) {
   if (track.length === 0) return 0;
   return Math.max(...track.map((t) => t.weight)) + (track.some((t) => t.ds) ? WEIGHTS.ds : 0);
+}
+
+/**
+ * GiB the browser round holds while its line `at` (an index into the round)
+ * runs: the heaviest line from there on, plus the Document Server while a line
+ * still to run needs it (run.mjs stops it once none does).
+ *
+ * ⚠ Task #194: the share of the heaviest line STILL TO RUN, not of the line
+ * running. The lines run in list order and the share only shrinks, so what
+ * the pool takes once Firefox is done (its 5.75 GiB) is never memory a later
+ * line needs: the round never waits on the pool. A share of the running line
+ * alone would let the pool fill up beside Cypress (1.75) and leave Firefox
+ * waiting behind it.
+ */
+export function trackShare(track, at = 0) {
+  return trackWeight(track.slice(Math.max(0, at)));
 }

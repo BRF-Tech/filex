@@ -72,3 +72,41 @@ describe('connect()', () => {
     await expect(connect()).rejects.toMatchObject({ code: 'unavailable' });
   });
 });
+
+describe('a .csv through the SDK (filex 0.57)', () => {
+  it('passes the csv declaration with the save, and answers the whole read with its dialect', async () => {
+    const parent = { postMessage: vi.fn() };
+    const restore = asFrame(parent);
+    try {
+      const { connect } = await freshSdk();
+      const p = connect({ applyTheme: false, saveShortcut: false });
+      const ch = new MessageChannel();
+      const host = ch.port1;
+      const asked: Array<{ method: string; params: unknown }> = [];
+      const dialect = { delimiter: ';', bom: false, crlf: true, encoding: 'windows-1254' };
+      host.onmessage = (ev) => {
+        const m = ev.data;
+        asked.push({ method: m.method, params: m.params });
+        if (m.method === 'session.get') {
+          host.postMessage({ id: m.id, result: { v: 1, app: { name: 'x', version: '1' }, files: [{ index: 0, name: 'a.csv' }], grants: [] } });
+        } else if (m.method === 'file.read') {
+          host.postMessage({ id: m.id, result: { name: 'a.csv', size: 3, mime: 'text/csv', text: 'a;b', text_dialect: dialect } });
+        } else if (m.method === 'file.save') {
+          host.postMessage({ id: m.id, result: { saved: true, size: 3 } });
+        }
+      };
+      window.dispatchEvent(new MessageEvent('message', { data: { type: PORT, v: 1 }, source: parent as unknown as Window, ports: [ch.port2] }));
+      const fx = await p;
+      const file = await fx.open();
+      const read = await file.read('text');
+      expect(read.text_dialect).toEqual(dialect);
+      expect(asked.find((a) => a.method === 'file.read')?.params).toEqual({ index: 0, as: 'text' });
+
+      const csv = { delimiter: ';', encoding: 'utf-8', bom: false, eol: 'lf' as const };
+      await fx.save('a;b\n', { csv });
+      expect(asked.find((a) => a.method === 'file.save')?.params).toMatchObject({ index: 0, data: 'a;b\n', csv });
+    } finally {
+      restore();
+    }
+  });
+});

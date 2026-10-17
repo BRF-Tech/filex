@@ -4,44 +4,50 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
 
-// TrashRetentionDays is how long a file deleted by sync is kept on this
-// machine before it is really gone.
+// LegacyTrashDays is how long the LOCAL SYNC TRASH an older filex left behind
+// keeps what it holds before the engine sweeps it (SweepLegacyTrash).
 //
-// Sync deletes files because the OTHER side lost them, which is exactly when a
-// mistake is least visible: a folder emptied on a phone quietly empties the
-// laptop too. The local copy is the last line of defence, so it is kept for a
-// month rather than a few days.
-const TrashRetentionDays = 30
+// ⚠⚠ Since 0.57 (task #259) sync keeps no local trash. A file deleted on the
+// server is deleted here directly: the copy that matters is the one in the
+// SERVER's trash, where every deletion lands and from where it is restored
+// (a file deleted here goes to the server's trash the same way). The local
+// trash was a second copy of every deleted file, moved out of the sync folder
+// into a hidden folder in the person's profile - copied and removed when the
+// sync folder was on another drive - and that is the behaviour an
+// antivirus's ransomware heuristics are written to catch: Bitdefender
+// stopped filex.exe in the middle of a sync and quarantined the user's files
+// (a folder deleted on the server, the deletion reaching a Windows client).
+// What an older version already put there keeps the promise it was put there
+// under - 30 days - and is then swept like before.
+const LegacyTrashDays = 30
 
 // Store holds the on-disk state for every pair: the baseline that makes change
-// detection possible, and the trash that makes deletes recoverable.
+// detection possible, and the hold that waits for a person's decision.
 //
 // Layout under Dir:
 //
 //	pairs.json                     the configured pairs
 //	baseline/<pair-id>.json        last agreed state
 //	held/<pair-id>.json            a hold: local items kept for a decision (hold.go)
-//	trash/<pair-id>/<stamp>/...    files this engine deleted locally
+//	trash/<pair-id>/<stamp>/...    an older filex's local trash, swept after LegacyTrashDays
 type Store struct{ Dir string }
 
 // DefaultStoreDir is $FILEX_SYNC_DIR when set, otherwise ~/.filex/sync (beside
 // the CLI's own config, which honours $FILEX_CLI_CONFIG the same way).
 //
-// ⚠ The override is not a convenience. This directory holds the pairs, the
-// per-pair baselines and the local trash — which contains real copies of files
-// the engine deleted. The desktop app's PORTABLE build runs from a USB stick on
+// ⚠ The override is not a convenience. This directory holds the pairs and the
+// per-pair baselines (and, from an older filex, a local trash with real copies
+// of deleted files). The desktop app's PORTABLE build runs from a USB stick on
 // a machine that is not the user's, and everything it keeps has to live in its
 // own folder so that deleting that folder leaves nothing behind. Without this,
 // a portable copy would seed somebody else's home directory with another
-// person's deleted files.
+// person's state.
 func DefaultStoreDir() (string, error) {
 	if dir := os.Getenv("FILEX_SYNC_DIR"); dir != "" {
 		return dir, nil
@@ -242,6 +248,9 @@ func (s *Store) RemovePair(id string) error {
 	if err := os.Remove(s.path("held", id+".json")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	if err := os.Remove(s.path("names", id+".json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	return nil
 }
 
@@ -374,73 +383,6 @@ func (s *Store) ConfirmHeld(pairID string) (int, error) {
 	return len(h.Items), s.saveHold(pairID, holdFile{})
 }
 
-// DiscardHeld ends a hold by moving the held files into the pair's local sync
-// trash (recoverable for TrashRetentionDays), so the next run makes this side
-// match the server: files that are only here are gone, and a file that
-// differs comes down from the server. A folder that held only such files is
-// removed once empty. A file whose signature changed since it was held is
-// not what the person decided about: it is left in place and counted in kept.
-//
-// ⚠⚠ So is a file that has a baseline row by now. A row means the engine has
-// since recorded it as in step on BOTH sides — an identical copy turned up on
-// the server and was adopted, say — and trashing it here would make the next
-// run carry the deletion to the server.
-func (s *Store) DiscardHeld(p Pair, now time.Time) (moved, kept int, err error) {
-	h, err := s.loadHold(p.ID)
-	if err != nil {
-		return 0, 0, err
-	}
-	base, _, err := s.LoadBaseline(p.ID)
-	if err != nil {
-		return 0, 0, err
-	}
-	var files, dirs []string
-	for rel, sig := range h.Items {
-		if sig == "dir" {
-			dirs = append(dirs, rel)
-		} else {
-			files = append(files, rel)
-		}
-	}
-	sort.Strings(files)
-	for _, rel := range files {
-		lp, err := localPathOf(p.Local, rel)
-		if err != nil {
-			return moved, kept, err
-		}
-		info, err := os.Lstat(lp)
-		if errors.Is(err, os.ErrNotExist) {
-			continue // already gone: nothing to decide
-		}
-		if err != nil {
-			return moved, kept, err
-		}
-		cur := Node{Rel: rel, Size: info.Size(), ModMillis: info.ModTime().UnixMilli()}
-		if _, agreed := base[rel]; agreed || !info.Mode().IsRegular() || cur.Signature() != h.Items[rel] {
-			kept++
-			continue
-		}
-		if err := s.TrashLocal(p.ID, p.Local, rel, now); err != nil {
-			return moved, kept, err
-		}
-		moved++
-	}
-	// Deepest first, and only when empty: a folder that still holds anything
-	// keeps it.
-	sort.Slice(dirs, func(i, j int) bool {
-		return strings.Count(dirs[i], "/") > strings.Count(dirs[j], "/")
-	})
-	for _, rel := range dirs {
-		if _, agreed := base[rel]; agreed {
-			continue
-		}
-		if lp, err := localPathOf(p.Local, rel); err == nil {
-			_ = os.Remove(lp)
-		}
-	}
-	return moved, kept, s.saveHold(p.ID, holdFile{})
-}
-
 func overlaps(a, b string) bool {
 	a = filepath.Clean(a)
 	b = filepath.Clean(b)
@@ -498,40 +440,120 @@ func (s *Store) SaveBaseline(pairID string, b Baseline) error {
 	return writeAtomic(s.path("baseline", pairID+".json"), raw)
 }
 
-// ─────────────────────────── trash ───────────────────────────
+// ─────────────────────────── names ───────────────────────────
 
-// TrashLocal moves a path out of the sync folder instead of deleting it.
-//
-// The engine NEVER calls os.Remove on user content: everything it removes from
-// disk lands here first, under a per-run timestamp, and is only really gone
-// once PruneTrash finds it older than the retention window.
-func (s *Store) TrashLocal(pairID, root, rel string, now time.Time) error {
-	src, err := localPathOf(root, rel)
+// LoadNames returns the pair's name pairings: server path → path here, for
+// the items synced to this computer under another name (localnames.go). No
+// file, or one that cannot be read, is no pairings: the next pass maps every
+// item again, and gives it the name it gave it before.
+func (s *Store) LoadNames(pairID string) (map[string]string, error) {
+	raw, err := os.ReadFile(s.path("names", pairID+".json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return map[string]string{}, err
+	}
+	var f struct {
+		Names map[string]string `json:"names"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil || f.Names == nil {
+		return map[string]string{}, nil
+	}
+	return f.Names, nil
+}
+
+// SaveNames writes the pair's name pairings (names/<pair-id>.json).
+func (s *Store) SaveNames(pairID string, names map[string]string) error {
+	if err := os.MkdirAll(s.path("names"), 0o700); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(struct {
+		Names map[string]string `json:"names"`
+	}{names})
 	if err != nil {
 		return err
 	}
-	if _, err := os.Lstat(src); errors.Is(err, os.ErrNotExist) {
-		return nil // already gone; nothing to preserve
-	}
-	dest := s.path("trash", pairID, now.UTC().Format("20060102-150405"), filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
-		return err
-	}
-	if err := os.Rename(src, dest); err == nil {
-		return nil
-	}
-	// Rename fails across filesystems (the trash may be on a different drive to
-	// the sync folder). Copy, then remove — in that order, so a failure leaves
-	// the original in place.
-	if err := copyTree(src, dest); err != nil {
-		return err
-	}
-	return os.RemoveAll(src)
+	return writeAtomic(s.path("names", pairID+".json"), raw)
 }
 
-// PruneTrash drops trashed items older than days. Returns how many were
-// removed.
-func (s *Store) PruneTrash(pairID string, days int, now time.Time) (int, error) {
+// ─────────────────────────── deleting here ───────────────────────────
+
+// RemoveLocal deletes a synced file or folder from this computer (task #259:
+// directly, not into a local trash - see LegacyTrashDays). The caller has
+// already checked it is what the plan saw (stillAsPlanned) or what the person
+// decided about (DiscardHeld).
+//
+// A FOLDER is deleted only when nothing in it is the person's: its synced
+// entries went first (the planner orders deletes deepest first, and
+// stillAsPlanned refuses a folder that still holds one), and what may be left
+// is what sync never carries. Of that, only filex's own and the system's
+// leftovers - partial downloads, .DS_Store, Thumbs.db, desktop.ini, a keep
+// marker - and symbolic links (the link goes, never what it points to) are
+// deleted with it. Anything else - a folder sync ignores by name, a file it
+// could not read - was never on the server, so nothing anywhere else holds a
+// copy of it: the folder is left where it is and the action reports
+// ErrLocalChanged, which keeps both sides as they are.
+//
+// A file marked read-only is deleted all the same (Windows refuses to delete
+// one that a move used to carry): it was in sync, and the server's trash
+// holds it.
+func RemoveLocal(p string) error {
+	info, err := os.Lstat(p)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil // already gone
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return removeFile(p)
+	}
+	entries, err := os.ReadDir(p)
+	if err != nil {
+		return err
+	}
+	for _, d := range entries {
+		if !leftoverOnly(d) {
+			return fmt.Errorf("%w: %s holds %q, which sync does not carry", ErrLocalChanged, filepath.Base(p), d.Name())
+		}
+	}
+	return os.RemoveAll(p)
+}
+
+// leftoverOnly reports whether a folder entry may be deleted with its folder:
+// a symbolic link, or a file sync ignores as filex's or the system's own.
+func leftoverOnly(d os.DirEntry) bool {
+	if d.Type()&os.ModeSymlink != 0 {
+		return true
+	}
+	if d.IsDir() {
+		return false
+	}
+	_, v := localEntry(d.Name(), d)
+	return v == entryIgnore
+}
+
+// removeFile deletes one file, clearing a read-only mark first if that is what
+// stands in the way.
+func removeFile(p string) error {
+	err := os.Remove(p)
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if chErr := os.Chmod(p, 0o600); chErr == nil {
+		if err2 := os.Remove(p); err2 == nil || errors.Is(err2, os.ErrNotExist) {
+			return nil
+		}
+	}
+	return err
+}
+
+// SweepLegacyTrash drops what an older filex put in this pair's local sync
+// trash once it is older than days (LegacyTrashDays). Returns how many runs'
+// worth were removed. It never adds anything: since 0.57 nothing is put
+// there.
+func (s *Store) SweepLegacyTrash(pairID string, days int, now time.Time) (int, error) {
 	dir := s.path("trash", pairID)
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -560,55 +582,6 @@ func (s *Store) PruneTrash(pairID string, days int, now time.Time) (int, error) 
 	return removed, nil
 }
 
-// TrashItem is one recoverable deletion.
-type TrashItem struct {
-	PairID  string
-	Deleted time.Time
-	Rel     string
-	Path    string
-	Size    int64
-}
-
-// ListTrash reports what can still be recovered, newest first.
-func (s *Store) ListTrash(pairID string) ([]TrashItem, error) {
-	dir := s.path("trash", pairID)
-	stamps, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var out []TrashItem
-	for _, st := range stamps {
-		when, err := time.Parse("20060102-150405", st.Name())
-		if err != nil {
-			continue
-		}
-		root := filepath.Join(dir, st.Name())
-		_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
-			}
-			info, err := d.Info()
-			if err != nil {
-				return nil
-			}
-			rel, _ := filepath.Rel(root, p)
-			out = append(out, TrashItem{
-				PairID:  pairID,
-				Deleted: when,
-				Rel:     filepath.ToSlash(rel),
-				Path:    p,
-				Size:    info.Size(),
-			})
-			return nil
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Deleted.After(out[j].Deleted) })
-	return out, nil
-}
-
 // ─────────────────────────── helpers ───────────────────────────
 
 // writeAtomic writes via a temporary file and renames, so a crash mid-write
@@ -633,44 +606,4 @@ func writeAtomic(dest string, data []byte) error {
 		return err
 	}
 	return os.Rename(name, dest)
-}
-
-func copyTree(src, dest string) error {
-	info, err := os.Lstat(src)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return copyFile(src, dest)
-	}
-	if err := os.MkdirAll(dest, 0o700); err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if err := copyTree(filepath.Join(src, e.Name()), filepath.Join(dest, e.Name())); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func copyFile(src, dest string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Close()
 }

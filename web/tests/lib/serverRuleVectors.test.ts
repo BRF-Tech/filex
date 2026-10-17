@@ -104,7 +104,7 @@ describe('numbers and lists kept for a server that does not send them', () => {
     expect(V.limits.app_ui_save_chunk_bytes).toBe(V.ui_save_chunk_bytes);
   });
 
-  it('the formats the desktop app finds saved beside a file (openwith.ts BESIDE_FORMATS ↔ onlyoffice besideTypes)', () => {
+  it('the formats the desktop app finds saved beside a file (openwith.ts BESIDE_FORMATS ↔ officesave BesideFormats)', () => {
     const src = read('desktop/src/openwith.ts');
     const m = src.match(/export const BESIDE_FORMATS: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/);
     expect(m, 'desktop/src/openwith.ts no longer declares BESIDE_FORMATS as a literal set').toBeTruthy();

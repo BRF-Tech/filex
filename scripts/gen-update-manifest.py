@@ -30,6 +30,12 @@ Usage:
     # mark a release as unsafe for automatic upgrades
     python3 scripts/gen-update-manifest.py --no-auto v0.7.3 --no-auto v0.7.4
 
+    # and switch it back on (the previous manifest's false is not carried):
+    # a server patch goes out with --no-auto, and scripts/release/matrix-watch.mjs
+    # turns it on once GitHub's full matrix passed behind it (task #252)
+    python3 scripts/gen-update-manifest.py --auto v0.57.1
+    FILEX_MANIFEST_AUTO=v0.57.1 python3 scripts/gen-update-manifest.py   # the same, for a wrapper that passes only its own options
+
     # which releases change the schema, as read from the tags (no network)
     python3 scripts/gen-update-manifest.py --print-migrations
 
@@ -271,6 +277,13 @@ def main() -> int:
         help="mark a version as NOT eligible for automatic upgrade (kill switch)",
     )
     ap.add_argument(
+        "--auto",
+        action="append",
+        default=[],
+        metavar="VERSION",
+        help="switch automatic upgrade back ON for a version the previous manifest pulled out (also: FILEX_MANIFEST_AUTO, comma-separated)",
+    )
+    ap.add_argument(
         "--migrations",
         action="append",
         default=[],
@@ -307,6 +320,12 @@ def main() -> int:
         return 0
 
     no_auto = {v.lstrip("v") for v in args.no_auto}
+    env_auto = [v.strip() for v in os.environ.get("FILEX_MANIFEST_AUTO", "").split(",") if v.strip()]
+    auto = {v.lstrip("v") for v in [*args.auto, *env_auto]}
+    both = sorted(auto & no_auto)
+    if both:
+        print(f"error: {', '.join('v' + v for v in both)} is asked to be both --auto and --no-auto", file=sys.stderr)
+        return 2
     migrations = derived | {v.lstrip("v") for v in args.migrations}
     security = {v.lstrip("v") for v in args.security}
     previous = load_previous(args.previous)
@@ -360,6 +379,10 @@ def main() -> int:
         if bare in min_versions:
             entry["min_version"] = min_versions[bare]
         entry = inherit(entry, previous.get(tag))
+        # Asked for by name, it is on: the one decision inherit() does not
+        # carry over (task #252: the full matrix passed behind a server patch).
+        if bare in auto:
+            entry["auto_ok"] = True
         # Still only the heading: the hand-written Releases-page summary says more.
         if not entry["notes"] or is_bare_title(entry["notes"], tag):
             entry["notes"] = highlights.get(tag, "") or entry["notes"]

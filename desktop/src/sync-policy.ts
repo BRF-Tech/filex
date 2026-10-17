@@ -405,3 +405,63 @@ export async function removeFolder(steps: {
     await steps.refresh();
   }
 }
+
+/** One held file `sync discard` left on this computer, and why (the engine's
+ *  sentence, in the language asked for). */
+export interface DiscardKept {
+  path: string;
+  /** `discard.kept_no_copy`, `discard.kept_changed`, … (docs/SYNC.md). */
+  code: string;
+  message: string;
+}
+
+/** What `filex sync discard --json` did (task #259). */
+export interface DiscardOutcome {
+  deleted: number;
+  kept: DiscardKept[];
+  /** How many items the folder still holds for a decision. */
+  stillHeld: number;
+  /** The engine's summary, in the language asked for ('' when it sent none). */
+  message: string;
+}
+
+/**
+ * Reads `filex sync discard --json`: one JSON event per line. The engine says
+ * every sentence itself (backend/cmd/filex/syncevents.go discardResult); this
+ * only collects them. A line that is not an event is skipped.
+ *
+ * ⚠ Since 0.57 a discard deletes only the held files the server still has an
+ * identical copy of; the rest stay, held, and the person is told why - which
+ * is this list.
+ */
+export function discardOutcome(stdout: string): DiscardOutcome {
+  const out: DiscardOutcome = { deleted: 0, kept: [], stillHeld: 0, message: '' };
+  for (const line of String(stdout ?? '').split(/\r?\n/)) {
+    if (!line.trim().startsWith('{')) continue;
+    let ev: { event?: unknown; code?: unknown; params?: Record<string, unknown>; message?: unknown };
+    try {
+      ev = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (ev.event !== 'discard' || typeof ev.code !== 'string') continue;
+    const msg = typeof ev.message === 'string' ? ev.message : '';
+    const p = ev.params ?? {};
+    if (ev.code.startsWith('discard.kept_')) {
+      out.kept.push({ path: typeof p.path === 'string' ? p.path : '', code: ev.code, message: msg });
+    } else if (ev.code === 'discard.done' || ev.code === 'discard.not_holding') {
+      out.message = msg;
+      if (typeof p.deleted === 'number') out.deleted = p.deleted;
+      if (typeof p.still_held === 'number') out.stillHeld = p.still_held;
+    }
+  }
+  return out;
+}
+
+/** The dialog's detail: the files left here, one engine sentence a line, at
+ *  most `max` of them and then `more(n)` for the rest. */
+export function discardDetail(o: DiscardOutcome, max: number, more: (n: number) => string): string {
+  const lines = o.kept.slice(0, max).map((k) => k.message || k.path);
+  if (o.kept.length > max) lines.push(more(o.kept.length - max));
+  return lines.join('\n');
+}

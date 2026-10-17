@@ -133,8 +133,9 @@ func TestStateList_APersonIsStillNarrowedAndAVisitorStillSeesNothing(t *testing.
 func TestPermissions_TheKitKnowsEveryNameTheHostAccepts(t *testing.T) {
 	for p := range bare {
 		// files:e2e-plaintext and files:co-edit (0.56) are derived too, from
-		// the `encrypted_folders` and `co_edit` blocks.
-		if isUIPerm(p) || isE2EPlainPerm(p) || isCoEditPerm(p) {
+		// the `encrypted_folders` and `co_edit` blocks, and office-engine
+		// (0.57) from `engines.office`.
+		if isUIPerm(p) || isE2EPlainPerm(p) || isCoEditPerm(p) || isOfficeEnginePerm(p) {
 			// `ui`, `ui:eval`, `ui:wasm-eval` are DERIVED from a manifest's
 			// `ui` block and granted, never named in `permissions` (the host
 			// refuses a manifest that does): the kit must not accept them.

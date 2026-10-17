@@ -423,3 +423,50 @@ test('absorbEvent counts what the engine said', () => {
   absorbEvent(st, ev({ event: 'something-new' }));
   assert.equal(st.events, 2, 'an event a newer engine adds is still an event');
 });
+
+// Task #238: a server item this computer cannot name is synced under another
+// name, and the engine says so after each pass (`pass.name.synced_as`, a
+// note). The folder's card lists them - the latest full pass's list, which a
+// targeted pass only adds to, and a full pass reporting none clears.
+test('the items synced here under another name are the last full pass\'s list', () => {
+  const st = newStatus('acc');
+  // The engine's own sentence is what the card shows (#213).
+  const said = (name: string, local: string) => `Bu bilgisayara ${local} adıyla eşitlendi: sunucudaki ${name} adı burada kullanılamıyor`;
+  const renamed = (pair: string, name: string, local: string) =>
+    ({ event: 'note', pair, code: 'pass.name.synced_as', params: { name, local, reason: 'synced_as', why: 'forbidden' }, message: said(name, local) });
+  const full = (pair: string) => ({ ...pass(pair), params: { failed: 0, full: true } });
+  const targeted = (pair: string) => ({ ...pass(pair), params: { failed: 0, full: false } });
+
+  feed(st, full('pair-1'));
+  feed(st, renamed('pair-1', 'rapor:2024.txt', 'rapor_2024.txt'));
+  feed(st, renamed('pair-1', 'CON', '_CON'));
+  assert.deepEqual(pairView(st, 'pair-1').renamed, [
+    { name: 'rapor:2024.txt', local: 'rapor_2024.txt', message: said('rapor:2024.txt', 'rapor_2024.txt') },
+    { name: 'CON', local: '_CON', message: said('CON', '_CON') },
+  ]);
+  assert.equal(pairView(st, 'pair-1').error, null, 'information, not a failure');
+  assert.deepEqual(pairView(st, 'pair-2').renamed, [], 'another folder has its own list');
+
+  // A targeted pass adds, and the same item is listed once.
+  feed(st, targeted('pair-1'));
+  feed(st, renamed('pair-1', 'docs', 'docs (2)'));
+  feed(st, renamed('pair-1', 'CON', '_CON'));
+  assert.deepEqual(pairView(st, 'pair-1').renamed?.map((r) => r.name), ['rapor:2024.txt', 'docs', 'CON']);
+
+  // The next full pass replaces the list...
+  feed(st, full('pair-1'));
+  feed(st, renamed('pair-1', 'docs', 'docs (2)'));
+  assert.deepEqual(pairView(st, 'pair-1').renamed, [{ name: 'docs', local: 'docs (2)', message: said('docs', 'docs (2)') }]);
+
+  // ...and one that reports none clears it. So does an engine that does not
+  // say `full` (older than the list): every pass of it is a full one.
+  feed(st, full('pair-1'));
+  assert.deepEqual(pairView(st, 'pair-1').renamed, []);
+  feed(st, renamed('pair-1', 'docs', 'docs (2)'));
+  feed(st, pass('pair-1'));
+  assert.deepEqual(pairView(st, 'pair-1').renamed, []);
+
+  // Any other note is still not state.
+  feed(st, { event: 'note', pair: 'pair-1', code: 'pass.skipped', params: { count: 1 }, message: 'x' });
+  assert.deepEqual(pairView(st, 'pair-1').renamed, []);
+});

@@ -12,6 +12,10 @@
 //      tab says so.
 //   4. The Plugins page opens it from the address (`?tab=defaults`).
 //   5. Turkish, with its own letters.
+//   6. The office engine (filex 0.57): each back end - the engine an app
+//      brings, the Document Server - with how it stands (being prepared,
+//      ready, failed and why), which goes first chosen with buttons (never a
+//      native select), and back to the default as a DELETE.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -24,7 +28,7 @@ import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 import { closeRowMenus, menuEntries, openRowMenu, pickMenuItem } from '../helpers/rowMenu';
 
-const api = vi.hoisted(() => ({ list: vi.fn(), put: vi.fn(), reset: vi.fn() }));
+const api = vi.hoisted(() => ({ list: vi.fn(), put: vi.fn(), reset: vi.fn(), putEngine: vi.fn(), resetEngine: vi.fn() }));
 vi.mock('@/api/fileTypes', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/fileTypes')>()),
   FileTypesApi: api,
@@ -38,6 +42,10 @@ vi.mock('@brftech/filex-core', async (importOriginal) => ({
 vi.mock('@/components/plugins/StoragePluginsTab.vue', () => ({ default: { template: '<div data-testid="storage-tab" />' } }));
 vi.mock('@/components/plugins/AppPluginsTab.vue', () => ({ default: { template: '<div data-testid="apps-tab" />' } }));
 vi.mock('@/components/plugins/PluginRequestsPanel.vue', () => ({ default: { template: '<div />' } }));
+// The server's defaults card (components/settings/InstanceSettingsCard, #258)
+// shares the page: it reads its group as it mounts and draws a <form> of its
+// own. It is not what this file tests.
+vi.mock('@/components/settings/InstanceSettingsCard.vue', () => ({ default: { template: '<div />' } }));
 
 import DefaultAppsTab from '@/components/plugins/DefaultAppsTab.vue';
 import Plugins from '@/views/Plugins.vue';
@@ -171,6 +179,91 @@ describe('Default apps', () => {
     expect(w.find('[data-testid="default-apps-open-drawio"]').text()).toContain('Zeta görüntüleyici');
     expect(w.find('[data-testid="default-apps-open-drawio"]').text()).toContain('filex (yerleşik)');
     expect(w.find('[data-testid="default-apps-status-png"]').text()).toBe('Değiştirildi');
+  });
+});
+
+/** The office engine's row as the server writes it (handlers.EngineRow). */
+function officeEngine(over: Record<string, unknown> = {}) {
+  return {
+    engine: 'office',
+    on: [
+      { id: 'app:office-editor', app: 'office-editor', version: '0.4.0', label: { en: 'Office editor', tr: 'Ofis düzenleyici' } },
+      { id: 'onlyoffice' },
+    ],
+    off: [],
+    custom: false,
+    states: { 'app:office-editor': { state: 'preparing' }, onlyoffice: { state: 'ready' } },
+    ...over,
+  };
+}
+
+describe('Default apps: the office engine', () => {
+  it('shows each back end and how it stands, the app being prepared first', async () => {
+    api.list.mockResolvedValue(answer({ engines: [officeEngine()] }));
+    const w = await mountTab();
+    const section = w.find('[data-testid="default-apps-engine"]');
+    expect(section.exists()).toBe(true);
+    expect(section.text()).toContain('Office engine');
+    const app = w.find('[data-testid="default-apps-engine-row-app:office-editor"]');
+    expect(app.text()).toContain('1.');
+    expect(app.text()).toContain('Office editor');
+    expect(app.text()).toContain('few minutes');
+    expect(w.find('[data-testid="default-apps-engine-state-app:office-editor"]').text()).toBe('Being prepared');
+    expect(w.find('[data-testid="default-apps-engine-row-onlyoffice"]').text()).toContain('ONLYOFFICE Document Server');
+    expect(w.find('[data-testid="default-apps-engine-state-onlyoffice"]').text()).toBe('Ready');
+    expect(w.find('[data-testid="default-apps-engine-first-app:office-editor"]').attributes('aria-checked')).toBe('true');
+    expect(w.find('select').exists(), 'buttons, never a native select').toBe(false);
+    expect(w.find('[data-testid="default-apps-engine-reset"]').exists(), 'nothing to go back from').toBe(false);
+  });
+
+  it('choosing the Document Server first sends the engine its new order', async () => {
+    api.list.mockResolvedValue(answer({ engines: [officeEngine()] }));
+    api.putEngine.mockResolvedValue(answer({ engines: [officeEngine({ custom: true })] }));
+    const w = await mountTab();
+    await w.find('[data-testid="default-apps-engine-first-onlyoffice"]').trigger('click');
+    await flushPromises();
+    expect(api.putEngine).toHaveBeenCalledWith('office', { order: ['onlyoffice', 'app:office-editor'], off: [] });
+    expect(api.put, 'no kind of file changed').not.toHaveBeenCalled();
+  });
+
+  it('a failed engine says why, and back to the default is a DELETE of the engine', async () => {
+    api.list.mockResolvedValue(answer({
+      engines: [officeEngine({ custom: true, states: { 'app:office-editor': { state: 'failed', error: 'x2t does not compile' }, onlyoffice: { state: 'off' } } })],
+    }));
+    api.resetEngine.mockResolvedValue(answer({ engines: [officeEngine()] }));
+    const w = await mountTab();
+    expect(w.find('[data-testid="default-apps-engine-state-app:office-editor"]').text()).toBe('Failed');
+    expect(w.find('[data-testid="default-apps-engine-error-app:office-editor"]').text()).toContain('x2t does not compile');
+    expect(w.find('[data-testid="default-apps-engine-state-onlyoffice"]').text()).toBe('Not connected');
+    expect(w.find('[data-testid="default-apps-engine-status"]').text()).toBe('Changed');
+    await w.find('[data-testid="default-apps-engine-reset"]').trigger('click');
+    await flushPromises();
+    expect(api.resetEngine).toHaveBeenCalledWith('office');
+    expect(api.reset).not.toHaveBeenCalled();
+  });
+
+  it('with no back end it says what to install', async () => {
+    api.list.mockResolvedValue(answer({ engines: [officeEngine({ on: [], states: {} })] }));
+    const w = await mountTab();
+    expect(w.find('[data-testid="default-apps-engine-none"]').text()).toContain('Office editor app');
+    expect(w.find('[data-testid="default-apps-engine-first"]').exists()).toBe(false);
+  });
+
+  it('a caller who may only read sees how each stands and no choice', async () => {
+    api.list.mockResolvedValue(answer({ editable: false, engines: [officeEngine({ custom: true })] }));
+    const w = await mountTab();
+    expect(w.find('[data-testid="default-apps-engine-state-onlyoffice"]').exists()).toBe(true);
+    expect(w.find('[data-testid="default-apps-engine-first"]').exists()).toBe(false);
+    expect(w.find('[data-testid="default-apps-engine-reset"]').exists()).toBe(false);
+  });
+
+  it('in Turkish, with its own letters', async () => {
+    api.list.mockResolvedValue(answer({ engines: [officeEngine()] }));
+    const w = await mountTab('tr');
+    expect(w.find('[data-testid="default-apps-engine"]').text()).toContain('Ofis motoru');
+    expect(w.find('[data-testid="default-apps-engine-row-app:office-editor"]').text()).toContain('Ofis düzenleyici');
+    expect(w.find('[data-testid="default-apps-engine-state-app:office-editor"]').text()).toBe('Hazırlanıyor');
+    expect(w.find('[data-testid="default-apps-engine-state-onlyoffice"]').text()).toBe('Hazır');
   });
 });
 

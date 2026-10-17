@@ -1,7 +1,8 @@
 // Pinia store tests for src/stores/auth.ts. AuthApi is mocked module-wide
 // so the store sees deterministic responses; we never reach axios.
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
+import { AxiosError } from 'axios';
 
 vi.mock('@/api/auth', () => ({
   AuthApi: {
@@ -148,6 +149,205 @@ describe('stores/auth', () => {
     expect(u).toBeNull();
     expect(store.user).toBeNull();
     expect(store.ready).toBe(true);
+  });
+
+  // ⚠⚠ A question that got no answer is not the answer "nobody". WebKit and
+  // Firefox fail the requests of a page that is being left and run its
+  // handlers: taken as a sign-out, App.vue then cleared `filex.session` and
+  // the person's look, and the next page booted signed out (e2e 98, WebKit,
+  // 0.57 second full chain).
+  it('fetchMe with no answer (the page left, the connection gone) keeps who was signed in', async () => {
+    const me = vi.mocked(AuthApi.me);
+    me.mockResolvedValueOnce({
+      user: { id: 9, email: 'u@x', display_name: 'U', role: 'admin', created_at: '', updated_at: '' },
+      permissions: ['files.read'],
+    });
+    const store = useAuthStore();
+    await store.fetchMe();
+    expect(store.sessionAnswered).toBe(true);
+
+    for (const err of [
+      new AxiosError('Network Error', 'ERR_NETWORK'),
+      new AxiosError('Request aborted', 'ECONNABORTED'),
+      new AxiosError('canceled', 'ERR_CANCELED'),
+      new AxiosError('timeout of 30000ms exceeded', 'ECONNABORTED'),
+    ]) {
+      me.mockRejectedValueOnce(err);
+      const u = await store.fetchMe();
+      expect(u?.id, err.code).toBe(9);
+      expect(store.user?.id, err.code).toBe(9);
+      expect(store.isAuthenticated).toBe(true);
+      expect(store.permissions).toEqual(['files.read']);
+      expect(store.ready).toBe(true);
+      expect(store.loading).toBe(false);
+    }
+  });
+
+  it('a first question with no answer leaves the session unanswered; a 401 answers it', async () => {
+    const me = vi.mocked(AuthApi.me);
+    const store = useAuthStore();
+    me.mockRejectedValueOnce(new AxiosError('Network Error', 'ERR_NETWORK'));
+    expect(await store.fetchMe()).toBeNull();
+    expect(store.user).toBeNull();
+    expect(store.ready).toBe(true);
+    expect(store.sessionAnswered).toBe(false);
+
+    me.mockRejectedValueOnce(
+      new AxiosError('Unauthorized', 'ERR_BAD_REQUEST', undefined, undefined, {
+        status: 401,
+        statusText: 'Unauthorized',
+        data: {},
+        headers: {},
+        config: {} as never,
+      }),
+    );
+    expect(await store.fetchMe()).toBeNull();
+    expect(store.sessionAnswered).toBe(true);
+  });
+
+  it('a 401 that follows a session does sign the store out', async () => {
+    const me = vi.mocked(AuthApi.me);
+    me.mockResolvedValueOnce({
+      user: { id: 9, email: 'u@x', display_name: 'U', role: 'admin', created_at: '', updated_at: '' },
+      permissions: ['files.read'],
+    });
+    const store = useAuthStore();
+    await store.fetchMe();
+    me.mockRejectedValueOnce(
+      new AxiosError('Unauthorized', 'ERR_BAD_REQUEST', undefined, undefined, {
+        status: 401,
+        statusText: 'Unauthorized',
+        data: {},
+        headers: {},
+        config: {} as never,
+      }),
+    );
+    expect(await store.fetchMe()).toBeNull();
+    expect(store.user).toBeNull();
+    expect(store.permissions).toEqual([]);
+    expect(store.sessionAnswered).toBe(true);
+  });
+
+  // ⚠⚠ Only 401 and 403 mean "nobody" (stores/auth meFailure). A server that
+  // was reached and could not answer - itself or a proxy in front of it while
+  // it restarts (5xx), or one that asks to be left alone (429) - is asked
+  // again, and if it still cannot answer, nothing changes.
+  describe('a server that cannot answer who is signed in', () => {
+    const signedIn = {
+      user: { id: 9, email: 'u@x', display_name: 'U', role: 'admin', created_at: '', updated_at: '' },
+      permissions: ['files.read'],
+    };
+    const answered = (status: number, headers: Record<string, string> = {}) =>
+      new AxiosError(`status ${status}`, status >= 500 ? 'ERR_BAD_RESPONSE' : 'ERR_BAD_REQUEST', undefined, undefined, {
+        status,
+        statusText: '',
+        data: status >= 500 ? '<html>Bad Gateway</html>' : { error: 'refused' },
+        headers,
+        config: {} as never,
+      });
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.mocked(AuthApi.me).mockReset();
+    });
+
+    for (const status of [500, 502, 503, 504, 429]) {
+      it(`${status}: asked three times, then who was signed in stays signed in`, async () => {
+        const me = vi.mocked(AuthApi.me);
+        me.mockResolvedValueOnce(signedIn);
+        const store = useAuthStore();
+        await store.fetchMe();
+        me.mockClear();
+
+        me.mockRejectedValue(answered(status));
+        const asked = store.fetchMe();
+        await vi.advanceTimersByTimeAsync(10_000);
+        const u = await asked;
+        expect(me).toHaveBeenCalledTimes(3);
+        expect(u?.id).toBe(9);
+        expect(store.user?.id).toBe(9);
+        expect(store.permissions).toEqual(['files.read']);
+        expect(store.sessionAnswered).toBe(true);
+        expect(store.ready).toBe(true);
+        expect(store.loading).toBe(false);
+      });
+    }
+
+    it('a cold load that meets a 502 once gets its answer on the next try', async () => {
+      const me = vi.mocked(AuthApi.me);
+      me.mockRejectedValueOnce(answered(502)).mockResolvedValueOnce(signedIn);
+      const store = useAuthStore();
+      const asked = store.fetchMe();
+      await vi.advanceTimersByTimeAsync(499);
+      expect(me).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      const u = await asked;
+      expect(me).toHaveBeenCalledTimes(2);
+      expect(u?.id).toBe(9);
+      expect(store.isAuthenticated).toBe(true);
+      expect(store.sessionAnswered).toBe(true);
+    });
+
+    it('a cold load the server never answers stays unanswered, not signed out', async () => {
+      const me = vi.mocked(AuthApi.me);
+      me.mockRejectedValue(answered(503));
+      const store = useAuthStore();
+      const asked = store.fetchMe();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await asked).toBeNull();
+      expect(store.sessionAnswered).toBe(false);
+      expect(store.ready).toBe(true);
+    });
+
+    it("a 429's Retry-After is waited for, up to 3 s", async () => {
+      const me = vi.mocked(AuthApi.me);
+      me.mockRejectedValueOnce(answered(429, { 'retry-after': '2' })).mockResolvedValueOnce(signedIn);
+      const store = useAuthStore();
+      const asked = store.fetchMe();
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(me).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await asked)?.id).toBe(9);
+
+      me.mockRejectedValueOnce(answered(429, { 'retry-after': '3600' })).mockResolvedValueOnce(signedIn);
+      const again = store.fetchMe();
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(me).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await again)?.id).toBe(9);
+      expect(me).toHaveBeenCalledTimes(4);
+    });
+
+    it('a status that is not about the session (404) is not asked again and changes nothing', async () => {
+      const me = vi.mocked(AuthApi.me);
+      me.mockResolvedValueOnce(signedIn);
+      const store = useAuthStore();
+      await store.fetchMe();
+      me.mockClear();
+      me.mockRejectedValueOnce(answered(404));
+      expect((await store.fetchMe())?.id).toBe(9);
+      expect(me).toHaveBeenCalledTimes(1);
+      expect(store.isAuthenticated).toBe(true);
+    });
+
+    for (const status of [401, 403]) {
+      it(`${status} is the server saying nobody: asked once, and the store signs out`, async () => {
+        const me = vi.mocked(AuthApi.me);
+        me.mockResolvedValueOnce(signedIn);
+        const store = useAuthStore();
+        await store.fetchMe();
+        me.mockClear();
+        me.mockRejectedValueOnce(answered(status));
+        expect(await store.fetchMe()).toBeNull();
+        expect(me).toHaveBeenCalledTimes(1);
+        expect(store.user).toBeNull();
+        expect(store.permissions).toEqual([]);
+        expect(store.sessionAnswered).toBe(true);
+      });
+    }
   });
 
   it('fetchMe(200) hydrates user + permissions', async () => {

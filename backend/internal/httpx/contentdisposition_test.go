@@ -5,26 +5,27 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/brf-tech/filex/backend/internal/testutil/hostilenames"
 )
 
 // The property that matters more than any single case: whatever the user named
 // their file, the header we write is ASCII. A byte over 127 in a header value
 // is what made a strict client throw mid-download.
 func TestContentDisposition_IsAlwaysASCII(t *testing.T) {
-	names := []string{
-		"rapor.txt",
-		"Türkçe adlı dosya.txt",
-		"日本語のファイル.pdf",
-		"emoji 🎉 dosya.png",
-		"Ünlü Şarkı — Kürşad.mp3",
-		"ıİşŞğĞüÜöÖçÇ.txt",
-		`tırnak"lı\ad.txt`,
-		"boşluklu   ad .txt",
-		"ıı",          // nothing ASCII to fall back on
-		"",            // no name at all
-		"a/b\\c.txt",  // separators
-		"satır\nsonu", // control characters
+	// The shared hostile names (task #238), and what is not a name at all.
+	var names []string
+	for _, n := range hostilenames.All() {
+		names = append(names, n.Name)
 	}
+	names = append(names,
+		"rapor.txt",
+		"Ünlü Şarkı — Kürşad.mp3",
+		`tırnak"lı\ad.txt`,
+		"ıı",         // nothing ASCII to fall back on
+		"",           // no name at all
+		"a/b\\c.txt", // separators
+	)
 	for _, n := range names {
 		got := ContentDisposition("attachment", n)
 		for i := 0; i < len(got); i++ {

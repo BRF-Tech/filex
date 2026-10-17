@@ -12,6 +12,7 @@ import (
 	"time"    /* wiring:d2 */
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 
@@ -235,6 +236,14 @@ type FolderPageEntry struct {
 	DateLabel string
 }
 
+// Shown is the entry's name as the page shows it: every bidi control made
+// visible (leafname.Visible), so `invoice` + U+202E + `fdp.exe` cannot read
+// as `invoiceexe.pdf` to a visitor (task #238). Href keeps the real name.
+func (e FolderPageEntry) Shown() string { return leafname.Visible(e.Name) }
+
+// Shown is the shared folder's name as the page shows it (leafname.Visible).
+func (d FolderPageData) Shown() string { return leafname.Visible(d.Name) }
+
 // FolderPageData feeds the folder browse template. Style and Footer are
 // injected by the handler (single-source public page chrome).
 type FolderPageData struct {
@@ -294,7 +303,7 @@ var folderPageTemplate = template.Must(template.New("sharefolder").Parse(`<!doct
 <html lang="{{.Lang}}" dir="{{.Dir}}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.Name}} - {{.T.folder_title_suffix}}</title>
+<title>{{.Shown}} - {{.T.folder_title_suffix}}</title>
 {{.Style}}
 <style>
 .card--folder { width: 880px; max-width: 100%; text-align: start; padding: 26px 24px; }
@@ -334,7 +343,7 @@ var folderPageTemplate = template.Must(template.New("sharefolder").Parse(`<!doct
 <div class="card card--folder">
 <div class="fhead">
 <div class="icon-badge">` + folderPageIconFolder + `</div>
-<h1>{{.Name}}</h1>
+<h1>{{.Shown}}</h1>
 </div>
 <p class="fsub">{{.CountsLabel}}{{if .SubPath}} - {{.SubPath}}{{end}}</p>
 <div class="factions">
@@ -345,17 +354,17 @@ var folderPageTemplate = template.Must(template.New("sharefolder").Parse(`<!doct
 <div class="fempty">{{.T.folder_empty}}</div>
 {{else if .Gallery}}
 <div class="ggrid">
-{{range .Entries}}<a class="gtile" href="{{.Href}}"{{if ne .Kind "dir"}} target="_blank" rel="noopener"{{end}} title="{{.Name}}{{if .SizeLabel}} - {{.SizeLabel}}{{end}}">
-{{if .ThumbSrc}}<img src="{{.ThumbSrc}}" alt="{{.Name}}" loading="lazy">{{else if eq .Kind "dir"}}<span class="gicon">` + folderPageIconFolder + `</span>{{else if eq .Kind "video"}}<span class="gicon">` + folderPageIconFile + `</span>{{else if eq .Kind "image"}}<span class="gicon">` + folderPageIconImage + `</span>{{else}}<span class="gicon">` + folderPageIconFile + `</span>{{end}}
+{{range .Entries}}<a class="gtile" href="{{.Href}}"{{if ne .Kind "dir"}} target="_blank" rel="noopener"{{end}} title="{{.Shown}}{{if .SizeLabel}} - {{.SizeLabel}}{{end}}">
+{{if .ThumbSrc}}<img src="{{.ThumbSrc}}" alt="{{.Shown}}" loading="lazy">{{else if eq .Kind "dir"}}<span class="gicon">` + folderPageIconFolder + `</span>{{else if eq .Kind "video"}}<span class="gicon">` + folderPageIconFile + `</span>{{else if eq .Kind "image"}}<span class="gicon">` + folderPageIconImage + `</span>{{else}}<span class="gicon">` + folderPageIconFile + `</span>{{end}}
 {{if eq .Kind "video"}}<span class="gbadge">` + folderPageIconPlay + `</span>{{end}}
-<span class="gname">{{.Name}}</span>
+<span class="gname">{{.Shown}}</span>
 </a>
 {{end}}</div>
 {{else}}
 <ul class="flist">
 {{range .Entries}}<li><a href="{{.Href}}"{{if ne .Kind "dir"}} target="_blank" rel="noopener"{{end}}>
 <span class="ficon">{{if eq .Kind "dir"}}` + folderPageIconFolder + `{{else if eq .Kind "image"}}` + folderPageIconImage + `{{else}}` + folderPageIconFile + `{{end}}</span>
-<span class="fname">{{.Name}}</span>
+<span class="fname" title="{{.Shown}}">{{.Shown}}</span>
 {{if .SizeLabel}}<span class="fmeta">{{.SizeLabel}}</span>{{end}}
 {{if .DateLabel}}<span class="fmeta">{{.DateLabel}}</span>{{end}}
 </a></li>

@@ -1,6 +1,15 @@
 {
   "editable": true,
   "enabled": true,
+  "engines": [
+    {
+      "custom": false,
+      "engine": "office",
+      "off": [],
+      "on": [],
+      "states": {}
+    }
+  ],
   "kinds": [
     {
       "ext": "apk",

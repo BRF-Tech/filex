@@ -612,22 +612,35 @@ export function readmeImages(markdown) {
  *          every suite on the export commit (#165, decision 5).
  *   full   everything here, before the export, as every release did up to
  *          0.52: for a day GitHub cannot be trusted with the heavy suites.
+ *   server a SERVER patch (#252, scripts/release/surfaces.mjs serverPatch):
+ *          X.Y.Z+1 whose changes reach the server alone. The server's gates
+ *          here - the builds, both images and their smoke tests, the changed
+ *          Go packages and their importers under -race - and nothing of the
+ *          interface or the desktop app (`serverSkip`). The gate stage waits
+ *          for ci.yml's build part alone (`serverGate`); GitHub's full matrix
+ *          runs behind the release, and the update manifest offers the patch
+ *          to automatic updates only once it passed (matrix-watch.mjs).
  *
  * ⚠ Why the heavy suites left this machine (#165): from 0.50 to 0.52 the
  * pretag here found no product fault the build host and GitHub had not, ran
  * the Go suite a fifth and vitest an eighth time per release, and started
  * over after every red - 935 minutes lost over seven releases.
  */
-export const PROFILES = ['minor', 'patch', 'full'];
+export const PROFILES = ['minor', 'patch', 'full', 'server'];
 
-const PROFILE_RANK = { patch: 0, minor: 1, full: 2 };
+const PROFILE_RANK = { server: -1, patch: 0, minor: 1, full: 2 };
 
 /**
  * True when a pretag that passed in profile `was` answers for `want` too. A
- * run recorded before profiles existed ran the whole chain: `full`.
+ * run recorded before profiles existed ran the whole chain: `full`. A server
+ * pretag answers for nothing else (it leaves the interface and the desktop
+ * app out), and only a server or a full one answers for a server patch (a
+ * patch or a minor ran its Go packages without -race).
  */
 export function profileCovers(was, want) {
-  return (PROFILE_RANK[was ?? 'full'] ?? -1) >= (PROFILE_RANK[want] ?? Infinity);
+  const w = was ?? 'full';
+  if (want === 'server') return w === 'server' || w === 'full';
+  return (PROFILE_RANK[w] ?? -2) >= (PROFILE_RANK[want] ?? Infinity) && w !== 'server';
 }
 
 /**
@@ -684,6 +697,10 @@ export const GATE_SOURCES = ['github', 'circleci'];
  *   patchSkip   (heavy) why a patch does not run it here
  *   deferred    (pretag) this machine cannot run it: the pretag leaves it to
  *               one that can, once a person says so (deferredSpecs below)
+ *   serverSkip  (pretag) why a server patch (#252) does not run it: it is
+ *               about a surface a server patch does not publish
+ *   serverOnly  (heavy) only a server patch runs it, here in its pretag
+ *               (the changed Go packages under -race)
  */
 export function selectGates({ pretag = [], heavy = [] }, profile, changed = null, { source = 'github' } = {}) {
   if (!GATE_SOURCES.includes(source)) throw new Error(`gate source ${source}: the sources are ${GATE_SOURCES.join(', ')}`);
@@ -693,11 +710,34 @@ export function selectGates({ pretag = [], heavy = [] }, profile, changed = null
   out.github = out.remote;
   const skip = (gate, why) => out.skipped.push({ gate, why });
   const unchanged = 'nothing it reads changed since the last release';
+  const narrow = profile === 'patch' || profile === 'server';
   for (const g of pretag) {
-    if (profile !== 'patch' || g.always || touched(g)) out.pretag.push(g);
+    if (profile === 'server' && g.serverSkip) skip(g, g.serverSkip);
+    else if (!narrow || g.always || touched(g)) out.pretag.push(g);
     else skip(g, unchanged);
   }
   for (const g of heavy) {
+    if (g.serverOnly && profile !== 'server') {
+      skip(g, 'only a server patch runs it');
+      continue;
+    }
+    if (profile === 'server') {
+      // The server's own gate here; every other heavy suite runs on GitHub
+      // behind the release (#252), and holds the patch's automatic updates
+      // back, not the patch.
+      if (g.serverOnly) {
+        if (touched(g)) out.pretag.push(g);
+        else skip(g, unchanged);
+      } else {
+        skip(
+          g,
+          g.patchOnly
+            ? 'a server patch runs the packages it changed under -race instead'
+            : "GitHub's full matrix runs it behind a server patch; the update manifest offers the patch to automatic updates once it passed (matrix-watch.mjs)",
+        );
+      }
+      continue;
+    }
     if (profile === 'full') {
       if (g.patchOnly) skip(g, 'the whole suite runs here instead');
       else out.pretag.push(g);

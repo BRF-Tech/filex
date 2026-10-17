@@ -8,12 +8,18 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 ## Getting started
 
-- [Installation](INSTALLATION.md) - minimal → full Compose → Helm → binary
-- [Configuration](CONFIGURATION.md) - every `FILEX_*` variable + `config.yaml`
+- [Installation](INSTALLATION.md) - minimal → full Compose → Helm → binary, and
+  [nightly builds](INSTALLATION.md#nightly-builds) (the image and the desktop app
+  of every night that passed its tests, on filex.sh/nightly and the Snap Store's
+  `edge`; not supported)
+- [Configuration](CONFIGURATION.md) - every `FILEX_*` variable + `config.yaml`,
+  and [which variables only seed a setting](CONFIGURATION.md#variables-that-seed-a-stored-setting)
+  that then lives on the admin panel (0.57: the server defaults,
+  `FILEX_TRUSTED_PROXIES`, the external services; `filex settings reseed`)
 - [Features](FEATURES.md) - every feature as its own entry: how it behaves, its
   limits and the guide that documents it
 - [Admin panel](ADMIN-PANEL.md) - the administrator's menu: where every page
-  lives (Files & storage, People & security, System), who is offered which
+  lives (Files & storage, People, Settings, Maintenance & records), who is offered which
   page, the keyboard, screen readers and the phone's drawer; and the panel's
   [search](ADMIN-PANEL.md#search) (pages, settings, people, API keys, apps, storages, shares, files,
   the `file:` / `user:` … prefixes, recent searches)
@@ -180,7 +186,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   [comments, a permission with a level](RBAC.md#permissions-with-a-level-comments)
   (`comments:rw` to add and delete one, since 0.53), and the acts that need an
   administrator signed in
-- [Roles & per-user permissions](PERMISSIONS.md) - what an account may do: 29
+- [Roles & per-user permissions](PERMISSIONS.md) - what an account may do: 30
   permissions, built-in and custom roles, per-person exceptions, delegated
   admins, the permissions installed apps declare, public links that follow
   their creator's right to share, per-protocol enforcement
@@ -190,15 +196,28 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 ## Integrations
 
-- [OnlyOffice](ONLYOFFICE.md) - in-browser editing of Office documents (which
-  the office editor app does with no Document Server, alone or together), New
+- [AI assistant](AI-ASSISTANT.md) - the assistant in the explorer (0.57): Anthropic,
+  OpenAI or an OpenAI-compatible server, or a fully local Ollama; it works
+  through the MCP tools as the person who asks, a change that can be undone
+  carries Undo and one that cannot waits on an approval card, encrypted folders
+  and the vault never reach a model, every file content sent is audited, the
+  `ai.assistant` permission, conversations kept per person on the server
+- [Office editing](ONLYOFFICE.md) - in-browser editing of Office documents:
+  [the Office editor app](ONLYOFFICE.md#the-office-editor-app) (no
+  Document Server, alone or together; from its 0.4.0 its
+  [office engine](ONLYOFFICE.md#the-office-engine-without-a-document-server)
+  also draws office thumbnails and runs the apps' office conversions on the
+  server), and
+  [an ONLYOFFICE Document Server](ONLYOFFICE.md#the-onlyoffice-document-server-optional),
+  supported and optional; New
   document, and [drafts](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save):
   nothing is in the folder until you save; the three addresses that must work,
   the **Test** that fetches through a document's own door and warns when JWT is
   off, and [what "Download failed" was](ONLYOFFICE.md#failure-editor-shows-download-failed)
   (the editor says which of its two failures it was), and
   [CSV files](ONLYOFFICE.md#csv-files): a `.csv` opens in ONLYOFFICE's
-  spreadsheet and is saved back as the same kind of CSV (0.51);
+  spreadsheet and is saved back as the same kind of CSV - its delimiter,
+  line ends and encoding (0.51);
   [when the document changes while it is open](ONLYOFFICE.md#when-the-document-changes-while-it-is-open)
   (never saved over: reloaded, or a question) and
   [the editor in a frame of its own](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)
@@ -231,6 +250,11 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   app) reads instead of its lines, and [`filex sync window`](SYNC.md#filex-sync-window)
 - [Uploads](UPLOADS.md) - the staged, resumable upload path: chunked, works on
   every driver, survives a dropped connection
+- [File names](FILE-NAMES.md) - the names filex refuses (and the one rule every
+  door asks), a name too long for its storage, invisible and right-to-left
+  override characters, spaces at the ends, composed and decomposed spellings,
+  what each surface does with a name it cannot carry, and the one list of
+  hostile names every surface is tested with
 - [Sharing & file requests](SHARING.md) - public download links + upload/file-drop;
   **My shares** and reading a link's PIN back, the one branded public screen and
   its PIN lock-out, the maximum link life, how the folder-ZIP cache is bounded,

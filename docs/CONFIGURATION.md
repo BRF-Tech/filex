@@ -115,8 +115,12 @@ admin panel. Their environment variable is only a **seed**: it is read on a
 boot where the setting has no stored row yet, and never again. Once a row
 exists - written by that first-boot seeding or by an administrator - the
 variable is inert: editing it in your compose file and restarting changes
-nothing, and nothing warns, because a setting that already has a value is not
-unusual. Change the setting in the admin panel instead. The seed is applied per
+nothing. A start whose variable says something other than the stored value
+logs it once, with the command that applies it (`FILEX_SYNC_INTERVAL is set
+but the stored value wins; run filex settings reseed
+sync.default_interval_minutes to apply it` - the key and the variable, never
+either value). Change the setting in the admin panel, or write the variable
+again with [`filex settings reseed`](#writing-the-environment-again-filex-settings-reseed). The seed is applied per
 setting, not per family: a setting whose row does not exist yet is seeded from
 its variable even if its siblings already have rows, so an upgrade keeps
 exactly the values an install had.
@@ -124,10 +128,53 @@ exactly the values an install had.
 The tables below mark each such variable as a **seed**: the ClamAV family
 (except `FILEX_CLAMAV_BIN`), `FILEX_SHARE_MAX_TTL`, `FILEX_DRAFTS_LIMIT`,
 `FILEX_APPS_E2E_PLAINTEXT`, the `FILEX_THUMBS_SVG_*`, `FILEX_THUMBS_OFFICE_*`
-and `FILEX_THUMBS_FOLDER_PREVIEWS` thumbnail settings and the `FILEX_USAGE_*`
-family. The first admin, SMTP, branding and default storage of
-[Zero-touch seeding](#zero-touch-seeding) are seeded the same way, once, when
-their record is absent.
+and `FILEX_THUMBS_FOLDER_PREVIEWS` thumbnail settings, the `FILEX_USAGE_*`
+family, `FILEX_SEARCH_CONTENT`, `FILEX_SEARCH_CONTENT_MAX`,
+`FILEX_SEARCH_MEMORY_PERCENT` and `FILEX_SEARCH_AUTO_REBUILD` (edited on
+**Admin → Settings → General**), and the server defaults edited on the admin
+panel: `FILEX_DEFAULT_LOCALE`, `FILEX_SYNC_INTERVAL`,
+`FILEX_UPLOAD_STAGING_TTL`, `FILEX_CACHE_MAX_BYTES`,
+`FILEX_THUMBS_SWEEP_INTERVAL` (**Admin → Settings → General**),
+`FILEX_VERSIONS_ON_OVERWRITE` (**Protection**), `FILEX_APP_PLUGIN_MAX_*_MB`,
+`FILEX_PLUGIN_REQUEST_TTL_DAYS`, `FILEX_COEDIT_MAX_MEMBERS`,
+`FILEX_COEDIT_UNSAVED_DAYS` (**Plugins → Apps**), `FILEX_NOTIFY_ENABLED`
+(**Notifications**), `FILEX_WEBHOOK_LANG` (**Webhooks**) and
+`FILEX_TRUSTED_PROXIES` (**Sign-in security**, [Trusted
+proxies](#trusted-proxies)). The server defaults and the trusted proxies were
+read at every start up to 0.56; an install upgraded with the variable set and
+nothing stored gets the variable's value written at its first 0.57 start, so
+nothing it runs with changes. Their
+`config.yaml` keys seed the same way when the variable is not set; a value
+equal to the default seeds nothing, so a later release's default still
+reaches the install. The first admin, SMTP, branding and default storage of
+[Zero-touch seeding](#zero-touch-seeding) and the
+[external services](#external-services) are seeded the same
+way, once, when their record is absent.
+
+Most of the server defaults are read when filex starts: a change on the admin
+panel applies at the next start, and its row says *Applies at the next start*
+until then. The default webhook's language applies at once.
+
+### Writing the environment again: `filex settings reseed`
+
+To make a changed variable take over a value that is already stored, ask for
+it - then restart filex:
+
+```bash
+filex settings reseed sync.default_interval_minutes   # one setting, by its key
+filex settings reseed --external                      # ONLYOFFICE and draw.io
+filex settings reseed --all                           # every seeded setting
+```
+
+In a container: `docker compose exec filex filex settings reseed --all`. A
+setting whose variable is not set is left as it is, except a server default,
+which goes back to its built-in value. `filex settings reseed
+login.trusted_proxies` writes `FILEX_TRUSTED_PROXIES` over the list saved on
+the **Sign-in security** page, and a running server takes it within a minute;
+with no variable set, the saved list is left as it is (never dropped to
+`auto`). The keys are the ones the tables below
+name (`instance.default_locale`, `cache.max_gb`, `drafts.limit`...); `filex
+settings reseed --help` lists the flags.
 
 ---
 
@@ -206,7 +253,7 @@ value, or removing it, still stops the server with the flag set.
 | `FILEX_PUBLIC_URL` | `http://localhost:5212` | **The external URL users open** - your real `https://…` domain behind a proxy. Every link filex hands out is built on it ([Public URL](#public-url)). ⚠ Unless `FILEX_ONLYOFFICE_CALLBACK_URL` is set, it must also be reachable from inside the OnlyOffice container, which fetches and saves documents through it ([three addresses](ONLYOFFICE.md#three-machines-three-addresses)). |
 | `FILEX_BASE_PATH` | - (the path of `FILEX_PUBLIC_URL`, usually none) | **Serve filex under a sub-path** behind a reverse proxy, e.g. `/filex` for `https://example.com/filex/`; `FILEX_PUBLIC_URL=https://example.com/filex` alone does the same. Unset with a root public URL: served at the root. The proxy must pass the **full** path. See [Base path](#base-path). |
 | `FILEX_DATA_DIR` | `~/.filex` (`/data` in Docker) | Holds the SQLite DB, search index, thumbnail cache, first-run secret. |
-| `FILEX_DEFAULT_LOCALE` | - | Pin the initial UI language (`en` / `tr`) for users who haven't chosen one, overriding browser detection. A user's explicit language switch still wins. |
+| `FILEX_DEFAULT_LOCALE` | - | [**Seed**](#variables-that-seed-a-stored-setting) of the setting `instance.default_locale` (**Admin → Settings → General → Default language**): the interface language for someone who has not chosen one, over browser detection, and the language of the server's emails to an address with no account. A person's own choice still wins. Applies at the next start. Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed instance.default_locale`. |
 | `FILEX_MULTI_TENANT` | - (the switch) | Native multi-tenancy - one install serves N tenants, each a host-bound auth realm (provider) confined to its own storage(s). **Off = a normal single-tenant install.** The mode is a switch on **Admin → Multi-tenant mode** (the platform operator's; a change takes effect when filex is restarted). Set, this variable **pins** it both ways - `1`/`true` on, any other value off - and the switch shows it locked; config file `multi_tenant` does the same when the variable is unset. Unset in both, the switch decides, and it is off until somebody turns it on. On, a sign-in names its tenant by the tenant's own address or its **realm** (the sign-in form's Realm field, `realm/name` over SFTP); a bare name is the platform's own tenant. See [MULTI-TENANCY.md](./MULTI-TENANCY.md) and [its Realms section](./MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for). |
 | `FILEX_COOKIE_DOMAIN` | - (host-only) | `Domain` attribute for the `filex_session` cookie, e.g. `.example.com` - subdomains of that domain then share the session. Applied on **both** set and clear, so logout removes the same cookie it created. Empty = host-only cookie. `Secure`/`SameSite`/`HttpOnly` are unaffected. **Multi-tenant:** only the last-resort fallback - the cookie Domain resolves per tenant (the provider's `cookie_domain`, else derived from the provider host by dropping its first label, else this value); ⚠ a tenant on its bare apex, or whose derivation would land on a public suffix (`tenant.com.tr` → `.com.tr`), must set `cookie_domain` explicitly ([MULTI-TENANCY.md → session cookie](./MULTI-TENANCY.md#callback-redirects--session-cookie-multi-tenant)). |
 | `FILEX_TENANT_DOMAIN` | - | **Multi-tenant:** gives every tenant an address of its own, `<realm>.<tenant domain>` (`tenants.files.example` → `acme.tenants.files.example`), and is the name a tenant's own domain points its CNAME at ([TENANT-ADMIN.md](TENANT-ADMIN.md#addresses-and-own-domains)). Needs a wildcard DNS record `*.<tenant domain>` of **address records** (A/AAAA) pointing at the platform: behind a wildcard CNAME every own domain's canonical name is that CNAME's target, and none can be proven. Empty = no platform subdomains and no own domains. On a platform subdomain or an own domain the session cookie is that address's alone. |
@@ -215,7 +262,7 @@ value, or removing it, still stops the server with the flag set.
 | `FILEX_TLS_HTTP_LISTEN` | `:80` | `acme` mode: the plain listener for the HTTP-01 challenge and the redirect to HTTPS; `off` for none (the TLS-ALPN-01 challenge on the TLS listener still works). |
 | `FILEX_TLS_ACME_EMAIL` | - | `acme` mode: the contact the ACME account is registered with. |
 | `FILEX_TLS_ACME_DIRECTORY` | Let's Encrypt | `acme` mode: another ACME directory URL (a staging directory, a private CA). The directory's own HTTPS certificate must be trusted, and filex has no setting of its own for that: a private CA's root is added the way any Go program takes one, `SSL_CERT_FILE` (replaces the system bundle, so give it a bundle with both) or `SSL_CERT_DIR` (adds a directory). |
-| `FILEX_TRUSTED_PROXIES` | `auto` | Reverse proxies whose forwarded client address (`X-Forwarded-For` / `X-Real-IP`) and scheme filex believes: addresses, CIDR networks and the words `auto`, `loopback`, `private`, `link-local` and `none`. A list **replaces** the default, so keep `auto` to add to it: `auto, 203.0.113.0/24`. The **Sign-in security** page's list wins over this variable. A bad entry stops the server at start. See [Trusted proxies](#trusted-proxies). |
+| `FILEX_TRUSTED_PROXIES` | `auto` | Reverse proxies whose forwarded client address (`X-Forwarded-For` / `X-Real-IP`) and scheme filex believes: addresses, CIDR networks and the words `auto`, `loopback`, `private`, `link-local` and `none`. A list **replaces** the default, so keep `auto` to add to it: `auto, 203.0.113.0/24`. [**Seed**](#variables-that-seed-a-stored-setting) of `login.trusted_proxies` (**Admin → Settings → Sign-in security**): up to 0.56 the variable was read at every start; now it is written into the setting at the first start where the setting holds nothing, as typed, and the saved list wins from then on - change it on the page, or apply a changed variable with `filex settings reseed login.trusted_proxies`. A bad entry stops the server at start. See [Trusted proxies](#trusted-proxies). |
 | `FILEX_CONFIG` | - | Path to `config.yaml` (same as `--config`). |
 
 ### Trusted proxies
@@ -224,7 +271,17 @@ Which peers filex believes about a client's address (`X-Forwarded-For`,
 `X-Real-IP`) and about how the client arrived (an `X-Forwarded-Proto: http`,
 which turns a tenant's links into `http://`, is read from these peers only).
 The list is the `login.trusted_proxies` setting (the **Sign-in security**
-page), else `FILEX_TRUSTED_PROXIES`, else **`auto`**.
+page), else `FILEX_TRUSTED_PROXIES`, else **`auto`**. Since 0.57 the variable
+(or `trusted_proxies` in `config.yaml`) is a
+[seed](#variables-that-seed-a-stored-setting): a start where the setting
+holds nothing writes the variable's list into it, exactly as typed
+(`auto, 172.18.0.1` stays `auto, 172.18.0.1`, `auto` stays `auto`), and from
+then on the saved list is the one in force - the page says *First value from
+FILEX_TRUSTED_PROXIES* while the two are the same, and names the variable's
+list beside the saved one when they are not. A changed variable is applied
+with `filex settings reseed login.trusted_proxies`; *Remove the saved list*
+on the page goes back to the variable's list (and the next start writes it
+in again).
 
 A forwarded header is read **only** when the socket's peer is on the list, and
 the chain is walked from the trusted end: a header a client writes itself never
@@ -426,6 +483,13 @@ proxies).
 A request with an arrival line and no `msg=http` line reached filex and has not
 been answered; one with neither never reached it.
 
+`status=499` is a request the client gave up on before filex answered it - a
+page being left, a cancelled download, a closed tab - whose handler then failed
+because of it ("context canceled"). It is logged and answered as 499 (nginx's
+"client closed request"), not as the server error it would otherwise read as;
+nobody is there to receive it. A refusal (4xx) keeps its own status, and a
+request that ran out of the SERVER's time stays a 5xx.
+
 ⚠ The **query string is never logged**. It carries thumbnail and OnlyOffice
 signatures, WebSocket tickets, share PINs, OIDC codes, S3 presigned credentials
 and people's search text. `action` is the only value read from it, and only as
@@ -568,9 +632,9 @@ next). Nothing to switch on: it is on by default.
 | **What counts** | A wrong password, and a wrong second-factor code. Not: the form asking for the code, a right password on a disabled account, an API token (not a password). |
 | **What resets** | A success resets the *account's* counter - never the address's, so one valid login between guesses cannot launder a spray. A protocol's cached credential and an API token do not reset it either (a busy client would wipe the counter with every request). |
 
-![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.de6ab8c9e4a3.png)
+![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.d1df80168e82.png)
 
-![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.3f4c6d3233f3.png)
+![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.42e1fe6f1937.png)
 
 **The IP allow-list** (`login.ip_allowlist`) is the way back in. An address on it is
 exempt from the per-address limit, and may sign in to **any** locked account (the
@@ -634,7 +698,7 @@ instance within a minute. A database read that fails keeps the last value known
 (the default when there is none). A `login.*` key written through the generic
 settings API reaches the running limit the same way.
 
-![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](https://filex.sh/shots/loginsecurity/login-security-page-1440.fa0a391a5c19.png)
+![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](https://filex.sh/shots/loginsecurity/login-security-page-1440.3b370a593b47.png)
 
 | Key | Default | Range |
 |---|---|---|
@@ -645,7 +709,7 @@ settings API reaches the running limit the same way.
 | `login.lock_base_seconds` | `60` | 1 - 86400 |
 | `login.lock_max_seconds` | `900` | 1 - 86400 (never below the base) |
 | `login.ip_allowlist` | empty | Addresses and CIDR networks. |
-| `login.trusted_proxies` | empty (→ `FILEX_TRUSTED_PROXIES`, then `auto`) | Addresses, CIDR networks and the words of [Trusted proxies](#trusted-proxies). On the page `auto` is a switch that shows what it resolved to and why, the three classes are three switches and the addresses a list of their own. |
+| `login.trusted_proxies` | `FILEX_TRUSTED_PROXIES`'s list, written at the first start ([seed](#variables-that-seed-a-stored-setting)); empty → `auto` | Addresses, CIDR networks and the words of [Trusted proxies](#trusted-proxies). On the page `auto` is a switch that shows what it resolved to and why, the three classes are three switches and the addresses a list of their own. |
 
 **Not covered:** S3 (a signed request proves an HMAC over a random secret - there is
 no password to guess), NFS (an export is bound to an address, not a password), API
@@ -685,7 +749,7 @@ so are configured in [Authentication](#authentication), not here.)
 
 | Env var | Description |
 |---|---|
-| `FILEX_SITE_NAME` | Instance display name shown in the UI. |
+| `FILEX_SITE_NAME` | Seeds the instance's **Display name** (`branding.name`, *Admin → Settings → Branding*): the name next to the logo, on the sign-in screen and in the mails filex sends. Upgrading: a `site_name` row an earlier release kept is carried into an empty Display name at start, then removed. |
 | `FILEX_TRASH_RETENTION_DAYS` | Days to keep trashed items before purge (see [TRASH-VERSIONING.md](TRASH-VERSIONING.md)). |
 | `FILEX_SHARE_MAX_TTL` | Longest life a **new** share link may be given - `7`, `7d` or `168h`; `0` = no ceiling. Seeds `share.max_ttl_days` (default 7) once; afterwards the admin **Protection** page owns it. Existing links are never changed (see [SHARING.md](SHARING.md)). |
 | `FILEX_DRAFTS_LIMIT` | How many drafts (new documents not saved yet) one person may keep, `1`-`1000`. Seeds `drafts.limit` (default 50) once; afterwards the admin **Protection** page owns it (see [PROTECTION.md → Drafts](PROTECTION.md#drafts)). |
@@ -715,33 +779,44 @@ for the storage model.)
 ## External services
 
 Each is optional - an empty URL disables it. Set via env, `external_services.*`,
-**or the admin UI** (*Settings → External services*).
+**or the admin UI** (*Admin → Settings → External services*).
 
 The running process always uses the value in the `external_services` table,
 read on every request, so an admin-UI change applies without a restart. Env and
-`config.yaml` are declarative configuration **for** that table - the opposite of
-a [seed](#variables-that-seed-a-stored-setting): a service they name is
-re-asserted onto its row at every boot, so editing `FILEX_ONLYOFFICE_URL` and
-restarting works, and an admin-UI edit to such a service applies now but is
-reverted at the next start. `GET /api/admin/external` returns
-`env_managed: true` for those, and the UI labels them. Switching such a service
-off in the admin UI is the same kind of edit: off everywhere at once (editor,
-office thumbnails, the apps' office engine), on again after the next restart;
-to switch it off for good, remove `FILEX_ONLYOFFICE_URL` (or `FILEX_DRAWIO_URL`,
-or its `config.yaml` key).
+`config.yaml` are a [seed](#variables-that-seed-a-stored-setting) for that
+table, like every other setting a variable gives a first value to: a service
+nothing was configured in yet (no address stored) takes the environment's
+address, secret, callback address and editor language on the next start, and
+from then on the row is the admin page's - an edit there, switching the service
+off included, stands across restarts. `GET /api/admin/external` returns
+`env_managed: true` for a service the environment names, and the page says
+which variable gave its first value. To make the environment take over again,
+run `filex settings reseed --external` and restart
+([Writing the environment again](#writing-the-environment-again-filex-settings-reseed)).
+
+> **Upgrading from 0.56 or earlier:** up to 0.56 a service the environment named
+> was written back onto its row at **every** start, so editing
+> `FILEX_ONLYOFFICE_URL` in compose and restarting changed it, and an edit on
+> the admin page lasted until the next start. Now the stored row stands: after
+> changing the variable, run `filex settings reseed --external` (or change the
+> address on *External services*), then restart. Nothing changes for an
+> install whose page and environment already agree.
 
 | Env var | Description |
 |---|---|
-| `FILEX_ONLYOFFICE_URL` | OnlyOffice Document Server URL (see [ONLYOFFICE.md](ONLYOFFICE.md)) |
+| `FILEX_ONLYOFFICE_URL` | ONLYOFFICE Document Server URL - optional: the [Office editor app](ONLYOFFICE.md#the-office-editor-app) edits office documents without one (see [ONLYOFFICE.md](ONLYOFFICE.md)) |
 | `FILEX_ONLYOFFICE_JWT` | Shared JWT secret - must match the Document Server |
 | `FILEX_ONLYOFFICE_CALLBACK_URL` | Address the Document Server uses to reach filex; empty means `FILEX_PUBLIC_URL`. Only needed when the browser's address and the container's address differ |
 | `FILEX_ONLYOFFICE_FRAME_ORIGIN` | The Document Server's own origin (`https://docs.example.com`), whose reverse proxy sends `/filex-frame/*` to filex: the editor's `api.js` then runs in a frame there instead of in filex's page ([ONLYOFFICE.md → The editor in a frame of its own](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)). The same site as filex is fine. On that host filex answers `/filex-frame/editor` and nothing else. Read at start (not on the admin page); a value that is not an origin, filex's own or `FILEX_APP_UI_ORIGIN` stops the server. YAML: `external_services.onlyoffice.frame_origin` |
-| `FILEX_ONLYOFFICE_LANG` | The editor's language: `auto` (each person's own filex language) or a language the editor offers (`de`, `fr`, `tr`, `pt-PT`, `zh-TW`, ...) for everybody. Re-asserted onto the ONLYOFFICE row at every boot like the URL (an admin-UI edit lasts until the next start); unset, *External services → ONLYOFFICE → Editor language* decides, `auto` by default. A value the editor does not offer is logged and ignored. YAML: `external_services.onlyoffice.editor_lang` ([ONLYOFFICE.md → The editor's language](ONLYOFFICE.md#the-editors-language)) |
+| `FILEX_ONLYOFFICE_LANG` | The editor's language: `auto` (each person's own filex language) or a language the editor offers (`de`, `fr`, `tr`, `pt-PT`, `zh-TW`, ...) for everybody. Seeds the editor language of the ONLYOFFICE row when it has none (an admin-UI choice stands; `filex settings reseed --external` writes the variable's again); unset, *External services → ONLYOFFICE → Editor language* decides, `auto` by default. A value the editor does not offer is logged and ignored. YAML: `external_services.onlyoffice.editor_lang` ([ONLYOFFICE.md → The editor's language](ONLYOFFICE.md#the-editors-language)) |
 | `FILEX_DRAWIO_URL` | Drawio embed URL (diagram editing) |
 
-The same Document Server draws the thumbnails of office documents
-([thumbnails.md → Office through OnlyOffice](thumbnails.md#office-through-onlyoffice));
-its two limits are the `FILEX_THUMBS_OFFICE_*` settings under [Thumbnails](#thumbnails).
+The same Document Server draws the thumbnails of office documents and runs the
+apps' office conversions, unless the office engine the Office editor app
+brings is asked first (by default it is, when installed:
+[ONLYOFFICE.md → The engine and a Document Server](ONLYOFFICE.md#the-engine-and-a-document-server);
+[thumbnails.md → Office through OnlyOffice](thumbnails.md#office-through-onlyoffice));
+their two limits are the `FILEX_THUMBS_OFFICE_*` settings under [Thumbnails](#thumbnails).
 
 > **Mermaid needs no service.** Mermaid diagrams render entirely client-side in
 > the browser via a bundled `mermaid` library - there is nothing to deploy and no
@@ -802,19 +877,20 @@ Drivers that live outside the binary - see [PLUGINS.md](PLUGINS.md).
 | `FILEX_PLUGIN_MAX_INFLIGHT` | `10` | Concurrent operations allowed **per plugin**. A caller that waits 5 s for a slot is refused rather than queued, and counted as `outcome="busy"` in [the metrics](METRICS.md#storage-plugins) - a sizing signal, not a bug. Raise it for a fast local plugin, lower it to keep a slow remote one from occupying the server. `0` or nonsense keeps the default. |
 | `FILEX_PLUGIN_LOOPBACK_SOURCES` | `0` | ⚠ **Development and tests only - never on a server.** `1` lets plugin and app **downloads** reach this machine (`127.0.0.0/8`, `::1`) and nothing else that is private: a storage plugin from a URL or a source, an app's manifest, module and interface bundle, an install request, the update check, an app store (its keys, its install links, a license check). By default every one of them reaches public addresses only (see below). The end-to-end tests set it, because they serve plugin sources from a small server on 127.0.0.1. With it on, a manifest that names a loopback address makes filex send GET requests to its own services, so the server says so in its log at start. An app's own requests (`http_request`, `asset_fetch`) never follow it. YAML: `plugin_loopback_sources`. |
 | `FILEX_APP_PLUGINS_DISABLED` | `0`, **`1` in demo mode** | Turns the [app plugin](APP-PLUGINS.md) runtime off: nothing under `<data-dir>/app-plugins` is loaded, the file menu shows no app rows, the admin tab explains why. Demo mode moves the default to `1` for the same reason as storage plugins; `FILEX_APP_PLUGINS_DISABLED=0` turns them back on deliberately. |
-| `FILEX_APP_PLUGIN_MAX_INPUT_MB` | `256` | Per-file ceiling on what one app job may read. |
-| `FILEX_APP_PLUGIN_MAX_OUTPUT_MB` | `512` | Per-file ceiling on what one app job may produce. |
-| `FILEX_APP_PLUGIN_MAX_WASM_MB` | `64` | Largest module an app install accepts. `FILEX_PLUGIN_TRUSTED_KEYS` applies to app modules too. |
+| `FILEX_APP_PLUGIN_MAX_INPUT_MB` | `256` | [**Seed**](#variables-that-seed-a-stored-setting) of `apps.max_input_mb` (1-16384, **Admin → Settings → Plugins → Apps**): per-file ceiling on what one app job may read. Applies at the next start. Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed apps.max_input_mb`. |
+| `FILEX_APP_PLUGIN_MAX_OUTPUT_MB` | `512` | [**Seed**](#variables-that-seed-a-stored-setting) of `apps.max_output_mb` (1-16384): per-file ceiling on what one app job may produce. Applies at the next start. Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed apps.max_output_mb`. |
+| `FILEX_APP_PLUGIN_MAX_WASM_MB` | `64` | [**Seed**](#variables-that-seed-a-stored-setting) of `apps.max_wasm_mb` (1-1024): largest module an app install accepts. `FILEX_PLUGIN_TRUSTED_KEYS` applies to app modules too. Applies at the next start. Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed apps.max_wasm_mb`. |
 | `FILEX_APPS_E2E_PLAINTEXT` | `true` | **Seed** of `apps.e2e_plaintext` (0.56): an app granted `files:e2e-plaintext` may edit a file of an unlocked end-to-end encrypted folder - the person's browser decrypts it for the app's frame and encrypts the save; the server carries only ciphertext ([E2E-ENCRYPTION.md → Editing in an app](E2E-ENCRYPTION.md#editing-in-an-app)). `false` turns it off for every app: no app is offered such a file and both of the app's doors refuse it. Seeded once, like the other stored settings; afterwards `PUT /api/admin/settings/apps.e2e_plaintext` with `{"value": "false"}` (the instance's administrator). Read at every request. |
 | `FILEX_APP_UI_ORIGIN` | - | Serves apps' own interfaces from an [origin of their own](APP-PLUGINS.md#an-origin-of-their-own), e.g. `https://apps.example-usercontent.com` (a scheme and a host; another registrable domain than filex's). The proxy sends that host to filex too; filex answers only the interface route there and refuses it on its own host. With it and no `FILEX_ONLYOFFICE_FRAME_ORIGIN`, the ONLYOFFICE editor's frame is served there too ([ONLYOFFICE.md → The editor in a frame of its own](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)). Empty (the default): interfaces are served from filex's origin, opaque by sandbox. A value that is not an origin, or filex's own, stops the server. YAML: `app_ui_origin`. |
-| `FILEX_APP_PLUGIN_MAX_UI_MB` | `128` | Largest [interface package](APP-PLUGINS.md#an-apps-own-interface) (the app's `ui` zip) an install accepts; the files inside it are capped too (512 MiB unpacked, 20 000 files, 64 MiB per file). |
+| `FILEX_APP_PLUGIN_MAX_UI_MB` | `128` | [**Seed**](#variables-that-seed-a-stored-setting) of `apps.max_ui_mb` (1-1024; applies at the next start): largest [interface package](APP-PLUGINS.md#an-apps-own-interface) (the app's `ui` zip) an install accepts; the files inside it are capped too (512 MiB unpacked, 20 000 files, 64 MiB per file). Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed apps.max_ui_mb`. |
+| `FILEX_OFFICE_ENGINE_MAX_MB` | `2048` | The most memory one module of the [office engine an app brings](ONLYOFFICE.md#the-office-engine-without-a-document-server) may use, in MiB (`512` to `4096`, x2t's own maximum; out of range is clamped): a conversion or a thumbnail that reaches it ends as *too large*. The engine's process may hold about twice that before filex ends it (watched on Linux and Windows). A plain variable, not a stored setting: read whenever an engine process starts, so a change applies to the next one (idle processes end after 3 minutes; a restart applies it at once). YAML: `office_engine_max_mb`. |
 | `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every installed app's source (its GitHub repository or address) for a newer version the running filex can run, and **tells the administrators** - it installs nothing: every newer version waits for an administrator's approval ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)). The same switch covers the storage plugins' [update sources](PLUGINS.md#updates-from-a-source). `0` = no request leaves the server for it - what an air-gapped install wants; **Check for updates** on the Apps tab still asks when pressed. A demo never checks. The time of the last check is stored, so a restart neither skips a day nor checks at every boot. YAML: `app_plugin_update_check`. |
 | `FILEX_APP_STORE_URLS` | - | Comma-separated app store **origins** (`https://store.example`, no path) trusted by configuration: their install links and license answers are accepted without an administrator approving the store first, signed with the keys in `FILEX_APP_STORE_KEYS` and no others. Set, it is an **allow list** ([below](#app-stores-allow-list)). Unset, a store is trusted only by an administrator who compared its key fingerprints on its first install link ([APP-PLUGINS.md → Trusted stores](APP-PLUGINS.md#trusted-stores)). A configured store has no remove button in the panel. YAML: `app_store_urls`. |
 | `FILEX_APP_STORE_KEYS` | - | Comma-separated ed25519 **public** keys (hex or standard base64) of the stores in `FILEX_APP_STORE_URLS`, each optionally prefixed with the one use it may sign for: `index:<key>` (install links) or `license:<key>` (license answers); a bare key may sign either. filex reads the store's `/v1/keys.json` for the key ids and accepts a key only when its material is listed here; a key the store publishes that is not here is refused (`store_key_not_configured`), never put to an administrator. Ignored (with a log line) when `FILEX_APP_STORE_URLS` names no store. Not the same setting as `FILEX_PLUGIN_TRUSTED_KEYS`, which checks modules. YAML: `app_store_keys`. |
 | `FILEX_APP_GITHUB_RAW_BASE` | `https://raw.githubusercontent.com` | Where a GitHub install (and a [store link](APP-PLUGINS.md#installing-from-a-store), which names a GitHub repository) reads a repository's files: `<base>/<owner>/<name>/<ref>/filex-app.json`. A mirror of GitHub's raw host for an install that cannot reach it, or the end-to-end tests' fake GitHub. The download guard applies to it like to every address: a loopback mirror needs `FILEX_PLUGIN_LOOPBACK_SOURCES`, a private one is refused. YAML: `app_github_raw_base`. |
 | `FILEX_APP_CLOCK` | - | ⚠ **Screenshots and tests only - never on a server.** An RFC 3339 instant (`2026-09-15T10:30:00Z`): the apps' clock reads it when filex starts and runs at real speed from there - the time inside every app module, and the host's own times it hands an app (a lock's end, a link's expiry, a certificate's not-after, a wake-up's window). The screenshot scenes set it so that what an app writes into its own words ("requested on", "frozen until", the date under a signature) is dated on their clock. Everything filex stores and compares stays on the real clock. The server says in its log at start that the clock is moved. No YAML key. |
 | `FILEX_SECRET_KEY` | - | Seals a **remote** plugin's bearer token and a [paid app's license key](APP-PLUGINS.md#paid-apps); without it both are refused ([The secret key](#the-secret-key)). |
-| `FILEX_PLUGIN_REQUEST_TTL_DAYS` | `14` | How long an [install request](APP-PLUGINS.md#install-requests) - what an API key leaves instead of installing an app or a storage plugin - waits for an administrator before it expires. Checked hourly and whenever the requests are read. YAML: `plugin_request_ttl_days`. |
+| `FILEX_PLUGIN_REQUEST_TTL_DAYS` | `14` | [**Seed**](#variables-that-seed-a-stored-setting) of `apps.request_ttl_days` (1-365, **Admin → Settings → Plugins → Apps**; applies at the next start, a request already made keeps its date): how long an [install request](APP-PLUGINS.md#install-requests) - what an API key leaves instead of installing an app or a storage plugin - waits for an administrator before it expires. Checked hourly and whenever the requests are read. YAML: `plugin_request_ttl_days`. Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed apps.request_ttl_days`. |
 
 Fixed, and documented in [PLUGINS.md](PLUGINS.md): where installed plugins,
 their signatures and their sockets live ([Where things live](PLUGINS.md#where-things-live));
@@ -868,7 +944,7 @@ do not set their own `sync_interval_s`. A storage that does set one wins.
 
 | Env var | Default | Description |
 |---|---|---|
-| `FILEX_SYNC_INTERVAL` | `15m` | Go duration (`30s`, `15m`, `1h`); `0` or a negative value is "unset". The 5 s floor applies to a storage's own `sync_interval_s` (under 5 s it falls back to this variable), not to this variable. |
+| `FILEX_SYNC_INTERVAL` | `15m` | [**Seed**](#variables-that-seed-a-stored-setting) of `sync.default_interval_minutes` (1-1440, **Admin → Settings → General → Scan storages every**; applies at the next start): how often a storage with no interval of its own is scanned. A Go duration (`30s`, `15m`, `1h`), rounded up to whole minutes; `0` or a negative value is "unset". The 5 s floor applies to a storage's own `sync_interval_s` (under 5 s it falls back to this setting), not to this one. Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed sync.default_interval_minutes`. |
 
 > ⚠ The variable is `FILEX_SYNC_INTERVAL`, **not** `FILEX_SYNC_DEFAULT_INTERVAL`.
 > An unparseable value logs a warning at boot and keeps the default rather than
@@ -917,7 +993,7 @@ work on every driver. See [UPLOADS.md](UPLOADS.md).
 |---|---|---|
 | `FILEX_UPLOAD_STAGING_DIR` | `<data_dir>/uploads` | Where in-flight upload parts live. |
 | `FILEX_UPLOAD_CHUNK_SIZE` | `8388608` (8 MiB) | Default part size when the client does not request one. |
-| `FILEX_UPLOAD_STAGING_TTL` | `24h` | Idle time before the sweeper removes an abandoned staging directory. Staging that belongs to a file you delete **permanently** is released at once and does not wait for this. |
+| `FILEX_UPLOAD_STAGING_TTL` | `24h` | [**Seed**](#variables-that-seed-a-stored-setting) of `upload.staging_ttl_hours` (1-720, **Admin → Settings → General**; a duration, rounded up to whole hours; applies at the next start): idle time before the sweeper removes an abandoned staging directory. Staging that belongs to a file you delete **permanently** is released at once and does not wait for this. Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed upload.staging_ttl_hours`. |
 
 > ⚠ The whole object passes through the staging directory - put it on a
 > filesystem with room for the largest upload you expect. `begin` refuses when
@@ -1061,7 +1137,7 @@ instead of failing the whole request, is in
 
 | Env var | Default | Description |
 |---|---|---|
-| `FILEX_VERSIONS_ON_OVERWRITE` | `1` | Master switch for the pre-write snapshot guard. `0`/`false` turns it off for a deployment whose storage backend cannot afford the extra write - those writes then proceed unsnapshotted, and filex logs one WARN at boot naming the state. `1`/`true` turns it back on, including over a `config.yaml` that set `versions_on_overwrite: false` (the env var wins in both directions). |
+| `FILEX_VERSIONS_ON_OVERWRITE` | `1` | [**Seed**](#variables-that-seed-a-stored-setting) of `versions.on_overwrite` (**Admin → Settings → Protection → Keep a version before overwriting**; applies at the next start): the master switch for the pre-write snapshot guard. Off for a deployment whose storage backend cannot afford the extra write - those writes then proceed unsnapshotted, and filex logs one WARN at boot naming the state. Once stored, the setting on the page is the one in force; `filex settings reseed versions.on_overwrite` writes the variable's value again. Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed versions.on_overwrite`. |
 | `FILEX_VERSIONS_FAIL_OPEN` | `0` | Lets a snapshot **failure** fall through to the write instead of refusing it, logging `overwrite proceeding without a snapshot` (naming the storage and path) each time; filex logs a WARN at boot while it is on. Off by default: a write must not proceed past a failed snapshot. It exists for one bind: when the object store fills up, snapshots start failing and the fail-closed default refuses **every** overwrite on the instance - desktop sync, WebDAV, OnlyOffice saves, the browser. |
 
 ⚠ These are independent. `FILEX_VERSIONS_ON_OVERWRITE=0` skips the snapshot
@@ -1104,10 +1180,10 @@ included, through the database, with no other service between the processes.
 |---|---|---|
 | `FILEX_COEDIT` | `1` | Off: every `coedit.*` call answers `503 coedit_off` and an app edits alone. |
 | `FILEX_COEDIT_DIR` | `<data_dir>/coedit` | The sessions' sealed blobs (the base document a member who joins late opens, the images added while editing), one folder per session, removed with it. ⚠ Several instances on one database must share it, as they share the upload staging directory. |
-| `FILEX_COEDIT_MAX_MEMBERS` | `20` | People in one session; one more is refused (`coedit_full`) and edits alone. |
+| `FILEX_COEDIT_MAX_MEMBERS` | `20` | [**Seed**](#variables-that-seed-a-stored-setting) of `coedit.max_members` (2-200, **Admin → Settings → Plugins → Apps**; applies at the next start): people in one session; one more is refused (`coedit_full`) and edits alone. Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed coedit.max_members`. |
 | `FILEX_COEDIT_MAX_LOG_MB` | `64` | A session's sealed log. Past it a member has to save; the next opening starts a new session. |
 | `FILEX_COEDIT_MAX_BLOB_MB` | `256` | A session's blobs together. |
-| `FILEX_COEDIT_UNSAVED_DAYS` | `30` | How long a session nobody is in keeps its unsaved changes for the next person who opens the file (a saved one is forgotten after an hour). |
+| `FILEX_COEDIT_UNSAVED_DAYS` | `30` | [**Seed**](#variables-that-seed-a-stored-setting) of `coedit.unsaved_days` (1-365; applies at the next start): how long a session nobody is in keeps its unsaved changes for the next person who opens the file (a saved one is forgotten after an hour). Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed coedit.unsaved_days`. |
 | `FILEX_SECRET_KEY` | - | ⚠ Needed to edit a file in an **ordinary** folder together: the server makes each session's key and keeps it sealed with this key (the unsaved work in the database and in `FILEX_COEDIT_DIR` stays sealed at rest); without it, and when it changes, see [The secret key](#the-secret-key). A file of an **end-to-end encrypted folder** does not use it: its session's key is made and sealed with the folder key in the members' browsers. |
 
 In `config.yaml`: `coedit: {enabled, dir, max_members, max_log_mb, max_blob_mb, unsaved_days}`.
@@ -1129,7 +1205,7 @@ and every later request - at local-disk speed, with full `Range` support. See
 | `FILEX_CACHE` | `1` | Master switch. `0` disables prepared copies entirely. |
 | `FILEX_CACHE_DIR` | `<data_dir>/cache` | Where prepared copies live. |
 | `FILEX_CACHE_MIN_SIZE` | `67108864` (64 MiB) | Smallest file worth preparing. Below it, nothing is ever cached. |
-| `FILEX_CACHE_MAX_BYTES` | `21474836480` (20 GiB) | **Global** ceiling on the cache directory, enforced with LRU eviction. |
+| `FILEX_CACHE_MAX_BYTES` | `21474836480` (20 GiB) | [**Seed**](#variables-that-seed-a-stored-setting) of `cache.max_gb` (1-10240 GB, **Admin → Settings → General → File cache size**; bytes, rounded up to whole GB; applies at the next start): the **global** ceiling on the cache directory, enforced with LRU eviction. Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed cache.max_gb`. |
 | `FILEX_CACHE_SLOW_BPS` | `10485760` (10 MiB/s) | Measured throughput below which a storage counts as slow. |
 
 A file is prepared only when it is **at least `MIN_SIZE`** *and* its storage is
@@ -1163,12 +1239,12 @@ regenerable, and a single folder-share archive can be tens of gigabytes.
 |---|---|---|
 | `FILEX_THUMBS_ENABLED` | `true` | Master switch. |
 | `FILEX_THUMB_BACKFILL_ON_BOOT` | - | Set `once` to backfill missing thumbnails on startup. |
-| `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | How often cached thumbnails whose node no longer exists are deleted (also once at boot). Once per boot the same worker also scales down pages cached at full size by a version before 0.41.0. `0` disables both. |
-| `FILEX_THUMBS_SVG_MAX_MB` | `5` | [**Seed**](#variables-that-seed-a-stored-setting) of the setting `thumbs.svg_max_mb` (1-64): the largest SVG drawn. The setting is edited in **Settings** or **Admin → Tools → Thumbnail repair**. See [thumbnails.md → SVG limits](thumbnails.md#svg-limits). |
+| `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | [**Seed**](#variables-that-seed-a-stored-setting) of `thumbs.sweep` (on/off) and `thumbs.sweep_interval_minutes` (10-10080, **Admin → Settings → General**; applies at the next start): how often cached thumbnails whose node no longer exists are deleted (also once at boot). Once per boot the same worker also scales down pages cached at full size by a version before 0.41.0. `0` seeds the switch off, which disables both. Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed thumbs.sweep thumbs.sweep_interval_minutes`. |
+| `FILEX_THUMBS_SVG_MAX_MB` | `5` | [**Seed**](#variables-that-seed-a-stored-setting) of the setting `thumbs.svg_max_mb` (1-64): the largest SVG drawn. The setting is edited in **Admin → Settings → General** (Thumbnail settings). See [thumbnails.md → SVG limits](thumbnails.md#svg-limits). |
 | `FILEX_THUMBS_SVG_TIMEOUT` | `10` | **Seed** of `thumbs.svg_timeout_seconds` (1-120): the longest time one SVG may take to draw. |
-| `FILEX_THUMBS_OFFICE_MAX_MB` | `25` | **Seed** of `thumbs.office_max_mb` (1-100): the largest office document sent to OnlyOffice for a thumbnail; larger ones are marked *Too large*. See [thumbnails.md → Office limits](thumbnails.md#office-limits). |
-| `FILEX_THUMBS_OFFICE_SLOTS` | `1` | **Seed** of `thumbs.office_slots` (1-4): how many office documents one filex process has OnlyOffice draw at once (a Community Edition document server runs one converter, shared with the editors). |
-| `FILEX_THUMBS_FOLDER_PREVIEWS` | `true` | **Seed** of `thumbs.folder_previews`: folder cards show up to three pictures from inside, and a resting pointer lists what a folder holds. Switched in **Settings** or on the repair tab. See [thumbnails.md → Folder previews](thumbnails.md#folder-previews). |
+| `FILEX_THUMBS_OFFICE_MAX_MB` | `25` | **Seed** of `thumbs.office_max_mb` (1-100): the largest office document the office engine (an app's, or OnlyOffice) is given for a thumbnail; larger ones are marked *Too large*. See [thumbnails.md → Office limits](thumbnails.md#office-limits). |
+| `FILEX_THUMBS_OFFICE_SLOTS` | `1` | **Seed** of `thumbs.office_slots` (1-4): how many office documents one filex process has the office engine draw at once (a Community Edition document server runs one converter, shared with the editors). With an app's engine it is also how many engine processes run for thumbnails, and as many for conversions. |
+| `FILEX_THUMBS_FOLDER_PREVIEWS` | `true` | **Seed** of `thumbs.folder_previews`: folder cards show up to three pictures from inside, and a resting pointer lists what a folder holds. Switched in **Admin → Settings → General** (Thumbnail settings). See [thumbnails.md → Folder previews](thumbnails.md#folder-previews). |
 | `FILEX_THUMBS_URL_TTL` | `24h` | How long a stamped `thumb_url` (`?exp=&sig=`) stays valid. The stamp is what lets a bare `<img src>` fetch a preview with no header and no cookie; an authenticated caller never needs one. ⚠ `0` means *use the default*, not "never expires". See [thumbnails.md → Serving](thumbnails.md#serving). |
 
 Kinds and their tool requirements (auto-detected on `PATH`; the default Docker
@@ -1178,9 +1254,10 @@ fallback); HEIC/HEIF/AVIF = ImageMagick with libheif
 (`imagemagick-heic` on Alpine), and for HEIC libheif's HEVC decoder
 (`libheif-plugin-libde265` on Debian/Ubuntu, which apt does not install on its
 own; checked at boot by decoding a sample, `thumbs.heic`); video/audio = `ffmpeg`; PDF = `gs` or
-`pdftoppm`; office = no tool here: the OnlyOffice document server draws office
-documents (configured under [External services](#external-services); without it
-they get no thumbnail and the repair tab says "ONLYOFFICE is not configured"). A missing tool turns
+`pdftoppm`; office = no tool here: an office engine draws office documents - the
+one the Office editor app brings (0.4.0), or the OnlyOffice document server
+configured under [External services](#external-services); with neither they get
+no thumbnail and the repair tab says "No office engine runs"). A missing tool turns
 that kind off: its files are recorded as *skipped* with the tool named, show a
 plain type tile, and are listed under **Admin → Tools → Thumbnail repair**
 until the tool is installed (restart, then the next listing or a *Fix* repair
@@ -1197,10 +1274,10 @@ configuration. See [thumbnails.md](thumbnails.md).
 | Env var | Default | Description |
 |---|---|---|
 | `FILEX_SEARCH_ENABLED` | `true` | Embedded Bleve full-text index. |
-| `FILEX_SEARCH_CONTENT` | `true` | Extract text from files into the index (content search). `0` stops enqueueing extraction; text already indexed keeps matching. |
-| `FILEX_SEARCH_CONTENT_MAX` | `5242880` | Source files larger than this are never content-extracted. |
-| `FILEX_SEARCH_MEMORY_PERCENT` | `25` | Share, in percent (1-50), of the memory filex was given - the container's limit, or the machine's RAM - that indexing may take on top of what filex holds at startup. Over it, content extraction and a rebuild wait for the index to give memory back. |
-| `FILEX_SEARCH_AUTO_REBUILD` | `true` | Rebuild the index in the background at startup when it was written by an older document schema. The replacement is built alongside the live index and swapped in, so search never goes dark. `0` leaves the index alone and reports `needs_rebuild` instead. |
+| `FILEX_SEARCH_CONTENT` | `true` | **Seed** of `search.content` (Admin → Settings → General → Search settings, "Search inside files"): extract text from files into the index (content search). `0` stops reading file text; text already indexed keeps matching. |
+| `FILEX_SEARCH_CONTENT_MAX` | `5242880` | **Seed** of `search.content_max_mb`: source files larger than this are never content-extracted. In BYTES here, stored in MB (rounded up, 1-1024). |
+| `FILEX_SEARCH_MEMORY_PERCENT` | `25` | **Seed** of `search.memory_percent`: share, in percent (1-50), of the memory filex was given - the container's limit, or the machine's RAM - that indexing may take. Over it, content extraction and a rebuild wait for the index to give memory back. |
+| `FILEX_SEARCH_AUTO_REBUILD` | `true` | **Seed** of `search.auto_rebuild`: rebuild the index in the background at startup when it was written by an older document schema. The replacement is built alongside the live index and swapped in, so search never goes dark. Off leaves the index alone and reports `needs_rebuild` instead. |
 | `FILEX_TESSERACT_BIN` | unset (`tesseract` on `$PATH`) | Path to the `tesseract` binary used to OCR images (png/jpg/webp/tiff) into the content index. **When set it is authoritative:** a value that does not resolve turns OCR *off* rather than falling back to `$PATH`. Unset, filex looks for `tesseract` on `$PATH`; if there is none, images are skipped silently and the capabilities endpoint reports `ocr: false`. |
 
 Index path is `config.yaml` only (`search.index_path`, default
@@ -1256,10 +1333,10 @@ cannot read it afterwards.
 
 | Env var | Default | Description |
 |---|---|---|
-| `FILEX_NOTIFY_ENABLED` | `true` | In-app bell + webhook. |
+| `FILEX_NOTIFY_ENABLED` | `true` | [**Seed**](#variables-that-seed-a-stored-setting) of `notify.enabled` (**Admin → Settings → Notifications**; applies at the next start): the in-app bell, the emails, push and the webhooks. Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed notify.enabled`. |
 | `FILEX_WEBHOOK_URL` | - | The **legacy single** webhook: one JSON POST per event, no event filter. Empty = in-app only, plus whatever targets exist. |
 | `FILEX_WEBHOOK_TOKEN` | - | Sent as `Authorization: Bearer` to that legacy webhook only. |
-| `FILEX_WEBHOOK_LANG` | - | The language the legacy webhook's `title` and `body` are said in (`tr`, `en`, a language pack's). Empty = the instance's (`FILEX_DEFAULT_LOCALE`, else English). A webhook target sets its own in Admin → Webhooks ([Which language](NOTIFICATIONS.md#which-language)). |
+| `FILEX_WEBHOOK_LANG` | - | [**Seed**](#variables-that-seed-a-stored-setting) of `notify.webhook_lang` (**Admin → Settings → Webhooks**; applies at once): the language the default webhook's `title` and `body` are said in (`tr`, `en`, a language pack's). Empty = the instance's default language, else English. A webhook target sets its own in Admin → Webhooks ([Which language](NOTIFICATIONS.md#which-language)). Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed notify.webhook_lang`. |
 | `FILEX_PUSH_ENABLED` | `true` | [Web Push](NOTIFICATIONS.md#web-push): what a person's bell tells them reaches their phone and browsers while filex is closed, once they turn it on for a device. ⚠ Needs [`FILEX_SECRET_KEY`](#the-secret-key): the VAPID key pushes are signed with is made at the first start and stored sealed with it. |
 | `FILEX_PUSH_SUBJECT` | `FILEX_PUBLIC_URL` (https) | The contact a push service may write to about this server: `mailto:ops@example.com` or an https address. Without an https public address: `mailto:filex@<its host>`. |
 | `FILEX_PUSH_HOSTS` | - | Push services accepted besides the browsers' own (Chrome, Firefox, Safari, Edge), comma separated; `*` accepts any https host that is a name, never an address. The sender connects directly, not through `HTTP_PROXY` / `HTTPS_PROXY`. |
@@ -1542,7 +1619,7 @@ only**, so nobody can lock it for everybody. Nothing here runs unless
 
 ## Branding (white label)
 
-*Admin → Customization → Branding* names the instance. It is kept in the
+*Admin → Settings → Branding* names the instance. It is kept in the
 `settings` table (no environment variable; on a [multi-tenant](MULTI-TENANCY.md#12-per-tenant-settings--branding)
 install each tenant's host has its own) and is public: `GET /api/branding`
 answers the sign-in page before anybody is signed in.
@@ -1704,8 +1781,8 @@ versions_fail_open: false         # let a failed snapshot through instead of ref
 seed:                              # first-boot only-if-absent (see Zero-touch seeding)
   admin_email: ""
   admin_password: ""
-  site_name: ""
-  trash_retention_days: ""
+  site_name: ""                    # FILEX_SITE_NAME - seeds the Display name (branding.name)
+  trash_retention_days: """"
   share_max_ttl_days: ""           # FILEX_SHARE_MAX_TTL - "7", "7d", "0" = no ceiling
   smtp:    { host: "", port: "", username: "", password: "", from: "", tls: starttls }
   storage: { driver: "", name: "", mount_path: "/", path: "",
@@ -1745,9 +1822,12 @@ here.
   turning escrow **on**, which can be [adopted](#adopting-escrow-later) with
   `FILEX_INSTALLATION_E2E_ESCROW_ADOPT=1` and is not retroactive. See
   [Install-time settings](#install-time-settings-filex_installation_).
-- `FILEX_TRUSTED_PROXIES` is a **fallback**: once the `login.trusted_proxies`
-  setting holds a list (saved on the **Sign-in security** page), editing the
-  variable and restarting changes nothing. Unset, it is **`auto`**, which does
+- `FILEX_TRUSTED_PROXIES` is a **seed** (since 0.57): it is written into the
+  `login.trusted_proxies` setting at the first start where the setting holds
+  nothing, and from then on editing the variable and restarting changes
+  nothing (the start logs that it did not) - change the list on the
+  **Sign-in security** page, or run `filex settings reseed
+  login.trusted_proxies`. Unset, it is **`auto`**, which does
   not trust a proxy **on the host** reaching filex's container through a
   published port, one **on another machine**, or a CDN or other public hop in
   front of your proxy: until each is listed (`auto, 192.0.2.10`), every visitor

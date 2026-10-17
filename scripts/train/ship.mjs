@@ -81,6 +81,7 @@ import {
   yellow,
 } from '../release/engine.mjs';
 import { npmPackages } from '../release/plan.mjs';
+import { publishes, releaseSurfaces } from '../release/surfaces.mjs';
 import { duration, since, usageOf } from './cli.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -284,6 +285,13 @@ export function unpublishable(text, { exportScript = path.join(REPO, 'scripts', 
  */
 export function buildSteps(cfg, ctx) {
   const { repo, tag, version, runDir, stamp, want, exp } = ctx;
+  // #252: what this release publishes (its record; every surface when it
+  // names none). A step of a surface it does not publish is listed as such,
+  // and runs nothing: a server patch leaves the desktop feed, npm and the
+  // embeds where they are.
+  const surfaces = ctx.surfaces ?? releaseSurfaces(null);
+  const server = ctx.profile === 'server';
+  const notThis = (id, title, surface) => steps.push({ id, title, skipped: `${tag} publishes ${surfaces.join(', ')}, not ${surface}: left as it is` });
   const ssh = sshWords(cfg);
   const env = { FILEX_SHIP_TAG: tag, FILEX_SHIP_VERSION: version, FILEX_SHIP_REPO: repo, FILEX_SHIP_EXPORT: exp, FILEX_SHIP_RUN: runDir };
   const specs = cfg.instances.map((i) => i.spec);
@@ -300,10 +308,16 @@ export function buildSteps(cfg, ctx) {
     sh: `set -o pipefail; ${sshScript(cfg, 'deploy', [cfg.image, tag, String(want), String(cfg.healthWait), ctx.onFail ?? cfg.onFail, bk, ...specs])}`,
   });
 
-  if (cfg.manifestCmd) add('manifest', 'the update manifest', { sh: cfg.manifestCmd });
+  // A server patch goes into the manifest with auto_ok off: no install takes
+  // it by itself until GitHub's full matrix passed behind it
+  // (scripts/release/matrix-watch.mjs switches it on).
+  if (cfg.manifestCmd) add('manifest', server ? 'the update manifest, auto_ok off until the matrix passed' : 'the update manifest', { sh: server ? `${cfg.manifestCmd} --no-auto ${tag}` : cfg.manifestCmd });
   else person('manifest', 'the update manifest', ['not set up (SHIP_MANIFEST_CMD): publish the update manifest by hand - CONTRIBUTING, Release process, step 9']);
 
-  if (cfg.desktopCmd) {
+  if (!publishes(surfaces, 'desktop')) {
+    notThis('desktop', 'the desktop feed', 'desktop');
+    notThis('purge', 'the CDN cache', 'desktop');
+  } else if (cfg.desktopCmd) {
     const pats = cfg.desktopAssets.map((p) => `-p ${shq(p)}`).join(' ');
     add('desktop', 'the desktop packages and feeds', {
       sh: `set -o pipefail; rm -rf ${shq(dl)} && mkdir -p ${shq(dl)} && gh release download ${shq(tag)} -R ${shq(cfg.githubRepo)} -D ${shq(dl)} ${pats} && ls -l ${shq(dl)} && ${cfg.desktopCmd} ${shq(dl)}`,
@@ -312,7 +326,9 @@ export function buildSteps(cfg, ctx) {
     person('desktop', 'the desktop feed', ['not set up (SHIP_DESKTOP_CMD): publish the desktop feed by hand - CONTRIBUTING, Release process, step 9']);
   }
 
-  if (cfg.desktopCmd && cfg.purgeCmd && cfg.feedUrl) {
+  if (!publishes(surfaces, 'desktop')) {
+    // said above
+  } else if (cfg.desktopCmd && cfg.purgeCmd && cfg.feedUrl) {
     add('purge', 'the feed files out of the CDN cache', {
       sh: () => {
         const dir = path.join(runDir, 'desktop');
@@ -364,9 +380,16 @@ export function buildSteps(cfg, ctx) {
     person('docs', 'docs.filex.sh', ['not set up (SHIP_DOCS_SRC, SHIP_DOCS_REFRESH): refresh docs.filex.sh by hand - CONTRIBUTING, Release process, step 11']);
   }
 
-  add('npm', 'npm serves every package', { check: ctx.npm });
+  if (!publishes(surfaces, 'ui')) {
+    notThis('npm', 'npm', 'ui');
+    notThis('embeds', 'the embeds', 'ui');
+  } else {
+    add('npm', 'npm serves every package', { check: ctx.npm });
+  }
 
-  if (cfg.revendorCmd) {
+  if (!publishes(surfaces, 'ui')) {
+    // said above
+  } else if (cfg.revendorCmd) {
     add('embeds', 'the vendored explorer', { sh: cfg.embedsDeployCmd ? `${cfg.revendorCmd} && ${cfg.embedsDeployCmd}` : cfg.revendorCmd });
     if (!cfg.embedsDeployCmd) {
       person('embeds-deploy', 'the embeds', [
@@ -401,6 +424,9 @@ export function personLines(cfg, { tag, version, releasesCommit = null, release 
   out.push(`  language packs:  node scripts/langpacks.mjs release ${version}   then the tag and push commands it prints, pack by pack`, '');
   if (releasesCommit) out.push(`  push ${releasesCommit.slice(0, 10)} "docs(releases): ${tag}" with the next push of main; the public repository gets it with the next export`, '');
   out.push('  reply on the issues and pull requests this release answers (by hand, never "Fixes #N")', '');
+  // #252: a server patch is in the manifest with auto_ok off until GitHub's
+  // full matrix passed behind it.
+  if (release?.profile === 'server') out.push(`  GitHub's full matrix behind the server patch, then auto_ok on:  node scripts/release/matrix-watch.mjs ${version}`, '');
   out.push(`  then:  pnpm release ${version} --resume --ack deploy`);
   return out;
 }
@@ -602,6 +628,7 @@ async function main(argv) {
 
   const log = (m) => console.log(`  ${dim(m)}`);
   const releases = { commit: null };
+  const releaseRecord = loadState(stateFile(gitDir, tag));
   const ctx = {
     repo,
     tag,
@@ -611,6 +638,9 @@ async function main(argv) {
     want,
     exp,
     onFail: o.onFail,
+    // #252: the surfaces the release publishes, and whether it is a server patch.
+    surfaces: releaseSurfaces(releaseRecord),
+    profile: releaseRecord?.profile ?? null,
     preflight: () => preflight({ cfg, repo, exp, tag, gitDir, want, runDir, bash }),
     releases: () => releasesPage({ repo, tag, version, bash, releases }),
     npm: () => waitForNpm(npmPackages(repo), version, cfg.npmWait, log),
@@ -630,7 +660,7 @@ async function main(argv) {
     console.log('');
     for (const s of steps) {
       const g = s.gate;
-      const what = s.person ? yellow('a person') : g.check ? dim(s.plan ?? '(checked here)') : dim(typeof g.sh === 'function' ? '(built when it runs)' : g.sh ?? (g.cmd ?? []).join(' '));
+      const what = s.skipped ? dim(`not this release: ${s.skipped}`) : s.person ? yellow('a person') : g.check ? dim(s.plan ?? '(checked here)') : dim(typeof g.sh === 'function' ? '(built when it runs)' : g.sh ?? (g.cmd ?? []).join(' '));
       console.log(`  ${s.id.padEnd(14)} ${s.title}\n  ${''.padEnd(14)} ${what}${AFTER[s.id]?.length ? dim(`  after ${AFTER[s.id].join(', ')}`) : ''}`);
       if (s.person) for (const l of s.person) console.log(`  ${''.padEnd(14)} ${dim(l)}`);
     }
@@ -680,7 +710,8 @@ async function main(argv) {
   console.log(`\n${bold(`ship ${tag}`)} ${dim(`(${duration(wall)})`)}`);
   for (const s of steps) {
     const r = record.get(s.id);
-    if (s.person) console.log(`  ${yellow('person')}  ${s.id.padEnd(10)} ${dim(s.title)}`);
+    if (s.skipped) console.log(`  ${dim('skip  ')}  ${s.id.padEnd(10)} ${dim(s.skipped)}`);
+    else if (s.person) console.log(`  ${yellow('person')}  ${s.id.padEnd(10)} ${dim(s.title)}`);
     else if (r) console.log(`  ${r.ok ? green('ok    ') : red('RED   ')}  ${s.id.padEnd(10)} ${dim(`${duration(r.secs)}  ${slash(r.log)}`)}`);
   }
   const lines = [];

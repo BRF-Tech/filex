@@ -24,6 +24,16 @@ project_name: filex
 # the build:backend stage takes care of `go mod tidy` indirectly.
 # If you need a local-friendly assertion, run scripts/sync-embed.mjs
 # before invoking goreleaser.
+#
+# The one hook (#259): the Windows version resource (VERSIONINFO) every
+# filex.exe carries - CompanyName, ProductName, its version - written to
+# backend/cmd/filex/rsrc_windows_{amd64,arm64}.syso, which `go build` links
+# into the Windows builds alone. The same one the desktop app's filex.exe
+# carries (desktop/scripts/fetch-cli.mjs): scripts/lib/winres.mjs. A plain
+# command, no `sh -c`.
+before:
+  hooks:
+    - node scripts/lib/winres.mjs --version {{ .Version }}
 
 builds:
   - id: filex
@@ -232,6 +242,11 @@ release:
   draft: false
   replace_existing_draft: true
   prerelease: auto
+  # #252: a server patch (release.yml hands FILEX_SURFACES=server) carries the
+  # server archives and the CLI binaries alone, so it is not GitHub's "latest"
+  # release: every releases/latest/download link names a desktop package or a
+  # CLI binary, and they stay on the last release that has them all.
+  make_latest: '{{ if eq (index .Env "FILEX_SURFACES") "server" }}false{{ else }}true{{ end }}'
   name_template: "v{{ .Version }}"
   # The interface's string catalogue — every key, its English, and which
   # grammar a translation of it follows — so a translator can start a

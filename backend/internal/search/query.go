@@ -93,7 +93,7 @@ const maxFallbackTerms = 32
 // A query with no letter or digit in it (`***`, `---`) asks for the query
 // itself, trimmed, as one piece of text.
 func PlanFallback(query string) Fallback {
-	words := uniqueWords(NormWords(query))
+	words := uniqueWords(fallbackWords(query))
 	if len(words) == 0 {
 		t := namefold.String(strings.TrimSpace(query))
 		if t == "" {

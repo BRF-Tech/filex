@@ -20,6 +20,7 @@ import type { LocaleCode } from '../../types/ExplorerConfig';
 import type { PublicRequestInfo } from '../../types/Public';
 import { useLocale } from '../../composables/useLocale';
 import { usePublicText } from '../../composables/usePublicText';
+import { visibleName } from '../../lib/nameRule';
 
 const props = defineProps<{
   info: PublicRequestInfo | null;
@@ -204,7 +205,7 @@ function onDrop(e: DragEvent): void {
 
     <ul v-if="uploads.length" class="fe-pdrop__list" data-testid="public-request-uploads">
       <li v-for="(u, i) in uploads" :key="`${u.name}-${i}`" class="fe-pdrop__item" :data-state="u.state">
-        <span class="fe-pdrop__name"><bdi>{{ u.name }}</bdi></span>
+        <span class="fe-pdrop__name"><bdi>{{ visibleName(u.name) }}</bdi></span>
         <span class="fe-ppage__filesize">{{ formatSize(u.size) }}</span>
         <progress
           v-if="u.state === 'sending'"

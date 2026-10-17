@@ -62,6 +62,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/editkind"
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/perm"
@@ -213,11 +214,6 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isTextSafePath(rel) && !h.catalogueSaysText(r.Context(), storageID, rel) {
-		writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "extension not allowed for save-text"})
-		return
-	}
-
 	drv, err := h.StorageResolver(storageID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no driver: " + err.Error()})
@@ -256,6 +252,21 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		if !v.WritePerm(w, r) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		}
+		return
+	}
+	// A NEW file's name goes through the one name rule (leafname, task #238);
+	// a save over a file that is there keeps the name it has.
+	if saveNeed == perm.FilesCreate {
+		if err := leafname.Check(path.Base(rel)); err != nil {
+			writeNameRefusal(w, r, err)
+			return
+		}
+	}
+	// The kind of file the text editor saves - asked after the name rule, so
+	// a refused name is said as the name rule whatever its extension (a name
+	// of only dots and spaces has none, task #238).
+	if !isTextSafePath(rel) && !h.catalogueSaysText(r.Context(), storageID, rel) {
+		writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "extension not allowed for save-text"})
 		return
 	}
 	// A key file saved where there was none is a new encryption
@@ -310,7 +321,7 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := wr.Write(r.Context(), rel, bytes.NewReader(body), int64(len(body))); err != nil {
-		writeJSON(w, mapDriverErr(err), map[string]string{"error": "write: " + err.Error()})
+		writeDriverErr(w, r, "write", err)
 		return
 	}
 

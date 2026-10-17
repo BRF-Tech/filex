@@ -20,6 +20,11 @@ export { default as FileExplorer } from './FileExplorer.vue';
 /* wiring:e2 names — the bell names an item inside an unlocked encrypted
  * folder through the mounted explorer (lib/e2eNameRegistry). */
 export { resolveE2eName, registerE2eNameResolver, type E2eNameResolver } from './lib/e2eNameRegistry';
+// Task #238 - which names a file may be given, and how a name is SHOWN: a
+// host that draws a name outside the explorer (a tab title, its own list)
+// draws it through `visibleName`, so a bidi control cannot hide the true
+// extension.
+export { containBidi, nameRefusal, onlyDots, visibleName, type NameRefusal } from './lib/nameRule';
 
 // PreviewModal is exposed so embedders can mount their own
 // fullscreen editor route (e.g. /files/edit) without re-implementing
@@ -99,6 +104,7 @@ export {
 export { useNotificationText } from './composables/useNotificationText';
 export {
   TRASH_VIEW_PATH,
+  encodeHashPath,
   explorerHashPath,
   explorerPathOf,
   isNotificationClickable,
@@ -147,6 +153,21 @@ export {
   type UserSettingsApi,
   type UserSettingsHost,
 } from './lib/userSettingsHost';
+/* The AI assistant (task #269): its client and what it answers, for a host
+ * that implements the settings dialog's assistant rows itself. */
+export {
+  assistantBase,
+  assistantClient,
+  type AssistantCapability,
+  type AssistantClient,
+  type AssistantConversation,
+  type AssistantEvent,
+  type AssistantItem,
+  type AssistantMe,
+  type AssistantPrefs,
+  type AssistantStep,
+  type AssistantSummary,
+} from './lib/assistant';
 /* Push notifications on this device (#191): the one subscription flow, which
  * a host with filex's own service worker hands its worker and transport. */
 export {
@@ -186,6 +207,7 @@ export { DENSITY_KEY, applyAccountDensity, getDensity, setDensity, type Density 
 export {
   EXPLORER_DRAWN_ROWS,
   EXPLORER_ROW_PREFIX,
+  SETTINGS_DIALOG_ROWS,
   accountMenuRows,
   explorerRowKey,
   type AccountAction,
@@ -689,11 +711,18 @@ export { isDraftLimit, isDraftFolderGone, draftLimitOf, DRAFT_LIMIT, DRAFT_TARGE
    pipeline (markdown-it, then the document sanitizer), for every other surface
    that shows it - an app's release notes on the update review. */
 export { markdownToSafeHtml } from './lib/markdownHtml';
+/* 0.57 - a picture from another server in somebody's Markdown waits behind a
+   placeholder until the person asks for it (or their setting loads them): the
+   gate a surface draws it with, and the question it asks. */
+export { useRemoteImages, revealRemoteImage } from './composables/useRemoteImages';
+export type { RemoteImageAsk, RemoteImageGate } from './composables/useRemoteImages';
+export { default as RemoteImageDialog } from './modals/RemoteImageDialog.vue';
+export { remoteImagesOn, setRemoteImages } from './lib/remoteImages';
 /* bul:s3 — global-search contract types + snippet helpers */
 export type { GlobalSearchHit, GlobalSearchScope } from './composables/useFileApi';
 /* #47 — several accounts in one ⌘K (the desktop rail), and the one place a
    search hit becomes an address. */
-export type { AccountSearchHook, SearchAccount, SearchHitItem } from './types/ExplorerConfig';
+export type { AccountSearchHook, ExplorerAccountSettings, SearchAccount, SearchHitItem } from './types/ExplorerConfig';
 export { groupHitsByAccount, hitItem, hitStorageName, hitToNode } from './lib/searchHit';
 export type { HitDriveContext, HitGroup } from './lib/searchHit';
 /* Browser-side reachability probe for external services (OnlyOffice, drawio).
@@ -756,6 +785,10 @@ export { trashTimeLeft } from './lib/trashTimeLeft';
 /* A person, named one way on every surface (lib/personName; server twin model.PersonLabel). */
 export { personName, personInitial } from './lib/personName';
 export type { PersonLike } from './lib/personName';
+/* #117 — a whole storage given to people: the caller's level at a storage's
+   root, read the one way the explorer reads it (lib/storageRoot). */
+export { rootLevel } from './lib/storageRoot';
+export type { RootLevel } from './lib/storageRoot';
 /* RTL — the direction of a language (the server's `rtl` flag, never a second
  * list) and the page-level rule that derives `<html dir>` from `<html lang>`. */
 export {

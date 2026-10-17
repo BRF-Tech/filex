@@ -523,6 +523,10 @@ var readLevelMutations = map[string]bool{
 	"POST /api/files/manager/star/":      true,
 	"POST /api/files/manager/recent/":    true,
 	"PUT /api/files/manager/view-prefs/": true,
+	// #259: whether entries of the caller's own trash listing hold the bytes
+	// of a sha256 - a question in a body, like the listing it judges by
+	// (GET /manager/trash); nothing changes and nothing of an entry comes back.
+	"POST /api/files/manager/trash/same": true,
 	// An app action a viewer may run; one that writes needs write (the handler asks).
 	"POST /api/files/plugins/actions/{plugin}/{action}/run": true,
 	"POST /api/files/plugins/views/{plugin}/{view}/event":   true,
@@ -569,6 +573,17 @@ var readLevelMutations = map[string]bool{
 	// The store screen's request (#162) changes no file, and the handler
 	// refuses every API key anyway: a person's request, from a session.
 	"POST /api/app-store/requests": true,
+	// The AI assistant (#269): a message, an answer to an approval and an
+	// undo run the MCP tools, and each tool asks its own verb of the key
+	// (fileToolVerb, withdrawUngrantedFileTools) - a `read` key's assistant
+	// can only read. The person's choice and their history are personal
+	// state.
+	"POST /api/files/assistant/chat":                      true,
+	"POST /api/files/assistant/conversations/{id}/decide": true,
+	"POST /api/files/assistant/conversations/{id}/undo":   true,
+	"PUT /api/files/assistant/prefs":                      true,
+	"DELETE /api/files/assistant/conversations":           true,
+	"DELETE /api/files/assistant/conversations/{id}":      true,
 }
 
 // tokenPermRoutes are the non-GET routes that ask a permission with a level

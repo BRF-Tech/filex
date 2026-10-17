@@ -252,9 +252,12 @@ func TestOfficeEngine_TheTwoNamesAreOneGrant(t *testing.T) {
 	_, has := got["libreoffice"]
 	assert.True(t, has, "the old name is said, not left out")
 
+	// 0.57: the office engine is the Office editor app's engine or
+	// ONLYOFFICE, so the review names neither product alone.
 	label := Permission("engines:libreoffice").Label("en")
-	assert.Contains(t, label, "ONLYOFFICE", "the review names what the app will run")
+	assert.Contains(t, label, "Office engine", "the review names what the app will run")
 	assert.NotContains(t, label, "LibreOffice")
+	assert.Contains(t, Permission("engines:office").Label("tr"), "Ofis motoru")
 }
 
 // The install review says the office engine apart: a document server to

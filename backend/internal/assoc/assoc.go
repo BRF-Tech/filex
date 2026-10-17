@@ -36,7 +36,19 @@ import (
 const (
 	CapOpen      = "open"
 	CapThumbnail = "thumbnail"
+	// CapEngine (filex 0.57) is not about a kind of file: it is which back end
+	// runs an engine filex offers its apps. Its one "kind" is the engine's
+	// name - EngineOffice: the office engine an app brings ("app:<app>",
+	// EngineSource) or the connected Document Server ("onlyoffice"). The
+	// office thumbnails go with it: the handler that draws them stays
+	// "onlyoffice" (the same drawer whichever back end runs, so a picture
+	// never goes stale for it), and the back end that draws is this
+	// capability's first one that runs.
+	CapEngine = "engine"
 )
+
+// EngineOffice is the office engine, CapEngine's one kind today.
+const EngineOffice = "office"
 
 // Builtin is filex's own handler: its viewer, or its thumbnail drawer.
 const Builtin = "builtin"
@@ -82,7 +94,11 @@ func OnlyOfficeOpenKinds() []string { return append([]string(nil), onlyOfficeOpe
 const appPrefix = "app:"
 
 // ValidCapability reports whether c is a capability.
-func ValidCapability(c string) bool { return c == CapOpen || c == CapThumbnail }
+func ValidCapability(c string) bool { return c == CapOpen || c == CapThumbnail || c == CapEngine }
+
+// EngineID is an app's handler id for the engine capability (an app brings
+// at most one engine of a kind).
+func EngineID(app string) string { return appPrefix + app }
 
 // extRe is what a kind may be: a file name's extension, lower-case, no dot.
 var extRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_+-]{0,31}$`)
@@ -172,7 +188,7 @@ func ValidID(capability, id string) bool {
 		return true
 	}
 	if id == OnlyOffice {
-		return capability == CapThumbnail || capability == CapOpen
+		return capability == CapThumbnail || capability == CapOpen || capability == CapEngine
 	}
 	rest, ok := strings.CutPrefix(id, appPrefix)
 	if !ok {
@@ -185,7 +201,7 @@ func ValidID(capability, id string) bool {
 	switch capability {
 	case CapOpen:
 		return hasView && viewIDRe.MatchString(view)
-	case CapThumbnail:
+	case CapThumbnail, CapEngine:
 		return !hasView
 	}
 	return false
@@ -339,6 +355,18 @@ func OpenDefault(onlyoffice bool, apps []Handler) []Handler {
 	out := DefaultOrder(CapOpen, true, apps)
 	if onlyoffice {
 		out = append([]Handler{{ID: OnlyOffice}}, out...)
+	}
+	return out
+}
+
+// EngineDefault is the engine capability's default order: the engines apps
+// bring first, by app name - an installed engine is used without anybody
+// having to choose it - and the connected Document Server after them, which
+// takes the jobs while an app's engine is not running (being prepared, say).
+func EngineDefault(onlyoffice bool, apps []Handler) []Handler {
+	out := append([]Handler(nil), apps...)
+	if onlyoffice {
+		out = append(out, Handler{ID: OnlyOffice})
 	}
 	return out
 }

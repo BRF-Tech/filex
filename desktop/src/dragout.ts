@@ -44,6 +44,7 @@ import path from 'node:path';
 import { log } from './log.js';
 import { serverUrl } from './server-url.js';
 import { CANCELLED, WHOLE_FILE_RANGE, landViaPart, wholeFileVerdict } from './download-guard.js';
+import { safeLocalName, uniqueLocalName } from './local-name.js';
 
 export interface DragItem {
   path: string; // wire path: `<depo>://rel`
@@ -337,10 +338,11 @@ export class DragOutCache {
     const body = JSON.parse(await readAll(res)) as { files?: Array<{ basename: string; type: string }> };
     xferLog('dir listed', { remoteDir, entries: (body.files ?? []).length });
     const base = remoteDir.endsWith('://') || remoteDir.endsWith('/') ? remoteDir : `${remoteDir}/`;
-    for (const f of body.files ?? []) {
-      if (!f.basename || f.basename === '.trash') continue;
+    const files = (body.files ?? []).filter((f) => f.basename && f.basename !== '.trash');
+    const names = namesInOneFolder(files);
+    for (const [i, f] of files.entries()) {
       const childRemote = `${base}${f.basename}`;
-      const childDest = path.join(dest, safeName(f.basename));
+      const childDest = path.join(dest, names[i]!);
       if (signal?.aborted) throw new Error(CANCELLED);
       if (f.type === 'dir') await this.downloadTreeTo(ctx, childRemote, childDest, signal, onFile);
       else {
@@ -369,10 +371,11 @@ export class DragOutCache {
     }
     const body = JSON.parse(await readAll(res)) as { files?: Array<{ basename: string; type: string; size?: number }> };
     const base = remoteDir.endsWith('://') || remoteDir.endsWith('/') ? remoteDir : `${remoteDir}/`;
-    for (const f of body.files ?? []) {
-      if (!f.basename || f.basename === '.trash') continue;
+    const files = (body.files ?? []).filter((f) => f.basename && f.basename !== '.trash');
+    const names = namesInOneFolder(files);
+    for (const [i, f] of files.entries()) {
       const childRemote = `${base}${f.basename}`;
-      const childLocal = path.join(localDir, safeName(f.basename));
+      const childLocal = path.join(localDir, names[i]!);
       if (f.type === 'dir') {
         dirs.push(childLocal);
         await this.planDir(ctx, childRemote, childLocal, plan, dirs, signal);
@@ -441,8 +444,9 @@ export async function createPlaceholders(
   const dir = path.join(root, 'pending', accountId, crypto.randomUUID());
   await fs.promises.mkdir(dir, { recursive: true });
   const paths: string[] = [];
-  for (const item of items) {
-    const target = path.join(dir, safeName(item.basename));
+  const names = namesInOneFolder(items);
+  for (const [i, item] of items.entries()) {
+    const target = path.join(dir, names[i]!);
     if (item.type === 'dir') await fs.promises.mkdir(target, { recursive: true });
     else await fs.promises.writeFile(target, '');
     paths.push(target);
@@ -469,12 +473,13 @@ export async function fulfilDrop(
   const written: string[] = [];
   let done = 0;
   let files = 0;
-  for (const item of items) {
+  const names = namesInOneFolder(items);
+  for (const [i, item] of items.entries()) {
     if (signal?.aborted) {
       ctx.onProgress?.({ done, total: items.length, finished: true, error: CANCELLED, files });
       return { ok: false, written, error: CANCELLED };
     }
-    const name = safeName(item.basename);
+    const name = names[i]!;
     const dest = path.join(dropDir, name);
     ctx.onProgress?.({ done, total: items.length, name, files });
     // Each file that lands is said: a folder is ONE item, and its count
@@ -513,14 +518,19 @@ function xferLog(step: string, detail?: unknown): void {
   log('xfer', step, detail);
 }
 
-/** One path segment, with the characters Windows actually refuses taken
- *  out. Spaces and dots stay: the file that lands on the desktop should
- *  carry the name it has on the server. */
+/** One path segment as the copy on this computer is called: local-name.ts's
+ *  one rule (the same as the sync engine's and the server's download name),
+ *  with room for the `.part` / `.filexpart` suffix a copy wears while it is
+ *  written. */
 function safeName(name: string): string {
-  const cleaned = String(name ?? '')
-    .replace(/[\\/:*?"<>|]/g, '_')
-    .replace(/[\u0000-\u001f]/g, '')
-    .replace(/^\.+$/, '_')
-    .trim();
-  return cleaned || 'file';
+  return safeLocalName(name, { reserve: '.filexpart'.length });
+}
+
+/** The names a list of items gets side by side in ONE folder: safe, and two
+ *  that are one name on this computer (`Rapor.docx` / `rapor.docx`) kept
+ *  apart as `rapor (2).docx` - one would otherwise land on the other. The
+ *  placeholders and the drop they are fulfilled by use this same list. */
+function namesInOneFolder(items: ReadonlyArray<{ basename: string }>): string[] {
+  const taken = new Set<string>();
+  return items.map((i) => uniqueLocalName(safeName(i.basename), taken));
 }

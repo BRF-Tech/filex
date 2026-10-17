@@ -343,6 +343,15 @@ func (r *Registry) checkDescribedUI(m *Manifest, got *wire.Manifest) error {
 	if wantCo, haveCo := coEditOpen(m), got.CoEdit != nil && got.CoEdit.Open; wantCo != haveCo {
 		return fmt.Errorf("the module describes co_edit.open %v, the manifest %v", haveCo, wantCo)
 	}
+	// And the office engine it brings, by its pin (office_engine_app.go).
+	var haveEngine *wire.OfficeEngineSpec
+	if got.Engines != nil {
+		haveEngine = got.Engines.Office
+	}
+	if wantEngine := officeEngineOf(m); (wantEngine == nil) != (haveEngine == nil) ||
+		(wantEngine != nil && !strings.EqualFold(strings.TrimSpace(wantEngine.SHA256), strings.TrimSpace(haveEngine.SHA256))) {
+		return fmt.Errorf("the module describes another office engine (engines.office) than the manifest")
+	}
 	ext := func(list []wire.UIExternal) []string {
 		out := make([]string, 0, len(list))
 		for _, e := range list {
@@ -430,6 +439,9 @@ func (m *Manifest) checkUI() error {
 	}
 	if ui.Print {
 		perms = append(perms, PermUIPrint)
+	}
+	if err := checkUIExtras(ui); err != nil {
+		return err
 	}
 	if len(ui.External) > maxUIExternal {
 		return fmt.Errorf("manifest: ui.external: at most %d addresses", maxUIExternal)
@@ -523,6 +535,11 @@ func uiOnlyPerm(p Permission) bool {
 		// Editing together (coedit.*) and the plaintext of an encrypted
 		// folder's file (file.read / file.save) are the bridge's too: the
 		// office editor, which asks for both, is only an interface.
+		return true
+	case PermOfficeEngine:
+		// The office engine an app brings runs in filex's engine process
+		// (internal/officeengine), never in the app's module: the office
+		// editor brings one and is still only an interface.
 		return true
 	}
 	return isUIPerm(p)

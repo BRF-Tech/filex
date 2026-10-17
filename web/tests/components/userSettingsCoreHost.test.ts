@@ -8,8 +8,9 @@
 //   1. It runs with NO pinia, NO router, NO vue-i18n — a plain host object,
 //      which is all the explorer can hand it.
 //   2. A row only some surfaces have is drawn only when the host gives it:
-//      the desktop app keeps its language and its click setting in its own
-//      Settings, has no start page, no download of itself and no browser
+//      the desktop app hands in its language, its click setting and its own
+//      notifications (ExplorerConfig.account.settings as an object, task
+//      #258), and has no start page, no download of itself and no browser
 //      notification API — none of those may appear there.
 //   3. The writes go through the host's endpoints and the host's own stores
 //      (profile → setUser, appearance → host.mode, bell switches → the
@@ -29,6 +30,8 @@ import { en as coreEn } from '@brftech/filex-core/src/locales/en';
 import { tr } from '@brftech/filex-core/src/locales/tr';
 import { answerAccountPrefs } from '../helpers/accountPrefs';
 import { ACCOUNT_CHECK_DELAY_MS } from '@brftech/filex-core/src/lib/accountRules';
+import { currentPrefs } from '@brftech/filex-core/src/lib/prefs';
+import { REMOTE_IMAGES_EVENT, remoteImagesOn } from '@brftech/filex-core/src/lib/remoteImages';
 
 // Picking a theme writes it to the account 400 ms later.
 answerAccountPrefs();
@@ -476,6 +479,114 @@ describe('the web app’s install row, when the host has one', () => {
     );
     await w.find('[data-testid="user-settings-tab-notifications"]').trigger('click');
     expect(w.find('[data-testid="user-settings-browser-ios"]').text()).toContain('work in BRF Teknoloji added to the Home Screen');
+    w.unmount();
+  });
+});
+
+// Task #258 (the owner's grouping of 2026-10-15): Preferences and
+// Notifications each say WHERE their rows are saved - the account's, the same
+// wherever the person signs in, and this device's. A row sits in the part
+// that tells the truth about its store.
+describe('Account and This device', () => {
+  async function pane(extra: Partial<UserSettingsHost>, tab: 'preferences' | 'notifications', locale = 'en') {
+    const { host } = plainHost(extra, locale);
+    const w = open(host);
+    await flushPromises();
+    await w.find(`[data-testid="user-settings-tab-${tab}"]`).trigger('click');
+    return w;
+  }
+  const inPart = (w: ReturnType<typeof open>, part: string, sel: string) =>
+    w.find(`[data-testid="${part}"]`).find(sel).exists();
+
+  it('Preferences: the account keeps the language, the time zone, the look, the folder view, the default apps and the quota', async () => {
+    const w = await pane(
+      { language: { pick: vi.fn() }, openTrigger: { get: () => 'double', set: vi.fn() }, startPage: { options: ['home'], get: () => 'home', set: vi.fn() } },
+      'preferences',
+    );
+    for (const sel of ['user-settings-locale', 'user-settings-timezone', 'user-settings-appearance', 'user-settings-density', 'user-settings-folder-view', 'user-settings-apps', 'user-settings-quota']) {
+      expect(inPart(w, 'user-settings-prefs-account', `[data-testid="${sel}"]`), sel).toBe(true);
+    }
+    // ...and this device the start page, the click, the keyboard shortcuts.
+    for (const sel of ['user-settings-start-home', 'user-settings-opentrigger-double', 'user-settings-shortcuts']) {
+      expect(inPart(w, 'user-settings-prefs-device', `[data-testid="${sel}"]`), sel).toBe(true);
+      expect(inPart(w, 'user-settings-prefs-account', `[data-testid="${sel}"]`), sel).toBe(false);
+    }
+    const heads = w.findAll('.fx-us__part-title').map((h) => h.text());
+    expect(heads).toEqual([coreEn['userSettings.scope.account'], coreEn['userSettings.scope.device']]);
+    w.unmount();
+  });
+
+  it('Notifications: My account keeps the bell and what it tells; This device is drawn only with a row of its own', async () => {
+    let w = await pane({}, 'notifications');
+    expect(inPart(w, 'user-settings-notify-account', '[data-testid="user-settings-inapp"]')).toBe(true);
+    expect(w.find('[data-testid="user-settings-notify-device"]').exists()).toBe(false);
+    w.unmount();
+
+    const setEnabled = vi.fn();
+    w = await pane({ deviceNotifications: { enabled: () => true, setEnabled } }, 'notifications');
+    expect(inPart(w, 'user-settings-notify-device', '[data-testid="user-settings-device-notify"]')).toBe(true);
+    expect(w.find('[data-testid="user-settings-device-notify"]').attributes('aria-checked')).toBe('true');
+    await w.find('[data-testid="user-settings-device-notify"]').trigger('click');
+    expect(setEnabled).toHaveBeenCalledWith(false);
+    expect(w.find('[data-testid="user-settings-device-notify"]').attributes('aria-checked')).toBe('false');
+    w.unmount();
+  });
+
+  it('says the parts in Turkish: Hesap, Bu cihaz, Hesabım, Düzenle…', async () => {
+    let w = await pane({}, 'preferences', 'tr');
+    expect(w.findAll('.fx-us__part-title').map((h) => h.text())).toEqual(['Hesap', 'Bu cihaz']);
+    expect(w.find('[data-testid="user-settings-shortcuts-edit"]').text()).toBe('Düzenle…');
+    w.unmount();
+    w = await pane({ deviceNotifications: { enabled: () => false, setEnabled: vi.fn() } }, 'notifications', 'tr');
+    expect(w.findAll('.fx-us__part-title').map((h) => h.text())).toEqual(['Hesabım', 'Bu cihaz']);
+    expect(w.text()).toContain(tr['userSettings.notifications.device']);
+    w.unmount();
+  });
+
+  it('the account keeps "Load remote images in previews": a switch, off until the person turns it on', async () => {
+    const heard: unknown[] = [];
+    const listen = (e: Event) => heard.push((e as CustomEvent).detail);
+    window.addEventListener(REMOTE_IMAGES_EVENT, listen);
+    try {
+      const w = await pane({}, 'preferences');
+      const row = w.find('[data-testid="user-settings-prefs-account"] [data-testid="user-settings-remote-images-row"]');
+      expect(row.exists()).toBe(true);
+      expect(row.text()).toContain(coreEn['userSettings.prefs.remoteImages']);
+      expect(row.text()).toContain(coreEn['userSettings.prefs.remoteImagesHint']);
+      const sw = w.find('[data-testid="user-settings-remote-images"]');
+      expect(sw.attributes('role')).toBe('switch');
+      expect(sw.attributes('aria-checked')).toBe('false');
+      expect(sw.attributes('aria-label')).toBe(coreEn['userSettings.prefs.remoteImages']);
+      expect(row.find('select').exists()).toBe(false);
+      await sw.trigger('click');
+      expect(sw.attributes('aria-checked')).toBe('true');
+      expect(currentPrefs().remoteImages).toBe('on');
+      expect(remoteImagesOn()).toBe(true);
+      await sw.trigger('click');
+      expect(currentPrefs().remoteImages).toBe('');
+      expect(remoteImagesOn()).toBe(false);
+      expect(heard).toEqual([true, false]);
+      w.unmount();
+    } finally {
+      window.removeEventListener(REMOTE_IMAGES_EVENT, listen);
+    }
+    const t = await pane({}, 'preferences', 'tr');
+    expect(t.find('[data-testid="user-settings-remote-images-row"]').text()).toContain('Önizlemelerde uzak görselleri yükle');
+    t.unmount();
+  });
+
+  it('Edit… opens the keyboard shortcuts over the dialog; Escape closes that one first', async () => {
+    const w = await pane({}, 'preferences');
+    await w.find('[data-testid="user-settings-shortcuts-edit"]').trigger('click');
+    await flushPromises();
+    const titles = () => [...document.querySelectorAll('.fe-modal__backdrop')].map((b) => b.textContent ?? '');
+    expect(titles().some((x) => x.includes(coreEn['shortcuts.settings.title']))).toBe(true);
+    // The modal stack: Escape belongs to the one on top.
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await flushPromises();
+    expect(titles().some((x) => x.includes(coreEn['shortcuts.settings.title']))).toBe(false);
+    expect(w.find('[data-testid="user-settings-dialog"]').exists()).toBe(true);
+    expect(w.emitted('update:modelValue')).toBeUndefined();
     w.unmount();
   });
 });

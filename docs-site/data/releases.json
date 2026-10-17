@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-10-12",
+  "generatedAt": "2026-10-13",
   "releases": [
+    {
+      "tag": "v0.56.3",
+      "date": "2026-10-13T14:02:52Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.56.3",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Fixed\n\n- **`df` and a mapped drive show the real disk, not 1 PB.** A client that asked\n  how much room there was got a made-up figure unless the account had a quota,\n  and a different one on every surface: `sftp df` and the Linux `filex mount`\n  said 1 PiB with nothing used, NFS 32 TiB, FTPS 1 TiB, the Windows mount 4 TiB\n  half full, and WebDAV nothing at all. Every surface now gives one answer:\n  inside a storage, the disk it is on (a local disk, an SMB share's volume, an\n  SFTP server that answers `statvfs`, a WebDAV server's quota); at the root\n  that lists the storages, those storages added up, a disk two of them share\n  counted once; either capped by the account's quota. SFTP's `statvfs`, FTPS's\n  `AVBL`, NFS's `FSSTAT`, WebDAV's RFC 4331 quota properties (Windows' mapped\n  drive) and `filex mount` (through the new `GET /api/files/manager?action=space`)\n  all read it. Only a location nothing can measure, such as an S3 bucket, still\n  answers a large empty disk\n  ([PROTOCOLS.md](docs/PROTOCOLS.md#free-space)). Reported by @gguglietti\n  ([GitHub #116](https://github.com/BRF-Tech/filex/issues/116)).\n\n- **Indexing a large existing tree no longer eats the server's memory.** Every\n  extracted text was written to the search index on its own, so the index made\n  one segment per file and spent its time merging them: measured on 13,500\n  files, about 5 GB resident and 6.5 GB of index files mid-merge after fifteen\n  minutes, rising with every file, where the settled index needed a fraction of\n  that. On a large RAID volume it took 63 GB and the host with it. Texts that\n  are ready together are now written together, and indexing keeps to a memory\n  budget: `FILEX_SEARCH_MEMORY_PERCENT` (default 25, at most 50) percent of the\n  memory filex was given - the container's limit, or the machine's RAM - above\n  which extraction and rebuilds wait for the index to give memory back\n  ([SEARCH.md](docs/SEARCH.md#content-search)). Reported by @gguglietti\n  ([GitHub #115](https://github.com/BRF-Tech/filex/issues/115)).\n\n- **A plugin in a long data directory starts.** A storage or app plugin talks\n  to filex over a Unix socket under `<data>/plugins/<name>/run/`, and a\n  socket's path may not be longer than about 108 characters (104 on macOS):\n  with a data directory longer than about 48 characters, such as a container\n  volume's host path, the plugin could not open its socket and the log said\n  only that it \"did not print its handshake line\". When the real path is too\n  long, filex now reaches the socket through a short private link in the temp\n  directory; the socket stays where it was, with its owner and permissions.\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0563---2026-10-13)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.56.3",
+        "ghcr.io/brf-tech/filex:full-v0.56.3"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
     {
       "tag": "v0.56.2",
       "date": "2026-10-12T17:49:13Z",

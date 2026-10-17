@@ -50,7 +50,7 @@ app runtime is on and at least one app is installed.)
 | **Remote service** | Nothing is launched: filex connects to an address you give it with a bearer token you give it. **Remote = TLS**: `https://` anywhere; plain `http://` only when the address is on the private network (loopback, link-local, RFC 1918, ULA), because the token and every storage credential travel on that connection. | A sidecar container, a plugin on another host, or a plugin you are developing. |
 | **From a store** (0.55) | A store's install link opens a review; **Install** reads the release's feed the store reviewed, holds this server's build to the store's pin and installs it as **From its source** would ([Installing from a store](#installing-from-a-store)). | A plugin a store lists - reviewed, its builds pinned and signed, its claims checked by the store. |
 
-![The Plugins page with the example plugin running](https://filex.sh/shots/admin-plugins.c25fa69cfc7c.png)
+![The Plugins page with the example plugin running](https://filex.sh/shots/admin-plugins.6bd96bf65745.png)
 
 > ⚠ **A plugin runs with filex's own privileges** and is handed the credentials
 > of every storage created on it. Install only plugins you trust - the same
@@ -277,7 +277,8 @@ server's platform is there. Installing it is your decision.
 - **Review update** (the row's **Actions**) shows the version jump, the
   SHA-256 of the build for this platform, the source and its notes (drawn
   as Markdown through the explorer preview's pipeline and its sanitizer,
-  like an app's; nothing in them runs, a link opens in a new tab). **Upgrade** - `POST /api/admin/plugins/{id}/upgrade`
+  like an app's; nothing in them runs, a link opens in a new tab, a picture
+  from another server waits for a click). **Upgrade** - `POST /api/admin/plugins/{id}/upgrade`
   `{"from_source": true}` - downloads that build, **refuses it unless its
   SHA-256 is the one the feed names** (before anything is stopped), and then
   upgrades exactly as an uploaded file would ([Upgrade in

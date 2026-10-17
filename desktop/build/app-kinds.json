@@ -1,0 +1,217 @@
+{
+  "about": "The kinds of file the app store's apps open, for the packages that declare them at build time (macOS, the Microsoft Store, the snap). Written by `pnpm --dir desktop app-kinds:refresh` (scripts/app-kinds.mjs); edit nothing here by hand.",
+  "store": "https://apps.filex.sh",
+  "index_key": "df18ded0d71e46e2d53cd479526744ebb9c3ddadb854a32879448fa64453636c",
+  "serial": 27,
+  "linux_types_from": "shared-mime-info 2.4 (Ubuntu 26.04)",
+  "apps": [
+    {
+      "name": "drawio",
+      "version": "31.5.3"
+    },
+    {
+      "name": "filextext",
+      "version": "0.1.1"
+    },
+    {
+      "name": "media-thumbs",
+      "version": "0.1.0"
+    },
+    {
+      "name": "office-editor",
+      "version": "0.3.1"
+    },
+    {
+      "name": "retro",
+      "version": "0.1.0"
+    }
+  ],
+  "kinds": [
+    {
+      "ext": "af",
+      "apps": [
+        "media-thumbs"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "afdesign",
+      "apps": [
+        "media-thumbs"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "afphoto",
+      "apps": [
+        "media-thumbs"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "afpub",
+      "apps": [
+        "media-thumbs"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "dio",
+      "apps": [
+        "drawio"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "docx",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      ]
+    },
+    {
+      "ext": "drawio",
+      "apps": [
+        "drawio"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "fxdoom",
+      "apps": [
+        "retro"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "fxtxt",
+      "apps": [
+        "filextext"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "jsdos",
+      "apps": [
+        "retro"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "odp",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.oasis.opendocument.presentation"
+      ]
+    },
+    {
+      "ext": "ods",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.oasis.opendocument.spreadsheet"
+      ]
+    },
+    {
+      "ext": "odt",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.oasis.opendocument.text"
+      ]
+    },
+    {
+      "ext": "otf",
+      "apps": [
+        "media-thumbs"
+      ],
+      "linux": [
+        "application/vnd.oasis.opendocument.formula-template",
+        "font/otf"
+      ]
+    },
+    {
+      "ext": "pptx",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+      ]
+    },
+    {
+      "ext": "psb",
+      "apps": [
+        "media-thumbs"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "psd",
+      "apps": [
+        "media-thumbs"
+      ],
+      "linux": [
+        "image/vnd.adobe.photoshop"
+      ]
+    },
+    {
+      "ext": "pxd",
+      "apps": [
+        "media-thumbs"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "ttf",
+      "apps": [
+        "media-thumbs"
+      ],
+      "linux": [
+        "font/ttf"
+      ]
+    },
+    {
+      "ext": "wad",
+      "apps": [
+        "retro"
+      ],
+      "linux": [
+        "application/x-doom-wad"
+      ]
+    },
+    {
+      "ext": "woff",
+      "apps": [
+        "media-thumbs"
+      ],
+      "linux": [
+        "font/woff"
+      ]
+    },
+    {
+      "ext": "woff2",
+      "apps": [
+        "media-thumbs"
+      ],
+      "linux": [
+        "font/woff2"
+      ]
+    },
+    {
+      "ext": "xlsx",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      ]
+    }
+  ]
+}

@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { activationWaitFactor, softActivation, softWindowChecks, windowVerdicts } from '../scripts/lib/store-activation.mjs';
+import { accountVerdict, activationWaitFactor, softActivation, softWindowChecks, storeLogDirs, windowVerdicts } from '../scripts/lib/store-activation.mjs';
 
 test('a developer machine never softens a failure', () => {
   assert.equal(softActivation({}), false);
@@ -99,4 +99,58 @@ test('store-e2e reports the window watch through these verdicts', () => {
   // …and nowhere else: no second, strict copy of either check.
   assert.equal(src.match(/no window of the Store copy came on screen/g), null);
   assert.equal(src.match(/kept off screen'/g), null);
+});
+
+// ── who ran it (task #248) ─────────────────────────────────────────────────
+//
+// GitHub's runner account is the built-in Administrator (RID 500), and no
+// activation check ever passed there: the diagnosis now says so, and prints
+// the account, its SID, its token and the UAC policy on every run.
+
+const whoami = (user: string, sid: string, label: string) =>
+  [
+    `"${user}","${sid}"`,
+    '',
+    '"Everyone","Well-known group","S-1-1-0","Mandatory group, Enabled by default, Enabled group"',
+    `"${label}","Label","S-1-16-12288",""`,
+  ].join('\r\n');
+
+test('the built-in Administrator with a full token is named as the reason a package does not start', () => {
+  const v = accountVerdict(whoami('fv-az123\\runneradmin', 'S-1-5-21-1-2-3-500', 'Mandatory Label\\High Mandatory Level'), { EnableLUA: '1' });
+  assert.equal(v.sid, 'S-1-5-21-1-2-3-500');
+  assert.equal(v.builtinAdmin, true);
+  assert.equal(v.integrity, 'high');
+  assert.equal(v.elevated, true);
+  assert.match(v.lines[0], /^account fv-az123\\runneradmin S-1-5-21-1-2-3-500 \(RID 500: the built-in Administrator\)$/);
+  assert.match(v.lines[2], /FilterAdministratorToken=unset \(0\)/);
+  assert.match(v.lines.at(-1)!, /^verdict: this is the built-in Administrator .* \(actions\/runner-images#9537\)\. Run the check as another account/);
+  // With FilterAdministratorToken=1 Windows gives it a filtered token: not the cause.
+  assert.doesNotMatch(accountVerdict(whoami('x\\a', 'S-1-5-21-1-2-3-500', 'Mandatory Label\\Medium Mandatory Level'), { EnableLUA: '1', FilterAdministratorToken: '1' }).lines.at(-1)!, /built-in Administrator/);
+});
+
+test('a second administrator under UAC passes the account, and UAC off is named', () => {
+  const ok = accountVerdict(whoami('lab\\e2e', 'S-1-5-21-1-2-3-1001', 'Mandatory Label\\Medium Mandatory Level'), { EnableLUA: '1', ConsentPromptBehaviorAdmin: '5' });
+  assert.equal(ok.builtinAdmin, false);
+  assert.equal(ok.integrity, 'medium');
+  assert.equal(ok.elevated, false);
+  assert.match(ok.lines.at(-1)!, /^verdict: the account and its token allow a packaged app to start/);
+  const noUac = accountVerdict(whoami('lab\\e2e', 'S-1-5-21-1-2-3-1001', 'Mandatory Label\\High Mandatory Level'), { EnableLUA: '0' });
+  assert.match(noUac.lines.at(-1)!, /UAC is off \(EnableLUA=0\)/);
+  // Nothing to read: said, never a guess.
+  assert.equal(accountVerdict('', {}).sid, '?');
+});
+
+test("the diagnosis reads the Store copy's own log folder first, then the redirected userData", () => {
+  const dirs = storeLogDirs({ home: path.join('C:', 'Users', 'e2e'), localAppData: path.join('C:', 'Users', 'e2e', 'AppData', 'Local'), pfn: 'Pkg_abc', userDataName: 'filex-store-e2e' });
+  assert.deepEqual(dirs, [
+    path.join('C:', 'Users', 'e2e', '.filex', 'desktop', 'logs'),
+    path.join('C:', 'Users', 'e2e', 'AppData', 'Local', 'Packages', 'Pkg_abc', 'LocalCache', 'Roaming', 'filex-store-e2e', 'logs'),
+  ]);
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const src = fs.readFileSync(path.join(dir, '..', 'scripts', 'store-e2e.mjs'), 'utf8');
+  assert.match(src, /for \(const logs of storeLogDirs\(\{ home: os\.homedir\(\),/);
+  // The account is said at the start of every run, and again in a diagnosis.
+  assert.match(src, /for \(const l of accountLines\(\)\) console\.log/);
+  assert.match(src, /console\.log\(`--- account and token\\n\$\{accountLines\(\)\.join\('\\n'\)\}`\)/);
+  assert.match(src, /execFileSync\('whoami\.exe', \['\/user', '\/groups', '\/fo', 'csv', '\/nh'\], \{ encoding: 'utf8', windowsHide: true \}\)/);
 });

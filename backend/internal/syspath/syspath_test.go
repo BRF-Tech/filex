@@ -194,6 +194,38 @@ func TestRefused(t *testing.T) {
 	}
 }
 
+// An editor's save on a person's behalf (filex 0.57): the Document Server's
+// callback and an app's save door ask the same verb, so the desktop's
+// working copy takes either editor's save, and its save beside, and nothing
+// else of filex's own folders does.
+func TestSaveVerb(t *testing.T) {
+	for _, c := range []struct {
+		rel     string
+		verb    Verb
+		refused bool
+	}{
+		{"Raporlar/rapor.docx", PutWorkCopy, false},
+		{".filex-open/0123456789ab-rapor.doc", PutWorkCopy, false},
+		{".filex-open/0123456789ab-rapor.docx", PutWorkCopy, false},
+		{".filex-open/0123456789ab-rapor (2).docx", PutWorkCopy, false},
+		{".filex-open/rapor.docx", PutWorkCopy, true},
+		{".filex-trash/rapor.docx", PutWorkCopy, true},
+		{".versions/rapor.docx", PutWorkCopy, true},
+		{".filex-drafts/7/0a1b2c3d/rapor.docx", OwnDraft, false},
+	} {
+		v := SaveVerb(c.rel)
+		if v != c.verb {
+			t.Errorf("SaveVerb(%q) = %v, want %v", c.rel, v, c.verb)
+		}
+		if got := RefusedBy(v, c.rel, 7); got != c.refused {
+			t.Errorf("RefusedBy(SaveVerb(%q)) = %v, want %v", c.rel, got, c.refused)
+		}
+	}
+	if !RefusedBy(SaveVerb(".filex-drafts/7/0a1b2c3d/rapor.docx"), ".filex-drafts/7/0a1b2c3d/rapor.docx", 8) {
+		t.Error("somebody else's draft stays refused")
+	}
+}
+
 func TestReserved(t *testing.T) {
 	for rel, want := range map[string]string{
 		"Documents/report.txt":         "",

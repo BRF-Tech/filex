@@ -12,7 +12,11 @@
  *        semicolons, CRLF, no byte order mark - with the new value, every
  *        cell nobody changed as it was (`007`, `05320000001`, `01.02.2026`,
  *        which ONLYOFFICE writes as `7`, `5320000001`, `1/2/2026`; filex 0.52,
- *        GitHub #88), and never as XLSX bytes;
+ *        GitHub #88), and never as XLSX bytes. Whichever Docs the run has:
+ *        Docs 9.4 saves commas and a byte order mark, Docs 10.0 the file's
+ *        own semicolons, and filex reads the save's delimiter from its bytes
+ *        (0.57, task #255: on Docs 10 0.56 wrote every row as one quoted
+ *        field and this step failed, ci run 38276862982);
  *     3. "Open with" offers ONLYOFFICE and filex's table; "Choose an app…"
  *        names ONLYOFFICE; "Always use" the table is kept on the account and
  *        followed;
@@ -27,7 +31,8 @@
  * FILEX_ONLYOFFICE_URL / FILEX_ONLYOFFICE_JWT and FILEX_ONLYOFFICE_CALLBACK_URL
  * when the document server reaches filex at another address (the save comes
  * back through it). Written against onlyoffice/documentserver (Docs 9.4),
- * JWT on.
+ * JWT on; step 2 holds on Docs 10.0 too. The app's side of the same rules is
+ * 260 (no Document Server).
  */
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';

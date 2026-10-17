@@ -339,6 +339,17 @@ func hfShareCreate(ctx context.Context, s *Scope, in json.RawMessage) (any, erro
 			if !s.reg.actorHoldsEditor(ctx, s.actor, s.storageID, f.PathRel, s.plugin.Row.ID) {
 				return nil, hostErr(wire.ErrPermissionDenied, "the person this job runs for may not share "+f.Name+": a public link needs editor on the file, as in the Share dialog")
 			}
+			// A link that hands a file over hands over only what the person
+			// may download, as a download link from the Share dialog does
+			// (files.download): a link of one input asks that input; a link
+			// of an output, or a page's copies, is made from the job's
+			// inputs and asks every one. A page that exposes no copy is the
+			// app's own content and is not asked. The link's door asks again
+			// at every visit.
+			handsOver := (spec == nil && (outRef != "" || strings.Trim(f.PathRel, "/") == rel)) || (spec != nil && len(req.Files) > 0)
+			if handsOver && !s.reg.actorMayDownload(ctx, s.actor, s.storageID, f.PathRel) {
+				return nil, hostErr(wire.ErrPermissionDenied, "the person this job runs for may not download "+f.Name+", so a public link may not hand it over")
+			}
 		}
 	}
 

@@ -300,10 +300,27 @@ func TestInternalDirs_AppOutputCannotBeNamedLikeFilexOwn(t *testing.T) {
 	assert.ErrorIs(t, err, syspath.ErrReserved, "an app wrote a .keepdir")
 	_, err = h.CommitSibling(ctx, f.StA.ID, ".versions/9", "out.pdf", strings.NewReader("x"), 1, nil)
 	assert.ErrorIs(t, err, syspath.ErrReserved, "an app wrote into .versions")
-	err = h.CommitVersion(ctx, f.StA.ID, ".filex-open/a1b2c3d4e5f6-x.docx", strings.NewReader("x"), 1, nil)
-	assert.ErrorIs(t, err, syspath.ErrReserved, "an app overwrote a working copy")
+	err = h.CommitVersion(ctx, f.StA.ID, ".versions/1", strings.NewReader("x"), 1, nil)
+	assert.ErrorIs(t, err, syspath.ErrReserved, "an app overwrote a version snapshot")
+	// The desktop's working copy is the one shape of filex's own an app's
+	// save goes over (#268: the office editor app takes "Open with" in place
+	// of a Document Server, and its save lands as the Document Server's did -
+	// syspath.SaveVerb). Nothing else in the work area is an app's to write.
+	for _, rel := range []string{".filex-open/x.docx", ".filex-open/sub/a1b2c3d4e5f6-x.docx", ".filex-open/a1b2c3d4e5f6-.keepdir"} {
+		err = h.CommitVersion(ctx, f.StA.ID, rel, strings.NewReader("x"), 1, nil)
+		assert.ErrorIs(t, err, syspath.ErrReserved, "an app wrote %s", rel)
+		assert.NoFileExists(t, filepath.Join(f.RootA, filepath.FromSlash(rel)))
+	}
 	assert.NoFileExists(t, filepath.Join(f.RootA, ".keepdir"))
 	assert.NoDirExists(t, filepath.Join(f.RootA, ".versions"))
+	workCopy := filepath.Join(f.RootA, ".filex-open", "a1b2c3d4e5f6-x.docx")
+	require.NoError(t, os.MkdirAll(filepath.Dir(workCopy), 0o755))
+	require.NoError(t, os.WriteFile(workCopy, []byte("opened"), 0o644))
+	require.NoError(t, h.CommitVersion(ctx, f.StA.ID, ".filex-open/a1b2c3d4e5f6-x.docx", strings.NewReader("saved"), 5, nil),
+		"the editor's save over the desktop's working copy")
+	got, err := os.ReadFile(workCopy)
+	require.NoError(t, err)
+	assert.Equal(t, "saved", string(got))
 
 	rel, err := h.CommitSibling(ctx, f.StA.ID, "", "out.pdf", strings.NewReader("x"), 1, nil)
 	require.NoError(t, err, "precondition: an ordinary output is written")

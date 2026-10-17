@@ -47,6 +47,11 @@ func TestActionForPath(t *testing.T) {
 		{"tenant storage link", http.MethodPost, "/api/admin/providers/3/storages", "3", "", "providers.storage_link", "providers", "3"},
 		{"tenant storage unlink", http.MethodDelete, "/api/admin/providers/3/storages/9", "3", "", "providers.storage_unlink", "providers", "3"},
 		{"tenant delete", http.MethodDelete, "/api/admin/providers/3", "3", "", "providers.delete", "providers", "3"},
+		// A file an administrator adds to an app or takes away (0.57): its
+		// own verbs, never the fallback's app-plugins.update / .delete.
+		{"app extra add", http.MethodPut, "/api/admin/app-plugins/4/extras/dictionaries/pl_PL/pl_PL.dic.txt", "4", "", "app_plugin.extra_add", "app_plugin", "4"},
+		{"app extra remove", http.MethodDelete, "/api/admin/app-plugins/4/extras/dictionaries/pl_PL/pl_PL.dic.txt", "4", "", "app_plugin.extra_remove", "app_plugin", "4"},
+		{"app extra from the catalog", http.MethodPost, "/api/admin/app-plugins/4/extras-catalog/dictionaries/pl_PL", "4", "", "app_plugin.extra_add", "app_plugin", "4"},
 		// Generic fallback: replica isn't in the explicit switch.
 		{"generic replica patch", http.MethodPatch, "/api/admin/replica/settings", "", "", "replica.update", "replica", ""},
 		{"generic queue retry", http.MethodPost, "/api/admin/queue/abc/retry", "abc", "", "queue.create", "queue", "abc"},

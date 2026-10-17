@@ -1,8 +1,12 @@
 package dav
 
 import (
+	"crypto/rand"
+	"encoding/json"
 	"encoding/xml"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -53,8 +57,22 @@ func quotaOf(t *testing.T, resp *http.Response) (avail, used uint64) {
 // showed whatever the client guessed.
 func TestPropfind_AStoragesQuotaIsItsDisk(t *testing.T) {
 	ha := newHarness(t)
-	ha.addStorage(t, "main", false, false)
-	disk, err := diskfree.Measure(t.TempDir())
+	st := ha.addStorage(t, "main", false, false)
+	// The measurement rests on the test's own data: on an empty file system
+	// the disk's used is 0 and that is true (the build host's -race job runs
+	// on a fresh tmpfs: "used = 0 with 3221225472 available, on a
+	// 3221225472-byte disk"). A megabyte the storage holds is on its disk
+	// whatever else is - random bytes, so no file system compresses it away.
+	var cfg struct {
+		Path string `json:"path"`
+	}
+	require.NoError(t, json.Unmarshal(st.ConfigJSON, &cfg))
+	const held = 1 << 20
+	fill := make([]byte, held)
+	_, err := rand.Read(fill)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(cfg.Path, "fill.bin"), fill, 0o644))
+	disk, err := diskfree.Measure(cfg.Path)
 	if err != nil {
 		t.Skipf("no disk probe on this platform: %v", err)
 	}
@@ -63,8 +81,8 @@ func TestPropfind_AStoragesQuotaIsItsDisk(t *testing.T) {
 	if avail == 0 || avail > disk.Total {
 		t.Errorf("available = %d, the disk is %d bytes", avail, disk.Total)
 	}
-	if used == 0 || avail+used > disk.Total {
-		t.Errorf("used = %d with %d available, on a %d-byte disk", used, avail, disk.Total)
+	if used < held || avail+used > disk.Total {
+		t.Errorf("used = %d with %d available, on a %d-byte disk holding a %d-byte file", used, avail, disk.Total, held)
 	}
 }
 

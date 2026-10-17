@@ -324,7 +324,7 @@ func (h *Handler) completeMultipartUpload(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := writer.Write(ctx, key, body, size); err != nil {
-		WriteError(w, r, statusForStorageErr(err), codeForWriteErr(err), err.Error())
+		h.storageFailed(w, r, true, err)
 		return
 	}
 
@@ -347,7 +347,7 @@ func (h *Handler) completeMultipartUpload(w http.ResponseWriter, r *http.Request
 	}
 
 	WriteXML(w, r, http.StatusOK, CompleteMultipartUploadResult{
-		Location: strings.TrimSuffix(h.cfg.PublicURL, "/") + "/" + st.Name + "/" + key,
+		Location: strings.TrimSuffix(h.cfg.PublicURL, "/") + "/" + escapeKeyPath(st.Name) + "/" + escapeKeyPath(key),
 		Bucket:   st.Name, Key: key, ETag: quoteETag(etag),
 	})
 }

@@ -223,6 +223,10 @@ async function main() {
     const limits = page.getByTestId('app-thumb-limits');
     await limits.waitFor({ timeout: 20_000 });
     await limits.scrollIntoViewIfNeeded();
+    // ⚠ The pointer and the focus off the form: the 0.57 picture showed the
+    // "Time per file" box's up/down arrows, drawn while it is hovered.
+    await page.mouse.move(4, 4);
+    await page.evaluate(() => document.activeElement?.blur?.());
     await sleep(400);
     await shot(limits, SET, 'app-thumbnails.png');
 

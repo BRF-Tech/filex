@@ -115,6 +115,39 @@ describe('AppPluginsApi', () => {
     const body = calls[0].body as FormData;
     expect(body.get('ui')).toBe(ui);
     expect(body.has('wasm')).toBe(false);
+    expect(body.has('engine'), 'no engine, no part').toBe(false);
+  });
+
+  // 0.57: an app with an `engines.office` block brings engine.zip, and an
+  // upload carries it as the part `engine` - the review, the install and
+  // the upgrade alike (one body builder, installPayload).
+  it('install, upgrade and their reviews from files: the `engine` part beside the interface', async () => {
+    const manifest = new File(['{}'], 'filex-app.json');
+    const ui = new File([new Uint8Array([80, 75, 3, 4])], 'ui.zip');
+    const engine = new File([new Uint8Array([80, 75, 3, 4, 0])], 'engine.zip');
+    const src = { kind: 'upload' as const, manifest, ui, engine };
+    await AppPluginsApi.dryRun(src);
+    await AppPluginsApi.install(src, ['files:read', 'ui', 'office-engine']);
+    await AppPluginsApi.upgradeDryRun(3, src);
+    await AppPluginsApi.upgrade(3, src, ['files:read', 'ui', 'office-engine']);
+    expect(calls.map((c) => c.url)).toEqual(['/admin/app-plugins', '/admin/app-plugins', '/admin/app-plugins/3/upgrade', '/admin/app-plugins/3/upgrade']);
+    for (const c of calls) {
+      const body = c.body as FormData;
+      expect(body.get('engine')).toBe(engine);
+      expect(body.get('ui')).toBe(ui);
+    }
+  });
+
+  // The Office editor's files are 140 MB: an upload's review carries them,
+  // so it waits like an install; a review from a source keeps the default.
+  it('a review of an upload waits for the upload, a review from a source does not', async () => {
+    const manifest = new File(['{}'], 'filex-app.json');
+    await AppPluginsApi.dryRun({ kind: 'upload', manifest });
+    await AppPluginsApi.upgradeDryRun(3, { kind: 'upload', manifest });
+    await AppPluginsApi.dryRun({ kind: 'github', repo: 'o/n' });
+    expect(calls[0].cfg).toEqual({ params: { dry_run: 1 }, timeout: INSTALL_TIMEOUT_MS });
+    expect(calls[1].cfg).toEqual({ params: { dry_run: 1 }, timeout: INSTALL_TIMEOUT_MS });
+    expect(calls[2].cfg).toEqual({ params: { dry_run: 1 } });
   });
 
   // ⚠⚠ The server compiles the module before it answers; a 20 MB module took

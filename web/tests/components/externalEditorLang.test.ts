@@ -152,12 +152,12 @@ describe('ONLYOFFICE → Editor language', () => {
     expect(calls.patches.find((c) => c.url === '/admin/external/drawio')).toBeUndefined();
   });
 
-  it('says so when FILEX_ONLYOFFICE_LANG pins it', async () => {
+  it('says so when FILEX_ONLYOFFICE_LANG gave it its first value', async () => {
     rows = [onlyOfficeRow({ editor_lang: 'de', editor_lang_env_managed: true }), DRAWIO];
     await mountExternal('en');
     const text = field()!.textContent ?? '';
     expect(text).toContain('FILEX_ONLYOFFICE_LANG');
-    expect(text).toContain('until filex restarts');
+    expect(text).toContain('stands across restarts');
   });
 
   it('in Turkish', async () => {

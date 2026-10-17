@@ -125,7 +125,6 @@
     "files": "Files",
     "storages": "Storages",
     "users": "Users",
-    "settings": "Settings",
     "external": "External services",
     "authProviders": "Identity providers",
     "apiMcp": "API / MCP",
@@ -168,19 +167,21 @@
     "myTenant": "My tenant",
     "menu": "Menu",
     "adminMenu": "Admin menu",
+    "general": "General",
     "top": {
       "files": "Files & storage",
-      "people": "People & security",
-      "system": "System"
+      "people": "People",
+      "maintenance": "Maintenance & records",
+      "settings": "Settings"
     },
     "section": {
       "files": "Files",
       "storage": "Storage",
       "people": "People & access",
-      "security": "Security",
-      "integrations": "Plugins & integrations",
-      "customize": "Customization",
-      "maintenance": "Maintenance & records"
+      "maintenance": "Maintenance & records",
+      "general": "General",
+      "security": "Security & data",
+      "integrations": "File processing & integrations"
     },
     "hint": {
       "dashboard": "The instance at a glance",
@@ -213,15 +214,17 @@
       "webhooks": "Send file events to other systems",
       "notifications": "Notifications and their delivery",
       "settings": "Instance-wide settings and email",
-      "branding": "Name and logo on public pages and sign-in",
+      "branding": "Name and logo on public pages, sign-in and emails",
       "appearance": "Themes and the default look",
       "archives": "Archive creation, extraction and limits",
       "queue": "Background jobs, progress and retries",
       "tools": "Maintenance you run on purpose",
       "audit": "Every change made in the admin panel",
       "updates": "New releases and the update policy",
-      "about": "Version and build"
-    }
+      "about": "Version and build",
+      "aiAssistant": "The assistant in the explorer: provider, model, limits"
+    },
+    "aiAssistant": "AI assistant"
   },
   "login": {
     "title": "Sign in",
@@ -487,6 +490,35 @@
       "missingInStorage": "Missing in storage",
       "sizeMismatch": "Size mismatch",
       "hashMismatch": "Hash mismatch"
+    },
+    "access": {
+      "title": "Access",
+      "hint": "People and groups given the whole storage reach every file and folder in it, in the web interface, the desktop app and over every protocol. Folder grants inside it stay as they are; where two apply, the higher level counts, and nothing here narrows access.",
+      "search": "Add a person or group…",
+      "noMatch": "Nobody matches.",
+      "levelHelp": {
+        "viewer": "Opens and downloads everything in the storage.",
+        "editor": "Also adds, changes and deletes.",
+        "owner": "Also decides who else has access."
+      },
+      "empty": "The whole storage has not been given to anyone.",
+      "given": "Access given.",
+      "changed": "Level changed.",
+      "revokeConfirm": "Take back {who}'s access to the whole storage? Their folder grants are kept.",
+      "revokeAll": "Revoke all access",
+      "revokeAllConfirm": "Take back every whole-storage assignment on {name}? Folder grants inside it are kept.",
+      "revokedAll": "Whole-storage access revoked. Folder grants are kept.",
+      "someFailed": "These could not be changed: {names}",
+      "groupOwnerConfirm": "Make the group {name} an owner of the whole storage? Every member will be able to decide who else has access.",
+      "folderGrants": "Grants on single folders are listed under",
+      "rbacOff": "Per-item access control is off on this storage: everyone opens it according to their role, so nobody can be given it here yet.",
+      "enable": "Turn on per-item access",
+      "enableWarning": "Once it is on, nobody but an administrator sees this storage unless it, or a folder in it, has been given to them. Choose who keeps access first, then turn it on.",
+      "enableKeepers": "Given the whole storage when it turns on",
+      "enableNobody": "Nobody chosen yet: only administrators will see this storage.",
+      "enableEarlier": "Assignments made before it was turned off apply again: {names}.",
+      "enableConfirm": "Turn on",
+      "enabledOk": "Per-item access is on."
     }
   },
   "users": {
@@ -616,11 +648,115 @@
       "change": "Change photo"
     }
   },
+  "instanceSettings": {
+    "savedOk": "Settings saved",
+    "restartNote": "Some of these are read when filex starts: a change to one of them applies at the next start, and its row says when one is waiting.",
+    "restartPending": "Applies at the next start",
+    "fromEnv": "First value from {env}",
+    "bounds": "From {min} to {max}; {default} by default.",
+    "unit": {
+      "minutes": "minutes",
+      "hours": "hours",
+      "days": "days",
+      "MB": "MB",
+      "GB": "GB",
+      "people": "people"
+    },
+    "groups": {
+      "general": {
+        "title": "Server defaults",
+        "desc": "How this server behaves where nobody chose otherwise: its language, how often storages are scanned, unfinished uploads, the file cache and the thumbnail cache's upkeep."
+      },
+      "protection": {
+        "title": "Before a file is overwritten",
+        "desc": "Whether filex keeps the old content of a file as a version before a write replaces it."
+      },
+      "apps": {
+        "title": "Apps and editing together",
+        "desc": "The largest files and packages an app may handle, how long an install request waits, and how many people may edit one file together."
+      },
+      "notifications": {
+        "title": "Notifications on this server",
+        "desc": "Whether the server records and delivers notifications at all."
+      },
+      "webhooks": {
+        "title": "The default webhook's language",
+        "desc": "The language the default webhook is told in. A target of its own has its own language, below."
+      }
+    },
+    "items": {
+      "instance_default_locale": {
+        "label": "Default language",
+        "hint": "What a person who has not chosen a language reads filex in, and the language of the server's emails to an address that has no account.",
+        "none": "The browser's language"
+      },
+      "sync_default_interval_minutes": {
+        "label": "Scan storages every",
+        "hint": "How often a storage with no interval of its own is checked for changes made outside filex."
+      },
+      "upload_staging_ttl_hours": {
+        "label": "Keep an unfinished upload for",
+        "hint": "A paused or interrupted upload can be resumed for this long; after that its parts are deleted."
+      },
+      "cache_max_gb": {
+        "label": "File cache size",
+        "hint": "How much disk filex uses for copies of files from slow storages. The oldest copies go first."
+      },
+      "thumbs_sweep": {
+        "label": "Tidy the thumbnail cache",
+        "hint": "Regularly removes the thumbnails of files that no longer exist."
+      },
+      "thumbs_sweep_interval_minutes": {
+        "label": "Tidy the thumbnail cache every",
+        "hint": "How often the thumbnail cache is checked while tidying is on."
+      },
+      "versions_on_overwrite": {
+        "label": "Keep a version before overwriting",
+        "hint": "Before a write replaces a file, its old content is kept as a version. Off, an overwrite cannot be undone - for a storage whose own versioning is enough."
+      },
+      "apps_max_input_mb": {
+        "label": "Largest file an app reads",
+        "hint": "A larger file is not handed to an app."
+      },
+      "apps_max_output_mb": {
+        "label": "Largest file an app writes",
+        "hint": "An app's result larger than this is refused."
+      },
+      "apps_max_wasm_mb": {
+        "label": "Largest app program",
+        "hint": "An app whose program is larger cannot be installed."
+      },
+      "apps_max_ui_mb": {
+        "label": "Largest app interface",
+        "hint": "An app whose interface package is larger cannot be installed."
+      },
+      "apps_request_ttl_days": {
+        "label": "An install request waits",
+        "hint": "How long a request for an app stays open before it expires. A request already made keeps its date."
+      },
+      "coedit_max_members": {
+        "label": "People editing one file together",
+        "hint": "The most people in one editing session."
+      },
+      "coedit_unsaved_days": {
+        "label": "Keep unsaved shared edits for",
+        "hint": "Changes made together that nobody saved are kept this long, then deleted."
+      },
+      "notify_enabled": {
+        "label": "Notifications",
+        "hint": "The bell, the emails, push and the webhooks. Off, the server records and sends no notification."
+      },
+      "notify_webhook_lang": {
+        "label": "Language of the default webhook",
+        "hint": "The language the default webhook's messages are written in.",
+        "none": "The server's default language"
+      }
+    }
+  },
   "settings": {
-    "title": "Settings",
+    "title": "General",
     "subtitle": "Instance-wide configuration",
-    "siteName": "Site name",
-    "envOnlyNote": "The public URL, sync interval, log level and default language are set by environment variables (FILEX_PUBLIC_URL, FILEX_SYNC_INTERVAL, FILEX_LOG_LEVEL, FILEX_DEFAULT_LOCALE), not from this page - see docs/CONFIGURATION.md.",
+    "envOnlyNote": "The public URL and the log level are set by environment variables (FILEX_PUBLIC_URL, FILEX_LOG_LEVEL), not from this page - see docs/CONFIGURATION.md.",
     "savedOk": "Settings saved",
     "folderView": {
       "title": "Default folder view",
@@ -690,7 +826,7 @@
       "editorLang": "Editor language",
       "editorLangAuto": "Automatic - each person's filex language",
       "editorLangHint": "Automatic opens the ONLYOFFICE editor in the language each person uses filex in. Choose a language to open it in that one for everybody.",
-      "editorLangEnvHint": "Set by {env}. A change here applies now and lasts until filex restarts, when the environment's value is written back."
+      "editorLangEnvHint": "{env} gave it its first value. A change here stands across restarts; filex settings reseed --external takes the environment's value again."
     },
     "states": {
       "healthy": "Healthy",
@@ -703,8 +839,8 @@
     "testFail": "Health check failed",
     "testWarn": "Reachable, but not everything is right: see the card",
     "testedUnsaved": "These results are for the values in the form, which are not saved yet. Save them to use them.",
-    "envManaged": "Set by the environment",
-    "envManagedHint": "Set by {env}. A change here, switching it off included, applies now and lasts until filex restarts, when the environment's value is written back. To switch it off for good, remove {env} (or its line in the config file).",
+    "envManaged": "First set by the environment",
+    "envManagedHint": "{env} gave this service its first value. A change here, switching it off included, stands across restarts. To take the environment's value again, run filex settings reseed --external and restart filex.",
     "overall": {
       "disabled": "Disabled",
       "unconfigured": "Not configured",
@@ -987,7 +1123,9 @@
     "revokeConfirm": "Revoke {email}'s access to {path}?",
     "revokedOk": "Grant revoked",
     "empty": "No grants yet.",
-    "group": "Group"
+    "group": "Group",
+    "wholeStorage": "Whole storage",
+    "wholeStorageOf": "{storage} (whole storage)"
   },
   "apiMcp": {
     "title": "API / MCP",
@@ -1191,7 +1329,42 @@
     "scopeAll": "All",
     "scopeName": "Name",
     "scopeContent": "Content",
-    "inContent": "In content"
+    "inContent": "In content",
+    "settings": {
+      "title": "Settings",
+      "desc": "How the index takes in your files. Kept here, not in the environment: the FILEX_SEARCH_* variables only gave these their first value.",
+      "savedOk": "Saved",
+      "savedNextStart": "Saved - applies at the next start",
+      "elsewhere": "What the index reads and how much memory it may take are set on Settings → General.",
+      "change": "Change the search settings →",
+      "indexOff": "The index is switched off on this server (FILEX_SEARCH_ENABLED). These settings are kept and apply once it is on.",
+      "content": {
+        "label": "Search inside files",
+        "desc": "Read the text of documents, PDFs and code into the index as they are written, so a search finds what is in a file and not only its name. Off, nothing new is read; text already in the index keeps matching. Applies to the next file written."
+      },
+      "contentMax": {
+        "title": "Largest file read for its text",
+        "desc": "Bigger files are found by their name only.",
+        "label": "Size limit (MB)",
+        "hint": "From {min} to {max} MB. Applies to the next file written."
+      },
+      "memory": {
+        "title": "Memory for indexing",
+        "desc": "The share of the memory filex was given that indexing may use. Over it, reading files and rebuilding wait for memory to come back.",
+        "label": "Share (%)",
+        "hint": "From {min} to {max} percent. Applies at once.",
+        "inForce": "Now {budget} of {given} ({from}).",
+        "unknown": "The memory filex was given could not be read, so indexing runs without a limit.",
+        "from": {
+          "container": "the container's limit",
+          "host": "the machine's memory"
+        }
+      },
+      "autoRebuild": {
+        "label": "Repair an outdated index at startup",
+        "desc": "After an upgrade that changes what the index holds, rebuild it in the background, beside the index that keeps answering searches. Applies at the next start."
+      }
+    }
   },
   "adminSearch": {
     "alias": {
@@ -1223,7 +1396,8 @@
       "external": "ONLYOFFICE, draw.io, document server, editors",
       "webhooks": "HTTP callbacks, events",
       "notifications": "alerts, bell",
-      "settings": "email, SMTP, site name",
+      "general": "settings, email, SMTP",
+      "displayName": "site name, instance name, product name",
       "branding": "logo, colors, name",
       "appearance": "theme, dark mode, custom CSS",
       "archives": "zip, 7z, tar, extract",
@@ -1233,6 +1407,7 @@
       "updates": "upgrade, new version, release",
       "about": "version, build, license",
       "smtp": "email server, outgoing mail",
+      "thumbnails": "SVG, previews, folder previews, Office thumbnails",
       "twoFactor": "2FA, TOTP, two-factor",
       "allowlist": "IP addresses",
       "stores": "app store, store"
@@ -1270,8 +1445,8 @@
     "toolFound": "Found",
     "toolMissing": "Not found",
     "heic": "HEIC photos",
-    "office": "Office documents (ONLYOFFICE)",
-    "officeHint": "Office documents get thumbnails from ONLYOFFICE. Configure it under Settings → External services; until then they show their type icon.",
+    "office": "Office documents",
+    "officeHint": "Office documents get thumbnails from an office engine: the Office editor app (Apps) or ONLYOFFICE (Settings → External services). Until one runs, they show their type icon.",
     "heicHint": "ImageMagick is installed but cannot decode HEIC photos: libheif's HEVC decoder is missing. Install libheif-plugin-libde265 (Debian, Ubuntu) or libheif-libde265 (Alpine), then restart filex.",
     "licenseIs": "License: {license}"
   },
@@ -1388,7 +1563,7 @@
           "video": "FFmpeg is not installed",
           "audio": "FFmpeg is not installed",
           "pdf": "Neither Ghostscript nor poppler is installed",
-          "office": "ONLYOFFICE is not configured (Settings → External services)",
+          "office": "No office engine runs: install the Office editor app (Apps) or connect ONLYOFFICE (Settings → External services); an app's engine is prepared for a few minutes after it is installed",
           "heif": "ImageMagick with HEIC support is not installed",
           "heic_codec": "libheif's HEVC decoder is not installed (libheif-plugin-libde265)",
           "other": "A program this kind of file needs is not installed"
@@ -1410,6 +1585,8 @@
       "retry": "Try again",
       "limits": {
         "title": "Thumbnail settings",
+        "elsewhere": "Folder previews and the SVG and Office limits are set on Settings → General.",
+        "changeLimits": "Change the limits →",
         "desc": "An SVG over either limit gets no thumbnail: it shows its icon and is listed under Tools → Thumbnail repair with the reason. Raise a limit to draw the files it skipped.",
         "size": "Largest SVG (MB)",
         "size_hint": "Between {min} and {max} MB. The default is 5.",
@@ -1419,8 +1596,8 @@
         "readonly": "These settings apply to the whole server; the server's administrator can change them.",
         "saved": "Thumbnail settings saved.",
         "svg_title": "SVG limits",
-        "office_title": "Office documents (ONLYOFFICE)",
-        "office_desc": "ONLYOFFICE draws the first page of an office document. It runs one conversion at a time, shared with the editors, so filex sends it one document at a time by default. A document over the size limit gets no thumbnail and is marked too large.",
+        "office_title": "Office documents",
+        "office_desc": "The office engine draws the first page of an office document: the Office editor app's engine or a connected ONLYOFFICE, whichever runs first under Plugins → Default apps. filex sends it one document at a time by default (ONLYOFFICE shares its converter with its editors). A document over the size limit gets no thumbnail and is marked too large.",
         "office_size": "Largest office document (MB)",
         "office_size_hint": "Between {min} and {max} MB. The default is 25.",
         "office_slots": "Documents at once",
@@ -1481,7 +1658,7 @@
     "creds": "Demo account: {email} · password: {password}",
     "sandbox": "Shared sandbox - everything resets nightly; storages, plugins and apps are switched off here.",
     "adminHint": "The admin panel is read-only here for every account - run your own filex to change what it shows.",
-    "alsoIncluded": "Also included: apps - sandboxed WebAssembly add-ons installed through a permission review, with e-Signature, Convert, an office editor, filextext and draw.io shipping alongside · an app you allow editing a file together, or a file of an encrypted folder, decrypted in your browser · language packs, right-to-left layout included · instance themes on the Appearance screen · the links you made, under My shares · personal and team tags · symlinked folders · a view and sort remembered per folder · roles, groups and per-person exceptions, per-file and per-folder access, and apps' own permissions · multi-tenancy, each tenant with its own sign-in realm and able to run itself - its own sign-in providers, domain and certificate · OIDC SSO, LDAP / Active Directory and sign-in with a Windows or Linux account · sign-in attempt limits with an IP allow-list · in-place viewers and editors, Office in the office editor app or through ONLYOFFICE · thumbnails of SVG, HEIC, text and archives, and folders drawn with the files that came into them last · Default apps: which app opens a kind of file · creating a document from + New - Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever ONLYOFFICE is connected or the office editor app is installed · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
+    "alsoIncluded": "Also included: apps - sandboxed WebAssembly add-ons installed through a permission review, with e-Signature, Convert, an office editor, filextext and draw.io shipping alongside · an app you allow editing a file together, or a file of an encrypted folder, decrypted in your browser · language packs, right-to-left layout included · instance themes on the Appearance screen · the links you made, under My shares · personal and team tags · symlinked folders · a view and sort remembered per folder · roles, groups and per-person exceptions, per-file and per-folder access, and apps' own permissions · multi-tenancy, each tenant with its own sign-in realm and able to run itself - its own sign-in providers, domain and certificate · OIDC SSO, LDAP / Active Directory and sign-in with a Windows or Linux account · sign-in attempt limits with an IP allow-list · in-place viewers and editors, Office in the office editor app or through ONLYOFFICE · thumbnails of office documents, SVG, HEIC, text and archives, and folders drawn with the files that came into them last · Default apps: which app opens a kind of file · creating a document from + New - Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever ONLYOFFICE is connected or the office editor app is installed · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
     "features": {
       "storageTitle": "6 storage drivers, both directions",
       "storageBody": "Mount local disks, S3, SFTP, WebDAV, FTP/FTPS and SMB/NAS side by side as one tree - then reach that same tree back as S3, SFTP, FTPS, NFSv3 or WebDAV.",
@@ -1564,7 +1741,7 @@
       "movedToSettings": "Your own notification settings - the bell, browser pop-ups, which events - are in your user settings.",
       "openSettings": "Open my notification settings"
     },
-    "adminTitle": "Notifications admin",
+    "adminTitle": "Notifications",
     "bell": "Notifications",
     "empty": "No notifications yet",
     "viewAll": "View all",
@@ -2110,11 +2287,13 @@
       },
       "trustsNobody": "No proxy is trusted: the address a request comes from is always the client's own, and X-Forwarded-For is never read.",
       "source": {
+        "seeded": "First value from {source}",
         "setting": "Set here",
         "env": "From the FILEX_TRUSTED_PROXIES environment variable",
         "auto": "Automatic: the built-in default"
       },
-      "override": "Saving stores this list here, and it takes precedence over the FILEX_TRUSTED_PROXIES environment variable. Remove the saved list to go back to the variable, or to the automatic default when the variable is empty.",
+      "configuredDiffers": "{source} names another list ({list}); the list saved here is the one in force. To use the configuration's list: {command}",
+      "override": "Saving stores this list here. FILEX_TRUSTED_PROXIES gives only the first value, at the first start: after that the list saved here is in force, and a changed variable is applied with filex settings reseed login.trusted_proxies. Remove the saved list to go back to the variable, or to the automatic default when the variable is empty.",
       "reset": "Remove the saved list",
       "resetConfirm": "Remove the saved list of trusted proxies? The FILEX_TRUSTED_PROXIES environment variable, or the automatic default, is in force again.",
       "resetDone": "Saved list removed",
@@ -2252,7 +2431,7 @@
     "title": "Branding",
     "subtitle": "Identity shown on public share, upload and PIN pages plus the sign-in screen",
     "name": "Display name",
-    "nameHelp": "Shown next to the logo on public pages and under the logo on the sign-in screen.",
+    "nameHelp": "The instance's name: next to the logo on public pages, under the logo on the sign-in screen, and in the emails it sends (\"shared with you via ...\").",
     "logo": "Logo",
     "logoHelp": "An image URL, a site-relative path, or an uploaded file stored inline (max 256 KB).",
     "logoUpload": "Upload file",
@@ -2655,6 +2834,10 @@
       },
       "errRepo": "Enter the repository as owner/name.",
       "errFiles": "Choose the manifest (filex-app.json) - and the module (.wasm), unless the app is a language pack.",
+      "errMissing": {
+        "ui": "The manifest has its own interface (a ui block): choose its ui.zip under Interface.",
+        "engine": "The manifest brings an office engine (engines.office): choose its engine.zip under Office engine."
+      },
       "errUrl": "Enter the manifest URL - and, for an app with a module, the module URL and its 64-character SHA-256.",
       "languagePackNote": "Only languages for filex itself - no module, nothing runs.",
       "alreadyInstalled": "“{name}” is already installed here (version {version}). Installing it a second time is not possible - upgrade the installed one to {next} from this same source instead.",
@@ -2667,8 +2850,9 @@
       "samePermissions": "It asks for the same permissions as the installed version.",
       "newPermission": "New",
       "enginesMissing": "This server does not have {engines}. The app installs, but what it does with them will not work until they are installed and filex is restarted.",
-      "officeMissing": "Office documents are converted by {name}, and none is connected to this server. The app installs; what it does with office documents works once an administrator connects {name} under External services - no restart needed.",
+      "officeMissing": "Office documents are converted by an office engine, and none runs on this server. The app installs; what it does with office documents works once an administrator installs the Office editor app (Apps) or connects {name} under External services - no restart needed.",
       "ui": "Interface (ui.zip) - for an app with its own interface",
+      "engine": "Office engine (engine.zip) - for an app that brings one (engines.office), such as the Office editor",
       "uiGroup": {
         "title": "Interface",
         "badge": "Has its own interface",
@@ -2821,6 +3005,49 @@
         "outOfRange": "A whole number between {min} and {max} (0 is the default).",
         "saved": "Thumbnail limits saved.",
         "order": "Which kinds it is asked for first is decided in Plugins → Default apps."
+      },
+      "dictionaries": {
+        "title": "Dictionaries",
+        "desc": "Spell checking and hyphenation for languages this app does not bring with it. Its interface reads them from its own package address, which needs no sign-in, so add only public dictionaries.",
+        "source": "Hunspell dictionaries, named as ONLYOFFICE publishes them: a folder per language (pl_PL) holding pl_PL.aff, pl_PL.dic and, if there is one, hyph_pl_PL.dic.",
+        "notRead": "This app's interface does not read files added to it (it may not read its own package), so no dictionary can be added.",
+        "empty": "No dictionaries added. The languages the app brings with it are checked without one.",
+        "used": "Used: {used} of {max}",
+        "add": "Add dictionary",
+        "addTitle": "Add a dictionary",
+        "column": {
+          "lang": "Language",
+          "parts": "Files",
+          "size": "Size",
+          "modified": "Added",
+          "status": "Status"
+        },
+        "status": {
+          "installed": "Installed",
+          "partial": "Partly installed",
+          "available": "Available"
+        },
+        "part": {
+          "aff": "spelling rules",
+          "dic": "word list",
+          "hyph": "hyphenation"
+        },
+        "lang": "Language folder",
+        "langHint": "The dictionary's folder name, for example pl_PL or sr_Latn_RS. A language added before is replaced.",
+        "langInvalid": "Letters and _ only, 2 to 16 characters.",
+        "aff": "Spelling rules (.aff)",
+        "dic": "Word list (.dic)",
+        "hyph": "Hyphenation (hyph_ .dic, if there is one)",
+        "needBoth": "Pick the .aff and the .dic file.",
+        "added": "{lang} added.",
+        "remove": "Remove",
+        "confirmTitle": "Remove the dictionary?",
+        "confirmText": "{lang} will no longer be checked in this app. Its files are removed from the server.",
+        "sourceCatalog": "The languages this app's release offers are listed: Install downloads a language's files and checks each against the release's sha256. Any other Hunspell dictionary can be added by hand.",
+        "catalogUnread": "The list of languages this app's release offers could not be read: {why}. Dictionaries can still be added by hand.",
+        "install": "Install",
+        "installing": "Installing...",
+        "removed": "{lang} removed."
       }
     },
     "kind": {
@@ -2884,7 +3111,31 @@
       "down": "Move down"
     },
     "saved": ".{ext}: saved.",
-    "resetDone": ".{ext}: back to the default order."
+    "resetDone": ".{ext}: back to the default order.",
+    "engine": {
+      "title": "Office engine",
+      "desc": "Office conversions apps ask for (Convert, file_convert) and the thumbnails of office documents are made by the office engine an app brings, run on this server, or by an ONLYOFFICE Document Server. The first one on this list that runs takes the work.",
+      "none": "Nothing converts office documents here: install the Office editor app under Apps, or connect an ONLYOFFICE Document Server under External services.",
+      "documentServer": "ONLYOFFICE Document Server",
+      "kindApp": "The office engine this app brings",
+      "kindServer": "Connected under External services",
+      "switchedOff": "Off",
+      "first": "Runs first",
+      "firstHint": "When the first one is not running (an app's engine still being prepared, say), the next one takes the work.",
+      "reset": "Back to the default order",
+      "resetHint": "By default an app's engine goes first and the Document Server after it.",
+      "saved": "Office engine: saved.",
+      "resetDone": "Office engine: back to the default order.",
+      "preparingHint": "It is compiled once after an install or an update, which takes a few minutes.",
+      "failedHint": "It could not be prepared: {error}. It is tried again in half an hour, or when the app is updated.",
+      "state": {
+        "ready": "Ready",
+        "preparing": "Being prepared",
+        "failed": "Failed",
+        "idle": "Not running",
+        "off": "Not connected"
+      }
+    }
   },
   "usage": {
     "title": "Usage & cost",
@@ -2956,7 +3207,7 @@
     "saved": "Archive settings saved"
   },
   "userSettings": {
-    "title": "Settings",
+    "title": "User settings",
     "open": "User settings",
     "saveChanges": "Save changes",
     "demoReadOnly": "This is a shared demo account, so its profile, password and second factor cannot be changed.",
@@ -3055,11 +3306,7 @@
     },
     "heading": "User settings",
     "headingSub": "Manage your profile, preferences, and security.",
-    "adminBadge": "Admin",
-    "ai": {
-      "soon": "Coming soon",
-      "body": "This release has no per-user assistant settings. The AI features filex does ship are configured for the whole instance by an administrator, so there is nothing here for you to turn on or off yet."
-    }
+    "adminBadge": "Admin"
   },
   "appearance": {
     "title": "Appearance",
@@ -3244,6 +3491,10 @@
         "use": {
           "label": "AI agent API",
           "hint": "Let AI agents and MCP clients work with files through /api/ai."
+        },
+        "assistant": {
+          "label": "AI assistant",
+          "hint": "Use the assistant in the explorer: it works with the person's own permissions, once an administrator has turned it on."
         }
       },
       "plugins": {
@@ -4057,5 +4308,49 @@
     },
     "requestStorage": "Ask for this plugin",
     "storageEmpty": "The store lists no storage plugin."
+  },
+  "assistantAdmin": {
+    "title": "AI assistant",
+    "subtitle": "The assistant in the explorer: which model answers, with which key, within which limits.",
+    "status": "Status",
+    "state": {
+      "on": "On",
+      "off": "Off",
+      "not_configured": "Not set up"
+    },
+    "enabled": "Turn the assistant on",
+    "enabledHint": "Off by default. On, what people ask, and the files the assistant reads for them, are sent to the provider below; every file it reads is in the audit log. Encrypted folders and the vault are never sent.",
+    "hideButton": "Hide the button",
+    "hideButtonHint": "Nobody sees the assistant's button in the explorer and nobody can use it, while what is set here is kept (the test below still works).",
+    "whoMay": "Who may use it is the AI assistant permission of each role. Every role has it until an administrator takes it away on Roles.",
+    "whoMayLink": "Roles",
+    "provider": "Provider",
+    "providerHelp": {
+      "anthropic": "Claude, through Anthropic's API. Needs an API key.",
+      "openai": "OpenAI - or any server that speaks its API (OpenRouter, vLLM, LM Studio): set its address.",
+      "ollama": "A local Ollama server: nothing leaves your network. Choose a model that can call tools."
+    },
+    "baseUrl": "Address",
+    "baseUrlHint": "Empty: the provider's own. For a server that speaks OpenAI's API, the address that ends in /v1.",
+    "apiKey": "API key",
+    "apiKeyStored": "A key is stored - type a new one to replace it",
+    "apiKeyNeeded": "Needed for this provider. Stored encrypted and never shown again.",
+    "apiKeyOptional": "Optional for this provider. Stored encrypted and never shown again.",
+    "noSecretKey": "This server has no FILEX_SECRET_KEY, so no API key can be stored. Ollama and a server of your own without a key still work.",
+    "clearKey": "Remove the stored key",
+    "model": "Model",
+    "modelHint": "The model's name as the provider writes it. Test lists the models the address offers.",
+    "test": "Test the connection",
+    "limits": "Limits and keeping",
+    "maxToolRounds": "Tool steps per request",
+    "maxToolRoundsHint": "How many times one request may use tools and go back to the model.",
+    "maxOutputTokens": "Longest reply (tokens)",
+    "maxRequestTokens": "Budget per request (tokens)",
+    "maxRequestTokensHint": "Input and output of every step together; reaching it stops the request.",
+    "timeout": "Provider timeout (seconds)",
+    "perMinute": "Requests per person per minute",
+    "retention": "Keep conversations (days)",
+    "retentionHint": "Counted from a conversation's last use; then it is deleted. A person can delete theirs at any time.",
+    "saved": "AI assistant settings saved"
   }
 }

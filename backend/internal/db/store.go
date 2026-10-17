@@ -1172,6 +1172,24 @@ type Store interface {
 	DeleteRecentSearch(ctx context.Context, userID, id int64) (bool, error)
 	ClearRecentSearches(ctx context.Context, userID int64, surface string) error
 
+	// The AI assistant's conversations (migration 00126, task #269) - one
+	// person's, never anybody else's: every call names the person, and an id
+	// that is not theirs is answered like one that does not exist. Written
+	// once for every engine (AssistantSQL).
+	CreateAssistantConversation(ctx context.Context, c *model.AssistantConversation) (*model.AssistantConversation, error)
+	// GetAssistantConversation answers nil, nil for a conversation that is
+	// not the person's.
+	GetAssistantConversation(ctx context.Context, userID, id int64) (*model.AssistantConversation, error)
+	ListAssistantConversations(ctx context.Context, userID int64, limit int) ([]*model.AssistantConversation, error)
+	// UpdateAssistantConversation is a compare-and-set on the revision the
+	// caller read: false, no error, when another writer came first.
+	UpdateAssistantConversation(ctx context.Context, c *model.AssistantConversation, from int64) (bool, error)
+	DeleteAssistantConversation(ctx context.Context, userID, id int64) (bool, error)
+	DeleteAssistantConversations(ctx context.Context, userID int64) error
+	// DeleteAssistantConversationsBefore is the retention sweep: every
+	// conversation last used before beforeMs (unix milliseconds).
+	DeleteAssistantConversationsBefore(ctx context.Context, beforeMs int64) error
+
 	// Plugin install requests (migration 00070, internal/pluginreq) — what an
 	// API key leaves instead of installing a plugin, for an administrator to
 	// approve or reject. Written once for every engine (PluginRequestSQL).

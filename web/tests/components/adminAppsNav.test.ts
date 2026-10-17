@@ -173,6 +173,7 @@ async function router(at = '/dashboard'): Promise<Router> {
       // what they measure.
       { path: '/appearance', name: 'appearance', component: Blank },
       { path: '/archives', name: 'archives', component: Blank },
+      { path: '/ai-assistant', name: 'ai-assistant', component: Blank },
       { path: '/protection', name: 'protection', component: Blank },
       { path: '/external', name: 'external', component: Blank },
       { path: '/replica', name: 'replica', component: Blank },

@@ -65,6 +65,21 @@ export interface ExplorerMenuRow {
 export const EXPLORER_DRAWN_ROWS: readonly string[] = ['view-list', 'view-grid', 'view-gallery', 'inspector', 'nav'];
 
 /**
+ * The "⋯" rows whose control the user settings dialog carries: Appearance
+ * (`theme`), Compact list (`density`), Time zone, and - since task #258 - the
+ * keyboard shortcuts' editor (Preferences → This device → Keyboard
+ * shortcuts). Where the dialog is one row away (an avatar with `account.
+ * settings`, the web page's avatar), these leave the avatar menu: one door
+ * each. ⚠ Where there is no dialog, nothing is dropped and the "⋯" keeps
+ * them all - an explorer embedded without `account` is not left without a
+ * way to its shortcuts.
+ *
+ * ONE list for every host that makes that trade (FileExplorer's own avatar,
+ * web/src/views/Explore.vue), so a row the dialog grows leaves both menus.
+ */
+export const SETTINGS_DIALOG_ROWS: readonly string[] = ['theme', 'density', 'timezone', 'shortcut-settings'];
+
+/**
  * The prefix on an explorer row's key inside the account menu, so an explorer
  * row named `settings` one day cannot silently take over the host's own row.
  */

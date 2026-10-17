@@ -1,7 +1,7 @@
 package onlyoffice
 
-// Saving a .csv edited in ONLYOFFICE (filex 0.51; csv.go says what was
-// measured, docs/ONLYOFFICE.md → CSV files says it for the operator).
+// Saving a .csv edited in ONLYOFFICE (filex 0.51; docs/ONLYOFFICE.md → CSV
+// files says it for the operator).
 //
 // ⚠⚠ The callback used to write whatever the document server handed back to
 // the document's own path without reading `filetype`. A document server set to
@@ -12,12 +12,15 @@ package onlyoffice
 // server saved when it is one, refused (logged, the editors told) when it is
 // anything else. The other office kinds are callback_format.go's.
 //
-// The CSV text is then compared with the file it replaces, so that the cells
-// nobody changed keep their text (csv_keep.go): 0.51.0 wrote every value as
-// ONLYOFFICE's spreadsheet shows it, `007` as `7`.
+// The CSV text is then written in the file's own way (internal/officesave,
+// the same for the Office editor app's saves): its delimiter, byte order
+// mark, line ends and encoding, the cells nobody changed as the file has
+// them (0.51.0 wrote every value as ONLYOFFICE's spreadsheet shows it, `007`
+// as `7`). How the server wrote its save is read from the bytes, never
+// assumed: Docs 9.4 writes commas and a byte order mark, Docs 10 the file's
+// own delimiter (task #255).
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -31,15 +34,10 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/officesave"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
-
-// csvSaveMaxBytes bounds a saved CSV (and the spreadsheet it is converted
-// from): it is read whole, to put the file's own delimiter back. A larger one
-// is not written. The comparison that keeps the untouched cells has a bound
-// of its own, csvKeepMaxBytes, and a save over that one is still written.
-const csvSaveMaxBytes = 256 << 20
 
 // csvSaveTimeout bounds the conversion of a spreadsheet the server saved
 // instead of a CSV.
@@ -52,38 +50,23 @@ const csvConvertParams = "csv-save-v1"
 // edited CSV as, and filex converts back.
 var csvFromTypes = map[string]bool{"xlsx": true, "xlsm": true, "xlsb": true, "xls": true, "ods": true}
 
-// docExt is a document's type as its name says it: the extension, lower
-// case, no dot.
-func docExt(name string) string {
-	return strings.TrimPrefix(strings.ToLower(path.Ext(name)), ".")
-}
-
-// binaryPackage reports whether b starts like a spreadsheet package and not
-// like text: a zip (XLSX, ODS) or an OLE compound file (XLS). Such bytes are
-// never written under a .csv name.
-func binaryPackage(b []byte) bool {
-	return bytes.HasPrefix(b, []byte("PK\x03\x04")) ||
-		bytes.HasPrefix(b, []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1})
-}
-
 // csvSave turns what the document server saved for a .csv into the bytes to
-// write: CSV text in the file's own dialect, with the text of the cells
-// nobody changed as the file on storage has it (KeepCSV). When the cells
-// cannot be kept - the file could not be read, is not UTF-8, is too large -
-// the save is written all the same, with the file's own delimiter, byte order
-// mark and line ends and ONLYOFFICE's values (RewriteCSV), and the log says
-// why (csvNotKept). got is the callback's `filetype` ("" from a server that
-// does not say).
+// write: CSV text in the file's own dialect and encoding, with the text of
+// the cells nobody changed as the file on storage has it
+// (officesave.SaveCSV). When the cells cannot be kept - the file could not be
+// read whole, is too large - the save is written all the same, in the file's
+// way with ONLYOFFICE's values, and the log says why (csvNotKept). got is the
+// callback's `filetype` ("" from a server that does not say).
 // An *errNotWritten is a save that must not be written.
 func (s *Service) csvSave(ctx context.Context, drv storage.Driver, node *model.Node, src io.Reader, got string) ([]byte, error) {
-	saved, err := io.ReadAll(io.LimitReader(src, csvSaveMaxBytes+1))
+	saved, err := io.ReadAll(io.LimitReader(src, officesave.MaxSaveBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("fetch saved doc: %w", err)
 	}
-	if int64(len(saved)) > csvSaveMaxBytes {
-		return nil, notWritten(refusedTooLarge, srvtext.Vars{"mb": fmt.Sprint(csvSaveMaxBytes >> 20)})
+	if int64(len(saved)) > officesave.MaxSaveBytes {
+		return nil, notWritten(refusedTooLarge, srvtext.Vars{"mb": fmt.Sprint(officesave.MaxSaveBytes >> 20)})
 	}
-	if got == "" && binaryPackage(saved) {
+	if got == "" && officesave.IsPackage(saved) {
 		// A server that does not name the type: the bytes do.
 		got = "xlsx"
 	}
@@ -95,31 +78,42 @@ func (s *Service) csvSave(ctx context.Context, drv storage.Driver, node *model.N
 			slog.Warn("onlyoffice callback: converting the saved spreadsheet to CSV",
 				slog.Int64("storage", node.StorageID), slog.String("path", node.Path),
 				slog.String("filetype", got), slog.String("err", err.Error()))
-			return nil, notWritten(refusedNotConverted, srvtext.Vars{"format": formatName(got)})
+			return nil, notWritten(refusedNotConverted, srvtext.Vars{"format": officesave.FormatName(got)})
 		}
 		saved = conv
 	default:
-		return nil, notWritten(refusedOtherType, srvtext.Vars{"format": formatName(got), "ext": "csv"})
+		return nil, notWritten(refusedOtherType, srvtext.Vars{"format": officesave.FormatName(got), "ext": "csv"})
 	}
-	if binaryPackage(saved) {
-		return nil, notWritten(refusedPackage, nil)
+	out, res, err := officesave.SaveCSV(s.csvOriginal(ctx, drv, node), saved, nil)
+	if err != nil {
+		return nil, csvRefusal(err)
 	}
-	d, original, why := s.csvOriginal(ctx, drv, node)
-	if why != "" {
-		csvNotKept(node, CSVKept{Why: why})
-		return RewriteCSV(saved, d), nil
-	}
-	// Not kept: out is RewriteCSV's all the same.
-	out, kept := KeepCSV(original, saved, d)
-	if !kept.Applied {
-		csvNotKept(node, kept)
+	if !res.Applied {
+		csvNotKept(node, res.CSVKept)
 		return out, nil
 	}
 	slog.Debug("onlyoffice callback: CSV cells kept",
 		slog.Int64("storage", node.StorageID), slog.String("path", node.Path),
-		slog.Int("records", kept.Records), slog.Int("unchanged", kept.Unchanged),
-		slog.Int("restored", kept.Restored), slog.Int("new", kept.New), slog.Int("deleted", kept.Deleted))
+		slog.String("saved_delimiter", officesave.DelimiterName(res.Saved.Comma)),
+		slog.Int("records", res.Records), slog.Int("unchanged", res.Unchanged),
+		slog.Int("restored", res.Restored), slog.Int("new", res.New), slog.Int("deleted", res.Deleted))
 	return out, nil
+}
+
+// csvRefusal is a CSV save officesave refused, in the words the editors are
+// told it with.
+func csvRefusal(err error) *errNotWritten {
+	r, ok := officesave.AsRefusal(err)
+	if !ok {
+		return notWritten(refusedCSVUnreadable, nil)
+	}
+	switch r.Why {
+	case "package":
+		return notWritten(refusedPackage, nil)
+	case "unencodable":
+		return notWritten(refusedCSVEncoding, srvtext.Vars{"encoding": r.Encoding, "char": string(r.Char)})
+	}
+	return notWritten(refusedCSVUnreadable, nil)
 }
 
 // csvNotKept logs why a saved CSV was written with ONLYOFFICE's values. Never
@@ -129,7 +123,7 @@ func (s *Service) csvSave(ctx context.Context, drv storage.Driver, node *model.N
 // about to write something that is not the save, or failed lining the records
 // up. Those are a warning, the panic with what it said and where, so that the
 // bug can be found; the others are what the file is, and say so once per save.
-func csvNotKept(node *model.Node, kept CSVKept) {
+func csvNotKept(node *model.Node, kept officesave.CSVKept) {
 	const msg = "onlyoffice callback: CSV cells not kept"
 	at := []any{slog.Int64("storage", node.StorageID), slog.String("path", node.Path), slog.String("why", kept.Why)}
 	switch kept.Why {
@@ -146,52 +140,24 @@ func csvNotKept(node *model.Node, kept CSVKept) {
 
 // csvOriginal reads the CSV on storage - the file the save is about to
 // replace - the way the document server's download of it does (the body
-// resolver: the staged copy while an upload is still transferring). It
-// answers how the file is written, sniffed from its first CSVSniffBytes as
-// when it was opened, and the whole file for KeepCSV to compare the save
-// with. why says when there is no file to compare: "not_utf8" or "too_large"
-// (over csvKeepMaxBytes), of which only the head is read, or "unreadable". A
-// file whose head could not be read keeps the server's own way (comma, a byte
-// order mark): nothing is guessed about a file nobody could read. One whose
-// rest could not be read keeps the dialect its head showed.
-func (s *Service) csvOriginal(ctx context.Context, drv storage.Driver, node *model.Node) (d CSVDialect, original []byte, why string) {
-	unread := CSVDialect{Comma: ',', BOM: true, UTF8: true}
+// resolver: the staged copy while an upload is still transferring): its head,
+// which says how it is written, and the whole file up to
+// officesave.KeepMaxBytes for the save to be compared with. A file whose head
+// could not be read is one nobody could read: the save is written as the
+// server wrote it, nothing guessed. One whose rest could not be read keeps
+// the way its head showed.
+func (s *Service) csvOriginal(ctx context.Context, drv storage.Driver, node *model.Node) officesave.Original {
 	var rc io.ReadCloser
 	src, err := s.Body.Resolve(ctx, drv, node.StorageID, node.Path, node)
 	if err == nil {
 		rc, err = src.Open(ctx)
 	}
+	o, err := officesave.ReadOriginalFrom(rc, err, node.Size)
 	if err != nil {
 		slog.Warn("onlyoffice callback: reading the CSV before its save",
 			slog.Int64("storage", node.StorageID), slog.String("path", node.Path), slog.String("err", err.Error()))
-		return unread, nil, "unreadable"
 	}
-	defer rc.Close()
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(io.LimitReader(rc, CSVSniffBytes)); err != nil {
-		return unread, nil, "unreadable"
-	}
-	d = SniffCSV(buf.Bytes())
-	if !d.UTF8 {
-		// Its text cannot be compared with a UTF-8 save: the rest is not read.
-		return d, nil, "not_utf8"
-	}
-	if node.Size > csvKeepMaxBytes {
-		return d, nil, "too_large"
-	}
-	if rest := node.Size - int64(buf.Len()); rest > 0 {
-		buf.Grow(int(rest) + bytes.MinRead)
-	}
-	// One byte past the bound says the file is longer than its row claims.
-	if _, err := buf.ReadFrom(io.LimitReader(rc, csvKeepMaxBytes+1-int64(buf.Len()))); err != nil {
-		slog.Warn("onlyoffice callback: reading the CSV before its save",
-			slog.Int64("storage", node.StorageID), slog.String("path", node.Path), slog.String("err", err.Error()))
-		return d, nil, "unreadable"
-	}
-	if int64(buf.Len()) > csvKeepMaxBytes {
-		return d, nil, "too_large"
-	}
-	return d, buf.Bytes(), ""
+	return o
 }
 
 // spreadsheetToCSV converts a spreadsheet the document server saved back to
@@ -236,5 +202,5 @@ func (s *Service) spreadsheetToCSV(ctx context.Context, saved []byte, from, name
 	if err != nil {
 		return nil, err
 	}
-	return conv.FetchResult(ctx, res, csvSaveMaxBytes)
+	return conv.FetchResult(ctx, res, officesave.MaxSaveBytes)
 }

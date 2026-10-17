@@ -146,7 +146,10 @@ type Host struct {
 	// engines are the engines INSTALLED on this fake server; the grant is a
 	// separate question (manifest permissions).
 	engines map[string]bool
-	users   []pluginkit.User
+	// officePreparing: the office engine an app brings is being compiled
+	// (PrepareOfficeEngine).
+	officePreparing bool
+	users           []pluginkit.User
 
 	shares map[string]*Share
 	keys   map[string]*IssuedKey
@@ -284,18 +287,31 @@ func (h *Host) SetSetting(key, value string) {
 
 // InstallEngine marks an engine as present on this server. Availability and
 // the grant are separate: an engine the manifest never asked for stays
-// refused even when installed. The office engine is "installed" when a
-// document server is connected: InstallEngine("office") (or "libreoffice",
-// the same engine).
+// refused even when installed. The office engine is "installed" when it
+// runs - an app's engine, or a connected document server:
+// InstallEngine("office") (or "libreoffice", the same engine).
 func (h *Host) InstallEngine(names ...string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, n := range names {
 		if officecmd.IsEngine(n) {
 			n = officecmd.Engine
+			h.officePreparing = false
 		}
 		h.engines[n] = true
 	}
+}
+
+// PrepareOfficeEngine puts the office engine where a real host has it for a
+// few minutes after the app that brings it is installed or updated: being
+// compiled, not available, and a run answered `unavailable` with the
+// host's "being prepared" sentence (the job is classified office_preparing,
+// not office_unconfigured). InstallEngine("office") makes it ready.
+func (h *Host) PrepareOfficeEngine() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.engines, officecmd.Engine)
+	h.officePreparing = true
 }
 
 // InstalledEngines is the engine map a call carries (ActionRunInput.Engines
@@ -754,7 +770,10 @@ func (h *Host) engineRunLocked(req pluginkit.EngineRequest) (*pluginkit.EngineRe
 			return nil, hostErr(wire.ErrInvalid, err.Error())
 		}
 		if !h.engineInstalledLocked(req.Engine) {
-			return nil, hostErr(wire.ErrUnavailable, "engine "+req.Engine+" is not configured on this host: office documents are converted by ONLYOFFICE Document Server, and none is connected (an administrator connects one under External services)")
+			if h.officePreparing {
+				return nil, hostErr(wire.ErrUnavailable, officecmd.PreparingMessage(req.Engine))
+			}
+			return nil, hostErr(wire.ErrUnavailable, officecmd.UnconfiguredMessage(req.Engine))
 		}
 		office = cmd
 	} else if !h.engines[req.Engine] {

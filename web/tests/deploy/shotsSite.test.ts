@@ -816,7 +816,7 @@ describe.skipIf(!inSource)('publishing never takes a published picture away', ()
   it('the site deploy spares /shots/ like /desktop/ and /updates/, and stops on a planned deletion there', () => {
     const text = readFileSync(SYNC_SITE, 'utf8');
     expect(text).toContain('--exclude=/shots/');
-    expect(text).toContain('updates\\|shots\\)');
+    expect(text).toContain('updates\\|shots\\|nightly\\)');
     expect(text).toMatch(/if \[ -d '\$TARGET'\/shots \]/);
   });
 

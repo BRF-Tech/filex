@@ -118,6 +118,8 @@ import { isEncryptedKind, type EncryptedKind } from '../../lib/encryptedRow';
 import { APP_PLAINTEXT_LIMIT, LedgerNeedsAccount, TooLargeToHand, VaultAppRefused, type AppPlaintextDoor } from '../../lib/appPlaintext';
 import { sealedStateGet, sealedStateSet, type AppStateLedger } from '../../lib/appStateE2e';
 import { E2E_PLAINTEXT_GRANT } from '../../lib/appViewer';
+import { TEXT_DIALECT_HEADER, csvDeclarationQuery, decodeIn, textDialectOf } from '../../lib/textDialect';
+import { VERSION_HEADER, saveAsideQuery, versionOf } from '../../lib/appSaveAside';
 import { CoEditSession, type CoEditTransport } from '../../lib/coeditSession';
 import { browserOutbox, type OutboxStore } from '../../lib/coeditOutbox';
 import PluginConfirmModal from './PluginConfirmModal.vue';
@@ -303,6 +305,9 @@ function session(): Session {
     dir: localeDir(props.locale),
     theme: themeInfo(),
     user: { name: props.userName ?? '' },
+    // The document editors' fixed language (#214), as the server's list
+    // said it for this interface (filex 0.57).
+    ...(current.value.editor_lang ? { editor_lang: current.value.editor_lang } : {}),
     files: fileInfos(),
     grants: [...grants.value],
   };
@@ -334,9 +339,15 @@ async function toBody(data: unknown, mime?: string): Promise<Blob | ReadableStre
 
 /* ── a file of an encrypted folder, in the clear (filex 0.56) ────────── */
 
-/** Each encrypted file's size and date as the server last wrote it (the
- *  answer of a save): the `expect` of its next save. */
+/** Each file's size and date as the server last wrote it (the answer of a
+ *  save): the `expect` of its next save - a file of an encrypted folder, or
+ *  one whose app asked for conflict copies (filex 0.57). */
 const savedSigs = new Map<number, { size: number; modified: number }>();
+
+/** Where an opened file's saves go once one of them went beside it or to a
+ *  conflict copy (filex 0.57, `beside` / `conflict`): that file, by index.
+ *  Outside an editing session only - a session keeps it on the server. */
+const savedTo = new Map<number, string>();
 
 /** "Only over the file as it was opened": "<size>:<ms>", or nothing when
  *  the host did not say when it was last changed. */
@@ -967,10 +978,18 @@ const handlers = {
       : await props.api.fetchResponse(f.path);
     const size = Number(res.headers.get('content-length') ?? f.size ?? 0) || (f.size ?? 0);
     const mime = f.mime || res.headers.get('content-type') || '';
-    const out = { name: f.name, size, mime };
+    // The version handed over (filex 0.57): the `expect` of a save that asks
+    // for a conflict copy, so a change made after this read is noticed.
+    const version = versionOf(res.headers.get(VERSION_HEADER));
+    if (version) savedSigs.set(typeof p.index === 'number' ? p.index : 0, version);
+    // A .csv's answer says how it is written (filex 0.57, lib/textDialect):
+    // handed on, and a read as text decodes it in its own encoding.
+    const dialect = textDialectOf(res.headers.get(TEXT_DIALECT_HEADER));
+    const out = { name: f.name, size, mime, ...(dialect ? { text_dialect: dialect } : {}) };
     switch (p.as ?? 'stream') {
       case 'text': {
         if (size > LIMITS.maxTextBytes) throw new BridgeFailure('too_large', 'read a file this large as a stream');
+        if (dialect && dialect.encoding !== 'utf-8') return { ...out, text: decodeIn(await res.arrayBuffer(), dialect.encoding) };
         return { ...out, text: await res.text() };
       }
       case 'bytes':
@@ -989,20 +1008,60 @@ const handlers = {
     const index = typeof p.index === 'number' ? p.index : 0;
     const f = fileAt(index);
     if (cannotSave(f)) throw new BridgeFailure('read_only', 'this file cannot be saved over here');
-    if (plaintextOf(f)) return savePlain(index, f, p.data, p.through);
+    // What the interface says about the CSV it saves (filex 0.57): its shape
+    // is checked here, its truth by the server against the bytes.
+    if (csvDeclarationQuery(p.csv) === null) throw new BridgeFailure('invalid', 'csv is {delimiter, encoding, bom, eol}');
+    // Beside the file, or a conflict copy (filex 0.57): the shape here, the
+    // rule (which formats, who may create the file, the name) on the server.
+    const aside = saveAsideQuery(p);
+    if (aside === null) throw new BridgeFailure('invalid', "beside is a file extension; conflict is 'copy'");
+    if (plaintextOf(f)) {
+      // A file of an encrypted folder is saved in its own format only: the
+      // server holds its ciphertext and could not name a file beside it.
+      if (aside.beside && aside.beside !== extOf(f.name)) {
+        throw new BridgeFailure('unavailable', 'a file of an encrypted folder is saved only in its own format');
+      }
+      return savePlain(index, f, p.data, p.through);
+    }
     const body = await toBody(p.data, p.mime);
-    const target = index === 0 && props.savePath ? props.savePath : f.path;
-    // In a session, the save says which part of its log it holds (0.56).
+    // In a session, the save says which part of its log it holds (0.56); the
+    // session itself keeps where its saves go, so it always names the file.
     const together = coedit && typeof p.through === 'number' ? coedit.saveParams(p.through) : null;
-    const r = together
-      ? await props.api.pluginUISave(props.app, props.view, { path: target }, body, { extra: together })
+    // Where the save goes: the file, the draft it is, or - once a save of
+    // this opening went beside the file or to a conflict copy - that file.
+    const own = index === 0 && props.savePath ? props.savePath : f.path;
+    const target = together ? own : savedTo.get(index) ?? own;
+    // A conflict copy needs to know the file changed: "only over the file as
+    // it was opened, or as this frame last saved it" (`expect`).
+    const expect = aside.conflict && !together ? expectOf(index, f) : undefined;
+    const extra: Record<string, string> = { ...(together ?? {}) };
+    if (aside.beside) extra.beside = aside.beside;
+    if (aside.conflict) extra.conflict = aside.conflict;
+    const opts = {
+      ...(Object.keys(extra).length ? { extra } : {}),
+      ...(p.csv ? { csv: p.csv } : {}),
+      ...(expect ? { expect } : {}),
+    };
+    const r = Object.keys(opts).length
+      ? await props.api.pluginUISave(props.app, props.view, { path: target }, body, opts)
       : await props.api.pluginUISave(props.app, props.view, { path: target }, body);
+    if (typeof r.modified === 'number') savedSigs.set(index, { size: r.size, modified: r.modified });
+    if (!together && r.path && r.path !== target && (r.beside || r.conflict)) savedTo.set(index, r.path);
     emit('saved', { path: r.path || target, size: r.size, index });
     // Saved: whatever the interface held is on the storage now. It says
     // `dirty(true)` again with its next change.
     dirty.value = false;
     emit('dirty', false);
-    return { saved: true, size: r.size };
+    // Where it went, when that is not the opened file: beside it, or a
+    // conflict copy (its name only - the interface is never told a path).
+    const elsewhere = r.beside || typeof r.conflict === 'string';
+    return {
+      saved: true,
+      size: r.size,
+      ...(elsewhere && r.name ? { name: r.name } : {}),
+      ...(r.beside ? { beside: true as const } : {}),
+      ...(typeof r.conflict === 'string' ? { conflict: r.conflict } : {}),
+    };
   },
 
   async 'file.saveAs'(params: unknown) {

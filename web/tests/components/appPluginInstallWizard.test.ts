@@ -209,7 +209,7 @@ describe('AppPluginInstallWizard', () => {
   });
 
   it('says every refusal code the contract names in the server’s sentence, never its English detail', async () => {
-    for (const code of ['sha256_mismatch', 'sha256_required', 'manifest_invalid', 'signature_required', 'name_taken', 'describe_mismatch', 'too_large', 'demo_refused', 'not_found'] as const) {
+    for (const code of ['sha256_mismatch', 'sha256_required', 'manifest_invalid', 'signature_required', 'name_taken', 'describe_mismatch', 'load_failed', 'load_timeout', 'too_large', 'demo_refused', 'not_found'] as const) {
       const said = `the server's sentence for ${code}`;
       refuse = { status: code === 'name_taken' ? 409 : 400, data: { error: code, message: said, detail: 'go detail' } };
       posts.length = 0;
@@ -334,6 +334,8 @@ describe('AppPluginInstallWizard', () => {
     await reachReview(w2);
     expect(w2.find('[data-testid="app-plugin-engines-missing"]').exists()).toBe(false);
     expect(w2.find('[data-testid="app-plugin-office-missing"]').text()).toContain('no restart needed');
+    // 0.57: the engine the Office editor app brings converts them too.
+    expect(w2.find('[data-testid="app-plugin-office-missing"]').text()).toContain('Office editor app');
     w2.unmount();
   });
 });
@@ -579,6 +581,120 @@ describe('AppPluginInstallWizard — an app with its own interface', () => {
     expect([sent?.name, sent?.size]).toEqual(['ui.zip', 4]);
     expect((body.get('manifest') as File)?.name).toBe('filex-app.json');
     expect(body.has('wasm')).toBe(false);
+    w.unmount();
+  });
+});
+
+// ⚠ filex 0.57: an app whose manifest has an `engines.office` block (the
+// Office editor 0.4.0) brings engine.zip, and an upload carries it itself as
+// the part `engine`. The wizard sent the module, the manifest, the interface
+// and the signature only, so the server refused the review ("supply
+// engine.zip") and the Office editor could not be installed from its files.
+describe('AppPluginInstallWizard — an upload that brings the office engine', () => {
+  const ENGINE_MANIFEST = JSON.stringify({
+    manifest_version: 1,
+    name: 'office-editor',
+    version: '0.4.0',
+    ui: { bundle: {} },
+    engines: { office: { sha256: 'ab'.repeat(32) } },
+  });
+  const withEngine = () => ({
+    ...wireDryRun(),
+    engine: false,
+    wasm_sha256: '',
+    ui: { sha256: 'cd'.repeat(32), files: 3, bytes: 2048, unpacked: 8192, external: [] },
+  });
+
+  /** Choose files in the Upload files tab, by each field's test id. */
+  async function choose(w: ReturnType<typeof mountWizard>, files: Record<string, File>) {
+    await w.find('[data-testid="app-plugin-source-file"]').trigger('click');
+    for (const [id, file] of Object.entries(files)) {
+      const input = w.find(`[data-testid="${id}"]`);
+      Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
+      await input.trigger('change');
+    }
+  }
+  const manifestFile = (text = ENGINE_MANIFEST) => new File([text], 'filex-app.json', { type: 'application/json' });
+  const zip = (name: string, size: number) => new File([new Uint8Array(size).fill(80)], name, { type: 'application/zip' });
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    posts.length = 0;
+    refuse = null;
+    dryRunAnswer = withEngine();
+  });
+
+  it('sends engine.zip as its own part, to the review and to the install', async () => {
+    const w = mountWizard();
+    await choose(w, {
+      'app-plugin-manifest': manifestFile(),
+      'app-plugin-ui': zip('ui.zip', 4),
+      'app-plugin-engine': zip('engine.zip', 6),
+    });
+    await w.find('form').trigger('submit');
+    await flushPromises();
+    expect(w.find('[data-testid="app-plugin-wizard-error"]').exists()).toBe(false);
+    const review = posts[0].body as FormData;
+    expect(posts[0].cfg?.params?.dry_run).toBe(1);
+    const sent = review.get('engine') as File;
+    expect([sent?.name, sent?.size]).toEqual(['engine.zip', 6]);
+    expect((review.get('ui') as File)?.name).toBe('ui.zip');
+
+    await w.find('input[type="checkbox"]').setValue(true);
+    await w.find('[data-testid="app-plugin-install"]').trigger('click');
+    await flushPromises();
+    const real = posts.find((p) => !p.cfg?.params?.dry_run)!;
+    expect(((real.body as FormData).get('engine') as File)?.name).toBe('engine.zip');
+    w.unmount();
+  });
+
+  it('says which file is missing before anything is sent: engine.zip for engines.office', async () => {
+    const w = mountWizard();
+    await choose(w, { 'app-plugin-manifest': manifestFile(), 'app-plugin-ui': zip('ui.zip', 4) });
+    await w.find('form').trigger('submit');
+    await flushPromises();
+    expect(w.find('[data-testid="app-plugin-wizard-error"]').text()).toBe(en.appPlugins.wizard.errMissing.engine);
+    expect(posts, 'nothing is uploaded for a review the server would refuse').toHaveLength(0);
+    w.unmount();
+  });
+
+  it('names both when neither the interface nor the engine is chosen, in Turkish on a Turkish screen', async () => {
+    const w = mountWizard('tr');
+    await choose(w, { 'app-plugin-manifest': manifestFile() });
+    await w.find('form').trigger('submit');
+    await flushPromises();
+    const said = w.find('[data-testid="app-plugin-wizard-error"]').text();
+    expect(said).toBe(`${tr.appPlugins.wizard.errMissing.ui} ${tr.appPlugins.wizard.errMissing.engine}`);
+    expect(said).toContain('ui.zip');
+    expect(said).toContain('engine.zip');
+    expect(posts).toHaveLength(0);
+    w.unmount();
+  });
+
+  it('leaves a manifest it cannot read to the server, which says why', async () => {
+    const w = mountWizard();
+    await choose(w, { 'app-plugin-manifest': manifestFile('{ not json') });
+    await w.find('form').trigger('submit');
+    await flushPromises();
+    expect(posts).toHaveLength(1);
+    w.unmount();
+  });
+
+  it('a wizard opened again starts with nothing chosen', async () => {
+    const w = mountWizard();
+    await choose(w, {
+      'app-plugin-manifest': manifestFile(),
+      'app-plugin-ui': zip('ui.zip', 4),
+      'app-plugin-engine': zip('engine.zip', 6),
+    });
+    await w.setProps({ modelValue: false });
+    await w.setProps({ modelValue: true });
+    await flushPromises();
+    await w.find('[data-testid="app-plugin-source-file"]').trigger('click');
+    await w.find('form').trigger('submit');
+    await flushPromises();
+    expect(w.find('[data-testid="app-plugin-wizard-error"]').text()).toBe(en.appPlugins.wizard.errFiles);
+    expect(posts, 'no file of the last opening is sent').toHaveLength(0);
     w.unmount();
   });
 });

@@ -3,10 +3,11 @@
 # green, built from that commit's PUBLIC form - the tree
 # scripts/export-public.sh makes of it, with the same rewrite and the same
 # refusals as a release - and never from the private tree: only what the open
-# repository would carry goes into it. Local only: it tags NB_IMAGE:NB_TAG on
-# this host and publishes nothing (`node scripts/chain/nightly.mjs publish`
-# does, when asked). One image, the default recipe (docker/Dockerfile), for
-# this host's architecture; no desktop packages.
+# repository would carry goes into it (scripts/chain/nightly-export.sh). Local
+# only: it tags NB_IMAGE:NB_TAG on this host and publishes nothing (`node
+# scripts/chain/nightly.mjs publish` does, when asked). One image, the default
+# recipe (docker/Dockerfile), for this host's architecture; the desktop side
+# is scripts/chain/nightly-desktop.sh.
 #
 # scripts/chain/nightly.mjs runs it under the build lock, with:
 #   NB_SRC            the nightly checkout, at the commit that ran green
@@ -19,6 +20,17 @@
 #   NB_VERSION        the version the binary reports (nightly-lib.mjs nightlyVersion)
 #   NB_DATE           the build time, ISO 8601
 #   NB_DOCKERFILE     the recipe, relative to the tree (default docker/Dockerfile)
+#   NB_LABELS_FILE    (optional) more labels, one key=value a line
+#                     (nightly-lib.mjs nightlyLabels: the source, what it is,
+#                     the night's test result)
+#
+# #266: what a nightly is can be read off it from outside. Its version names
+# the commit (0.57.0-nightly.20261014+2ca25999, `filex --version` and the
+# admin's About say it), and so do its labels: the commit
+# (org.opencontainers.image.revision), the public commit its tree was exported
+# on (sh.filex.nightly.public-base) and the night's test result
+# (sh.filex.nightly.tests) -
+#   docker inspect --format '{{json .Config.Labels}}' ghcr.io/brf-tech/filex:nightly
 #
 # The public clone is left reset: the export stages its tree there, and this
 # script throws that away once the image is built.
@@ -28,48 +40,34 @@ set -euo pipefail
 DOCKERFILE="${NB_DOCKERFILE:-docker/Dockerfile}"
 mkdir -p "$NB_OUT"
 say() { echo "$(date -u +%FT%TZ) nightly-build: $*"; }
+. "$(dirname "${BASH_SOURCE[0]}")/nightly-export.sh"
 
-head=$(git -c safe.directory='*' -C "$NB_SRC" rev-parse HEAD)
-if [ "$head" != "$NB_SHA" ]; then
-  say "the checkout is at $head, not at $NB_SHA"
-  exit 1
-fi
-
-reset_public() {
-  git -C "$NB_PUBLIC_DIR" reset --quiet --hard "origin/main"
-  git -C "$NB_PUBLIC_DIR" clean -ffdxq
-}
-
-if [ ! -d "$NB_PUBLIC_DIR/.git" ]; then
-  if [ -e "$NB_PUBLIC_DIR" ]; then
-    say "$NB_PUBLIC_DIR exists and is not a clone: move it away"
-    exit 1
-  fi
-  say "cloning $NB_PUBLIC_REMOTE into $NB_PUBLIC_DIR"
-  git clone --quiet "$NB_PUBLIC_REMOTE" "$NB_PUBLIC_DIR"
-fi
-git -C "$NB_PUBLIC_DIR" fetch --quiet origin main
-git -C "$NB_PUBLIC_DIR" checkout --quiet --force -B main origin/main
-reset_public
-trap 'reset_public >/dev/null 2>&1 || true' EXIT
-
+trap 'nightly_public_reset "$NB_PUBLIC_DIR" >/dev/null 2>&1 || true' EXIT
 say "export of ${NB_SHA:0:8} into $NB_PUBLIC_DIR"
-if ! bash "$NB_SRC/scripts/export-public.sh" "$NB_PUBLIC_DIR" > "$NB_OUT/export.log" 2>&1; then
-  tail -30 "$NB_OUT/export.log"
-  say "the export refused this commit (log $NB_OUT/export.log): nothing is built from it"
+if ! nightly_public_export "$NB_SRC" "$NB_SHA" "$NB_PUBLIC_DIR" "$NB_PUBLIC_REMOTE" "$NB_OUT/export.log"; then
   exit 1
 fi
-tail -3 "$NB_OUT/export.log"
+base=$(git -C "$NB_PUBLIC_DIR" rev-parse origin/main)
+
+labels=(
+  --label "org.opencontainers.image.title=filex nightly"
+  --label "org.opencontainers.image.version=$NB_VERSION"
+  --label "org.opencontainers.image.revision=$NB_SHA"
+  --label "org.opencontainers.image.created=$NB_DATE"
+  --label "sh.filex.nightly.public-base=$base"
+)
+if [ -n "${NB_LABELS_FILE:-}" ] && [ -f "$NB_LABELS_FILE" ]; then
+  while IFS= read -r line; do
+    [ -n "$line" ] && labels+=(--label "$line")
+  done < "$NB_LABELS_FILE"
+fi
 
 say "docker build $NB_IMAGE:$NB_TAG ($NB_VERSION) from $DOCKERFILE"
 if ! docker build --pull -f "$NB_PUBLIC_DIR/$DOCKERFILE" \
   --build-arg "VERSION=$NB_VERSION" \
   --build-arg "COMMIT=${NB_SHA:0:8}" \
   --build-arg "DATE=$NB_DATE" \
-  --label "org.opencontainers.image.title=filex nightly" \
-  --label "org.opencontainers.image.version=$NB_VERSION" \
-  --label "org.opencontainers.image.revision=$NB_SHA" \
-  --label "org.opencontainers.image.created=$NB_DATE" \
+  "${labels[@]}" \
   -t "$NB_IMAGE:$NB_TAG" "$NB_PUBLIC_DIR" > "$NB_OUT/docker-build.log" 2>&1; then
   tail -30 "$NB_OUT/docker-build.log"
   say "docker build failed (log $NB_OUT/docker-build.log)"

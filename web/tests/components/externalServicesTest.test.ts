@@ -191,19 +191,19 @@ describe('Test now: a document server that does not enforce JWT', () => {
   });
 });
 
-// 0.50: an ONLYOFFICE pinned by the environment and switched off here stays
-// off only until filex restarts (the boot writes the environment back). The
-// card says so, names the variable, and says how to switch it off for good.
-describe('a service the environment pins', () => {
-  it('names the variable and says a switch-off lasts until the restart, in English', async () => {
+// Task #258 (0.57): the environment SEEDS an external service; a change made
+// here - switching it off included - stands across restarts. The card names
+// the variable that gave the first value and the way to take it again.
+describe('a service the environment named', () => {
+  it('names the variable and says a change here stands, in English', async () => {
     ROW.env_managed = true;
     try {
       const w = await mountExternal('en');
       const hint = w.get('[data-testid="env-managed-hint-onlyoffice"]').text();
-      expect(hint).toContain('Set by FILEX_ONLYOFFICE_URL.');
+      expect(hint).toContain('FILEX_ONLYOFFICE_URL gave this service its first value.');
       expect(hint).toContain('switching it off included');
-      expect(hint).toContain('until filex restarts');
-      expect(hint).toContain('remove FILEX_ONLYOFFICE_URL');
+      expect(hint).toContain('stands across restarts');
+      expect(hint).toContain('filex settings reseed --external');
     } finally {
       ROW.env_managed = false;
     }
@@ -214,9 +214,9 @@ describe('a service the environment pins', () => {
     try {
       const w = await mountExternal('tr');
       const hint = w.get('[data-testid="env-managed-hint-onlyoffice"]').text();
-      expect(hint).toContain('FILEX_ONLYOFFICE_URL ile ayarlanmış.');
+      expect(hint).toContain('Bu servisin ilk değeri FILEX_ONLYOFFICE_URL değişkeninden geldi.');
       expect(hint).toContain('kapatmak da dahil');
-      expect(hint).toContain('yeniden başlayana kadar');
+      expect(hint).toContain('geçerli kalır');
     } finally {
       ROW.env_managed = false;
     }

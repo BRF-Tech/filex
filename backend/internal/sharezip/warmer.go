@@ -31,6 +31,10 @@ type DirShare struct {
 	StorageID int64
 	Path      string
 	NodeID    int64
+	// Keep is the link's member rule (handlers.LinkMembers, asked as its
+	// creator), so the warmed archive holds what a visitor's download would;
+	// nil keeps every member.
+	Keep Keep
 }
 
 // ActiveShares is the single answer to "which nodes have a live folder share
@@ -201,7 +205,7 @@ func (w *Warmer) runOnce(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		did, err := w.cache.Warm(ctx, drv, s.Path, s.NodeID)
+		did, err := w.cache.Warm(ctx, drv, s.Path, s.NodeID, s.Keep)
 		if err != nil {
 			if errors.Is(err, ErrShareGone) {
 				// Not a failure: the share died while we built for it.

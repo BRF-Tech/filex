@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/enginebin"
+	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/testutil/dbtest"
 )
 
@@ -444,4 +445,26 @@ func TestService_OfficeThumbsFollowOnlyOfficeNotLibreOffice(t *testing.T) {
 	caps, err = New(store).Get(ctx)
 	require.NoError(t, err)
 	assert.False(t, caps.Thumbs.Office)
+}
+
+// Or by the office engine an app brings (0.57): the app runtime's `office`
+// engine is available, with no Document Server configured - office
+// thumbnails, and the About page says so. RED before 0.57: the row followed
+// the Document Server alone.
+func TestService_OfficeThumbsFollowTheAppsEngineToo(t *testing.T) {
+	ctx := context.Background()
+	_, store := dbtest.NewTestDB(t)
+	svc := New(store)
+	svc.SetAppPlugins(model.AppPluginsCapabilities{Enabled: true})
+	svc.SetAppPluginEngines(func(context.Context) map[string]bool { return map[string]bool{"office": false} })
+	caps, err := svc.Get(ctx)
+	require.NoError(t, err)
+	assert.False(t, caps.Thumbs.Office, "being prepared: no office thumbnails yet")
+
+	svc2 := New(store)
+	svc2.SetAppPlugins(model.AppPluginsCapabilities{Enabled: true})
+	svc2.SetAppPluginEngines(func(context.Context) map[string]bool { return map[string]bool{"office": true} })
+	caps, err = svc2.Get(ctx)
+	require.NoError(t, err)
+	assert.True(t, caps.Thumbs.Office)
 }

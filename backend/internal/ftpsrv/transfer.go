@@ -14,6 +14,7 @@ import (
 	ftpserver "github.com/fclairamb/ftpserverlib"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -155,10 +156,18 @@ func (f *fs) openWrite(name string, flags int, offset int64) (ftpserver.FileTran
 	if t.isRoot() || t.Rel == "" {
 		return nil, os.ErrInvalid
 	}
-	if !f.canDo(t, f.writeNeed(t)) {
+	need := f.writeNeed(t)
+	if !f.canDo(t, need) {
 		// ⚠ A write that cannot happen must SAY so, unlike a read: answering
 		// "no such file" would make a client retry against a path it can see.
 		return nil, os.ErrPermission
+	}
+	// A new file's name, asked at the open (553) - before a byte is spooled -
+	// and not at Close, after the whole transfer (internal/leafname).
+	if need == perm.FilesCreate {
+		if err := refuseName(t.Rel); err != nil {
+			return nil, err
+		}
 	}
 	drv, err := f.driverFor(t)
 	if err != nil {

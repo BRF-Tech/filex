@@ -292,6 +292,7 @@ const nameError = computed(() => {
     case 'slash':
       return t('newdoc.err.slash');
     case 'dots':
+    case 'invalid':
       return t('modal.newfolder.invalid');
     case 'bare_ext':
       return t('newdoc.err.bare_ext');

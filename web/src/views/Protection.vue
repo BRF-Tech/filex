@@ -33,6 +33,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import Select from '@/components/ui/Select.vue';
 import Toggle from '@/components/ui/Toggle.vue';
+import InstanceSettingsCard from '@/components/settings/InstanceSettingsCard.vue';
 
 const DOCS_URL = 'https://github.com/BRF-Tech/filex/blob/main/docs/PROTECTION.md';
 
@@ -379,6 +380,10 @@ function saveVersions() {
           </Button>
         </div>
       </form>
+
+      <!-- Whether a version is kept before an overwrite at all
+           (FILEX_VERSIONS_ON_OVERWRITE until 0.57, task #258). -->
+      <InstanceSettingsCard group="protection" />
 
       <!-- Share-link ceiling. Applies to NEW links only; existing ones are
            counted so the operator can decide about them by hand. -->

@@ -28,6 +28,7 @@ import type { ExternalServiceStatus } from '../types/FileNode';
 import type { PluginActionsResponse } from '../types/Plugins';
 import type { WebPushController } from './webPush';
 import type { AccountCheckAnswer, AccountCheckQuery } from './accountRules';
+import type { AssistantCapability, AssistantMe, AssistantPrefs } from './assistant';
 
 /** The signed-in person, as the dialog reads and writes it. */
 export interface SettingsUser {
@@ -97,6 +98,8 @@ export interface SettingsCapabilities {
   external?: { onlyoffice?: ExternalServiceStatus };
   /** wiring:e2 vault - the server has the vault API (the idle-time row). */
   e2e_vault?: boolean;
+  /** The AI assistant's state for this caller (task #269). */
+  assistant?: AssistantCapability;
 }
 
 /** The account's own endpoints — every one of them open to every signed-in
@@ -129,6 +132,17 @@ export interface UserSettingsApi {
    */
   vaultIdle?(): Promise<number>;
   setVaultIdle?(minutes: number): Promise<number>;
+  /**
+   * The AI assistant (task #269) - `GET /api/files/assistant`: its state for
+   * the person, who reads what they write (provider and model), how long a
+   * conversation is kept, and their own choice. Absent: the pane says only
+   * what `capabilities.assistant` says.
+   */
+  assistant?(): Promise<AssistantMe>;
+  /** `PUT /api/files/assistant/prefs`: the person's own choice. */
+  setAssistantPrefs?(prefs: AssistantPrefs): Promise<AssistantPrefs>;
+  /** `DELETE /api/files/assistant/conversations`: every conversation, gone. */
+  clearAssistantHistory?(): Promise<void>;
 }
 
 export type SettingsThemeMode = 'light' | 'auto' | 'dark';
@@ -213,6 +227,16 @@ export interface UserSettingsHost {
     ask(): Promise<BrowserNotifyPermission>;
   };
   /**
+   * The operating system's own notifications on this device while the app
+   * runs - the desktop app's (task #258: its switch moved from the app's own
+   * Settings into this dialog, under Notifications → This device). Absent →
+   * not drawn.
+   */
+  readonly deviceNotifications?: {
+    enabled(): boolean;
+    setEnabled(on: boolean): void | Promise<void>;
+  };
+  /**
    * Push notifications on this device (#191, lib/webPush): what the bell
    * tells the person reaches this phone or browser while filex is closed.
    * Given by a host that runs filex's own service worker (the web app, in a
@@ -264,5 +288,10 @@ export function userSettingsApi(
     vaultIdle: async () => (await jsonFetch<{ idle_minutes: number }>(`${root}/api/files/e2e/vault/prefs`)).idle_minutes,
     setVaultIdle: async (minutes) =>
       (await jsonFetch<{ idle_minutes: number }>(`${root}/api/files/e2e/vault/prefs`, json('PUT', { idle_minutes: minutes }))).idle_minutes,
+    assistant: () => jsonFetch<AssistantMe>(`${root}/api/files/assistant`),
+    setAssistantPrefs: (prefs) => jsonFetch<AssistantPrefs>(`${root}/api/files/assistant/prefs`, json('PUT', prefs)),
+    clearAssistantHistory: async () => {
+      await jsonFetch(`${root}/api/files/assistant/conversations`, json('DELETE'));
+    },
   };
 }

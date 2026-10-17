@@ -21,6 +21,8 @@
 // v0.44.2 to v0.46.1), so it no longer does. The switch remains for a runner
 // that can activate one.
 
+import path from 'node:path';
+
 /** @param {Record<string, string | undefined>} env */
 export function softActivation(env) {
   return env.CI === 'true' && env.STORE_E2E_STRICT !== '1';
@@ -80,5 +82,71 @@ export function windowVerdicts(seen, env) {
       soft,
       detail: seen.ran ? held.map(describeWindow).join('; ') || 'no window of the app was seen at all' : notRun,
     },
+  ];
+}
+
+// ── who is running the check (task #248) ─────────────────────────────────
+//
+// An MSIX package's Chromium does not start under the BUILT-IN Administrator
+// account (RID 500): with FilterAdministratorToken off - Windows' default for
+// that account - it runs with a full administrator token and no UAC at all,
+// and packaged apps refuse that (actions/runner-images#9537). GitHub's
+// Windows runner is exactly that account (`runneradmin`, renamed), which is
+// why no activation check ever passed there from 0.44.2 on, and why the
+// failures said nothing useful: the diagnosis printed neither the account nor
+// its token. A run under any other account (a second local administrator,
+// with UAC, in an interactive session: docs/CONTRIBUTING.md, "The Store
+// check without a Windows desktop") is the fix this points to.
+
+/**
+ * What `whoami /user /groups /fo csv /nh` and the UAC policy say about the
+ * account, in words. `whoami` is the two CSV blocks as printed (the first line
+ * the user, then one line per group); `policy` the values of
+ * HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System (EnableLUA,
+ * FilterAdministratorToken, ConsentPromptBehaviorAdmin; absent = undefined).
+ *
+ * Returns { sid, user, builtinAdmin, integrity, elevated, lines }: `lines` is
+ * what the diagnosis prints, the last one the verdict.
+ */
+export function accountVerdict(whoami, policy = {}) {
+  const rows = String(whoami ?? '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => [...l.matchAll(/"([^"]*)"/g)].map((m) => m[1]));
+  const userRow = rows.find((r) => r.length === 2 && /^S-1-5-21-/.test(r[1])) ?? rows.find((r) => r.length === 2) ?? [];
+  const [user = '?', sid = '?'] = userRow;
+  const label = rows.find((r) => /^Mandatory Label\\/i.test(r[0] ?? ''))?.[0] ?? '';
+  const integrity = /High/i.test(label) ? 'high' : /System/i.test(label) ? 'system' : /Medium/i.test(label) ? 'medium' : label ? 'low' : 'unknown';
+  const builtinAdmin = /^S-1-5-21-.*-500$/.test(sid);
+  const lua = policy.EnableLUA;
+  const filter = policy.FilterAdministratorToken;
+  const elevated = integrity === 'high' || integrity === 'system';
+  const lines = [
+    `account ${user} ${sid}${builtinAdmin ? ' (RID 500: the built-in Administrator)' : ''}`,
+    `token integrity ${integrity}${elevated ? ' (elevated)' : ''}`,
+    `UAC: EnableLUA=${lua ?? 'unset'} FilterAdministratorToken=${filter ?? 'unset (0)'} ConsentPromptBehaviorAdmin=${policy.ConsentPromptBehaviorAdmin ?? 'unset'}`,
+  ];
+  if (builtinAdmin && String(filter ?? '0') !== '1') {
+    lines.push('verdict: this is the built-in Administrator with a full token and no UAC - an MSIX app does not start under it (actions/runner-images#9537). Run the check as another account in an interactive session.');
+  } else if (String(lua ?? '1') === '0') {
+    lines.push('verdict: UAC is off (EnableLUA=0), and packaged apps do not activate without it. Turn it on and sign in again.');
+  } else {
+    lines.push('verdict: the account and its token allow a packaged app to start; look at the app log and the package status above.');
+  }
+  return { sid, user, builtinAdmin, integrity, elevated, lines };
+}
+
+/**
+ * Where the app under test logs, in the order to read them: the Store copy's
+ * own folder (`~/.filex/desktop/logs`, src/log.ts: Explorer cannot see the
+ * package's redirected AppData, so the Store build logs beside the user's
+ * files), then the package's redirected userData, where a build from before
+ * that move, or one the channel was not detected for, writes.
+ */
+export function storeLogDirs({ home, localAppData, pfn, userDataName }) {
+  return [
+    path.join(home, '.filex', 'desktop', 'logs'),
+    path.join(localAppData, 'Packages', pfn, 'LocalCache', 'Roaming', userDataName, 'logs'),
   ];
 }

@@ -14,7 +14,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { ciParts, gateParts } from '../../../scripts/ci-parts.mjs';
-import { toWslPath } from '../../../scripts/lib/go-build.mjs';
+import { goModToolchain, toWslPath } from '../../../scripts/lib/go-build.mjs';
 import { dockerfileSources, gateCacheKey, inputEntries, matchesInputs, parseLsTree, selectGates } from '../../../scripts/release/checks.mjs';
 import { findBash, shq, slash } from '../../../scripts/release/engine.mjs';
 import plan, { storeJobProblems } from '../../../scripts/release/plan.mjs';
@@ -35,6 +35,7 @@ type Gate = {
   github?: string;
   patch?: string;
   patchOnly?: boolean;
+  serverOnly?: boolean;
   script?: string;
   sh?: unknown;
   vitest?: { files: string[] };
@@ -49,6 +50,7 @@ const gate = (name: string) => every.find((g) => g.name === name)!;
 const BUILD_UI = 'build: packages, admin (vue-tsc + vite), embed';
 const BUILD_BIN = 'build: server binary';
 const GO_PATCH = 'go: vet + test, the packages a patch changed and their importers';
+const GO_SERVER = 'go: vet + test -race, the packages a server patch changed and their importers';
 const MIGRATIONS = 'go: migrations on sqlite, postgres AND mysql';
 
 /** gate-name fragment → why it is in the plan */
@@ -204,10 +206,10 @@ describe("this repository's release plan", () => {
   // so a minor runs none of them here: the gate stage reads them part by part.
   it('a minor reads every heavy suite from GitHub, part by part, and runs none here at the gate stage', () => {
     const minor = selectGates(p, 'minor', null);
-    expect(names(minor.github).sort()).toEqual(heavy.filter((g) => !g.patchOnly).map((g) => g.name).sort());
+    expect(names(minor.github).sort()).toEqual(heavy.filter((g) => !g.patchOnly && !g.serverOnly).map((g) => g.name).sort());
     for (const g of minor.github) expect(g.github).toBe('ci.yml');
     expect(minor.local).toEqual([]);
-    expect(names(minor.skipped.map((s: { gate: Gate }) => s.gate))).toEqual([GO_PATCH]);
+    expect(names(minor.skipped.map((s: { gate: Gate }) => s.gate))).toEqual([GO_PATCH, GO_SERVER]);
   });
 
   it('every heavy gate GitHub runs names its parts, and every part is a job of the full matrix', () => {
@@ -273,8 +275,9 @@ describe("this repository's release plan", () => {
     const full = selectGates(p, 'full', null);
     expect(full.github).toEqual([]);
     expect(full.local).toEqual([]);
-    for (const g of heavy) if (!g.patchOnly) expect(names(full.pretag), g.name).toContain(g.name);
+    for (const g of heavy) if (!g.patchOnly && !g.serverOnly) expect(names(full.pretag), g.name).toContain(g.name);
     expect(names(full.pretag)).not.toContain(GO_PATCH);
+    expect(names(full.pretag)).not.toContain(GO_SERVER);
   });
 
   // #76 (2026-09-25): "a patch is a patch" - but the two ghost releases died
@@ -444,7 +447,7 @@ describe("this repository's release plan", () => {
 
   it('names the workflow guards by titles that exist, so a rename cannot make the gate vacuous', () => {
     const guards = p.exportGates.find((g: { vitest?: unknown }) => g.vitest).vitest.mustPass as string[];
-    const sources = ['releaseGatesImages.test.ts', 'goreleaserTemplates.test.ts', 'wingetCla.test.ts', 'msstoreSubmit.test.ts', 'releaseArm64.test.ts', 'releaseMacosOnly.test.ts', 'releaseSnapArm64Only.test.ts', 'releaseNpmTrusted.test.ts', 'ciFullMatrix.test.ts', 'releasePromote.test.ts', 'releaseVerifyCircleci.test.ts', 'releaseStoresOnly.test.ts', 'releaseDesktopUpgrade.test.ts'].map((f) =>
+    const sources = ['releaseGatesImages.test.ts', 'goreleaserTemplates.test.ts', 'wingetCla.test.ts', 'msstoreSubmit.test.ts', 'releaseArm64.test.ts', 'releaseMacosOnly.test.ts', 'releaseSnapArm64Only.test.ts', 'releaseSnapChannels.test.ts', 'wingetFirstPackage.test.ts', 'releaseAurLinuxOnly.test.ts', 'nightlyDesktop.test.ts', 'releaseSurfaces.test.ts', 'releaseNpmTrusted.test.ts', 'ciFullMatrix.test.ts', 'releasePromote.test.ts', 'releaseVerifyCircleci.test.ts', 'releaseStoresOnly.test.ts', 'releaseDesktopUpgrade.test.ts'].map((f) =>
       fs.readFileSync(path.join(REPO, 'web', 'tests', 'deploy', f), 'utf8'),
     );
     expect(guards.length).toBeGreaterThanOrEqual(5);
@@ -509,7 +512,7 @@ describe("this repository's release plan", () => {
     expect(sh).toMatch(builds);
 
     const native = gate.cmd(ctx, 'native');
-    expect(native[native.length - 1]).toContain(`FILEX_CHECKOUT=${shq(slash(REPO))} && cd ${shq(slash(path.join(REPO, 'backend')))} && `);
+    expect(native[native.length - 1]).toContain(`FILEX_CHECKOUT=${shq(slash(REPO))} GOTOOLCHAIN=${goModToolchain(path.join(REPO, 'backend'))} && cd ${shq(slash(path.join(REPO, 'backend')))} && `);
   });
 
   it.runIf(!!bash)('the fixture script builds in the module it is given and writes the module back into its own checkout', () => {

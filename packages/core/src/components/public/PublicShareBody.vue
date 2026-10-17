@@ -25,6 +25,7 @@ import type { PublicEntry, PublicShareInfo } from '../../types/Public';
 import type { PublicLinkStore } from '../../composables/usePublicLink';
 import { useLocale } from '../../composables/useLocale';
 import { usePublicText } from '../../composables/usePublicText';
+import { visibleName } from '../../lib/nameRule';
 import SurfaceConversation from '../plugin/SurfaceConversation.vue';
 import SurfaceFooterButtons from '../plugin/SurfaceFooterButtons.vue';
 
@@ -103,14 +104,14 @@ const parent = computed(() => {
     <section v-if="app?.files?.length" class="fe-ppage__appfiles" data-testid="public-page-files">
       <div v-for="f in app?.files ?? []" :key="f.ref" class="fe-ppage__file-one fe-ppage__appfile">
         <p class="fe-surface__text">
-          <strong>{{ f.name }}</strong>
+          <strong>{{ visibleName(f.name) }}</strong>
           <span v-if="f.size" class="fe-ppage__filesize"> · {{ formatSize(f.size) }}</span>
         </p>
         <a
           class="fe-btn"
           :href="link.fileDownloadUrl(f.ref)"
           download
-          :title="t('plugin.page.open_file', { name: f.name })"
+          :title="t('plugin.page.open_file', { name: visibleName(f.name) })"
           :data-testid="`public-page-file-${f.ref}`"
         >
           {{ t('ctx.download') }}
@@ -123,7 +124,7 @@ const parent = computed(() => {
   <template v-else-if="unavailable">
     <div class="fe-ppage__file-one" data-testid="public-share-unavailable">
       <p v-if="!node?.name" class="fe-surface__text">
-        <strong>{{ info?.subject }}</strong>
+        <strong>{{ visibleName(info?.subject ?? '') }}</strong>
       </p>
       <p class="fe-surface__text fe-surface__text--muted" role="status">{{ pt('err_unavailable_body') }}</p>
     </div>
@@ -134,13 +135,13 @@ const parent = computed(() => {
     <div class="fe-ppage__file-one" data-testid="public-share-folder">
       <!-- Same rule as a document: the heading is the folder's name already. -->
       <p v-if="!node?.name" class="fe-surface__text">
-        <strong>{{ info?.subject }}</strong>
+        <strong>{{ visibleName(info?.subject ?? '') }}</strong>
       </p>
       <nav v-if="info?.path" class="fe-ppage__crumbs" data-testid="public-share-crumbs">
         <button type="button" class="fe-btn fe-btn--sm" @click="emit('navigate', parent ?? '')">
           {{ pt('folder_up') }}
         </button>
-        <span class="fe-ppage__crumb">{{ info?.path }}</span>
+        <span class="fe-ppage__crumb">{{ visibleName(info?.path ?? '') }}</span>
       </nav>
 
       <!-- ⚠ The server does not send a listing for a folder share yet: it
@@ -158,7 +159,7 @@ const parent = computed(() => {
             :data-testid="`public-entry-${e.name}`"
             @click="emit('navigate', e.path)"
           >
-            <bdi>{{ e.name }}</bdi>
+            <bdi>{{ visibleName(e.name) }}</bdi>
           </button>
           <a
             v-else
@@ -166,7 +167,7 @@ const parent = computed(() => {
             class="fe-ppage__entry"
             :data-testid="`public-entry-${e.name}`"
             download
-          ><bdi>{{ e.name }}</bdi></a>
+          ><bdi>{{ visibleName(e.name) }}</bdi></a>
           <span v-if="!e.is_dir && e.size !== undefined" class="fe-ppage__filesize">{{ formatSize(e.size) }}</span>
           <span v-if="e.modified" class="fe-ppage__filesize">{{ formatDate(e.modified) }}</span>
         </li>
@@ -186,14 +187,14 @@ const parent = computed(() => {
   <!-- ── one document ───────────────────────────────────────────────── -->
   <template v-else>
     <div class="fe-ppage__file-one" data-testid="public-share-file">
-      <img v-if="isImage" class="fe-ppage__shot" :src="link.downloadUrl()" :alt="node?.name ?? ''" />
+      <img v-if="isImage" class="fe-ppage__shot" :src="link.downloadUrl()" :alt="visibleName(node?.name ?? '')" />
       <!-- ⚠ The name is NOT repeated here. The shell's heading is already the
            file's own name (`PublicLinkPage.title`), and printing it again
            under itself — "brand-guidelines.pdf" over "brand-guidelines.pdf ·
            791 B" — is the stutter the levelled-down page shipped with. Only
            the size, and the name as a fallback for a link that has none. -->
       <p class="fe-surface__text fe-surface__text--muted" data-testid="public-share-fileline">
-        <strong v-if="!node?.name">{{ info?.subject }}</strong>
+        <strong v-if="!node?.name">{{ visibleName(info?.subject ?? '') }}</strong>
         <span v-if="node?.size !== undefined" class="fe-ppage__filesize">{{ formatSize(node?.size) }}</span>
       </p>
       <a class="fe-btn fe-btn--primary" :href="link.downloadUrl()" data-testid="public-share-download">

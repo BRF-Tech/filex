@@ -9,6 +9,10 @@
 #                   space-separated ("./internal/foo ./cmd/filex"), or "./..."
 #                   for the whole module. scripts/release/checks.mjs
 #                   (goPackageDirs) says which; empty means the whole module.
+#   FILEX_GO_RACE   1: the tests run under -race (#252: a server patch's gate,
+#                   which does not wait for GitHub's -race parts). The race
+#                   detector needs cgo and a C compiler: without one this says
+#                   so and fails, it never tests without -race instead.
 #
 # Runs in the Go module: the release's goGate changes into it (under WSL, into
 # its mirror on WSL's own disk). GitHub still runs the whole suite on the
@@ -20,11 +24,20 @@
 set -euo pipefail
 
 dirs="${FILEX_GO_DIRS:-./...}"
+race=()
+whole_timeout=30m
+if [ "${FILEX_GO_RACE:-}" = 1 ]; then
+  export CGO_ENABLED=1
+  cc="$(go env CC)"
+  command -v "${cc%% *}" >/dev/null 2>&1 || { echo "-race needs a C compiler and there is none here (go env CC: ${cc:-unset}): install one (gcc), or run the patch as --profile patch" >&2; exit 1; }
+  race=(-race)
+  whole_timeout=60m
+fi
 
 whole() {
   echo "the whole module: $1"
   go vet ./...
-  exec go test -timeout 30m ./...
+  exec go test ${race[@]+"${race[@]}"} -timeout "$whole_timeout" ./...
 }
 
 [ "$dirs" = "./..." ] && whole "nothing narrower was named"
@@ -69,4 +82,4 @@ printf '  %s\n' $targets
 # shellcheck disable=SC2086
 go vet $targets
 # shellcheck disable=SC2086
-go test -timeout 30m $targets
+go test ${race[@]+"${race[@]}"} -timeout 30m $targets

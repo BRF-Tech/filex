@@ -81,7 +81,7 @@ describe('the sign-in page', () => {
     const w = mount(Login, {
       global: {
         plugins: [i18n],
-        stubs: { LogoMark: true, LocaleSwitcher: true, DarkModeToggle: true, RouterLink: true },
+        stubs: { LogoMark: true, RouterLink: true },
       },
     });
     mounted.push(w);

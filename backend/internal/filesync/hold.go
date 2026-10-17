@@ -10,8 +10,9 @@ import "fmt"
 // can tell them apart. So a FIRST run that would upload more than
 // MassUploadThreshold local-only files into a server folder that already has
 // files holds them instead, and the pair keeps holding until the person
-// decides: `filex sync confirm` sends them, `filex sync discard` moves them
-// into the local sync trash. Downloads and everything the baseline knows go on
+// decides: `filex sync confirm` sends them, `filex sync discard` deletes from
+// this computer those the server still holds an identical copy of (discard.go)
+// and keeps the rest held. Downloads and everything the baseline knows go on
 // as usual; only this machine's unknown items wait.
 //
 // ⚠⚠ The hold is written BEFORE the pass carries out a single action, and a
@@ -107,7 +108,7 @@ func (e *Engine) holdPass(actions []Action, base Baseline, local, remote Snapsho
 	}
 	if triggered {
 		e.progress(ProgressEvent{Phase: "hold", Held: len(held)}, "hold: %d item(s) here are not on the server - waiting for a decision "+
-			"(`filex sync confirm %s` sends them, `filex sync discard %s` moves them to the local sync trash)",
+			"(`filex sync confirm %s` sends them, `filex sync discard %s` deletes from this computer those the server has a copy of)",
 			len(held), e.Pair.ID, e.Pair.ID)
 	}
 	return kept, true, nil

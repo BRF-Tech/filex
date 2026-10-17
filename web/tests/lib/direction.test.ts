@@ -37,6 +37,7 @@ import {
   isolateValue,
   localeDir,
   openAlongInline,
+  scrollEdges,
   syncDocumentDir,
 } from '@brftech/filex-core/src/lib/direction';
 import { useLocale } from '@brftech/filex-core/src/composables/useLocale';
@@ -163,6 +164,30 @@ describe('menus beside an anchor — LTR unchanged, RTL its mirror', () => {
     expect(openAlongInline(700, 200, 1440, 'rtl')).toBe(500);
     // Near the LEFT edge there is no room that way, so it flips to the right.
     expect(openAlongInline(100, 200, 1440, 'rtl')).toBe(100);
+  });
+});
+
+describe('scrollEdges — where a sideways scroller stands, in both directions', () => {
+  // task #264: the filter row's track and the table's frozen cells read the
+  // same scroll the same way.
+  const box = (scrollLeft: number, scrollWidth = 600, clientWidth = 300) => ({ scrollLeft, scrollWidth, clientWidth });
+
+  it('a box that fits has nothing past either edge', () => {
+    expect(scrollEdges(box(0, 300, 300))).toEqual({ start: false, end: false });
+    // A sub-pixel difference is rounding, not more content.
+    expect(scrollEdges(box(0, 300.6, 300))).toEqual({ start: false, end: false });
+  });
+
+  it('LTR: at the start, in the middle, at the end', () => {
+    expect(scrollEdges(box(0))).toEqual({ start: false, end: true });
+    expect(scrollEdges(box(120))).toEqual({ start: true, end: true });
+    expect(scrollEdges(box(300))).toEqual({ start: true, end: false });
+  });
+
+  it('RTL: scrollLeft goes NEGATIVE toward the end, and reads the same', () => {
+    expect(scrollEdges(box(-0))).toEqual({ start: false, end: true });
+    expect(scrollEdges(box(-120))).toEqual({ start: true, end: true });
+    expect(scrollEdges(box(-300))).toEqual({ start: true, end: false });
   });
 });
 

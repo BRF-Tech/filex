@@ -210,30 +210,51 @@ describe('UserSettingsModal', () => {
     expect(rail.slice(0, 4)).toEqual(['Profile', 'Preferences', 'Notifications', 'Security']);
   });
 
-  // ⚠ The assistant row exists so the rail matches the reference shell's five,
-  // and the owner's condition for that was that it promise NOTHING: there are
-  // no per-user assistant settings on this server (the AI settings that exist
-  // are instance-wide and admin-only). A future hand filling that pane with a
-  // switch has to delete this test to do it, which is the point — the rail
-  // entry saying "coming soon" while the pane offered a control would be the
-  // one shape worse than not having the entry at all.
-  it('the assistant section says it is not here yet, and offers nothing to press', async () => {
+  // The assistant's pane (task #269) says the state the SERVER gives - it was
+  // an empty "coming soon" until 0.57. Off (or a server that says nothing):
+  // one sentence, nothing to press. On: who reads what the person writes, the
+  // retention, their one choice and the history's delete button.
+  it('the assistant section says the state the server gives, and offers its controls when it is on', async () => {
     const auth = useAuthStore();
     auth.user = NON_ADMIN;
     const w = mountModal();
     await w.vm.$nextTick();
-
-    const tab = w.find('[data-testid="user-settings-tab-ai"]');
-    expect(tab.text()).toContain('Coming soon');
-
-    await tab.trigger('click');
+    await w.find('[data-testid="user-settings-tab-ai"]').trigger('click');
     await w.vm.$nextTick();
-
     const pane = w.find('[data-testid="user-settings-ai"]');
     expect(pane.exists()).toBe(true);
-    expect(pane.text()).toContain('Coming soon');
-    expect(pane.findAll('input, select, textarea').length).toBe(0);
-    expect(pane.findAll('button').length).toBe(0);
+    expect(pane.find('[data-testid="user-settings-ai-state"]').text()).toContain('turned off');
+    expect(pane.find('[data-testid="user-settings-ai-confirm-all"]').exists()).toBe(false);
+    expect(pane.text()).not.toContain('Coming soon');
+    w.unmount();
+
+    const caps = useCapabilitiesStore();
+    caps.data = { ...caps.data, assistant: { state: 'on', permitted: true, button: true } };
+    vi.mocked(api.get).mockImplementation(((url: string) => {
+      if (url === '/files/assistant') {
+        return Promise.resolve({
+          data: {
+            state: 'on', permitted: true, button: true, retention_days: 30,
+            prefs: { confirm_all: false }, provider: 'anthropic', model: 'claude-opus-5-5',
+          },
+        });
+      }
+      return Promise.resolve({ data: { actions: [], views: [] } });
+    }) as typeof api.get);
+    const put = vi.spyOn(api, 'put').mockResolvedValue({ data: { confirm_all: true } } as never);
+    const w2 = mountModal();
+    await flushPromises();
+    await w2.find('[data-testid="user-settings-tab-ai"]').trigger('click');
+    await flushPromises();
+    const pane2 = w2.find('[data-testid="user-settings-ai"]');
+    expect(pane2.find('[data-testid="user-settings-ai-state"]').text()).toContain('is on');
+    expect(pane2.find('[data-testid="user-settings-ai-provider"]').text()).toBe('Anthropic · claude-opus-5-5');
+    expect(pane2.text()).toContain('30 days');
+    await pane2.find('[data-testid="user-settings-ai-confirm-all"]').trigger('click');
+    await flushPromises();
+    expect(put).toHaveBeenCalledWith('/files/assistant/prefs', { confirm_all: true });
+    expect(pane2.find('[data-testid="user-settings-ai-confirm-all"]').attributes('aria-checked')).toBe('true');
+    put.mockRestore();
   });
 
   it('carries the mute list along when the bell flag is flipped', async () => {

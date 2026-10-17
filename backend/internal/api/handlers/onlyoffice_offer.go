@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
+	"github.com/brf-tech/filex/backend/internal/httpx"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 )
 
@@ -55,21 +56,11 @@ func (h *OnlyOffice) fetchOffered(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+safeHeaderName(name)+"\"")
+	// The one header builder every download uses (httpx): the real name in
+	// filename*, an ASCII fallback beside it. A hand-built copy turned each
+	// byte of `Bütçe.docx` into `_` (task #238).
+	w.Header().Set("Content-Disposition", httpx.ContentDisposition("attachment", name))
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, io.MultiReader(bytes.NewReader(head[:n]), f))
-}
-
-// safeHeaderName keeps a file name inside a quoted header value.
-func safeHeaderName(name string) string {
-	out := make([]byte, 0, len(name))
-	for i := 0; i < len(name); i++ {
-		c := name[i]
-		if c < 0x20 || c == '"' || c == '\\' || c >= 0x7f {
-			c = '_'
-		}
-		out = append(out, c)
-	}
-	return string(out)
 }

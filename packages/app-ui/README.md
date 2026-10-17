@@ -19,7 +19,7 @@ npm install @brftech/filex-app-ui
 import { connect } from '@brftech/filex-app-ui';
 
 const fx = await connect();              // the handshake; rejects outside filex
-const file = await fx.open();            // { name, ext, size, mime, readOnly, text(), bytes(), stream(), save() }
+const file = await fx.open();            // { name, ext, size, mime, readOnly, text(), bytes(), stream(), read(), save() }
 editor.value = await file.text();
 editor.addEventListener('input', () => fx.dirty(true));
 fx.onSave(() => editor.value);           // filex's Save, a draft's "Save to disk", Ctrl+S
@@ -31,7 +31,7 @@ with a `<script src>`: it defines `window.FilexAppUI.connect`.
 | Call | What it does |
 |---|---|
 | `fx.session` | the app and view, the reader's language and direction, filex's colours, the person's display name, the files (each with `encrypted: 'folder' \| 'vault' \| 'file'` when it is end-to-end encrypted, filex 0.55 - on its own information only: the file is `readOnly` and its read is refused; `plaintext: true` beside `encrypted: 'folder'` or `'vault'`, filex 0.56: the app asked for `encrypted_folders` and filex hands the file over in the clear - decrypted in the person's browser for `open()`, encrypted again on `save()`, at most `LIMITS.maxEncryptedBytes`; `saveAs` and the module are not offered while such a file is open), the grants |
-| `fx.open(i)` / `fx.save(data)` / `fx.saveAs(name, data)` | read an opened file; save over it (a new version, or the draft it is); save a new file where the person picks |
+| `fx.open(i)` / `fx.save(data)` / `fx.saveAs(name, data)` | read an opened file; save over it (a new version, or the draft it is); save a new file where the person picks. A `.csv` (filex 0.57): `file.read(as)` answers `text_dialect` - its delimiter, byte order mark, line ends and encoding - and `text()` is decoded in that encoding; `fx.save(data, {csv: {delimiter, encoding, bom, eol}})` says how the saved CSV is written, which filex checks against the bytes before it writes the file in its own way ([APP-PLUGINS-API.md → CSV files](https://github.com/BRF-Tech/filex/blob/main/docs/APP-PLUGINS-API.md#csv-files-how-they-are-written)) |
 | `fx.dirty(on)`, `fx.title(t)`, `fx.toast(t, tone)`, `fx.confirm(opts)`, `fx.close()` | tell filex about unsaved changes; ask filex to draw a line, a question, to close (a toast and a question carry your app's name) |
 | `fx.copy(text)` | put text on the clipboard - call it from a click or a key press: without one, filex asks the person first |
 | `fx.download(name, data, mime?)` | hand the person a file for their own disk (`"ui": { "download": true }` in the manifest) - from a click, or filex asks; 256 MiB at most; Chromium streams it into the file they pick |

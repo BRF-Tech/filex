@@ -11,53 +11,20 @@ package onlyoffice
 // they contradict is a wrong rule, and a false "same" undoes a person's edit.
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/brf-tech/filex/backend/internal/officesave/officesavetest"
 
 	"github.com/stretchr/testify/assert"
 )
 
-// The fixture of the release gate (e2e/tests/199-csv-onlyoffice.spec.ts,
-// GitHub #88): semicolons, CRLF, no byte order mark; `3` in B2 typed over as
-// `42`, nothing else touched.
-var docs94Fixture = "ad;adet;not;kod;tel;tarih\r\n" +
-	"elma;3;\"a; b\";007;05320000001;01.02.2026\r\n" +
-	"armut;5;şeker;042;05330000002;15.03.2026\r\n"
-
-var docs94FixtureEdited = strings.Replace(docs94Fixture, "elma;3;", "elma;42;", 1)
-
-// What ONLYOFFICE saved for it, by the editor's language, and what the file
-// gets. In every one the leading zeros are gone; the dates are written the
-// language's way (German writes these two as they were).
-var docs94FixtureSaved = map[string]struct{ saved, want string }{
-	"en": {
-		saved: "\xEF\xBB\xBFad,adet,not,kod,tel,tarih\n" +
-			"elma,42,a; b,7,5320000001,1/2/2026\n" +
-			"armut,5,şeker,42,5330000002,15.03.2026\n",
-		want: docs94FixtureEdited,
-	},
-	"tr": {
-		saved: "\xEF\xBB\xBFad,adet,not,kod,tel,tarih\n" +
-			"elma,42,a; b,7,5320000001,1.02.2026\n" +
-			"armut,5,şeker,42,5330000002,15.03.2026\n",
-		want: docs94FixtureEdited,
-	},
-	"de": {
-		saved: "\xEF\xBB\xBFad,adet,not,kod,tel,tarih\n" +
-			"elma,42,a; b,7,5320000001,01.02.2026\n" +
-			"armut,5,şeker,42,5330000002,15.03.2026\n",
-		want: docs94FixtureEdited,
-	},
-	// French writes day/month/year, both in two digits: a form the English
-	// editor keeps as typed (15/03/2026), so it is no rule, and the two
-	// dates are French's.
-	"fr": {
-		saved: "\xEF\xBB\xBFad,adet,not,kod,tel,tarih\n" +
-			"elma,42,a; b,7,5320000001,01/02/2026\n" +
-			"armut,5,şeker,42,5330000002,15/03/2026\n",
-		want: strings.NewReplacer("01.02.2026", "01/02/2026", "15.03.2026", "15/03/2026").Replace(docs94FixtureEdited),
-	},
-}
+// The vectors (and how they were taken) are officesavetest's, shared with
+// officesave's own KeepCSV tests.
+var (
+	docs94Fixture       = officesavetest.Docs94Fixture
+	docs94FixtureEdited = officesavetest.Docs94FixtureEdited
+	docs94FixtureSaved  = officesavetest.Docs94FixtureSaved
+)
 
 // Through the callback: 0.51.0 wrote these with `7`, `5320000001` and the
 // dates as ONLYOFFICE wrote them.
@@ -65,9 +32,9 @@ func TestCSVCallback_TheFixtureOfTheReleaseGateKeepsItsCells(t *testing.T) {
 	for lang, c := range docs94FixtureSaved {
 		t.Run(lang, func(t *testing.T) {
 			h := newCSVHarness(t, docs94Fixture)
-			resp := h.save(t, c.saved, "csv", "7")
+			resp := h.save(t, c.Saved, "csv", "7")
 			assert.Equal(t, 0, resp["error"])
-			assert.Equal(t, c.want, h.disk(t))
+			assert.Equal(t, c.Want, h.disk(t))
 		})
 	}
 }

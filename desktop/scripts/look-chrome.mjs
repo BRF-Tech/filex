@@ -26,7 +26,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { SHOTS, _electron, launchApp, signIn, sleep } from './lib/harness.mjs';
+import { SHOTS, _electron, launchApp, setAccountLanguage, signIn, sleep } from './lib/harness.mjs';
 
 const OUT = process.env.LOOK_OUT ?? SHOTS;
 const TAG = process.env.LOOK_TAG ?? 'chrome';
@@ -85,10 +85,10 @@ try {
   // a half-translated settings page is the one defect a screenshot catches and
   // a test does not.
   await win.evaluate(() => { document.querySelector('#settings').scrollTop = 0; });
-  await win.evaluate(() => document.querySelector('#settings [data-locale="tr"]')?.click());
+  await setAccountLanguage(win, 'tr');
   await sleep(1200);
   await shot(win, '05b-settings-tr');
-  await win.evaluate(() => document.querySelector('#settings [data-locale="en"]')?.click());
+  await setAccountLanguage(win, 'en');
   await sleep(1000);
 
   // ── the remote folder picker ──────────────────────────────────────

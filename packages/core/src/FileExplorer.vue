@@ -15,7 +15,7 @@
  * the difference.
  */
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, reactive, ref, watch, watchEffect } from 'vue';
-import type { ExplorerConfig, SearchAccount, ThemeMode } from './types/ExplorerConfig';
+import type { ExplorerAccountSettings, ExplorerConfig, SearchAccount, ThemeMode } from './types/ExplorerConfig';
 import type {
   FileNode,
   ShareInfo,
@@ -76,9 +76,17 @@ import { provideTableEnv } from './lib/tableEnv';
 import { gateOnService } from './lib/serviceGate';
 import { isOfficeExt } from './lib/serverRules';
 import { canShareAny, sharingHeld, type SharingHeld } from './lib/sharingHeld';
+import {
+  managesStorageRoot,
+  rootLevelFor,
+  rootLevelsOf,
+  storageRootTarget,
+  storageRowMenu,
+  type RootLevel,
+} from './lib/storageRoot'; /* #117 — a whole storage, given to people */
 import { appStoreAsks, appStoreRowShown } from './lib/appStoreRow';
 import { publicLinksOff } from './lib/e2eLinks';
-import { opFailure, sayFailure, serverWords } from './lib/errorWords';
+import { opFailure, requestFailure, sayFailure, serverWords } from './lib/errorWords';
 import { jobOpenOf } from './lib/jobOpen'; /* filex #78 - a finished job's `open` */
 import { resolveUiProfile } from './lib/uiProfile';
 import RecentlyOpened from './components/RecentlyOpened.vue';
@@ -93,6 +101,8 @@ import ContextMenu, { type ContextAction } from './components/ContextMenu.vue';
 import UploadProgress from './components/UploadProgress.vue';
 import PendingOpsTray from './components/PendingOpsTray.vue';
 import InspectorPanel from './components/InspectorPanel.vue'; /* koru:k1 */
+import AssistantPanel from './components/AssistantPanel.vue';
+import { assistantBase, assistantClient } from './lib/assistant';
 import SideNav, { type NavDest } from './components/SideNav.vue'; /* gezinti:g1 */
 import HomeView from './components/HomeView.vue'; /* gorunum:v3-shell */
 import DraftsView from './components/DraftsView.vue'; /* Drafts, issue #71 */
@@ -120,9 +130,12 @@ import {
   useThemeState,
   useThemeModeState,
   applyThemeToEl,
+  applyStoredPalette,
   syncThemeStyle,
   type ThemeModePref,
 } from './lib/themes';
+import { configurePrefs, hydratePrefs, savePref } from './lib/prefs';
+import { applyAccountDensity } from './lib/density';
 /* /wiring:c1 */
 /* zaman:z3 — the embed's own time-zone setting + this instance's tiers */
 import { useExplorerTimeZone } from './composables/useExplorerTimeZone';
@@ -286,6 +299,7 @@ import ArchivePasswordModal from './modals/ArchivePasswordModal.vue';
 import DraftConflictModal from './modals/DraftConflictModal.vue'; /* Drafts, issue #71 */
 import { draftFolderLabel, type DraftDto } from './lib/drafts';
 import { draftKeyOf } from './lib/internalPaths';
+import { trimName } from './lib/nameRule';
 import { useDraftSave, type SavedDraft } from './composables/useDraftSave';
 import RenameModal from './modals/RenameModal.vue';
 import DeleteConfirmModal from './modals/DeleteConfirmModal.vue';
@@ -338,6 +352,7 @@ import {
 } from './composables/useNotificationFeed';
 import {
   TRASH_VIEW_PATH,
+  encodeHashPath,
   explorerPathOf,
   resolveNotificationTarget,
   sameRowPath,
@@ -346,6 +361,7 @@ import {
 } from './lib/notificationTarget';
 import {
   EXPLORER_DRAWN_ROWS,
+  SETTINGS_DIALOG_ROWS,
   accountMenuRows,
   explorerRowKey,
   type AccountAction,
@@ -424,7 +440,7 @@ const emit = defineEmits<{
   /**
    * paylas:m1 — the navigation panel's "My shares" row was pressed.
    *
-   * ⚠ Passed through, not acted on. "How to connect" and "API keys" are
+   * ⚠ Passed through, not acted on. "Connections" and "API keys" are
    * surfaces this component OWNS, so it opens them itself; the list of links a
    * person minted is a page of the host application (the SPA's `my-shares`
    * route), and the explorer has no business deciding what a host's URLs look
@@ -845,6 +861,10 @@ const MANAGER_SEARCH_PAGE = 250;
  * it, and its banner still has to name a storage the catalog does not cover.
  */
 const coverageMap = ref<Record<string, CatalogCoverage | null>>({});
+/** #117 — the caller's level at each storage's root, from the last response
+ *  that said (`storage_info[].perm`; lib/storageRoot rootLevelsOf). A host's
+ *  own `config.storages[].perm` wins over it (rootLevelFor). */
+const rootLevels = ref<Record<string, RootLevel>>({});
 /** "Catalog everything" per storage, by name: `0` while its scan is being
  *  asked for, the storage's id while the scan is followed. ⚠ Per storage —
  *  one flag for all of them held every storage's button and banner. */
@@ -1687,9 +1707,9 @@ const accountRows = computed<AccountAction[]>(() => {
   // (EXPLORER_DRAWN_ROWS) — measured in the desktop window: Grid, Gallery and
   // Details sat in the avatar two inches from the view switcher and the ⓘ.
   const drawn = EXPLORER_DRAWN_ROWS.filter((k) => k !== 'inspector' || props.config.showInfoPanel !== false);
-  // ⚠ With the settings dialog here, the three explorer rows whose control it
-  // carries leave the menu — the same trade the web page makes
-  // (Explore.vue ROWS_WITH_ANOTHER_DOOR): one door each.
+  // ⚠ With the settings dialog here, the explorer rows whose control it
+  // carries leave the menu (lib/accountMenu SETTINGS_DIALOG_ROWS, the list
+  // the web page uses too): one door each.
   const inDialog = acc.settings ? SETTINGS_DIALOG_ROWS : [];
   return accountMenuRows(own, explorerMenuRows.value, {
     omit: [...drawn, ...inDialog, ...(acc.omit ?? [])],
@@ -1722,16 +1742,14 @@ function onAccountSelect(key: string) {
  * `/api/auth/me` answered, its capabilities, its toast, the account zone it
  * registered (`tzOwner`) and its own theme mode.
  *
- * ⚠ The rows only some surfaces have — language, start page, one click or two,
- * the desktop-app downloads, browser notifications — are NOT given: an
- * explorer has no front door, and the desktop app keeps its language and its
- * click setting in its own Settings, so repeating them here would be two doors
- * to one switch.
+ * ⚠ The rows only some surfaces have are the HOST's to give
+ * (`account.settings` as an object, task #258): the desktop app hands in its
+ * language, its click setting and its own notifications, which moved here
+ * from its own settings screen - one door each. The start page, the
+ * desktop-app downloads and the browser's notifications are the admin app's
+ * and are not drawn in an explorer.
  */
 const SETTINGS_ROW = 'user-settings';
-/** The "⋯" rows whose control the dialog carries (Appearance, Compact list,
- *  Time zone). */
-const SETTINGS_DIALOG_ROWS = ['theme', 'density', 'timezone'];
 const settingsOpen = ref(false);
 const settingsHost: UserSettingsHost = {
   get locale() {
@@ -1763,9 +1781,55 @@ const settingsHost: UserSettingsHost = {
       const m = themeModePref.value === 'host' ? props.config.theme || 'auto' : themeModePref.value;
       return m === 'light' || m === 'dark' ? m : 'auto';
     },
-    set: (v) => setThemeModePref(v),
+    set: (v) => pickThemeMode(v),
+  },
+  // The rows only the host can carry out (ExplorerConfig.account.settings as
+  // an object, task #258): the desktop app's language, its click setting and
+  // its own notifications. Read per access, so a host that swaps its config
+  // is followed.
+  get language() {
+    return accountSettingsHooks()?.language;
+  },
+  get openTrigger() {
+    return accountSettingsHooks()?.openTrigger;
+  },
+  get deviceNotifications() {
+    return accountSettingsHooks()?.deviceNotifications;
   },
 };
+
+/** `account.settings` when it is an object of host rows; `undefined` for `true`. */
+function accountSettingsHooks(): ExplorerAccountSettings | undefined {
+  const s = props.config.account?.settings;
+  return s && typeof s === 'object' ? s : undefined;
+}
+
+/* ── the account's look (ExplorerConfig.accountPrefs, task #258) ─────────
+ *
+ * A host that names its surface keeps the person's light/dark, palette and
+ * density on the ACCOUNT, as the web app does: core's preferences store
+ * (lib/prefs) is pointed at that surface's document with this explorer's own
+ * credential, read once mounted, and painted. ⚠ Read and painted, not sent
+ * back: `applyStoredPalette` / `applyAccountDensity` and the mode setter
+ * below do not echo a hydrated value to the server (a read that writes is
+ * every open window becoming a writer). An embed that sets nothing keeps
+ * this browser's copy, as it always did.
+ */
+function pickThemeMode(m: ThemeModePref): void {
+  setThemeModePref(m);
+  if (props.config.accountPrefs?.surface && (m === 'light' || m === 'dark' || m === 'auto')) savePref('theme', m);
+}
+onMounted(() => {
+  const surface = props.config.accountPrefs?.surface;
+  if (!surface) return;
+  configurePrefs({ surface, base: connectionsBase(props.config), headers: () => api.authHeaders() });
+  void hydratePrefs().then((p) => {
+    if (!p) return;
+    if (p.theme === 'light' || p.theme === 'dark' || p.theme === 'auto') setThemeModePref(p.theme);
+    applyStoredPalette(p.palette);
+    applyAccountDensity(p.density);
+  });
+});
 // Longest life a new share link may be given (server setting, days; 0 = no
 // ceiling). Both share dialogs derive their expiry choices from it.
 // THIS person's ceiling (the install's or their permission rules'); an older
@@ -3053,13 +3117,47 @@ function persistInspector(v: boolean) {
 function toggleInspector() {
   showInspector.value = !showInspector.value;
   persistInspector(showInspector.value);
+  // One panel on the right at a time: the details or the assistant.
+  if (showInspector.value) showAssistant.value = false;
 }
 function openInspector() {
   if (!showInspector.value) {
     showInspector.value = true;
     persistInspector(true);
   }
+  showAssistant.value = false;
 }
+
+/* === the AI assistant (task #269) ========================================
+ * The button is the server's to offer (`capabilities.assistant.button`: on,
+ * set up, not hidden by the administrator, and the person holds
+ * ai.assistant) - every surface draws it from that and from nothing else.
+ * The panel docks where the details panel does; one of the two at a time.
+ * Its client rides this explorer's own transport: the same credential, the
+ * same language, the same proxy (/api/files/assistant). */
+const showAssistant = ref(false);
+const assistantButton = computed(() => capabilitiesData.value?.assistant?.button === true);
+const assistantApi = assistantClient(
+  {
+    request: api.rawRequest,
+    json: api.jsonFetch,
+    failure: (status: number, body: string) => requestFailure(status, body, locale.value),
+  },
+  assistantBase(api.endpoints.manager),
+);
+function toggleAssistant() {
+  showAssistant.value = !showAssistant.value;
+  if (showAssistant.value && showInspector.value) {
+    showInspector.value = false;
+    persistInspector(false);
+  }
+}
+/* The paths the assistant is offered with a message: the focused pane's
+   selection, as the selection bar counts it. */
+const assistantSelection = computed(() => activeTargets().map((n) => n.path));
+watch(assistantButton, (on) => {
+  if (!on) showAssistant.value = false;
+});
 function closeInspector() {
   if (showInspector.value) {
     showInspector.value = false;
@@ -3196,7 +3294,7 @@ function closeNavDrawer() {
 const sharedStorageNames = ref<string[]>([]);
 
 /**
- * The Connections entries — "How to connect" and "API keys" — and the two
+ * The Connections section's entries — "Connections" and "API keys" — and the two
  * overlays they open. Both surfaces already lived in this package
  * (ConnectionsPanel, TokensPanel) and neither was reachable from inside the
  * explorer: our own web app wired the buttons in its page shell, so an
@@ -3242,7 +3340,7 @@ const callerIsApp = computed(
  * The identity-bearing surfaces: API keys, Recent, Starred, Shared with me.
  * ⚠ Suppression is per token KIND, never per role — a viewer is still a person
  * with their own recents. And it is not the whole panel: Upload, the storages,
- * Trash and "How to connect" stay useful inside an embed.
+ * Trash and "Connections" stay useful inside an embed.
  */
 const identitySurfaces = computed(() => !callerIsApp.value);
 /**
@@ -5080,7 +5178,10 @@ async function loadListing(path?: string) {
     searchTruncated.value =
       !!searchQuery.value && advSearchTruncated(resp.files.length, MANAGER_SEARCH_PAGE, resp.truncated);
     searchRanLocally.value = !!searchQuery.value && (adv ? adv.local : ranLocally);
-    if (Array.isArray(resp.storage_info)) coverageMap.value = coverageByStorage(resp.storage_info);
+    if (Array.isArray(resp.storage_info)) {
+      coverageMap.value = coverageByStorage(resp.storage_info);
+      rootLevels.value = rootLevelsOf(resp.storage_info); /* #117 */
+    }
     adapter.value = resp.adapter;
     dirname.value = resp.dirname;
     dirPerm.value = (resp.perm as string) || '';
@@ -5661,8 +5762,9 @@ function writePersistedPath(path: string) {
     if (mode === 'localStorage') return;
   }
   // Encode per segment so folder names with `%`/`#`/`?` survive the URL
-  // round-trip while `/` separators stay readable.
-  const encoded = path ? path.split('/').map(encodeURIComponent).join('/') : '';
+  // round-trip while `/` separators stay readable. One writer, shared with the
+  // links a notification opens (lib/notificationTarget encodeHashPath).
+  const encoded = encodeHashPath(path);
   const target = encoded ? `#${encoded}` : '';
   if ((window.location.hash || '') === target) return;
   // replaceState never fires `hashchange`, so onHashChange only ever sees
@@ -6626,6 +6728,28 @@ const keepStripPercent = computed<number | null>(() => {
   return Math.min(100, Math.round((act.done * 100) / act.total));
 });
 
+/**
+ * #117 — a storage row's menu, wherever one is drawn (the virtual root and
+ * the split pane): open, open in a new tab and, for whoever owns the
+ * storage's root — an administrator, or a person given the storage as owner
+ * (lib/storageRoot managesStorageRoot, the server's own rule) — "Access…",
+ * the whole storage given to people and groups. Then the desktop app's keep
+ * pair: a whole storage can be kept too, which IS the "sync everything"
+ * shape, one pair, not one per subfolder.
+ */
+function storageRowActions(sel: FileNode[]): ContextAction[] {
+  const row = sel[0] as (FileNode & { storage?: string }) | undefined;
+  const name = String(row?.storage || row?.path || '');
+  const level = rootLevelFor(name, props.config.storages, rootLevels.value);
+  return [
+    ...storageRowMenu(t, {
+      manages: managesStorageRoot({ admin: callerAdmin.value, level }),
+      shareUsers: permHeld('share.users'),
+    }),
+    ...keepActionsFor(sel),
+  ];
+}
+
 /** Menu entries for one selected folder OR file, by its keep state. Empty
  *  for multi-selections, trash, encrypted folders, or a web mount. */
 function keepActionsFor(sel: FileNode[]): ContextAction[] {
@@ -6846,13 +6970,7 @@ const contextActions = computed<ContextAction[]>(() => {
   if (inStorageRoot) {
     if (!any) return [];
     if (!single) return [];
-    return [
-      { key: 'open', label: t('ctx.open') },
-      { key: 'open-tab', label: t('ctx.open_new_tab') } /* wiring:d1 */,
-      // A whole storage can be kept too — that IS the "sync everything"
-      // shape, and it is one pair, not one per subfolder.
-      ...keepActionsFor(sel),
-    ];
+    return storageRowActions(sel);
   }
 
   // Empty background right-click: folder-level actions only. Viewers (no edit
@@ -7004,11 +7122,7 @@ function selectionActionListAll(sel: FileNode[]): ContextAction[] {
    * Answered HERE because this is the one list both surfaces render. */
   if (sel.some(isStorageRow)) {
     if (!single) return [];
-    return [
-      { key: 'open', label: t('ctx.open') },
-      { key: 'open-tab', label: t('ctx.open_new_tab') },
-      ...keepActionsFor(sel),
-    ];
+    return storageRowActions(sel);
   }
   const isFile = single && sel[0]?.type === 'file';
   const tagsLabel = t('ctx.tags_menu');
@@ -7338,6 +7452,15 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
     case 'access':
       if (targets[0]) {
         permTarget.value = targets[0];
+        showPerm.value = true;
+      }
+      break;
+    case 'storage-access':
+      /* #117 — the same access dialog, on the storage's root: it offers
+         people and groups only there (lib/storageRoot sharingAtTarget). */
+      if (targets[0]) {
+        permTarget.value = storageRootTarget(targets[0]);
+        permInitialTab.value = 'perms';
         showPerm.value = true;
       }
       break;
@@ -7918,7 +8041,11 @@ async function submitNewFolder(name: string) {
  * the vault's (vault.mkdir), not this.
  */
 async function createFolderAt(dirWire: string, name: string): Promise<string> {
-  const wireName = await e2eWireName(dirWire, name, { isDir: true });
+  /* ⚠ The name the SERVER makes: new folder trims its name (lib/nameRule
+     trimName, Go's strings.TrimSpace). A dropped folder called ` Docs ` was
+     created as `Docs` while its files were sent to ` Docs /…` (task #238). An
+     encrypted name has no space to trim. */
+  const wireName = trimName(await e2eWireName(dirWire, name, { isDir: true }));
   await api.newFolder(dirWire, wireName);
   return wireJoin(dirWire, wireName);
 }
@@ -11806,6 +11933,8 @@ function closeRecoveryKey() {
       :narrow="isNarrow /* bag:b4 */"
       :theme="themeMode /* bag:b4 */"
       :inspector-open="showInspector /* koru:k1 */"
+      :assistant-button="assistantButton"
+      :assistant-open="showAssistant"
       :nav-open="navToggleOn /* gezinti:g1 */"
       :nav-enabled="sideNavEnabled /* gezinti:g1 */"
       :view-modes="allowedViewModes /* gezinti:g1 */"
@@ -11815,6 +11944,7 @@ function closeRecoveryKey() {
       :search-escalates="navView === 'home' /* gorunum:v3-shell */"
       @open-palette="openPaletteWith /* surucu:d1 */"
       @toggle-inspector="toggleInspector /* koru:k1 */"
+      @toggle-assistant="toggleAssistant"
       @toggle-nav="toggleSideNav /* gezinti:g1 */"
       @open-theme="showThemeGallery = true /* wiring:c1 */"
       @update:view-mode="setDisplayedViewMode($event) /* ui-fix — to the active pane */"
@@ -12753,6 +12883,17 @@ function closeRecoveryKey() {
              one would leave a restored version, a deleted comment or a renamed
              file on screen unchanged in the half it happened in. */"
     />
+    <!-- The AI assistant (task #269), docked where the details panel docks;
+         drawn only while open, and only where the server offers it. -->
+    <AssistantPanel
+      v-if="showAssistant && assistantButton"
+      :client="assistantApi"
+      :locale="locale"
+      :selection="assistantSelection"
+      :narrow="isNarrow"
+      @close="showAssistant = false"
+      @changed="() => (paneIsActive ? void splitPaneRef?.reload() : void load())"
+    />
     </div>
     <!-- /koru:k1 fe__main -->
 
@@ -13465,7 +13606,7 @@ function closeRecoveryKey() {
       :host-mode="config.theme || 'auto'"
       @close="showThemeGallery = false"
       @select="setActiveTheme"
-      @mode="(m: ThemeModePref) => setThemeModePref(m)"
+      @mode="(m: ThemeModePref) => pickThemeMode(m)"
     />
     <!-- /wiring:c1 -->
 

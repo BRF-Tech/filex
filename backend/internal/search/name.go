@@ -40,7 +40,19 @@ import (
 // decomposed name's words in pieces — `Gürel` as `gu rel` — which no query
 // word can match, and `IŞIK` as `işik` where the query `ışık` asks for
 // `ışık`.
-const indexSchemaVersion = "3"
+// v3 -> v4 (0.57, tasks #261 and #238 - one bump for both, so an index of
+// 0.56 is rebuilt once, not twice):
+//   - #261: an explicit mapping (mapping.go) - no `_all` field, term vectors
+//     only on `content`, no doc values, and only the fields filex reads back
+//     are stored. Matching is unchanged (same analyzer); the index is a
+//     fraction of its size (8 GB at 21,000 documents under v3).
+//   - #238: a format character (Unicode Cf: zero-width space, soft hyphen,
+//     word joiner, byte order mark, a bidi control) no longer splits a word.
+//     A v3 document holds `zero` + U+200B + `width.txt` as `zero width txt`,
+//     which the query `zerowidth` cannot match.
+//
+// The bump is what makes the automatic repair rebuild an existing index once.
+const indexSchemaVersion = "4"
 
 // indexVersionKey is the Bleve internal-KV key holding the above.
 const indexVersionKey = "filex:index_schema"
@@ -73,13 +85,25 @@ const indexVersionKey = "filex:index_schema"
 // letter nor a digit. Composition removes most marks; the ones that survive
 // it have no precomposed form (every Devanagari vowel sign is one) and
 // belong to the letter before them just the same.
-func Normalize(s string) string {
+func Normalize(s string) string { return normalize(s, true) }
+
+// normalize is Normalize, with a say in what a format character (Unicode
+// Cf: zero-width space, soft hyphen, word joiner, byte order mark, a bidi
+// control) is. dropFormat: nothing - it is not there at all to the eye, and
+// `zero` + ZERO WIDTH SPACE + `width.txt` reads `zerowidth.txt`, which is what
+// the person searching types (task #238; before, each split the word in two
+// and the name was found by neither half alone). Otherwise a separator, the
+// form the database fallback asks with (fallbackWords).
+func normalize(s string, dropFormat bool) string {
 	s = namefold.Canonical(s)
 	var b strings.Builder
 	b.Grow(len(s))
 	pendingSpace := false
 	wrote := false
 	for _, r := range s {
+		if dropFormat && r > unicode.MaxASCII && unicode.Is(unicode.Cf, r) {
+			continue
+		}
 		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r) {
 			if pendingSpace && wrote {
 				b.WriteByte(' ')
@@ -92,6 +116,17 @@ func Normalize(s string) string {
 		pendingSpace = true
 	}
 	return b.String()
+}
+
+// fallbackWords are the words the database fallback asks for (PlanFallback):
+// split at a format character, not joined across it. ⚠ The stored name holds
+// the zero-width space between `zero` and `width`, and the database compares
+// folded text (internal/namefold) that keeps it, so `zerowidth` is in no
+// stored name - `zero` and `width` are. The fallback's own scoring
+// (PrepareQuery) then compares through Normalize on both sides, where the
+// two spellings meet.
+func fallbackWords(s string) []string {
+	return strings.Fields(normalize(s, false))
 }
 
 // NormWords is Normalize split into its words — the unit every

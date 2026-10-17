@@ -107,9 +107,9 @@ for spec in "$@"; do
     if [ "$want" -gt 0 ] && [ "$got" != "$want" ]; then fail_instance "its database is at migration ${got:-?}, the release carries $want"; fi
   fi
   gws=$(gateways_of "$cid")
-  value=$(env_of "$cid" FILEX_TRUSTED_PROXIES)
+  proxies_in_force "$(db_path)" "$(env_of "$cid" FILEX_TRUSTED_PROXIES)"
   # shellcheck disable=SC2086
-  if ! missing=$(trusted_covers "$value" $gws); then fail_instance "gateway $missing is not in FILEX_TRUSTED_PROXIES \"$value\""; fi
+  if ! missing=$(trusted_covers "$P_LIST" $gws); then fail_instance "gateway $missing is not in $P_SOURCE \"$P_LIST\""; fi
   log "$I_NAME: $ref healthy in $(($(date +%s) - t0))s, migration $got, gateway ${gws% } trusted"
 done
 log "deployed $tag"

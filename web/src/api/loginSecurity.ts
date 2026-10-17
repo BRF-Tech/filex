@@ -16,7 +16,22 @@ import { api } from './client';
 
 /** Where the list of trusted proxies in force came from: the page's setting,
  *  FILEX_TRUSTED_PROXIES, or neither (`auto`, the built-in default). */
-export type TrustedProxiesSource = 'setting' | 'env' | 'auto';
+/**
+ * Where the list in force came from: `seeded` - saved, and the same as the
+ * configuration's list (FILEX_TRUSTED_PROXIES seeds it at a first start since
+ * 0.57); `setting` - saved on this page; `env` - nothing saved, the
+ * configuration's list; `auto` - neither.
+ */
+export type TrustedProxiesSource = 'seeded' | 'setting' | 'env' | 'auto';
+
+/** The configuration's trusted-proxy list, the seed of the saved one. */
+export interface TrustedProxiesConfigured {
+  /** `FILEX_TRUSTED_PROXIES`, or `config.yaml trusted_proxies`. */
+  source: string;
+  entries: string[];
+  /** The saved list overrules it (`filex settings reseed login.trusted_proxies` applies it). */
+  differs: boolean;
+}
 
 export interface LoginSecuritySettings {
   enabled: boolean;
@@ -130,6 +145,8 @@ export interface LoginSecurityState {
   /** The list in force with `auto` spelled out: the class words first, then the networks and addresses. */
   trusted_proxies_effective: string[];
   trusted_proxies_source: TrustedProxiesSource;
+  /** The configuration's list; null when it names none. */
+  trusted_proxies_configured?: TrustedProxiesConfigured | null;
   /** Which words the list in force takes (auto and the classes) - one switch each on the page. */
   trusted_defaults: TrustedClasses;
   /** The addresses and networks of the list in force, without the words. */

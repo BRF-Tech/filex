@@ -317,10 +317,10 @@ func (w *writeFile) Close() error {
 	// on an object store (storage.ErrKindConflict). macOS writing sidecars over
 	// /dav is exactly the traffic that produces these names.
 	if err := storage.EnsureFileTarget(ctx, w.drv, w.rel); err != nil {
-		return mapErr(err)
+		return noteMapErr(ctx, err)
 	}
 	if err := wr.Write(ctx, w.rel, w.tmp, w.size); err != nil {
-		return mapErr(err)
+		return noteMapErr(ctx, err)
 	}
 	w.h.syncWrite(ctx, w.st, w.rel, w.size, sniffTempMime(w.tmp, w.rel))
 	return nil

@@ -404,6 +404,21 @@ func RefusedBy(v Verb, rel string, person int64) bool {
 	return Refused(v, rel)
 }
 
+// SaveVerb is the verb of an editor's save at rel on a person's behalf -
+// over the document or beside it (an office save in another format, a
+// conflict copy): OwnDraft in the drafts area (RefusedBy lets the owner's
+// own through), PutWorkCopy anywhere else, which an ordinary file passes and
+// of filex's own folders only the desktop's working copies do
+// (`.filex-open/<session>-<name>`, isWorkCopy - a working copy's beside save
+// keeps the session prefix: `<session>-rapor.docx`). The Document Server's
+// callback and an app's save door ask the same.
+func SaveVerb(rel string) Verb {
+	if _, ok := DraftOwner(rel); ok {
+		return OwnDraft
+	}
+	return PutWorkCopy
+}
+
 // Refused reports whether a person-facing mutation must be refused because
 // rel names filex's own machinery: anything Hidden, except the one shape the
 // desktop app's "open with filex" writes.

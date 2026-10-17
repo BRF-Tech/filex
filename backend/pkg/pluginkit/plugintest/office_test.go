@@ -110,3 +110,41 @@ func TestOfficeEngine_IsAKnownEngine(t *testing.T) {
 		t.Fatal("both names of the office engine are known")
 	}
 }
+
+// The office engine an app brings is compiled for a few minutes after it is
+// installed or updated: an app sees it unavailable, with the host's "being
+// prepared" sentence (a job that fails on it is office_preparing, not
+// office_unconfigured), and then it runs. The test host can put an app in
+// that window. RED before 0.57: the kit had no such state.
+func TestOfficeEngine_BeingPreparedThenReady(t *testing.T) {
+	h := officeHost("engines:office")
+	ref := h.AddInput(plugintest.File{Name: "in.docx", Data: []byte("DOCX")})
+	run := func() (*pluginkit.EngineResult, error) {
+		return h.EngineRun(pluginkit.EngineRequest{Engine: "office", Args: []string{"--convert-to", "pdf", "in.docx"},
+			Inputs: map[string]string{"in.docx": ref.Ref}})
+	}
+
+	h.PrepareOfficeEngine()
+	if h.EngineAvailable("office") {
+		t.Fatal("not available while it is being prepared")
+	}
+	_, err := run()
+	if !plugintest.IsCode(err, wire.ErrUnavailable) || !strings.Contains(err.Error(), "being prepared") {
+		t.Fatalf("being prepared: %v", err)
+	}
+
+	h.InstallEngine("office")
+	res, err := run()
+	if err != nil || res.Exit != 0 || len(res.Outputs) != 1 {
+		t.Fatalf("ready: %+v %v", res, err)
+	}
+
+	// Not there at all: the sentence names the app first, and still ONLYOFFICE.
+	none := officeHost("engines:office")
+	ref = none.AddInput(plugintest.File{Name: "in.docx", Data: []byte("DOCX")})
+	_, err = none.EngineRun(pluginkit.EngineRequest{Engine: "office", Args: []string{"--convert-to", "pdf", "in.docx"},
+		Inputs: map[string]string{"in.docx": ref.Ref}})
+	if !strings.Contains(err.Error(), "Office editor app") || !strings.Contains(err.Error(), "ONLYOFFICE") {
+		t.Fatalf("not configured: %v", err)
+	}
+}

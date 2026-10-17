@@ -110,6 +110,38 @@ print(" ".join(missing))
 sys.exit(1 if missing else 0)' "$value" "$@"
 }
 
+# proxies_in_force DB VALUE -> P_SOURCE P_LIST: the trusted-proxy list the
+# instance goes by - the one saved in its settings (login.trusted_proxies)
+# when it holds one, else VALUE (FILEX_TRUSTED_PROXIES). DB is the instance's
+# SQLite file, or `none`.
+# ⚠ Since 0.57 FILEX_TRUSTED_PROXIES is a SEED (task #258): written into that
+# row on a start where it is empty, and not read again once it is not. A
+# gateway added to the compose file after that is trusted only once it is in
+# the row (the Sign-in security page, or `filex settings reseed
+# login.trusted_proxies` in the container), so the compose file alone would
+# pass a deploy whose filex trusts none of it.
+proxies_in_force() {
+  local saved=""
+  P_SOURCE="FILEX_TRUSTED_PROXIES"
+  P_LIST="$2"
+  if [ "$1" != none ] && [ -f "$1" ]; then
+    saved=$(sqlite3 -readonly "$1" "SELECT COALESCE(value, '') FROM settings WHERE setting_key = 'login.trusted_proxies';" </dev/null 2>/dev/null || true)
+  fi
+  if [ -n "$(printf '%s' "$saved" | tr -d '[:space:]')" ]; then
+    P_SOURCE="the saved list (login.trusted_proxies)"
+    P_LIST="$saved"
+  fi
+}
+
+# db_path -> the parsed instance's SQLite file, or `none`
+db_path() {
+  if [ "$I_DB" = none ]; then
+    printf 'none'
+  else
+    printf '%s' "$I_DIR/$I_DB"
+  fi
+}
+
 # wait_health PORT SECONDS -> exit 0 once /healthz answers 200
 wait_health() {
   local port="$1" until

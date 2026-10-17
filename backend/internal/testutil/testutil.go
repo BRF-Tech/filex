@@ -274,6 +274,41 @@ func NewTestServerWith(t *testing.T, cfgMutate func(*config.Config), depsMutate 
 	return srv, client, store
 }
 
+// RequestAsHost builds a request to the test server that arrives under
+// ANOTHER Host name - a reverse proxy's, another tenant's, a bare
+// "localhost:5212" - while staying the signed-in person.
+//
+// It exists because of a client-side change in Go 1.26: http.Client now picks
+// a jar's cookies by req.Host when that field is set, not by the URL's host.
+// A test that overrode Host therefore stopped sending the session cookie and
+// the server answered 401 before it ever looked at the Host (measured
+// go1.25.0 vs go1.26.0 and go1.27.1, task #254). The server is not affected -
+// a browser's Host and URL host are the same name - so the fix belongs here:
+// the cookies the jar holds for the server's own URL are attached by hand.
+func RequestAsHost(t *testing.T, srv *httptest.Server, client *http.Client, method, path, host string, body io.Reader) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(method, srv.URL+path, body)
+	if err != nil {
+		t.Fatalf("testutil: request: %v", err)
+	}
+	AttachJarCookies(client, req)
+	req.Host = host
+	return req
+}
+
+// AttachJarCookies puts the cookies the client's jar holds for the request's
+// URL onto the request itself, so overriding req.Host afterwards cannot lose
+// them (see RequestAsHost for why Go 1.26 made that necessary). A client
+// without a jar, or a request the jar has nothing for, is left alone.
+func AttachJarCookies(client *http.Client, req *http.Request) {
+	if client == nil || client.Jar == nil || req == nil || req.URL == nil {
+		return
+	}
+	for _, c := range client.Jar.Cookies(req.URL) {
+		req.AddCookie(c)
+	}
+}
+
 // LoginAs posts to /api/auth/login and returns the freshly-issued cookie
 // value. The cookie is also stored on the supplied client's jar.
 //

@@ -82,7 +82,7 @@ const (
 	ActionDownload    ActionKind = "download"     // remote → local
 	ActionMkdirRemote ActionKind = "mkdir_remote" // create a folder on the server
 	ActionMkdirLocal  ActionKind = "mkdir_local"  // create a folder on disk
-	ActionDeleteLocal ActionKind = "delete_local" // remove locally (into local trash)
+	ActionDeleteLocal ActionKind = "delete_local" // remove locally (deleted; the server's trash holds it)
 	ActionDeleteRemot ActionKind = "delete_remote"
 	// ActionConflict keeps both versions: the remote copy is downloaded beside
 	// the local one under ConflictName, then the local file is uploaded.

@@ -3,6 +3,8 @@ package ftpsrv
 import (
 	"context"
 	"errors"
+	"fmt"
+	iofs "io/fs"
 	"math"
 	"os"
 	"path"
@@ -15,9 +17,11 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -253,9 +257,28 @@ func (f *fs) ReadDir(name string) ([]os.FileInfo, error) {
 		if !t.Set.CanSee(rel) {
 			continue
 		}
+		if !listable(o.Name) {
+			continue
+		}
 		out = append(out, objectInfo(o, t.Set.Effective(rel)))
 	}
 	return out, nil
+}
+
+// listable reports whether a name can stand in an FTP listing.
+//
+// ⚠ FTP is line-based: LIST, NLST and MLSD write one entry per CRLF-ended
+// line on the data connection, and STAT of a folder writes them on the
+// CONTROL connection, where every line is a reply. A name holding a CR or a
+// LF - legal on a Linux disk; no filex door gives one any more
+// (internal/leafname), but a file made on the storage itself or earlier
+// still has it - would end its entry early and start another line: a stray entry
+// in the listing, or a line the client reads as the server's reply. Such a
+// name cannot be addressed over FTP anyway (no command can carry it), so it
+// is left out of the listing, like an entry the caller may not see; the
+// other surfaces still show it (task #238).
+func listable(name string) bool {
+	return !strings.ContainsAny(name, "\r\n")
 }
 
 // Stat answers the size/type questions a client asks before a transfer.
@@ -307,6 +330,9 @@ func (f *fs) Mkdir(name string, _ os.FileMode) error {
 	if !f.canDo(t, perm.FilesCreate) {
 		return os.ErrPermission
 	}
+	if err := refuseName(t.Rel); err != nil {
+		return err
+	}
 	drv, err := f.driverFor(t)
 	if err != nil {
 		return err
@@ -326,8 +352,14 @@ func (f *fs) Mkdir(name string, _ os.FileMode) error {
 // asks for the interface; making it the same thing keeps the two honest.
 func (f *fs) MkdirAll(name string, perm os.FileMode) error { return f.Mkdir(name, perm) }
 
-// Remove deletes a file — to the TRASH, like every other surface.
-func (f *fs) Remove(name string) error {
+// Remove is DELE: it deletes a FILE — to the TRASH, like every other surface.
+// DELE on a folder, empty or not, answers 550 "is a directory" and removes
+// nothing: a folder goes only by RMD (protocolsync.CheckRemoveFile).
+func (f *fs) Remove(name string) error { return f.discard(name, false) }
+
+// discard sends name to the trash: a file (folder false), or a folder RMD
+// found empty (folder true).
+func (f *fs) discard(name string, folder bool) error {
 	t, err := f.resolve(name)
 	if err != nil {
 		return err
@@ -341,6 +373,11 @@ func (f *fs) Remove(name string) error {
 	drv, err := f.driverFor(t)
 	if err != nil {
 		return err
+	}
+	if !folder {
+		if err := protocolsync.CheckRemoveFile(f.ctx, drv, t.Rel); err != nil {
+			return mapStorageErr(err)
+		}
 	}
 	// The bytes and the rows under the storage's row gate (Syncer.Discard,
 	// Purge; issue #201): a storage scan never judges the catalogue between
@@ -372,12 +409,35 @@ func (f *fs) Remove(name string) error {
 }
 
 // RemoveDir implements ClientDriverExtensionRemoveDir, so RMD and DELE are
-// told apart. They do the same thing here (both trash), but a client that
-// sends RMD on a file expects an error rather than a deletion.
-func (f *fs) RemoveDir(name string) error { return f.Remove(name) }
+// told apart: RMD removes an EMPTY folder (to the trash, like DELE). A folder
+// with something in it answers 550 "directory not empty", RMD on a file 550
+// "not a directory", and nothing goes to the trash
+// (protocolsync.CheckRmdir, task #238).
+func (f *fs) RemoveDir(name string) error {
+	t, err := f.resolve(name)
+	if err != nil {
+		return err
+	}
+	if t.isRoot() || t.Rel == "" {
+		return os.ErrPermission
+	}
+	if !f.canDo(t, perm.FilesDelete) {
+		return os.ErrPermission
+	}
+	drv, err := f.driverFor(t)
+	if err != nil {
+		return err
+	}
+	if err := protocolsync.CheckRmdir(f.ctx, drv, t.Rel); err != nil {
+		return mapStorageErr(err)
+	}
+	return f.discard(name, true)
+}
 
-// RemoveAll is afero's recursive form; the trash already takes the subtree.
-func (f *fs) RemoveAll(name string) error { return f.Remove(name) }
+// RemoveAll is afero's recursive form, which ftpserverlib calls for SITE
+// RMDIR. It is RMD here: a folder goes only when it is empty (the owner's
+// decision for 0.57; nothing removes a tree over FTP).
+func (f *fs) RemoveAll(name string) error { return f.RemoveDir(name) }
 
 func (f *fs) Rename(oldname, newname string) error {
 	src, err := f.resolve(oldname)
@@ -405,6 +465,13 @@ func (f *fs) Rename(oldname, newname string) error {
 	if f.writeNeed(dst) == perm.FilesModify && !f.canDo(dst, perm.FilesModify) {
 		return os.ErrPermission
 	}
+	// A NEW name is asked of the one rule (internal/leafname); moving an item
+	// into another folder under the name it already has gives it nothing new.
+	if path.Base(dst.Rel) != path.Base(src.Rel) {
+		if err := refuseName(dst.Rel); err != nil {
+			return err
+		}
+	}
 	if src.Storage.ID != dst.Storage.ID {
 		// Across storages this is a copy plus a delete — an async operation in
 		// filex. Refusing is honest; answering before any bytes moved is not.
@@ -417,6 +484,16 @@ func (f *fs) Rename(oldname, newname string) error {
 	mover, ok := drv.(storage.Mover)
 	if !ok {
 		return storage.ErrUnsupported
+	}
+	// An RNTO puts the source's bytes at the new path: not where they would
+	// become downloadable while they are not where they are
+	// (protoperm.TreeDownloadLifted - a folder by every file below it).
+	_, lifted, lerr := protoperm.TreeDownloadLifted(f.ctx, drv, src.Set, src.Rel, dst.Set, dst.Rel)
+	if lerr != nil {
+		return mapStorageErr(lerr)
+	}
+	if lifted {
+		return os.ErrPermission
 	}
 	// Who may encrypt (internal/e2epolicy): an RNTO onto a key file's or a
 	// `.fxe`'s name is asked as a STOR of the file there would be (onto a
@@ -521,7 +598,15 @@ func (f *fs) OpenFile(string, int, os.FileMode) (afero.File, error) {
 }
 
 // mapStorageErr turns a driver error into what the library expects.
+//
+// ⚠ ftpserverlib prints the error's text into the reply ("550 Issue during
+// transfer: …", "Could not create …: …"), so what reaches the client is this
+// function's answer word for word. A driver's own error carries the server's
+// path (`open /srv/<storage root>/…: file name too long`); only its errno
+// travels (task #238).
 func mapStorageErr(err error) error {
+	var pathErr *iofs.PathError
+	var linkErr *os.LinkError
 	switch {
 	case err == nil:
 		return nil
@@ -529,7 +614,32 @@ func mapStorageErr(err error) error {
 		return os.ErrNotExist
 	case errors.Is(err, storage.ErrReadOnly):
 		return os.ErrPermission
+	case storage.IsNameTooLong(err):
+		return errNameTooLong
+	case errors.Is(err, leafname.ErrRefused):
+		return fmt.Errorf("%w: %w", ftpserver.ErrFileNameNotAllowed, err)
+	case errors.As(err, &pathErr):
+		return pathErr.Err
+	case errors.As(err, &linkErr):
+		return linkErr.Err
 	default:
 		return err
 	}
+}
+
+// errNameTooLong is a name the storage could not hold: 553, the reply FTP
+// keeps for a file name that is not allowed (ftpserver.ErrFileNameNotAllowed).
+var errNameTooLong = fmt.Errorf("%w: name too long", ftpserver.ErrFileNameNotAllowed)
+
+// refuseName asks the one rule (internal/leafname) of the name rel would give
+// an entry, before anything is written: the list's refused names - a
+// backslash, a NUL, a control character, `..`, `...` - are refused on every
+// door (553), so a file never exists on one surface that the next cannot open
+// (task #238). A file that already has such a name is not asked: it stays
+// readable, writable and removable.
+func refuseName(rel string) error {
+	if err := leafname.Check(path.Base(rel)); err != nil {
+		return fmt.Errorf("%w: %w", ftpserver.ErrFileNameNotAllowed, err)
+	}
+	return nil
 }

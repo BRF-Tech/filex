@@ -451,7 +451,7 @@ function metaFor(n: FileNode): string {
           ><bdi>{{ displayParentDirOf(n) }}</bdi></span>
         </div>
       </div>
-      <div class="fe-gal__label" :title="n.basename">
+      <div class="fe-gal__label" :title="nodeDisplayName(n)">
         <bdi>{{ nodeDisplayName(n) }}</bdi>
       </div>
       <!-- issue #34 — a symlink the server will not follow. Its own line: a

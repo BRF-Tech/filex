@@ -263,3 +263,69 @@ test('bytes: a save in another format is caught by its bytes when the server wro
   assert.equal(api.savedFormatOf('Rapor.docx', Buffer.from('plain text')), null);
   assert.equal(api.savedFormatOf('notes.txt', ooxml('X')), null, 'not a type filex opens');
 });
+
+// Task #268 - the office editor app (no Document Server) saves an opened .doc
+// beside its working copy by the server's own rule (file.save `beside`,
+// officesave.BesideName): `<session>-Rapor.docx`, `<session>-Rapor (2).docx`
+// when that name is taken. Unlike a Document Server, whose every save is a
+// new file beside the copy, the app keeps an opening's later saves on the
+// file its first save made: ONE name, rewritten in place. The desktop finds
+// it by the folder's listing alone (no callback, no notification), and every
+// rewrite comes home to the same Rapor.docx.
+test('the office editor app: one save beside the copy, rewritten in place, comes home to one Rapor.docx', async () => {
+  const dir = tmp();
+  try {
+    const doc = path.join(dir, 'Rapor.doc');
+    fs.writeFileSync(doc, OLE);
+    const copy = 'docs://.filex-open/a1b2c3d4e5f6-Rapor.doc';
+    const brought: Array<{ remote: string; seen: unknown }> = [];
+    const listing = (etag: string) => [
+      { basename: 'a1b2c3d4e5f6-Rapor.doc', type: 'file', etag: 'copy' },
+      { basename: 'a1b2c3d4e5f6-Rapor.docx', type: 'file', etag },
+    ];
+    const take = (etag: string) => {
+      const fresh = api.unseenBesideSaves(copy, listing(etag), brought);
+      for (const b of fresh) {
+        const remote = 'docs://.filex-open/' + b.basename;
+        const known = brought.find((x) => x.remote === remote);
+        if (known) known.seen = b.stat;
+        else brought.push({ remote, seen: b.stat });
+      }
+      return fresh;
+    };
+
+    const first = take('s1');
+    assert.deepEqual(first.map((b: { basename: string; ext: string }) => [b.basename, b.ext]), [['a1b2c3d4e5f6-Rapor.docx', 'docx']]);
+    const one = await api.writeBesideSave(doc, first[0].ext, ooxml('SAVE-1'), null);
+    assert.equal(one.outcome, 'created');
+    assert.equal(one.target.path, path.join(dir, 'Rapor.docx'));
+
+    assert.deepEqual(take('s1'), [], 'the same save, listed again, is not brought home twice');
+
+    const second = take('s2');
+    assert.deepEqual(second.map((b: { basename: string }) => b.basename), ['a1b2c3d4e5f6-Rapor.docx'], 'the rewrite of the same name is a new save');
+    const two = await api.writeBesideSave(doc, second[0].ext, ooxml('SAVE-2'), one.target);
+    assert.equal(two.outcome, 'updated');
+    assert.equal(two.target.path, one.target.path);
+    assert.ok(fs.readFileSync(one.target.path).equals(ooxml('SAVE-2')));
+    assert.ok(fs.readFileSync(doc).equals(OLE), 'Rapor.doc was touched');
+    assert.deepEqual(fs.readdirSync(dir).sort(), ['Rapor.doc', 'Rapor.docx']);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A conflict copy the server writes beside a working copy
+// (`<session>-Rapor.filex-conflict-<UTC>.docx`, officesave.ConflictName) is
+// not a save of the copy in another format: never brought home as one. (It
+// cannot arise from this app: an outside change goes up as a NEW working copy,
+// never over the one an editor has open.)
+test('listing: a conflict copy beside the working copy is not a save in another format', () => {
+  const copy = 'docs://.filex-open/a1b2c3d4e5f6-Rapor.doc';
+  const entries = [
+    { basename: 'a1b2c3d4e5f6-Rapor.doc' },
+    { basename: 'a1b2c3d4e5f6-Rapor.filex-conflict-20261016T101500.docx' },
+    { basename: 'a1b2c3d4e5f6-Rapor.filex-conflict-20261016T101500.doc' },
+  ];
+  assert.deepEqual(api.unseenBesideSaves(copy, entries, undefined), []);
+});

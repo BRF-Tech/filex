@@ -43,6 +43,10 @@ func (r *Registry) SetLicenseHold(app, reason string) {
 		case reason == "" && before != "":
 			p.log("info", "its license holds again; the app runs")
 		}
+		if before != reason {
+			// A held app brings no office engine (OfficeEngines).
+			r.enginesChanged()
+		}
 	}
 }
 

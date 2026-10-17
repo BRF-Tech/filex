@@ -131,6 +131,7 @@ export default defineConfig({
           { text: 'App plugin wire contract', link: '/APP-PLUGINS-API' },
           { text: 'Usage & cost', link: '/USAGE' },
           { text: 'Uploads & resume', link: '/UPLOADS' },
+          { text: 'File names', link: '/FILE-NAMES' },
           { text: 'Quotas', link: '/QUOTAS' },
           { text: 'Search', link: '/SEARCH' },
           { text: 'Sharing & file requests', link: '/SHARING' },
@@ -159,7 +160,8 @@ export default defineConfig({
         items: [
           { text: 'Embedding the explorer', link: '/INTEGRATION' },
           { text: 'MCP & AI Tokens', link: '/MCP' },
-          { text: 'OnlyOffice', link: '/ONLYOFFICE' },
+          { text: 'AI assistant', link: '/AI-ASSISTANT' },
+          { text: 'Office editing', link: '/ONLYOFFICE' },
           { text: 'ShareX', link: '/SHAREX' },
           { text: 'SSO (OIDC)', link: '/SSO' },
           { text: 'LDAP', link: '/LDAP' },

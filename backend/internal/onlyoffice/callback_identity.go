@@ -42,7 +42,6 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
-	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
 // openerTTL is how long a record of who opened a session is kept.
@@ -187,28 +186,6 @@ func (s *Service) mayCreate(ctx context.Context, node *model.Node, uid int64, re
 		return false
 	}
 	return set.Can(rel, perm.FilesCreate)
-}
-
-// creatorOf is the session's editors, the first of them who may create the
-// file at rel leading; why says why nobody may (no editor the session had, or
-// none of them may create files there).
-func (s *Service) creatorOf(ctx context.Context, node *model.Node, key string, users []string, rel string, got string) (editors []int64, why *errNotWritten) {
-	editors = s.sessionEditors(key, users)
-	vars := srvtext.Vars{"ext": docExt(node.Name), "format": formatName(got)}
-	if len(editors) == 0 {
-		return nil, notWritten(refusedNoEditor, nil)
-	}
-	for i, id := range editors {
-		if s.mayCreate(ctx, node, id, rel) {
-			if i > 0 {
-				// The one it is written for leads: the audit row names them.
-				ordered := append([]int64{id}, editors[:i]...)
-				editors = append(ordered, editors[i+1:]...)
-			}
-			return editors, nil
-		}
-	}
-	return editors, notWritten(refusedNoCreate, vars)
 }
 
 // keyOf is the document key a callback names.

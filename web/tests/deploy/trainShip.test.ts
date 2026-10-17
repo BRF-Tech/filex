@@ -490,4 +490,27 @@ describe.skipIf(!BASH)('the server scripts', () => {
     expect(miss.stdout.trim()).toBe('192.168.96.1');
     expect(sh('source "$1"; trusted_covers "" 192.168.96.1', COMMON).status).toBe(1);
   });
+
+  // ⚠ Since 0.57 FILEX_TRUSTED_PROXIES only SEEDS the saved list (task #258):
+  // the gate checks the list the instance goes by - the saved one when it
+  // holds one - or a gateway added to compose alone would pass a deploy whose
+  // filex trusts none of it.
+  const sqlite = BASH ? sh('sqlite3 -version').status === 0 : false;
+  it.skipIf(!sqlite)('read the trusted-proxy list an instance goes by: the saved one, else the variable', () => {
+    const d = tmp();
+    const db = posixPath(path.join(d, 'instance.sqlite'));
+    const make = sh('sqlite3 "$1" "CREATE TABLE settings (setting_key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);"', db);
+    expect(make.status, make.stderr).toBe(0);
+    const read = (dbArg: string, env: string) =>
+      sh('source "$1"; proxies_in_force "$2" "$3"; printf "%s|%s" "$P_SOURCE" "$P_LIST"', COMMON, dbArg, env).stdout;
+
+    expect(read(db, 'auto, 192.168.96.1')).toBe('FILEX_TRUSTED_PROXIES|auto, 192.168.96.1');
+    expect(read('none', 'auto, 192.168.96.1')).toBe('FILEX_TRUSTED_PROXIES|auto, 192.168.96.1');
+
+    sh(`sqlite3 "$1" "INSERT INTO settings VALUES ('login.trusted_proxies', '', '');"`, db);
+    expect(read(db, 'auto, 192.168.96.1'), 'an emptied list: the variable').toBe('FILEX_TRUSTED_PROXIES|auto, 192.168.96.1');
+
+    sh(`sqlite3 "$1" "UPDATE settings SET value = 'auto, 10.0.0.9' WHERE setting_key = 'login.trusted_proxies';"`, db);
+    expect(read(db, 'auto, 192.168.96.1')).toBe('the saved list (login.trusted_proxies)|auto, 10.0.0.9');
+  });
 });

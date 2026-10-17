@@ -12,26 +12,28 @@ guide, linked from the table below.
 
 ## The menu
 
-Since 0.51 the panel's navigation is a **mega menu** in the top bar. The
-**Dashboard** is a plain link at its start; every other page sits in one of
-three panels, each opened by its button and laid out in columns, with a short
-line under every page saying what it is for:
+The panel's navigation is a **mega menu** in the top bar. The **Dashboard**
+is a plain link at its start; every other page sits in one of four panels,
+each opened by its button and laid out in columns, with a short line under
+every page saying what it is for. Three panels hold what the instance HAS -
+its files, its people, its records - and one, **Settings**, holds every page
+that changes how it behaves. The bar reads Dashboard, Files & storage,
+People, Settings, Maintenance & records:
 
 | Panel | Section | Pages |
 |---|---|---|
-| **Files & storage** | Files | Files (the file manager), File history, Shares, Trash, Tagged files, Duplicates (its cards are the whole report's totals, `total_groups` / `total_copies` / `total_waste` from `GET /api/admin/duplicates`, beside the 100 largest groups), Search index - see [Sharing](SHARING.md), [Trash & versioning](TRASH-VERSIONING.md), [Search](SEARCH.md) |
+| **Files & storage** | Files | Files (the file manager), File history, Shares, Trash, Tagged files, Duplicates (its cards are the whole report's totals, `total_groups` / `total_copies` / `total_waste` from `GET /api/admin/duplicates`, beside the 100 largest groups), Search index (its stats and rebuild; it links to the search settings on General) - see [Sharing](SHARING.md), [Trash & versioning](TRASH-VERSIONING.md), [Search](SEARCH.md) |
 | | Apps | One row per installed app that has a screen of its own - see [Apps](APP-PLUGINS.md). The section is not shown when no app has one. |
 | | Storage | Storages, Connections, Sync runs, Replica, Usage & cost - see [Storage](STORAGE.md), [Protocols](PROTOCOLS.md), [Replication](REPLICATION.md), [Usage & cost](USAGE.md) |
-| **People & security** | People & access | Users, Groups, Roles, Folder access, Tenants or My tenant - see [Roles & permissions](PERMISSIONS.md), [Groups](GROUPS.md), [RBAC & folder access](RBAC.md), [Tenant self-service](TENANT-ADMIN.md) |
-| | Security | Identity providers, Sign-in security, Encryption, Protection, API / MCP - see [SSO](SSO.md), [LDAP](LDAP.md), [End-to-end encryption](E2E-ENCRYPTION.md), [Protection](PROTECTION.md), [MCP](MCP.md) |
-| **System** | Plugins & integrations | Plugins (with Install requests, the trusted stores and, since 0.53, who sees [the store screen](APP-PLUGINS.md#the-store-screen)), External services, Webhooks, Notifications (the history and the [notification digest](NOTIFICATIONS.md#the-digest)'s defaults) - see [Storage plugins](PLUGINS.md), [Apps](APP-PLUGINS.md), [OnlyOffice](ONLYOFFICE.md), [Notifications & webhooks](NOTIFICATIONS.md) |
-| | Customization | Settings, Multi-tenant mode, Branding, Appearance, Archives - see [Configuration](CONFIGURATION.md), [Multi-tenancy](MULTI-TENANCY.md), [Archives](ARCHIVES.md) |
-| | Maintenance & records | Queue, Tools, Audit log, Updates, About - see [Updates](UPDATES.md) |
+| **People** | People & access | Users, Groups, Roles, Folder access, Tenants - see [Roles & permissions](PERMISSIONS.md), [Groups](GROUPS.md), [RBAC & folder access](RBAC.md), [Multi-tenancy](MULTI-TENANCY.md) |
+| **Settings** | General | General (the server's defaults - default language, sync interval, unfinished uploads, file cache, thumbnail cache upkeep - the thumbnail settings, the search settings and the mail server), Branding, Appearance (themes, the default folder view, the stylesheet), Multi-tenant mode, My tenant - see [Configuration](CONFIGURATION.md), [Thumbnails](thumbnails.md), [Multi-tenancy](MULTI-TENANCY.md), [Tenant self-service](TENANT-ADMIN.md) |
+| | Security & data | Identity providers, Sign-in security, Encryption, Protection - see [SSO](SSO.md), [LDAP](LDAP.md), [End-to-end encryption](E2E-ENCRYPTION.md), [Protection](PROTECTION.md) |
+| | File processing & integrations | Archives, Plugins (with Install requests, the trusted stores and who sees [the store screen](APP-PLUGINS.md#the-store-screen)), External services, Webhooks, Notifications (the history and the [notification digest](NOTIFICATIONS.md#the-digest)'s defaults), API / MCP, AI assistant - see [Archives](ARCHIVES.md), [Storage plugins](PLUGINS.md), [Apps](APP-PLUGINS.md), [OnlyOffice](ONLYOFFICE.md), [Notifications & webhooks](NOTIFICATIONS.md), [MCP](MCP.md), [AI assistant](AI-ASSISTANT.md) |
+| **Maintenance & records** | Maintenance & records | Queue, Tools, Audit log, Updates, About - see [Updates](UPDATES.md) |
 
-| | |
-|---|---|
-| ![The People & security panel open over Admin → Users](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png) | ![The System panel in Turkish, in the dark theme](https://filex.sh/shots/megamenu/system-dark-tr-1440.7593af7dd72b.png) |
-| *People & security* open over *Users*: two sections, a line under every page, the page you are on marked. | The same menu in Turkish and in the dark theme: *System*, three sections. |
+![The Settings panel open over Admin → Settings → General: three columns, a line under every page](https://filex.sh/shots/megamenu/settings-panel-1440.23a710915f9c.png)
+
+![The Settings panel in Turkish, in the dark theme](https://filex.sh/shots/megamenu/settings-dark-tr-1440.53abae9d3fd2.png)
 
 Every page is two clicks away: the panel's button, then the page. The
 page's own sub-pages (a storage's settings, a person's page, a file's
@@ -39,20 +41,27 @@ versions) are reached from the page, as before.
 
 **Addresses did not change.** The menu groups the pages; it did not move
 them. `/admin/users`, `/admin/login-security`, `/admin/plugins?tab=defaults`
-and every other link or bookmark from an earlier release opens the same page.
-The other guides still name a page as *Admin → Page* (for example
-*Admin → Sign-in security*); that page is in the table above.
+and every other link or bookmark from an earlier release opens the same page
+(the General page is `/admin/settings`). The other guides name a page as
+*Admin → Page* (for example *Admin → Sign-in security*, *Admin → Plugins*),
+or, for a page of the Settings panel, with the panel in front of it
+(*Admin → Settings → External services*); the page that was called Settings
+before 0.57 is always *Admin → Settings → General*. The table above has where
+each one sits.
 
 Under the top bar, the trail names the section a page lives in, between the
 dashboard and the page: *Dashboard › People & access › Users*. The section is
-words, not a link - it is a heading in the menu, not a page.
+words, not a link - it is a heading in the menu, not a page. A step that says
+what the previous one says is said once: the General page's trail is
+*Dashboard › General*.
 
 ## Who sees which page
 
 The menu offers a person exactly the pages the panel would open for them -
 the same rule the server applies to each page's API:
 
-- An **administrator** sees every page.
+- An **administrator** of a single-tenant install, and the platform's own
+  administrator on a multi-tenant one, sees every page.
 - A **delegated administrator** - an account given an `admin.*` permission
   without the administrator role ([Roles & permissions](PERMISSIONS.md)) - sees
   the pages that permission opens, and the file manager:
@@ -68,6 +77,23 @@ the same rule the server applies to each page's API:
 - On a **multi-tenant** install, *Tenants* is the platform operator's and *My
   tenant* is a tenant administrator's; a single-tenant install shows neither,
   and their addresses lead to the dashboard ([Multi-tenancy](MULTI-TENANCY.md)).
+- A **tenant's administrator** is not offered the pages about the instance,
+  whose every call the server refuses them (`403 supertenant_only`) - on
+  read and on write:
+
+  | Panel | Pages a tenant's administrator is not offered |
+  |---|---|
+  | Files & storage | Search index, Replica, Usage & cost |
+  | Settings | General, Appearance, Multi-tenant mode, Identity providers, Sign-in security, Protection, Archives, Plugins, External services, Webhooks, AI assistant |
+  | Maintenance & records | Queue, Updates |
+
+  What they are offered works on their tenant: Files, File history, Shares,
+  Trash, Tagged files, Duplicates, Storages, Connections, Sync runs; Users,
+  Groups, Roles, Folder access; under Settings, Branding, My tenant (their
+  own sign-in and domains), Encryption, API / MCP and Notifications - where
+  they see their tenant's [summary defaults](NOTIFICATIONS.md#the-digest),
+  not the instance's history; and Tools, Audit log, About. The capability behind it is `caller_platform` (true on a
+  single-tenant install and for the supertenant's people).
 - *Multi-tenant mode* is the administrator's who may configure the instance:
   every administrator of a single-tenant install, the platform operator of a
   multi-tenant one, never a tenant's administrator. It is the one page about
@@ -85,8 +111,8 @@ the same rule the server applies to each page's API:
 
 A section with nothing left in it is not drawn, and neither is a panel with
 no section left: a delegated administrator holding only `admin.users` sees no
-Dashboard link, *Files & storage* with Files alone, *People & security* with
-Users and Groups, and no *System* at all.
+Dashboard link, *Files & storage* with Files alone, *People* with Users and
+Groups, and neither *Settings* nor *Maintenance & records*.
 
 ## Keyboard and screen readers
 
@@ -118,7 +144,7 @@ per section, and every section open - so a page is two taps away: *Menu*,
 then the page. The drawer opens scrolled to the page you are on, and closes
 when you choose one, tap outside it or press its close button.
 
-![The admin menu's drawer on a 390-pixel phone](https://filex.sh/shots/megamenu/drawer-390.f8df63fbbbe6.png)
+![The admin menu's drawer on a 390-pixel phone](https://filex.sh/shots/megamenu/drawer-390.7201a5e9217e.png)
 
 ## Search
 

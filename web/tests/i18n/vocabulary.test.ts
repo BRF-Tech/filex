@@ -38,6 +38,10 @@ function readable(s: string): string {
     .replace(/`[^`]*`/g, ' ')
     .replace(/\bX-[A-Za-z-]+/g, ' ')
     .replace(/\b[A-Z][A-Z0-9]+_[A-Z0-9_]+\b/g, ' ')
+    // A setting's key as a command takes it (`filex settings reseed
+    // login.trusted_proxies`, loginSecurity.proxies.override): dotted, with
+    // an underscore - an identifier, not the word "login".
+    .replace(/\b[a-z][a-z0-9]*(?:\.[a-z0-9_]+)*\.[a-z0-9]*_[a-z0-9_]*\b/g, ' ')
     .replace(/https?:\/\/\S+/g, ' ')
     .replace(/\{[^{}]*\}/g, ' ');
 }
@@ -58,6 +62,8 @@ const TOKEN_IS_THEIRS: Record<string, string> = {
   'notifications.tokenSet': 'the global webhook\'s Bearer token (see notifications.webhookToken)',
   'notifications.tokenUnset': 'the global webhook\'s Bearer token (see notifications.webhookToken)',
   'webhooks.global.hint': 'the global webhook\'s Bearer token (see notifications.webhookToken)',
+  'assistantAdmin.maxOutputTokens': 'a model\'s tokens - the unit an AI provider counts and bills a reply in, not an API key',
+  'assistantAdmin.maxRequestTokens': 'a model\'s tokens (see assistantAdmin.maxOutputTokens)',
   'plugins.fields.token': 'a remote storage plugin\'s token is the plugin service\'s own secret',
   'plugins.remoteHint': 'a remote storage plugin\'s token is the plugin service\'s own secret',
   'external.advisories.jwt_not_enforced': 'the document server\'s JWT, and its own error quoted as it shows it ("The document security token is not correctly formed")',
@@ -159,6 +165,9 @@ const TURKISH: Rule[] = [
   { use: 'filtre', wrong: tr('<süzgeç|<süzer>|<süzebilir') },
   { use: 'depo', wrong: tr('<tüm disk|<bu diskte|<disklerde>') },
   { use: 'kova', wrong: tr('<bucket') },
+  /* 0.57 shots: the Notifications pane said "Zilinize" in its subtitle and
+     "Uygulama içi çan" / "çanınız" two lines below - one bell, two words. */
+  { use: 'zil (the notification bell)', wrong: tr('<çan(ı|ın|a|da|dan|ınız|ınızı|ınıza|ınızda|ınızın)?>') },
   /* 2026-10-01 (#130 measured in the browser): an LDAP form said "E-posta
      attribute" beside "Grup niteliği", and the header proxy "Kullanıcı
      header'ı" beside "Ad başlığı" - an English word left in a Turkish
@@ -279,6 +288,11 @@ describe('one term per concept (docs/CONTRIBUTING.md → Words)', () => {
     expect(offenders({ src: 'set by an override' }, ENGLISH).length).toBe(1);
   });
 
+  it('a setting key is not a word, and "log in" still is (a detector that finds nothing proves nothing)', () => {
+    expect(offenders({ ok: 'Apply it with filex settings reseed login.trusted_proxies.' }, ENGLISH)).toEqual([]);
+    expect(offenders({ a: 'Log in to continue.', b: 'The login page' }, ENGLISH).length).toBe(2);
+  });
+
   it('an exception names a key that exists — a stale exemption hides the next copy', () => {
     const stale = Object.keys(TOKEN_IS_THEIRS).filter((k) => !(k in english));
     expect(stale).toEqual([]);
@@ -297,6 +311,12 @@ const SAME: Array<[string, string[]]> = [
   ['trash', ['node.trash', 'sidenav.trash', 'nav.trash', 'trash.title']],
   ['home', ['node.home', 'sidenav.home', 'home.title', 'userSettings.prefs.startPage_home']],
   ['API keys', ['sidenav.apikeys', 'conn.tokens.title', 'explore.apiKeys']],
+  /* The connection guides (task #258): the explorer's row that opens them,
+     the section it sits in, the panel's own title and the admin menu's page
+     are one name - it was "How to connect" on the row and "Storage
+     connections" on the panel. The desktop app's heading says the same
+     (desktop/ui/app.html `set.connections`, outside these tables). */
+  ['connections', ['sidenav.connect', 'sidenav.connections', 'conn.title', 'nav.connections']],
   ['PIN', ['plugin.pin.label', 'myShares.fields.pin', 'server.public.pin_aria']],
   /* What an API key may do: the fieldset the boxes sit in, the column that
      lists them afterwards, and the same pair in the admin panel. Said four

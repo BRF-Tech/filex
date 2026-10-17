@@ -145,10 +145,24 @@ func (h *StagedUpload) Begin(w http.ResponseWriter, r *http.Request) {
 		writeReadOnly(w, r, http.StatusForbidden)
 		return
 	}
-	name, nameOK := sanitizeUploadName(req.Name)
-	if !nameOK {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad upload filename"})
-		return
+	name, nameErr := checkUploadName(req.Name)
+	if nameErr != nil {
+		// A file that already has a name refused for a control character is
+		// written to as it is (keepsExistingName); only a NEW one is refused.
+		base := path.Base(req.Name)
+		exists := func() bool {
+			drv, err := h.Manager.StorageResolver(st.ID)
+			if err != nil {
+				return false
+			}
+			_, serr := drv.Stat(r.Context(), path.Join(destRel, base))
+			return serr == nil
+		}
+		if !keepsExistingName(nameErr, exists) {
+			writeNameRefusal(w, r, nameErr)
+			return
+		}
+		name = base
 	}
 	if req.Size < 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad size"})
@@ -190,7 +204,16 @@ func (h *StagedUpload) Begin(w http.ResponseWriter, r *http.Request) {
 	// resolveAdapterDir asked only for the folder's level: adding a file is
 	// files.create, replacing one that is there is files.modify.
 	stagedNeed := perm.FilesCreate
-	if _, serr := drv.Stat(r.Context(), fullRel); serr == nil {
+	_, serr := drv.Stat(r.Context(), fullRel)
+	// A name longer than the storage holds is refused HERE, before the
+	// client pushes the bytes: a local disk answers the Stat itself with
+	// ENAMETOOLONG. It used to be found at commit, after the whole transfer
+	// (task #238).
+	if storage.IsNameTooLong(serr) {
+		writeNameRefusal(w, r, serr)
+		return
+	}
+	if serr == nil {
 		stagedNeed = perm.FilesModify
 	}
 	if !h.Manager.require(w, r, st, fullRel, stagedNeed, "insufficient permission") {

@@ -39,8 +39,6 @@ function mountLogin() {
       mocks: {},
       stubs: {
         LogoMark: true,
-        LocaleSwitcher: true,
-        DarkModeToggle: true,
         Input: true,
         Checkbox: true,
       },

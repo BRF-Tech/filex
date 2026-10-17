@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 
 import RenameModal from '@brftech/filex-core/src/modals/RenameModal.vue';
+import { REFUSED_NAMES } from '../../../e2e/helpers/hostile-names.mjs';
 
 function errorText(): string | null {
   return document.body.querySelector('[data-testid="rename-error"]')?.textContent?.trim() ?? null;
@@ -71,6 +72,60 @@ describe('RenameModal', () => {
       w.unmount();
     });
   }
+
+  // Task #238: the dialog refuses exactly what the server refuses (the shared
+  // hostile names' `refused` set), with a word. ⚠ Except a name with a line
+  // break: a text box cannot hold one (the HTML value rule strips it), so no
+  // person can type it here; tests/lib/nameRule.test.ts holds the rule to it.
+  const LINE_BREAK = new RegExp('[' + String.fromCodePoint(10) + String.fromCodePoint(13) + ']');
+  for (const n of REFUSED_NAMES.filter((x) => !LINE_BREAK.test(x.name))) {
+    it(`refuses the hostile name ${n.id}, as the server does`, async () => {
+      const w = mount(RenameModal, {
+        props: { open: true, locale: 'en', currentName: 'a.txt' },
+        attachTo: document.body,
+      });
+      await w.vm.$nextTick();
+      const input = document.body.querySelector('input') as HTMLInputElement;
+      input.value = n.name;
+      input.dispatchEvent(new Event('input'));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+      await w.vm.$nextTick();
+      expect(w.emitted('submit')).toBeUndefined();
+      expect(errorText()).toBe('Invalid character');
+      w.unmount();
+    });
+  }
+
+  it('saving the name unchanged renames nothing, even one with a leading space', async () => {
+    const w = mount(RenameModal, {
+      props: { open: false, locale: 'en', currentName: ' notes.txt' },
+      attachTo: document.body,
+    });
+    await w.setProps({ open: true });
+    const input = document.body.querySelector('input') as HTMLInputElement;
+    expect(input.value).toBe(' notes.txt');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await w.vm.$nextTick();
+    expect(w.emitted('submit')).toBeUndefined();
+    expect(w.emitted('close')).toHaveLength(1);
+    w.unmount();
+  });
+
+  it('an emptied name says so instead of doing nothing', async () => {
+    const w = mount(RenameModal, {
+      props: { open: true, locale: 'en', currentName: 'a.txt' },
+      attachTo: document.body,
+    });
+    await w.vm.$nextTick();
+    const input = document.body.querySelector('input') as HTMLInputElement;
+    input.value = '   ';
+    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await w.vm.$nextTick();
+    expect(w.emitted('submit')).toBeUndefined();
+    expect(errorText()).toBe('Type a name.');
+    w.unmount();
+  });
 
   it('a good name is submitted', async () => {
     const w = mount(RenameModal, {

@@ -35,7 +35,7 @@ import { createServer, type Server } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { loginAs } from '../helpers/auth';
+import { openSignedIn } from '../helpers/auth';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage, storageRoot } from '../helpers/seed';
 import { installInterfaceApp, openAppInterface, removeAppByName } from '../helpers/appInterface';
 import { zip } from '../helpers/zip';
@@ -339,12 +339,8 @@ test.describe.serial('An app’s own interface — the sandbox, in every engine'
   });
 
   test('save as in the standalone editor: the focus ring of the first breadcrumb is drawn whole', async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem('filex.tourDone', '1');
-      localStorage.setItem('filex.installPrompt.dismissed', '1');
-    });
-    await loginAs(page);
-    await page.goto(
+    await openSignedIn(
+      page,
       `/admin/files/edit?path=${encodeURIComponent(`${store}://note.${ext}`)}&type=${ext}&mode=edit&app=${encodeURIComponent(app)}`,
     );
     const el = page.locator('iframe[data-testid="app-frame"]');

@@ -1,0 +1,14 @@
+# How often a round looks for a queued release. A template:
+# scripts/train/install-auto.sh fills @EVERY@ (default "*:0/30": every half
+# hour, see systemd.time(7)). A round that is running holds the service, so
+# the timer starts nothing beside it.
+[Unit]
+Description=filex autonomous release round, @EVERY@
+
+[Timer]
+OnCalendar=@EVERY@
+Persistent=false
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

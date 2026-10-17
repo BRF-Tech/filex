@@ -83,11 +83,37 @@ test('the sync engine is started without --lang and restarts when the account la
   assert.match(apply[1], /refreshPairs\(\)/);
 });
 
-test('Settings → Language writes the account and offers no "System"', () => {
+// Task #258: the language is a row of User settings (the explorer's dialog,
+// Preferences → Account), handed in as a hook; App settings (⚙) has none.
+test('User settings → Language writes the account through the main process, and App settings has no language row', () => {
   const handler = /ipcMain\.handle\('settings:set'[\s\S]*?\n {2}\}\);/.exec(main);
   assert.ok(handler);
   assert.match(handler[0], /writeAccountLocale\(acc, patch\.locale\)/);
   assert.doesNotMatch(handler[0], /state\.locale = patch\.locale/);
-  assert.doesNotMatch(html, /\['system', T\('set\.language_system'\)\]/);
-  assert.match(html, /state\.effectiveLocale === code/);
+  // The dialog's hook is the window's own pickLanguage, which asks settings:set.
+  assert.match(html, /language: \{ pick: \(code\) => \{ void pickLanguage\(code\); \} \}/);
+  const pick = /async function pickLanguage\(code\) \{([\s\S]*?)\n {6}\}/.exec(html);
+  assert.ok(pick, 'pickLanguage is where the dialog\'s pick lands');
+  assert.match(pick[1], /window\.filexApp\.setSettings\(\{ locale: code \}\)/);
+  assert.match(pick[1], /applyLang\(state\.effectiveLocale\)/);
+  // ...and the ⚙ screen draws no language buttons.
+  assert.doesNotMatch(html, /data-locale=/);
+  assert.doesNotMatch(html, /'set\.language'/);
+});
+
+test('one click or two is set in User settings, without remounting the explorer the dialog is in', () => {
+  const set = /function setOpenTrigger\(v\) \{([\s\S]*?)\n {6}\}/.exec(html);
+  assert.ok(set);
+  assert.match(set[1], /localStorage\.setItem\('filex\.openTrigger'/);
+  assert.match(set[1], /el\.config = \{ \.\.\.el\.config, openTrigger: openTriggerPref\(\) \}/);
+  assert.doesNotMatch(set[1], /mountExplorer|mountedFor = null/);
+  assert.doesNotMatch(html, /data-opentrigger=/);
+});
+
+test('this computer\'s notifications are a User settings row; App settings keeps the computer\'s own', () => {
+  assert.match(html, /deviceNotifications: \{\s*enabled: \(\) => state\.notifications !== false,/);
+  assert.match(html, /setSettings\(\{ notifications: !!on \}\)/);
+  assert.doesNotMatch(html, /toggle\('notifs'/);
+  // The look is the account's on this surface too.
+  assert.match(html, /accountPrefs: \{ surface: 'desktop' \}/);
 });

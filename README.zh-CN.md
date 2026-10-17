@@ -22,8 +22,8 @@ SSO/LDAP、多租户、加密文件夹、可嵌入的 Web 组件、桌面应用�
 <sub>本文译自[英文 README](README.md)（0.56 发行前精简后的版本）；两者不一致时，以英文版为准。本文为机器翻译，尚待母语者审校，欢迎指正。文中链接指向的文档均为英文。</sub>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.e032d7456831.png">
-  <img src="https://filex.sh/shots/explorer-grid-light.de398671d43b.png" alt="filex 资源管理器 - 缩略图网格" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.ff7a02b49f27.png">
+  <img src="https://filex.sh/shots/explorer-grid-light.475b0b61faab.png" alt="filex 资源管理器 - 缩略图网格" width="900">
 </picture>
 
 </div>
@@ -171,7 +171,7 @@ docker run -p 5212:5212 \
 
 资源管理器的全部功能：[docs/FEATURES.md → The explorer](docs/FEATURES.md#the-explorer)。
 
-<p align="center"><img src="https://filex.sh/shots/driveshell/driveshell-hero-1440.16ace59f07c3.png" alt="filex 外壳" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/driveshell/driveshell-hero-1440.6410104e072c.png" alt="filex 外壳" width="860"></p>
 
 <details>
 <summary><b>资源管理器截图</b> - 外壳、搜索、导航、标签、回收站、铃铛、主题、符号链接、ONLYOFFICE 中的 CSV</summary>
@@ -180,14 +180,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![filex 外壳](https://filex.sh/shots/driveshell/driveshell-hero-1440.16ace59f07c3.png)
+![filex 外壳](https://filex.sh/shots/driveshell/driveshell-hero-1440.6410104e072c.png)
 
 <sub>外壳：每个人进入后看到的界面</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![在文件夹中搜索](https://filex.sh/shots/driveshell/driveshell-search-1440.c0f3ceda0ec4.png)
+![在文件夹中搜索](https://filex.sh/shots/driveshell/driveshell-search-1440.2536c373425f.png)
 
 <sub>在这个文件夹中搜索；`⌘K` / `Ctrl K` 把查询交给命令面板</sub>
 
@@ -196,14 +196,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![导航面板](https://filex.sh/shots/sidenav/sidenav-expanded-1440.461d5aaaff2a.png)
+![导航面板](https://filex.sh/shots/sidenav/sidenav-expanded-1440.e96ea7e98388.png)
 
 <sub>导航面板：Home（主页）、Shared with me（与我共享）、My shares（我的共享）、Recent（最近）、Starred（已加星标）、Trash（回收站），以及你能访问的存储</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![折叠为图标栏](https://filex.sh/shots/sidenav/sidenav-rail-1440.843a2158380d.png)
+![折叠为图标栏](https://filex.sh/shots/sidenav/sidenav-rail-1440.9269e026d29a.png)
 
 <sub>折叠为图标栏</sub>
 
@@ -212,14 +212,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![个人标签和团队标签](https://filex.sh/shots/tags/tags-kinds-1440.64e4d6a5ccbc.png)
+![个人标签和团队标签](https://filex.sh/shots/tags/tags-kinds-1440.a4504c43e5cb.png)
 
 <sub>标签：你自己的，或者你团队的；一个标签会打开带这个标签的每个文件，无论这些文件在哪个文件夹里</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![回收站视图](https://filex.sh/shots/sidenav/view-trash-1440.ab3cfb3b01cf.png)
+![回收站视图](https://filex.sh/shots/sidenav/view-trash-1440.40f8904b147f.png)
 
 <sub>Trash（回收站）：删除了什么、原本在哪里，以及离清除还剩多久</sub>
 
@@ -228,14 +228,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![带未读角标的铃铛，已展开](https://filex.sh/shots/signing/bell-badge-1440.61396b9ab714.png)
+![带未读角标的铃铛，已展开](https://filex.sh/shots/signing/bell-badge-1440.e9232b261511.png)
 
 <sub>铃铛：未读数就在铃铛上，每一行都通向它所说的地方</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![覆盖在资源管理器之上的完整通知列表](https://filex.sh/shots/signing/notifications-list-1440.3176161f2110.png)
+![覆盖在资源管理器之上的完整通知列表](https://filex.sh/shots/signing/notifications-list-1440.669ce56b62d7.png)
 
 <sub>你的全部通知，都在资源管理器里：每个人都可以用，而不只是管理员</sub>
 
@@ -244,14 +244,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![主题编辑器](https://filex.sh/shots/appearance/theme-editor-1440.5b28006557f8.png)
+![主题编辑器](https://filex.sh/shots/appearance/theme-editor-1440.867a94807e72.png)
 
 <sub>Appearance（外观）：用你自己的颜色组合出一个主题，边输入边预览</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![套用了运维人员主题的资源管理器](https://filex.sh/shots/appearance/themed-explorer-1440.dbe464fc39c7.png)
+![套用了运维人员主题的资源管理器](https://filex.sh/shots/appearance/themed-explorer-1440.abc278616daa.png)
 
 <sub>设为默认之后，每个人的资源管理器套用的就是它…</sub>
 
@@ -260,14 +260,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![套用了运维人员主题的登录页](https://filex.sh/shots/appearance/themed-signin-1440.98801a84bea2.png)
+![套用了运维人员主题的登录页](https://filex.sh/shots/appearance/themed-signin-1440.b891c6431444.png)
 
 <sub>…登录页也是，这时还没有任何人登录</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![指向存储之外的符号链接，带有标记](https://filex.sh/shots/symlinks/symlink-badge-1440.0d128385d287.png)
+![指向存储之外的符号链接，带有标记](https://filex.sh/shots/symlinks/symlink-badge-1440.82a105d4239e.png)
 
 <sub>filex 不会跟随的符号链接会明确说明：既在列表里，也在它的详细信息里用文字写明</sub>
 
@@ -306,7 +306,7 @@ docker run -p 5212:5212 \
 
 存储与协议的全部功能：[docs/FEATURES.md → Storage and protocols](docs/FEATURES.md#storage-and-protocols)。
 
-<p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.8bfbe35780f4.png" alt="How to connect（如何连接）" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png" alt="How to connect（如何连接）" width="860"></p>
 
 <details>
 <summary><b>存储与协议截图</b> - 连接指南、API 密钥和一个存储插件</summary>
@@ -315,14 +315,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![How to connect](https://filex.sh/shots/sidenav/connect-1440.8bfbe35780f4.png)
+![How to connect](https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png)
 
 <sub>How to connect（如何连接）：各份指南，都根据*你的*部署生成</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.cfc100f30069.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.3464cb59b2f8.png)
 
 <sub>API keys（API 密钥）：在资源管理器或嵌入端里签发你自己的密钥（凭某个人的会话或令牌；用一个共享的*应用*令牌做代理的嵌入端没有这个条目）</sub>
 
@@ -331,14 +331,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![连接指南](https://filex.sh/shots/connections-guide.98a4f82ecd9d.png)
+![连接指南](https://filex.sh/shots/connections-guide.3999cf32c3d9.png)
 
 <sub>用什么都能访问 filex：S3、SFTP、FTPS、NFS、WebDAV。每条命令都根据*你的*部署生成</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Plugins](https://filex.sh/shots/admin-plugins.c25fa69cfc7c.png)
+![Plugins](https://filex.sh/shots/admin-plugins.6bd96bf65745.png)
 
 <sub>filex 未内置的一个存储：在 **Plugins → Storage plugins**（插件 > 存储插件）中以插件形式安装，配置表单由插件自己描述</sub>
 
@@ -370,7 +370,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![共享对话框](https://filex.sh/shots/share-modal.d6f6572228ea.png)
+![共享对话框](https://filex.sh/shots/share-modal.87cb16a1a6f0.png)
 
 <sub>共享：PIN、过期时间、下载次数上限、单行 `curl` 命令</sub>
 
@@ -402,14 +402,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.330fcc5fda73.png)
+![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.0fffdc146eb1.png)
 
 <sub>管理面板里的每张表格：每行一个固定的 **Actions**（操作）菜单，与资源管理器的 ⋮ 打开的是同一个菜单</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Admin → Encryption：策略设为须经批准，三个请求等待处理](https://filex.sh/shots/encryption/admin-encryption-1440.b74163acb93c.png)
+![Admin → Encryption：策略设为须经批准，三个请求等待处理](https://filex.sh/shots/encryption/admin-encryption-1440.35606d99b816.png)
 
 <sub>谁可以加密：关闭、仅限管理员、角色允许的每个人，或者经管理员批准之后；还有等待处理的请求，注明是谁提出的、为什么提出（[谁可以加密](docs/E2E-ENCRYPTION.md#who-may-encrypt)）</sub>
 
@@ -441,7 +441,7 @@ docker run -p 5212:5212 \
 
 人员与访问的全部功能：[docs/FEATURES.md → People and access](docs/FEATURES.md#people-and-access)。
 
-<p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png" alt="Admin → Roles：内置角色和两个自定义角色" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png" alt="Admin → Roles：内置角色和两个自定义角色" width="860"></p>
 
 <details>
 <summary><b>人员与访问截图</b> - 角色、群组、登录安全、被锁定的账户、管理面板及其菜单</summary>
@@ -450,14 +450,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Roles：内置角色和两个自定义角色](https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png)
+![Admin → Roles：内置角色和两个自定义角色](https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png)
 
 <sub>Roles（角色）：Administrator（管理员）、User（用户）、Viewer（查看者）以及你自己的角色，每个角色由谁持有、允许什么、在哪些文件夹上有所不同、有哪些限制（[docs/PERMISSIONS.md](docs/PERMISSIONS.md)）</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Admin → Groups](https://filex.sh/shots/groups/groups-list-1440.73224b70e40b.png)
+![Admin → Groups](https://filex.sh/shots/groups/groups-list-1440.22ff57b029f5.png)
 
 <sub>Groups（群组）：具名的一组人，带有文件夹访问权限和一个角色；成员手动添加，或者与登录带来的群组保持一致（[docs/GROUPS.md](docs/GROUPS.md)）</sub>
 
@@ -473,7 +473,7 @@ docker run -p 5212:5212 \
 </td>
 <td width="50%" valign="top">
 
-![Admin → Sign-in security](https://filex.sh/shots/loginsecurity/login-security-1440.077cec3f1b0a.png)
+![Admin → Sign-in security](https://filex.sh/shots/loginsecurity/login-security-1440.70f2a2a76257.png)
 
 <sub>Sign-in security（登录安全）：尝试次数限制，以及从不计数的允许地址；受信任的代理、锁定和登录记录在同一页面的下方（[登录尝试次数限制](docs/CONFIGURATION.md#sign-in-attempt-limits)）</sub>
 
@@ -482,14 +482,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![账户被锁定时的登录表单](https://filex.sh/shots/loginsecurity/login-locked-1440.3f4c6d3233f3.png)
+![账户被锁定时的登录表单](https://filex.sh/shots/loginsecurity/login-locked-1440.42e1fe6f1937.png)
 
 <sub>…以及账户被锁定时登录表单显示的内容，锁定的倒计时就在按钮上</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![管理仪表盘](https://filex.sh/shots/admin-dashboard.d94a065baab6.png)
+![管理仪表盘](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
 
 <sub>管理面板</sub>
 
@@ -498,16 +498,16 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![演示首页](https://filex.sh/shots/demo-landing.bb2b8d97d4ff.png)
+![演示首页](https://filex.sh/shots/demo-landing.64f23c6f8cb3.png)
 
 <sub>演示首页</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![管理菜单的 People & security 面板已打开，覆盖在 Admin → Users 之上](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png)
+![管理菜单的 Settings 面板已打开，覆盖在 Admin → Settings → General 之上](https://filex.sh/shots/megamenu/settings-panel-1440.23a710915f9c.png)
 
-<sub>管理菜单：所有页面分在 **Files & storage**（文件与存储）、**People & security**（人员与安全）和 **System**（系统）三个菜单面板里，每个页面下面都有一行简短说明；在手机上，同一批页面放在抽屉里（[docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md)）</sub>
+<sub>管理菜单：所有页面分在 **Files & storage**（文件与存储）、**People**（人员）、**Settings**（设置：General、Security & data、File processing & integrations）和 **Maintenance & records**（维护与记录）四个菜单面板里，每个页面下面都有一行简短说明；在手机上，同一批页面放在抽屉里（[docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md)）</sub>
 
 </td>
 </tr>
@@ -543,7 +543,7 @@ sudo snap install filex-app                 # the same snap as the badge above
 <details>
 <summary><b>关于安装和 CLI 的更多内容</b> - Store 版本、winget、发行版下载、Linux、arm64、客户端命令</summary>
 
-Store 版本（*filex File Manager*）是唯一经过代码签名的 Windows 版本（由 Microsoft 签名），并由 Store 负责更新。桌面应用的 winget 包（`BRFTech.filex-app`）随每个发行版提交，正在等待 winget 审核人员的首次审核，所以 `winget install BRFTech.filex-app` 目前还找不到它。安装程序、便携版 `.exe`、AppImage、`.deb`、`.rpm` 和 `.dmg` 都附在[最新发行版](https://github.com/BRF-Tech/filex/releases/latest)上，尚未经过代码签名，所以运行 Windows 安装程序时会出现 SmartScreen 提示。详见 [docs/DESKTOP.md](docs/DESKTOP.md)。单独安装 CLI：`brew install brf-tech/filex/filex`，在 Windows 上则用 `winget install BRFTech.filex`（[docs/CLI.md](docs/CLI.md)）。
+Store 版本（*filex File Manager*）是唯一经过代码签名的 Windows 版本（由 Microsoft 签名），并由 Store 负责更新。桌面应用的 winget 包（`BRFTech.filex-app`）正在等待 winget 审核人员的首次审核（在被接受之前，发行版不会改动这份提交），所以 `winget install BRFTech.filex-app` 目前还找不到它。安装程序、便携版 `.exe`、AppImage、`.deb`、`.rpm` 和 `.dmg` 都附在[最新发行版](https://github.com/BRF-Tech/filex/releases/latest)上，尚未经过代码签名，所以运行 Windows 安装程序时会出现 SmartScreen 提示。详见 [docs/DESKTOP.md](docs/DESKTOP.md)。单独安装 CLI：`brew install brf-tech/filex/filex`，在 Windows 上则用 `winget install BRFTech.filex`（[docs/CLI.md](docs/CLI.md)）。
 
 在 Linux 上，`.deb` 和 `.rpm` 什么都不需要；在 Ubuntu 23.10 及更高版本上，AppImage 需要一个一次性设置的 AppArmor 配置文件（[AppImage on recent Ubuntu](docs/DESKTOP.md#appimage-on-recent-ubuntu)），Snap 则运行在 snap 的严格隔离（strict confinement）之中（[The snap and the sandbox](docs/DESKTOP.md#the-snap-and-the-sandbox)）。每个发行版也都会为 arm64 构建：服务器、镜像，以及 Linux、Windows on Arm 和 Apple Silicon 上的桌面应用（[docs/INSTALLATION.md → ARM (arm64)](docs/INSTALLATION.md#arm-arm64)）。这个应用能做的一切：[docs/FEATURES.md → Desktop app, phone and CLI](docs/FEATURES.md#desktop-app-phone-and-cli)。
 
@@ -576,7 +576,7 @@ filex sync run --watch 30s
 <filex-explorer api-base="http://localhost:5212" sidenav connections ui-profile="simple"></filex-explorer>
 ```
 
-<p align="center"><img src="https://filex.sh/shots/sidenav/embed-webcomponent-1440.c8c25d893d24.png" alt="嵌入的 Web 组件" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/sidenav/embed-webcomponent-1440.b802d5b6ab56.png" alt="嵌入的 Web 组件" width="860"></p>
 
 <details>
 <summary><b>Vue 3 和 React</b> - 另外两种封装，以及详细说明在哪里</summary>
@@ -610,14 +610,14 @@ import { FileManager } from '@brftech/filex-react';
 <tr>
 <td width="50%" valign="top">
 
-![Shared with me](https://filex.sh/shots/sidenav/view-shared-1440.475ec2d8b49f.png)
+![Shared with me](https://filex.sh/shots/sidenav/view-shared-1440.faf6f6668c20.png)
 
 <sub>Shared with me（与我共享）：其他人授予你访问权限的文件夹，无需挂载说明</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![嵌入的 Web 组件](https://filex.sh/shots/sidenav/embed-webcomponent-1440.c8c25d893d24.png)
+![嵌入的 Web 组件](https://filex.sh/shots/sidenav/embed-webcomponent-1440.b802d5b6ab56.png)
 
 <sub>嵌入在另一个产品的页面中</sub>
 
@@ -692,7 +692,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 <tr>
 <td width="50%" valign="top">
 
-![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.9f93226381ed.png)
+![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.54c60e832ced.png)
 
 <sub>等待签署期间：文档对每个人都是冻结的，谁已签署，在文档的详细信息里可以看到</sub>
 
@@ -708,7 +708,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 <tr>
 <td width="50%" valign="top">
 
-![已安装应用的详情](https://filex.sh/shots/apps/apps-detail-1440.4e27b40c5ce7.png)
+![已安装应用的详情](https://filex.sh/shots/apps/apps-detail-1440.b7f6ec845458.png)
 
 <sub>已安装的应用：它从哪里来、指纹是什么，以及它持有的每一项权限，用直白的文字写明（它的设置和操作接在后面，在页面更靠下的地方）</sub>
 
@@ -724,7 +724,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 <tr>
 <td width="50%" valign="top">
 
-![自带界面的应用的安装审核](https://filex.sh/shots/apps/app-interface-review-1440.51df0aa460ad.png)
+![自带界面的应用的安装审核](https://filex.sh/shots/apps/app-interface-review-1440.877a89c82359.png)
 
 <sub>自带界面的应用：审核时会显示应用包的指纹、应用包之外的每个地址（实时加载的地址是一项权限，以黄色显示），以及浏览器无法保证的事</sub>
 
@@ -763,7 +763,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 </td>
 <td width="50%" valign="top">
 
-![Plugins → Default apps](https://filex.sh/shots/defaultapps/default-apps-1440.27d3c64fe457.png)
+![Plugins → Default apps](https://filex.sh/shots/defaultapps/default-apps-1440.0dd62b519f8f.png)
 
 <sub>Default apps（默认应用）：每一种由 filex 之外的东西处理的文件，谁来打开它、谁来绘制它的缩略图，按你设定的顺序（[默认应用](docs/APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)）</sub>
 
@@ -772,14 +772,14 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 <tr>
 <td width="50%" valign="top">
 
-![用最新文件绘制的文件夹](https://filex.sh/shots/thumbnails/folders-grid-1440.2b408fb54f7e.png)
+![用最新文件绘制的文件夹](https://filex.sh/shots/thumbnails/folders-grid-1440.dd7653d6edca.png)
 
 <sub>文件夹预览：每个文件夹用最近进入其中的三个文件绘制；这些 SVG 由 filex 的内置引擎绘制（[docs/thumbnails.md](docs/thumbnails.md#folder-previews)）</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![从商店链接打开的安装审核](https://filex.sh/shots/store/store-review-1440.d93b2b571d93.png)
+![从商店链接打开的安装审核](https://filex.sh/shots/store/store-review-1440.36cf3bbc2a50.png)
 
 <sub>从商店安装：同样的审核，标为 **From store**（来自商店），付费应用的许可证密钥只显示开头几个字符（[Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store)）</sub>
 
@@ -788,14 +788,14 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 <tr>
 <td width="50%" valign="top">
 
-![来自商店的第一个链接：要信任它吗？](https://filex.sh/shots/store/store-trust-1440.94bebecac9fe.png)
+![来自商店的第一个链接：要信任它吗？](https://filex.sh/shots/store/store-trust-1440.8fb07862db1a.png)
 
 <sub>来自某个商店的第一个链接：它的地址和它的密钥指纹，信任之前先比对（[受信任的商店](docs/APP-PLUGINS.md#trusted-stores)）</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![被搁置的付费应用，管理页面上的横幅](https://filex.sh/shots/store/store-license-held-1440.2dd9518d7e87.png)
+![被搁置的付费应用，管理页面上的横幅](https://filex.sh/shots/store/store-license-held-1440.6fd145640e0f.png)
 
 <sub>商店吊销了的许可证：应用被搁置，显示 *Unlicensed*（未授权），什么都没删除，每个管理页面上都有一条横幅（[付费应用](docs/APP-PLUGINS.md#paid-apps)）</sub>
 
@@ -887,7 +887,7 @@ filex 可以运行在独立的主机的根路径上，也可以运行在共用�
 | **共享** | 带 PIN、过期时间和下载次数上限的公开链接，文件请求，以及通过电子邮件发送的共享邀请（[共享](docs/SHARING.md)） |
 | **防护** | 回收站和版本历史、可选的 ClamAV 扫描、端到端加密文件夹、复制到第二个存储（已有的文件会先做一次初始复制），以及审计日志（[回收站与版本管理](docs/TRASH-VERSIONING.md)、[防护](docs/PROTECTION.md)、[端到端加密](docs/E2E-ENCRYPTION.md)、[复制](docs/REPLICATION.md)、[审计日志](docs/BACKEND.md#admin-audit-log)） |
 | **查看器与编辑器** | 图片、视频、音频、PDF、Markdown、代码（Monaco）、在办公编辑器应用中或通过 ONLYOFFICE 处理的 Office 文档、draw.io 图表、可绘制也可作为文本编辑的 Mermaid 图表、3D 模型，以及 ZIP、7z 和 TAR 压缩包（[ONLYOFFICE](docs/ONLYOFFICE.md)、[压缩包](docs/ARCHIVES.md)） |
-| **搜索与缩略图** | 遵循权限的内嵌全文搜索，以及图片、视频、PDF 和文件夹的缩略图；连接了 ONLYOFFICE 时还有 Office 文档的缩略图（[搜索](docs/SEARCH.md)、[缩略图](docs/thumbnails.md)） |
+| **搜索与缩略图** | 遵循权限的内嵌全文搜索，以及图片、视频、PDF、文件夹和 Office 文档的缩略图；Office 文档的缩略图由服务器上的 Office 编辑器应用引擎或已连接的 ONLYOFFICE 绘制（[搜索](docs/SEARCH.md)、[缩略图](docs/thumbnails.md)） |
 | **实时** | 基于 WebSocket 的在线状态和实时文件更新，以及通过 filex 的中继在应用中多人一起编辑文件（[实时](docs/REALTIME.md)、[一起编辑](docs/APP-PLUGINS-API.md#editing-together-coedit-056)） |
 | **客户端** | 带文件夹同步的桌面应用、可以在手机上以你的实例名称和徽标安装的 Web 应用、CLI、Vue / React / Web 组件嵌入、REST API 和 MCP 服务器（[桌面应用](docs/DESKTOP.md)、[同步](docs/SYNC.md)、[CLI](docs/CLI.md)、[集成](docs/INTEGRATION.md)、[MCP](docs/MCP.md)） |
 | **应用与语言** | 沙箱化的应用（e-Signature、Convert、Office editor、filextext、draw.io），通过 filex 打印，通过它的中继多人一起编辑文件，只有在你允许时才会打开加密文件夹中的文件，并在你的浏览器中解密；语言包和从右到左布局（[应用](docs/APP-PLUGINS.md)、[在应用中编辑](docs/E2E-ENCRYPTION.md#editing-in-an-app)、[RTL](docs/RTL.md)） |

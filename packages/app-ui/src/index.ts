@@ -42,6 +42,7 @@ import {
   type CoEditAppendResult,
   type CoEditLeaseResult,
   type CoEditBlobGetResult,
+  type CsvDeclaration,
 } from './protocol';
 
 export * from './protocol';
@@ -64,6 +65,12 @@ export interface OpenedFile extends FileInfo {
   text(): Promise<string>;
   bytes(): Promise<ArrayBuffer>;
   stream(): Promise<ReadableStream<Uint8Array>>;
+  /**
+   * The whole answer of a read (filex 0.57): the content `as` asks for, and
+   * what filex knows about how the file is written (`text_dialect`, for a
+   * `.csv`).
+   */
+  read(as?: 'stream' | 'bytes' | 'text'): Promise<ReadResult>;
   /** Save new content over this file (a new version, or the draft it is). */
   save(data: SaveData, mime?: string): Promise<SaveResult>;
 }
@@ -87,9 +94,18 @@ export interface FilexApp {
   /**
    * Save new content over an opened file. `through` (filex 0.56, editing
    * together): the last log entry the saved document holds, so the session
-   * knows what is saved.
+   * knows what is saved. `csv` (filex 0.57): how the CSV saved over a `.csv`
+   * is written (CsvDeclaration); filex checks it against the bytes and
+   * writes the file in its own way. `beside` (filex 0.57): the save is in
+   * this format, which the file cannot hold - written beside it under a name
+   * filex chooses (`SaveResult.name`). `conflict: 'copy'` (filex 0.57): a
+   * file that changed since it was opened gets the save as a conflict copy
+   * (`SaveResult.conflict`) instead of a refusal.
    */
-  save(data: SaveData, opts?: { index?: number; mime?: string; through?: number }): Promise<SaveResult>;
+  save(
+    data: SaveData,
+    opts?: { index?: number; mime?: string; through?: number; csv?: CsvDeclaration; beside?: string; conflict?: 'copy' },
+  ): Promise<SaveResult>;
   /** Save a NEW file; filex asks the person where (its own folder picker). */
   saveAs(name: string, data: SaveData, mime?: string): Promise<SaveAsResult>;
   /** Unsaved changes, or not: filex asks before the person leaves them. */
@@ -339,6 +355,7 @@ function bridge(port: MessagePort, opts: ConnectOptions): FilexApp {
         text: () => read('text', 'text'),
         bytes: () => read('bytes', 'bytes'),
         stream: () => read('stream', 'stream'),
+        read: (as: 'stream' | 'bytes' | 'text' = 'bytes') => request<ReadResult>('file.read', { index, as }),
         save: (data: SaveData, mime?: string) => app.save(data, { index, mime }),
       };
     },
@@ -346,6 +363,9 @@ function bridge(port: MessagePort, opts: ConnectOptions): FilexApp {
       const p = await payload(data);
       const params: Record<string, unknown> = { index: o.index ?? 0, data: p.data, mime: o.mime };
       if (typeof o.through === 'number') params.through = o.through;
+      if (o.csv) params.csv = { ...o.csv };
+      if (o.beside) params.beside = o.beside;
+      if (o.conflict) params.conflict = o.conflict;
       return request<SaveResult>('file.save', params, p.transfer);
     },
     async saveAs(name, data, mime) {

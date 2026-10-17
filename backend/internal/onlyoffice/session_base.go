@@ -65,13 +65,13 @@ import (
 	"io"
 	"log/slog"
 	"path"
-	"strings"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/memcache"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/officesave"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -472,36 +472,25 @@ func (s *Service) DropSession(ctx context.Context, node *model.Node, key string)
 	return s.putBase(ctx, key, *b)
 }
 
-// conflictName is `<stem>.filex-conflict-<UTC time>.<ext>` - the desktop
-// app's conflict copy name too (desktop/src/openwith.ts conflictPathFor).
-func conflictName(name string, now time.Time) string {
-	ext := path.Ext(name)
-	stem := strings.TrimSuffix(name, ext)
-	if stem == "" {
-		stem, ext = name, ""
-	}
-	return stem + ".filex-conflict-" + now.UTC().Format("20060102T150405") + ext
-}
-
 // saveConflict writes a stale session's save beside the document as a
 // conflict copy, for one of the session's editors who may create it there.
 func (s *Service) saveConflict(ctx context.Context, drv storage.Driver, writer storage.Writer, node *model.Node, src io.Reader, length int64, key string, users []string) (map[string]any, error) {
-	target, err := s.freeBeside(ctx, drv, node, path.Join(path.Dir(node.Path), conflictName(node.Name, time.Now())))
+	env := s.besideEnv(ctx, drv, writer, node)
+	target, err := env.ConflictTarget(ctx, node, "", time.Now())
 	if err != nil {
 		return map[string]any{"error": 1, "message": "no free name beside the document"}, nil
 	}
-	ext := docExt(node.Name)
+	ext := officesave.DocExt(node.Name)
 	slog.Info("onlyoffice callback: the document changed while it was edited",
 		slog.Int64("storage", node.StorageID), slog.String("path", node.Path), slog.String("saved", target))
-	return s.writeBeside(ctx, drv, writer, node, src, length, key, users, besideSave{
-		target:   target,
-		got:      ext,
-		mime:     assoc.MimeOf(ext),
-		titleKey: savedConflictTitle,
-		bodyKey:  savedConflictBody,
-		vars:     srvtext.Vars{"name": node.Name, "saved": path.Base(target)},
-		action:   AuditActionSavedConflict,
-		why:      "changed while it was edited",
-		noCreate: refusedConflictNoCreate,
-	})
+	return s.writeBeside(ctx, env, node, src, length, key, users, besideSave{Save: officesave.Save{
+		Target:   target,
+		Format:   ext,
+		Mime:     assoc.MimeOf(ext),
+		TitleKey: savedConflictTitle,
+		BodyKey:  savedConflictBody,
+		Vars:     srvtext.Vars{"name": node.Name, "saved": path.Base(target)},
+		Action:   AuditActionSavedConflict,
+		Why:      "changed while it was edited",
+	}, noCreate: refusedConflictNoCreate})
 }

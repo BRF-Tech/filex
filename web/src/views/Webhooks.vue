@@ -19,6 +19,7 @@ import Checkbox from '@/components/ui/Checkbox.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Select from '@/components/ui/Select.vue';
 import GlobalWebhookCard from '@/components/GlobalWebhookCard.vue';
+import InstanceSettingsCard from '@/components/settings/InstanceSettingsCard.vue';
 import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
@@ -318,6 +319,9 @@ function onRowAction(key: string, row: WebhookTarget) {
     <!-- The default webhook sits beside the targets so every place an event
          goes is set on ONE page (it used to be on the notifications page). -->
     <GlobalWebhookCard />
+    <!-- The default webhook's language (FILEX_WEBHOOK_LANG until 0.57,
+         task #258); a target's own is set in its form below. -->
+    <InstanceSettingsCard group="webhooks" />
 
     <DataTable
       table-id="admin.webhooks"

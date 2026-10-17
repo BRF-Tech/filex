@@ -7,10 +7,12 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  encodeHashPath,
   explorerHashPath,
   isNotificationClickable,
   notificationHref,
   notificationRoute,
+  qualifiedFromHash,
   resolveNotificationTarget,
   sameRowPath,
   shareHref,
@@ -257,5 +259,29 @@ describe('an app page target', () => {
   it('half an address is no address', () => {
     expect(resolveNotificationTarget({ kind: 'app', open: { plugin: 'sign' } })).toEqual({ kind: 'none' });
     expect(resolveNotificationTarget({ kind: 'app' })).toEqual({ kind: 'none' });
+  });
+});
+
+// Task #238: a folder's name in the address a notification opens. The
+// explorer writes its hash one segment at a time (encodeHashPath) and reads it
+// back with one decode, so the link must be written the same way - and a
+// route.hash vue-router already decoded must not be decoded again.
+describe('hostile folder names in a notification link', () => {
+  const folders = ['a%20b', '100%', 'issue #42', 'why?', 'Bütçe ğüşıöç', '100%41'];
+
+  for (const folder of folders) {
+    it(`${JSON.stringify(folder)} survives the link and comes back as itself`, () => {
+      const href = notificationHref({ kind: 'folder', storage: 'docs', folder }, '/drive/');
+      const hash = href.slice(href.indexOf('#'));
+      expect(hash).toBe(`#${encodeHashPath(`docs/${folder}`)}`);
+      // The browser hands the hash over as written; the explorer decodes once.
+      expect(qualifiedFromHash(hash)).toBe(`docs://${folder}`);
+      // vue-router's route.hash is that decoded string already.
+      expect(qualifiedFromHash(`#docs/${folder}`, { decoded: true })).toBe(`docs://${folder}`);
+    });
+  }
+
+  it('a plain folder still reads as it always did', () => {
+    expect(encodeHashPath('qldemo/Documents')).toBe('qldemo/Documents');
   });
 });

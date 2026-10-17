@@ -87,6 +87,23 @@ describe('fromManagerRoot', () => {
     expect(fromManagerRoot({ storages: ['arsiv'], storage_info: null })).toEqual([{ name: 'arsiv', label: 'arsiv' }]);
   });
 
+  it('carries the caller’s level at each root, so the explorer offers "Access…" to its owner (#117)', () => {
+    const out = fromManagerRoot({
+      storages: ['team', 'shared', 'old'],
+      storage_info: [
+        { name: 'team', read_only: false, perm: 'owner' },
+        { name: 'shared', read_only: false, perm: 'editor' },
+        // A word the server does not say is not a level.
+        { name: 'old', read_only: false, perm: 'root' },
+      ],
+    });
+    expect(out.map((s) => [s.name, s.perm])).toEqual([
+      ['team', 'owner'],
+      ['shared', 'editor'],
+      ['old', undefined],
+    ]);
+  });
+
   it('survives a body without a storages array', () => {
     expect(fromManagerRoot({})).toEqual([]);
     expect(fromManagerRoot(null)).toEqual([]);

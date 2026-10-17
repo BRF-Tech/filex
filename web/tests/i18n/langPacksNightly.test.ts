@@ -986,7 +986,12 @@ describe("a night: the Claude account's limit", () => {
     expect(report).toContain(`Claude account limit (429): "${SAID}"`);
     expect(report).toContain('lang-es es: 0 translated, 2 left - not started: Claude account limit (429), tried again next night');
     // Not what 2026-10-09 said: no refusal, no list of empty answers.
-    for (const word of ['refused', 'UNTRANSLATED', 'RED']) expect(report, word).not.toContain(word);
+    // ⚠ Read without the `tree:` line: it quotes the checkout's own commit
+    // subject, and a HEAD called "... a refused new name ..." made this red
+    // (fix/057-int-reds c75ca074c) with the night saying nothing of the kind.
+    const said = report.split('\n').filter((l) => !l.startsWith('tree: ')).join('\n');
+    expect(report).toMatch(/^tree: /m);
+    for (const word of ['refused', 'UNTRANSLATED', 'RED']) expect(said, word).not.toContain(word);
     expect(r.out).toContain(SAID);
     // The session's own log stays where a person looks for it.
     expect(fs.readFileSync(path.join(rec.night, 'logs', 'filex-lang-de-agent-1.json'), 'utf8')).toContain('usage_limit_reached');

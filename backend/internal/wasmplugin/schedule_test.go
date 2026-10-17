@@ -423,10 +423,15 @@ func TestSchedule_ATrappingTickIsContainedAndNotRetriedInsideTheHour(t *testing.
 
 func TestSchedule_ASlowTickIsCutOffByItsBudget(t *testing.T) {
 	h := newHarness(t, nil)
-	// A one-second ceiling, so the test does not sit through the default.
-	p, q := h.installScheduled(t, map[string]string{"tick_mode": "slow"}, func(m map[string]any) {
-		m["limits"] = map[string]any{"call_timeout_s": 1}
-	})
+	p, q := h.installScheduled(t, map[string]string{"tick_mode": "slow"}, nil)
+	// A one-second ceiling, so the test does not sit through the default -
+	// set AFTER the install (task #182). Declared in the manifest, the same
+	// second also bounded the install's own describe call, whose budget
+	// includes starting the module: under -race on the busy build host that
+	// alone took more than a second, and the test died in install with
+	// "describe (timeout): the plugin did not finish within 1s" (full chain
+	// gl-2924679562, 2026-10-08) before it reached the tick it is about.
+	p.Manifest.Limits.CallTimeoutS = 1
 	assert.Equal(t, 1, TickTimeout(p.Manifest))
 
 	started := time.Now()

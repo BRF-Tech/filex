@@ -186,15 +186,31 @@ describe('a release cannot publish before its images build', () => {
     expect(body).not.toMatch(/needs\.test\./);
     // a tag run: both runs, on THIS commit, successful
     expect(body).toMatch(/SHA: \$\{\{ github\.sha \}\}/);
-    const ci = script.match(/actions\/workflows\/ci\.yml\/runs[\s\S]*?--jq '([^']*)'/);
+    // Every ci.yml question is on this commit's push run. A full release asks
+    // for that run to have passed whole; a server patch (#252,
+    // release-surfaces.patch, `surfaces: server`) picks the run and waits for
+    // ITS part to end "completed success", and any other end publishes nothing.
+    const ciAll = [...script.matchAll(/actions\/workflows\/ci\.yml\/runs[\s\S]*?--jq '([^']*)'/g)].map((m) => m[1]);
     const dry = script.match(/actions\/workflows\/release\.yml\/runs[\s\S]*?--jq '([^']*)'/);
-    expect(ci, 'asks for the ci.yml runs').not.toBeNull();
+    expect(ciAll.length, 'asks for the ci.yml runs').toBeGreaterThan(0);
     expect(dry, 'asks for the release.yml runs').not.toBeNull();
-    for (const [what, m, event] of [['ci.yml', ci, 'push'], ['the dry run', dry, 'workflow_dispatch']] as const) {
-      const jq = m![1];
-      expect(jq, `${what}: on this commit`).toContain('.head_sha == env.SHA');
-      expect(jq, `${what}: started by ${event}`).toContain(`.event == "${event}"`);
-      expect(jq, `${what}: passed`).toContain('.conclusion == "success"');
+    for (const jq of ciAll) {
+      expect(jq, 'ci.yml: on this commit').toContain('.head_sha == env.SHA');
+      expect(jq, 'ci.yml: started by push').toContain('.event == "push"');
+    }
+    expect(
+      ciAll.some((jq) => jq.includes('.conclusion == "success"')),
+      'ci.yml: a full release publishes only a commit whose push run passed',
+    ).toBe(true);
+    if (ciAll.some((jq) => !jq.includes('.conclusion == "success"'))) {
+      expect(script, 'a server patch: its part passed').toMatch(/"completed success"\) break ;;/);
+      expect(script, 'a server patch: any other end of its part publishes nothing').toMatch(/completed\*\)\s*\n[^\n]*publishes nothing[^\n]*\n\s*exit 1 ;;/);
+    }
+    {
+      const jq = dry![1];
+      expect(jq, 'the dry run: on this commit').toContain('.head_sha == env.SHA');
+      expect(jq, 'the dry run: started by workflow_dispatch').toContain('.event == "workflow_dispatch"');
+      expect(jq, 'the dry run: passed').toContain('.conclusion == "success"');
     }
     // the dry run of EVERYTHING, by the name run-name gives it
     expect(dry![1]).toContain('.display_title == env.WANT');
@@ -202,10 +218,11 @@ describe('a release cannot publish before its images build', () => {
     // #174: and the CI run was the FULL matrix - its last job passed
     // (scripts/ci-parts.mjs, completeName; the name pinned here as text)
     expect(script).toMatch(/export COMPLETE="All tests \(full\)"/);
-    const jobs = script.match(/actions\/runs\/\$ci\/jobs[\s\S]*?--jq '([^']*)'/);
-    expect(jobs, "asks for the jobs of that ci.yml run").not.toBeNull();
-    expect(jobs![1]).toContain('.name == env.COMPLETE');
-    expect(jobs![1]).toContain('.conclusion == "success"');
+    // (a server patch asks the same run for its own part, env.PART, above)
+    const jobs = [...script.matchAll(/actions\/runs\/\$ci\/jobs[\s\S]*?--jq '([^']*)'/g)].map((m) => m[1]).find((jq) => jq.includes('env.COMPLETE'));
+    expect(jobs, "asks for the jobs of that ci.yml run").toBeDefined();
+    expect(jobs!).toContain('.name == env.COMPLETE');
+    expect(jobs!).toContain('.conclusion == "success"');
     // either missing: red, and nothing after it runs - unless CircleCI's ci
     // workflow passed on the commit (#181, releaseVerifyCircleci.test.ts)
     expect(script).toMatch(/if \[ "\$missing" -ne 0 \]; then[\s\S]*?exit 1/);

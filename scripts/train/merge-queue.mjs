@@ -19,7 +19,13 @@
 //                    checkout), e.g. --check 'pnpm -s --filter ./web build'
 //   --no-go          skip the Go build + vet after every merge
 //   --env FILE       settings (default: $FILEX_TRAIN_ENV, else
-//                    ~/.config/filex-train.env): who is told when it ends
+//                    ~/.config/filex-train.env): who is told when it ends, and
+//                    where the private pipeline is (EMBARGO_API,
+//                    EMBARGO_TOKEN_FILE; scripts/lib/embargo.mjs)
+//   --embargo-unchecked WHY
+//                    merge an embargoed branch (sec/<name>) whose tip has no
+//                    green chain anyway; WHY goes into its merge commit as an
+//                    `Embargo-Unchecked:` trailer and into the queue's report
 //
 // A queue line:   <branch> [<message file>]     (# starts a comment)
 //
@@ -36,6 +42,11 @@
 // person is needed.
 //
 // What it does for each line, in order:
+//   0. an embargoed branch (sec/<name>) enters only with a green chain on its
+//      tip, asked of the private pipeline before anything is merged (task
+//      #182: one was pushed with `-o ci.skip` and reached main without the
+//      chain ever running on it) - or with --embargo-unchecked, said in the
+//      commit;
 //   1. a branch whose tip is already in the release branch is skipped - so
 //      running the queue again after a stop carries on where it stopped;
 //   2. `git merge --no-ff --no-commit <tip>` with rerere on: a conflict
@@ -55,6 +66,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { chainVerdict, embargoSettings, isEmbargoed, pipelinesFor, readToken } from '../lib/embargo.mjs';
 import { goShellArgv } from '../lib/go-build.mjs';
 import { announce } from '../lib/notify.mjs';
 import { loadSettings } from '../lib/settings.mjs';
@@ -108,7 +120,7 @@ export function goCheckScript() {
 
 /** The command line, parsed. */
 export function parseArgs(argv) {
-  const o = { queue: null, onto: 'main', msgDir: null, repo: null, plan: false, checks: [], go: true, env: '' };
+  const o = { queue: null, onto: 'main', msgDir: null, repo: null, plan: false, checks: [], go: true, env: '', embargoUnchecked: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
@@ -124,11 +136,36 @@ export function parseArgs(argv) {
     else if (a === '--check') o.checks.push(next());
     else if (a === '--no-go') o.go = false;
     else if (a === '--env') o.env = next();
-    else if (a === '-h' || a === '--help') o.help = true;
+    else if (a === '--embargo-unchecked') {
+      o.embargoUnchecked = next().trim();
+      if (!o.embargoUnchecked) throw new Error('--embargo-unchecked needs the reason, in words');
+    } else if (a === '-h' || a === '--help') o.help = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (!o.help && !o.queue) throw new Error('--queue FILE is required');
   return o;
+}
+
+/**
+ * Why an embargoed row may not be merged, or '' when it may: its tip's chain
+ * is green on the private pipeline (scripts/lib/embargo.mjs). `ask` is
+ * pipelinesFor (a test hands its own). Not embargoed, already merged, or
+ * waved through with --embargo-unchecked: ''.
+ */
+export async function embargoProblem(row, { settings, unchecked = '', ask = pipelinesFor, token = readToken } = {}) {
+  if (!isEmbargoed(row.branch) || row.merged || !row.tip || unchecked) return '';
+  const where = embargoSettings(settings);
+  if (!where) {
+    return `${row.branch}: an embargoed branch enters only with a green chain on its tip, and the settings do not say where the private pipeline is (EMBARGO_API, EMBARGO_TOKEN_FILE) - or say why not with --embargo-unchecked "<why>"`;
+  }
+  let pipelines;
+  try {
+    pipelines = await ask({ api: where.api, token: token(where.tokenFile), sha: row.tip });
+  } catch (e) {
+    return `${row.branch}: the private pipeline could not be asked about ${row.tip.slice(0, 10)} (${e.message}) - or say why not with --embargo-unchecked "<why>"`;
+  }
+  const v = chainVerdict(pipelines);
+  return v.ok ? '' : `${row.branch}: ${v.why} on ${row.tip.slice(0, 10)} - run it (a push without -o ci.skip, or the pipeline by hand) and run the queue again, or say why not with --embargo-unchecked "<why>"`;
 }
 
 const USAGE = usageOf(import.meta.url);
@@ -188,7 +225,11 @@ async function main(argv) {
   for (const r of rows) {
     if (!r.tip) problems.push(`${r.branch}: no such branch`);
     else if (!r.merged && !r.msgOk) problems.push(`${r.branch}: no message - write ${slash(r.msg)} (English, the merge commit's whole message)`);
+    const embargo = await embargoProblem(r, { settings: settings.env, unchecked: o.embargoUnchecked });
+    if (embargo) problems.push(embargo);
   }
+  const waved = rows.filter((r) => isEmbargoed(r.branch) && !r.merged && r.tip && o.embargoUnchecked).map((r) => r.branch);
+  if (waved.length) console.log(yellow(`embargoed, merged without a green chain on the tip (--embargo-unchecked): ${waved.join(', ')} - ${o.embargoUnchecked}\n`));
 
   console.log(`${bold('merge queue')} onto ${bold(o.onto)} in ${slash(repo)} ${dim(`(${slash(queueFile)})`)}\n`);
   rows.forEach((r, i) => {
@@ -277,7 +318,10 @@ async function main(argv) {
       exit = 1;
       break;
     }
-    const commit = run('git', ['-C', repo, '-c', 'rerere.enabled=true', 'commit', '--cleanup=whitespace', '-F', r.msg]);
+    // An embargoed branch merged without its chain says so in its own commit,
+    // where the history keeps it (task #182).
+    const trailer = waved.includes(r.branch) ? ['--trailer', `Embargo-Unchecked: ${o.embargoUnchecked}`] : [];
+    const commit = run('git', ['-C', repo, '-c', 'rerere.enabled=true', 'commit', '--cleanup=whitespace', '-F', r.msg, ...trailer]);
     if (commit.status !== 0) {
       abortMerge(repo);
       stop = `${r.branch}: git commit failed (the merge was aborted):\n${(commit.stderr || commit.stdout).trim()}`;
@@ -332,7 +376,8 @@ async function main(argv) {
 
   const result = exit === 0 ? 'ok' : exit === 3 ? 'waiting' : 'red';
   const title = `filex merge queue onto ${o.onto}: ${exit === 0 ? 'done' : exit === 3 ? 'waiting for a person' : 'RED'} (${since(t0)})`;
-  await announce(settings.env, { title, message: [...done, ...(left.length ? [`not reached: ${left.join(', ')}`] : []), ...(stop ? ['', stop] : [])].join('\n'), result }, {
+  const wavedLine = waved.length ? [`embargoed without a green chain (--embargo-unchecked): ${waved.length} branch(es) - ${o.embargoUnchecked}`] : [];
+  await announce(settings.env, { title, message: [...done, ...wavedLine, ...(left.length ? [`not reached: ${left.join(', ')}`] : []), ...(stop ? ['', stop] : [])].join('\n'), result }, {
     log: (l) => console.log(`  ${dim(l)}`),
   });
   return exit;

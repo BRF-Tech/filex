@@ -211,11 +211,11 @@ async function main() {
           await m.waitForFunction((l) => document.documentElement.lang === l, locale, { timeout: 20_000 });
           await openVault(m);
           await unlock(m);
-          // The filter row scrolls on itself at 390 px, its "Listing actions"
-          // pinned over the chips that slide under it (base.css
-          // .fe-filterbar, .fe-filterbar__actions): the row must fit, not
-          // what it scrolls.
-          for (const x of await layoutProblems(m, { scrollers: ['.fe-filterbar'] })) problems.push(`${scheme} ${width}px ${locale}: ${x}`);
+          // The filter row's TRACK scrolls on itself at 390 px, and its
+          // "Listing actions" ⋮ sits after the track, outside it (base.css
+          // .fe-filterbar__track, task #264): the track must fit, not what
+          // it scrolls, and the ⋮ is measured like any other control.
+          for (const x of await layoutProblems(m, { scrollers: ['.fe-filterbar__track'] })) problems.push(`${scheme} ${width}px ${locale}: ${x}`);
         }
         await setLanguage(admin, m, 'en');
         await mctx.close();

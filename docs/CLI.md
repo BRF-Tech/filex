@@ -129,11 +129,11 @@ that must not touch your real state - both ignored when empty:
 | Variable | Default | What it moves |
 |---|---|---|
 | `FILEX_CLI_CONFIG` | `~/.filex/cli.yaml` | The saved URL + token (and the [realm](#multi-tenant-servers-the-realm) it was signed in to) |
-| `FILEX_SYNC_DIR` | `~/.filex/sync` | The [sync](SYNC.md) pairs, per-pair baselines and local trash |
+| `FILEX_SYNC_DIR` | `~/.filex/sync` | The [sync](SYNC.md) pairs and per-pair baselines |
 
 The [portable desktop app](DESKTOP.md#portable-windows) sets `FILEX_SYNC_DIR`
 for exactly this reason: its whole promise is that everything it keeps sits in
-one folder beside the `.exe`, and the sync trash holds real copies of deleted
+one folder beside the `.exe`, and the pairs name another person's folders and
 files.
 
 ### Interactive login

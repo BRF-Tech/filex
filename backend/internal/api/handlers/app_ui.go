@@ -19,6 +19,7 @@
 package handlers
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"log/slog"
@@ -33,6 +34,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/officesave"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
@@ -92,9 +94,9 @@ func (h *AppPlugins) UISave(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	// The kind it writes: the file it was opened with, or the new name.
-	target := strings.TrimSpace(q.Get("path"))
+	target := keptPath(q.Get("path"))
 	if target == "" {
-		target = strings.TrimSpace(q.Get("name"))
+		target = keptPath(q.Get("name"))
 	}
 	if !h.openAllowed(w, r, p, v, path.Base(strings.ReplaceAll(target, "\\", "/"))) {
 		return
@@ -117,11 +119,11 @@ func (h *AppPlugins) UISave(w http.ResponseWriter, r *http.Request) {
 	}
 	defer cleanup()
 	uid := u.ID
-	if target := strings.TrimSpace(q.Get("path")); target != "" {
+	if target := keptPath(q.Get("path")); target != "" {
 		h.uiSaveOver(w, r, p, v, target, body, size, uid)
 		return
 	}
-	h.uiSaveNew(w, r, p, v, strings.TrimSpace(q.Get("dir")), strings.TrimSpace(q.Get("name")), body, size, uid)
+	h.uiSaveNew(w, r, p, v, keptPath(q.Get("dir")), keptPath(q.Get("name")), body, size, uid)
 }
 
 // uiSaveOver writes a new version of a file the interface was opened with —
@@ -195,17 +197,52 @@ func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmp
 	if !(e2eSave && kind == encryptedInFolder && e2eKindUnreadable(r.Context(), h.Store, drv, storageID, rel)) && !viewSaves(w, r, v, rel, obj.Mime) {
 		return
 	}
+	// What the save asks beyond its bytes (filex 0.57, app_ui_beside.go):
+	// `beside=<ext>`, a format the file cannot hold, written beside it;
+	// `conflict=copy`, a conflict copy instead of a refusal.
+	aside, ok := uiAsideOf(w, r, rel, e2eSave)
+	if !ok {
+		return
+	}
 	// "Only over the file as the app opened it" (`expect`, the listing's
 	// size and date - upload_expect.go): asked when the explorer sends it, as
 	// it does for a file of an encrypted folder, so a version written
 	// meanwhile is never overwritten unseen.
 	// In an editing session (coedit.go) the session says it instead: the
 	// file must be what the session holds - its base or its last save -
-	// whoever of its members saved it last.
-	inSession, sessionHolds := h.coeditSaveHolds(r, p, drv, storageID, rel)
-	if (inSession && !sessionHolds) || (!inSession && !uploadExpectHolds(r.Context(), h.Store, h.StorageResolver, storageID, rel, r.URL.Query().Get("expect"))) {
+	// whoever of its members saved it last; a session whose saves already go
+	// beside the file (savedTo) asks it of that file, and writes there.
+	inSession, sessionHolds, savedTo := h.coeditSaveHolds(r, p, drv, storageID, rel)
+	holds := sessionHolds
+	if !inSession {
+		holds = uploadExpectHolds(r.Context(), h.Store, h.StorageResolver, storageID, rel, r.URL.Query().Get("expect"))
+	}
+	at := rel
+	if savedTo != "" {
+		at = savedTo
+	}
+	switch {
+	case !holds && !aside.copy:
 		writeErrorSaid(w, r, http.StatusPreconditionFailed, "changed", "app_save_changed", apierr.Params{"name": rel})
 		return
+	case !holds:
+		h.uiSaveAside(w, r, p, v, st, drv, rel, at, aside.ext(at), true, body, size, uid)
+		return
+	case at == rel && aside.besideOf(rel):
+		h.uiSaveAside(w, r, p, v, st, drv, rel, rel, aside.beside, false, body, size, uid)
+		return
+	case at != rel:
+		// A version of the file the session's saves go to: the person's
+		// files.modify there, and the kind the view saves.
+		if pv := aclCanID(r.Context(), h.ACL, h.Store, storageID, at, perm.FilesModify); !pv.ok {
+			if !pv.WritePerm(w, r) {
+				writeErrorSaid(w, r, http.StatusForbidden, "permission_denied", "app_save_denied", nil)
+			}
+			return
+		}
+		if !viewSaves(w, r, v, at, "") {
+			return
+		}
 	}
 	if e2eSave {
 		enc, ok := encryptedBody(body)
@@ -215,25 +252,46 @@ func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmp
 		}
 		body = enc
 	}
+	// A .csv is written in the file's own way - its delimiter, byte order
+	// mark, line ends and encoding, the cells nobody changed as it has them -
+	// whichever way the app wrote it (app_ui_csv.go, internal/officesave). A
+	// save whose bytes are not what the app declared is refused here, before
+	// a byte is written.
+	if !e2eSave && at == rel && isCSV(rel) {
+		out, ok := h.csvSaveOver(w, r, drv, storageID, rel, obj.Size, body)
+		if !ok {
+			return
+		}
+		body, size = bytes.NewReader(out), int64(len(out))
+	}
 	if !h.roomFor(w, r, size) {
 		return
 	}
 	actor := uid
-	if err := h.CommitVersion(r.Context(), storageID, rel, body, size, &actor); err != nil {
+	if err := h.CommitVersion(r.Context(), storageID, at, body, size, &actor); err != nil {
 		writeSaveFailure(w, r, err)
 		return
 	}
 	if e2eSave {
 		h.auditE2E(r, p, v, storageID, rel, "save", size)
 	} else {
-		h.auditUISave(r, p, storageID, rel, size, "version")
+		h.auditUISave(r, p, storageID, at, size, "version")
 	}
 	// Editing together: which part of the session's log this save holds.
-	h.coeditSaved(r, p, drv, storageID, rel)
-	out := map[string]any{"saved": true, "path": st.Name + "://" + rel, "name": path.Base(rel), "size": size}
+	h.coeditSaved(r, p, drv, storageID, rel, at)
+	out := map[string]any{"saved": true, "path": st.Name + "://" + at, "name": path.Base(at), "size": size}
+	// A session whose saves go beside the file says so on each of them: a
+	// member who joined after the first is told where its saves go too.
+	if at != rel {
+		if officesave.IsConflictName(path.Base(at)) {
+			out["conflict"] = path.Base(at)
+		} else {
+			out["beside"] = true
+		}
+	}
 	// The listing's date of the version just written: with `size`, the
 	// `expect` of the next save over the same file.
-	if ms, ok := h.listingModified(r.Context(), storageID, rel); ok {
+	if ms, ok := h.listingModified(r.Context(), storageID, at); ok {
 		out["modified"] = ms
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -266,6 +324,15 @@ func (h *AppPlugins) uiSaveNew(w http.ResponseWriter, r *http.Request, p *wasmpl
 	// saves an .html beside the diagram — and the person's quota.
 	if !viewSaves(w, r, v, name, mime.TypeByExtension(path.Ext(name))) {
 		return
+	}
+	// A new .csv is written as the app wrote it (there is no file to write it
+	// the way of), once its bytes are what the app declared (app_ui_csv.go).
+	if isCSV(name) {
+		checked, ok := csvCheckDeclared(w, r, name, body)
+		if !ok {
+			return
+		}
+		body = checked
 	}
 	if !h.roomFor(w, r, size) {
 		return

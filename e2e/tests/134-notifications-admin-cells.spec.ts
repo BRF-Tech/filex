@@ -53,13 +53,29 @@ const AR = arabicPack();
 /** The admin's preference document as this spec found it, put back after. */
 let prefsBefore: Record<string, unknown> = {};
 
-/** Install a pack by its manifest, whatever its direction. */
+/**
+ * Install a pack by its manifest, whatever its direction, and answer its name.
+ *
+ * ⚠ The name is read from the manifest, and a copy left by an earlier try is
+ * removed first. An install finishes on the server whatever the client does
+ * (wasmplugin Registry.Install, context.WithoutCancel): on the build host's
+ * 0.57 chain one took 12 s while the -race jobs ran beside the browsers (a
+ * tiny upload took 2 s in the same seconds), the request gave up at its 10 s,
+ * the pack was installed anyway with no name to remove it by, and the retry
+ * was answered 409 name_taken. Measured on a quiet machine, offline: 35-100
+ * ms - the install makes no network call. Hence the longer budget too.
+ */
 async function installManifest(path: string): Promise<string> {
+  const buffer = readFileSync(path);
+  const name = String((JSON.parse(buffer.toString('utf8')) as { name?: string }).name ?? '');
+  expect(name, `${path} names its pack`).not.toBe('');
+  await removeByName(name);
   const res = await api.post('/api/admin/app-plugins', {
-    multipart: { manifest: { name: 'filex-app.json', mimeType: 'application/json', buffer: readFileSync(path) } },
+    multipart: { manifest: { name: 'filex-app.json', mimeType: 'application/json', buffer } },
+    timeout: 60_000,
   });
   expect(res.ok(), `installing ${path}: ${res.status()} ${await res.text()}`).toBeTruthy();
-  return String((await res.json()).name ?? '');
+  return name;
 }
 
 async function removeByName(name: string): Promise<void> {

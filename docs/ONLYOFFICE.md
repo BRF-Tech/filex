@@ -1,43 +1,140 @@
-# OnlyOffice integration
+# Office editing
 
-filex opens Word, Excel and PowerPoint documents (and PDF, OpenDocument, CSV
-and more) for **in-browser editing and co-authoring** in a self-hosted
-[OnlyOffice Document Server](https://www.onlyoffice.com/), and saves the edits
-straight back into the storage the file came from. It is **optional**: without
-it filex works normally, and office files open in the built-in read-only
-preview ([What happens if it isn't configured](#what-happens-if-its-not-configured)).
+filex edits Word, Excel and PowerPoint documents (and their OpenDocument
+kin) in the browser, alone or with others, and saves the edits straight back
+into the storage the file came from. There are two ways to do it:
 
-> **You do not need a Document Server to edit office documents - alone or
-> together.** The office editor app,
-> [`filex-office-editor`](https://github.com/BRF-Tech/filex-office-editor)
-> (installed like any [app](APP-PLUGINS.md)), runs ONLYOFFICE's editor in the
-> browser and saves through filex; with filex 0.56 and the app's 0.3.0
-> several people edit a file together through filex's own relay
-> ([Editing together](APP-PLUGINS-API.md#editing-together-coedit-056)). The
-> Document Server described on this page stays supported and optional: what
-> still needs one is filex's own work on an office file on the server - the
-> [thumbnails](#thumbnails) of office documents and the office engine that
-> converts them (the Convert app's `engines:office`).
+| | The Office editor app | An ONLYOFFICE Document Server |
+|---|---|---|
+| What you run | nothing: an app you install in filex | a server of your own, next to filex |
+| What it opens | the standard ONLYOFFICE set, the older `doc`, `xls`, `ppt`, `rtf` and `.csv` included (0.4.0; before it `docx`, `xlsx`, `pptx`, `odt`, `ods`, `odp`) | the standard ONLYOFFICE set ([Supported file types](#supported-file-types)), the older `doc`, `xls`, `ppt` and `.csv` included |
+| Editing together | yes, through filex's own relay | yes, through the Document Server |
+| Print, *Download as*, PDF | yes, in the browser | yes |
+| **+ New** | Word, Excel, PowerPoint | Word, Excel, PowerPoint and OpenDocument |
+| A file of an encrypted folder | yes, decrypted in your browser | no |
+| Office thumbnails, the apps' office conversions | yes, on the server, through the app's [office engine](#the-office-engine-without-a-document-server) (0.4.0, filex 0.57) | yes |
 
-The same Document Server draws office [thumbnails](#thumbnails), opens a
-**`.csv`** in its spreadsheet editor ([CSV files](#csv-files)), and opens in
-each person's own filex language or in one the administrator chooses for
-everybody ([The editor's language](#the-editors-language)).
-It works on every surface that embeds the explorer - the web app, the
-[desktop app](DESKTOP.md) and any host page using `<filex-explorer>` - because
-they all open the same editor component against the same endpoints. The
-desktop app also opens Office files from your own disk in it and writes them
-back to that path
+**Start with the app** ([The Office editor app](#the-office-editor-app)): it
+needs no server, no address and no secret, and since its 0.4.0 it also brings
+the [office engine](#the-office-engine-without-a-document-server) that filex
+runs on the server for the [thumbnails](#thumbnails) of office documents and
+the [office conversions apps ask for](#office-conversions-for-apps-the-office-engine)
+(the Convert app's office targets, PDF from an office file) - the work filex
+used to ask a Document Server for. A Document Server stays supported and
+optional ([The ONLYOFFICE Document Server](#the-onlyoffice-document-server-optional)):
+keep or connect one for the fonts added to it
+([Where it differs from a Document Server](#where-it-differs-from-a-document-server)), or to edit in it. The
+two can be installed side by side;
+[Default apps](APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)
+decides which one opens a file, and its **Office engine** section which one
+converts and draws ([The engine and a Document Server](#the-engine-and-a-document-server)).
+
+Without either, office files open in the built-in read-only preview
+([What happens if it's not configured](#what-happens-if-its-not-configured)).
+Both work on every surface that embeds the explorer - the web app, the
+[desktop app](DESKTOP.md) and any host page using `<filex-explorer>`. The
+desktop app also opens Office files from your own disk in the editor and
+writes them back to that path
 ([Opening documents from your computer](DESKTOP.md#opening-documents-from-your-computer)),
 so a machine with no Office installed gets an editor for the documents
 already on it.
+
+---
+
+## The Office editor app
+
+The Office editor app,
+[`filex-office-editor`](https://github.com/BRF-Tech/filex-office-editor), runs
+ONLYOFFICE's editor inside filex, in the browser: the editor's files come from
+the app's own package and the document is converted in the browser, so
+nothing runs on a server of yours. It is an [app](APP-PLUGINS.md) like any
+other, AGPL-3.0, based on ONLYOFFICE Docs by Ascensio System SIA.
+
+**Install it** - an administrator, once; filex never installs it by itself:
+
+- **From a store.** On [filex Apps](https://apps.filex.sh), press **Install**
+  on *Office editor* and give your filex's address: it opens the install
+  review on your filex
+  ([Installing from a store](APP-PLUGINS.md#installing-from-a-store)). People
+  who are not administrators can ask for it on the **Apps → App store** page,
+  when it is shown to them ([The store screen](APP-PLUGINS.md#the-store-screen)).
+- **From GitHub.** *Admin → Plugins → Apps → Install an app → GitHub
+  repository*, `BRF-Tech/filex-office-editor` and the tag of its latest
+  release ([From GitHub, step by step](APP-PLUGINS.md#from-github-step-by-step)).
+- **From its files**, on a server that cannot reach GitHub. Download
+  `filex-app.json`, `ui.zip` and `engine.zip` from the release, then *Admin →
+  Plugins → Apps → Install an app → Upload files*: the manifest, **Interface**
+  `ui.zip`, **Office engine** `engine.zip`, and no module. The wizard says
+  which file is missing before it uploads anything.
+
+Read the permission review and press **Install**. From then on:
+
+- **Opening.** A `.docx`, `.xlsx`, `.pptx`, `.odt`, `.ods` or `.odp` opens in
+  the editor in place of the preview; a person who may only read it cannot
+  save it. The editor's frame loads pictures, styles and fonts only from the
+  app's own package, `data:` and `blob:` (the app asks for no address of its
+  own), so a document's linked picture from another server is not fetched. On a phone a document opens to read, with **Edit**
+  ([On a phone](E2E-OFFICE.md#on-a-phone)).
+- **Saving.** **Save** writes a new version of the file, like any save in
+  filex: the old one stays in its [history](TRASH-VERSIONING.md). A file that
+  changed since the editor opened it is not saved over: the save becomes a
+  conflict copy beside it, as a Document Server's does
+  ([When the document changes while it is open](#when-the-document-changes-while-it-is-open)).
+  A format the editor cannot write (`.doc`, `.xls`, `.ppt`...) is saved
+  beside the file as DOCX, XLSX or PPTX ([A save in another format](#a-save-in-another-format)).
+- **Who and which language.** Comments and tracked changes carry the
+  person's name, and the editor opens in the person's language or in the one
+  fixed for everybody ([The editor's language](#the-editors-language)).
+- **Spell checking and hyphenation** work in filex's interface languages out
+  of the box; an administrator adds any other language on the app's page
+  ([Dictionaries for the office editor](APP-PLUGINS.md#dictionaries-for-the-office-editor)).
+- **Editing together.** Several people edit one document at once through
+  filex's own relay, with no Document Server
+  ([Editing together](APP-PLUGINS-API.md#editing-together-coedit-056)).
+- **Print, *Download as*, PDF.** Through filex, from the editor's menus; a PDF
+  is made in the browser from the editor's own page layout.
+- **+ New.** *New document* gets Word, Excel and PowerPoint rows
+  ([Creating new documents](#creating-new-documents)).
+- **Encrypted folders.** A file of an encrypted folder you have unlocked
+  opens in the app, decrypted in your browser and encrypted again before a
+  save leaves it ([E2E-OFFICE.md](E2E-OFFICE.md)).
+
+On the server, with no Document Server (0.4.0 and filex 0.57):
+
+- **Office thumbnails.** The app's office engine draws the picture of an
+  office document's first page, the same one a Document Server draws
+  ([Thumbnails](#thumbnails)).
+- **Office conversions for apps.** The Convert app's office targets, PDF from
+  an office file and MCP's `file_convert` run on the app's engine
+  ([The office engine without a Document Server](#the-office-engine-without-a-document-server)).
+- **The older and rarer formats** - `.doc`, `.xls`, `.ppt`, `.rtf` and the
+  rest of [Supported file types](#supported-file-types) - and **`.csv`**,
+  which the app opens in its own delimiter and encoding and saves back the
+  same way ([CSV files](#csv-files)).
+
+Before 0.4.0 the app did none of these: office documents showed their type
+icon, office conversions needed a Document Server, and those formats opened
+in the preview, a CSV in filex's own table.
+
+---
+
+## The ONLYOFFICE Document Server (optional)
+
+A self-hosted [ONLYOFFICE Document Server](https://www.onlyoffice.com/)
+(Community Edition is fine) opens office documents for in-browser editing
+and co-authoring, draws office [thumbnails](#thumbnails), converts office
+documents for apps, opens a **`.csv`** in its spreadsheet editor
+([CSV files](#csv-files)), and opens in each person's own filex language or in
+one the administrator chooses for everybody
+([The editor's language](#the-editors-language)). filex's default install
+runs none; the shipped compose files keep one behind the `onlyoffice`
+profile, pinned to the version filex is tested against
+([1. Run the Document Server](#1-run-the-document-server-with-a-jwt-secret)).
 
 **Set it up:** [Prerequisites](#prerequisites), the three steps of
 [Setup](#setup), and - before you fill in any address -
 [Three machines, three addresses](#three-machines-three-addresses). Everything
 after that is reference.
-
----
 
 ## Prerequisites
 
@@ -50,11 +147,26 @@ after that is reference.
 
 ### 1. Run the Document Server with a JWT secret
 
+The compose files filex ships have it as an optional service, off unless you
+ask for it:
+
+- **`docker-compose.yml`** (the quick start): uncomment the ONLYOFFICE lines
+  of `.env` - `ONLYOFFICE_JWT_SECRET` at least, and filex's own two (or do
+  [step 2](#2-point-filex-at-it) in the admin UI) - then
+  `docker compose --profile onlyoffice up -d`.
+- **`deploy/compose/docker-compose.full.yml`** (the full stack, behind Caddy):
+  add `onlyoffice` to `COMPOSE_PROFILES` in its `.env`, and fill in
+  `ONLYOFFICE_DOMAIN`, `ONLYOFFICE_JWT_SECRET` and `FILEX_ONLYOFFICE_URL`
+  there (the lines are commented out). Its Caddyfile already has the
+  Document Server's host.
+
+Anywhere else, the service is:
+
 ```yaml
 # docker-compose.yml (excerpt)
 services:
   onlyoffice:
-    image: onlyoffice/documentserver:latest
+    image: onlyoffice/documentserver:9.4.0.1
     environment:
       JWT_ENABLED: "true"
       JWT_SECRET: "a-long-random-shared-secret"   # keep this
@@ -64,6 +176,13 @@ services:
 ```
 
 Pick a long random `JWT_SECRET` and keep it - filex needs the **same** value.
+
+⚠ **Pin the version.** `9.4.0.1` is the one filex is tested against; the
+shipped compose files use it and take another from `ONLYOFFICE_IMAGE` in
+`.env`. Never `latest`: it moves under you, and a new Document Server can
+change what a save looks like (Docs 10.0 writes a CSV with the file's own
+delimiter, where 9.4 wrote commas; filex reads both - [CSV files](#csv-files)).
+Move to another version when you choose to, and test a save first.
 
 ⚠⚠ **Always set one.** The save callback route is public, and filex tells a
 genuine save from a forged one only by its signature: with a secret, an
@@ -95,16 +214,16 @@ FILEX_ONLYOFFICE_JWT=a-long-random-shared-secret  # MUST match JWT_SECRET above
 Both are required: filex treats OnlyOffice as **enabled only when both are
 set**.
 
-⚠ **The environment wins on every restart.** A service configured through env
-or `config.yaml` is written back onto its stored row each time filex starts
-(compose is declarative: editing `FILEX_ONLYOFFICE_URL` and restarting has to
-take effect). So an edit made in the admin UI to an env-pinned service applies
-now and is reverted at the next boot; the card is labelled **"Set by the
-environment"** then. That includes switching it off there: OnlyOffice is then
-off for the editor, the office thumbnails and the apps' office engine alike,
-until the next start switches it on again from `FILEX_ONLYOFFICE_URL`; remove
-the variable to switch it off for good (the card and the `PATCH` answer say
-so). Leave the variables unset if you want the UI to own the setting.
+⚠ **The environment gives the first value; the admin page keeps it.** A
+service configured through env or `config.yaml` is written onto its stored row
+on a start where nothing is configured in it yet, and from then on the row is
+the admin page's: an edit there - switching OnlyOffice off included, which
+turns the Document Server off for the editor, the office thumbnails and the
+apps' office conversions alike (the Office editor app's engine, where there
+is one, goes on) - stands across restarts, and the card is labelled **"First set by the
+environment"**. After changing `FILEX_ONLYOFFICE_URL` or
+`FILEX_ONLYOFFICE_JWT` on an install that already has the service, run
+[`filex settings reseed --external`](CONFIGURATION.md#writing-the-environment-again-filex-settings-reseed) and restart filex (or make the same change on the card).
 
 ### 3. Make sure all three addresses work
 
@@ -225,7 +344,7 @@ wants - and the public URL is used.
 | `FILEX_ONLYOFFICE_CALLBACK_URL` | `external_services.onlyoffice.callback_url` | no | The address the **Document Server** uses to reach filex. Empty (the default) means `FILEX_PUBLIC_URL`. Set it only when those two must differ - see [When the Document Server needs a different address](#when-the-document-server-needs-a-different-address-from-your-users) |
 | `FILEX_ONLYOFFICE_FRAME_ORIGIN` | `external_services.onlyoffice.frame_origin` | no (recommended) | The Document Server's own origin (`https://docs.example.com`), whose proxy sends `/filex-frame/*` to filex: the editor's `api.js` runs in a frame there, not in filex's page. Read at start - see [The editor in a frame of its own](#the-editor-in-a-frame-of-its-own) |
 | `FILEX_APP_UI_ORIGIN` | `app_ui_origin` | no | The origin app interfaces are served from; when `FILEX_ONLYOFFICE_FRAME_ORIGIN` is empty the editor's frame is served there |
-| `FILEX_ONLYOFFICE_LANG` | `external_services.onlyoffice.editor_lang` | no | The editor's language: `auto` (the default - each person's own filex language) or a language the editor offers (`de`, `fr`, `tr`, `pt-PT`, `zh-TW`, ...) for everybody. Written onto the row at every start, like the URL; see [The editor's language](#the-editors-language) |
+| `FILEX_ONLYOFFICE_LANG` | `external_services.onlyoffice.editor_lang` | no | The editor's language: `auto` (the default - each person's own filex language) or a language the editor offers (`de`, `fr`, `tr`, `pt-PT`, `zh-TW`, ...) for everybody. Seeds the row's language when it has none, like the URL; see [The editor's language](#the-editors-language) |
 
 Both are optional in the sense that the **admin UI** can supply them instead -
 whichever way they arrive, the value the running process uses is the one in the
@@ -302,10 +421,13 @@ What it means for the Document Server:
   thumbnail's download is kept apart from the record behind the editor's
   "Download failed" explanation (`GET /api/files/onlyoffice/diagnose`).
 
-Without a Document Server, office documents get no thumbnail: they show their
-type icon, and *Admin → Tools → Thumbnail repair* lists them as "OnlyOffice is
-not configured". Configure it (no restart) and they are drawn as they are
-listed.
+Without a Document Server, the office engine the Office editor app brings
+(0.4.0) draws the same pictures on the server
+([The office engine without a Document Server](#the-office-engine-without-a-document-server));
+with both, **Default apps → Office engine** says which one draws. With
+neither, office documents show their type icon, and *Admin → Tools →
+Thumbnail repair* lists them as "No office engine runs". Install the app or
+connect a Document Server (no restart) and they are drawn as they are listed.
 
 ### What a save does
 
@@ -529,7 +651,11 @@ filex's page.
 
 The editor opens in **the language each person uses filex in**: a Turkish
 screen gets ONLYOFFICE's menus and dialogs in Turkish, a German one in German -
-a language pack's language included, as long as ONLYOFFICE has it too.
+a language pack's language included, as long as ONLYOFFICE has it too. The
+same holds for the Office editor app: a language fixed for everybody (below)
+is handed to it too (`session.editor_lang`,
+[APP-PLUGINS-API.md → Who is looking, and in which language](APP-PLUGINS-API.md#who-is-looking-and-in-which-language)),
+and the setting is read even with no Document Server configured.
 
 **The server decides**, the same way for every surface that opens the editor
 (the explorer's viewer, the editor tab, the desktop app's document windows,
@@ -544,7 +670,7 @@ the editor configuration it signs carries `editorConfig.lang` and
 3. **The language on the person's screen.** The viewer sends it as the
    request's `Accept-Language` (the language filex is drawing in, not the one
    the browser was installed in).
-4. **The person's account language** (Settings → Language).
+4. **The person's account language** (User settings → Preferences → Language).
 5. **The instance's language**, `FILEX_DEFAULT_LOCALE`.
 6. **English.**
 
@@ -572,10 +698,12 @@ uses it, no restart. The list is ONLYOFFICE's own (its
 46 languages, `pt-PT` and `zh-TW` among them.
 
 For a compose-managed install, `FILEX_ONLYOFFICE_LANG` (`auto` or a language
-code; `de-DE` and `de_DE` are read as `de`) does the same, the way
-`FILEX_ONLYOFFICE_URL` pins the address: it is written onto the setting at
-every start, a change on the admin page lasts until the next one, and the
-card says so. A value the editor does not offer is logged at start and not
+code; `de-DE` and `de_DE` are read as `de`) gives the setting its first
+value, the way `FILEX_ONLYOFFICE_URL` gives the address: it is written onto a
+row that has no language of its own, a choice on the admin page stands across
+restarts, and the card says which variable gave the first value
+([`filex settings reseed --external`](CONFIGURATION.md#writing-the-environment-again-filex-settings-reseed)
+writes it again). A value the editor does not offer is logged at start and not
 written. Unset, the setting belongs to the admin page.
 
 Over the API: `GET /api/admin/external` carries `editor_lang`,
@@ -589,7 +717,10 @@ The MCP tool `admin_external_update` takes the same field.
 
 ## Supported file types
 
-The editor opens the standard OnlyOffice set, grouped into three document types:
+The Document Server's editor opens the standard OnlyOffice set, grouped into
+three document types (the [Office editor app](#the-office-editor-app) opens
+the same set from its 0.4.0, `.csv` included; earlier releases open `docx`,
+`xlsx`, `pptx`, `odt`, `ods` and `odp`):
 
 - **Documents (word):** `doc, docx, docm, dot, dotx, dotm, odt, ott, rtf, txt, html, htm, epub, fodt, mht, xml, xps, pdf, wps, …`
 - **Spreadsheets (cell):** `xls, xlsx, xlsm, xlt, xltx, xltm, xlsb, csv, ods, ots, fods, et, ett, …`
@@ -602,10 +733,13 @@ preview/download for those.
 
 ## CSV files
 
-While OnlyOffice is configured, a **`.csv`** opens in ONLYOFFICE's spreadsheet
-editor. That is the product's default, not a setting each install has to
-make: filex's own read-only table is the second choice, and without
-OnlyOffice it is the only one. Only `.csv` (a `.tsv` opens in the table).
+While a Document Server is connected, a **`.csv`** opens in ONLYOFFICE's
+spreadsheet editor. That is the product's default, not a setting each install
+has to make: an installed app that opens CSV - the Office editor app, from
+its 0.4.0 - comes next, and filex's own read-only table is the last choice,
+the only one when there is neither. Only `.csv` (a `.tsv` opens in the table).
+An app's interface that edits a CSV is held to the same rules for how the
+file is written ([CSV files: how they are written](APP-PLUGINS-API.md#csv-files-how-they-are-written)).
 
 - **Opening.** A double click opens it the way an office document opens: a
   look first, in the editor's view mode, with an **Edit** button that opens
@@ -619,7 +753,8 @@ OnlyOffice it is the only one. Only `.csv` (a `.tsv` opens in the table).
   administrator can reorder or switch it off under *Admin → Plugins → Default
   apps*, which lists `.csv` while OnlyOffice is configured
   (`PUT /api/admin/file-types/csv`). Switch OnlyOffice off and a `.csv` opens
-  in the table again, without an error: a rule or a person's choice that names
+  in the next choice - an app that opens CSV, or the table - without an
+  error: a rule or a person's choice that names
   ONLYOFFICE is kept, and used again once it is back. An administrator sees
   *Open with ONLYOFFICE* greyed with where to set it up meanwhile; nobody else
   is offered it.
@@ -628,9 +763,9 @@ OnlyOffice it is the only one. Only `.csv` (a `.tsv` opens in the table).
 |---|---|
 | ![A semicolon CSV open in ONLYOFFICE's spreadsheet, a look first](https://filex.sh/shots/csvoffice/csv-view-1440.83237ba55d3d.png) | ![The CSV in the editor tab, with the line on what a save keeps](https://filex.sh/shots/csvoffice/csv-edit-1440.4efc379a293d.png) |
 | A double click: the spreadsheet, a look first, no "Choose CSV options" question. | **Edit**: the editor tab, and filex's line on what a save as CSV keeps. |
-| ![The file menu: Open with ONLYOFFICE, the built-in viewer, Choose an app…](https://filex.sh/shots/csvoffice/csv-open-with-menu.2caeabb88a28.png) | ![Choose an app…, ONLYOFFICE and the table](https://filex.sh/shots/csvoffice/csv-choose-app.57b1ed93440f.png) |
+| ![The file menu: Open with ONLYOFFICE, the built-in viewer, Choose an app…](https://filex.sh/shots/csvoffice/csv-open-with-menu.a1541e22b5fd.png) | ![Choose an app…, ONLYOFFICE and the table](https://filex.sh/shots/csvoffice/csv-choose-app.57b1ed93440f.png) |
 | The file's menu offers both. | **Choose an app…** can make either the person's default. |
-| ![Default apps: .csv, ONLYOFFICE first, the table second](https://filex.sh/shots/csvoffice/default-apps-csv-1440.f78775e4ce39.png) | ![ONLYOFFICE switched off: its row greyed, saying where to set it up](https://filex.sh/shots/csvoffice/csv-menu-no-onlyoffice.dc12b704a282.png) |
+| ![Default apps: .csv, ONLYOFFICE first, the table second](https://filex.sh/shots/csvoffice/default-apps-csv-1440.2f19cd58693f.png) | ![ONLYOFFICE switched off: its row greyed, saying where to set it up](https://filex.sh/shots/csvoffice/csv-menu-no-onlyoffice.5c04628c016a.png) |
 | *Admin → Plugins → Default apps* lists `.csv` while ONLYOFFICE is connected. | ONLYOFFICE switched off: the table opens the file, and an administrator sees the row greyed. |
 
 ### Opening without the "Choose CSV options" question
@@ -644,23 +779,41 @@ away:
   first lines (outside quotes) into the same number of fields; a comma when
   nothing does (a one-column file, an empty one);
 - **the encoding**: UTF-8 (`codePage` 65001), with or without a byte order
-  mark. A file that is not UTF-8 (UTF-16, a legacy code page such as
-  Windows-1254) gets no options: ONLYOFFICE asks which encoding it is, because
-  a wrong guess would change every non-ASCII letter and the save would keep
-  the change.
+  mark. A file in another encoding (UTF-16, a legacy code page such as
+  Windows-1254) gets no options: ONLYOFFICE's dialog asks which one it is.
+  Pick the file's own code page there. A wrong pick shows other letters in
+  place of the file's, and a save that then holds a letter the file's
+  encoding cannot hold is refused ([What a save writes](#what-a-save-writes)).
 
 ### What a save writes
 
 The Document Server saves an edited CSV when the last editor closes it, as for
 every document ([What a save does](#what-a-save-does)). With its default
 (`assemblyFormatAsOrigin: true`) the callback's file is a CSV (`filetype:
-"csv"`), but written ONLYOFFICE's way whatever the file was: comma-separated, a
-UTF-8 byte order mark in front, `\n` line ends (Docs 9.4). filex puts the
-file's own way back before it writes it - its delimiter, its byte order mark
-or none, its `\r\n` or `\n` - and the text of every cell nobody changed
-([Cells nobody changed keep their text](#cells-nobody-changed-keep-their-text)).
-A semicolon file stays a semicolon file. A file that was not UTF-8 is saved as
-UTF-8, with a byte order mark so that a reader knows.
+"csv"`), written the Document Server's own way, which depends on its version:
+Docs 9.4 writes commas, a UTF-8 byte order mark and `\n` line ends whatever
+the file was; Docs 10 writes the file's own delimiter. filex assumes neither.
+
+- **How the save is read.** filex reads how the saved CSV is written from its
+  own bytes: the byte order mark, the encoding (UTF-8, or UTF-16 by its
+  mark), the line ends, and the delimiter - the one under which the save
+  reads as the file's table, cell for cell, rather than the one filex
+  expected. Docs 9.4 and Docs 10 are both saved right.
+- **How it is written.** In the file's own way: its delimiter, its byte order
+  mark or none, its `\r\n` or `\n`, and its **encoding** - UTF-8, UTF-16
+  (little- or big-endian), or a legacy single-byte code page filex recognises
+  from the file's bytes (`windows-1250`, `windows-1251`, `windows-1252`,
+  `windows-1253`, `windows-1254`, `windows-1257`). A semicolon file stays a semicolon file, and a
+  Windows-1254 file stays Windows-1254. A row nobody changed is written byte
+  for byte as it was, and the cells nobody changed keep their text
+  ([Cells nobody changed keep their text](#cells-nobody-changed-keep-their-text)).
+- **When it is not written.** A save that holds a character the file's
+  encoding cannot hold (an emoji, or a letter of another alphabet, in a
+  Windows-1254 file), and saved bytes that are not text in an encoding filex
+  can read for that file, are refused: the file does not change, and the
+  people who edited it are told as for any refused save (below). To keep
+  such an edit, save a copy as UTF-8 from ONLYOFFICE (*File → Download as*)
+  and upload it, or turn the file into UTF-8 first.
 
 ⚠⚠ A `.csv` is only ever written as CSV text:
 
@@ -668,7 +821,7 @@ UTF-8, with a byte order mark so that a reader knows.
   as **XLSX** (`filetype: "xlsx"`, measured). filex converts it back to CSV
   through the Document Server's own conversion service (the file is offered
   to it for that one conversion, as an app's office conversion is: UTF-8,
-  then the file's own delimiter and its unchanged cells as above; what the
+  then the file's own way and its unchanged cells as above; what the
   conversion writes for a number or a date was not measured) and writes that.
 - Anything else - another type, bytes that are a zip or an old Excel workbook
   whatever the callback says, a conversion that fails, a save over 256 MiB -
@@ -761,11 +914,6 @@ a quoted cell comes back as it was.
   the same order (`1.02.2026` over `1.2.2026` in the English editor,
   `1/13/2026` over `01/13/2026` in the Turkish one) keeps the file's text:
   only the typed spelling is lost.
-- **A file that is not UTF-8** (ONLYOFFICE asked for its encoding when it
-  opened): its text cannot be compared with what ONLYOFFICE saved, so its
-  first save keeps only the file's delimiter and line ends, with ONLYOFFICE's
-  values, in UTF-8 with a byte order mark. From then on it is a UTF-8 file and
-  its cells are kept.
 - **A file over 64 MiB or two million rows, or with a row of more than 16384
   cells** (as many columns as an ONLYOFFICE sheet has): only its delimiter,
   byte order mark and line ends are kept.
@@ -783,11 +931,14 @@ a quoted cell comes back as it was.
   moved there in the same save, or that other row was itself changed, the
   first of the rows that now read the same gets the file's text, `05`.
 
-A save is never refused, and never held back, over any of this. When the cells
-of a file cannot be kept at all it is written with the file's delimiter, byte
-order mark and line ends and ONLYOFFICE's values, and the log says
-`onlyoffice callback: CSV cells not kept` with the reason (`not_utf8`,
-`too_large`, `too_many_records`, `too_many_fields`, `unreadable`). Two reasons
+Keeping the cells never refuses a save, and never holds one back: what
+refuses one is only how the save is read and written
+([What a save writes](#what-a-save-writes)). When the cells of a file cannot
+be kept at all it is written with the file's delimiter, byte order mark, line
+ends and encoding and ONLYOFFICE's values, and the log says
+`onlyoffice callback: CSV cells not kept` with the reason (`too_large`,
+`too_many_records`, `too_many_fields`, `unreadable`, or `not_text` for a
+UTF-16 file whose bytes do not read back as the same text). Two reasons
 are filex's own failure, logged as a warning and worth a report:
 `check_failed` (what filex was about to write did not read back as the save)
 and `panic` (its comparison failed; the line carries what failed and where,
@@ -875,6 +1026,13 @@ saves to that same file, and removes the copies with the session
 An older desktop app does not: the edit stays in the working folder and is
 removed with it.
 
+**The Office editor app** saves the same way, by the same code: it says the
+save is in another format (`file.save` `beside`), and filex writes it beside
+the file under the same names, for a person who may create files there,
+with the bell's notice and an audit row (`file.app_saved_beside`); later
+saves of the same opening, and of an editing session, go to that file
+([APP-PLUGINS-API.md → Saving beside the file, conflict copies](APP-PLUGINS-API.md#saving-beside-the-file-conflict-copies)).
+
 ---
 
 ## When the document changes while it is open
@@ -958,6 +1116,16 @@ The desktop app's "Open with filex" adds the same rule for a document on your
 own disk, where the server cannot see the change
 ([DESKTOP.md → When the file changes while it is open](DESKTOP.md#when-the-file-changes-while-it-is-open)).
 
+**The Office editor app** keeps the same rule, written by the same code: a
+save of a document that changed after the app read it (or, editing together,
+after the session's base or last save) is written as a conflict copy beside
+it, `teklif.filex-conflict-<UTC time>.docx`, for a person who may create
+files there; the file keeps the other change, the bell says so, the audit
+log writes `file.app_saved_conflict`, and later saves of the same opening go
+to the copy. The app asks for it (`file.save` `conflict: 'copy'`); an app that
+does not gets the 0.56 answer
+([APP-PLUGINS-API.md → Saving beside the file, conflict copies](APP-PLUGINS-API.md#saving-beside-the-file-conflict-copies)).
+
 ---
 
 ## Creating new documents
@@ -978,9 +1146,9 @@ editors; [BACKEND.md → Rules the server publishes](BACKEND.md#rules-the-server
 and the client crosses that against the `external` block. With no Document
 Server configured the six office formats (`docx`, `xlsx`, `pptx`, `odt`,
 `ods`, `odp`) are not in the picker and the dialog says why - *"Office
-documents need a document server (ONLYOFFICE), which is not set up here."* -
-rather than creating a file nobody on this install could open. The sentence is
-the server's (`capabilities.newdoc_withheld`, in the reader's language), and it
+documents need an office engine, the Office editor app or ONLYOFFICE, and
+neither is set up here."* - rather than creating a file nobody on this
+install could open. The sentence is the server's (`capabilities.newdoc_withheld`, in the reader's language), and it
 is said only when nothing here makes an office document: an app whose rows
 make `.docx`, `.xlsx` or `.pptx` (below) is a way to make them, and the line is
 not shown beside its rows.
@@ -989,9 +1157,9 @@ An office app installed and no document server - the app's rows, and only
 draw.io said to be missing - then the same dialog in Turkish, the server's
 sentence in the reader's language:
 
-![New document with an office app installed: its .docx, .xlsx and .pptx rows, and no line asking for a document server](https://filex.sh/shots/officeapp/newdoc-office-app-1280.70ef3ae038a7.png)
+![New document with an office app installed: its .docx, .xlsx and .pptx rows, and no line asking for a document server](https://filex.sh/shots/officeapp/newdoc-office-app-1280.5346ee2d09b2.png)
 
-![The same dialog in Turkish, dark: only draw.io is said to be missing, in the server's Turkish](https://filex.sh/shots/officeapp/newdoc-office-app-dark-tr-1280.4f71d02f903c.png)
+![The same dialog in Turkish, dark: only draw.io is said to be missing, in the server's Turkish](https://filex.sh/shots/officeapp/newdoc-office-app-dark-tr-1280.de4906405641.png)
 
 An installed app may add rows of its own (`new_documents` - draw.io's
 **draw.io diagram**, say): they are listed under **Apps**, in the app's own
@@ -1026,7 +1194,7 @@ field selects the name part only, the way a rename does, so typing replaces
   extension is swapped (`notes.txt` → `notes.md`); a name with no extension, or
   one you chose (`test.conf`), stays as it is.
 
-![The New document dialog with a Plain text document named LICENSE](https://filex.sh/shots/newdoc/newdoc-any-name-1280.c36430b7d719.png)
+![The New document dialog with a Plain text document named LICENSE](https://filex.sh/shots/newdoc/newdoc-any-name-1280.e62db0a423f9.png)
 
 The create itself is `POST /api/files/manager?action=newfile` with
 `{path, name, type, exact_name}` - the extension rules, `400 EXT_NEEDS_TYPE`
@@ -1076,7 +1244,7 @@ nothing until you save it.
 
 | Save, when a file has taken the name meanwhile | Drafts, in the navigation panel |
 |---|---|
-| ![Save the draft under another name?](https://filex.sh/shots/newdoc/drafts-taken-1280.c0d6502f3476.png) | ![The Drafts view](https://filex.sh/shots/newdoc/drafts-view-1280.6092d950f3fb.png) |
+| ![Save the draft under another name?](https://filex.sh/shots/newdoc/drafts-taken-1280.c0d6502f3476.png) | ![The Drafts view](https://filex.sh/shots/newdoc/drafts-view-1280.c3e1734bf7e2.png) |
 
 Drafts belong to a person, so a caller that is not one creates the file
 directly: an app token, and an embed confined to one folder by its host (one
@@ -1088,12 +1256,17 @@ endpoints are in [BACKEND.md → Drafts](BACKEND.md#drafts).
 
 ## Office conversions for apps (the office engine)
 
-The Document Server is also the apps' **office engine**: when an app converts
-an office document - the Convert app's Word, Excel, PowerPoint and
-OpenDocument targets, PDF and PDF/A from any of them - filex hands the file to
-the Document Server's conversion API. filex ships and runs no LibreOffice, not
-even one installed next to a bare binary, so this is the only way office
-documents are converted.
+When an app converts an office document - the Convert app's Word, Excel,
+PowerPoint and OpenDocument targets, PDF and PDF/A from any of them, MCP's
+`file_convert` - filex hands the file to an **office engine**: the one the
+Office editor app brings (0.4.0), run on the server
+([The office engine without a Document Server](#the-office-engine-without-a-document-server)),
+or a connected Document Server's conversion API. When both are there,
+**Admin → Plugins → Default apps → Office engine** decides which
+is asked first (the app's engine, by default). filex ships and runs no
+LibreOffice, not even one installed next to a bare binary.
+
+A Document Server as the engine:
 
 - **Nothing more to set up.** The engine uses the URL, the JWT secret and the
   callback address configured above, and the Document Server downloads the file
@@ -1103,41 +1276,172 @@ documents are converted.
   converts too.
 - **Live.** Connecting or removing the Document Server under External services
   turns the engine on or off at once; no restart.
-- **Not connected:** an app's office targets say so ("Office documents are
-  converted by ONLYOFFICE, and none is connected"), an administrator sees the
-  greyed action and the install review say "connect it under External
-  services", and a job that tries anyway fails with that sentence - never a
-  silent error.
 - **What it does not do** (Document Server 9.4): HTML from a spreadsheet or a
   presentation, and one CSV file per sheet (the first sheet is written).
   PDF/A comes out as PDF/A-2a. Text and CSV results are UTF-8 and start with a
   byte order mark; a CSV takes the separator asked for. `.odg` drawings and
   EPUB books are read.
 
+**Neither** (no app brings an engine and no Document Server is connected): a
+job that asks for an office conversion fails with `office_unconfigured` and
+says that office documents are converted by the Office editor app's engine or
+by a Document Server; an administrator is told to install the app under Apps
+(or connect a Document Server under External services) - never a silent
+error. With the app installed but its engine still being prepared, and no
+Document Server, the job fails with `office_preparing` instead
+([Being prepared](#being-prepared)).
+
 For app authors: [PLUGIN-KIT → The office engine](PLUGIN-KIT.md#the-office-engine).
+
+---
+
+## The office engine without a Document Server
+
+The Office editor app brings an **office engine** for the server: ONLYOFFICE's
+converter (x2t) and its page layout (the editor's own scripts), compiled to
+WebAssembly. With it, filex does on its own what it asked a Document Server
+for:
+
+- the **office conversions apps ask for** (`engines:office`): the Convert
+  app's Word, Excel, PowerPoint and OpenDocument targets, PDF, HTML and EPUB,
+  and MCP's `file_convert` - unchanged for the apps;
+- the **office thumbnails** - the same 320-pixel picture of the first page
+  ([thumbnails.md → Office through OnlyOffice](thumbnails.md#office-through-onlyoffice)).
+
+**Set it up:** install the Office editor app (a release that carries its
+engine; its manifest says `engines.office`). There is no address, no secret
+and no callback to fill in. For a few minutes after the install the engine is
+**being prepared**; **Admin → Plugins → Default apps → Office engine** says
+when it is ready.
+
+### How it runs
+
+- **In a process of its own.** filex starts `filex office-engine` - a hidden
+  command of its own binary - and hands it one job at a time over its standard
+  input and output. The engine's code never runs inside the server process
+  and is never built into filex: it comes with the app's release
+  (`engine.zip`, beside the app's interface bundle), checked against the
+  SHA-256 its manifest names at install and every time a process starts. The
+  editor's scripts and fonts are read from the app's installed package,
+  read-only.
+- **No network, no secrets.** The engine sees the job's own directory and
+  the app's package, nothing else, and its process gets none of filex's
+  environment. A picture a document only links to (a `.docx`'s linked
+  picture, an `<img>` of an HTML page or an EPUB chapter) is not fetched,
+  for a thumbnail or a conversion alike: x2t and the layout run with no
+  socket and no host function that could reach one, and nothing waits for
+  it either. The picture is left out of the pages and the thumbnail, as a
+  Document Server without a network leaves it: a `.docx`'s thumbnail is
+  drawn as the same document's without the link, and such a document
+  converts in the time of one that names nothing elsewhere (measured with
+  the Office editor 0.4.0's engine: 2 seconds to PDF and to a thumbnail, no
+  request to the server it names).
+- **Everywhere filex runs:** Linux, Windows and macOS, amd64 and arm64 (the
+  WebAssembly runtime is filex's own, [wazero](https://wazero.io)).
+- **Its deadline is filex's.** A job that runs past its time - an engine
+  call's (120 seconds unless the app asks for more, at most 900), a
+  thumbnail's 60 - ends with its process; the next job starts another.
+
+### Being prepared
+
+The engine is compiled once on each machine: after the app is installed or
+updated, and after filex itself is updated. That takes **3.5 to 5 minutes**
+in the background; later processes load it from the cache in about a second.
+The cache is in `<data dir>/office-engine/` (the compiled modules, the
+layout's precompiled scripts, and a marker per prepared version); deleting it
+only makes the next start prepare again.
+
+While it is being prepared:
+
+- **Default apps** shows the app's engine as *Being prepared*, since when
+  (then *Ready*, or *Failed* with the reason);
+- a **conversion** goes to the Document Server if one is connected, and
+  otherwise fails with "the office engine is still being prepared" (the job's
+  error code is `office_preparing`, not `office_unconfigured`);
+- **office thumbnails** wait, and are drawn as their files are listed once it
+  is ready.
+
+A preparation that fails says why on Default apps (and in the log) and is
+tried again after 30 minutes, and at every start.
+
+### The engine and a Document Server
+
+Both may be there. **Admin → Plugins → Default apps → Office engine** lists
+them in the order they are asked - by default the app's engine first, the
+Document Server after it - and its **Runs first** picks the one asked first
+(a rule sent to `PUT /api/admin/file-types/engines/office` may also switch
+one off). A job goes to the first
+one that runs now, so a Document Server listed second takes the work while
+the app's engine is being prepared. Office thumbnails follow the same order.
+Their drawer is **ONLYOFFICE** whichever back end draws, so the pictures a
+Document Server drew stay valid when the app's engine takes over, and the
+other way round.
+
+### Memory
+
+| What | Limit |
+|---|---|
+| [`FILEX_OFFICE_ENGINE_MAX_MB`](CONFIGURATION.md#storage-plugins) | The most memory one module of the engine may use, in MiB: `2048` by default, `512` to `4096` (x2t's own maximum). x2t needs 284 MiB to start; a 200,000-row CSV took 2.6 GiB. x2t's memory is reserved up to the cap when a job starts, so growing it never copies it; the reservation is address space only, so the system backs what x2t actually writes and takes it back when the job ends (measured on Linux and Windows: four thumbnails and five conversions in a row, no engine process above 750 MiB at its peak with the 2048 MiB default). A job that reaches the cap ends as *too large*. |
+| The process | About **twice** the cap. filex reads the process's memory every half second on Linux and Windows and ends a process that goes past it; on macOS only the cap per module holds. |
+| Processes | One per `thumbs.office_slots` (1 by default, at most 4) for conversions, and as many again for thumbnails; each takes one job at a time. A process ends after 3 idle minutes or 50 jobs; its layout worker is started again after 20 documents or 1.5 GiB. |
+
+### Where it differs from a Document Server
+
+The pages and the conversions are the Document Server's own - a measured
+letter's PDF came out byte for byte the same; documents with SVG, EMF or WMF
+pictures, HTML to Markdown and text in legacy code pages (a Word 95 document,
+a CSV in windows-1254) come out as the Document Server's - with these
+differences:
+
+- it is **slower**: a document's layout takes 2 to 20 seconds;
+- the **fonts** are the app's (Liberation, Carlito, Caladea, with the same
+  metrics as the Microsoft fonts they stand for): fonts added to a Document
+  Server are not used;
+- a picture or a style sheet a document **links from another server** (a
+  `.docx`'s linked picture, an HTML page's picture) is left out and never
+  fetched, as a Document Server without a network leaves it: the document
+  converts and gets its thumbnail without it.
+
+A document the engine cannot read fails with the engine's reason (a thumbnail
+is marked *Damaged*). If the fonts matter, keep a Document Server and put it
+first under **Default apps → Office engine**.
+
+For app authors: the manifest's `engines.office` block and the engine
+process's protocol are in
+[APP-PLUGINS-API.md → An app's office engine](APP-PLUGINS-API.md#an-apps-office-engine-enginesoffice-057).
 
 ---
 
 ## What happens if it's not configured
 
-Nothing breaks. With no URL and secret - from either source:
+Nothing breaks. With no Document Server URL and secret - from either source:
 
 - filex reports OnlyOffice as **disabled** in its capabilities.
-- Office files open in the **read-only preview** (or download), not an editor.
-- A `.csv` opens in filex's **read-only table** ([CSV files](#csv-files)),
-  and *Open with ONLYOFFICE* is greyed for an administrator, not offered to
+- Office files open in the [Office editor app](#the-office-editor-app) when it
+  is installed, and in the **read-only preview** (or download) when it is not.
+  With the app installed, an earlier pick of filex's own viewer for an office
+  type (a person's *Always open with*, a Default apps order, an *Open with*
+  link) gives way to the app - in the browser, the editor tab and the desktop
+  app alike; filex's viewer stays in *Open with*.
+- A `.csv` opens in the Office editor app when it is installed (0.4.0), and
+  otherwise in filex's **read-only table** ([CSV files](#csv-files));
+  *Open with ONLYOFFICE* is greyed for an administrator, not offered to
   anybody else.
-- **+ New → New document** offers only the types a built-in editor opens -
+- **+ New → New document** offers the types a built-in editor opens -
   Markdown, plain text, CSV, JSON, YAML, XML, HTML and the code formats - and
-  names the missing service for the rest (see
-  [Creating new documents](#creating-new-documents)).
+  the Office editor app's Word, Excel and PowerPoint rows when it is
+  installed; with neither, it names the missing service for the office types
+  (see [Creating new documents](#creating-new-documents)).
 - The editor endpoint returns `onlyoffice: not configured` if called directly.
-- Apps cannot convert office documents (the office engine is unavailable; see
-  [Office conversions for apps](#office-conversions-for-apps-the-office-engine)).
-- Office documents have **no thumbnail**: their type icon, and the reason on
-  the Thumbnail repair tab ([Thumbnails](#thumbnails)).
+- Office conversions for apps and office thumbnails run on the Office
+  editor app's engine when it is installed (0.4.0) and prepared
+  ([The office engine without a Document Server](#the-office-engine-without-a-document-server)).
+  Without it, apps cannot convert office documents (no office engine runs;
+  see [Office conversions for apps](#office-conversions-for-apps-the-office-engine))
+  and office documents have **no thumbnail**: their type icon, and the
+  reason on the Thumbnail repair tab ([Thumbnails](#thumbnails)).
 
-You can add OnlyOffice later at any time - it's purely additive.
+You can add a Document Server later at any time - it's purely additive.
 
 ---
 
@@ -1146,7 +1450,11 @@ You can add OnlyOffice later at any time - it's purely additive.
 ### Failure: "OnlyOffice not configured" / no Edit option
 Only one (or neither) of URL and secret is set. Set **both** - in *Settings →
 External services*, which takes effect immediately, or as
-`FILEX_ONLYOFFICE_URL` + `FILEX_ONLYOFFICE_JWT` followed by a restart.
+`FILEX_ONLYOFFICE_URL` + `FILEX_ONLYOFFICE_JWT` followed by a restart. Since
+0.57 the variables only [seed](CONFIGURATION.md#external-services) a service
+nothing is stored for yet: with an address already saved, run
+`filex settings reseed --external` before the restart, or set the secret on
+the page.
 
 ⚠ A **URL with no secret** is the usual cause, and it is easy to miss: the Test
 button probes `/healthcheck` and answers "reachable" for a Document Server that
@@ -1333,9 +1641,10 @@ The two JWT secrets don't match. The secret filex holds - the `external_services
 row, whatever put it there - **must** equal the Document Server's `JWT_SECRET`;
 a mismatch makes the Document Server reject the config (or filex reject the
 callback) with a token error. ⚠ Correct it on whichever side is wrong: an edit
-in *Settings → External services* takes effect on the next request with no
-filex restart, while `FILEX_ONLYOFFICE_JWT` is re-asserted onto the row at boot
-and therefore needs one. The Document Server needs a restart either way.
+in *Admin → Settings → External services* takes effect on the next request with
+no filex restart; a changed `FILEX_ONLYOFFICE_JWT` reaches a stored row only
+through [`filex settings reseed --external`](CONFIGURATION.md#writing-the-environment-again-filex-settings-reseed) and a restart. The Document Server needs a restart either
+way.
 
 A save callback that carries **no** token is refused as long as filex holds a
 secret ([Always set one](#1-run-the-document-server-with-a-jwt-secret)). If
@@ -1493,6 +1802,8 @@ Server's address alone, as one more layer.
 
 ## See also
 
+- [APP-PLUGINS.md](APP-PLUGINS.md) - installing apps, the Office editor among
+  them, and [Default apps](APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)
 - [E2E-OFFICE.md](E2E-OFFICE.md) - editing office documents in an encrypted
   folder: the design, and what of it exists
 - [CONFIGURATION.md](CONFIGURATION.md) - full config/env reference

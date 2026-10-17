@@ -293,17 +293,7 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		linkPerm = perm.ShareUploadLinks
 	}
 	if err := publicLinkRefusal(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, linkPerm); err != nil {
-		var lr *linkRefusal
-		if errors.As(err, &lr) && lr.v.WritePerm(w, r) {
-			return
-		}
-		if errors.Is(err, errE2EEncrypted) {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": codeE2EEncrypted})
-			return
-		}
-		if !answerGate(w, r, err) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
-		}
+		writeLinkRefusal(w, r, err)
 		return
 	}
 
@@ -440,7 +430,7 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	// full folder read from object storage, for a file that the warmer never
 	// looks at again and (before the sweeper) nothing ever deleted.
 	if sh.Kind != model.ShareKindDrop {
-		h.warmFolderZip(node)
+		h.warmFolderZip(node, sh)
 	}
 	h.warmFolderThumbs(node)
 
@@ -549,7 +539,10 @@ const zipWarmTimeout = 30 * time.Minute
 // Silent by design. This is an optimisation on top of a cache that already
 // falls back to streaming a fresh ZIP; a failure here must not fail the share
 // creation the user actually asked for.
-func (h *Share) warmFolderZip(node *model.Node) {
+//
+// The archive holds what the link's visitors may have (LinkMembers, asked as
+// sh's creator) - built on the detached context, which outlives the request.
+func (h *Share) warmFolderZip(node *model.Node, sh *model.Share) {
 	if h.Zip == nil || !h.Zip.Enabled() || node == nil || node.Type != model.NodeTypeDirectory {
 		return
 	}
@@ -557,11 +550,12 @@ func (h *Share) warmFolderZip(node *model.Node) {
 	if err != nil || drv == nil {
 		return
 	}
-	path, id := node.Path, node.ID
+	path, id, storageID := node.Path, node.ID, node.StorageID
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), zipWarmTimeout)
 		defer cancel()
-		_, _ = h.Zip.Warm(ctx, drv, path, id)
+		keep := LinkMembers(ctx, h.ACL, h.Store, sh, storageID)
+		_, _ = h.Zip.Warm(ctx, drv, path, id, keep)
 	}()
 }
 
@@ -1155,7 +1149,10 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 			h.renderFolderBrowse(r.Context(), w, r, drv, node, resolved, pin)
 			return
 		}
-		h.serveFolderZip(r.Context(), w, r, drv, node.StorageID, node.Path, node.Name, node.ID, resolved.ID, pin)
+		// Every member answers the link's member rule (LinkMembers, as the
+		// creator): a file the creator may not download is not in the ZIP.
+		keep := LinkMembers(r.Context(), h.ACL, h.Store, resolved, node.StorageID)
+		h.serveFolderZip(r.Context(), w, r, drv, node.StorageID, node.Path, node.Name, node.ID, resolved.ID, pin, keep)
 		return
 	}
 
@@ -1198,8 +1195,12 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// download most browsers block from an https page), another site
 	// entirely, a scheme that is not a download at all. Anything but an
 	// absolute https URL is served through filex instead, which always works.
+	disposition := "attachment"
+	if r.URL.Query().Get("inline") == "1" {
+		disposition = "inline"
+	}
 	if pres, ok := drv.(storage.Presigner); ok && !src.Staged && drv.Capabilities().Presign {
-		if u, err := pres.PresignDownload(r.Context(), node.Path, 5*time.Minute); err == nil && redirectableDownload(u) {
+		if u, err := presignShareDownload(r.Context(), pres, node, disposition); err == nil && redirectableDownload(u) {
 			http.Redirect(w, r, u, http.StatusFound)
 			return
 		}
@@ -1215,10 +1216,6 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rc.Close()
 
-	disposition := "attachment"
-	if r.URL.Query().Get("inline") == "1" {
-		disposition = "inline"
-	}
 	mime := node.Mime
 	if mime == "" {
 		mime = "application/octet-stream"
@@ -1232,6 +1229,20 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// (the visitor got bytes, and a refund here would reopen the very gap this
 	// claim closes).
 	_, _ = io.Copy(w, rc)
+}
+
+// presignShareDownload is the address a public link redirects to: with the
+// Content-Disposition filex would have sent itself when the driver can sign
+// one into the URL (the S3 driver's PresignDownloadAs), so the saved name is
+// the file's and not the URL's last segment (task #238); else the plain one.
+func presignShareDownload(ctx context.Context, pres storage.Presigner, node *model.Node, disposition string) (string, error) {
+	type presignAs interface {
+		PresignDownloadAs(ctx context.Context, p string, ttl time.Duration, disposition string) (string, error)
+	}
+	if as, ok := pres.(presignAs); ok {
+		return as.PresignDownloadAs(ctx, node.Path, 5*time.Minute, httpx.ContentDisposition(disposition, node.Name))
+	}
+	return pres.PresignDownload(ctx, node.Path, 5*time.Minute)
 }
 
 // claimDownload takes one download off the share's cap before anything is
@@ -1279,11 +1290,13 @@ func (h *Share) claimDownloadSlot(r *http.Request, shareID int64) bool {
 // ⚠ No Content-Length. There is no way to know one before the last member is
 // deflated, and this repo has already shipped a download that promised a length
 // it did not have (see declareBodyLength). Chunked is the honest answer.
-func (h *Share) streamFolderZip(ctx context.Context, w http.ResponseWriter, drv storage.Driver, storageID int64, root, name string) error {
+func (h *Share) streamFolderZip(ctx context.Context, w http.ResponseWriter, drv storage.Driver, storageID int64, root, name string, keep sharezip.Keep) error {
 	files, err := sharezip.CollectFiles(ctx, drv, root)
 	if err != nil {
 		return err
 	}
+	// The cached archive's filter (Plan), so the two never differ.
+	files = sharezip.Kept(files, keep)
 
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", httpx.ContentDisposition("attachment", name+".zip"))
@@ -1338,7 +1351,10 @@ func (h *Share) streamFolderZip(ctx context.Context, w http.ResponseWriter, drv 
 // a worse failure than the current one, because it would then be served to
 // everyone until the signature changed. Closing it properly means merging the
 // node catalogue into the walk, which is a listing change, not a read change.
-func (h *Share) serveFolderZip(ctx context.Context, w http.ResponseWriter, r *http.Request, drv storage.Driver, storageID int64, root, name string, nodeID, shareID int64, pin string) {
+//
+// keep is the link's member rule (LinkMembers); both the cached and the
+// streamed archive hold only the members it keeps.
+func (h *Share) serveFolderZip(ctx context.Context, w http.ResponseWriter, r *http.Request, drv storage.Driver, storageID int64, root, name string, nodeID, shareID int64, pin string, keep sharezip.Keep) {
 	// Both serving paths claim their download BEFORE writing (see
 	// claimDownload): a folder ZIP takes long enough that two clicks used to
 	// overlap comfortably inside the old check-then-count gap.
@@ -1348,7 +1364,7 @@ func (h *Share) serveFolderZip(ctx context.Context, w http.ResponseWriter, r *ht
 		}
 		// streamFolderZip writes its headers up front, so a failure part-way
 		// through has already handed bytes over — the claim stands.
-		_ = h.streamFolderZip(ctx, w, drv, storageID, root, name)
+		_ = h.streamFolderZip(ctx, w, drv, storageID, root, name, keep)
 	}
 	serve := func(cachePath string) {
 		if !h.claimDownload(w, r, shareID) {
@@ -1365,7 +1381,7 @@ func (h *Share) serveFolderZip(ctx context.Context, w http.ResponseWriter, r *ht
 		return
 	}
 
-	cachePath, files, err := h.Zip.Plan(ctx, drv, root, nodeID)
+	cachePath, files, err := h.Zip.Plan(ctx, drv, root, nodeID, keep)
 	if err != nil {
 		stream()
 		return

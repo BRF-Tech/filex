@@ -199,6 +199,10 @@ func errc(err error) int {
 		return -fuse.ENOSPC
 	case ErrTooBig:
 		return -fuse.EFBIG
+	case ErrBadName:
+		return -fuse.EINVAL
+	case ErrNameTooLong:
+		return -fuse.ENAMETOOLONG
 	}
 	return -fuse.EIO
 }

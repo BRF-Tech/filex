@@ -12,6 +12,7 @@ import { useI18n } from 'vue-i18n';
 import { ArrowLeft, Save, Trash2, UsersRound, FolderLock, UserPlus, Info, TriangleAlert } from 'lucide-vue-next';
 
 import { GroupsApi, type GroupDetail, type GroupGrant, type GroupMember } from '@/api/groups';
+import { grantPlace } from '@/lib/grantPlace';
 import { RolesApi, type PermissionRule } from '@/api/roles';
 import { UsersApi } from '@/api/users';
 import type { User } from '@/api/types';
@@ -394,8 +395,9 @@ const grantColumns = computed<DataColumn<GroupGrant>[]>(() => [
         :empty="t('groups.noFolders')"
         row-key="id"
       >
+        <!-- #117 — a grant on the storage root reads "alpha (whole storage)" (lib/grantPlace) -->
         <template #cell-path="{ row }">
-          <span class="tbl-mono"><bdi>{{ (row as GroupGrant).storage_name }}://{{ (row as GroupGrant).path_prefix || '' }}</bdi></span>
+          <span class="tbl-mono"><bdi>{{ grantPlace(row as GroupGrant, t) }}</bdi></span>
         </template>
         <template #cell-level="{ row }">
           <div>

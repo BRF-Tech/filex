@@ -179,6 +179,11 @@ type Config struct {
 	// brings for its own interface (docs/APP-PLUGINS-API.md → An app's own
 	// interface).
 	AppPluginMaxUIMB int `yaml:"app_plugin_max_ui_mb"`
+	// OfficeEngineMaxMB caps the memory of every instance of the office
+	// engine an app brings (FILEX_OFFICE_ENGINE_MAX_MB, default 2048, 512 to
+	// 4096 - x2t's own maximum); the engine's process may hold about twice
+	// that (internal/officeengine). Read when an engine process starts.
+	OfficeEngineMaxMB int `yaml:"office_engine_max_mb"`
 	// AppPluginUpdateCheck (FILEX_APP_PLUGIN_UPDATE_CHECK, default on) runs
 	// the daily check that asks every installed app's source for a newer
 	// version and installs the ones that ask for nothing new
@@ -499,8 +504,10 @@ type NFSConfig struct {
 type SeedConfig struct {
 	AdminEmail    string `yaml:"admin_email"`
 	AdminPassword string `yaml:"admin_password"`
-	SiteName      string `yaml:"site_name"`
-	TrashDays     string `yaml:"trash_retention_days"`
+	// SiteName seeds the Display name (`branding.name`, FILEX_SITE_NAME):
+	// the one name of the instance, on its pages and in its mails.
+	SiteName  string `yaml:"site_name"`
+	TrashDays string `yaml:"trash_retention_days"`
 	// ShareMaxTTLDays seeds the `share.max_ttl_days` setting — the longest
 	// life a NEW share link may be given (FILEX_SHARE_MAX_TTL, e.g. "7" or
 	// "30d"; "0" = unlimited). Like the other seeds it only applies when the
@@ -911,6 +918,13 @@ type ThumbsConfig struct {
 }
 
 // SearchConfig — bleve index.
+//
+// ⚠⚠ Since 0.57 (task #261) Content, ContentMaxBytes, AutoRebuild and
+// MemoryPercent are only the FIRST value of the settings-table rows the
+// Search page edits (internal/search settings.go): their variables and these
+// YAML keys seed a row on a boot where none exists yet, and the row wins from
+// then on. Nothing reads these fields after search.SeedSettings. Enabled and
+// IndexPath stay here: whether the index is opened at all, and where it lives.
 type SearchConfig struct {
 	Enabled   bool   `yaml:"enabled"`
 	IndexPath string `yaml:"index_path"`
@@ -1401,6 +1415,7 @@ func applyEnv(c *Config) {
 		{"FILEX_APP_PLUGIN_MAX_OUTPUT_MB", &c.AppPluginMaxOutputMB},
 		{"FILEX_APP_PLUGIN_MAX_WASM_MB", &c.AppPluginMaxWasmMB},
 		{"FILEX_APP_PLUGIN_MAX_UI_MB", &c.AppPluginMaxUIMB},
+		{"FILEX_OFFICE_ENGINE_MAX_MB", &c.OfficeEngineMaxMB},
 		{"FILEX_PLUGIN_REQUEST_TTL_DAYS", &c.PluginRequestTTLDays},
 	} {
 		if v := os.Getenv(kv.env); v != "" {

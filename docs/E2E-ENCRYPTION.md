@@ -1182,7 +1182,7 @@ kept), and the tenant's administrators answer under Admin → Encryption.
 
 | | |
 |---|---|
-| ![Admin → Encryption: the approval policy and three requests waiting](https://filex.sh/shots/encryption/admin-encryption-1440.b74163acb93c.png) | ![Approving a new-folder request](https://filex.sh/shots/encryption/approve-new-folder.2d58b972f592.png) |
+| ![Admin → Encryption: the approval policy and three requests waiting](https://filex.sh/shots/encryption/admin-encryption-1440.35606d99b816.png) | ![Approving a new-folder request](https://filex.sh/shots/encryption/approve-new-folder.2d58b972f592.png) |
 | Admin → Encryption under `approval`: the requests waiting, each with its kind, who asked and why. | The answer to a new-folder request says what it opens: one new encrypted folder there, once. |
 | ![The request for an encrypted folder New folder opens, with its reason](https://filex.sh/shots/encryption/request-new-folder.e74894fba30f.png) | |
 | The person's side: *Request an encrypted folder…* in the New folder dialog, a reason written. | |
@@ -2026,11 +2026,11 @@ entry with a readable (and meaningless) name, shown as such.
 
 | | |
 |---|---|
-| ![Creating an encrypted folder](https://filex.sh/shots/e2e-recovery/create-encrypted-folder.83f4e4a875bd.png) | ![The recovery key, shown once](https://filex.sh/shots/e2e-recovery/recovery-key-shown-once.565d587f56fe.png) |
+| ![Creating an encrypted folder](https://filex.sh/shots/e2e-recovery/create-encrypted-folder.fbf82bbd84ff.png) | ![The recovery key, shown once](https://filex.sh/shots/e2e-recovery/recovery-key-shown-once.58db68a847c5.png) |
 | Creating the folder. The escrow notice appears only when the installation has escrow on. | The recovery key, shown once. The dialog will not close until you tick that you saved it. |
-| ![The lock screen](https://filex.sh/shots/e2e-recovery/locked-folder.ab407a10763a.png) | ![Unlocking with a recovery key](https://filex.sh/shots/e2e-recovery/unlock-with-recovery-key.24da26a5d602.png) |
+| ![The lock screen](https://filex.sh/shots/e2e-recovery/locked-folder.8d3a6296a745.png) | ![Unlocking with a recovery key](https://filex.sh/shots/e2e-recovery/unlock-with-recovery-key.4a3d7fc91fdb.png) |
 | A wrong password, and the way out underneath it. | The recovery-key dialog. The **Escrow key** tab appears only when both the installation and the folder have escrow. |
-| ![The escrow tab](https://filex.sh/shots/e2e-recovery/unlock-with-escrow-key.0d7ea71a0557.png) | ![The offer to a pre-v0.31 folder](https://filex.sh/shots/e2e-recovery/legacy-folder-upgrade-offer.0230e9658c97.png) |
+| ![The escrow tab](https://filex.sh/shots/e2e-recovery/unlock-with-escrow-key.ef44e5d582bc.png) | ![The offer to a pre-v0.31 folder](https://filex.sh/shots/e2e-recovery/legacy-folder-upgrade-offer.de286c978ce9.png) |
 | Escrow says up front that the owner will be told. | A folder from before v0.31, just opened by password: the offer is visible, and it discloses the escrow consequence. |
 
 Retake them with

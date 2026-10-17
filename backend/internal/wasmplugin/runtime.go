@@ -189,6 +189,13 @@ func (c *Compiled) Call(ctx context.Context, export string, input []byte, budget
 		ModuleConfig: clock.moduleConfig(),
 	})
 	if err != nil {
+		// ⚠ Starting the instance (the guest's runtime start-up) runs under
+		// the same budget. A start cut short by it is a timeout - on a busy
+		// machine, not a crash of the guest.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, &CallError{Code: CodeTimeout, Export: export,
+				Message: fmt.Sprintf("the plugin did not start within %s", budget.Round(time.Second)), Cause: err}
+		}
 		return nil, &CallError{Code: CodePluginTrap, Export: export, Message: "the plugin could not be started", Cause: err}
 	}
 	defer inst.Close(context.WithoutCancel(ctx))
@@ -235,13 +242,29 @@ func (c *Compiled) HasExport(ctx context.Context, export string) (bool, error) {
 	return inst.FunctionExists(export), nil
 }
 
+// DescribeBudget is describe's budget: the app's call budget, and never less
+// than MinDescribeTimeout.
+//
+// ⚠⚠ Why (0.57 chain, 2026-10-16): describe is filex's own proof, at
+// install and every load, and nobody waits on it the way a person waits on
+// a screen. With the call budget alone (15 s by default, sign's 30), two
+// installs on an overloaded machine (two race-test jobs starting beside the
+// suite, memory and disk stalled) ran out of it while the module was still
+// starting, and were refused - as describe_mismatch, "the build and the
+// manifest do not belong together", about a module that was fine; the same
+// installs took 6 s and 2 s a minute later. A busy server is not a different
+// program.
+func DescribeBudget(m *Manifest) time.Duration {
+	return time.Duration(max(m.CallTimeout(), MinDescribeTimeout)) * time.Second
+}
+
 // Describe calls the guest's describe export and checks that it agrees with
 // the installed manifest on the things a grant depends on. The file on disk
 // is the operator's intent; the guest's answer is the proof it is the same
 // program.
 func (c *Compiled) Describe(ctx context.Context, locale string) (*wire.Manifest, error) {
 	in, _ := jsonMarshal(wire.DescribeInput{HostVersion: HostVersion, Locale: locale})
-	out, err := c.Call(ctx, "describe", in, 0)
+	out, err := c.Call(ctx, "describe", in, DescribeBudget(c.Manifest))
 	if err != nil {
 		return nil, err
 	}

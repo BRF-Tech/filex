@@ -199,7 +199,7 @@ database, the first time it runs (the mark `auth.instances.upgraded`):
 
 A **single-tenant install** reads none of this: every enabled instance serves
 every sign-in, as every provider does today. The tables are filled anyway, so
-turning multi-tenant mode on later (Admin → Multi-tenant mode, or
+turning multi-tenant mode on later (Admin → Settings → Multi-tenant mode, or
 `FILEX_MULTI_TENANT`) starts from the same bindings. While the mode is off the
 Identity providers page shows no bindings and lists no tenant's own provider;
 the rows are kept for when it is back on.
@@ -416,11 +416,14 @@ treats them alike. Two rules move with it:
     those carry the headers, so they get `404`. The second hands out a
     private key: never to the internet. For good measure, answer `/api/tls/*`
     with a 404 in the proxy's own site block.
-  - ⚠ The default trusted list is every loopback, private and link-local
-    address, so anything that reaches filex's own port directly from the
-    private network counts as the proxy. Keep that port unpublished (the
-    proxy reaches it on the container network), or set
-    `FILEX_TRUSTED_PROXIES` to the proxy's own address.
+  - ⚠ The default trusted list (`auto`) is this machine and, in a
+    container, the other containers on its networks
+    ([Trusted proxies](CONFIGURATION.md#trusted-proxies)), so anything that
+    reaches filex's own port from another container on those networks
+    counts as the proxy. Keep that port unpublished (the proxy reaches it on
+    the container network), or set the trusted list to the proxy's own
+    address (**Sign-in security**, or `FILEX_TRUSTED_PROXIES` before the
+    first start: since 0.57 the variable only seeds the list).
   - Proxies without such hooks (Traefik, nginx, an Ingress) issue certificates
     per host as they do today; the screen says the certificate is the proxy's.
 
@@ -481,18 +484,23 @@ filex's own TLS in `acme` mode).
 
 ## The tenant screen
 
-**Admin → Tenants** (the platform operator's; an administrator of a tenant is
-refused like the API refuses them, and the menu shows it only to the operator
-of a multi-tenant install). One table (the shared `DataTable`, remembered as
+**Admin → People → Tenants** (the platform operator's; an administrator of a
+tenant is refused like the API refuses them, and the menu shows it only to the
+operator of a multi-tenant install). One table (the shared `DataTable`, remembered as
 `admin.tenants`): name, realm, address, sign-in, storages, people, state.
 
-**Admin → My tenant** is the same for a tenant's administrator, for their own
-tenant: its own OIDC and LDAP (`/api/admin/tenant/auth-providers`), the
+**Admin → Settings → My tenant** (the General column) is the same for a
+tenant's administrator, for their own tenant: its own OIDC and LDAP (`/api/admin/tenant/auth-providers`), the
 platform's providers that serve it (named, never configured), and its
 addresses and own domains (`/api/admin/tenant/domains`). The operator sees
 exactly that section on every tenant's page (one component,
 `TenantSelfService`), plus the insecure switch. Own domains are one more table
 (`admin.tenant.domains`).
+
+A tenant's administrator is offered, in the admin menu, only the pages that
+work on their tenant: the pages about the instance - Protection, Plugins,
+External services, the Queue and the rest whose API refuses them - are left
+out ([ADMIN-PANEL.md → Who sees which page](ADMIN-PANEL.md#who-sees-which-page)).
 
 - **New tenant**: a name and a slug; the **realm is suggested from the slug**
   (`GET /api/admin/providers/realm-suggestion`, the server's one rule,

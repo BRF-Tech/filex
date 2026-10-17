@@ -323,11 +323,12 @@ func TestAppPlugins_AdminInstall_UserRuns_OutputLandsWithBookkeeping(t *testing.
 	assert.Contains(t, list.Runtime.Engines, "ffmpeg")
 	// Every engine with the name a person reads, so the panel keeps no list
 	// of its own (it printed "libreoffice" beside the review's "LibreOffice").
-	// 0.50: the office engine is ONLYOFFICE, under its old name too (an app
+	// 0.57: the office engine is "Office engine" (the Office editor app's
+	// engine or ONLYOFFICE), under its old name too (an app
 	// built before 0.50 still asks for `engines:libreoffice`), and it is
 	// listed once, as `office`.
-	assert.Equal(t, "ONLYOFFICE", list.Runtime.EngineNames["office"])
-	assert.Equal(t, "ONLYOFFICE", list.Runtime.EngineNames["libreoffice"])
+	assert.Equal(t, "Office engine", list.Runtime.EngineNames["office"])
+	assert.Equal(t, "Office engine", list.Runtime.EngineNames["libreoffice"])
 	assert.Contains(t, list.Runtime.Engines, "office")
 	assert.NotContains(t, list.Runtime.Engines, "libreoffice")
 	assert.Equal(t, "librsvg", list.Runtime.EngineNames["rsvg"])

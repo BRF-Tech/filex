@@ -1,4 +1,4 @@
-// Package perm is filex's per-user permission model: 29 named permissions,
+// Package perm is filex's per-user permission model: 30 named permissions,
 // the presets built from them, and the resolver that turns an account's role,
 // the install's defaults, the permission rules that match it and its own
 // overrides into one answer per permission — with where that answer came
@@ -49,7 +49,15 @@ const (
 	ShareUsers       Perm = "share.users"
 	CommentsWrite    Perm = "comments.write"
 	AIUse            Perm = "ai.use"
-	PluginsRun       Perm = "plugins.run"
+	// AIAssistant is the assistant built into the explorer (task #269): a
+	// conversation that runs the agent tools as the person. Not carved out
+	// of ai.use - that one is the agent API an outside program uses with an
+	// API key; this one never hands out a key - so neither needs the other.
+	// Every preset holds it, and the version that adds it gives it to every
+	// saved role (upgrade.go, grantOnAdd): the assistant itself is off until
+	// an administrator sets it up, so the permission alone sends nothing.
+	AIAssistant Perm = "ai.assistant"
+	PluginsRun  Perm = "plugins.run"
 )
 
 // Access outside the web app.
@@ -125,6 +133,7 @@ var catalogue = []Def{
 	{Key: ShareUsers, Group: GroupSharing, ViewerCapped: true},
 	{Key: CommentsWrite, Group: GroupSharing},
 	{Key: AIUse, Group: GroupSharing},
+	{Key: AIAssistant, Group: GroupSharing},
 	{Key: PluginsRun, Group: GroupSharing},
 
 	{Key: AccessWebDAV, Group: GroupAccess},
@@ -292,12 +301,14 @@ var Standard = filter(func(d Def) bool { return d.Group != GroupAdmin })
 var ReadOnly = Standard & viewerCeiling
 
 // UploadOnly can put files in — encrypted ones too, as it could before
-// files.encrypt existed — and nothing else: a drop-box account.
-var UploadOnly = Of(FilesCreate, FilesEncrypt, AccountEdit)
+// files.encrypt existed — and nothing else: a drop-box account. The AI
+// assistant, which every preset holds, can only do what the rest allows.
+var UploadOnly = Of(FilesCreate, FilesEncrypt, AccountEdit, AIAssistant)
 
 // Guest can look and download, and cannot even change its own profile — a
-// shared or demo login.
-var Guest = Of(FilesDownload)
+// shared or demo login. It holds the AI assistant, as every preset does; the
+// assistant reads only what a guest may.
+var Guest = Of(FilesDownload, AIAssistant)
 
 var presets = []Preset{
 	{Name: PresetFullAdmin, Set: allSet},

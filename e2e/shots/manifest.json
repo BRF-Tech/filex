@@ -5,85 +5,85 @@
   "environment": "chain",
   "pictures": {
     "admin-dashboard.png": {
-      "sha256": "d94a065baab6a882588ec836ee5992996785679b1bac6f01e33c828d788fac27",
+      "sha256": "233358b87c3eb1f1c7e2b1bb67b789a916dc27ee207ca2ab8480e499eba591f3",
       "width": 3200,
       "height": 1880,
-      "bytes": 228584,
+      "bytes": 230698,
       "scene": "capture.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "admin-plugins.png": {
-      "sha256": "c25fa69cfc7c2e314c63289ec380f263ca8560d919e0ad733900cbe48d3b81d6",
+      "sha256": "6bd96bf65745441f8b76b325a6d65698b45decc6aa55c2d8b8c5174a0b104895",
       "width": 3200,
       "height": 1880,
-      "bytes": 256213,
+      "bytes": 259534,
       "scene": "capture.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "appearance/theme-editor-1440.png": {
-      "sha256": "5b28006557f81b7bd5751c38c2218d3412f2ce107c0943faf403512ad2609dc4",
+      "sha256": "867a94807e72aeda56b72af22c17c6ef54e867ffa4948ca35d19180ff07e5f93",
       "width": 2880,
       "height": 1988,
-      "bytes": 286578,
+      "bytes": 288946,
       "scene": "appearance.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "appearance/themed-explorer-1440.png": {
-      "sha256": "dbe464fc39c7e0f926383190cbb434476a6559fbbb83d7337578204051a3c495",
+      "sha256": "abc278616daaebcfa16cb4c2290e97a122769b248995c222ef52ed632b322d3b",
       "width": 2880,
       "height": 1800,
-      "bytes": 309084,
+      "bytes": 303933,
       "scene": "appearance.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "appearance/themed-signin-1440.png": {
-      "sha256": "98801a84bea26355565990928698e29b6f1af14a6f8ad8223760199caeef6715",
+      "sha256": "b891c643144458f8e6274a080e7e31338dce25db4dfed25c52379d835f883412",
       "width": 2880,
       "height": 1800,
-      "bytes": 100256,
+      "bytes": 100006,
       "scene": "appearance.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "apppermissions/person-delegated.png": {
-      "sha256": "625d9350683e789faed4ca1ef1063fd8013210738f2ed7ad34393eaebf9218be",
+      "sha256": "dbc7104cf194f4b3d70f04b8d761a080ed2110d51337333cdec533833fa8b1aa",
       "width": 1344,
       "height": 1386,
-      "bytes": 200817,
+      "bytes": 200579,
       "scene": "apppermissions.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "apppermissions/person-exceptions.png": {
-      "sha256": "7e1f829939f449a20664e3d122ed77779fb0b8159ba81d70cf4c933ceed1fe5d",
+      "sha256": "6d132fcacdb019f6af2c2d0e2b829cf617f6443b254cd72148f32a47008571c6",
       "width": 1344,
       "height": 1346,
-      "bytes": 198942,
+      "bytes": 198698,
       "scene": "apppermissions.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "apppermissions/role-custom.png": {
-      "sha256": "9331d1dd4c433a1173804662fb5c5cc1225a977cc1e9892370316667b498d395",
+      "sha256": "b146e8d04758da0330f3d94e6e2e7c3825d018b81eb41b259131d6857d6ca7e7",
       "width": 1724,
       "height": 702,
-      "bytes": 105098,
+      "bytes": 105327,
       "scene": "apppermissions.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "apppermissions/role-user.png": {
-      "sha256": "8cd405c6b49b126233b1d9a589e3a5d1ead1b5c89d0726a4b90f14f0a3faf1dc",
+      "sha256": "d6760b3bb4daf90b389c5a4e6b0a0f24a527157a6ef9a4afc22689184fdf4df5",
       "width": 1792,
       "height": 1090,
-      "bytes": 127956,
+      "bytes": 127675,
       "scene": "apppermissions.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "appprint/print-consent-1280.png": {
       "sha256": "454c0567b284ed19d078052f321150496e7ef3e7271c2e6b90a9e290e3d279a0",
@@ -92,7 +92,7 @@
       "bytes": 77169,
       "scene": "appprint.mjs",
       "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "appprint/print-consent-390.png": {
       "sha256": "d372f0664c9fafad804fb4c4814af9ae936bea6082511e3876ef3843783c44fd",
@@ -101,7 +101,7 @@
       "bytes": 58995,
       "scene": "appprint.mjs",
       "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "appprint/print-consent-dark-tr-1280.png": {
       "sha256": "0c2f5bd7a7d6fd84fa3a2b3d506879d5247e72ce33bc2e910e4a49cdf2b763db",
@@ -110,7 +110,7 @@
       "bytes": 80450,
       "scene": "appprint.mjs",
       "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "appprint/print-consent-dark-tr-390.png": {
       "sha256": "a9436934c13b8c53713e8e5c7ac453addfd551de906001a6fd04efeff1f3c287",
@@ -119,16 +119,16 @@
       "bytes": 63630,
       "scene": "appprint.mjs",
       "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "apps/app-interface-review-1440.png": {
-      "sha256": "51df0aa460adf276dc480a1b779ae217791c9014137780e7875ae91960d00852",
+      "sha256": "877a89c823599b4fc40bb17bf3279262970f808d0d3cac6e9f735074179919f0",
       "width": 1344,
       "height": 2986,
-      "bytes": 407433,
+      "bytes": 407209,
       "scene": "apps.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "apps/app-interface-viewer-1440.png": {
       "sha256": "519b2361815628f54002e3548dc953a06f28c57028c4144a4e3e3bde43aabfb8",
@@ -137,25 +137,25 @@
       "bytes": 148840,
       "scene": "apps.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "apps/app-new-document-1440.png": {
-      "sha256": "3d03f7fa7b671c17ece5bd2fbb6f0933dca198a88d4aea8912b825f651ca426d",
+      "sha256": "ce889271cba2ae13c144645b2dadfc8e68895bdd052fb6693d8ffe8b5b6a22c7",
       "width": 1600,
       "height": 1740,
-      "bytes": 145429,
+      "bytes": 147652,
       "scene": "apps.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "apps/apps-detail-1440.png": {
-      "sha256": "4e27b40c5ce77e98c9eec5905a6f8c5724a0e1ca1a9475e9a8f4e79d5890285e",
+      "sha256": "b7f6ec84545897604326839f074d650bcc6cbb90823a12f9c74c6d3066626a5e",
       "width": 2880,
       "height": 2000,
-      "bytes": 608155,
+      "bytes": 611743,
       "scene": "apps.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "apps/apps-install-review-1440.png": {
       "sha256": "cdb1a4ebf8f6a15812dae6296c50d4454600bb7017e4c9cfb9beb0f5da15816c",
@@ -164,7 +164,7 @@
       "bytes": 663298,
       "scene": "apps.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "apps/convert-wizard-1440.png": {
       "sha256": "231ada006fd6bc7375e3e335725e6559991bd3c78ce4fec22bee21e84e138781",
@@ -173,7 +173,34 @@
       "bytes": 134940,
       "scene": "apps.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "assistant/approval-1440.png": {
+      "sha256": "b154026fc149c36f29b334fe46c37bd74f4b1cd3c324df68a24ab9b3c8d602a0",
+      "width": 720,
+      "height": 1678,
+      "bytes": 113786,
+      "scene": "assistant.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "assistant/panel-1440.png": {
+      "sha256": "ab167021d62a3c57499b90c746a9107cfdc22308574ed860f014904853e54418",
+      "width": 2880,
+      "height": 1800,
+      "bytes": 261477,
+      "scene": "assistant.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "assistant/settings-1440.png": {
+      "sha256": "8ec69fc1b9be792d8f9d461dd0833d4039e5d554d5c759efbc543ca992193039",
+      "width": 1536,
+      "height": 2872,
+      "bytes": 361223,
+      "scene": "assistant.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "authproviders/auth-provider-pam-1440.png": {
       "sha256": "e20e2d03f5d9dcf7ad8cddceafb378e4679c22429af136a4b509388bc55a53d1",
@@ -182,7 +209,7 @@
       "bytes": 401429,
       "scene": "authproviders.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "authproviders/auth-provider-windows-1440.png": {
       "sha256": "f9d62088848b25229bb9ad39d966735c67e7c9327ad74b84bb8fc7bff44a004b",
@@ -191,34 +218,34 @@
       "bytes": 235000,
       "scene": "authproviders.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "authproviders/auth-providers-1440.png": {
-      "sha256": "8184cd134048050d24a82050842d847a1e2ffa8393e58beccbe13a576c59326a",
+      "sha256": "3a863843c46fbeb3084808aaaf7725ca37e8e61ec8735c8eba5252f6c8539a18",
       "width": 2880,
       "height": 1926,
-      "bytes": 183922,
+      "bytes": 186629,
       "scene": "authproviders.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "authproviders/auth-providers-958.png": {
-      "sha256": "74365d2de48cdd450c1bdc03b1372b8ac76af75f666b1edac2b941c3d4628d5a",
+      "sha256": "bdf3396e70b7efb65dae9211b1accef2861a88544b204f2d503c942d433a32fa",
       "width": 1916,
       "height": 1926,
-      "bytes": 154906,
+      "bytes": 156064,
       "scene": "authproviders.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "connections-guide.png": {
-      "sha256": "98a4f82ecd9d1591227c5d19732b3828971f77c9b4893833969721c017fee73c",
+      "sha256": "3999cf32c3d95f586b991b020aafcee600547755175b0d1a0f41c9256dacb1fb",
       "width": 3200,
       "height": 3278,
-      "bytes": 542641,
+      "bytes": 541357,
       "scene": "capture.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "csvoffice/csv-choose-app.png": {
       "sha256": "57b1ed93440f56e98d06f2430261ff62e11c7c8a9f716b9130ca4e74695cef6d",
@@ -227,7 +254,7 @@
       "bytes": 58296,
       "scene": "csvoffice.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "csvoffice/csv-edit-1440.png": {
       "sha256": "4efc379a293dafd4e1ff51005d68de8265165a25d688ff87c1ed2eb9ed7812cc",
@@ -236,25 +263,25 @@
       "bytes": 199664,
       "scene": "csvoffice.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "csvoffice/csv-menu-no-onlyoffice.png": {
-      "sha256": "dc12b704a28214d3c0411b3fa12ace2f05b81adbd16814fbdfd27a332290eca3",
+      "sha256": "5c04628c016ae3ba2e27625fe981c17063055e08f299e1f8936e0143a2c98c96",
       "width": 2880,
       "height": 1800,
-      "bytes": 265676,
+      "bytes": 261022,
       "scene": "csvoffice.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "csvoffice/csv-open-with-menu.png": {
-      "sha256": "2caeabb88a281d1a48198b7753dfe09432a17451bae31084ad2a0aed6528fc87",
+      "sha256": "a1541e22b5fd7f9c1be46b475354fa2f23a36a5f6a233a9c5376382b671c0b33",
       "width": 2880,
       "height": 1800,
-      "bytes": 271815,
+      "bytes": 267358,
       "scene": "csvoffice.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "csvoffice/csv-view-1440.png": {
       "sha256": "83237ba55d3dd643c2e07edfc553d06b93f2437dbafce2552c6d0a9f901dc936",
@@ -263,16 +290,16 @@
       "bytes": 170215,
       "scene": "csvoffice.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "csvoffice/default-apps-csv-1440.png": {
-      "sha256": "f78775e4ce393a2ece2023560e2786b9dc24285d284ac8d178f5d17174abd151",
+      "sha256": "2f19cd58693f1127f7481fa198594adbb38cde14fc5b69e9d3cbb3b0e4088edd",
       "width": 2880,
       "height": 1800,
-      "bytes": 205298,
+      "bytes": 270473,
       "scene": "csvoffice.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "defaultapps/app-thumbnails.png": {
       "sha256": "61e41ec0ea0a1f7e755d9163e29cdd9eeba5bb7b3afce4bcd5242170fa08afd4",
@@ -281,25 +308,25 @@
       "bytes": 95777,
       "scene": "defaultapps.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "defaultapps/default-apps-1440.png": {
-      "sha256": "27d3c64fe4578ed320be2fe549984dab83c01b79a5e9539724618fbe3eda789a",
+      "sha256": "0dd62b519f8f292da6828514ea5de103b2444f0b3401ed291305f9de72d7004f",
       "width": 2880,
       "height": 1800,
-      "bytes": 319756,
+      "bytes": 380202,
       "scene": "defaultapps.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "defaultapps/explorer-app-thumbnails-1440.png": {
-      "sha256": "1dc7b7784971aafdc100f2131e1b9d1da662fe7f5384e150398a7f6ae474ed7d",
+      "sha256": "3371e9e30aecb1105a873053cda0b1b4ab5da9a187294467fd82982d60b19f33",
       "width": 2880,
       "height": 1800,
-      "bytes": 234941,
+      "bytes": 230627,
       "scene": "defaultapps.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "defaultapps/file-type-editor.png": {
       "sha256": "4c829bf6f9a8931814243a7c39cf02f127b02a2113dd0ada5e1b9ea461e5743e",
@@ -308,16 +335,16 @@
       "bytes": 68160,
       "scene": "defaultapps.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "defaultapps/install-file-types-1440.png": {
-      "sha256": "1d893f407c0be73d2300f9a8db0f147254d4ef2d57c551543ea04e31b8827709",
+      "sha256": "51994ec2e511923750cc4c00ff1b0e5ffda8e3163ed9151c0f3ed705dc4aed98",
       "width": 1344,
       "height": 3498,
-      "bytes": 422397,
+      "bytes": 422835,
       "scene": "defaultapps.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "defaultapps/open-with-dialog.png": {
       "sha256": "ea9b92e6cc2f9bfc161b2742ee3d9a18ea3356aa8f4883416e38136a800dc9a6",
@@ -326,313 +353,313 @@
       "bytes": 51242,
       "scene": "defaultapps.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "defaultapps/open-with-menu.png": {
-      "sha256": "bd841ff64489723722b87779b1e37e2fa8dd4e31396d70ac1d7b0fb11aaf642e",
+      "sha256": "725757be0400d94a33035efc4a17d1cf44c571a903c30dec2a8d7e4a4548d1f9",
       "width": 2880,
       "height": 1800,
-      "bytes": 237949,
+      "bytes": 233533,
       "scene": "defaultapps.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "defaultapps/settings-default-apps.png": {
-      "sha256": "f348b66f7396066e49683df9c4b18a4055b0cb35effdf0a123c76fb44b3cfaf6",
+      "sha256": "a7438a62c20b0ba9ab4cf2f363e04410f9ece7c99cc9b0155139bb6a4eecee20",
       "width": 1600,
       "height": 1240,
-      "bytes": 173650,
+      "bytes": 168145,
       "scene": "defaultapps.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "defaultapps/thumb-repair-handlers-1440.png": {
-      "sha256": "17f153d1ad75a54fbcbf2ad65af21d51740540f0cfbd1528e0c9acb752a22538",
+      "sha256": "2da164361c6ee2eef874f380d89c296c46e0efd3b896508b702e6233d0223e95",
       "width": 2880,
       "height": 1800,
-      "bytes": 289385,
+      "bytes": 283810,
       "scene": "defaultapps.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "demo-landing.png": {
-      "sha256": "bb2b8d97d4ff1e8b6ff6e6117f7f8a0f3dd31aafc78f8bd1e6eff30dbef9b675",
+      "sha256": "64f23c6f8cb37f072d714546cba9ed90b923ce25d4a799f750338cb904ecfab6",
       "width": 3200,
       "height": 2530,
-      "bytes": 570368,
+      "bytes": 571352,
       "scene": "capture.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/admin-shell-1440.png": {
-      "sha256": "577e28cb6ecc1eb51bbda6a798f4270f9c1826fa6e9f7206a10b88f5a7e372b2",
+      "sha256": "5b0bd003bf006bec202fe5e88f59865adfbbc785a7401b35fc2cf1b2bee763aa",
       "width": 2880,
       "height": 1800,
-      "bytes": 351512,
+      "bytes": 346343,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-390-dark.png": {
-      "sha256": "3a0b31804a90d0b8ee25fb239c174dc7237fdd889abc003514416d884c5e898f",
+      "sha256": "6c8dc6f44608de3285ccff60b6dd4cbfcb1ac6784d40a8e6526127dcfe40c809",
       "width": 780,
       "height": 1688,
-      "bytes": 86920,
+      "bytes": 86810,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-390.png": {
-      "sha256": "fe8ed1863506371285ba0f0a1ddaf7be9a882bccc89f43180245abf12e3047d4",
+      "sha256": "86f27cf5bc90c38bcba039112161731026991f3749abb1ad4173103339c28f34",
       "width": 780,
       "height": 1688,
-      "bytes": 85507,
+      "bytes": 86315,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-dark-1440.png": {
-      "sha256": "ac8f51dc37bfe6dc95f33c33c7482f1cba7c207471afe3428b4653e7404baa89",
+      "sha256": "05d7fd2514bd0bef8089cd12d8ccf09519a76ad862c9df2519d64e1743c80519",
       "width": 2880,
       "height": 1800,
-      "bytes": 293391,
+      "bytes": 288143,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-dark-info-1440.png": {
-      "sha256": "24ea65df3005842a7de6a7b79f87bc4f65a6f2d6890f1b2ac1ec79b2ecfc000d",
+      "sha256": "17253b6424ccee5e57568a83dd84472b52332cd324b38e846e9663c37d8ebd13",
       "width": 2880,
       "height": 1800,
-      "bytes": 329000,
+      "bytes": 324876,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-drawer-390.png": {
-      "sha256": "81dbf484af7671641ee3ea710f3fe5816926ecd4fdf9fca7cd9d4e6429c12ec3",
+      "sha256": "a85daed8a66d944cfd9a83b597e44c42425e347255d27f4346f712ff12e6dfc3",
       "width": 780,
       "height": 1688,
-      "bytes": 92654,
+      "bytes": 88724,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-filter-1440.png": {
-      "sha256": "103b38da1aeabdafa4ceea1edaf3a7febc0b62f409064c41cf31cdd2829bcaa6",
+      "sha256": "f9160df0c9984776c84cf38fad3b3d9f48051b7455bc1b0eea4a21595175f119",
       "width": 2880,
       "height": 1800,
-      "bytes": 177625,
+      "bytes": 172889,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-filter-empty-1440.png": {
-      "sha256": "f0f8aacd743dd578a6c0ba3c36013abefc0fe9b0c50b655bf32d54823f1bb992",
+      "sha256": "446c6d13d223fa6232b6c5b1c5dc8cc7a06b66d6488b1566d5a56c23194d4a1f",
       "width": 2880,
       "height": 1800,
-      "bytes": 174745,
+      "bytes": 170252,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-grid-1440.png": {
-      "sha256": "0bd2f5561b16b9f573cb97ffd2898259072e7163561ac570812f82181d388e92",
+      "sha256": "356ca14a1b9b652e90c6b3e4cc4ef3c18b9cbf3a7ebfab06b3ea077d6fca7bc0",
       "width": 2880,
       "height": 1800,
-      "bytes": 295051,
+      "bytes": 291033,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-hero-1440.png": {
-      "sha256": "16ace59f07c3ac605d028241c820f07b831292739ad0ab3d3f365f8fbfc70536",
+      "sha256": "6410104e072c30448516239acac89795c82b01d31a2b10251bd0684ccfb89932",
       "width": 2880,
       "height": 1800,
-      "bytes": 311526,
+      "bytes": 306536,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-info-activity-1440.png": {
-      "sha256": "c4353c2e19c1eb4762e728ec2f02b23eddab2a083fe522549ae8be020e5d4c0d",
+      "sha256": "bfaafa35a3e3914e7d1f7b728e2a9e395bd04b502d48854a3dc94fc6cee9bc57",
       "width": 2880,
       "height": 1800,
-      "bytes": 345731,
+      "bytes": 341173,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-info-details-1440.png": {
-      "sha256": "0fc6437dd3e99ec0321604c9e7e2bac23da4a4be37ac614acb40ae395a34a548",
+      "sha256": "f51b90b3ee6dc0363d30e234ffcc00a856786dcb83180a709e0caa26cacc9b73",
       "width": 2880,
       "height": 1800,
-      "bytes": 386054,
+      "bytes": 381567,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-info-link-1440.png": {
-      "sha256": "430a21bf7943090994b28a79f6ad63550fccfcf263ddf32eb15c040ab56dfa6e",
+      "sha256": "125a60c2135431ca371db347ec86d95b166db6b87f7ecd07f090e8c50851ca86",
       "width": 2880,
       "height": 1800,
-      "bytes": 409105,
+      "bytes": 407496,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-info-people-1440.png": {
-      "sha256": "86d5eeec36ac75d75188c2a2fdaf71f1a96803dc516498d3f215c85ad58d221a",
+      "sha256": "874fdc609f29dde72ebf9bce0f76e3b6ab4e05de150214e9f108f2ba13ace11e",
       "width": 2880,
       "height": 1800,
-      "bytes": 247219,
+      "bytes": 242045,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-list-1440.png": {
-      "sha256": "f977dbf4cca5070458e34baff975a8c8371314f3e09a59f76da867d23f56082f",
+      "sha256": "e25ad8b2d0e553118f3fa7d64f698c4ffeec34b7733369ba91484af7599f9e6a",
       "width": 2880,
       "height": 1800,
-      "bytes": 307983,
+      "bytes": 303320,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-new-menu-1440.png": {
-      "sha256": "543754d914d384ab34bce932c19bf02c207f5a4e7606c1b351cf3dca8edafc26",
+      "sha256": "e3d48fe9a7d375ab9adee8e8321b624879db10871c940c51aee54b879cac0ab6",
       "width": 2880,
       "height": 1800,
-      "bytes": 303384,
+      "bytes": 298885,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-palette-1440.png": {
-      "sha256": "17a2fff06062e7bd0910d3146b4851b98e2b30f30ec10d81b9a3374b4051bb39",
+      "sha256": "dfb951b9738d478f0c81af43969a5c5675525f5a488dd08289e9bec235d48fbc",
       "width": 2880,
       "height": 1800,
-      "bytes": 212840,
+      "bytes": 208738,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-rail-1440.png": {
-      "sha256": "89aa2e1e3c011902e6a241c387772c2dca81911082bb1162b2e39cae9f854f66",
+      "sha256": "fc552ef3a8f405cbacae3b9e633f1063895817ff52198ddb3c15541667758b9c",
       "width": 2880,
       "height": 1800,
-      "bytes": 237596,
+      "bytes": 236801,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/driveshell-search-1440.png": {
-      "sha256": "c0f3ceda0ec411b4f45857635bae87badc664d2aea3659e4ae795ede360545f0",
+      "sha256": "2536c373425fea91eedc48c9d2d2d241e67becb0513d02c6709d5313a61be799",
       "width": 2880,
       "height": 1800,
-      "bytes": 189242,
+      "bytes": 184602,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "driveshell/embed-no-panel-1440.png": {
-      "sha256": "dd009a7c601b0709c600b7baf820c9c7d719b01c6a88be1ba46fbf368c11d754",
+      "sha256": "c391ca2d1a049879a9a53b1aa64c98e219ed8e5e5dcce92a4e02f4e4b0433825",
       "width": 2880,
       "height": 1800,
-      "bytes": 135811,
+      "bytes": 135066,
       "scene": "driveshell.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "e2e-recovery/create-encrypted-folder.png": {
-      "sha256": "83f4e4a875bd498322af31a45a360fa962980c7e59db6948aff329913247b632",
+      "sha256": "fbf82bbd84ffeb22b30e8fd718ae279e4ebfa0792c5efd62666dbfa5e819b091",
       "width": 2560,
       "height": 1720,
-      "bytes": 343705,
+      "bytes": 339010,
       "scene": "e2e-recovery.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "e2e-recovery/escrow-used-notification.png": {
-      "sha256": "8ec0096c52fa79c4b9ba9bc0dc6713632bc016b66e46f43afb00bbf3b9ffdd6f",
+      "sha256": "047a0f11c442fb4ed8dfe9f96bd084c860a4620b2e895aadda8c1b9fa43c60e9",
       "width": 2560,
       "height": 1720,
-      "bytes": 239125,
+      "bytes": 234933,
       "scene": "e2e-recovery.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "e2e-recovery/legacy-folder-no-recovery.png": {
-      "sha256": "96024ca19120d0feb67cd0fbd88dd4bd9fa6b645bf71911a21d1b7b88052f1f8",
+      "sha256": "a060ef138ad1e3c812b7c1d88118100a394ba367f5b06693ac8859bea8e747d4",
       "width": 2560,
       "height": 1720,
-      "bytes": 276735,
+      "bytes": 272678,
       "scene": "e2e-recovery.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "e2e-recovery/legacy-folder-recovery-key.png": {
-      "sha256": "b8554fd196129c300546ef715284872d62bbca6e18e4c38458e6af32980ac9dd",
+      "sha256": "baa6068c2779f0817e4a519cf32d50827e03bbc3b06fe8fdc032e4400a2fac12",
       "width": 2560,
       "height": 1720,
-      "bytes": 300578,
+      "bytes": 296090,
       "scene": "e2e-recovery.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "e2e-recovery/legacy-folder-upgrade-offer.png": {
-      "sha256": "0230e9658c9700fbc77aadd6756ca6476244b9ba2697e980e77891173ecbd1c6",
+      "sha256": "de286c978ce9f523f1052a7ebeffd1feb8a0b957f8fd885f70d43c3130d69b44",
       "width": 2560,
       "height": 1720,
-      "bytes": 232994,
+      "bytes": 228523,
       "scene": "e2e-recovery.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "e2e-recovery/locked-folder.png": {
-      "sha256": "ab407a10763a007cf343036a71d5ef6c9c8edd39dad81de7a53c3a8c905feb33",
+      "sha256": "8d3a6296a7450666ebb0d51adec0cdb87e299b425458f982ac7c09f745b3a7ec",
       "width": 2560,
       "height": 1720,
-      "bytes": 171702,
+      "bytes": 167134,
       "scene": "e2e-recovery.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "e2e-recovery/recovery-key-shown-once.png": {
-      "sha256": "565d587f56febb9b78fedea72db4a739e0c7a65765c9ead562b420c319349a3f",
+      "sha256": "58db68a847c5891f6907bd60f6169b780aafd2b90ed620025d195ef64df1d520",
       "width": 2560,
       "height": 1720,
-      "bytes": 287246,
+      "bytes": 281192,
       "scene": "e2e-recovery.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "e2e-recovery/unlock-with-escrow-key.png": {
-      "sha256": "0d7ea71a05579d0bee6718f36070fb52260cb94968b39771a62fa3732914d06a",
+      "sha256": "ef44e5d582bc14d2f3fc19115e5f42cde4023e008a1a0fa558b659a7b4d89b40",
       "width": 2560,
       "height": 1720,
-      "bytes": 212282,
+      "bytes": 208029,
       "scene": "e2e-recovery.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "e2e-recovery/unlock-with-recovery-key.png": {
-      "sha256": "24da26a5d60259f29f1252c66537e9e86490dbac3666a4e5ac301acba689fb4c",
+      "sha256": "4a3d7fc91fdb22b02882c02689099c9f752d1639818ef4c9b97fbcd168ffc52c",
       "width": 2560,
       "height": 1720,
-      "bytes": 192391,
+      "bytes": 188018,
       "scene": "e2e-recovery.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "e2e-recovery/unlocked-with-recovery-key.png": {
-      "sha256": "26dee5fadb53a67e5fc0aaa9d7563f7861e9de4b5f51feed92ef8e575fc9e21c",
+      "sha256": "6d8e7d40902a4221dd87938a06bfdf6766ee93fa6d640c8933dc62e4db553bbc",
       "width": 2560,
       "height": 1720,
-      "bytes": 312245,
+      "bytes": 307465,
       "scene": "e2e-recovery.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "e2eapp/app-encrypted-folder-1280.png": {
       "sha256": "856d3586a9e22f3b467118e0e891751c169ffb2bad374306cebaa7da1339561c",
@@ -641,7 +668,7 @@
       "bytes": 144513,
       "scene": "e2eapp.mjs",
       "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "e2eapp/open-with-encrypted-1280.png": {
       "sha256": "aa5c86c8c9bb51a6d6b0bdd71cc433baf2a21021b4799b12368786ab75199ae5",
@@ -650,7 +677,7 @@
       "bytes": 33840,
       "scene": "e2eapp.mjs",
       "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "e2eapp/vault-lock-soon-1280.png": {
       "sha256": "df4684a99783d54ba55fb1d524e2263e4e061701f49bcb06a023a1aa1963036b",
@@ -659,16 +686,16 @@
       "bytes": 150271,
       "scene": "e2eapp.mjs",
       "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "encryption/admin-encryption-1440.png": {
-      "sha256": "b74163acb93ce89894617c3d8582e6c1ba7c5fa6b432518a0283c2f13aff985c",
+      "sha256": "35606d99b816278ee20bcc33a6d461ab22f3ba9e24cbbff19e8a39518784eeeb",
       "width": 2880,
       "height": 1800,
-      "bytes": 312065,
+      "bytes": 315154,
       "scene": "encryption.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "encryption/approve-new-folder.png": {
       "sha256": "2d58b972f592002f38b268d7e04189d7e35091567e27f8b0006edb49a89bd898",
@@ -677,7 +704,7 @@
       "bytes": 72399,
       "scene": "encryption.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "encryption/request-new-folder.png": {
       "sha256": "e74894fba30f96d8f9991bf4fad8d3182519dabe7156f862a51979eb4b5e22ed",
@@ -686,43 +713,43 @@
       "bytes": 67318,
       "scene": "encryption.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "explorer-grid-dark.png": {
-      "sha256": "e032d7456831aa37cfded92c6480cf35d0e6dac7d0fdde12dca62b6d674c487d",
+      "sha256": "ff7a02b49f2753b85e4769afa659936dba96073ec3456e853943e5dea95e1ed3",
       "width": 3200,
-      "height": 1408,
-      "bytes": 293030,
+      "height": 1384,
+      "bytes": 287099,
       "scene": "capture.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "explorer-grid-light.png": {
-      "sha256": "de398671d43b347426305848059ec28d81e6d98e109b1d7e58315a7b5e027908",
+      "sha256": "475b0b61faab5051a5fd9473d88813ed308a667afab82ffd1b0e8612fa36e273",
       "width": 3200,
-      "height": 1408,
-      "bytes": 294063,
+      "height": 1384,
+      "bytes": 289384,
       "scene": "capture.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "groups/group-page-1440.png": {
-      "sha256": "61f4012ef1b0f2ef786be13cb0738d6bbdec205ae1664febf6ebc4bdaf27c44e",
+      "sha256": "e3e98c4b2c4c58c88b825b9c06782ee33412e9724b4b8839ab4dc29f92cb7088",
       "width": 2880,
       "height": 2500,
-      "bytes": 301534,
+      "bytes": 303069,
       "scene": "groups.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "groups/groups-list-1440.png": {
-      "sha256": "73224b70e40b768a3ce7a44cb69ce101e858f326201967e2fdd389abebcdd6e8",
+      "sha256": "22ff57b029f553b9e47f08aca708023bf004735b596df23566daacc7e05150af",
       "width": 2880,
       "height": 1800,
-      "bytes": 214458,
+      "bytes": 216229,
       "scene": "groups.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "groups/share-group-1440.png": {
       "sha256": "31c2a81e1eeb1096c73db8d67c0e8e72d629357201e45f5f690fe3c402267f0b",
@@ -731,16 +758,16 @@
       "bytes": 102594,
       "scene": "groups.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "groups/user-groups-1440.png": {
-      "sha256": "d6c5428fd5f4ed3d0a3cf777e3db6d0d8d3ae3e154f0a557e6ae5422365ef06d",
+      "sha256": "025a87c15115da745d25c64192fa8c6488c4da6193aaf65c21d2ef5d19b11ff0",
       "width": 2880,
       "height": 2200,
-      "bytes": 315710,
+      "bytes": 317335,
       "scene": "groups.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "langpack/apps-list-1440.png": {
       "sha256": "004f0c8199814534b6cbe519a2e633cff1d13667a18de3b91c03b4132617bad4",
@@ -752,76 +779,76 @@
       "checked": "2026-10-09T09:10:41.300Z"
     },
     "loginsecurity/login-locked-1440.png": {
-      "sha256": "3f4c6d3233f33de33c54309ac55615361c6f466cd37ca1166df12ea061daeb3e",
+      "sha256": "42e1fe6f193743287f13b5b56c8eb0684a31d7041725848cebaa363998a6c59b",
       "width": 2880,
       "height": 1800,
-      "bytes": 117933,
+      "bytes": 117493,
       "scene": "loginsecurity.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "loginsecurity/login-remaining-1440.png": {
-      "sha256": "de6ab8c9e4a360c2dc8b1655f3bce7a81ee73eae4a83c062471e7b5beede22c7",
+      "sha256": "d1df80168e82ed2d5f528fae82a49b2bb38f982609f3115a9634e7770964131c",
       "width": 2880,
       "height": 1800,
-      "bytes": 115966,
+      "bytes": 115667,
       "scene": "loginsecurity.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "loginsecurity/login-security-1440.png": {
-      "sha256": "077cec3f1b0ad84158256c3de00fb2530415cc7027de7488ec15f241ad5d0ff1",
+      "sha256": "70f2a2a762571b74bda4aa654230b7bcdb745e2dd162de55ac20c4ac92a04ea3",
       "width": 2880,
       "height": 1908,
-      "bytes": 283689,
+      "bytes": 286234,
       "scene": "loginsecurity.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "loginsecurity/login-security-958.png": {
-      "sha256": "2f48a232f4c7a93600331743046132f4e25415ea06155e357110a80254ac3b4c",
+      "sha256": "116dd643474da625203badf00c646de5de08ac24048231d97d5323f07c6bf198",
       "width": 1916,
-      "height": 5756,
-      "bytes": 1120284,
+      "height": 5796,
+      "bytes": 1136690,
       "scene": "loginsecurity.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "loginsecurity/login-security-page-1440.png": {
-      "sha256": "fa0a391a5c197ba1aef9998253b4dbda35f417333b03359dad4831e7b35bb340",
+      "sha256": "3b370a593b47669e74d6152ff6ac9478f41ff0d1d45eab1b16b498c290f3a432",
       "width": 2880,
-      "height": 5684,
-      "bytes": 1185003,
+      "height": 5724,
+      "bytes": 1199293,
       "scene": "loginsecurity.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "megamenu/drawer-390.png": {
-      "sha256": "f8df63fbbbe6ba9c8afc7d71999ca404dd63f3dd81be80f608f5f9c78120dac0",
+      "sha256": "7201a5e9217ef712b8e67e97a302fb568da76420f0e4e9be4887356774915b3c",
       "width": 780,
       "height": 1688,
-      "bytes": 152813,
+      "bytes": 146219,
       "scene": "megamenu.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "megamenu/people-panel-1440.png": {
-      "sha256": "2efdcb9a685ae21c8cc20e17eeead6ae08934ae725d4a2c4b2dc747b716fd1e5",
+      "sha256": "2e872feffaa9eb0df20717a4d66c13d152c9e8bda66a9eb9089093f1a15fb100",
       "width": 2880,
       "height": 1520,
-      "bytes": 257011,
+      "bytes": 239409,
       "scene": "megamenu.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "megamenu/search-ldap-1440.png": {
-      "sha256": "f5a64d244a4e3d8fd8f0c2f262bc4989aa38c7051aa8481f64a1cc12cec35219",
+      "sha256": "9530b71d0dbae0cfd4fb2719943656b0dd0236ef2f9b97e7189a6f49bd1811fd",
       "width": 2880,
       "height": 1520,
-      "bytes": 246746,
+      "bytes": 248061,
       "scene": "megamenu.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "megamenu/search-tr-390.png": {
       "sha256": "50610d264908835bdb8f89a03d47b77291d9bb80a9d26035c74854ef33b558e9",
@@ -830,16 +857,25 @@
       "bytes": 54176,
       "scene": "megamenu.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
-    "megamenu/system-dark-tr-1440.png": {
-      "sha256": "7593af7dd72bc4a63ca60eea70d377774d5b161b40a72316fb6a69c5e651e94d",
+    "megamenu/settings-dark-tr-1440.png": {
+      "sha256": "53abae9d3fd24249d7709e63d5d57e27a9dcabc8d79ab02834b14f7beac16960",
       "width": 2880,
       "height": 1800,
-      "bytes": 354230,
+      "bytes": 339890,
       "scene": "megamenu.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "megamenu/settings-panel-1440.png": {
+      "sha256": "23a710915f9cb5a0f6d9afed6741d0385736d3814bed1fd6dee0b31dd8a3dbce",
+      "width": 2880,
+      "height": 1520,
+      "bytes": 325464,
+      "scene": "megamenu.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "mermaid/mermaid-edit-1280.png": {
       "sha256": "cab051b8dfb0390ab1976752cfbc3f0fd0adc61c2233c44786cfef3e0131f89b",
@@ -848,7 +884,7 @@
       "bytes": 76200,
       "scene": "mermaid.mjs",
       "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "mermaid/mermaid-view-1280.png": {
       "sha256": "cb1ef3b761eedad831cd74235a1646d3eb59f715bbf53338a5d2f6d6ab906024",
@@ -857,7 +893,7 @@
       "bytes": 91859,
       "scene": "mermaid.mjs",
       "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "newdoc/drafts-close-1280.png": {
       "sha256": "d49e1e1267da70d8f113f5eb725ece138c77309e5c85dd85e7a0a66695699ab7",
@@ -866,7 +902,7 @@
       "bytes": 104273,
       "scene": "newdoc.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "newdoc/drafts-close-390-dark.png": {
       "sha256": "8db30db8b31e6e14961a7b76f5b863ddc10aaa7c637a8bd2ac8122eb52b2ea4c",
@@ -875,7 +911,7 @@
       "bytes": 79448,
       "scene": "newdoc.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "newdoc/drafts-taken-1280.png": {
       "sha256": "c0d6502f34769a58d2aa05b6197b229cdd8a3dd8114ea9c9dc2d34a5ed055aac",
@@ -884,34 +920,34 @@
       "bytes": 98859,
       "scene": "newdoc.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "newdoc/drafts-view-1280.png": {
-      "sha256": "6092d950f3fbbf48f6cb88f865bcb06ff00b6e35253d1780482efa85bf47d8a3",
+      "sha256": "c3e1734bf7e2df0fb4e4e2aff5c4ae3ea8091f257127c2c78260f7f31d4aff64",
       "width": 2560,
       "height": 1720,
-      "bytes": 188585,
+      "bytes": 184291,
       "scene": "newdoc.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "newdoc/newdoc-any-name-1280.png": {
-      "sha256": "c36430b7d719c85f19377ad907aad7563e7c47bb91e0c4674fbb00a3fd709222",
+      "sha256": "e62db0a423f9aa4472d4a8991597b012b9d98f3b7e14476301daed32d3a43f97",
       "width": 2560,
       "height": 1720,
-      "bytes": 253323,
+      "bytes": 252736,
       "scene": "newdoc.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "newdoc/newdoc-any-name-390-dark.png": {
-      "sha256": "35b6db59b0fc481be91197edb69476b4bf6234d33a85875c7f6abfb641304090",
+      "sha256": "91da65445a83262d8f674f963830c1dc7d4cf4f3585c383087a0e6c9fe5211a4",
       "width": 780,
       "height": 1688,
-      "bytes": 106096,
+      "bytes": 105733,
       "scene": "newdoc.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "newdoc/newdoc-license-editor-1280.png": {
       "sha256": "7c6b9a266ab5e55c3694fb664c25153f94a31e59238cde007bf8bec07f292236",
@@ -920,7 +956,7 @@
       "bytes": 56438,
       "scene": "newdoc.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "officeapp/coedit-editor-1280.png": {
       "sha256": "92d45b0674952aaa51f3b461563be28e7bfc1c297382884bdf50acaf475c154c",
@@ -929,7 +965,7 @@
       "bytes": 159685,
       "scene": "officeapp.mjs",
       "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "officeapp/coedit-watcher-1280.png": {
       "sha256": "904b31e20f365669a9883ab7360d6ce129f12c72c86e5c5ed0a5954f9a85148b",
@@ -938,25 +974,25 @@
       "bytes": 178296,
       "scene": "officeapp.mjs",
       "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "officeapp/newdoc-office-app-1280.png": {
-      "sha256": "70ef3ae038a7f7e857cbd55bd984aa722fb176709424f5553a729df17ec508ad",
+      "sha256": "5346ee2d09b22854ba31a86a4fd7680cf7003c8e72821f57889a2e652d146727",
       "width": 1600,
       "height": 1552,
-      "bytes": 141872,
+      "bytes": 142231,
       "scene": "officeapp.mjs",
-      "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "officeapp/newdoc-office-app-dark-tr-1280.png": {
-      "sha256": "4f71d02f903cb08450aab36d04e2518e0937c8361e969f1253310bd8992f3a53",
+      "sha256": "de4906405641f4ef707bd28610786f55457cff56d732e4c9c3d295c2fbabdc07",
       "width": 1600,
       "height": 1520,
-      "bytes": 143276,
+      "bytes": 145687,
       "scene": "officeapp.mjs",
-      "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "officeapp/office-app-phone-390.png": {
       "sha256": "b56888356934bee84539791e8bf7a8f0b7a14426a98f96b19b0b032db15928c4",
@@ -965,34 +1001,34 @@
       "bytes": 103058,
       "scene": "officeapp.mjs",
       "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "officeapp/office-app-review-1440.png": {
-      "sha256": "0431e9a31479c93c194ac90fb7dc90cde9f0d761c79a959a2ba5189a53db856a",
+      "sha256": "9ad60d04a53e5ac8c35c76b8cb6a2e46205ca519d85158e8ad5af1c612f2b871",
       "width": 1344,
       "height": 3914,
-      "bytes": 565588,
+      "bytes": 564499,
       "scene": "officeapp.mjs",
-      "taken": "2026-10-10T00:12:33.406Z",
-      "checked": "2026-10-10T00:12:33.406Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "pluginrequests/requests-1440.png": {
-      "sha256": "ec6723def503fa8769d8873ed1897499ac78ac6d2367d7849d92f0221cfa0b82",
+      "sha256": "8ef4a069b3449c11f7c0cd9c02d8a4d76ded2ce33fc0dcaf83cd3b6e1a473dc7",
       "width": 2560,
       "height": 518,
-      "bytes": 164672,
+      "bytes": 164644,
       "scene": "pluginrequests.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "pluginrequests/review.png": {
-      "sha256": "4f18ee6e170c15bfcea2dc5b82893a7c80e3d5d6965d6c91c89605ba91d84d75",
+      "sha256": "117cf2a960f7da060d90429847820b3b401d7bd28c3415c319844b9906db1c61",
       "width": 1344,
       "height": 3532,
-      "bytes": 639153,
+      "bytes": 639466,
       "scene": "pluginrequests.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "public-share.png": {
       "sha256": "0e3ba07f7c88a23053064afeb621d005d5c47c6a1a376fc7d3cf8cebf6158034",
@@ -1001,241 +1037,241 @@
       "bytes": 664139,
       "scene": "capture.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "realm/login-realm-1440.png": {
-      "sha256": "8f475089f6400db49a64af243ea2ae6b6949f01f9ebf6f4f65ca2bfb74041a63",
+      "sha256": "04c63e0ba149dc0a8ff6c295105667eabfc71685d8c4f2c63dc3962f1a061be2",
       "width": 2880,
       "height": 1800,
-      "bytes": 120200,
+      "bytes": 120021,
       "scene": "realm.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "realm/login-realm-958.png": {
-      "sha256": "d8dada4a4878729e502c6b974f75e48b549a2d4a88bca3868fca54a38116b429",
+      "sha256": "9acee364e68c3a2cc8cafcb0d5e6b023b59c808390f72004429c4b20f8734619",
       "width": 1916,
       "height": 1800,
-      "bytes": 109029,
+      "bytes": 108862,
       "scene": "realm.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "realm/login-realm-locked-1440.png": {
-      "sha256": "6aab246c7428dd74c411f93c62f714ce439c7dcabef193540e9aee21ae387665",
+      "sha256": "ad0cd828c6acc81a586193aeb726380d4641e3bcd2590719700cf6f6a474852f",
       "width": 2880,
       "height": 1800,
-      "bytes": 109052,
+      "bytes": 108872,
       "scene": "realm.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "roles/folder-access-1440.png": {
-      "sha256": "693f0707339ee37c6e11e25fd0da18b8c455019091e7441ae24694c3b6edd1e8",
+      "sha256": "dec921e0eed086dc2fdc676770b9ee423d8df8e5ba4c03ef00e41156b4203216",
       "width": 2880,
       "height": 1800,
-      "bytes": 197053,
+      "bytes": 198620,
       "scene": "roles.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "roles/role-editor-1440.png": {
-      "sha256": "1cbf21192719dfe75b051008770df7e2dd0ce759a653ef5fe7d90a55c1b684a0",
+      "sha256": "3524f24e0347c38d61b6e6472d70405ae0b2b5001aa9a2cf232b2084b57438a7",
       "width": 1792,
       "height": 4824,
-      "bytes": 613545,
+      "bytes": 612968,
       "scene": "roles.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "roles/roles-gaps-1280.png": {
-      "sha256": "bf4cbd7277e28b6f824a532173962304da4bc7e057407428c24026722d02ff6d",
+      "sha256": "5b3074ba17954984f799d50063e811c55e659ce263f62a8578a249a9c637ede4",
       "width": 2560,
       "height": 1800,
-      "bytes": 325088,
+      "bytes": 325911,
       "scene": "roles.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "roles/roles-list-1440.png": {
-      "sha256": "77477a2c7001154443dabc7cc663a14aa8d3297fc00a7b80ca7e3748833cabd1",
+      "sha256": "6bb0779b66e37f06c55de6c668a51e30675f2b37ef97eb17d65a1acf223dfb82",
       "width": 2880,
       "height": 1800,
-      "bytes": 219020,
+      "bytes": 219566,
       "scene": "roles.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "share-modal.png": {
-      "sha256": "d6f6572228eaf81018033d78f705fa951d50196abe38adf66fb4c6f585637f11",
+      "sha256": "87cb16a1a6f02b2d6ea283c4ebdf1cc7852caa69b7b70fb48bf01c6a3d5b695d",
       "width": 880,
       "height": 1620,
-      "bytes": 154226,
+      "bytes": 153462,
       "scene": "capture.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/admin-rail-1440.png": {
-      "sha256": "2cc91b15c805e8441cc1e7d1e41be73ada2a3c0102d46fe7de525127da539704",
+      "sha256": "502bedd44cfc747bcbd8aa26a475f0757a8f7d423bca7a4323b010ab884a0d6f",
       "width": 2880,
       "height": 1800,
-      "bytes": 135227,
+      "bytes": 134556,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/admin-storages-order-1440.png": {
-      "sha256": "18320ebce8d8b3536f877aafba8204a2ba4b6721150af221fdea3cd8e4855ba5",
+      "sha256": "926684c0dced5a8ba995b5cdfc42eb127293a2a40d8b7d818e34f62ac26dce8d",
       "width": 2880,
       "height": 1800,
-      "bytes": 164141,
+      "bytes": 166374,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/apikeys-1440.png": {
-      "sha256": "0697d3157b70f1cc333c5f6de1eba38cab45c4086b2b643ed0646cf0f1257c94",
+      "sha256": "a2a44818fe248e8ff08b42be93d361ea5666d8795ffb15cddeacab15d0e1d5ec",
       "width": 2880,
       "height": 1800,
-      "bytes": 305574,
+      "bytes": 301263,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/apikeys-minted-1440.png": {
-      "sha256": "cfc100f30069dc408171a92280d3950e8c227a30b207de095503292533b5c2fd",
+      "sha256": "3464cb59b2f8c4d2276b7363288aaa765d9ef0615998d6c0497685f3627a8f37",
       "width": 2880,
       "height": 1800,
-      "bytes": 348520,
+      "bytes": 344821,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/connect-1440.png": {
-      "sha256": "8bfbe35780f4d31bd16e8d514519ee5f547085872e8500b41e9f8b07748bee59",
+      "sha256": "45536274e7dc99e48c6d6ecfb279ec8ee85d20455b64a0daa88addf842ecacf6",
       "width": 2880,
       "height": 3108,
-      "bytes": 706442,
+      "bytes": 698842,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/embed-apikeys-1440.png": {
-      "sha256": "0690e85084b35df101a75695d798c01c261f16695f3ed47dee3e12bb7bb14aae",
+      "sha256": "71b20e46e90492b075ad5941a5b098e4613226e982ef21f2a7b675a34f84b46d",
       "width": 2880,
       "height": 1800,
-      "bytes": 299429,
+      "bytes": 295982,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/embed-webcomponent-1440.png": {
-      "sha256": "c8c25d893d249bcaec6c069e243c4c3f5cf8e03c143941bc01ec56b9c850879c",
+      "sha256": "b802d5b6ab5606fe2ed88579764f4209e19ae2db829c0c75fb1b0165bc14f10b",
       "width": 2880,
       "height": 1800,
-      "bytes": 183336,
+      "bytes": 182480,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/sidenav-closed-390.png": {
-      "sha256": "bcff050e217e3404bd8f2938dc7c72ca488878289499e02410d8a1947b4e4aab",
+      "sha256": "58f7df6d285ff6d4e5a15fb07d2e6c9d32242ed3081d5f65db3fdb90ad28b118",
       "width": 780,
       "height": 1688,
-      "bytes": 114711,
+      "bytes": 117653,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/sidenav-drawer-390.png": {
-      "sha256": "a375364fef7e5f0596b1bb7fc5041984f89f6c5c5d22de9503fd1118bad80644",
+      "sha256": "c6e0d6effa566e4443e6aade1350326f49689e923c9a9a5fb2e9152e1c9cad2e",
       "width": 780,
       "height": 1688,
-      "bytes": 97797,
+      "bytes": 93902,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/sidenav-expanded-1440.png": {
-      "sha256": "461d5aaaff2ac34c4b983b02c492650b0fbd409b9824dfd7a83666c45d01a5ae",
+      "sha256": "e96ea7e9838861a69d83d905c90c7cc3cf1203b98348e55769efa90a6c4c54a0",
       "width": 2880,
       "height": 1800,
-      "bytes": 315339,
+      "bytes": 310833,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/sidenav-rail-1440.png": {
-      "sha256": "843a2158380d105b408a0edd3ab70cc0f66663748e19b61f95dbdf137f8f9a7f",
+      "sha256": "9269e026d29a80a4bda3d3a3421d7a48fa678654c65e69f6121fd5faebf79e8a",
       "width": 2880,
       "height": 1800,
-      "bytes": 258941,
+      "bytes": 258278,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/storage-order-menu-1440.png": {
-      "sha256": "6aeee0490716893c7c794efd2b188583cf055fbc20585a163eae7de70f72f50e",
+      "sha256": "cb8c28254ec6f6c89374944bd82cf2daa8e4515dbd697e4e3649ef507aa1f628",
       "width": 2880,
       "height": 1800,
-      "bytes": 211482,
+      "bytes": 208495,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/view-recent-1440.png": {
-      "sha256": "d895bd46f19adb26cde250a46e9fca07cadf5512ad038844b86e98040cd513b7",
+      "sha256": "39b96d0660312c8157025c4acd13b7620d972160ed34a6c4bf4565025fc36591",
       "width": 2880,
       "height": 1800,
-      "bytes": 279743,
+      "bytes": 275003,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/view-shared-1440.png": {
-      "sha256": "475ec2d8b49fce1e7df819aafacf57621211ae797dd8e68ea43976e726bc339e",
+      "sha256": "faf6f6668c206a0bd5d3de4e5fedcc28506c7b3d0a6d7b16f6a2d4ad806f5ef1",
       "width": 2880,
       "height": 1800,
-      "bytes": 187951,
+      "bytes": 183302,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/view-starred-1440.png": {
-      "sha256": "6e829c536361f9a713bd3aa56222e8206434dd94f9b7867de6d94fa4b11b792f",
+      "sha256": "89f5b63c3573c3761d2f03cb48bdeb68e9e05dbe422acab96917bea6b2e26837",
       "width": 2880,
       "height": 1800,
-      "bytes": 239883,
+      "bytes": 235433,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "sidenav/view-trash-1440.png": {
-      "sha256": "ab3cfb3b01cf2f75fb622ba8925134fb4dd78ef0ac732053d9b02b7692330b88",
+      "sha256": "40f8904b147f8ebecb6d362a19165ffdcb76f4a7479e654e975fcf4585f81713",
       "width": 2880,
       "height": 1800,
-      "bytes": 206040,
+      "bytes": 201451,
       "scene": "sidenav.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "signing/admin-table-actions-1440.png": {
-      "sha256": "330fcc5fda7367c8e26f8510fd6a706b4f839837f82ec9f75e0911a0b6228cc9",
+      "sha256": "0fffdc146eb1aefb373b938f764ac1107638a23035da5b2c064ab949b69f5383",
       "width": 2880,
       "height": 1800,
-      "bytes": 219987,
+      "bytes": 221668,
       "scene": "signing.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "signing/bell-badge-1440.png": {
-      "sha256": "61396b9ab714bbe0bb1230246a6996960a5f7e7029a0ecebe892d335b8e44d11",
+      "sha256": "e9232b261511e3a5cd089b56b1d478b5b6e9f80ff5d3ff8dc47b0ed3c254bbe2",
       "width": 2880,
       "height": 1800,
-      "bytes": 325500,
+      "bytes": 320850,
       "scene": "signing.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "signing/my-shares-1440.png": {
       "sha256": "6f8676cbb5552fcf24a4a5add57ac7d469e65d45a5407ea5f0d81ec6cc9cb25b",
@@ -1244,16 +1280,16 @@
       "bytes": 120736,
       "scene": "signing.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "signing/notifications-list-1440.png": {
-      "sha256": "3176161f21103c998159fd3ac0e822a31a47b965e69cd193a5b69c478405e9fa",
+      "sha256": "669ce56b62d7baa0cfe4cf4b4a160d35983e27e74bbca443d9bef566b13f0ace",
       "width": 2880,
       "height": 1800,
-      "bytes": 321052,
+      "bytes": 316854,
       "scene": "signing.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "signing/sign-define-1440.png": {
       "sha256": "63ea72b1372493b5402b01ecd9aeb36b3e44faa3abc3214949982c1ffc00aae3",
@@ -1262,7 +1298,7 @@
       "bytes": 357918,
       "scene": "signing.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "signing/sign-outside-fill-1440.png": {
       "sha256": "9f50aeb7abef8727ca75ad1d5f1d59186e57eb6373b5a410cc289c8394c6c1bd",
@@ -1271,7 +1307,7 @@
       "bytes": 512878,
       "scene": "signing.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "signing/sign-outside-pin-1440.png": {
       "sha256": "2cd8ccb99483fbb3f5ad03ec42b9ff2b32a83c2d07d9eb20223d4291d5f39db1",
@@ -1280,7 +1316,7 @@
       "bytes": 559918,
       "scene": "signing.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "signing/sign-pins-1440.png": {
       "sha256": "9baa89dac7da191c4b7a05a294b3762b058f772550015660c86f0caab39a7921",
@@ -1289,7 +1325,7 @@
       "bytes": 105208,
       "scene": "signing.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "signing/sign-place-1440.png": {
       "sha256": "696a10b65be840cdb02db426624b3e1addad4427fe5b2712f0a04eb020685c06",
@@ -1298,178 +1334,232 @@
       "bytes": 226097,
       "scene": "signing.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "signing/sign-status-1440.png": {
-      "sha256": "9f93226381edc889c7a849151cfe52d04ef8caf3f15f2bad88e71b788875b917",
+      "sha256": "54c60e832ced5c230b2cdf3fc6a2bba3d2889e34a5a5eb41d9c65db390370fbd",
       "width": 2880,
       "height": 2140,
-      "bytes": 433554,
+      "bytes": 431171,
       "scene": "signing.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/reload-tag.png": {
-      "sha256": "d7af199e34d078517353fda06917e2d58f8ec914451f78d2fb72f76eb889852f",
+      "sha256": "16e1de82a3eea1484e80fe0f1827713a14e09c6e509e75d2abe4362125130560",
       "width": 2880,
       "height": 1800,
-      "bytes": 216709,
+      "bytes": 215911,
       "scene": "starstags.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/reload-trash.png": {
-      "sha256": "0d464a15301ceb592292077cf9501a93585c980e9250c4df9de4b49f7a147782",
+      "sha256": "fa98f9034c4005913bafbf921e9193f5bcbd220e412b01f2554ddb1be22cc60d",
       "width": 2880,
       "height": 1800,
-      "bytes": 170406,
+      "bytes": 170759,
       "scene": "starstags.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/star-gallery-starred.png": {
-      "sha256": "1c6cd0b109d1231eb10fe66309c974c42b081b0a7ed9669353297bedb7bead53",
+      "sha256": "6b6aa9f004dae4933ab31e779d13c8239c7d6a07dd5116c51a0a128b6a3584f0",
       "width": 2880,
       "height": 1800,
-      "bytes": 372841,
+      "bytes": 368343,
       "scene": "starstags.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/star-grid-hover.png": {
-      "sha256": "51c65c5a88e54d9295c080c18c7e070139cb34f6cedd940e37ff16092efa026b",
+      "sha256": "ee1593cf5d281d420c31c1bc37b7504f2008b87b78a2f9f30c7db439ed204662",
       "width": 2880,
       "height": 1800,
-      "bytes": 315684,
+      "bytes": 311046,
       "scene": "starstags.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/star-grid-starred.png": {
-      "sha256": "7fd4b5e263c10304100b53933289fd842da507e106e0170b65eb016879aa1677",
+      "sha256": "2bb80aa6d4ef4117a3cfa5d68d110367f0437a6952e9b97d48c603a58c729482",
       "width": 2880,
       "height": 1800,
-      "bytes": 309646,
+      "bytes": 304918,
       "scene": "starstags.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/star-menu-gallery.png": {
-      "sha256": "e7308b77e8aaae49ebb9f4f3fac259bee24d923647c8096f8bb8ed2a6c07fb32",
+      "sha256": "2f33c754c8e78ca7703ffe177834024ce17e0ac986d8f975cd6c1f77de80865c",
       "width": 2880,
       "height": 1800,
-      "bytes": 425667,
+      "bytes": 420776,
       "scene": "starstags.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/star-menu-grid.png": {
-      "sha256": "74160b64f860540dabcfdf62fb73dde1e3a9d47692797bc6f2c7ce0fa0c84abc",
+      "sha256": "f1cb0213542f208d1b5e55908e5b12eb57e84ccdaaa19434b58b80c053544858",
       "width": 2880,
       "height": 1800,
-      "bytes": 354200,
+      "bytes": 350026,
       "scene": "starstags.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/star-menu-list.png": {
-      "sha256": "a7c14ce0f74f4cbb7c2891c211a67651eda0b24b403c135cbdc91fca3d80c53c",
+      "sha256": "766a9b230598640a52c570f5dfef199416664e0462810c87caaf8bd5d54b3990",
       "width": 2880,
       "height": 1800,
-      "bytes": 337665,
+      "bytes": 333042,
       "scene": "starstags.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/star-menu-unstar.png": {
-      "sha256": "6540aa88703ff4453b7b648512a1614bd1baf53d8e6de69e35c5bce922f845f3",
+      "sha256": "7c9703818ce6c1b47280d9ecb63ab5144dd5d5d2306b74ad99a7f9958000b62a",
       "width": 2880,
       "height": 1800,
-      "bytes": 338653,
+      "bytes": 334058,
       "scene": "starstags.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/starred-view.png": {
-      "sha256": "52e81feb0c5317190727dc11ab4fc63b05e1dd06451fa1fc433544e4cb0612d5",
+      "sha256": "4890006bb79be1eaddc5e5d5331e50326b66d5a8359aa73bf2e3a0ce6875ad5d",
       "width": 2880,
       "height": 1800,
-      "bytes": 213755,
+      "bytes": 209217,
       "scene": "starstags.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/tag-empty.png": {
-      "sha256": "3e243d9bd6360b11e3bc69f222319ff83bb45b7c2356da71c5bd0f62e8470403",
+      "sha256": "be9d4ca27c67742568422dbd499c0ec773161ce79415c659990f4f78a0ceae02",
       "width": 2880,
       "height": 1800,
-      "bytes": 162366,
+      "bytes": 161669,
       "scene": "starstags.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/tag-view-390.png": {
-      "sha256": "34f56129526000473de3311322551c8e831560762c7e2cfd70567258ea9f424a",
+      "sha256": "54304753939854bf8c639d0540117415334970493bc4c67d329c5610c519cd17",
       "width": 780,
       "height": 1688,
-      "bytes": 140616,
+      "bytes": 140679,
       "scene": "starstags.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/tag-view.png": {
-      "sha256": "85bbcb4346db5bf0f03d2fa52fe4b75352059ada9b0050271117fa81408bef66",
+      "sha256": "344d7b51fe91caf0946b9cac9855cf4d5e4208f886e2a6e3209b1af6ca4437b5",
       "width": 2880,
       "height": 1800,
-      "bytes": 220716,
+      "bytes": 219992,
       "scene": "starstags.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/tags-drawer-390.png": {
-      "sha256": "f026ffbedea1f20ef0db8d2ef5cab7ba284ff58991450fb1a613e117fd3d59c1",
+      "sha256": "09599975d1807b9e6194a78144350d91fa8fc614668260ca5956be2ac956c676",
       "width": 780,
       "height": 1688,
-      "bytes": 101632,
+      "bytes": 100985,
       "scene": "starstags.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/tags-panel-all.png": {
-      "sha256": "a2da839e1b4030fc1d7a8843566265a52c5cfa7962483e23800407d36e6bb783",
+      "sha256": "fa0ef22c5ad5cedeffda39a363e01db74b713db9f787fde627ec28575137bc81",
       "width": 2880,
       "height": 1800,
-      "bytes": 215179,
+      "bytes": 214447,
       "scene": "starstags.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/tags-panel-empty.png": {
-      "sha256": "26b802e5a2d9ff04860757b8c037d2bd184c19f69983dd7a0ebb12c5dc0079e5",
+      "sha256": "99370d945359f6b48d2db2a1c7e4b3d2b33a20e92305432b0b31edd16ba48814",
       "width": 2880,
       "height": 1800,
-      "bytes": 189123,
+      "bytes": 184418,
       "scene": "starstags.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/tags-panel.png": {
-      "sha256": "4c487ce01e5de6f7f43caf5cdf41c319d59b79d49d7232bed239cd526519534f",
+      "sha256": "f342e12cdeeb0890a15f876885ed7b8e1b633152ce053ea1f12017885f20c4eb",
       "width": 2880,
       "height": 1800,
-      "bytes": 215427,
+      "bytes": 214659,
       "scene": "starstags.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "starstags/tags-rail.png": {
-      "sha256": "06ae9a3247b71e2646e55e10fec2f0b8afb3053f69136d1b0b891cc84a44c8bf",
+      "sha256": "e6ea52472f9f7158d5998adea98a5b34da56719ba6aac2aa6450957d115bffaa",
       "width": 2880,
       "height": 1800,
-      "bytes": 158749,
+      "bytes": 157907,
       "scene": "starstags.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "storageaccess/folder-access-whole-1440.png": {
+      "sha256": "a7fe716f5196bfe9b7e1070c0672ad2238658ca9a09bf06cf6b0b2abdababda5",
+      "width": 2880,
+      "height": 1800,
+      "bytes": 178674,
+      "scene": "storageaccess.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "storageaccess/storage-access-1440.png": {
+      "sha256": "c3a292fe253fa7e3dd0ebd2164c0729c10f02c78327d833b372b051cc89deff2",
+      "width": 2560,
+      "height": 802,
+      "bytes": 128022,
+      "scene": "storageaccess.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "storageaccess/storage-access-off-1440.png": {
+      "sha256": "6c15ea9d2f5654fc0bf7c1939ce7d908dcd37c78e2bbd5a745e4653f8e3f5f05",
+      "width": 2560,
+      "height": 828,
+      "bytes": 101162,
+      "scene": "storageaccess.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "storageaccess/storage-access-turn-on-1440.png": {
+      "sha256": "ce2ac42b892b204af154d8cfc201d46578e0106f58202a420ce240424eee4f7b",
+      "width": 1344,
+      "height": 584,
+      "bytes": 65242,
+      "scene": "storageaccess.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "storageaccess/storage-root-dialog-1440.png": {
+      "sha256": "82451b79ed680b26446e75bec34654ac542639ba950f2f93cdd6923a7b9b7ac8",
+      "width": 880,
+      "height": 1096,
+      "bytes": 106579,
+      "scene": "storageaccess.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "storageaccess/storage-row-access-1440.png": {
+      "sha256": "50058378992c629e11753a9e84b9abd17312853f9ec5d426b11a6e362b0cb5ac",
+      "width": 2880,
+      "height": 1800,
+      "bytes": 145902,
+      "scene": "storageaccess.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/storage-store-review-1280.png": {
       "sha256": "335ba665cf51a7b74115fb6f5cb3a8837007878c06b617c13b1cb19480e8972f",
@@ -1478,7 +1568,7 @@
       "bytes": 258053,
       "scene": "store.mjs",
       "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/storage-store-review-390.png": {
       "sha256": "63f5bd0f0642e91bc507203ceee0f7fdd7d4677533433c0120b4ec4d978d6311",
@@ -1487,7 +1577,7 @@
       "bytes": 278041,
       "scene": "store.mjs",
       "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/storage-store-review-dark-tr-1280.png": {
       "sha256": "3ab6dd14f4e816d999b0c6854da6899ad0f4bda2724ca5e2eb746b663583bde9",
@@ -1496,7 +1586,7 @@
       "bytes": 263201,
       "scene": "store.mjs",
       "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/storage-store-review-dark-tr-390.png": {
       "sha256": "5050a3df55647ea5388400d290ccba2f2fd9a03f2c904707076e8769f1e27e99",
@@ -1505,52 +1595,52 @@
       "bytes": 287805,
       "scene": "store.mjs",
       "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/store-connected-1440.png": {
-      "sha256": "edf7052b6ba0be74e8bd2e03628d6151e2fa06521aa2019cce1598f1118756b6",
+      "sha256": "519365a75e34e5b0a7bd4ce8dc41e59da7b9cb8c7d282793a42134fdd422ec53",
       "width": 2880,
       "height": 1800,
-      "bytes": 341085,
+      "bytes": 359141,
       "scene": "store.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/store-license-1440.png": {
-      "sha256": "3d8a74fb5c8587bd095603c4bb211d2769a54de305687b19012681b150e9aab1",
+      "sha256": "04e822850a623df1112227a75cf5fd2d0b763a801fe3f4f182b8c8240553b6e3",
       "width": 2880,
       "height": 1800,
-      "bytes": 365719,
+      "bytes": 369754,
       "scene": "store.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/store-license-held-1440.png": {
-      "sha256": "2dd9518d7e873ed12d0e827511b696280e1f82a3fa50c904f8f3779971c7bae8",
+      "sha256": "6fd145640e0f9d3809995a6d285d66e3848f058ca21474d6dfb0585f5cd77627",
       "width": 2880,
       "height": 1800,
-      "bytes": 362558,
+      "bytes": 365900,
       "scene": "store.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/store-request-review-1440.png": {
-      "sha256": "e1250043359d4db6f5888e942174026abb9ae8490bd03ef25fb211c4f886d1a9",
+      "sha256": "85fcea0c021ca8da2529da6dc60117eb2aeac59d71399515da5bab28857589f9",
       "width": 1344,
       "height": 1622,
-      "bytes": 214456,
+      "bytes": 214822,
       "scene": "store.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/store-review-1440.png": {
-      "sha256": "d93b2b571d937e5a24e153b1c52e98bd2995000a4146f02f9c4044f35bd9a7f9",
+      "sha256": "36cf3bbc2a5098ac4104c56dd07af3b0975da9cb1282eab5adc78a5a1033712c",
       "width": 1344,
       "height": 3428,
-      "bytes": 467968,
+      "bytes": 468842,
       "scene": "store.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/store-screen-1440.png": {
       "sha256": "ea70abf83dfc08bac2762eefbec5464dbe30c68d3d18ae58f7c20f8e0e021421",
@@ -1559,7 +1649,7 @@
       "bytes": 136983,
       "scene": "store.mjs",
       "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/store-screen-request-1440.png": {
       "sha256": "264281b5b76df1c3bc8a8ea014aeb2b22fc51681fbd5170e8f7117734fd17c8a",
@@ -1568,7 +1658,7 @@
       "bytes": 126028,
       "scene": "store.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/store-screen-storage-tab-1280.png": {
       "sha256": "29d3996ec13796d24e0ee669f881ebeb04901aec7e537413cdf8656578cddda4",
@@ -1577,16 +1667,16 @@
       "bytes": 201720,
       "scene": "store.mjs",
       "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/store-screen-storage-tab-390.png": {
-      "sha256": "98282c593dd00ba5082bef79a067a9aa60e497637e97c738d77e5e0fc6ab6efb",
+      "sha256": "80357eb25406fdfa8c2921e6c7af504d82d6b3e21170da3d278e6857a8b2c161",
       "width": 780,
       "height": 1834,
-      "bytes": 216079,
+      "bytes": 219773,
       "scene": "store.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/store-screen-storage-tab-dark-tr-1280.png": {
       "sha256": "24245542796ea51d0bc5c1568489b18a97d80352c2eb8743af77952d781650b4",
@@ -1595,25 +1685,25 @@
       "bytes": 201269,
       "scene": "store.mjs",
       "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/store-screen-storage-tab-dark-tr-390.png": {
-      "sha256": "99e0079ecbe2c707e6e754262737c080a7febe15c2642e3b2cf49fa60d8cd407",
+      "sha256": "33af42334dc89e356b2e3351bf1236bc6e5f3002a24f591ea94b268e14d15131",
       "width": 780,
-      "height": 1898,
-      "bytes": 214159,
+      "height": 1948,
+      "bytes": 222654,
       "scene": "store.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/store-trust-1440.png": {
-      "sha256": "94bebecac9fe0f14165c5336a0f03659435ec37e84239450ea713f9f6e41942a",
+      "sha256": "8fb07862db1a60d80731dcbf20dddfd5f92a70ec0e89d6f8e25796973e03bb09",
       "width": 2880,
       "height": 1800,
-      "bytes": 214046,
+      "bytes": 217044,
       "scene": "store.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "store/store-trusted-1440.png": {
       "sha256": "4a97448baeaf91654872eb236bea8fd8ea18498009f29c2f4b3bbd9309393c8f",
@@ -1622,25 +1712,25 @@
       "bytes": 87312,
       "scene": "store.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "symlinks/symlink-badge-1440.png": {
-      "sha256": "0d128385d287efb22187589dbdbd93792f41b759f1752ac924358f00bca6d6fd",
+      "sha256": "82a105d4239ecf80d3c40fadfc486e2d975277c4a32d4d53fdab1dd48612441e",
       "width": 2880,
       "height": 1800,
-      "bytes": 341757,
+      "bytes": 337414,
       "scene": "symlinks.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "tags/tags-kinds-1440.png": {
-      "sha256": "64e4d6a5ccbcc549bf35d3c09af2f7165327dd67909fcc2a4b80f86698d13696",
+      "sha256": "a4504c43e5cb016f9a50fdc9d627bd4a112d3c796175abf3968e61d98e5a326d",
       "width": 2880,
       "height": 2000,
-      "bytes": 243457,
+      "bytes": 238826,
       "scene": "tags.mjs",
-      "taken": "2026-10-11T08:49:42.736Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "tenancy/confirm-1440.png": {
       "sha256": "c9b56a713e35b612411d39d45bf5d422aa78b93074d2c267b247bb11c13323b1",
@@ -1649,7 +1739,7 @@
       "bytes": 100501,
       "scene": "tenancy.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "tenancy/confirm-dark-tr-1440.png": {
       "sha256": "37cf27bea961e0660c11996a3382b7b125457a6906d158c284f88c0751a0eaea",
@@ -1658,88 +1748,133 @@
       "bytes": 107042,
       "scene": "tenancy.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "tenancy/locked-1440.png": {
-      "sha256": "73bd04f7b0c69dd91401de383a74aacb914facc5a3d05c4750c031007c68c8df",
+      "sha256": "a4165eb5dad021c5cfab70f36ac19e0697be849355a5183beaea40cec0032e91",
       "width": 2880,
       "height": 1520,
-      "bytes": 180097,
+      "bytes": 180919,
       "scene": "tenancy.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "tenancy/page-390.png": {
-      "sha256": "08a63c3318c911eb1acd4494001f1b243b249c0f228d13265bc460f00e8f4af2",
+      "sha256": "b071e440e5d59712032ffb16de6e340bcf60bc91cc0657996d50b11775f11ae7",
       "width": 780,
       "height": 1688,
-      "bytes": 174763,
+      "bytes": 173424,
       "scene": "tenancy.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "tenancy/restart-1440.png": {
-      "sha256": "272149630ed11331afcf9160d72ecf7e28168127b85cd4ceef57047be7b3ceaa",
+      "sha256": "ab26b1432c7f3fec09585fb9478b7b49154444f98077c0bc8b72444bffb3b477",
       "width": 2880,
       "height": 1520,
-      "bytes": 189227,
+      "bytes": 190017,
       "scene": "tenancy.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "thumbnails/folder-peek-1440.png": {
-      "sha256": "7f4aab163c027517339e0acb81030316f8a4a029f04788c4fc0cbf95e2562e84",
+      "sha256": "4c13bf1077767dd7194cf0d20b6bec222b64f3243299af7812a3d4eb294db87b",
       "width": 2880,
       "height": 1800,
-      "bytes": 280743,
+      "bytes": 276329,
       "scene": "thumbnails.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "thumbnails/folders-gallery-1440.png": {
-      "sha256": "d7d3ef13ebc129f7ba444bbdd735c506a38259431d79df0227e83710f9762f1f",
+      "sha256": "e3469b6ba66d674a8469f58f216394f24ed44d8bc5a6c51e7c870a2ef0d5e2e6",
       "width": 2880,
       "height": 1800,
-      "bytes": 267551,
+      "bytes": 263071,
       "scene": "thumbnails.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "thumbnails/folders-grid-1440.png": {
-      "sha256": "2b408fb54f7ef43f69a9a7856795d7d4ae384b8964fdba971db67e8a56ece5ce",
+      "sha256": "dd7653d6edca892c8307527b761177a208596ada100d53bf42b9faf8653be95a",
       "width": 2880,
       "height": 1800,
-      "bytes": 226973,
+      "bytes": 222242,
       "scene": "thumbnails.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "thumbnails/folders-grid-dark-1440.png": {
-      "sha256": "9c54697707d5bb8bbf957811db151e33cf820de836e72050d0416b042a926b20",
+      "sha256": "18b1de31d7aa02663b4ca781bc459ff836bb444108ba23f46a00a8d949f6b8d8",
       "width": 2880,
       "height": 1800,
-      "bytes": 225129,
+      "bytes": 219343,
       "scene": "thumbnails.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "thumbnails/folders-list-1440.png": {
-      "sha256": "572b653a82374cde4427b86811a8df96417c93a374bcb1f8ab8c5dd283db89a8",
+      "sha256": "8e93058def1591ca10061b0655609de7019e774c917a1f59825dee5768ad59e7",
       "width": 2880,
       "height": 1800,
-      "bytes": 233955,
+      "bytes": 229653,
       "scene": "thumbnails.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "thumbnails/thumbnail-repair-1440.png": {
-      "sha256": "c13a17556be7107fac60a489d61709080eab48aab927d62439322c62be8b4b70",
+      "sha256": "20d89532c44565b79d2e22644db64174c0348f7245fb9790346f3cc194e1faac",
       "width": 2880,
       "height": 2600,
-      "bytes": 376292,
+      "bytes": 314549,
       "scene": "thumbnails.mjs",
-      "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-09T09:10:41.300Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "usersettings/notifications-tr-dark-1440.png": {
+      "sha256": "457bc34d15a0ebb97bbed917ae0ae83aebd0f021cafdae4ed09a67fb7f55b934",
+      "width": 1600,
+      "height": 1240,
+      "bytes": 186909,
+      "scene": "usersettings.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "usersettings/preferences-account-1440.png": {
+      "sha256": "b54af2cf2248bca651fe7c68bfafe80bc93c3cae71ba2b7ac796c057bbd0cdaa",
+      "width": 1600,
+      "height": 1240,
+      "bytes": 157533,
+      "scene": "usersettings.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "usersettings/preferences-device-1440.png": {
+      "sha256": "7fef836c1c0d100a694ecb4053022461fc0f9da5ff540d8a8008fcbaaf799bd7",
+      "width": 1600,
+      "height": 1240,
+      "bytes": 176381,
+      "scene": "usersettings.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "usersettings/preferences-remote-images-1440.png": {
+      "sha256": "d969b63dc0f6f3fad99faa23e557e7cde03b07dacd9edc7b7f0f49047f8a6107",
+      "width": 1600,
+      "height": 1240,
+      "bytes": 176942,
+      "scene": "usersettings.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "usersettings/shortcuts-over-dialog-1440.png": {
+      "sha256": "0ba99dba39dd8c5231dd657b3953d51d1884bf6e889d43839c48efba6ff1890f",
+      "width": 2880,
+      "height": 2000,
+      "bytes": 304419,
+      "scene": "usersettings.mjs",
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "vault/level-picker-vault.png": {
       "sha256": "5aee0b137538f3d28c31c65fc9c71f4f3869d163f390026b5fdf15b847015bc0",
@@ -1748,43 +1883,43 @@
       "bytes": 202921,
       "scene": "vault.mjs",
       "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "vault/vault-strip-held-1280.png": {
-      "sha256": "49df5f685437d29b0104d3b866f39140d5949989fe181deb749a33319bede804",
+      "sha256": "a98221602911b25ea1e00078b460956230920bdeb27780d571116ecd0bb522cf",
       "width": 2560,
       "height": 1800,
-      "bytes": 249666,
+      "bytes": 245323,
       "scene": "vault.mjs",
-      "taken": "2026-10-09T09:10:41.300Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "vault/vault-strip-held-390-dark.png": {
-      "sha256": "40847bcfac2110378be50d16ce184726f7bf95ee85e758052d5d3713f47b5db9",
+      "sha256": "50b17c21f41d754796ff08e0600c0119d3b122f8ee471687df00d8e4eb5f2fe7",
       "width": 780,
       "height": 1688,
-      "bytes": 181210,
+      "bytes": 182436,
       "scene": "vault.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "vault/vault-strip-read-1280.png": {
-      "sha256": "faf547c83eae2de6a5fd3d931a837c1cb1b8046b5801b0c24816b251de2a98ad",
+      "sha256": "fa1541be7356913c64b5180bd1e5ac86702a90b98ec328944931e03536138359",
       "width": 2560,
       "height": 1800,
-      "bytes": 191156,
+      "bytes": 186877,
       "scene": "vault.mjs",
-      "taken": "2026-10-08T12:37:48.854Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "vault/vault-strip-write-1280.png": {
-      "sha256": "68e9d0870b216b1db8072c53f4d207db25fcd011d32b7866d5ed4484a8dfdbc0",
+      "sha256": "1a2525cbc983a5bb7972db2a7f31e5582e4d11efff0bab71783eb22c762a2047",
       "width": 2560,
       "height": 1800,
-      "bytes": 221114,
+      "bytes": 216857,
       "scene": "vault.mjs",
-      "taken": "2026-10-11T17:11:02.546Z",
-      "checked": "2026-10-11T17:11:02.546Z"
+      "taken": "2026-10-16T23:32:53.970Z",
+      "checked": "2026-10-16T23:32:53.970Z"
     },
     "viewer-markdown.png": {
       "sha256": "1789ecdcfbc51bb9bda3320d12d31e459c3f97e40da0ab3342e9cb8e948878cd",
@@ -1793,105 +1928,114 @@
       "bytes": 222145,
       "scene": "capture.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
-      "checked": "2026-10-11T08:49:42.736Z"
+      "checked": "2026-10-16T23:32:53.970Z"
     }
   },
   "scenes": {
     "appearance.mjs": {
-      "digest": "9783b02be8b5bc86d08d37594575050616daa6d45e4c281ea32eea8a5ccc20bc"
+      "digest": "3cf5325bb4b3bffb175520408d3d2b43bbb4fcd9f48bb4a6fda725ebc0c24ad1"
     },
     "apppermissions.mjs": {
-      "digest": "94bf2cca18c94f33ae460de443bcdb3a5bf60b58e763c813277f8eae7af9e1bb"
+      "digest": "85192e8ea0410e0acdb265ea5ddb03291301a2de73e6b2e77d446b7a5dbf9fd3"
     },
     "appprint.mjs": {
-      "digest": "84d646c3066efb9d55848dd0b9f425941447b2e65960a9b8819476356b7bd8aa"
+      "digest": "c0bf94a57d9842591065dd30fbbd7ac63db4c65b550be0e6e1ef93414365b27a"
     },
     "apps.mjs": {
-      "digest": "e87145b623228222116a7bbdc36350eec10804fca7680a54b15387c32cd0851e"
+      "digest": "65eed6402b402e0a5d39e3067710c94389918765fa2fc984d026b8cf6dec13a4"
+    },
+    "assistant.mjs": {
+      "digest": "99b0d85378a728d0f71a85b4061c47b212d96d63842c3c26360d477642602a2f"
     },
     "authproviders.mjs": {
-      "digest": "902374b87c58cc1a7e757e2633722559b18721ae9fab3777c40b63094604a3be"
+      "digest": "72112603d3be830fde24082caa55b07e7502022e960f9dbae52543425d63cbca"
     },
     "capture.mjs": {
-      "digest": "790febeb2ea55744013cc648b6a31c9e7d71842bfed7ff0fcf1f08f156ec8eca"
+      "digest": "54ba12926af63ef9b386b329ac48dde47938469d092ff60894437346a648785f"
     },
     "csvoffice.mjs": {
-      "digest": "b0e3dc13003c2673f2c8035581419090586e1c8dd03efe057072cdbee7ce2d30"
+      "digest": "7a49e65e467c0aa8e791d9ebf0cf7edbf9130b49c2b396cfb28f8003a2999d23"
     },
     "defaultapps.mjs": {
-      "digest": "bed889fcab018781a3f5e361e8c7cdd5420a8f73bb16d78b824a16c110255877"
+      "digest": "a3954e28fcb21197a9ceb188e97ae127ac80c4207ed31cd808c9d7900c327981"
     },
     "driveshell.mjs": {
-      "digest": "a3277625dd6ad4972dd497dbe1f0f3c857a73247d4ed5f54833214348fc9cab2"
+      "digest": "dff45d9e16e5b34e05fa810959603970e0566f47c83c21042bd4c3ba0018c1c6"
     },
     "e2e-recovery.mjs": {
-      "digest": "26b3d1669716478d522986cda1f1055ed217bc8e81afcc0ad45afc156ac054a5"
+      "digest": "3335516f45a32b51b09af25d84aa990e8e13a9f69da273b2519b55177cfc268b"
     },
     "e2eapp.mjs": {
-      "digest": "d6cf0a76b62c4c562e63337f901f1c94a6bec60c3de27cf1859762085eaa79a9"
+      "digest": "1550ff2700afcb02d99719065d24a14dd6cc364d288501d600fecce4db10dffe"
     },
     "encryption.mjs": {
-      "digest": "e59b16eefe273d0b747a989de71332f428d5db126afb6c07aed60afc6f368c93"
+      "digest": "ee7a7439ad5d7132b14a9cda3e702f320de576a037daf61d51cce1a3e5eb3e05"
     },
     "groups.mjs": {
-      "digest": "75faa123244e0b3db650b67f4016ebee855ce94ee0f74bf09f7ad586c2c0d0fa"
+      "digest": "76958f622e777907e889703e720eadfc011dc023cab633347cb9419ece14364d"
     },
     "langpack.mjs": {
       "digest": "5195bc9626828dbdec9a59c824140c036b8b9be8135434a58f40d6a24c7ad5fa"
     },
     "loginsecurity.mjs": {
-      "digest": "11c052204682312bf9990f215f9f309d2003b1d8cea615f1dd6fac71adc29b40"
+      "digest": "5499b831f92ae2206623316ab67b43d6f9301d3b31e3f7dc33f09eb22e5d5218"
     },
     "megamenu.mjs": {
-      "digest": "b127a5e6787b72258a6d1ea2a74961439a4e34fbcb56a480e203f306982b18a3"
+      "digest": "97138bbd181aa7fe9883ecddc6c5d64fb6d8297291aa0efd479ab9563a987ec5"
     },
     "mermaid.mjs": {
-      "digest": "0e2f8c93741a62a9102f064d56b99523e194779a19590718874681ddb2fb5209"
+      "digest": "4417c5fd973ea65959854da293287f1df9bc34517e6c9088581fb16db5f1035c"
     },
     "newdoc.mjs": {
-      "digest": "acb2f5fca935fedaae5992e2f2a767a533b152c5e79412496c84f5a993931daa"
+      "digest": "8f11820de13b5c0b4367c7abc406407787e1aa1ff6269baf4006478af1d0750d"
     },
     "notifications.mjs": {
-      "digest": "71881a826efc4c322642b169ac9787eacc446f030a669ebdae00413f59db24b2"
+      "digest": "a1246f7014b723de66c77b185ad69b370b36990fce004b78caa5aa21f739a759"
     },
     "officeapp.mjs": {
-      "digest": "90a3c19b1e4597e359deb2916c900a14ca60d327b6bb6ba62a3bca8001f2cb39"
+      "digest": "a7294e5e476abfa1bf3c2b9fbb9f7ce5c41fc43a23ca754d329a344c3ade1f33"
     },
     "pluginrequests.mjs": {
-      "digest": "229cdb113c7a3d8a04fa06914e7bdfd2d0d144a536e2a15d42a14801e2b9af05"
+      "digest": "f9fb14ca62bbf8ee97b5d441fb7a7142b07669b91cd7a9b9c896c46669e39895"
     },
     "realm.mjs": {
-      "digest": "61f70c3a0e8512ef6b8f50875258995cc86eb711fdc0f3ddd474ce94f3e8465b"
+      "digest": "cc894b572809f203835b2c528a6d6d7edcc1b8053ce8f1deb175f1b0c75b0366"
     },
     "roles.mjs": {
-      "digest": "6bfca62866ea691497f312359fd3495fcf6ebb85db2a25914d465e50df9afe77"
+      "digest": "3fde8236bcf94992185ab9a4a4d9ec39857aa0ccb18de42b19cc21a0265157c9"
     },
     "sidenav.mjs": {
-      "digest": "5b0fe412d485c3ea0a22d804a82a637c324f6f9ec40eebcd3c6917e04b3c61ad"
+      "digest": "cb47c04110b9d9df965c73799b6a48a7a64b577872636674d37f8275353608db"
     },
     "signing.mjs": {
-      "digest": "d6e1a82b6fa7998b332a64c367dd1e80a340ccca865623914175a8d8ecb173a4"
+      "digest": "f1cccc24846a62c3817916eda8236936e5ffb9c837f08a85d69f95171f0b18b6"
     },
     "starstags.mjs": {
-      "digest": "4f6128b3256b0ca22c2f4dc7450af70cdc1af90ec2daadfbc4b7f4bf31227fa1"
+      "digest": "594cd2bad6947eb0807ab91096b8abeb8bda40493e343415a186435ba01adb73"
+    },
+    "storageaccess.mjs": {
+      "digest": "4bdd7c4fafe11acd9dacc0cfadfd7f5fe2125df6c1f0702165f9b45751e248c9"
     },
     "store.mjs": {
-      "digest": "f8fb495d326a23bf89acdda36e1dc73ad8f61c5d9d5aba4dca571f34879fa59b"
+      "digest": "13d38ac29aad787a1c79140456ed2232c45d5976e7d3bd4c6518d6f16e7b8867"
     },
     "symlinks.mjs": {
-      "digest": "1939172a037187cce3c1a9cca5eec8a7d0bbe5ab9cb3f5b02b4611b8c559820d"
+      "digest": "07e3f198c35347ed3b24f312a51b2f3f49286eb35c47f344219fe701c5771c95"
     },
     "tags.mjs": {
-      "digest": "b2c147c37c1b7789c45e86932da6df175ebc9169801c8b193395fd3772cfd199"
+      "digest": "ffe31408eff11b5d7af48c581e0110aebb1de7e0f70c6142035aa2295928108d"
     },
     "tenancy.mjs": {
-      "digest": "fc5776f77c59108f0c6f84aa1c56bb689864ef1aa4e336ecc8ee5a22dc796e5c"
+      "digest": "43cf37553eba7925cf808ea121083179b04f135b7344a9d24bbf30b9a94ec087"
     },
     "thumbnails.mjs": {
-      "digest": "ece9f61a56c440b06197e668fe8135eb0ca137181a86168cedffb6e08a29f9b1"
+      "digest": "7da5c75e7488a10127e8bdb4255a77eda838e78c364d1585e1a44d861926a5df"
+    },
+    "usersettings.mjs": {
+      "digest": "27725202868a3eae5de8ba8b638f11739c0ddc2b0694e52f99feeb7d1d229cf1"
     },
     "vault.mjs": {
-      "digest": "89c5032b8a2483912f4a3046b2226425c35fc5422efe522803913987486ba7f3"
+      "digest": "462087e7c426ef0efa623e72ea1a7cb2a4ddfc6b8b2c7c319e552bea4475183e"
     }
   }
 }

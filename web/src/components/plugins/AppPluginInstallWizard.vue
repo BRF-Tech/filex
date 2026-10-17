@@ -2,8 +2,12 @@
 /**
  * AppPluginInstallWizard — install (or upgrade) an app in three steps.
  *
- *   1. Source: a GitHub repository (`owner/name` + ref), the two files
- *      (module + manifest, optionally a signature), or a URL pair + SHA-256.
+ *   1. Source: a GitHub repository (`owner/name` + ref), the files (module +
+ *      manifest, the interface bundle `ui.zip` and the office engine
+ *      `engine.zip` when the manifest names them, optionally a signature),
+ *      or a URL pair + SHA-256. An upload whose manifest has a `ui` or an
+ *      `engines.office` block and no file chosen for it is stopped here,
+ *      before anything is sent (lib/appUploadParts).
  *   2. Review: the same body with `?dry_run=1` — the server reads the
  *      manifest and hands back every permission with its label and the
  *      reason the manifest gives. Nothing is installed until the operator
@@ -88,6 +92,7 @@ import {
 import { extractError } from '@/api/client';
 import { formatBytes } from '@/lib/format';
 import { changedPlacements, defaultPlaces } from '@/lib/fileTypes';
+import { uploadPartsMissing } from '@/lib/appUploadParts';
 import { useToastStore } from '@/stores/toast';
 import { pluginLabelOf } from '@brftech/filex-core';
 import { AppStoreApi, storeRefusal, type AppLicense, type StoreReview } from '@/api/appStore';
@@ -144,6 +149,7 @@ const gitRef = ref('');
 const wasmFile = ref<File | null>(null);
 const manifestFile = ref<File | null>(null);
 const uiFile = ref<File | null>(null);
+const engineFile = ref<File | null>(null);
 const signature = ref('');
 const url = ref('');
 const manifestUrl = ref('');
@@ -198,6 +204,7 @@ function reset() {
   wasmFile.value = null;
   manifestFile.value = null;
   uiFile.value = null;
+  engineFile.value = null;
   signature.value = '';
   url.value = '';
   manifestUrl.value = '';
@@ -251,6 +258,9 @@ function onManifest(e: Event) {
 function onUI(e: Event) {
   uiFile.value = (e.target as HTMLInputElement).files?.[0] ?? null;
 }
+function onEngine(e: Event) {
+  engineFile.value = (e.target as HTMLInputElement).files?.[0] ?? null;
+}
 
 /** The body for the chosen source, or the message saying what is missing. */
 function buildSource(): AppPluginInstallSource | string {
@@ -271,6 +281,7 @@ function buildSource(): AppPluginInstallSource | string {
       wasm: wasmFile.value,
       manifest: manifestFile.value,
       ui: uiFile.value,
+      engine: engineFile.value,
       signature: signature.value.trim() || undefined,
     };
   }
@@ -298,6 +309,23 @@ function explain(e: unknown): string {
   return err?.message || extractError(e, t('errors.generic'));
 }
 
+/**
+ * The sentence naming the packages the chosen manifest needs and the form
+ * has no file for ('' when none): an upload carries them itself, and the
+ * server would refuse the review only after the rest was uploaded.
+ */
+async function partsMissing(src: Extract<AppPluginInstallSource, { kind: 'upload' }>): Promise<string> {
+  let text: string;
+  try {
+    text = await src.manifest.text();
+  } catch {
+    return '';
+  }
+  return uploadPartsMissing(text, { ui: !!src.ui, engine: !!src.engine })
+    .map((part) => t(`appPlugins.wizard.errMissing.${part}`))
+    .join(' ');
+}
+
 /** Step 1 → 2: the dry run. */
 async function toReview() {
   failure.value = '';
@@ -305,6 +333,13 @@ async function toReview() {
   if (typeof src === 'string') {
     failure.value = src;
     return;
+  }
+  if (src.kind === 'upload') {
+    const said = await partsMissing(src);
+    if (said) {
+      failure.value = said;
+      return;
+    }
   }
   busy.value = true;
   try {
@@ -597,6 +632,14 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
             class="block w-full text-sm text-zinc-600 file:me-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-3 file:py-1.5 file:text-sm dark:text-zinc-300 dark:file:bg-zinc-800"
             data-testid="app-plugin-ui"
             @change="onUI"
+          />
+          <label class="block text-sm font-medium text-zinc-800 dark:text-zinc-100">{{ t('appPlugins.wizard.engine') }}</label>
+          <input
+            type="file"
+            accept=".zip,application/zip"
+            class="block w-full text-sm text-zinc-600 file:me-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-3 file:py-1.5 file:text-sm dark:text-zinc-300 dark:file:bg-zinc-800"
+            data-testid="app-plugin-engine"
+            @change="onEngine"
           />
           <Input v-model="signature" :label="t('appPlugins.wizard.signature')" :required="requiresSignature" monospace data-testid="app-plugin-signature" />
           <p class="-mt-2 text-xs text-zinc-500">

@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -55,7 +56,13 @@ func browseSkip(name string) bool { return syspath.IsName(name) }
 // root. Returns ok=false on traversal attempts ("..", absolute) or
 // internal segments. "" (share root) is valid.
 func cleanShareRel(rel string) (string, bool) {
-	rel = strings.Trim(strings.ReplaceAll(rel, "\\", "/"), "/")
+	// A backslash separates only on a host whose separator it is (the local
+	// driver's toSlash, issue #34): on Linux `a\b.txt` is one name, and
+	// folding it made a file the shared folder lists unopenable (task #238).
+	if os.IsPathSeparator('\\') {
+		rel = strings.ReplaceAll(rel, "\\", "/")
+	}
+	rel = strings.Trim(rel, "/")
 	if rel == "" {
 		return "", true
 	}
@@ -111,6 +118,9 @@ func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r
 		h.renderErrorPage(w, r, http.StatusNotFound, "folder")
 		return
 	}
+	// A file the link's creator may not download is not listed: the link
+	// would not serve it (LinkMembers).
+	keep := LinkMembers(ctx, h.ACL, h.Store, sh, node.StorageID)
 
 	entries := make([]share.FolderEntry, 0, len(objs))
 	for _, o := range objs {
@@ -120,6 +130,9 @@ func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r
 		childRel := o.Name
 		if rel != "" {
 			childRel = rel + "/" + o.Name
+		}
+		if o.Kind != storage.KindDirectory && !linkMemberServed(keep, joinShareRel(node.Path, childRel)) {
+			continue
 		}
 		entries = append(entries, share.FolderEntry{
 			Name:    o.Name,
@@ -259,6 +272,12 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 	// Nothing inside filex's own trees is served, whichever row the link
 	// names (see HandleDownload).
 	if syspath.Hidden(node.Path) || syspath.Hidden(full) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	// Nor a file the link's creator may not download (LinkMembers) - its
+	// tile included: it answers like a file that is not there.
+	if !linkMemberServed(LinkMembers(r.Context(), h.ACL, h.Store, resolved, node.StorageID), full) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}

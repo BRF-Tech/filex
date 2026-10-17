@@ -189,10 +189,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.listObjects(w, r, principal, st)
 		}
 	default:
+		// A key that is a second spelling of another path is refused before
+		// anything is asked of it (names.go, keyError) ...
+		if tgt.Key != "" {
+			if err := keyError(tgt.Key); err != nil {
+				writeKeyError(w, r, err)
+				return
+			}
+		}
 		st, code, ok := h.resolveBucket(r.Context(), principal, tgt.Bucket)
 		if !ok {
 			WriteError(w, r, http.StatusNotFound, code, "the specified bucket does not exist")
 			return
+		}
+		// ... and a PUT or a POST, which put something at the key, may only
+		// make names a file may be given (newKeyError). Every other verb reads
+		// or deletes what is there, under the name it has.
+		if tgt.Key != "" && (r.Method == http.MethodPut || r.Method == http.MethodPost) {
+			if err := h.newKeyError(r.Context(), st, tgt.Key); err != nil {
+				writeKeyError(w, r, err)
+				return
+			}
 		}
 		q := r.URL.Query()
 		uploadID := q.Get("uploadId")
@@ -279,7 +296,16 @@ func s3Verb(r *http.Request, tgt target) string {
 }
 
 func (h *Handler) parseTarget(r *http.Request) (target, error) {
-	path := strings.TrimPrefix(r.URL.Path, Prefix)
+	path := r.URL.Path
+	// ⚠ The /s3 mount prefix exists only where the endpoint shares the app's
+	// host. On the dedicated S3 host the path begins with the bucket (or, in
+	// virtual-hosted style, the key), and trimming there ate a name that
+	// starts with "s3": `s3cmd.conf` was stored as `cmd.conf`, `s3/x` landed
+	// on the root's `x`, path-style bucket `s3yedek` was read as `yedek`
+	// (task #238).
+	if !HostMatches(h.cfg.Domain, r.Host) {
+		path = strings.TrimPrefix(path, Prefix)
+	}
 	path = strings.TrimPrefix(path, "/")
 
 	if bucket, ok := h.virtualHostBucket(r.Host); ok {

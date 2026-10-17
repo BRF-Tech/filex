@@ -13,8 +13,8 @@ It is available two ways, and they are the same engine:
 Both read and write `~/.filex/sync/pairs.json`, so a folder paired in the app is
 visible to the CLI and the other way round.
 
-**`FILEX_SYNC_DIR` moves that whole directory** - pairs, the per-pair baselines
-and the local trash - somewhere else. The
+**`FILEX_SYNC_DIR` moves that whole directory** - pairs and the per-pair
+baselines - somewhere else. The
 [portable Windows app](DESKTOP.md#portable-windows) sets it so its state lands
 beside the `.exe` rather than in the home directory of a machine the user is
 only borrowing; set it yourself when you want a self-contained checkout or a
@@ -64,7 +64,7 @@ yours. The same bytes settle the file; only a real difference makes a copy.
 
 When it does, the copy goes to the server too, under the same name, and both
 files are recorded at once - a copy you later tidy away on the server is
-removed here as well (into the local trash) instead of coming back as a new
+deleted here as well instead of coming back as a new
 file. A copy's name never nests: a conflict on `report (server copy …).xlsx`
 makes another `report (server copy …).xlsx`, not `report (server copy …)
 (server copy …).xlsx`, and a name already taken gets ` (2)`. (Before this, one
@@ -101,13 +101,46 @@ and the pair shows `holding N item(s)` until you decide:
 
 ```bash
 filex sync confirm <pair-id>   # they are wanted: the next run uploads them
-filex sync discard <pair-id>   # they are stale: into the local sync trash; the next run makes this side match the server
+filex sync discard <pair-id>   # they are stale: deleted from this computer - each one the server still has a copy of
 ```
 
-`discard` never touches a file you edited after it was held, and everything it
-moves is recoverable with `filex sync trash` for 30 days. A first sync into an
-**empty** server folder is never held. `filex sync list --json` carries
-`hold_new` and `held` for the desktop app, which offers the same two choices.
+`discard` deletes a held file only when **the server still holds an identical
+copy of it** - the same bytes (sha256) - that you can reach: in your trash on
+the server, or elsewhere in the pair's storage. Deleting it then loses nothing.
+Every other held item stays where it is and **stays held** (released, the next
+run would upload it again, the very thing the hold stops), and `discard` says
+why, file by file:
+
+| Reason (`--json` code) | The file stays because |
+|---|---|
+| `discard.kept_no_copy` | the server has no identical copy of it - it may be the only copy there is |
+| `discard.kept_changed` | it changed after it was held (or while the server was being asked): that is not what you decided about |
+| `discard.kept_unchecked` | the server could not be asked (offline, an older server, its search off and the trash without it) |
+| `discard.kept_failed` | it had a copy and could not be deleted (`params.error` says why) |
+| `discard.kept_synced` | the engine has it in step with the server by now; it is not held any more |
+
+What it deletes is **deleted** - not moved anywhere on this computer. How it
+looks for a copy, with the endpoints the server already has plus one:
+
+- **Your trash.** The trash listing (`GET /api/files/manager/trash`, read once)
+  gives the entries of the file's size, its own name first; a trashed file has
+  no download, so `POST /api/files/manager/trash/same` has the server compare
+  the file's sha256 with each entry's bytes and answer "same" or "not" - for
+  entries your own trash listing shows, and nothing more
+  ([TRASH-VERSIONING.md](TRASH-VERSIONING.md#trash-endpoints)).
+- **The pair's storage.** The search (`GET /api/files/search`) by the file's
+  name and exact size, under the pair's storage; each hit (at most 4) is
+  downloaded and hashed on this computer. A server whose search is off cannot
+  look there.
+
+`discard` asks the server, so it needs the pair's account signed in, like
+`sync run`. With `--json` it writes one event per line
+(`{"event":"discard","code":"discard.deleted","params":{"path","where"}, "message"}`,
+then one per file left with its reason, then `discard.done` with `deleted`,
+`kept` and `still_held`), the message in the `--lang` language - what the
+desktop app shows. A first sync into an **empty** server folder is never held.
+`filex sync list --json` carries `hold_new` and `held` for the desktop app,
+which offers the same two choices.
 
 ### An interrupted first run resumes
 
@@ -169,17 +202,24 @@ operating system lets go, so there is never a stale lock to delete. The
 `.lock` files themselves stay (they are a few bytes); deleting one does not
 free a pair, and is not needed.
 
-### Deletions are recoverable for 30 days
+### Deletions are restored from the server's trash
 
-Anything sync removes **from your machine** is moved aside, not deleted:
+A deletion on either side ends up in **the server's trash**, and that is where it
+is restored from (the Trash in the file list, `filex trash`): a file you delete
+here is deleted on the server, which moves it to its trash; a file deleted on
+the server is moved to its trash there and then **deleted here**. A restored
+file comes back down on the next run.
 
-```bash
-filex sync trash                                  # what can still be recovered
-filex sync trash --restore reports/2026/q1.xlsx   # put it back
-```
-
-A restored file is treated as new on the next run, so it goes back to the server
-too. Files deleted **on the server** go to the server's own trash, as usual.
+Since 0.57 sync keeps **no local trash**. It used to move what it deleted into
+a hidden folder in your profile (`~/.filex/sync/trash`, copied and then removed
+when the sync folder was on another drive) - a second copy of a file the server
+already keeps, and the exact pattern an antivirus's ransomware detection looks
+for: Bitdefender stopped `filex.exe` mid-sync and quarantined the files.
+A deletion is now a plain delete, and only of what sync has carried: a folder
+deleted on the server keeps anything in it that sync never carried (a folder
+sync ignores by name, a file it could not read), and the run says so. What an
+older version already put in `~/.filex/sync/trash` is still swept after its 30
+days.
 
 ### Clocks are never compared across the two sides
 
@@ -211,9 +251,10 @@ is the app's, not the pairs'.
 
 A pair that is holding items for a decision (`hold_new` / `held` in
 `filex sync list --json`) gets a notice on its card in Settings with the count
-and two buttons - **Upload them** runs `filex sync confirm <pair>`, **Move to
-local trash** runs `filex sync discard <pair>` after asking - and the account's
-watcher is restarted after either.
+and two buttons - **Upload them** runs `filex sync confirm <pair>`, **Delete
+from this computer** runs `filex sync discard <pair> --json` with the pair's
+account after asking, and then lists the files it left here, each with the
+engine's reason - and the account's watcher is restarted after either.
 
 Settings' **Download limit**, **Upload limit** and **When to sync** presets are
 handed to every watcher as `--limit-down` / `--limit-up` (KiB/s) and
@@ -252,9 +293,8 @@ filex sync run [--pair <id>] [--account <label>] [--watch <interval>] [--live=fa
                [--limit-down <KiB/s>] [--limit-up <KiB/s>] [--window HH:MM-HH:MM]
                [--watch-max <duration>] [--full-every <duration>] [--json] [--lang <tag>]
 filex sync window [HH:MM-HH:MM] [--json] [--lang <tag>]
-filex sync trash [--pair <id>] [--restore <path>]
 filex sync confirm <pair-id>
-filex sync discard <pair-id>
+filex sync discard <pair-id> [--json] [--lang <tag>]
 ```
 
 `move` repoints a pair at a folder (or file) that you have **already moved** on
@@ -295,10 +335,9 @@ an estimate: `transfer: 120/11704 (1.2 GiB of 52.6 GiB, about 8h 10m left)`.
 the first time you pair a folder that already has files in it.
 
 `--file` pairs **one file** instead of a folder: `filex sync add ~/notes.md
-docs://team/notes.md --file`. Same planner, same rules, same 30-day local trash -
-the snapshots simply carry one entry. Both sides keep the file's name (a pair
-that renamed across would sync the wrong entry, so it is refused), and a restore
-from `sync trash` lands beside the file rather than inside it.
+docs://team/notes.md --file`. Same planner, same rules - the snapshots simply
+carry one entry. Both sides keep the file's name (a pair that renamed across
+would sync the wrong entry, so it is refused).
 
 `--account` limits a run to the pairs recorded against one signed-in server. One
 token authenticates against exactly one server, so the desktop app runs one
@@ -359,12 +398,15 @@ and the engine's errors reached a Turkish window in English.
 | `hold` | `hold` | `count` - items held for a decision (see `sync list --json` for the pair's numbers) |
 | `pass` | `pass.in_step`, `pass.done`, `pass.done_failed` | `planned`, `applied`, `uploaded`, `downloaded`, `removed_here`, `removed_server`, `conflicts`, `identical`, `held`, `failed`, `duration_ms` |
 | `error` | `pass.action_failed`, `pass.failed`, `lock.failed` | `error` - the engine's own words (English) |
-| `note` | `pass.raced`, `pass.skipped`, `pass.trashed` | `detail`, `count`, `example` |
+| `error` | `pass.name.taken`, `pass.name.server_refuses`, `pass.name.image` | `name`, `reason`, `local` (the name here), `other` (the server item a copy here stands for) - one per item a pass could not sync because of its name, on every pass ([below](#names-your-computer-cannot-hold)) |
+| `note` | `pass.raced`, `pass.skipped`, `pass.removed` (0.57; was `pass.trashed`) | `detail`, `count`, `example` |
+| `note` | `pass.name.synced_as` | `name` (the server's path), `local` (the path here), `why` (`reserved`, `forbidden`, `trailing`, `too_long`, `twin`) - one per item kept here under a safe name, on every pass |
 | `lock` | `lock.busy`, `lock.acquired` | `state`, `detail` - who holds the pair |
 | `local` | `local.watched`, `local.too_large`, `local.unavailable` | `state` (watched, too-large, unavailable), `detail`, `interval_seconds` |
 | `live` | `live.connected`, `live.polling`, `live.offline`, `live.off` | `state` (connected, polling, offline), `detail`, `interval_seconds` |
 | `window` | `window.waiting`, `window.closed`, `window.outside` | `window`, `start`, `end`, `opens_at` (RFC 3339: when it opens next) |
 | `fatal` | `signed_out`, `pairs_busy`, `no_pairs`, `pairs_unreadable`, `window.bad`, `window.empty`, `fatal` | `exit`, `error`, and `pairs` / `input` for the codes that have them |
+| `discard` | `discard.deleted`, `discard.kept_no_copy`, `discard.kept_changed`, `discard.kept_unchecked`, `discard.kept_failed`, `discard.kept_synced`, `discard.done`, `discard.not_holding` (`filex sync discard --json`, 0.57) | `path`, `where` (a deleted file's copy on the server), `reason`, `error`; on `discard.done` `deleted`, `kept`, `still_held` |
 
 **The language of `message`.** `--lang <tag>` (or `$FILEX_LANG`); without one,
 the account's own language on the server; else English. filex speaks English
@@ -512,9 +554,67 @@ also means a full check walks the server tree once, not twice.
   be told to follow outward ones - see [Symlinks](STORAGE.md#symlinks). The
   difference is that a storage has a declared root to measure against and a
   cycle guard behind it; a sync folder is whatever you dragged in.
-- OS clutter: `.DS_Store`, `Thumbs.db`, `desktop.ini`, recycle bins.
+- OS clutter: `.DS_Store`, `Thumbs.db`, `desktop.ini`, recycle bins, in any
+  letter case (`THUMBS.DB`).
+- A file here whose name the server does not accept (a control character,
+  a `\`, `...`; [File names](FILE-NAMES.md#the-names-filex-refuses)): it is
+  reported, not uploaded and failed again on every pass.
 - Anything unreadable - a locked file is reported, not fatal. One file must not
   stop the other thousand.
+
+---
+
+## Names your computer cannot hold
+
+The server keeps the name a file was given, and your computer may not be able
+to hold it. Windows refuses `< > : " | ? * \`, control characters, a name
+ending in a dot or a space, and the device names `CON`, `PRN`, `AUX`, `NUL`,
+`COM1`-`COM9` and `LPT1`-`LPT9`, with any extension. A Linux or macOS disk
+holds 255 bytes in one name, Windows 255 UTF-16 units. Windows and macOS treat
+`Rapor.docx` and `rapor.docx` as one name, and macOS also treats a name
+composed and decomposed (`Bütçe.txt` from a keyboard and from a Mac) as one.
+
+**Such a file is synced under a safe name.** A forbidden character and a
+trailing dot or space become `_`, a device name gets a `_` in front, a long
+name is shortened with its extension kept, and the second of two names that
+are one name here gets ` (2)`: `report.` arrives as `report_`, `CON` as
+`_CON`, `a:b.txt` as `a_b.txt`, the second `rapor.docx` as `rapor (2).docx`.
+The folder lists it as "Synced to this computer as ..." on every pass. The
+pairing between the two names is kept with the engine's state
+(`names/<pair-id>.json`) and stays the same from pass to pass:
+
+- a change you make here is uploaded to the server's **original** name;
+- a change on the server is downloaded to the safe name;
+- deleting it on either side follows the usual rules: a delete here goes to
+  the server's trash, a delete on the server deletes it here (the server's
+  trash holds it).
+
+Nothing on the server is ever renamed or deleted because of a name.
+
+⚠ The pairing lives only in that file. If it is lost (the engine's state
+folder deleted, a new computer), a file kept under a safe name looks like a
+new file of yours, and the next pass uploads it once under the safe name: a
+second copy on the server, nothing lost
+([known limits](FILE-NAMES.md#known-limits)).
+
+**When the safe name is taken here** by a file that is not this one, the
+server's file is not downloaded and the folder says so ("a file with the same
+name already exists here"); rename one of the two and the next pass brings it
+down.
+
+**A file here that differs from a server file only in letter case** (or, on
+macOS, in how its accents are encoded) is the same file: on a first pairing
+the two are compared like any other pair, and kept as two copies only when
+their bytes differ. It is never uploaded as a second file.
+
+**A file here whose name the server does not accept** (a control character,
+a `\`, `...`) is not uploaded, and the folder says so on every pass until it
+is renamed.
+
+A copy an older version wrote under another name (`report` for the server's
+`report.`) is taken as that file when it is the same kind; a folder an older
+version made out of a name (`back` for the server's `back\slash.txt`) stays
+here, unsynced, and is reported (`pass.name.image`).
 
 ---
 

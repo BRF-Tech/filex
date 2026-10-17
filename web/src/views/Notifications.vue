@@ -15,6 +15,7 @@ import Button from '@/components/ui/Button.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import DigestPolicyCard from '@/components/DigestPolicyCard.vue';
 import PushKeyCard from '@/components/PushKeyCard.vue';
+import InstanceSettingsCard from '@/components/settings/InstanceSettingsCard.vue';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { accountLocaleWritten } from '@/i18n';
 import Badge from '@/components/ui/Badge.vue';
@@ -27,7 +28,18 @@ const caps = useCapabilitiesStore();
 
 const refreshing = ref(false);
 
+/**
+ * The instance's half of the page - every account's history, the test event,
+ * the webhook pointer - is the platform's: on a multi-tenant install the
+ * server refuses it to a tenant's administrator (`requireSupertenant`). The
+ * summary defaults below are THEIR tenant's (notification_digest.go
+ * `digestScope`), so the page stays in their menu and shows them those
+ * (task #258). Shown unless the server says the reader stands in a tenant.
+ */
+const instanceSide = computed(() => caps.data?.caller_platform !== false);
+
 async function load() {
+  if (!instanceSide.value) return;
   refreshing.value = true;
   try {
     await Promise.all([
@@ -44,6 +56,7 @@ onMounted(load);
 // language picked on screen is written to the account, and once that has
 // landed the history is asked for again.
 watch(locale, async () => {
+  if (!instanceSide.value) return;
   await accountLocaleWritten();
   void notif.fetchAdminList();
 });
@@ -234,7 +247,7 @@ const columns = computed<DataColumn<NotificationRow>[]>(() => [
         <Bell class="h-6 w-6 text-brand-600 dark:text-brand-400" />
         <h1 class="text-xl font-semibold">{{ t('notifications.adminTitle') }}</h1>
       </div>
-      <div class="flex items-center gap-2">
+      <div v-if="instanceSide" class="flex items-center gap-2">
         <Button variant="outline" size="sm" @click="load" :loading="refreshing">
           <RefreshCcw class="h-4 w-4" />
           {{ t('common.refresh') }}
@@ -265,6 +278,7 @@ const columns = computed<DataColumn<NotificationRow>[]>(() => [
          a second webhook form of its own (release-candidate sweep, 2026-09-21:
          two webhook settings, no way to tell which one was in force). -->
     <div
+      v-if="instanceSide"
       class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-white p-4 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
       data-testid="notif-webhooks-pointer"
     >
@@ -287,7 +301,12 @@ const columns = computed<DataColumn<NotificationRow>[]>(() => [
          push on for a device in their own settings. -->
     <PushKeyCard v-if="caps.data?.caller_admin" />
 
+    <!-- Whether the server records and delivers notifications at all
+         (FILEX_NOTIFY_ENABLED until 0.57, task #258): the instance's. -->
+    <InstanceSettingsCard v-if="instanceSide" group="notifications" />
+
     <DataTable
+      v-if="instanceSide"
       table-id="admin.notifications"
       :columns="columns"
       :rows="tableRows"

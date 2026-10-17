@@ -563,7 +563,14 @@ func TestSplitDavPath(t *testing.T) {
 		{"/dav/depo", "depo", "", true},
 		{"/dav/depo/", "depo", "", true},
 		{"/dav/depo/a/b.txt", "depo", "a/b.txt", true},
-		{"/dav/depo/../etc", "depo", "etc", true}, // traversal collapses inside the storage
+		// The WHOLE path is cleaned before the storage is split off, exactly
+		// as the FileSystem does (splitStoragePath): `..` above the storage
+		// segment names another storage, never another path in this one.
+		{"/dav/depo/../etc", "etc", "", true},
+		{"/dav/nope/../depo/a.txt", "depo", "a.txt", true},
+		{"/dav/../depo", "depo", "", true},
+		{"/dav/depo/./a//b.txt", "depo", "a/b.txt", true},
+		{"/dav/depo/a/../..", "", "", true},
 		{"/api/files", "", "", false},
 	}
 	for _, c := range cases {
@@ -578,9 +585,10 @@ func TestPathTraversalCannotEscapeStorage(t *testing.T) {
 	ha := newHarness(t)
 	ha.addStorage(t, "depo", false, false)
 
-	// A crafted path that would escape the storage root resolves inside it
-	// (path.Clean) — and the local driver double-guards. Nothing above the
-	// storage root is reachable.
+	// A crafted path that would escape the storage root is cleaned as a whole
+	// (splitStoragePath): its `..` climbs to the /dav root and names a storage
+	// called etc, which does not exist — and the local driver double-guards.
+	// Nothing above the storage root is reachable.
 	resp := ha.req(t, http.MethodGet, "/dav/depo/..%2f..%2fetc%2fpasswd", ha.adminEmail, ha.adminPass, "", nil)
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }

@@ -48,6 +48,7 @@ import {
   type OfficeEventChannel,
 } from '../lib/officeDiagnosis';
 import { fileIconTile } from '../lib/fileIcons';
+import { visibleName } from '../lib/nameRule';
 import { actionIconSvg } from '../lib/actionIcons';
 import { requestFailure, sayFailure } from '../lib/errorWords';
 import { createArchivePreviewCache } from '../lib/archivePreviewCache';
@@ -64,6 +65,9 @@ import type { FileApi } from '../composables/useFileApi';
 import { labelOf as pluginLabelOf } from '../lib/pluginLabel';
 import DraftConflictModal from './DraftConflictModal.vue';
 import OutsideChangeModal from './OutsideChangeModal.vue';
+import RemoteImageDialog from './RemoteImageDialog.vue';
+import { provideRemoteImages, useRemoteImages } from '../composables/useRemoteImages';
+import { renderMermaid } from '../lib/mermaidRender';
 import {
   officeSession,
   officeSessionEndpoint,
@@ -933,6 +937,15 @@ async function fetchText(url: string): Promise<void> {
 const markdownHtml = ref<string>('');
 const markdownEl = ref<HTMLDivElement | null>(null);
 /**
+ * Pictures from other servers in the file (lib/sanitizeHtml, RemoteImages):
+ * held behind a placeholder until the person asks, or turned on in their
+ * settings. One gate per opening, shared with the viewers drawn inside this
+ * preview (a notebook), so the question is asked once, by this dialog.
+ */
+const remoteImages = useRemoteImages(() => props.locale);
+provideRemoteImages(remoteImages);
+remoteImages.watchRoot(markdownEl);
+/**
  * The renderer could not be loaded at all.
  *
  * ⚠ Tracked separately from "nothing to render". In view mode a missing
@@ -948,7 +961,7 @@ async function renderMarkdown(text: string): Promise<void> {
     // `<img>`, tables, `<details>`, etc. to work), and the output goes through
     // the one preview sanitizer before it reaches v-html: lib/markdownHtml.ts,
     // the pipeline the update review's release notes use too.
-    const html = await markdownToSafeHtml(text);
+    const html = await markdownToSafeHtml(text, 'document', { remoteImages: remoteImages.policy() });
     if (html === null) {
       markdownHtml.value = '';
       markdownUnavailable.value = true;
@@ -988,21 +1001,20 @@ async function enrichMarkdown(): Promise<void> {
         try {
           const m = await import(/* @vite-ignore */ 'mermaid');
           mermaid = m.default ?? m;
-          mermaid.initialize?.({
-            startOnLoad: false,
-            securityLevel: 'strict',
-          });
         } catch {
           mermaid = null;
         }
       }
       if (!mermaid) continue;
       try {
+        // lib/mermaidRender: the one way a diagram is drawn, asking no other
+        // server for anything; its pictures from elsewhere wait as the
+        // Markdown's own do.
         const id = `filex-md-mermaid-${Math.random().toString(36).slice(2)}`;
-        const { svg } = await mermaid.render(id, block.textContent || '');
+        const svg = await renderMermaid(mermaid, id, block.textContent || '', remoteImages.policy());
         const wrap = document.createElement('div');
         wrap.className = 'fe-preview__md-mermaid';
-        wrap.innerHTML = sanitizeHtml(svg, 'diagram');
+        wrap.innerHTML = sanitizeHtml(svg, 'diagram', { remoteImages: remoteImages.policy() });
         block.parentElement?.replaceWith(wrap);
       } catch {
         /* leave fenced block */
@@ -1217,6 +1229,8 @@ async function saveCode(): Promise<void> {
 // --- Orchestration: fetch + render when modal opens ---
 
 async function runOrchestration(open: boolean, url: string, k: string): Promise<void> {
+  // Another opening: a picture allowed for the last file is asked about again.
+  remoteImages.reset();
   rawText.value = '';
   markdownHtml.value = '';
   codeHtml.value = '';
@@ -2174,7 +2188,7 @@ onBeforeUnmount(() => {
         <div class="fe-viewer__ident">
           <span class="fe-viewer__tile" aria-hidden="true" v-html="tileHtml"></span>
           <span class="fe-viewer__idcol">
-            <span class="fe-viewer__name" :title="file.path">{{ displayName }}</span>
+            <span class="fe-viewer__name" :title="visibleName(file.path)">{{ displayName }}</span>
             <span v-if="metaLine" class="fe-viewer__meta">{{ metaLine }}</span>
           </span>
         </div>
@@ -2255,7 +2269,7 @@ onBeforeUnmount(() => {
         <template v-if="draftActive && draft">
           <span class="fe-draftbar__pill">{{ t('draft.badge') }}</span>
           <span class="fe-draftbar__text">
-            <bdi>{{ draft.name }}</bdi>
+            <bdi>{{ visibleName(draft.name) }}</bdi>
             <span class="fe-draftbar__target" data-testid="draft-bar-target">{{ t('draft.bar.target', { folder: draftFolder }) }}</span>
           </span>
           <span v-if="draftError" class="fe-draftbar__error" role="alert" data-testid="draft-bar-error">{{ draftError }}</span>
@@ -2313,7 +2327,7 @@ onBeforeUnmount(() => {
             <img
               ref="imgEl"
               :src="src"
-              :alt="file.basename"
+              :alt="displayName"
               class="fe-preview__image"
               :style="imageStyle"
               @load="measureFit"
@@ -2385,6 +2399,8 @@ onBeforeUnmount(() => {
                   ref="markdownEl"
                   class="fe-preview__md-split-output fe-preview__md"
                   dir="auto"
+                  @click="remoteImages.onClick"
+                  @keydown="remoteImages.onKeydown"
                   v-html="markdownHtml"
                 ></div>
               </div>
@@ -2396,7 +2412,15 @@ onBeforeUnmount(() => {
             </div>
             <!-- ⚠ RTL: a document reads in ITS direction, not the interface's —
                  `auto` lets an English README stay left to right in Arabic. -->
-            <div v-else-if="markdownHtml" ref="markdownEl" class="fe-preview__md" dir="auto" v-html="markdownHtml"></div>
+            <div
+              v-else-if="markdownHtml"
+              ref="markdownEl"
+              class="fe-preview__md"
+              dir="auto"
+              @click="remoteImages.onClick"
+              @keydown="remoteImages.onKeydown"
+              v-html="markdownHtml"
+            ></div>
             <pre v-else class="fe-preview__pre">{{ rawText }}</pre>
           </template>
 
@@ -2657,6 +2681,9 @@ onBeforeUnmount(() => {
     @cancel="draftSave.cancel"
     @confirm="draftSave.confirm"
   />
+  <!-- A picture from another server asks before it is loaded; a sibling of
+       the viewer's dialog for the reason the drafts' questions are. -->
+  <RemoteImageDialog :gate="remoteImages" :locale="locale" :theme="theme" />
 </template>
 
 <style>

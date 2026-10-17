@@ -54,7 +54,10 @@ import {
   APPIMAGE_DESKTOP_ENTRY,
   CURRENT_CHANNEL,
   LEGACY_LINUX_DESKTOP_ENTRY,
+  LINUX_APP_NAME,
+  OPENWITH_DESKTOP_ENTRY,
   appImageDesktopEntry,
+  hiddenDesktopEntry,
   defaultHandlerRoute as handlerRouteFor,
   otherCopyOf,
   engineStateDir,
@@ -73,6 +76,7 @@ import {
   type MountResult,
 } from './drive.js';
 import { DragOutCache, createPlaceholders, fulfilDrop, type DragItem, type DragProgress } from './dragout.js';
+import { exactLocalPath, safeLocalName, serverRelFor } from './local-name.js';
 import { DragFills, throttleReports } from './dragfill.js';
 import { localDriveRoots, watchForDrop } from './dropwatch.js';
 import { remoteDownloadUrl, remoteSearchUrl, searchResults } from './remote-search.js';
@@ -98,15 +102,17 @@ import {
   LocalChangedError,
   LocalDocMonitor,
   OFFICE_EXTENSIONS,
+  SourceChangedError,
   OpeningDocs,
   OFFICE_MIME_TYPES,
   SessionStore,
   WriteBackError,
   classifyArgv,
+  documentRouteUrl,
   extensionOf,
   fingerprint,
   hasChanged,
-  isOfficeDocument,
+  leaveQuestionFor,
   needsRecovery,
   newSessionId,
   orphanScratchEntries,
@@ -116,13 +122,14 @@ import {
   scratchBasename,
   scratchRemoteDir,
   scratchRemotePath,
-  readLocalVersion,
+  hashLocalVersion,
   staleSessions,
   writeBackAtomic,
   writeConflictCopy,
+  writtenVersion,
   besidePathFor,
   besideSaves,
-  savedFormatOf,
+  savedFormatOfContent,
   statIn,
   unseenBesideSaves,
   writeBesideSave,
@@ -134,15 +141,53 @@ import {
   type ScratchEntry,
 } from './openwith.js';
 import {
+  AppKindsStore,
+  candidatesFor,
+  choiceKey,
+  emptyAppKinds,
+  kindRows,
+  labelIn,
+  mergeRecords,
+  pickCandidate,
+  registrableKinds,
+  registrableMediaTypes,
+  type AppKindsFile,
+  type Candidate,
+  type RegisteredKinds,
+  type ServerRecord,
+} from './app-kinds.js';
+import {
+  assocRouteFor,
+  globs2Files,
+  linuxMimePackage,
+  linuxTypesFor,
+  mergeGlobs,
+  packageKinds,
+  parseGlobs2,
+  regQueryValueNames,
+  registeredWindowsKinds,
+  typeHintsOf,
+  windowsAssocChangedArgs,
+  windowsAssocReg,
+  windowsKinds,
+  windowsRegBytes,
+  type AssocRoute,
+} from './os-assoc.js';
+// The kinds the app store's apps open, as THIS package declares them at build
+// time (macOS, the Store, the snap: os-assoc.ts) - for Settings to count.
+import catalogKinds from '../build/app-kinds.json';
+import {
   deleteRemote,
-  downloadFile,
+  downloadToSpool,
   ensureScratchDir,
   listDir,
   listStorages,
+  readServerApps,
+  sendWorkingCopy,
   statRemote,
-  uploadFile,
   type RemoteContext,
 } from './openwith-io.js';
+import { clearSpools, contentSize, disposeSpool, writeContent, type Content, type Spooled } from './spool.js';
 import {
   SyncSupervisor,
   addPair,
@@ -151,7 +196,6 @@ import {
   confirmHeld,
   discardHeld,
   readPairs,
-  listTrash,
   movePair,
   removePair,
   type Pair,
@@ -160,6 +204,8 @@ import {
   LIMIT_PRESETS_KIB,
   WINDOW_PRESETS,
   answerHold,
+  discardDetail,
+  discardOutcome,
   heldItems,
   normLimit,
   storedWindow,
@@ -594,7 +640,11 @@ function openMainWindow(): void {
   // The account's language may have been changed on another surface (the web
   // panel, another computer): read it again when the window comes forward, at
   // most once a minute.
-  mainWindow.on('focus', () => void syncAccountLocale({ throttleMs: 60_000 }));
+  mainWindow.on('focus', () => {
+    void syncAccountLocale({ throttleMs: 60_000 });
+    // An app installed on a server while the window was behind others.
+    void refreshAppKinds({ maxAgeMs: APP_KINDS_FOCUS_MS });
+  });
 
   // Closing the window parks the app in the tray instead of killing it. A sync
   // client that stops syncing the moment its window is shut is not a sync
@@ -822,6 +872,9 @@ function accountsChanged(): void {
   wireAuthHeaderInjection();
   // Another account on screen is another person's language (#191).
   void syncAccountLocale();
+  // A new server's apps open their kinds from now on; a removed one's go
+  // (refreshAppKinds reads only the accounts it has no fresh answer for).
+  void refreshAppKinds({ maxAgeMs: APP_KINDS_REFRESH_MS });
 }
 
 /** The language the app draws: the ACTIVE ACCOUNT's (#191 - the app's
@@ -925,9 +978,9 @@ const TRAY_STRINGS: Bilingual = {
   resume: ['Resume sync', 'Eşitlemeyi sürdür'],
   pausedState: ['sync paused', 'eşitleme duraklatıldı'],
   syncingState: ['syncing…', 'eşitleniyor…'],
-  failingState: ['a folder could not be synced - see Settings', 'bir klasör eşitlenemedi - Ayarlar’a bak'],
+  failingState: ['a folder could not be synced - see App settings', 'bir klasör eşitlenemedi - Uygulama ayarları’na bak'],
   updateReady: ['Update {v} ready - installs itself (or now)', '{v} güncellemesi hazır - kendiliğinden kurulur (ya da şimdi)'],
-  settings: ['Settings…', 'Ayarlar…'],
+  settings: ['App settings…', 'Uygulama ayarları…'],
   quit: ['Quit filex', "filex'ten çık"],
 };
 
@@ -1066,6 +1119,8 @@ function markSignedOut(accountId: string, why: string): void {
   }
   supervisor?.stop(accountId);
   refreshTray();
+  // Its server's apps no longer open anything from this computer.
+  settleAppKinds();
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
   try {
     if (Notification.isSupported()) {
@@ -1806,14 +1861,19 @@ const SYNC_STRINGS: Bilingual = {
     'Şu ankinin içinde olmayan (ve onu içermeyen) bir klasör seç.',
   ],
   unexpectedTitle: ['filex hit an unexpected error', 'filex beklenmedik bir hatayla karşılaştı'],
-  discardTitle: ['Move held items to the local trash', 'Bekleyen öğeleri yerel çöpe taşı'],
-  discardMessageOne: ['Move the 1 held item off this computer?', 'Bekleyen 1 öğe bu bilgisayardan kaldırılsın mı?'],
-  discardMessage: ['Move the {n} held items off this computer?', 'Bekleyen {n} öğe bu bilgisayardan kaldırılsın mı?'],
+  discardTitle: ['Delete held items from this computer', 'Bekleyen öğeleri bu bilgisayardan sil'],
+  discardMessageOne: ['Delete the 1 held item from this computer?', 'Bekleyen 1 öğe bu bilgisayardan silinsin mi?'],
+  discardMessage: ['Delete the {n} held items from this computer?', 'Bekleyen {n} öğe bu bilgisayardan silinsin mi?'],
   discardDetail: [
-    'They go to the sync trash on this computer and are kept there for 30 days (Settings → Removed by sync). Nothing on the server changes.\n\n{local}',
-    'Bu bilgisayardaki eşitleme çöpüne gider ve orada 30 gün saklanır (Ayarlar → Eşitlemenin sildikleri). Sunucuda hiçbir şey değişmez.\n\n{local}',
+    'Only the files the server still has an identical copy of - in your trash there, or in another folder - are deleted from this computer, so nothing is lost. The others stay here and keep waiting, and filex says why. Nothing on the server changes.\n\n{local}',
+    'Yalnızca sunucuda birebir aynı kopyası duran dosyalar (oradaki Çöp kutunuzda ya da başka bir klasörde) bu bilgisayardan silinir; böylece hiçbir şey kaybolmaz. Diğerleri burada kalır ve beklemeye devam eder; filex nedenini söyler. Sunucuda hiçbir şey değişmez.\n\n{local}',
   ],
-  discardButton: ['Move to local trash', 'Yerel çöpe taşı'],
+  discardMore: ['…and {n} more', '…ve {n} tane daha'],
+  discardNoAccount: [
+    'This folder belongs to an account that is not signed in here, so the server cannot be asked which of these files it still has.',
+    'Bu klasör burada oturumu açık olmayan bir hesaba ait; sunucuya bu dosyalardan hangilerinin kopyasını tuttuğu sorulamıyor.',
+  ],
+  discardButton: ['Delete from this computer', 'Bu bilgisayardan sil'],
   holdTitle: ['Items held for a decision', 'Karar bekleyen öğeler'],
   holdFailed: ['filex could not do that: {err}', 'filex bunu yapamadı: {err}'],
   signedOutTitle: ['{email} is signed out of {host}', '{email}, {host} oturumundan çıkarıldı'],
@@ -1845,8 +1905,9 @@ function remoteInside(child: string, parent: string): boolean {
   return child.startsWith(parent + '/');
 }
 
-/** Windows refuses these characters in a path segment; everywhere else only
- *  the separator matters.
+/** A path segment as Windows can hold it (local-name.ts, the one rule: its
+ *  forbidden characters, trailing dots and spaces, device names); everywhere
+ *  else only the separator matters.
  *
  *  ⚠ `..` is dropped on EVERY platform, and that is a security guard, not
  *  tidiness: the wire path comes from the SERVER's listing, so a hostile or
@@ -1855,7 +1916,7 @@ function remoteInside(child: string, parent: string): boolean {
  *  merges both sides — it would upload whatever it found there. Segments are
  *  therefore filtered before they ever reach path.join. */
 function fsSegment(seg: string): string {
-  return process.platform === 'win32' ? seg.replace(/[<>:"\\|?*]/g, '_') : seg;
+  return process.platform === 'win32' ? safeLocalName(seg) : seg;
 }
 
 /** Path segments of a wire remote, with anything that could climb out of the
@@ -1928,10 +1989,37 @@ function readyKeyOf(accountId: string, items: Array<{ path: string }>): string {
   return `${accountId}|${dragKeyOf(items)}`;
 }
 
+/**
+ * The sync engine's name pairings for a pair: server path → path here, for
+ * the items it keeps on this computer under another name (a server file this
+ * computer cannot name, the second of two names that are one name here).
+ * Read from the engine's own state (names/<pair-id>.json under
+ * FILEX_SYNC_DIR, which this app sets for every engine it runs, else the
+ * engine's default ~/.filex/sync). Nothing there - or nothing readable - is no
+ * pairings.
+ */
+function engineNamePairings(pairId: string): Record<string, string> {
+  const dir = process.env.FILEX_SYNC_DIR || path.join(app.getPath('home'), '.filex', 'sync');
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(dir, 'names', `${pairId}.json`), 'utf8')) as {
+      names?: Record<string, string>;
+    };
+    return raw.names && typeof raw.names === 'object' ? raw.names : {};
+  } catch {
+    return {};
+  }
+}
+
 /** The sync engine's local copy of a wire path, when it keeps one. Used only
  *  to fill the drag cache without going over the network — the mirror itself
  *  is never handed to the OS drag (a drop completed as a move would take the
- *  user's synced file with it). */
+ *  user's synced file with it).
+ *
+ *  ⚠ Only a path that IS that item (local-name.ts exactLocalPath): every
+ *  segment spelled exactly so on disk. `rapor.docx` beside its twin
+ *  `Rapor.docx` resolves to the twin on Windows and macOS, and `a:b.txt` made
+ *  safe is some other `a_b.txt`: the bytes handed over were another file's
+ *  (task #238). null sends the drag to the server instead. */
 function mirrorPathFor(accountId: string, remote: string): string | null {
   const wire = normRemote(remote);
   const pairs = accountPairs(accountId);
@@ -1942,7 +2030,14 @@ function mirrorPathFor(accountId: string, remote: string): string | null {
   const rest = anc.remote.endsWith('://')
     ? wire.slice(anc.remote.length)
     : wire.slice(anc.remote.length + 1);
-  return path.join(anc.local, ...safeSegments(rest));
+  const readdir = (dir: string): string[] | null => {
+    try {
+      return fs.readdirSync(dir);
+    } catch {
+      return null;
+    }
+  };
+  return exactLocalPath(anc.local, rest.split('/').filter(Boolean), readdir, path.join);
 }
 
 /**
@@ -2203,6 +2298,10 @@ interface LiveOpenWith {
   /** The page in the window: whether it takes outside changes (it said
    *  hello), and whether its editor holds an edit. */
   page: { speaks: boolean; edited: boolean };
+  /** The `app=` the window opened the document with (openwith.ts
+   *  officeEditorChoice), kept for every later load of the window - a new
+   *  working copy after an outside change opens in the same editor. */
+  app: string | null;
   /** Rising number of outside changes (the page's OutsideChange.seq). */
   seq: number;
   /** Outside changes and answers are taken one at a time. */
@@ -2227,8 +2326,9 @@ interface OutsidePending {
   /** That version, uploaded as the next working copy (the editor moves to it
    *  if the answer is to take it). */
   next: { remote: string; seen: RemoteStat | null } | null;
-  /** A save of filex's that came in meanwhile: held, written nowhere yet. */
-  held: Buffer | null;
+  /** A save of filex's that came in meanwhile: held, written nowhere yet -
+   *  a spool of the session's (openWithSpool), this record's to dispose of. */
+  held: Spooled | null;
   heldSeen: RemoteStat | null;
   /** The app's own question is up (a page that does not take changes). */
   asking: boolean;
@@ -2273,11 +2373,40 @@ function openWithQuietMs(): number {
 
 const OPEN_WITH_STRINGS: Bilingual = {
   ok: ['OK', 'Tamam'],
-  notOfficeTitle: ['filex does not open this kind of file', 'filex bu tür dosyaları açmaz'],
-  notOfficeBody: ['{names}', '{names}'],
-  notOfficeDetail: [
-    'filex opens office documents ({types}) in its own editor. Everything else stays with the app you already use for it.',
-    'filex ofis belgelerini ({types}) kendi düzenleyicisinde açar. Diğer her şey zaten kullandığın uygulamada kalır.',
+  cancel: ['Cancel', 'Vazgeç'],
+  notFileTitle: ['filex opens files, not folders', 'filex klasörleri değil dosyaları açar'],
+  notFileDetail: [
+    'Open a folder from the filex window, or keep it on this computer from there.',
+    'Bir klasörü filex penceresinden aç ya da oradan bu bilgisayarda tut.',
+  ],
+  // The kinds of file filex opens come from the person's servers (src/app-kinds.ts).
+  nobodyOpensTitle: ['None of your filex servers opens .{kind} files', 'filex sunucularının hiçbiri .{kind} dosyalarını açmıyor'],
+  nobodyOpensDetail: [
+    'filex opens a file from this computer when an app on one of your filex servers opens its kind - an office document also when the server has a Document Server. An administrator adds apps from the app store.',
+    'filex bu bilgisayardaki bir dosyayı, filex sunucularından birindeki bir uygulama o türü açıyorsa açar; bir ofis belgesini sunucuda Document Server varsa da açar. Uygulamaları yönetici uygulama mağazasından ekler.',
+  ],
+  nobodyOpensKinds: ['Your servers open: {kinds}', 'Sunucularının açtıkları: {kinds}'],
+  nobodyOpensNone: ['Your servers open no kind of file from this computer yet.', 'Sunucuların bu bilgisayardan henüz hiçbir dosya türünü açmıyor.'],
+  nobodyOpensUnasked: ['{servers} could not be asked; try again once it answers.', '{servers} sunucusuna sorulamadı; yanıt verdiğinde yeniden dene.'],
+  signedOutTitle: ['Your filex accounts on this computer are signed out', 'Bu bilgisayardaki filex hesaplarının oturumu kapalı'],
+  signedOutDetail: [
+    'Reconnect in the filex window, then open {name} again.',
+    'filex penceresinden yeniden bağlan, sonra {name} dosyasını yeniden aç.',
+  ],
+  chooseTitle: ['Open {name}', '{name} dosyasını aç'],
+  chooseMessage: [
+    'More than one of your servers opens .{kind} files. Where should {name} open?',
+    'Birden fazla sunucun .{kind} dosyalarını açıyor. {name} nerede açılsın?',
+  ],
+  chooseRemember: ['Always open .{kind} files there', '.{kind} dosyalarını hep orada aç'],
+  openerApp: ['{app} on {server}', '{server} üzerinde {app}'],
+  openerDocumentServer: ['Document Server on {server}', '{server} üzerinde Document Server'],
+  // The name Explorer gives a file the servers' apps open, once filex is its
+  // default (the ProgId, os-assoc.ts WIN_APP_PROGID).
+  appDocumentType: ['filex document', 'filex belgesi'],
+  appEntryComment: [
+    'filex: opens the kinds of file the apps on your filex servers open',
+    'filex: filex sunucularındaki uygulamaların açtığı dosya türlerini açar',
   ],
   signInTitle: ['Sign in to filex first', "Önce filex'e giriş yap"],
   signInBody: [
@@ -2373,6 +2502,14 @@ const OPEN_WITH_STRINGS: Bilingual = {
   ],
   draftLeave: ['Close', 'Kapat'],
   draftStay: ['Keep editing', 'Düzenlemeye devam et'],
+  // A document window closing while its editor (an app's interface: the
+  // office editor app) holds changes it has not saved: they are lost.
+  unsavedLeaveMessage: ['Close {name} without saving?', '{name} kaydedilmeden kapatılsın mı?'],
+  unsavedLeaveDetail: [
+    'The changes made since the last save are not in the document yet. Keep editing and save to keep them.',
+    'Son kayıttan sonraki değişiklikler henüz belgede değil. Saklamak için düzenlemeye devam edip kaydedin.',
+  ],
+  unsavedLeave: ['Close without saving', 'Kaydetmeden kapat'],
 };
 
 function openText(key: string, vars: Record<string, string> = {}): string {
@@ -2420,6 +2557,56 @@ function openWithRecoveryDir(): string {
   return path.join(explorerVisibleRoot(CURRENT_CHANNEL, app.getPath('userData'), app.getPath('home')), 'openwith-recovered');
 }
 
+/**
+ * Where saves brought home from the server are spooled before they go
+ * anywhere (openwith-io.ts downloadToSpool): a folder of the app's own under
+ * userData, so a save of several GB is never held in memory and never sits
+ * half-written beside the person's document. Emptied at every start; a
+ * session's own go when it ends.
+ */
+function openWithSpoolDir(): string {
+  return path.join(app.getPath('userData'), 'openwith-spool');
+}
+
+/** The spool a session's downloads go to: its own tag, so its leftovers can be found. */
+function spoolFor(live: LiveOpenWith): { dir: string; tag: string } {
+  return { dir: openWithSpoolDir(), tag: live.record.id };
+}
+
+/** How many times a document saved again while it goes up at opening is
+ *  read and sent again before the opening gives up. */
+const SEND_ATTEMPTS = 4;
+
+/**
+ * The document, sent as a version of itself (openwith-io.ts sendWorkingCopy:
+ * read a part at a time and held to that version). Saved again while it goes
+ * up, it is read again and sent again from the start - a few times, then the
+ * opening says so. The version sent.
+ */
+async function sendHeldToVersion(
+  acc: Account,
+  ctx: RemoteContext,
+  dir: string,
+  basename: string,
+  localPath: string,
+  first: LocalVersion,
+): Promise<LocalVersion> {
+  let version = first;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await sendWorkingCopy(ctx, dir, basename, { path: localPath, version }, { limitBytes: serverUploadLimit(acc.id) });
+      return version;
+    } catch (err) {
+      if (!(err instanceof SourceChangedError) || attempt >= SEND_ATTEMPTS) throw err;
+      log('openwith', 'the document changed while it went up - reading it again', { localPath, attempt });
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+      const again = await hashLocalVersion(localPath);
+      if (!again) throw new Error('the document is not there any more');
+      version = again;
+    }
+  }
+}
+
 /** Documents arriving from any of the three OS routes land here. */
 function queueOpenWith(paths: string[]): void {
   for (const p of paths) {
@@ -2447,7 +2634,7 @@ async function openDocuments(paths: string[]): Promise<void> {
   for (const raw of paths) {
     const p = path.resolve(String(raw));
     const st = await fs.promises.stat(p).catch(() => null);
-    if (!st?.isFile() || !isOfficeDocument(p)) {
+    if (!st?.isFile()) {
       refused.push(p);
       continue;
     }
@@ -2456,15 +2643,14 @@ async function openDocuments(paths: string[]): Promise<void> {
   if (refused.length) {
     await tellUser(
       'warning',
-      openText('notOfficeTitle'),
+      openText('notFileTitle'),
       refused.map((p) => path.basename(p)).join('\n'),
-      openText('notOfficeDetail', { types: OFFICE_EXTENSIONS.join(', ') }),
+      openText('notFileDetail'),
     );
   }
   if (!docs.length) return;
 
-  const acc = activeAccount(state) ?? state.accounts[0] ?? null;
-  if (!acc) {
+  if (!state.accounts.length) {
     openShell('/connect', 'filex - Connect');
     await tellUser(
       'info',
@@ -2474,10 +2660,35 @@ async function openDocuments(paths: string[]): Promise<void> {
     );
     return;
   }
+  if (!liveAccounts().length) {
+    openMainWindow();
+    await tellUser('info', openText('signedOutTitle'), path.basename(docs[0]!), openText('signedOutDetail', { name: path.basename(docs[0]!) }));
+    return;
+  }
 
+  // Which server opens what (app-kinds.ts): read again unless it was just
+  // read - an app installed a minute ago opens its kind on the next
+  // double-click. A server that cannot be asked keeps what it last said.
+  await refreshAppKinds({ maxAgeMs: OPEN_FRESH_MS });
+
+  /** Documents no server opens, by kind: said once per kind, after the rest opened. */
+  const nobody = new Map<string, string[]>();
   for (const doc of docs) {
+    // Already open, or being opened: brought forward (openOneDocument), not
+    // a second question about which server opens it.
+    if (focusIfOpen(doc)) continue;
+    const candidates = candidatesFor(doc, appKinds.servers, accountOrder());
+    if (!candidates.length) {
+      const kind = choiceKey(doc);
+      nobody.set(kind, [...(nobody.get(kind) ?? []), path.basename(doc)]);
+      log('openwith', 'no server opens this kind', { doc, kind });
+      continue;
+    }
+    const chosen = await chooseServer(doc, candidates);
+    const acc = chosen ? state.accounts.find((a) => a.id === chosen.accountId) : null;
+    if (!chosen || !acc) continue;
     try {
-      await openOneDocument(acc, doc);
+      await openOneDocument(acc, doc, chosen.app);
       openWithError = null;
     } catch (err) {
       const msg = String((err as Error)?.message ?? err);
@@ -2491,17 +2702,118 @@ async function openDocuments(paths: string[]): Promise<void> {
       );
     }
   }
+  for (const [kind, names] of nobody) await tellNobodyOpens(kind, names);
+}
+
+/** How fresh what the servers open must be at a double-click. */
+const OPEN_FRESH_MS = 60_000;
+
+/** The largest file an account's server takes (its capabilities'
+ *  `upload_limit_mb`, read with what it opens); 0 is no limit, or not known. */
+function serverUploadLimit(accountId: string): number {
+  return appKinds.servers.find((s) => s.accountId === accountId)?.uploadLimit ?? 0;
+}
+
+/** The accounts whose servers are asked: signed in, the active one first. */
+function liveAccounts(): Account[] {
+  const active = activeAccount(state);
+  const live = state.accounts.filter((a) => !a.signedOut);
+  return active && !active.signedOut ? [active, ...live.filter((a) => a.id !== active.id)] : live;
+}
+
+function accountOrder(): string[] {
+  return liveAccounts().map((a) => a.id);
+}
+
+/** How a server is named to the person: its host, and the account where two share it. */
+function serverName(accountId: string): string {
+  const acc = state.accounts.find((a) => a.id === accountId);
+  if (!acc) return '';
+  let host = acc.serverUrl;
+  try {
+    host = new URL(acc.serverUrl).host;
+  } catch {
+    /* the address as stored */
+  }
+  const twins = state.accounts.filter((a) => a.id !== acc.id && a.serverUrl === acc.serverUrl).length;
+  return twins ? `${acc.email} @ ${host}` : host;
+}
+
+function candidateLabel(c: Candidate): string {
+  const server = serverName(c.accountId);
+  if (c.via === 'document-server') return openText('openerDocumentServer', { server });
+  return openText('openerApp', { app: labelIn(c.label, effectiveLocale()) || c.plugin || '', server });
+}
+
+/**
+ * Which server opens `doc`: the one whose sync folder holds it (the twin is
+ * the server's own file, no copy is made), else the one there is or the one
+ * the person chose for the kind before, else asked - the servers that open
+ * it, a button each, with "always open .<kind> files there". null: cancelled.
+ */
+async function chooseServer(doc: string, candidates: Candidate[]): Promise<Candidate | null> {
+  const twin = candidates.find((c) => resolveSyncTwin(doc, accountPairs(c.accountId)));
+  if (twin) return twin;
+  const kind = choiceKey(doc);
+  const pick = pickCandidate(candidates, appKinds.choices[kind] ?? null);
+  if (pick.kind === 'one') return pick.candidate;
+  if (pick.kind === 'none') return null;
+  if (appKinds.choices[kind]) {
+    // A remembered choice that no longer holds is not kept to be followed later.
+    delete appKinds.choices[kind];
+    saveAppKinds();
+  }
+  log('openwith', 'more than one server opens this kind', { doc, kind, servers: pick.candidates.map((c) => c.accountId) });
+  // An unattended run cannot answer a dialog (tellUser): the first, as listed.
+  if (process.env.FILEX_NO_BROWSER === '1') return pick.candidates[0]!;
+  const name = path.basename(doc);
+  const answer = await dialog
+    .showMessageBox({
+      type: 'question',
+      title: openText('chooseTitle', { name }),
+      message: openText('chooseMessage', { name, kind }),
+      buttons: [...pick.candidates.map(candidateLabel), openText('cancel')],
+      cancelId: pick.candidates.length,
+      defaultId: 0,
+      checkboxLabel: openText('chooseRemember', { kind }),
+      checkboxChecked: false,
+    })
+    .catch(() => null);
+  const chosen = answer ? pick.candidates[answer.response] : undefined;
+  if (!chosen) return null;
+  if (answer?.checkboxChecked) {
+    appKinds.choices[kind] = { accountId: chosen.accountId, app: chosen.app };
+    saveAppKinds();
+  }
+  return chosen;
+}
+
+/** No server opens these documents: said so, with what the servers do open. */
+async function tellNobodyOpens(kind: string, names: string[]): Promise<void> {
+  const kinds = kindRows(appKinds.servers).map((r) => '.' + r.ext);
+  const office = appKinds.servers.some((s) => s.documentServer) ? OFFICE_EXTENSIONS.map((e) => '.' + e) : [];
+  const all = [...new Set([...office, ...kinds])].sort();
+  const unasked = liveAccounts().filter((a) => !appKinds.servers.some((s) => s.accountId === a.id)).map((a) => serverName(a.id));
+  const detail = [
+    openText('nobodyOpensDetail'),
+    all.length ? openText('nobodyOpensKinds', { kinds: all.join('  ') }) : openText('nobodyOpensNone'),
+    ...(unasked.length ? [openText('nobodyOpensUnasked', { servers: unasked.join(', ') })] : []),
+  ].join('\n\n');
+  await tellUser('info', openText('nobodyOpensTitle', { kind: kind || '?' }), names.join('\n'), detail);
 }
 
 /** Documents between the double-click and their editor (OpeningDocs). */
 const openingDocs = new OpeningDocs(process.platform);
 
-async function openOneDocument(acc: Account, localPath: string): Promise<void> {
-  // ⚠ One document, one editor. Double-clicking a file that is already open —
-  // easy to do, since the app does not put itself in front of you — would
-  // otherwise make a SECOND working copy of the same document, with two
-  // sessions writing back to one path: whichever saved last would win, and the
-  // other person's edit would vanish without a word.
+/**
+ * ⚠ One document, one editor. Double-clicking a file that is already open —
+ * easy to do, since the app does not put itself in front of you — would
+ * otherwise make a SECOND working copy of the same document, with two
+ * sessions writing back to one path: whichever saved last would win, and the
+ * other person's edit would vanish without a word. True: it is open (brought
+ * forward) or being opened.
+ */
+function focusIfOpen(localPath: string): boolean {
   const already = [...liveOpenWith.values()].find(
     (l) => !l.closing && sameLocalPath(l.record.localPath, localPath),
   );
@@ -2509,8 +2821,14 @@ async function openOneDocument(acc: Account, localPath: string): Promise<void> {
     showWindow(already.window);
     focusWindow(already.window);
     log('openwith', 'already open - focusing it', { localPath });
-    return;
+    return true;
   }
+  return false;
+}
+
+/** `app`: the window's `app=` - how the chosen server opens it (app-kinds.ts candidatesFor). */
+async function openOneDocument(acc: Account, localPath: string, app: string | null): Promise<void> {
+  if (focusIfOpen(localPath)) return;
 
   // ⚠ …and one that is still being opened. The check above only knows
   // documents whose editor is up, which is after the working copy has gone
@@ -2520,20 +2838,23 @@ async function openOneDocument(acc: Account, localPath: string): Promise<void> {
     return;
   }
   try {
-    const twin = resolveSyncTwin(localPath, accountPairs(acc.id));
+    if (app) log('openwith', 'opens in an app', { localPath, app, account: acc.id });
+    const twin = resolveSyncTwin(localPath, accountPairs(acc.id), {
+      serverRel: (pairId, rel) => serverRelFor(rel, engineNamePairings(pairId)),
+    });
     if (twin) {
       log('openwith', 'synced twin', { localPath, remote: twin.remote, pair: twin.pairId });
-      openEditorWindow(acc, twin.remote, localPath, 'twin');
+      openEditorWindow(acc, twin.remote, localPath, 'twin', app);
       return;
     }
-    // The upload is the slow part (up to 256 MB), and nothing was on screen
+    // The upload is the slow part (up to the server's limit), and nothing was on screen
     // until the editor came up: said once it takes a moment.
     const slow = setTimeout(
       () => openWithNotify(openText('openingTitle', { name: path.basename(localPath) }), openText('openingBody')),
       1500,
     );
     try {
-      await openViaScratch(acc, localPath);
+      await openViaScratch(acc, localPath, app);
     } finally {
       clearTimeout(slow);
     }
@@ -2572,19 +2893,21 @@ async function scratchStorageFor(acc: Account, ctx: RemoteContext): Promise<stri
   throw last ?? new Error('no writable storage on this account');
 }
 
-async function openViaScratch(acc: Account, localPath: string): Promise<void> {
+async function openViaScratch(acc: Account, localPath: string, app: string | null): Promise<void> {
   const ctx = remoteCtx(acc);
-  // The bytes AND the version they are (#184): the version is what every
-  // later save is held to - a save goes over the document only while it is
-  // still what filex read here, or what filex itself wrote last.
-  const read = await readLocalVersion(localPath);
+  // The version the document is (#184): what every later save is held to -
+  // a save goes over the document only while it is still what filex read
+  // here, or what filex itself wrote last. Hashed, not read into memory.
+  const read = await hashLocalVersion(localPath);
   if (!read) throw new Error('the document is not there any more');
-  const bytes = read.bytes;
   const storage = await scratchStorageFor(acc, ctx);
   const dir = scratchRemoteDir(storage);
   const id = newSessionId();
   const basename = scratchBasename(localPath, id);
-  await uploadFile(ctx, dir, basename, bytes);
+  // In parts from 8 MiB up, resumable, up to the server's own limit, read
+  // from the file a part at a time and held to that version
+  // (openwith-io.ts sendWorkingCopy); the server checks the hash.
+  const version = await sendHeldToVersion(acc, ctx, dir, basename, localPath, read);
   const seen = await statRemote(ctx, dir, basename);
   const now = new Date().toISOString();
   const record: OpenWithSession = {
@@ -2607,7 +2930,7 @@ async function openViaScratch(acc: Account, localPath: string): Promise<void> {
   await sessionStore?.put(record);
   log('openwith', 'scratch copy', { localPath, remote: record.remote });
 
-  const win = openEditorWindow(acc, record.remote, localPath, 'scratch');
+  const win = openEditorWindow(acc, record.remote, localPath, 'scratch', app);
   const live: LiveOpenWith = {
     record,
     window: win,
@@ -2619,10 +2942,10 @@ async function openViaScratch(acc: Account, localPath: string): Promise<void> {
     wroteBack: false,
     monitor: new LocalDocMonitor({
       path: localPath,
-      baseline: read.version,
-      onChange: (version, changed) => {
+      baseline: version,
+      onChange: (outside) => {
         const l = liveOpenWith.get(id);
-        if (l) void queueOutside(l, () => takeOutsideChange(l, { version, bytes: changed }));
+        if (l) void queueOutside(l, () => takeOutsideChange(l, { version: outside }));
       },
       onError: (err) => log('openwith', 'watching the document', String((err as Error)?.message ?? err)),
     }),
@@ -2631,6 +2954,7 @@ async function openViaScratch(acc: Account, localPath: string): Promise<void> {
     fork: null,
     beside: null,
     page: { speaks: false, edited: false },
+    app,
     seq: 0,
     outsideBusy: Promise.resolve(),
   };
@@ -2726,14 +3050,16 @@ function docChromeScript(): string {
   })();`;
 }
 
-/** The `/files/edit` URL for a remote path, in edit mode. */
-function editRouteUrl(acc: Account, remote: string): string {
-  const url = serverUrl(acc.serverUrl, '/files/edit');
-  url.searchParams.set('path', remote);
-  url.searchParams.set('type', extensionOf(remote));
-  url.searchParams.set('mode', 'edit');
-  return url.toString();
+/** The `/files/edit` URL for a remote path, in edit mode, with the window's
+ *  `app=` choice when it has one (openwith.ts documentRouteUrl). */
+function editRouteUrl(acc: Account, remote: string, app?: string | null): string {
+  return documentRouteUrl(acc.serverUrl, remote, app);
 }
+
+/** Windows the app itself is moving to another page (an outside change's
+ *  new working copy, after the person chose it): the page's "leave?" is not
+ *  asked again - the person has just answered it. Cleared at the next load. */
+const quietUnload = new WeakSet<BrowserWindow>();
 
 /**
  * The shared shell for BOTH document windows — the in-app viewer
@@ -2793,6 +3119,7 @@ function makeDocumentWindow(
   // itself (a sign-in bounce, a reload after a save). The window chrome (drag +
   // controls) and any caller's `extraInject` (the open-with banner) ride along.
   win.webContents.on('did-finish-load', () => {
+    quietUnload.delete(win);
     const extra = extraInject ? extraInject() : '';
     void win.webContents
       .executeJavaScript(extra + docChromeScript(), true)
@@ -2804,14 +3131,25 @@ function makeDocumentWindow(
   // it only reports it here, and without an answer the window would simply
   // refuse to close. The same question, as the OS's own dialog. Leaving loses
   // nothing: the draft keeps what was typed, and stays in Drafts.
+  //
+  // The page asks it for an app's interface holding unsaved changes too (the
+  // office editor app, in an "Open with filex" window above all), and there
+  // the edit is NOT kept anywhere: the words are the ones true for the page in
+  // the window (openwith.ts leaveQuestionFor), never the draft's promise.
   win.webContents.on('will-prevent-unload', (e) => {
+    if (quietUnload.has(win)) {
+      quietUnload.delete(win);
+      e.preventDefault();
+      return;
+    }
+    const draft = leaveQuestionFor(win.webContents.getURL()) === 'draft';
     const leave = dialog.showMessageBoxSync(win, {
       type: 'question',
-      buttons: [openText('draftLeave'), openText('draftStay')],
+      buttons: [openText(draft ? 'draftLeave' : 'unsavedLeave'), openText('draftStay')],
       defaultId: 1,
       cancelId: 1,
-      message: openText('draftLeaveMessage'),
-      detail: openText('draftLeaveDetail'),
+      message: draft ? openText('draftLeaveMessage') : openText('unsavedLeaveMessage', { name: title }),
+      detail: openText(draft ? 'draftLeaveDetail' : 'unsavedLeaveDetail'),
     });
     if (leave === 0) e.preventDefault();
   });
@@ -2878,8 +3216,9 @@ function openEditorWindow(
   remote: string,
   localPath: string,
   mode: 'scratch' | 'twin',
+  app: string | null = null,
 ): BrowserWindow {
-  return makeDocumentWindow(acc, editRouteUrl(acc, remote), path.basename(localPath), () =>
+  return makeDocumentWindow(acc, editRouteUrl(acc, remote, app), path.basename(localPath), () =>
     bannerScript(openWithBanner(localPath, mode)),
   );
 }
@@ -3008,8 +3347,10 @@ async function pollOpenWith(id: string): Promise<void> {
     // A save already held for the open question is not fetched again.
     const held = live.outside?.heldSeen;
     if (held && fingerprint(held) === fingerprint(current)) return;
-    const bytes = await downloadFile(ctx, live.record.remote);
-    await landSave(live, bytes, current);
+    // Into a spool, never into memory (openwith-io.ts downloadToSpool);
+    // landSave owns it from here.
+    const save = await downloadToSpool(ctx, live.record.remote, spoolFor(live));
+    await landSave(live, save, current);
   } catch (err) {
     // Network hiccup, server restart, expired token. Keep watching — the
     // document is still on the server and the next tick may well succeed.
@@ -3030,64 +3371,77 @@ async function pollOpenWith(id: string): Promise<void> {
  * beside the document as a conflict copy. While a question is open the save
  * is held, written nowhere.
  */
-async function landSave(live: LiveOpenWith, bytes: Buffer, current: RemoteStat | null): Promise<void> {
-  if (live.outside) {
-    // ⚠ `seen` does not move: a crash now finds the copy ahead of the record
-    // and recovers the held save beside the document.
-    live.outside.held = bytes;
-    live.outside.heldSeen = current;
-    log('openwith', 'save held - the document changed outside filex and the question is open', {
-      localPath: live.record.localPath,
-    });
-    sendOutside(live);
-    return;
-  }
-  // #151 — the bytes are not the document's format (a server before 0.51
-  // wrote ONLYOFFICE's DOCX over the working copy of a .doc): beside the
-  // document, never over it.
-  const other = savedFormatOf(live.record.localPath, bytes);
-  if (other) {
-    await landBeside(live, other, bytes);
-  } else if (live.fork) {
-    await writeFork(live, bytes);
-  } else {
-    try {
-      await live.monitor.ownWrite(() =>
-        writeBackAtomic(live.record.localPath, bytes, {
-          fallbackDir: openWithRecoveryDir(),
-          expect: live.monitor.baseline,
-        }),
-      );
-      live.wroteBack = true;
-      log('openwith', 'wrote back', { localPath: live.record.localPath, bytes: bytes.length });
-    } catch (err) {
-      if (err instanceof LocalChangedError) {
-        live.monitor.markSeen(err.current);
-        if (!live.closing) {
-          // Found by the write-back before the watch said so: the same
-          // question, with this save held. ⚠ Queued, not awaited: this can
-          // run inside a queued step (an answer's held save), and waiting on
-          // the queue from inside it would wait forever.
-          void queueOutside(live, () => takeOutsideChange(live, { held: { bytes, seen: current } }));
-          return;
+async function landSave(live: LiveOpenWith, save: Spooled, current: RemoteStat | null): Promise<void> {
+  // ⚠ The spool is this call's: it goes when the call is done with it,
+  // unless it is handed on (held for an open question, or queued with one).
+  let handedOn = false;
+  try {
+    if (live.outside) {
+      // ⚠ `seen` does not move: a crash now finds the copy ahead of the
+      // record and recovers the held save beside the document. Replaced in
+      // one step (nothing awaited before it): the save held before is no
+      // one's from here.
+      const before = live.outside.held;
+      live.outside.held = save;
+      live.outside.heldSeen = current;
+      handedOn = true;
+      if (before && before !== save) void disposeSpool(before);
+      log('openwith', 'save held - the document changed outside filex and the question is open', {
+        localPath: live.record.localPath,
+      });
+      sendOutside(live);
+      return;
+    }
+    // #151 — the bytes are not the document's format (a server before 0.51
+    // wrote ONLYOFFICE's DOCX over the working copy of a .doc): beside the
+    // document, never over it.
+    const other = await savedFormatOfContent(live.record.localPath, save);
+    if (other) {
+      await landBeside(live, other, save);
+    } else if (live.fork) {
+      await writeFork(live, save);
+    } else {
+      try {
+        await live.monitor.ownWrite(() =>
+          writeBackAtomic(live.record.localPath, save, {
+            fallbackDir: openWithRecoveryDir(),
+            expect: live.monitor.baseline,
+          }),
+        );
+        live.wroteBack = true;
+        log('openwith', 'wrote back', { localPath: live.record.localPath, bytes: save.size });
+      } catch (err) {
+        if (err instanceof LocalChangedError) {
+          live.monitor.markSeen(err.current);
+          if (!live.closing) {
+            // Found by the write-back before the watch said so: the same
+            // question, with this save held. ⚠ Queued, not awaited: this can
+            // run inside a queued step (an answer's held save), and waiting on
+            // the queue from inside it would wait forever.
+            handedOn = true;
+            void queueOutside(live, () => takeOutsideChange(live, { held: { save, seen: current } }));
+            return;
+          }
+          // Nobody left to ask: beside the document, never over it.
+          await keepBeside(live, save);
+        } else if (err instanceof WriteBackError) {
+          await shoutWriteFailed(err, path.basename(live.record.localPath));
+        } else {
+          throw err;
         }
-        // Nobody left to ask: beside the document, never over it.
-        await keepBeside(live, bytes);
-      } else if (err instanceof WriteBackError) {
-        await shoutWriteFailed(err, path.basename(live.record.localPath));
-      } else {
-        throw err;
       }
     }
+    // A save that lands after the window is gone shortens the wait: the thing
+    // the grace period exists for has happened.
+    if (live.closing) live.until = Math.min(live.hardUntil, Date.now() + openWithQuietMs());
+    // Recorded either way. Retrying the same failing write every two seconds
+    // would bury the machine in notifications and never succeed; the next
+    // genuine save produces a new fingerprint and gets its own attempt.
+    live.record.seen = current;
+    await persistOpenWith(live);
+  } finally {
+    if (!handedOn) await disposeSpool(save);
   }
-  // A save that lands after the window is gone shortens the wait: the thing
-  // the grace period exists for has happened.
-  if (live.closing) live.until = Math.min(live.hardUntil, Date.now() + openWithQuietMs());
-  // Recorded either way. Retrying the same failing write every two seconds
-  // would bury the machine in notifications and never succeed; the next
-  // genuine save produces a new fingerprint and gets its own attempt.
-  live.record.seen = current;
-  await persistOpenWith(live);
 }
 
 /**
@@ -3099,9 +3453,9 @@ async function landSave(live: LiveOpenWith, bytes: Buffer, current: RemoteStat |
  * #151 — a save in another format (`ext`, or what the bytes are) is named for
  * its own format: `rapor.filex-conflict-<time>.docx` beside `rapor.doc`.
  */
-async function keepBeside(live: LiveOpenWith, bytes: Buffer, ext?: string): Promise<string | null> {
+async function keepBeside(live: LiveOpenWith, bytes: Content, ext?: string): Promise<string | null> {
   const name = path.basename(live.record.localPath);
-  const other = ext ?? savedFormatOf(live.record.localPath, bytes);
+  const other = ext ?? (await savedFormatOfContent(live.record.localPath, bytes));
   const doc = other ? besidePathFor(live.record.localPath, other) : live.record.localPath;
   for (const target of [doc, path.join(openWithRecoveryDir(), path.basename(doc))]) {
     try {
@@ -3123,12 +3477,12 @@ async function keepBeside(live: LiveOpenWith, bytes: Buffer, ext?: string): Prom
 
 /** A save after "Keep both": to the conflict copy (the same one each time,
  *  held to the version filex wrote there), or a new one the first time. */
-async function writeFork(live: LiveOpenWith, bytes: Buffer): Promise<void> {
+async function writeFork(live: LiveOpenWith, bytes: Content): Promise<void> {
   const fork = live.fork;
   if (!fork) return;
   // #151 — a save in another format is already a separate file: beside the
   // document, where the session's other saves in that format go.
-  const other = savedFormatOf(live.record.localPath, bytes);
+  const other = await savedFormatOfContent(live.record.localPath, bytes);
   if (other) {
     await landBeside(live, other, bytes);
     return;
@@ -3139,7 +3493,7 @@ async function writeFork(live: LiveOpenWith, bytes: Buffer): Promise<void> {
         fallbackDir: openWithRecoveryDir(),
         expect: fork.version,
       });
-      log('openwith', 'wrote the conflict copy', { kept: fork.path, bytes: bytes.length });
+      log('openwith', 'wrote the conflict copy', { kept: fork.path, bytes: contentSize(bytes) });
       return;
     } catch (err) {
       if (!(err instanceof LocalChangedError) && !(err instanceof WriteBackError)) throw err;
@@ -3149,7 +3503,9 @@ async function writeFork(live: LiveOpenWith, bytes: Buffer): Promise<void> {
   const kept = await keepBeside(live, bytes);
   if (!kept) return;
   fork.path = kept;
-  fork.version = (await readLocalVersion(kept).catch(() => null))?.version ?? null;
+  // What filex wrote there, not a re-read (writeBackAtomic's rule): a re-read
+  // could already be somebody else's write, which would then pass for ours.
+  fork.version = await writtenVersion(kept, bytes);
   refreshBanner(live);
 }
 
@@ -3169,7 +3525,12 @@ async function pollRetired(live: LiveOpenWith, acc: Account, entries: readonly S
       if (r.fate === 'beside') {
         // An editor that was thought to hold nothing saved after all: an
         // edit nobody chose to drop.
-        await keepBeside(live, await downloadFile(ctx, r.remote));
+        const save = await downloadToSpool(ctx, r.remote, spoolFor(live));
+        try {
+          await keepBeside(live, save);
+        } finally {
+          await disposeSpool(save);
+        }
       } else {
         log('openwith', 'a late save of an editor whose edits were dropped - not kept', { remote: r.remote });
       }
@@ -3183,7 +3544,12 @@ async function pollRetired(live: LiveOpenWith, acc: Account, entries: readonly S
     if (late.length) {
       const newest = late[late.length - 1]!;
       if (r.fate === 'beside') {
-        await keepBeside(live, await downloadFile(ctx, scratchFile(live, newest.basename)), newest.ext);
+        const save = await downloadToSpool(ctx, scratchFile(live, newest.basename), spoolFor(live));
+        try {
+          await keepBeside(live, save, newest.ext);
+        } finally {
+          await disposeSpool(save);
+        }
       } else {
         log('openwith', 'a late save of an editor whose edits were dropped - not kept', { remote: newest.basename });
       }
@@ -3256,8 +3622,12 @@ async function pollBeside(live: LiveOpenWith, acc: Account, entries: readonly Sc
   const fresh = unseenBesideSaves(live.record.remote, entries, live.record.beside);
   if (!fresh.length) return false;
   const newest = fresh[fresh.length - 1]!;
-  const bytes = await downloadFile(remoteCtx(acc), scratchFile(live, newest.basename));
-  await landBeside(live, newest.ext, bytes);
+  const save = await downloadToSpool(remoteCtx(acc), scratchFile(live, newest.basename), spoolFor(live));
+  try {
+    await landBeside(live, newest.ext, save);
+  } finally {
+    await disposeSpool(save);
+  }
   // Recorded either way, as a save of the copy itself is (landSave): a write
   // that failed was said out loud, and is not retried every tick.
   noteBeside(live, fresh);
@@ -3275,7 +3645,7 @@ async function pollBeside(live: LiveOpenWith, acc: Account, entries: readonly Sc
  * to the same file, held to the version filex wrote there - rewritten outside
  * filex since, to a conflict copy beside it, and the person is told.
  */
-async function landBeside(live: LiveOpenWith, ext: string, bytes: Buffer): Promise<void> {
+async function landBeside(live: LiveOpenWith, ext: string, bytes: Content): Promise<void> {
   const name = path.basename(live.record.localPath);
   const before = live.beside;
   try {
@@ -3288,7 +3658,7 @@ async function landBeside(live: LiveOpenWith, ext: string, bytes: Buffer): Promi
       localPath: live.record.localPath,
       saved: target.path,
       outcome,
-      bytes: bytes.length,
+      bytes: contentSize(bytes),
     });
     if (outcome === 'created') {
       const vars = {
@@ -3334,17 +3704,22 @@ function queueOutside(live: LiveOpenWith, step: () => Promise<void>): Promise<vo
   return run;
 }
 
-/** The outside version, put on the server as a working copy of its own. */
+/**
+ * The outside version, put on the server as a working copy of its own - read
+ * from the document and held to `version` (openwith-io.ts sendWorkingCopy).
+ * Saved again meanwhile, it is SourceChangedError and nothing was kept: the
+ * monitor reports the version that came after it, and that one goes up.
+ */
 async function uploadWorkingCopy(
   acc: Account,
   live: LiveOpenWith,
-  bytes: Buffer,
+  version: LocalVersion,
 ): Promise<{ remote: string; seen: RemoteStat | null }> {
   const ctx = remoteCtx(acc);
   const storage = live.record.storage;
   const dir = scratchRemoteDir(storage);
   const basename = scratchBasename(live.record.localPath, newSessionId());
-  await uploadFile(ctx, dir, basename, bytes);
+  await sendWorkingCopy(ctx, dir, basename, { path: live.record.localPath, version }, { limitBytes: serverUploadLimit(acc.id) });
   const seen = await statRemote(ctx, dir, basename);
   const remote = scratchRemotePath(storage, basename);
   // On the record at once: a crash now must not leave a copy nothing knows of.
@@ -3370,75 +3745,101 @@ async function dropCopy(acc: Account, live: LiveOpenWith, remote: string): Promi
  */
 async function takeOutsideChange(
   live: LiveOpenWith,
-  what: { version?: LocalVersion; bytes?: Buffer; held?: { bytes: Buffer; seen: RemoteStat | null } },
+  what: { version?: LocalVersion; held?: { save: Spooled; seen: RemoteStat | null } },
 ): Promise<void> {
-  if (liveOpenWith.get(live.record.id) !== live || live.fork) return;
-  if (live.closing) {
-    // Nobody to ask any more: beside the document, never over it.
-    if (what.held) {
-      await keepBeside(live, what.held.bytes);
-      live.record.seen = what.held.seen;
-      await persistOpenWith(live);
-    }
-    return;
-  }
-  let version = what.version;
-  let bytes = what.bytes;
-  if (!version || !bytes) {
-    const read = await readLocalVersion(live.record.localPath);
-    if (!read) {
-      // Gone: the write-back's own "the document is not there" path speaks.
-      if (what.held) await landSave(live, what.held.bytes, what.held.seen);
+  // ⚠ The held save's spool is this step's until it is handed on (to the
+  // open question, or to landSave); otherwise it goes when the step ends.
+  let held = what.held ?? null;
+  const handOn = (): { save: Spooled; seen: RemoteStat | null } => {
+    const h = held!;
+    held = null;
+    return h;
+  };
+  try {
+    if (liveOpenWith.get(live.record.id) !== live || live.fork) return;
+    if (live.closing) {
+      // Nobody to ask any more: beside the document, never over it.
+      if (held) {
+        await keepBeside(live, held.save);
+        live.record.seen = held.seen;
+        await persistOpenWith(live);
+      }
       return;
     }
-    version = read.version;
-    bytes = read.bytes;
-  }
-  const o = live.outside;
-  if (o && o.version.sha256 === version.sha256) {
-    // The same outside version, found twice (the watch and the write-back).
-    if (what.held) {
-      o.held = what.held.bytes;
-      o.heldSeen = what.held.seen;
-      sendOutside(live);
+    let version = what.version;
+    if (!version) {
+      const now = await hashLocalVersion(live.record.localPath);
+      if (!now) {
+        // Gone: the write-back's own "the document is not there" path speaks.
+        if (held) {
+          const h = handOn();
+          await landSave(live, h.save, h.seen);
+        }
+        return;
+      }
+      version = now;
     }
-    return;
+    const o = live.outside;
+    if (o && o.version.sha256 === version.sha256) {
+      // The same outside version, found twice (the watch and the write-back).
+      if (held) {
+        const h = handOn();
+        const before = o.held;
+        o.held = h.save;
+        o.heldSeen = h.seen;
+        if (before && before !== h.save) void disposeSpool(before);
+        sendOutside(live);
+      }
+      return;
+    }
+    if (!o && version.sha256 === live.monitor.baseline.sha256) {
+      // Back to what filex has (an outside undo): nothing to ask.
+      if (held) {
+        const h = handOn();
+        await landSave(live, h.save, h.seen);
+      }
+      return;
+    }
+    const acc = state.accounts.find((a) => a.id === live.record.accountId);
+    if (!acc) return;
+    const next = await uploadWorkingCopy(acc, live, version);
+    // The copy offered for the previous change: the page may already be on it
+    // (its answer still on the way), so it is watched like any copy the editor
+    // left - a save on it is kept beside the document - not deleted under it.
+    if (o?.next) {
+      live.retired.push({ remote: o.next.remote, seen: o.next.seen, fate: 'beside', until: Date.now() + openWithGraceMs() });
+    }
+    live.seq += 1;
+    // ⚠ `o.held` read now, not before the upload: a save held meanwhile
+    // (landSave) replaced it there. One this step's held save replaces is
+    // no one's from here.
+    const carried = held ? handOn() : null;
+    const dropped = carried && o?.held && o.held !== carried.save ? o.held : null;
+    live.outside = {
+      seq: live.seq,
+      version,
+      next,
+      held: carried ? carried.save : (o?.held ?? null),
+      heldSeen: carried ? carried.seen : (o?.heldSeen ?? null),
+      asking: false,
+    };
+    if (dropped) void disposeSpool(dropped);
+    live.monitor.markSeen(version);
+    log('openwith', 'the document changed outside filex', {
+      localPath: live.record.localPath,
+      next: next.remote,
+      held: !!live.outside.held,
+    });
+    await persistOpenWith(live);
+    sendOutside(live);
+  } finally {
+    if (held) await disposeSpool(held.save);
   }
-  if (!o && version.sha256 === live.monitor.baseline.sha256) {
-    // Back to what filex has (an outside undo): nothing to ask.
-    if (what.held) await landSave(live, what.held.bytes, what.held.seen);
-    return;
-  }
-  const acc = state.accounts.find((a) => a.id === live.record.accountId);
-  if (!acc) return;
-  const next = await uploadWorkingCopy(acc, live, bytes);
-  // The copy offered for the previous change: the page may already be on it
-  // (its answer still on the way), so it is watched like any copy the editor
-  // left - a save on it is kept beside the document - not deleted under it.
-  if (o?.next) {
-    live.retired.push({ remote: o.next.remote, seen: o.next.seen, fate: 'beside', until: Date.now() + openWithGraceMs() });
-  }
-  live.seq += 1;
-  live.outside = {
-    seq: live.seq,
-    version,
-    next,
-    held: what.held?.bytes ?? o?.held ?? null,
-    heldSeen: what.held ? what.held.seen : (o?.heldSeen ?? null),
-    asking: false,
-  };
-  live.monitor.markSeen(version);
-  log('openwith', 'the document changed outside filex', {
-    localPath: live.record.localPath,
-    next: next.remote,
-    held: !!live.outside.held,
-  });
-  await persistOpenWith(live);
-  sendOutside(live);
 }
 
 /** How long a page that has not said hello yet gets before the app asks the
- *  question itself (a server whose editor page is older than this app). */
+ *  question itself (a server whose editor page is older than this app, or an
+ *  app's interface in the window). */
 const OUTSIDE_HELLO_WAIT_MS = 4000;
 
 /** Tells the page about the open outside change; a page that does not take
@@ -3456,10 +3857,14 @@ function sendOutside(live: LiveOpenWith): void {
 }
 
 /**
- * The question, asked by the app: the page in the window is from a server
- * whose editor does not take outside changes. It cannot say whether its
- * editor holds an edit, so the app asks every time rather than reload over
- * what might be one. Escape is "Keep both", the answer that loses nothing.
+ * The question, asked by the app: the page in the window takes no outside
+ * changes - it is from a server older than this app, or the editor on it is
+ * an app's interface (the office editor app), which owns its document and
+ * follows none (web/src/views/Editor.vue says no hello then). It cannot say
+ * whether its editor holds an edit, so the app asks every time rather than
+ * reload over what might be one. Escape is "Keep both", the answer that loses
+ * nothing; "Keep the outside version" loads it into the same editor
+ * (LiveOpenWith.app).
  */
 async function askNatively(live: LiveOpenWith, o: OutsidePending): Promise<void> {
   if (live.outside !== o || live.window.isDestroyed() || live.page.speaks) {
@@ -3517,45 +3922,59 @@ async function applyOutsideAnswer(
   if (!acc) return;
   live.outside = null;
   log('openwith', 'outside change answered', { localPath: live.record.localPath, choice, held: !!o.held });
-  if ((choice === 'reloaded' || choice === 'theirs') && o.next) {
-    // The held save (if any) is of the old copy: it is dealt with here, so
-    // the old copy's watch starts past it.
-    live.retired.push({
-      remote: live.record.remote,
-      seen: o.heldSeen ?? live.record.seen,
-      fate: choice === 'theirs' ? 'drop' : 'beside',
-      until: Date.now() + openWithGraceMs(),
-    });
-    live.record.retired = [
-      ...(live.record.retired ?? []).filter((r) => r.remote !== o.next!.remote),
-      { remote: live.record.remote, seen: o.heldSeen ?? live.record.seen },
-    ];
-    live.record.remote = o.next.remote;
-    live.record.seen = o.next.seen;
-    live.monitor.adopt(o.version);
-    // #151 — the editor is on the outside version now. Its saves in another
-    // format are not the ones the earlier file beside the document holds, so
-    // they go to a new one (`rapor (2).docx`) rather than over those edits.
-    live.beside = null;
-    if (o.held && choice === 'reloaded') await keepBeside(live, o.held);
-    if (opts.reloadWindow && !live.window.isDestroyed()) {
-      void live.window.loadURL(editRouteUrl(acc, o.next.remote)).catch(() => undefined);
+  // ⚠ The held save's spool is this answer's now: it goes when the answer is
+  // dealt with, unless landSave takes it (and disposes of it itself).
+  let held = o.held;
+  try {
+    if ((choice === 'reloaded' || choice === 'theirs') && o.next) {
+      // The held save (if any) is of the old copy: it is dealt with here, so
+      // the old copy's watch starts past it.
+      live.retired.push({
+        remote: live.record.remote,
+        seen: o.heldSeen ?? live.record.seen,
+        fate: choice === 'theirs' ? 'drop' : 'beside',
+        until: Date.now() + openWithGraceMs(),
+      });
+      live.record.retired = [
+        ...(live.record.retired ?? []).filter((r) => r.remote !== o.next!.remote),
+        { remote: live.record.remote, seen: o.heldSeen ?? live.record.seen },
+      ];
+      live.record.remote = o.next.remote;
+      live.record.seen = o.next.seen;
+      live.monitor.adopt(o.version);
+      // #151 — the editor is on the outside version now. Its saves in another
+      // format are not the ones the earlier file beside the document holds, so
+      // they go to a new one (`rapor (2).docx`) rather than over those edits.
+      live.beside = null;
+      if (held && choice === 'reloaded') await keepBeside(live, held);
+      if (opts.reloadWindow && !live.window.isDestroyed()) {
+        // The person chose the outside version: the editor's own "leave with
+        // unsaved changes?" (an app's interface asks it) is already answered.
+        quietUnload.add(live.window);
+        void live.window.loadURL(editRouteUrl(acc, o.next.remote, live.app)).catch(() => undefined);
+      }
+    } else if (choice === 'mine') {
+      if (o.next) await dropCopy(acc, live, o.next.remote);
+      live.monitor.adopt(o.version);
+      if (held) {
+        const save = held;
+        held = null;
+        await landSave(live, save, o.heldSeen);
+      }
+    } else {
+      if (o.next) await dropCopy(acc, live, o.next.remote);
+      live.monitor.stop();
+      live.fork = { path: null, version: null };
+      if (held) {
+        await writeFork(live, held);
+        live.record.seen = o.heldSeen;
+      }
+      refreshBanner(live);
     }
-  } else if (choice === 'mine') {
-    if (o.next) await dropCopy(acc, live, o.next.remote);
-    live.monitor.adopt(o.version);
-    if (o.held) await landSave(live, o.held, o.heldSeen);
-  } else {
-    if (o.next) await dropCopy(acc, live, o.next.remote);
-    live.monitor.stop();
-    live.fork = { path: null, version: null };
-    if (o.held) {
-      await writeFork(live, o.held);
-      live.record.seen = o.heldSeen;
-    }
-    refreshBanner(live);
+    await persistOpenWith(live);
+  } finally {
+    if (held) await disposeSpool(held);
   }
-  await persistOpenWith(live);
 }
 
 /** The open-with session whose window sent an IPC message, or null. */
@@ -3580,11 +3999,15 @@ async function beginOpenWithGrace(id: string): Promise<void> {
     if (!o) return;
     live.outside = null;
     live.fork = { path: null, version: null };
-    const acc = state.accounts.find((a) => a.id === live.record.accountId);
-    if (acc && o.next) await dropCopy(acc, live, o.next.remote);
-    if (o.held) {
-      await writeFork(live, o.held);
-      live.record.seen = o.heldSeen;
+    try {
+      const acc = state.accounts.find((a) => a.id === live.record.accountId);
+      if (acc && o.next) await dropCopy(acc, live, o.next.remote);
+      if (o.held) {
+        await writeFork(live, o.held);
+        live.record.seen = o.heldSeen;
+      }
+    } finally {
+      await disposeSpool(o.held);
     }
     await persistOpenWith(live);
     log('openwith', 'window closed with the outside-change question open - keeping both', { id });
@@ -3625,6 +4048,10 @@ async function finishOpenWith(id: string): Promise<void> {
     }
   }
   await sessionStore?.remove(id);
+  // A save still held (a question nobody answered) and any spool of the
+  // session's a failed step left behind - but not one still being written.
+  await disposeSpool(live.outside?.held);
+  await clearSpools(openWithSpoolDir(), { tag: id, parts: false });
   log('openwith', 'session done', { id, wroteBack: live.wroteBack, beside: live.beside?.path ?? null });
   if (live.wroteBack) {
     // #151 — the file the edit is in: rapor.docx, when the saves went beside
@@ -3639,12 +4066,12 @@ async function finishOpenWith(id: string): Promise<void> {
 /** An edit recovered from a previous run, beside `target` as
  *  `<name>.filex-recovered-<time>.<ext>` (a second one in the same second
  *  `…-<time>-2.<ext>`): never over a file. */
-async function keepRecovered(target: string, bytes: Buffer): Promise<string> {
+async function keepRecovered(target: string, bytes: Content): Promise<string> {
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '');
   for (let n = 1; n < 100; n++) {
     const p = recoveryPathFor(target, n > 1 ? stamp + '-' + n : stamp);
     try {
-      await fs.promises.writeFile(p, bytes, { flag: 'wx' });
+      await writeContent(p, bytes, { exclusive: true });
       return p;
     } catch (err) {
       if ((err as NodeJS.ErrnoException)?.code === 'EEXIST') continue;
@@ -3656,7 +4083,7 @@ async function keepRecovered(target: string, bytes: Buffer): Promise<string> {
 
 /** An edit a previous run left on the server, put beside `target` (the
  *  document, or the file its format is named for) and the person told. */
-async function recoverEdit(s: OpenWithSession, target: string, bytes: Buffer): Promise<void> {
+async function recoverEdit(s: OpenWithSession, target: string, bytes: Content): Promise<void> {
   const kept = await keepRecovered(target, bytes);
   log('openwith', 'recovered an edit from a previous run', { localPath: s.localPath, kept });
   openWithNotify(
@@ -3678,6 +4105,10 @@ async function recoverEdit(s: OpenWithSession, target: string, bytes: Buffer): P
  */
 async function sweepOpenWith(): Promise<void> {
   if (!sessionStore) return;
+  // Spools a previous run left (it ended in the middle of a save): the
+  // server still holds what they held - the recovery below reads it from
+  // there. Not one of a session this run has open already.
+  await clearSpools(openWithSpoolDir(), { keep: (tag) => liveOpenWith.has(tag) });
   const all = await sessionStore.list();
   const copyBases = all.flatMap((s) => [s.remote, ...(s.retired ?? []).map((r) => r.remote)]).map(remoteBase);
   const known = new Set([...copyBases, ...all.flatMap((s) => (s.beside ?? []).map((b) => remoteBase(b.remote)))]);
@@ -3698,10 +4129,14 @@ async function sweepOpenWith(): Promise<void> {
       for (const c of copies) {
         const current = statIn(entries, remoteBase(c.remote));
         if (needsRecovery({ ...s, remote: c.remote, seen: c.seen }, current)) {
-          const bytes = await downloadFile(ctx, c.remote);
-          // #151 — bytes in another format are named for it.
-          const other = savedFormatOf(s.localPath, bytes);
-          await recoverEdit(s, other ? besidePathFor(s.localPath, other) : s.localPath, bytes);
+          const save = await downloadToSpool(ctx, c.remote, { dir: openWithSpoolDir(), tag: 'sweep' });
+          try {
+            // #151 — bytes in another format are named for it.
+            const other = await savedFormatOfContent(s.localPath, save);
+            await recoverEdit(s, other ? besidePathFor(s.localPath, other) : s.localPath, save);
+          } finally {
+            await disposeSpool(save);
+          }
         }
         if (current) await deleteRemote(ctx, dir, [c.remote]);
         // #151 — the newest save the server wrote beside that copy in another
@@ -3711,8 +4146,12 @@ async function sweepOpenWith(): Promise<void> {
         const late = unseenBesideSaves(c.remote, entries, s.beside);
         if (late.length) {
           const newest = late[late.length - 1]!;
-          const bytes = await downloadFile(ctx, scratchRemotePath(s.storage, newest.basename));
-          await recoverEdit(s, besidePathFor(s.localPath, newest.ext), bytes);
+          const save = await downloadToSpool(ctx, scratchRemotePath(s.storage, newest.basename), { dir: openWithSpoolDir(), tag: 'sweep' });
+          try {
+            await recoverEdit(s, besidePathFor(s.localPath, newest.ext), save);
+          } finally {
+            await disposeSpool(save);
+          }
           // On the record before the copies go: a sweep deferred after this
           // (the server went away mid-way) must not recover it a second time.
           s.beside = [
@@ -3798,22 +4237,308 @@ const LINUX_DESKTOP_ENTRY = linuxDesktopEntry(CURRENT_CHANNEL, process.env.APPIM
  * x-scheme-handler/filex` answered "No default applications".)
  * ⚠ Only from the real registration path: a test run (FILEX_NO_BROWSER)
  * never reaches it, like every other OS registration here.
+ *
+ * `extra`: the media types of the kinds the apps on the person's servers
+ * open (registerAppKinds), in the same one entry - an AppImage has no
+ * package entry beside it to say the office documents.
  */
-function registerAppImage(appImage: string): void {
-  const dataHome = process.env.XDG_DATA_HOME || path.join(app.getPath('home'), '.local', 'share');
-  const file = path.join(dataHome, 'applications', APPIMAGE_DESKTOP_ENTRY);
+function registerAppImage(appImage: string, extra: readonly string[] = []): boolean {
+  const file = path.join(userDataHome(), 'applications', APPIMAGE_DESKTOP_ENTRY);
   const scheme = `x-scheme-handler/${DEEP_LINK_SCHEME}`;
-  const types = [...OFFICE_EXTENSIONS.map((e) => OFFICE_MIME_TYPES[e]).filter(Boolean), scheme] as string[];
+  const types = [...new Set([...OFFICE_EXTENSIONS.map((e) => OFFICE_MIME_TYPES[e]).filter(Boolean), ...extra, scheme])] as string[];
+  const body = appImageDesktopEntry(appImage, types);
+  let changed = false;
   try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, appImageDesktopEntry(appImage, types), 'utf8');
+    changed = (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null) !== body;
+    if (changed) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, body, 'utf8');
+    }
   } catch (e) {
     log('link', 'could not write the AppImage desktop entry; filex:// links will not reach this copy', String((e as Error)?.message ?? e));
-    return;
+    return false;
   }
   execFile('xdg-mime', ['default', APPIMAGE_DESKTOP_ENTRY, scheme], (err, _out, stderr) => {
     if (err) log('link', 'xdg-mime could not make this AppImage the filex:// handler', (stderr || err.message).trim());
   });
+  return changed;
+}
+
+/** $XDG_DATA_HOME, or ~/.local/share. */
+function userDataHome(): string {
+  return process.env.XDG_DATA_HOME || path.join(app.getPath('home'), '.local', 'share');
+}
+
+// ── the kinds the servers' apps open ─────────────────────────────────
+//
+// "Open with filex" takes every kind of file an app on one of the person's
+// servers opens, beside the office documents (src/app-kinds.ts). What each
+// server opens is read when the app starts, when an account is added,
+// removed or signed out, when the window comes back to the front (at most
+// every few minutes), every half hour, before a double-click of a kind not
+// read in the last minute, and from Settings. The OS is told it right after
+// (src/os-assoc.ts), where the OS lets a running app do that.
+
+let appKindsStore: AppKindsStore | null = null;
+let appKinds: AppKindsFile = emptyAppKinds();
+let appKindsReading: Promise<void> | null = null;
+/** A round asked for while one ran (an account added meanwhile): the freshness it asked for. */
+let appKindsAgain: number | null = null;
+/** The OS registration was written once this run (an update's uninstaller
+ *  clears part of it on Windows: the first one after a start always writes). */
+let appKindsAsserted = false;
+let appKindsError: string | null = null;
+
+/** How long one server may take to say what it opens. */
+const APP_KINDS_TIMEOUT_MS = 15_000;
+const APP_KINDS_REFRESH_MS = 30 * 60_000;
+const APP_KINDS_FOCUS_MS = 5 * 60_000;
+
+function saveAppKinds(): void {
+  try {
+    appKindsStore?.save(appKinds);
+  } catch (err) {
+    log('openwith', 'could not store what the servers open', String((err as Error)?.message ?? err));
+  }
+}
+
+function appKindsRoute(): AssocRoute {
+  return assocRouteFor({
+    platform: process.platform,
+    channel: CURRENT_CHANNEL,
+    packaged: app.isPackaged,
+    portable: portable.portable,
+    testRun: process.env.FILEX_NO_BROWSER === '1',
+    appImage: process.env.APPIMAGE ?? null,
+  });
+}
+
+/**
+ * Reads again what the servers open - every signed-in account whose answer
+ * is older than `maxAgeMs` - keeps the last answer of a server that could not
+ * be asked, drops the accounts that are gone or signed out, then tells the OS.
+ * One round at a time: a call while one runs waits for it.
+ */
+function refreshAppKinds(opts: { maxAgeMs?: number } = {}): Promise<void> {
+  const maxAge = opts.maxAgeMs ?? 0;
+  if (appKindsReading) {
+    appKindsAgain = Math.min(appKindsAgain ?? maxAge, maxAge);
+    return appKindsReading;
+  }
+  const now = Date.now();
+  const due = liveAccounts().filter((a) => {
+    const r = appKinds.servers.find((s) => s.accountId === a.id);
+    return !r || r.serverUrl !== a.serverUrl || now - r.readAt > maxAge;
+  });
+  appKindsReading = (async () => {
+    const fresh: ServerRecord[] = [];
+    await Promise.all(
+      due.map(async (acc) => {
+        const answer = await Promise.race([
+          readServerApps(remoteCtx(acc)),
+          new Promise<{ status: 'unreachable'; reason: string }>((resolve) =>
+            setTimeout(() => resolve({ status: 'unreachable', reason: 'no answer in time' }), APP_KINDS_TIMEOUT_MS),
+          ),
+        ]);
+        if (answer.status === 'ok') {
+          fresh.push({ accountId: acc.id, serverUrl: acc.serverUrl, readAt: Date.now(), ...answer.apps });
+        } else if (answer.status === 'signed-out') {
+          markSignedOut(acc.id, 'the server refused the list of its apps (HTTP 401)');
+        } else {
+          log('openwith', 'could not ask a server what it opens; keeping what it said last', { account: acc.id, reason: answer.reason });
+        }
+      }),
+    );
+    const live = new Set(accountOrder());
+    appKinds.servers = mergeRecords(appKinds.servers, fresh, live);
+    for (const [kind, c] of Object.entries(appKinds.choices)) if (!live.has(c.accountId)) delete appKinds.choices[kind];
+    saveAppKinds();
+    await registerAppKinds();
+  })()
+    .catch((err) => {
+      appKindsError = String((err as Error)?.message ?? err);
+      log('openwith', 'reading what the servers open failed', appKindsError);
+    })
+    .finally(() => {
+      appKindsReading = null;
+      if (appKindsAgain !== null) {
+        const again = appKindsAgain;
+        appKindsAgain = null;
+        void refreshAppKinds({ maxAgeMs: again });
+      }
+    });
+  return appKindsReading;
+}
+
+/** An account signed out or removed while no round is running: its kinds go now. */
+function settleAppKinds(): void {
+  if (appKindsReading) return; // the running round drops it (refreshAppKinds)
+  const live = new Set(accountOrder());
+  const before = appKinds.servers.length;
+  appKinds.servers = appKinds.servers.filter((s) => live.has(s.accountId));
+  if (appKinds.servers.length !== before) {
+    saveAppKinds();
+    void registerAppKinds();
+  }
+}
+
+function sameList(a: readonly string[] | undefined, b: readonly string[]): boolean {
+  return !!a && a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
+/**
+ * Tells the OS what the servers' apps open, by this copy's route
+ * (os-assoc.ts assocRouteFor). Written only when it changed - and once per
+ * start whatever the record says, so what an update, a reinstall or a
+ * registry cleaner took away comes back.
+ */
+async function registerAppKinds(): Promise<void> {
+  const route = appKindsRoute();
+  const kinds = registrableKinds(appKinds.servers);
+  const media = registrableMediaTypes(appKinds.servers);
+  const prev = appKinds.registered;
+  if (route !== 'windows' && route !== 'linux' && route !== 'linux-appimage') {
+    // Nothing is registered at run time here: the package says it (build) or
+    // nothing does (a run from source, the portable copy, a test run).
+    if (appKinds.registered?.route !== route) {
+      appKinds.registered = { route, kinds: [], types: [], own: [] };
+      saveAppKinds();
+    }
+    return;
+  }
+  const want = route === 'windows' ? windowsKinds(kinds) : kinds;
+  if (appKindsAsserted && prev?.route === route && sameList(prev.kinds, want) && (route === 'windows' || sameList(prev.media, media))) return;
+  try {
+    appKinds.registered = route === 'windows' ? await registerWindowsKinds(want, prev) : await registerLinuxKinds(route, kinds, media);
+    appKindsAsserted = true;
+    appKindsError = null;
+    log('openwith', 'told the system what the servers open', { route, kinds: appKinds.registered.kinds.length });
+  } catch (err) {
+    appKindsError = String((err as Error)?.message ?? err);
+    log('openwith', 'could not tell the system what the servers open', appKindsError);
+  }
+  saveAppKinds();
+}
+
+/** Runs a command, never throwing: its exit code and what it said. */
+async function runQuiet(file: string, args: string[]): Promise<{ code: number; out: string }> {
+  const r = await runMountHelper(file, args, '');
+  return { code: r.code, out: (r.stderr || r.stdout).trim() };
+}
+
+/**
+ * Windows (the NSIS install): one `reg import` of the document
+ * os-assoc.ts windowsAssocReg writes - the kinds added, the ones no server
+ * opens any more taken back (what the record says filex wrote, and what the
+ * registry says is there) - then SHChangeNotify.
+ */
+async function registerWindowsKinds(kinds: string[], prev: RegisteredKinds | null): Promise<RegisteredKinds> {
+  const exeName = path.basename(process.execPath);
+  const q = await runMountHelper('reg.exe', ['query', `HKCU\\Software\\Classes\\Applications\\${exeName}\\SupportedTypes`], '');
+  const there = q.code === 0 ? registeredWindowsKinds(regQueryValueNames(q.stdout), OFFICE_EXTENSIONS) : [];
+  const drop = [...new Set([...(prev?.route === 'windows' ? prev.kinds : []), ...there])].filter((k) => !kinds.includes(k));
+  // Already what the registry holds (the start's re-assert, most of the
+  // time): one `reg query`, nothing written, Explorer not disturbed.
+  if (!drop.length && sameList([...there].sort(), kinds)) return { route: 'windows', kinds, types: [], own: [], media: [] };
+  const doc = windowsAssocReg({ exe: process.execPath, exeName, add: kinds, drop, typeName: openText('appDocumentType') });
+  const file = path.join(app.getPath('userData'), 'openwith-kinds.reg');
+  await fs.promises.writeFile(file, windowsRegBytes(doc));
+  try {
+    const r = await runQuiet('reg.exe', ['import', file]);
+    if (r.code !== 0) throw new Error(`reg import exited ${r.code}: ${r.out}`);
+  } finally {
+    await fs.promises.rm(file, { force: true }).catch(() => undefined);
+  }
+  const n = await runQuiet('powershell.exe', windowsAssocChangedArgs());
+  if (n.code !== 0) log('openwith', 'could not tell Explorer the associations changed', n.out);
+  return { route: 'windows', kinds, types: [], own: [], media: [] };
+}
+
+/**
+ * Linux (a .deb, .rpm or AUR install, or the AppImage): the media types for
+ * the kinds (os-assoc.ts linuxTypesFor, by the system's own globs2), filex's
+ * own types for the extensions the system has none for (a package in
+ * $XDG_DATA_HOME/mime/packages, then update-mime-database), and the hidden
+ * entry that names them (the AppImage's own, or filex-app-openwith.desktop,
+ * then update-desktop-database). Nothing left: both files go.
+ */
+async function registerLinuxKinds(route: AssocRoute, kinds: string[], media: string[]): Promise<RegisteredKinds> {
+  const dataHome = userDataHome();
+  const appImage = route === 'linux-appimage' ? (process.env.APPIMAGE ?? null) : null;
+  const entryName = appImage ? APPIMAGE_DESKTOP_ENTRY : OPENWITH_DESKTOP_ENTRY;
+  const globs = mergeGlobs(
+    await Promise.all(globs2Files(process.env, app.getPath('home')).map((f) => fs.promises.readFile(f, 'utf8').then(parseGlobs2, () => new Map()))),
+  );
+  // The package's own entry already says these (electron-builder.yml
+  // linux.mimeTypes): said again, "Open with" would list filex twice.
+  const declared = appImage ? new Set<string>() : new Set<string>([...Object.values(OFFICE_MIME_TYPES), `x-scheme-handler/${DEEP_LINK_SCHEME}`]);
+  // `.otf` is two types to the system: an app that says which it opens is
+  // registered for that one alone (os-assoc.ts typesOfKind).
+  const t = linuxTypesFor(kinds, media, globs, declared, typeHintsOf(appKinds.servers.flatMap((s) => s.apps)));
+
+  const pkg = path.join(dataHome, 'mime', 'packages', entryName.replace(/\.desktop$/, '.xml'));
+  if (await writeOrRemove(pkg, linuxMimePackage(t.own))) {
+    const r = await runQuiet('update-mime-database', [path.join(dataHome, 'mime')]);
+    if (r.code !== 0) log('openwith', 'update-mime-database failed', r.out);
+  }
+  let entryChanged: boolean;
+  if (appImage) {
+    entryChanged = registerAppImage(appImage, t.types);
+  } else {
+    // The launcher (build/linux/launcher.sh), as the package's own entry
+    // starts it: the Electron binary is `<launcher>-bin` beside it.
+    const launcher = process.execPath.replace(/-bin$/, '');
+    const program = fs.existsSync(launcher) ? launcher : process.execPath;
+    const entry = path.join(dataHome, 'applications', entryName);
+    entryChanged = await writeOrRemove(entry, t.types.length ? hiddenDesktopEntry(program, t.types, openText('appEntryComment'), LINUX_APP_NAME) : null);
+  }
+  if (entryChanged) {
+    const r = await runQuiet('update-desktop-database', [path.join(dataHome, 'applications')]);
+    if (r.code !== 0) log('openwith', 'update-desktop-database failed', r.out);
+  }
+  return { route, kinds, types: t.types, own: t.own.map((o) => o.type), media };
+}
+
+/** Writes `body` to `file` (null removes it); true when that changed anything. */
+async function writeOrRemove(file: string, body: string | null): Promise<boolean> {
+  const now = await fs.promises.readFile(file, 'utf8').catch(() => null);
+  if (now === body) return false;
+  if (body === null) {
+    await fs.promises.rm(file, { force: true });
+    return true;
+  }
+  await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  const tmp = file + '.part';
+  await fs.promises.writeFile(tmp, body, 'utf8');
+  await fs.promises.rename(tmp, file);
+  return true;
+}
+
+/** What Settings shows of the kinds the servers' apps open. */
+function appKindsPublicState() {
+  const route = appKindsRoute();
+  const office = new Set<string>(OFFICE_EXTENSIONS);
+  const rows = kindRows(appKinds.servers).map((r) => ({
+    ext: r.ext,
+    office: office.has(r.ext),
+    openers: r.openers.map((o) => ({ server: serverName(o.accountId), label: o.label, plugin: o.plugin })),
+  }));
+  const documentServers = appKinds.servers.filter((s) => s.documentServer).map((s) => serverName(s.accountId));
+  const readAt = appKinds.servers.reduce((m, s) => Math.max(m, s.readAt), 0);
+  return {
+    route,
+    rows,
+    documentServers,
+    // The kinds THIS package declares at build time (the store's catalog):
+    // what a macOS, Store or snap copy lists under "Open with".
+    packageKinds: route === 'build' ? packageKinds((catalogKinds as { kinds?: Array<{ ext: string }> }).kinds?.map((k) => k.ext) ?? []).length : 0,
+    registered: appKinds.registered?.route === route ? appKinds.registered.kinds.length : 0,
+    readAt: readAt || null,
+    reading: !!appKindsReading,
+    choices: Object.keys(appKinds.choices).length,
+    unasked: liveAccounts().filter((a) => !appKinds.servers.some((s) => s.accountId === a.id)).map((a) => serverName(a.id)),
+    error: appKindsError,
+  };
 }
 
 function defaultHandlerRoute(): DefaultHandlerRoute {
@@ -3870,6 +4595,8 @@ function openWithPublicState() {
       page: { ...l.page },
     })),
     lastError: openWithError,
+    // The kinds the apps on the servers open (app-kinds.ts).
+    apps: appKindsPublicState(),
   };
 }
 
@@ -3888,6 +4615,8 @@ function windowsHelperPath(file: string): string {
   const root = process.env.SystemRoot || 'C:\\Windows';
   if (file === 'powershell.exe') return path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   if (file === 'net.exe') return path.join(root, 'System32', 'net.exe');
+  // "Open with filex" for the kinds the servers' apps open (registerWindowsKinds).
+  if (file === 'reg.exe') return path.join(root, 'System32', 'reg.exe');
   return file;
 }
 
@@ -4196,14 +4925,6 @@ function wireIpc(): void {
     return (body.files ?? [])
       .filter((f) => f.type === 'dir')
       .map((f) => ({ name: f.basename, path: `${base}${f.basename}` }));
-  });
-
-  ipcMain.handle('sync:trash', async () => {
-    const out: { rel: string; deleted: string }[] = [];
-    for (const p of knownPairs) {
-      for (const it of await listTrash(p.id)) out.push({ rel: it.rel, deleted: it.deleted });
-    }
-    return out;
   });
 
   // ── "Mount as a drive" (WebDAV) ────────────────────────────────────────
@@ -4519,7 +5240,8 @@ function wireIpc(): void {
     const n = heldItems(pair);
     // ⚠ Asked natively, defaulting to Cancel: these are files on this
     // computer, and one misplaced click next to "Upload them" must not be
-    // what moves them. They go to the sync trash, not away.
+    // what deletes them. They are deleted, not moved into a local trash
+    // (task #259), and the dialog says so.
     const response = await askChoice({
       type: 'question',
       title: syncText('discardTitle'),
@@ -4531,7 +5253,27 @@ function wireIpc(): void {
       noLink: true,
     });
     if (response !== 0) return publicState();
-    await holdAnswer(pair.id, discardHeld);
+    // The engine asks the pair's server which files it still has a copy of
+    // (task #259), so it runs with that account's sign-in.
+    const acc =
+      state.accounts.find((a) => a.id === pair.account) ?? (state.accounts.length === 1 ? state.accounts[0] : undefined);
+    const box: { outcome: ReturnType<typeof discardOutcome> | null } = { outcome: null };
+    await holdAnswer(pair.id, async (id) => {
+      if (!acc?.token) throw new Error(syncText('discardNoAccount'));
+      box.outcome = discardOutcome(await discardHeld(id, { serverUrl: acc.serverUrl, token: acc.token }, effectiveLocale()));
+      return box.outcome.message;
+    });
+    const o = box.outcome;
+    if (o) {
+      // The files left here are the ones the person has to look at: each with
+      // the engine's own sentence for why.
+      await tellUser(
+        o.kept.length > 0 ? 'warning' : 'info',
+        syncText('holdTitle'),
+        o.message,
+        o.kept.length > 0 ? discardDetail(o, 12, (n) => syncText('discardMore', { n: String(n) })) : undefined,
+      );
+    }
     return publicState();
   });
 
@@ -5025,6 +5767,16 @@ function wireIpc(): void {
   // the OS's own default.
   ipcMain.handle('openwith:state', () => openWithPublicState());
   ipcMain.handle('openwith:setDefault', () => makeFilexTheDefault());
+  // Settings: ask the servers again now, and forget the remembered choices.
+  ipcMain.handle('openwith:refresh', async () => {
+    await refreshAppKinds({ maxAgeMs: 0 });
+    return openWithPublicState();
+  });
+  ipcMain.handle('openwith:forgetChoices', () => {
+    appKinds.choices = {};
+    saveAppKinds();
+    return openWithPublicState();
+  });
 
   // #184 — an "Open with filex" window's page (preload-editor `filexOutside`).
   // Each message acts on the session of the window that sent it; from any
@@ -5127,6 +5879,11 @@ if (!app.requestSingleInstanceLock()) {
     // default Edit/View/Window scaffolding only offers devtools and reload.
     Menu.setApplicationMenu(null);
     watchDownloads();
+    // What the servers opened when the app last ran, and what the OS was told
+    // (app-kinds.ts): read first, so the AppImage's entry below keeps those
+    // kinds and a double-click at a cold start is answered before any server.
+    appKindsStore = new AppKindsStore(path.join(app.getPath('userData'), 'openwith-apps.json'));
+    appKinds = appKindsStore.load();
 
     if (process.env.FILEX_NO_BROWSER === '1') {
       // ⚠⚠ A test run registers NOTHING with the operating system. The scheme
@@ -5156,7 +5913,7 @@ if (!app.requestSingleInstanceLock()) {
     } else if (process.platform === 'linux' && process.env.APPIMAGE) {
       // A bare AppImage has no desktop entry on the system for the link to
       // name; it writes its own (src/channel.ts → appImageDesktopEntry).
-      registerAppImage(process.env.APPIMAGE);
+      registerAppImage(process.env.APPIMAGE, appKinds.registered?.route === 'linux-appimage' ? appKinds.registered.types : []);
     } else {
       app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
     }
@@ -5215,6 +5972,10 @@ if (!app.requestSingleInstanceLock()) {
     startNotifier();
     // The app's language is the account's (#191): read it from the server.
     void syncAccountLocale();
+    // What the servers' apps open, and the OS told it (app-kinds.ts) - again
+    // every half hour, for an app installed or removed on a server meanwhile.
+    void refreshAppKinds({ maxAgeMs: 0 });
+    setInterval(() => void refreshAppKinds({ maxAgeMs: APP_KINDS_REFRESH_MS }), APP_KINDS_REFRESH_MS).unref?.();
     // Whether this build can swap itself decides WHICH updater to wire, so it
     // runs first.
     void detectManualUpdates().then(wireAutoUpdate);

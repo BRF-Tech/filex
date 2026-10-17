@@ -139,6 +139,10 @@ type Installed struct {
 	prev     *prevState
 	state    string
 	stateErr string
+	// stateCode is the runtime's code for a load that failed in a call
+	// (CallError.Code: timeout, plugin_trap ...), "" otherwise: what an
+	// install says apart (loadRefusal).
+	stateCode string
 	// hold is why the app's license keeps it from running ("" = it does
 	// not); see StateUnlicensed.
 	hold string
@@ -193,10 +197,22 @@ func (p *Installed) State() (string, string) {
 
 func (p *Installed) setState(state, err string) {
 	p.mu.Lock()
-	p.state, p.stateErr = state, err
+	p.state, p.stateErr, p.stateCode = state, err, ""
 	p.mu.Unlock()
 	if err != "" {
 		p.logs.add("error", state+": "+err)
+	}
+}
+
+// setCallFailure is setState for a load a call ended (describe, an export
+// probe), keeping the call's code.
+func (p *Installed) setCallFailure(state string, err error) {
+	p.setState(state, err.Error())
+	var ce *CallError
+	if errors.As(err, &ce) {
+		p.mu.Lock()
+		p.stateCode = ce.Code
+		p.mu.Unlock()
 	}
 }
 
@@ -215,6 +231,9 @@ type Registry struct {
 	// holds are the license holds by app name (license_hold.go): kept here
 	// and not only on the entry, because an upgrade replaces the entry.
 	holds map[string]string
+	// engineHost runs the office engines apps bring (office_engine_app.go);
+	// nil until the server wires it.
+	engineHost EngineHost
 	// installLocks serialise Install per app name.
 	installLocks keylock.Map
 
@@ -506,6 +525,7 @@ func (r *Registry) Load(ctx context.Context) error {
 			p.log("warn", p.Row.Name+" "+p.Row.Version+" says it works with filex "+c.Requires+"; this is filex "+FilexVersion()+". It keeps running; the update check looks for a version that fits.")
 		}
 	}
+	r.enginesChanged()
 	return nil
 }
 
@@ -668,6 +688,13 @@ func (r *Registry) compile(ctx context.Context, p *Installed) {
 		r.persistError(ctx, p, err.Error())
 		return
 	}
+	// And the office engine it brings (office_engine_app.go): an engine that
+	// is no longer the bytes approved fails the app the same way.
+	if err := r.checkInstalledEngine(p); err != nil {
+		p.setState(StateFailed, err.Error())
+		r.persistError(ctx, p, err.Error())
+		return
+	}
 	if !p.HasModule() {
 		// ⚠ An app that is ONLY an interface (draw.io's editor): no module,
 		// no runtime instance, nothing to describe. "Running" means its
@@ -705,7 +732,7 @@ func (r *Registry) compile(ctx context.Context, p *Installed) {
 		if IsCode(err, CodeRefused) {
 			state = StateRefused
 		}
-		p.setState(state, err.Error())
+		p.setCallFailure(state, err)
 		r.persistError(ctx, p, err.Error())
 		return
 	}
@@ -1013,7 +1040,35 @@ const (
 	// ErrCodeUpToDate: "upgrade from its source" found nothing newer there
 	// (updates.go FetchUpdate).
 	ErrCodeUpToDate = "up_to_date"
+	// ErrCodeLoadFailed: the module did not load - it did not compile, did
+	// not start or crashed in describe - so nothing was installed. Not
+	// describe_mismatch, which is a module that answered as another program.
+	ErrCodeLoadFailed = "load_failed"
+	// ErrCodeLoadTimeout: the module ran out of time while it was being
+	// started and asked to describe itself (DescribeBudget) - a busy
+	// server, worth another try.
+	ErrCodeLoadTimeout = "load_timeout"
 )
+
+// loadRefusal is the refusal of an install or an upgrade whose new module p
+// did not load (its state is not StateRunning): describe_mismatch when it
+// answered as another program (StateRefused), load_timeout when it ran out
+// of time before it answered, load_failed otherwise. ⚠ One answer for all
+// three used to say "the build and the manifest do not belong together"
+// about a module that had merely timed out on a busy machine, and the hunt
+// went to the files.
+func loadRefusal(p *Installed) error {
+	p.mu.RLock()
+	state, msg, code := p.state, p.stateErr, p.stateCode
+	p.mu.RUnlock()
+	switch {
+	case state == StateRefused:
+		return installErr(ErrCodeDescribeMismatch, msg)
+	case code == CodeTimeout:
+		return installErr(ErrCodeLoadTimeout, msg)
+	}
+	return installErr(ErrCodeLoadFailed, msg)
+}
 
 // Why a fetch failed (InstallError.Reason on fetch_failed).
 const (
@@ -1055,6 +1110,9 @@ type InstallInput struct {
 	// UI is the interface bundle (a zip) when the manifest has a `ui` block;
 	// consumed, capped at MaxUIBytes.
 	UI io.Reader
+	// Engine is the office engine (engine.zip) when the manifest has an
+	// `engines.office` block; consumed, held to the manifest's sha256.
+	Engine io.Reader
 	// SHA256 (lower hex) the module must match; "" skips (upload only).
 	SHA256    string
 	Signature string
@@ -1345,6 +1403,8 @@ type staged struct {
 	// ui is the checked interface bundle and its mirrored files; nil when the
 	// manifest has no `ui` block.
 	ui *stagedUI
+	// engine is the checked office engine; nil when the manifest brings none.
+	engine *stagedEngine
 }
 
 // stage validates the manifest, the module bytes and the interface bundle,
@@ -1367,6 +1427,9 @@ func (r *Registry) stage(ctx context.Context, in *InstallInput) (*staged, error)
 		if in.UI != nil {
 			return nil, installErr(ErrCodeManifestInvalid, "an interface bundle was supplied, but this manifest is a language pack and has no ui block")
 		}
+		if in.Engine != nil {
+			return nil, installErr(ErrCodeManifestInvalid, "an office engine was supplied, but this manifest is a language pack and has no engines block")
+		}
 		return r.stagePack(m, in)
 	}
 	var ui *stagedUI
@@ -1378,6 +1441,15 @@ func (r *Registry) stage(ctx context.Context, in *InstallInput) (*staged, error)
 	case in.UI != nil:
 		return nil, installErr(ErrCodeManifestInvalid, "an interface bundle was supplied, but the manifest has no ui block")
 	}
+	var engine *stagedEngine
+	switch {
+	case officeEngineOf(m) != nil:
+		if engine, err = r.stageEngine(m, in, ui); err != nil {
+			return nil, err
+		}
+	case in.Engine != nil:
+		return nil, installErr(ErrCodeManifestInvalid, "an office engine was supplied, but the manifest has no engines.office block")
+	}
 	if in.Wasm == nil {
 		if m.UI != nil && !m.NeedsModule() {
 			// ⚠ An app that is ONLY an interface: as for a language pack,
@@ -1387,7 +1459,7 @@ func (r *Registry) stage(ctx context.Context, in *InstallInput) (*staged, error)
 			if err != nil {
 				return nil, err
 			}
-			return &staged{m: m, sum: sum, signd: signd, ui: ui}, nil
+			return &staged{m: m, sum: sum, signd: signd, ui: ui, engine: engine}, nil
 		}
 		why := "an app with actions, screens, public pages, settings or permissions needs its WebAssembly module (only a manifest that adds languages, or one that is only an interface, installs without one)"
 		if m.UI != nil {
@@ -1410,7 +1482,7 @@ func (r *Registry) stage(ctx context.Context, in *InstallInput) (*staged, error)
 	if err != nil {
 		return nil, err
 	}
-	return &staged{m: m, wasm: wasm, sum: sum, signd: signd, ui: ui}, nil
+	return &staged{m: m, wasm: wasm, sum: sum, signd: signd, ui: ui, engine: engine}, nil
 }
 
 // checkIntegrity hashes the payload an install stands on — the module, or a
@@ -1517,11 +1589,17 @@ func (r *Registry) Install(ctx context.Context, in *InstallInput) (*Status, *Dry
 	if state, serr := p.loadState(); state != StateRunning {
 		// A module that does not describe itself as the manifest says is not
 		// installed half-way: files and row go, the error is the answer.
+		refusal := loadRefusal(p)
 		r.drop(p)
 		_ = r.opts.Store.DeleteAppPlugin(ctx, row.ID)
 		_ = os.RemoveAll(filepath.Join(r.opts.Dir, st.m.Name))
-		return nil, nil, installErr(ErrCodeDescribeMismatch, serr)
+		// Said in the server's log too: the refusal goes to the client
+		// alone, and a red install in a log with no reason is a guess.
+		r.log.Warn("app-plugins: install refused, the module did not load", slog.String("plugin", st.m.Name),
+			slog.String("version", st.m.Version), slog.String("state", state), slog.String("err", serr))
+		return nil, nil, refusal
 	}
+	r.enginesChanged()
 	return r.StatusOf(p), nil, nil
 }
 
@@ -1575,7 +1653,12 @@ func (r *Registry) Upgrade(ctx context.Context, id int64, in *InstallInput) (*St
 	// ⚠ As in Install: an upgrade swaps files and compiles; a client that
 	// leaves in the middle must not leave the app half-replaced.
 	ctx = context.WithoutCancel(ctx)
-	// Keep the old files until the new module has proven itself.
+	// Keep the old files until the new module has proven itself. An office
+	// engine the app brings lets go of them first (on Windows a file a
+	// process holds open cannot be moved), and is told what runs once the
+	// swap is over, whichever way it ends.
+	r.releaseEngine(p.Row.Name)
+	defer r.enginesChanged()
 	dir := filepath.Join(r.opts.Dir, p.Row.Name)
 	backup := dir + ".prev"
 	_ = os.RemoveAll(backup)
@@ -1618,6 +1701,7 @@ func (r *Registry) Upgrade(ctx context.Context, id int64, in *InstallInput) (*St
 	// found the day somebody switched it back on (and the update check now
 	// upgrades apps that are off, too).
 	if state, serr := np.loadState(); state != StateRunning {
+		refusal := loadRefusal(np)
 		*p.Row = oldRow
 		_ = os.RemoveAll(dir)
 		_ = os.Rename(backup, dir)
@@ -1634,7 +1718,9 @@ func (r *Registry) Upgrade(ctx context.Context, id int64, in *InstallInput) (*St
 			r.compile(ctx, p)
 		}
 		np.log("error", "upgrade to "+st.m.Version+" rolled back: "+serr)
-		return nil, nil, installErr(ErrCodeDescribeMismatch, serr)
+		r.log.Warn("app-plugins: upgrade rolled back, the new module did not load", slog.String("plugin", p.Row.Name),
+			slog.String("version", st.m.Version), slog.String("state", state), slog.String("err", serr))
+		return nil, nil, refusal
 	}
 	// The upgrade settles what the update check had found, when this version
 	// is at least that one (updates.go).
@@ -1680,7 +1766,10 @@ func (r *Registry) writeFiles(name string, st *staged, manifest []byte) error {
 	if err := os.WriteFile(filepath.Join(dir, "filex-app.json"), manifest, 0o600); err != nil {
 		return fmt.Errorf("app-plugins: write manifest: %w", err)
 	}
-	return writeUI(dir, st.ui)
+	if err := writeUI(dir, st.ui); err != nil {
+		return err
+	}
+	return writeEngine(dir, st.engine)
 }
 
 // SetEnabled flips a plugin on or off, loading or unloading it.
@@ -1701,6 +1790,7 @@ func (r *Registry) SetEnabled(ctx context.Context, id int64, on bool) (*Status, 
 	} else {
 		r.unload(ctx, p)
 	}
+	r.enginesChanged()
 	return r.StatusOf(p), nil
 }
 
@@ -1738,11 +1828,16 @@ func (r *Registry) Remove(ctx context.Context, id int64) error {
 	}
 	// Its thumbnail limits go with it (00077).
 	_ = r.opts.Store.DeleteAppThumbLimits(ctx, id)
+	// An office engine it brought lets go of its files first.
+	r.releaseEngine(p.Row.Name)
+	defer r.enginesChanged()
 	_ = os.RemoveAll(filepath.Join(r.opts.Dir, p.Row.Name))
 	// Its downloads go with it (asset_fetch).
 	_ = os.RemoveAll(r.assetDir(p.Row.Name))
 	// ...and so do the versions it kept to go back to.
 	_ = os.RemoveAll(r.versionsRoot(p.Row.Name))
+	// ...and the files an administrator added to it (extras.go).
+	_ = os.RemoveAll(r.extrasDir(p.Row.Name))
 	return nil
 }
 

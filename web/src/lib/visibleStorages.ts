@@ -29,6 +29,7 @@
  */
 
 import type { StorageRef } from '@/api/types';
+import { rootLevel, type RootLevel } from '@brftech/filex-core';
 import { readBearerToken, readCsrfCookie } from '@/lib/explorerConfig';
 import { getServerRoot } from '@/api/runtimeConfig';
 
@@ -51,6 +52,10 @@ export interface VisibleStorage {
    *  explorer's navigation panel and Home follow it unless the person has an
    *  order of their own (`lib/storageOrder` in the core package). */
   sortOrder?: number | null;
+  /** #117 — this caller's level at the storage's root (`storage_info[].perm`).
+   *  The explorer offers "Access…" on the storage's row to whoever owns it.
+   *  Absent on the admin list: an administrator owns every root. */
+  perm?: RootLevel;
 }
 
 /** The server's `coverage` beside a size figure says the figure is partial. */
@@ -101,13 +106,17 @@ export function fromManagerRoot(body: unknown): VisibleStorage[] {
   if (!Array.isArray(names)) return [];
   const ro = new Map<string, boolean>();
   const pos = new Map<string, number>();
+  const level = new Map<string, RootLevel>();
   if (Array.isArray(b.storage_info)) {
     for (const i of b.storage_info) {
-      const row = i as { name?: unknown; read_only?: unknown; sort_order?: unknown };
+      const row = i as { name?: unknown; read_only?: unknown; sort_order?: unknown; perm?: unknown };
       if (typeof row?.name !== 'string') continue;
       ro.set(row.name, row.read_only === true);
       // #57 — the administrator's position, when the drive has one.
       if (typeof row.sort_order === 'number') pos.set(row.name, row.sort_order);
+      // #117 — the caller's level at the root, when the server says it.
+      const at = rootLevel(row.perm);
+      if (at) level.set(row.name, at);
     }
   }
   return names
@@ -116,6 +125,7 @@ export function fromManagerRoot(body: unknown): VisibleStorage[] {
       const out: VisibleStorage = { name: n, label: n };
       if (ro.has(n)) out.readOnly = ro.get(n);
       if (pos.has(n)) out.sortOrder = pos.get(n);
+      if (level.has(n)) out.perm = level.get(n);
       return out;
     });
 }

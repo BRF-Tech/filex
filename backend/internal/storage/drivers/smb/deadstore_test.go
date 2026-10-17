@@ -16,6 +16,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/stall"
+	"github.com/brf-tech/filex/backend/internal/testutil/refusedport"
 )
 
 // Issue #75 (the rest of #73): the SMB driver bounded only the TCP connect
@@ -104,13 +105,7 @@ func assertUnavailable(t *testing.T, err error, took, ceiling time.Duration, wor
 
 func refusedAddr(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := l.Addr().String()
-	_ = l.Close()
-	return addr
+	return refusedport.Addr(t)
 }
 
 // silentAddr accepts connections and never answers a byte: a hung server
@@ -167,16 +162,40 @@ var smbCalls = []smbCall{
 	}},
 }
 
+// assertSaysOneOf checks the error says at least one of the phrases, for a
+// verdict with more than one honest wording. No phrases: nothing to check.
+func assertSaysOneOf(t *testing.T, err error, phrases []string) {
+	t.Helper()
+	if len(phrases) == 0 {
+		return
+	}
+	for _, w := range phrases {
+		if strings.Contains(err.Error(), w) {
+			return
+		}
+	}
+	t.Errorf("error says none of %q: %v", phrases, err)
+}
+
 func TestDeadStore_AnswersWithinTheCeiling(t *testing.T) {
 	endpoints := []struct {
 		name  string
 		addr  func(t *testing.T) string
 		words []string
+		// anyOf: one of these must be in the message, for a verdict the
+		// RUNNER's resolver decides. A name that does not exist is an
+		// NXDOMAIN here and a lookup that times out on a CI runner whose
+		// resolver stays silent (CI run 38178266274: "got no answer within
+		// 1s (2 attempts in 2.1s)"). Both are name-lookup verdicts and both
+		// are the behaviour under test; pinning one wording pinned the
+		// runner's DNS instead.
+		anyOf []string
 	}{
-		{"connection refused", refusedAddr, []string{"the connection was refused"}},
-		{"never answers the negotiation", silentAddr, []string{"the server sent nothing for 1s"}},
-		{"black-hole ip", func(*testing.T) string { return "192.0.2.1:445" }, nil},
-		{"dns nxdomain", func(*testing.T) string { return "filex-dead-smb.invalid:445" }, []string{"does not resolve", "(1 attempt in"}},
+		{"connection refused", refusedAddr, []string{"the connection was refused"}, nil},
+		{"never answers the negotiation", silentAddr, []string{"the server sent nothing for 1s"}, nil},
+		{"black-hole ip", func(*testing.T) string { return "192.0.2.1:445" }, nil, nil},
+		{"dns nxdomain", func(*testing.T) string { return "filex-dead-smb.invalid:445" }, nil,
+			[]string{"does not resolve", "the name lookup got no answer"}},
 	}
 	for _, ep := range endpoints {
 		for _, c := range smbCalls {
@@ -186,6 +205,7 @@ func TestDeadStore_AnswersWithinTheCeiling(t *testing.T) {
 				took, err := timeCall(context.Background(), func(ctx context.Context) error { return c.run(ctx, d) })
 				t.Logf("%s %s: %.1fs err=%v", ep.name, c.name, took.Seconds(), err)
 				assertUnavailable(t, err, took, deadStoreCeiling, ep.words...)
+				assertSaysOneOf(t, err, ep.anyOf)
 			})
 		}
 	}
@@ -320,6 +340,43 @@ func (p *stallProxy) pipe(dst, src net.Conn, stallAfter *atomic.Int64, paced boo
 	}
 }
 
+// answerBudget is how long a step that only sets the scene - the server
+// answering before the proxy stalls it, and again once it is let go - may
+// keep asking.
+const answerBudget = 20 * time.Second
+
+// untilAnswers asks call until it succeeds, for at most answerBudget.
+//
+// ⚠ Only for the steps around the claim, never the claim itself. These tests
+// give the driver a 1 s attempt timeout, and on a shared build host a healthy
+// Samba can take longer than that to set up a session: smbd writes its TDB
+// files, and the host's disk stalled for seconds (the 0.57 chain, 2026-10-16:
+// io pressure 0.47, disk writes of 6 s, and "the server was fine at first:
+// ... the server sent nothing for 1s (2 attempts in 2.2s)"). Stopping Samba
+// for 2.5 s at the first call gives exactly that message. A server that is
+// slow before the stall, or after it, is not what is measured; that the call
+// is cut while the proxy holds the server silent, and that the same driver
+// works again afterwards without a restart, is.
+func untilAnswers(t *testing.T, what string, call func() error) {
+	t.Helper()
+	deadline := time.Now().Add(answerBudget)
+	tries := 0
+	for {
+		tries++
+		err := call()
+		if err == nil {
+			if tries > 1 {
+				t.Logf("%s: answered at try %d", what, tries)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: %v (%d tries in %s)", what, err, tries, answerBudget)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 // proxiedDriver is liveDriver through a stallProxy, with the dead-store limits.
 func proxiedDriver(t *testing.T) (*Driver, *stallProxy) {
 	t.Helper()
@@ -345,18 +402,17 @@ func proxiedDriver(t *testing.T) (*Driver, *stallProxy) {
 func TestLive_HungServerIsCutAndTheStorageRecovers(t *testing.T) {
 	d, p := proxiedDriver(t)
 	ctx := context.Background()
-	if err := d.Mkdir(ctx, "x"); err != nil {
-		t.Fatalf("the server was fine at first: %v", err)
-	}
+	untilAnswers(t, "the server was fine at first", func() error { return d.Mkdir(ctx, "x") })
 	p.silent.Store(true)
 	took, err := timeCall(ctx, func(ctx context.Context) error { _, err := d.List(ctx, ""); return err })
 	t.Logf("hung server: %.1fs err=%v", took.Seconds(), err)
 	assertUnavailable(t, err, took, deadStoreCeiling, "the server sent nothing for 1s")
 
 	p.silent.Store(false)
-	if _, err := d.List(ctx, ""); err != nil {
-		t.Fatalf("the storage did not recover when the server answered again: %v", err)
-	}
+	untilAnswers(t, "the storage did not recover when the server answered again", func() error {
+		_, err := d.List(ctx, "")
+		return err
+	})
 }
 
 // ⚠ The limits are on silence, not length: 4 MB up at 512 KB/s is eight
@@ -438,9 +494,7 @@ func TestLive_StalledUploadIsCut(t *testing.T) {
 	t.Cleanup(func() { stall.SendStallFloor = time.Minute })
 	d, p := proxiedDriver(t)
 	ctx := context.Background()
-	if err := d.Mkdir(ctx, "x"); err != nil {
-		t.Fatal(err)
-	}
+	untilAnswers(t, "the server was fine at first", func() error { return d.Mkdir(ctx, "x") })
 	p.upStall.Store(1 << 20)
 	body := bytes.Repeat([]byte("s"), 32<<20)
 	took, err := timeCall(ctx, func(ctx context.Context) error {
@@ -455,9 +509,9 @@ func TestLive_StalledDownloadIsCut(t *testing.T) {
 	d, p := proxiedDriver(t)
 	ctx := context.Background()
 	body := bytes.Repeat([]byte("h"), 4<<20)
-	if err := d.Write(ctx, "half.bin", bytes.NewReader(body), int64(len(body))); err != nil {
-		t.Fatal(err)
-	}
+	untilAnswers(t, "the server was fine at first", func() error {
+		return d.Write(ctx, "half.bin", bytes.NewReader(body), int64(len(body)))
+	})
 	p.downStall.Store(1 << 20)
 	rc, err := d.Read(ctx, "half.bin")
 	if err != nil {
@@ -473,7 +527,8 @@ func TestLive_StalledDownloadIsCut(t *testing.T) {
 	}
 	_ = rc.Close()
 	p.downStall.Store(0)
-	if _, err := d.List(ctx, ""); err != nil {
-		t.Errorf("the storage did not recover after the stalled download: %v", err)
-	}
+	untilAnswers(t, "the storage did not recover after the stalled download", func() error {
+		_, err := d.List(ctx, "")
+		return err
+	})
 }

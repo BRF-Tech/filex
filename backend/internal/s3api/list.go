@@ -117,7 +117,7 @@ func parseListParams(r *http.Request) listParams {
 		// uses the continuation token and ignores start-after. Honouring
 		// start-after instead would restart a paged listing from the
 		// beginning, and a client walking a large bucket would loop forever.
-		p.After = p.Token
+		p.After = keyFromToken(p.Token)
 		if p.After == "" {
 			p.After = p.StartAfter
 		}
@@ -132,6 +132,12 @@ func parseListParams(r *http.Request) listParams {
 func (h *Handler) listObjects(w http.ResponseWriter, r *http.Request, p *protocolauth.Principal, st *model.Storage) {
 	ctx := r.Context()
 	params := parseListParams(r)
+	// The walk starts in the prefix's folder: a folder no key could have
+	// (`..`, an empty segment) would start it somewhere else (names.go).
+	if err := prefixError(params.Prefix); err != nil {
+		writeKeyError(w, r, err)
+		return
+	}
 
 	drv, err := h.cfg.Resolver(st.ID)
 	if err != nil {
@@ -176,10 +182,18 @@ func (h *Handler) listObjects(w http.ResponseWriter, r *http.Request, p *protoco
 	out.KeyCount = len(lister.contents) + len(lister.prefixes)
 	if lister.truncated {
 		if params.V2 {
-			out.NextContinuationToken = lister.next
+			out.NextContinuationToken = continuationToken(lister.next)
 		} else {
 			out.NextMarker = lister.next
 		}
+	}
+	// ⚠ Asked for, so done: the elements carry the keys percent-encoded.
+	// The value used to be echoed with the keys left raw, and every SDK that
+	// asks (aws-cli and botocore by default) decoded them anyway: `C++.txt`
+	// came back as `C  .txt`, a literal `%20` as a space, and the GET that
+	// followed answered 404 (task #238).
+	if strings.EqualFold(params.EncodingType, "url") {
+		encodeListing(&out)
 	}
 	WriteXML(w, r, http.StatusOK, out)
 }

@@ -280,6 +280,16 @@ export function explorerHashPath(dest: NotificationDestination): string {
 }
 
 /**
+ * A hash path as the explorer WRITES it into the address bar: each segment
+ * percent-encoded on its own, the `/` between them kept (FileExplorer
+ * writePersistedPath), so a name with `%`, `#` or `?` in it comes back as it
+ * was (task #238).
+ */
+export function encodeHashPath(p: string): string {
+  return p ? p.split('/').map(encodeURIComponent).join('/') : '';
+}
+
+/**
  * The explorer's own ADDRESS for a destination — what its `load()` and its
  * `initialPath` take: `qldemo://Documents`, `qldemo://` for a storage root,
  * `.trash` for the Trash view, `''` for anything the explorer does not open.
@@ -308,15 +318,27 @@ export function explorerPathOf(dest: NotificationDestination): string {
  * `''` for an empty hash. A hash naming only a storage yields `<storage>://`,
  * which is that storage's root — the shape the explorer uses for it.
  */
-export function qualifiedFromHash(hash: string | undefined | null): string {
+export function qualifiedFromHash(
+  hash: string | undefined | null,
+  /** `decoded`: the hash was decoded already - vue-router's `route.hash` is
+   *  (task #238: decoding it again turned a folder named `100%41` into
+   *  `100A`). */
+  opts: { decoded?: boolean } = {},
+): string {
   const raw = String(hash ?? '').replace(/^#/, '').replace(/^\/+/, '');
   if (!raw) return '';
-  // The hash is written by the browser, so it arrives percent-encoded.
+  // The hash is written by the browser, so it arrives percent-encoded - per
+  // SEGMENT (encodeHashPath, the explorer's own writer): decoded the way the
+  // explorer reads it back, with decodeURIComponent. ⚠ Not decodeURI, which
+  // leaves `%23` and `%3F` alone: a folder named `issue #42` came back as
+  // `issue %2342`.
   let decoded = raw;
-  try {
-    decoded = decodeURI(raw);
-  } catch {
-    /* a malformed escape is not worth losing the navigation over */
+  if (!opts.decoded) {
+    try {
+      decoded = decodeURIComponent(raw);
+    } catch {
+      /* a malformed escape (a folder named `100%`) is not worth losing the navigation over */
+    }
   }
   const cut = decoded.indexOf('/');
   if (cut < 0) return `${decoded}://`;
@@ -411,6 +433,12 @@ export function notificationHref(dest: NotificationDestination, base = '/', root
     if (dest.open.action) q.push(`appAction=${encodeURIComponent(dest.open.action)}`);
     else if (dest.open.view) q.push(`appView=${encodeURIComponent(dest.open.view)}`);
   }
-  const hash = explorerHashPath(dest);
+  // ⚠ Encoded per segment, as the explorer writes its own hash
+  // (encodeHashPath): this href is opened as it is, by the browser or the
+  // service worker, and the explorer DECODES what it finds. Raw, a folder
+  // named `a%20b` opened `a b`, and `100%` beside a non-ASCII folder made the
+  // whole decode fail (task #238). A route (notificationRoute) stays readable:
+  // vue-router encodes its hash itself.
+  const hash = encodeHashPath(explorerHashPath(dest));
   return `${prefix}explore${q.length ? `?${q.join('&')}` : ''}${hash ? `#${hash}` : ''}`;
 }

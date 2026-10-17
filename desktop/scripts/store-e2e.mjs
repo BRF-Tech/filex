@@ -49,7 +49,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { DESKTOP, check, finish, sleep } from './lib/harness.mjs';
-import { activationWaitFactor, describeWindow, softActivation, windowVerdicts } from './lib/store-activation.mjs';
+import { accountVerdict, activationWaitFactor, describeWindow, softActivation, storeLogDirs, windowVerdicts } from './lib/store-activation.mjs';
 
 if (process.platform !== 'win32') {
   // Not a skip: a Store package can only be installed on Windows, and a gate
@@ -168,6 +168,26 @@ function activationCheck(name, ok, detail = '') {
   return softCheck(name, ok, detail, SOFT, 'activation on a CI runner; not a Store upload');
 }
 
+/**
+ * Who runs this check, and with what token (#248): the account and its SID
+ * (RID 500 is the built-in Administrator, which a packaged app does not
+ * start under), the token's integrity level, and the UAC policy. Lines, the
+ * last one the verdict; never throws.
+ */
+function accountLines() {
+  try {
+    const whoami = execFileSync('whoami.exe', ['/user', '/groups', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true });
+    const policy = JSON.parse(
+      ps(`$p = Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -ErrorAction SilentlyContinue
+@{ EnableLUA = $p.EnableLUA; FilterAdministratorToken = $p.FilterAdministratorToken; ConsentPromptBehaviorAdmin = $p.ConsentPromptBehaviorAdmin } | ConvertTo-Json -Compress`) || '{}',
+    );
+    const clean = Object.fromEntries(Object.entries(policy).filter(([, v]) => v !== null && v !== undefined).map(([k, v]) => [k, String(v)]));
+    return accountVerdict(whoami, clean).lines;
+  } catch (e) {
+    return [`account: could not be read (${String(e?.message ?? e).split('\n')[0]})`];
+  }
+}
+
 /** What a failed activation leaves behind — printed so the next red run says why. */
 function diagnoseActivation() {
   const tryPs = (label, script) => {
@@ -177,11 +197,16 @@ function diagnoseActivation() {
       console.log(`--- ${label}\n(could not read: ${String(e?.message ?? e).split('\n')[0]})`);
     }
   };
+  console.log(`--- account and token\n${accountLines().join('\n')}`);
   tryPs('session', `"interactive=$([Environment]::UserInteractive) session=$((Get-Process -Id $PID).SessionId) explorer=$((Get-Process explorer -ErrorAction SilentlyContinue | ForEach-Object SessionId) -join ',')"`);
   tryPs('filex.exe processes of the variant', `Get-CimInstance Win32_Process -Filter "Name='filex.exe'" | Where-Object { $_.ExecutablePath -like (${q(installLocation)} + '*') } | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }`);
   tryPs('package status', `Get-AppxPackage -Name ${q(VARIANT.identity)} | Select-Object Status, IsDevelopmentMode, SignatureKind | Format-List | Out-String`);
-  const logs = path.join(process.env.LOCALAPPDATA, 'Packages', pfn, 'LocalCache', 'Roaming', VARIANT.name, 'logs');
-  tryPs('app log (last 40 lines)', `if (Test-Path ${q(logs)}) { Get-ChildItem ${q(logs)} -Filter *.log | Sort-Object LastWriteTime | Select-Object -Last 1 | ForEach-Object { Get-Content $_.FullName -Tail 40 } } else { 'no log directory at ' + ${q(logs)} }`);
+  // The Store copy logs to ~/.filex/desktop/logs (src/log.ts), not to its
+  // redirected userData: the latter was the only place this looked until
+  // #248, and found "no log directory" on every red run.
+  for (const logs of storeLogDirs({ home: os.homedir(), localAppData: process.env.LOCALAPPDATA, pfn, userDataName: VARIANT.name })) {
+    tryPs(`app log in ${logs} (last 40 lines)`, `if (Test-Path ${q(logs)}) { Get-ChildItem ${q(logs)} -Filter *.log | Sort-Object LastWriteTime | Select-Object -Last 1 | ForEach-Object { 'file ' + $_.FullName + ', written ' + $_.LastWriteTime.ToString('s'); Get-Content $_.FullName -Tail 40 } } else { 'no log directory at ' + ${q(logs)} }`);
+  }
 }
 
 function killVariant() {
@@ -308,6 +333,9 @@ Add-Content -LiteralPath $log -Value 'stopped' -Encoding UTF8`;
 
 const handlerBefore = realProtocolHandler();
 let windowWatch = null;
+// Said at the start of every run, not only when activation fails: a run
+// that passes says which account it passed under.
+for (const l of accountLines()) console.log(`      ${l}`);
 
 try {
   if (ps(`(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock' -ErrorAction SilentlyContinue).AllowDevelopmentWithoutDevLicense`) !== '1') {

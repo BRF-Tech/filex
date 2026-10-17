@@ -370,33 +370,8 @@ func TestTransfersAreByteExactEvenInASCIIMode(t *testing.T) {
 	}
 }
 
-func TestTurkishFilenamesSurvive(t *testing.T) {
-	hz := newHarness(t)
-	hz.user(t, "ftp@example.com")
-	st := hz.storage(t, "main")
-	c := hz.mustLogin(t, "ftp@example.com", testPassword)
-
-	const name = "/main/gölge dosya şğüöç.txt"
-	if err := c.Stor(name, strings.NewReader("türkçe")); err != nil {
-		t.Fatalf("stor: %v", err)
-	}
-	entries, err := c.List("/main")
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	found := false
-	for _, e := range entries {
-		if e.Name == "gölge dosya şğüöç.txt" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("the Turkish name is not in the listing: %v", entryNames(entries))
-	}
-	if _, err := os.Stat(filepath.Join(hz.rootOf(t, st), "gölge dosya şğüöç.txt")); err != nil {
-		t.Fatalf("not on disk under its own name: %v", err)
-	}
-}
+// The Turkish-name round trip that stood here is TestHostileNamesSurvive
+// (hostile_names_test.go), which walks the shared hostile names (task #238).
 
 // REST is how a client resumes an interrupted download.
 //

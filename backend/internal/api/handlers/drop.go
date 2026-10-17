@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
@@ -28,6 +29,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 )
@@ -289,6 +291,10 @@ var dropRefusalText = map[string]string{
 	"storage_unavailable": "server.public.drop_err_storage",
 	"quota_exceeded":      "server.public.drop_err_quota",
 	"name_too_long":       "server.public.drop_err_name_long",
+	// A FILE's name (task #238): one no door may create (leafname), and
+	// one longer than the folder's storage holds.
+	"bad_name":           "server.public.drop_err_bad_name",
+	"file_name_too_long": "server.public.drop_err_file_name_long",
 	// A key file or `.fxe` the link creator may not create (refusesE2E): to
 	// the visitor, a file the link does not take.
 	"e2e_not_allowed": "server.public.drop_err_ext_any",
@@ -442,19 +448,31 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 		h.refuse(w, r, http.StatusUnprocessableEntity, map[string]any{"error": "too_many_files", "max_files": ds.MaxFiles})
 		return
 	}
+	// Every file's name through the one name rule (leafname, task #238),
+	// before anything is written: a name no door may create is the
+	// visitor's to change (400 bad_name), never "storage unavailable".
+	// `name[]` carries each name as the person's browser had it
+	// (upload_names.go).
+	// nil: every file of a drop is new (a fresh submission folder), so no
+	// refused name can be an existing file's.
+	names, nameErr := uploadNames(r.MultipartForm, files, nil)
+	if nameErr != nil {
+		h.refuse(w, r, http.StatusBadRequest, map[string]any{"error": "bad_name", "reason": leafname.Reason(nameErr)})
+		return
+	}
 	maxBytes := int64(ds.MaxFileSizeMB) << 20
-	for _, fh := range files {
+	for i, fh := range files {
 		if fh.Size > maxBytes {
 			h.refuse(w, r, http.StatusRequestEntityTooLarge, map[string]any{"error": "file_too_large", "max_file_size_mb": ds.MaxFileSizeMB})
 			return
 		}
-		if !extAllowed(fh.Filename, ds.AllowedExt) {
+		if !extAllowed(names[i], ds.AllowedExt) {
 			h.refuse(w, r, http.StatusUnsupportedMediaType, map[string]any{"error": "ext_not_allowed", "allowed_ext": ds.AllowedExt})
 			return
 		}
 		// The creator's own role may block the type outright (blocked
 		// extensions): the file lands in their storage as their file.
-		if ext := linkCreatorBlocksName(r.Context(), h.ACL, h.Store, sh, st, path.Join(node.Path, fh.Filename)); ext != "" {
+		if ext := linkCreatorBlocksName(r.Context(), h.ACL, h.Store, sh, st, path.Join(node.Path, names[i])); ext != "" {
 			h.refuse(w, r, http.StatusUnsupportedMediaType, map[string]any{"error": "ext_not_allowed", "extension": ext})
 			return
 		}
@@ -498,7 +516,7 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	}
 	// Who may encrypt, for the link creator — before the submission folder or
 	// a byte is written (e2e_policy_gate.go).
-	if h.refusesE2E(w, r, sh, st, subRel, files) {
+	if h.refusesE2E(w, r, sh, st, subRel, names) {
 		return
 	}
 	if _, err := h.Manager.EnsureDir(r.Context(), st, subRel); err != nil {
@@ -510,13 +528,13 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	// Keep the LAST write error: with `saved == 0` it is the only account of
 	// why nothing landed, and it decides what the visitor is told.
 	var lastErr error
-	for _, fh := range files {
+	for i, fh := range files {
 		src, err := fh.Open()
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		ingested, err := h.Manager.IngestFile(r.Context(), st, subRel, fh.Filename, src, fh.Size)
+		ingested, err := h.Manager.IngestFile(r.Context(), st, subRel, names[i], src, fh.Size)
 		_ = src.Close()
 		if err != nil {
 			lastErr = err
@@ -589,6 +607,17 @@ func (h *Drop) failWrite(w http.ResponseWriter, r *http.Request, err error, stag
 		code = "reserved_name"
 		status = http.StatusForbidden
 	}
+	// Nor a name the visitor can change (task #238): one no door may create,
+	// or one longer than the folder's storage holds. A 503 told them to
+	// retry, into the same refusal.
+	if errors.Is(err, leafname.ErrRefused) {
+		code = "bad_name"
+		status = http.StatusBadRequest
+	}
+	if storage.IsNameTooLong(err) {
+		code = "file_name_too_long"
+		status = http.StatusBadRequest
+	}
 	msg := "no error" // saved==0 with every file open+ingest succeeding is impossible, but never log a nil deref
 	if err != nil {
 		msg = err.Error()
@@ -605,7 +634,12 @@ func (h *Drop) failWrite(w http.ResponseWriter, r *http.Request, err error, stag
 	if files > 0 {
 		attrs = append(attrs, slog.Int("files", files))
 	}
-	slog.Error("drop: upload could not be written", attrs...)
+	if status == http.StatusBadRequest {
+		// The visitor's file name, not an outage: not an error to page on.
+		slog.Info("drop: upload refused for its name", attrs...)
+	} else {
+		slog.Error("drop: upload could not be written", attrs...)
+	}
 	h.refuse(w, r, status, map[string]any{"error": code})
 }
 
@@ -732,7 +766,7 @@ func (h *Drop) renderUploader(w http.ResponseWriter, r *http.Request, tok string
 		"Lang":      lang,
 		"Dir":       pageDir(lang),
 		"T":         t,
-		"Folder":    folderName,
+		"Folder":    leafname.Visible(folderName),
 		"NameMax":   dropNameMax,
 		"Config":    template.JS(cfgJSON),
 		"BrandCSS":  chrome.BrandCSS,
@@ -754,6 +788,7 @@ func dropScriptStrings(t map[string]string) map[string]string {
 		"drop_err_ext_any", "drop_err_large_any",
 		"drop_err_bad_pin", "drop_err_expired", "drop_err_rate",
 		"drop_err_no_files", "drop_err_storage", "drop_err_quota",
+		"drop_err_bad_name", "drop_err_file_name_long",
 		"drop_err_generic",
 	}
 	out := make(map[string]string, len(keys))
@@ -1061,7 +1096,7 @@ drop.addEventListener('drop',function(e){ if(e.dataTransfer&&e.dataTransfer.file
 sendBtn.onclick=function(){
   if(!picked.length) return;
   var fd=new FormData();
-  picked.forEach(function(f){ fd.append('file[]', f, f.name); });
+  picked.forEach(function(f){ fd.append('file[]', f, f.name); fd.append('name[]', f.name); });
   if(CFG.pin) fd.append('pin', CFG.pin);
   var nm=el('uploaderName'); if(nm) fd.append('uploader_name', nm.value||'');
   fd.append('note', el('note').value||'');
@@ -1094,7 +1129,7 @@ function fail(code, res){
   // storage_unavailable is deliberately NOT the generic "try again" line: the
   // link and the files are fine, the backing storage is down, and telling the
   // visitor that is the difference between waiting and retrying into a wall.
-  var m={ too_many_files:fill(pl('drop_err_too_many', CFG.maxFiles), {count: CFG.maxFiles}), file_too_large:fill(T.drop_err_large_any, {mb: CFG.maxFileSizeMB}), ext_not_allowed:T.drop_err_ext_any, bad_pin:T.drop_err_bad_pin, expired:T.drop_err_expired, rate_limited:T.drop_err_rate, no_files:T.drop_err_no_files, storage_unavailable:T.drop_err_storage, quota_exceeded:T.drop_err_quota };
+  var m={ too_many_files:fill(pl('drop_err_too_many', CFG.maxFiles), {count: CFG.maxFiles}), file_too_large:fill(T.drop_err_large_any, {mb: CFG.maxFileSizeMB}), ext_not_allowed:T.drop_err_ext_any, bad_pin:T.drop_err_bad_pin, expired:T.drop_err_expired, rate_limited:T.drop_err_rate, no_files:T.drop_err_no_files, storage_unavailable:T.drop_err_storage, quota_exceeded:T.drop_err_quota, bad_name:T.drop_err_bad_name, file_name_too_long:T.drop_err_file_name_long };
   msg.className='msg err'; msg.textContent = (m[code]||T.drop_err_generic);
 }
 render();

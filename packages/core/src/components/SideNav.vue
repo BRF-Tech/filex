@@ -9,7 +9,7 @@
  * see.
  *
  * Why it exists (GitHub #14): the explorer's shape — split pane, tabs, three
- * view modes, "How to connect" — is a power-user tool, and the reporter's
+ * view modes, "Connections" — is a power-user tool, and the reporter's
  * users read that as a file manager they would have to relearn. The answer is
  * not a second UI: it is one explorer with the navigation people already know
  * from Drive, that anyone can collapse when they want the width back.
@@ -137,7 +137,7 @@ const props = withDefaults(defineProps<{
   /** …and its kind ('' = a view of both kinds, e.g. an old `#.tag~x` link). */
   activeTagKind?: TagKind | '';
   /**
-   * Show the Connections entries — "How to connect" and "API keys".
+   * Show the Connections section's entries — "Connections" and "API keys".
    * ⚠ Never derived from a role here or anywhere: the backend decides what a
    * caller may see, and hiding the surface client-side only hides it from the
    * accounts that need it (see ExplorerConfig.connections).
@@ -1240,10 +1240,14 @@ function onStoragePointerDown(s: NavStorage, ev: PointerEvent) {
       <!-- Connections. Last, because it is where you go once rather than every
            day — and in core rather than in the host app, so an embedded
            explorer's users can reach the guides and mint their own keys
-           instead of being told to ask an administrator. -->
-      <div v-if="showConnections" class="fe-sidenav__section">
-        <p v-if="showLabels" class="fe-sidenav__heading">{{ t('sidenav.connections') }}</p>
-        <hr v-else class="fe-sidenav__rule" aria-hidden="true" />
+           instead of being told to ask an administrator.
+           ⚠ No visible heading (the owner, 2026-10-15, task #258): the row is
+           itself "Connections", and a heading of the same word over it said
+           it twice. The rule the collapsed rail already draws separates the
+           section at every width; the list keeps its name for a screen
+           reader. -->
+      <div v-if="showConnections" class="fe-sidenav__section" data-testid="sidenav-connections">
+        <hr class="fe-sidenav__rule" aria-hidden="true" />
         <ul class="fe-sidenav__group" :aria-label="t('sidenav.connections')">
           <li>
             <button
@@ -1272,7 +1276,7 @@ function onStoragePointerDown(s: NavStorage, ev: PointerEvent) {
               <span v-if="showLabels" class="fe-sidenav__text">{{ t('sidenav.connect') }}</span>
             </button>
           </li>
-          <!-- API keys is the person half of this section: "How to connect"
+          <!-- API keys is the person half of this section: "Connections"
                stays for an app token (mount instructions are not identity),
                the keys go. -->
           <li v-if="showIdentitySurfaces !== false">

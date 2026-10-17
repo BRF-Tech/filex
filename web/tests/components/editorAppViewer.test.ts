@@ -137,3 +137,41 @@ describe('"Open in new tab" from an app’s interface', () => {
     w.unmount();
   });
 });
+
+// ── the desktop's "Open with filex" window (#184, task #268) ──────────────
+//
+// In that window the page has a bridge (`window.filexOutside`, desktop
+// preload-editor): it says hello when its viewer takes a change made to the
+// document outside filex (ONLYOFFICE's editor reloads or asks). An app's
+// interface owns its document and takes none, so under one the page says no
+// hello and the desktop asks the person itself - a hello there left every
+// outside change unanswered and every save held.
+describe('the desktop window\'s outside-change bridge', () => {
+  const bridge = () => {
+    const hello = vi.fn();
+    (window as unknown as { filexOutside?: unknown }).filexOutside = { hello, report: vi.fn(), answer: vi.fn(), on: vi.fn() };
+    return hello;
+  };
+  afterEach(() => {
+    delete (window as unknown as { filexOutside?: unknown }).filexOutside;
+  });
+
+  it('says hello when filex’s own viewer is on the page', async () => {
+    const hello = bridge();
+    await openEditor('path=main://notes.txt&mode=edit');
+    expect(frameSrc()).toBeNull();
+    expect(hello).toHaveBeenCalledWith(1);
+  });
+
+  it('says no hello under an app’s interface - the first for the type or the one the window named', async () => {
+    const hello = bridge();
+    await openEditor('path=main://doc.sketch&mode=edit');
+    expect(frameSrc()).toContain('/_appui/sketch/0123456789abcdef/index.html');
+    expect(hello).not.toHaveBeenCalled();
+    unmountAll();
+    const again = bridge();
+    await openEditor('path=main://doc.sketch&mode=edit&app=board/main');
+    expect(frameSrc()).toContain('/_appui/board/fedcba9876543210/index.html');
+    expect(again).not.toHaveBeenCalled();
+  });
+});

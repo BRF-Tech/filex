@@ -357,7 +357,7 @@ export interface ExplorerConfig {
    * Default: OFF, and it is the only row in that group whose default is off
    * for a reason that has nothing to do with taste. Every other entry either
    * opens a listing this component owns (Home, Recent, Starred, Trash, a tag,
-   * a storage) or a panel it draws itself ("How to connect", "API keys") —
+   * a storage) or a panel it draws itself ("Connections", "API keys") —
    * this one opens a page of the HOST. The explorer can announce the intent
    * (`open-my-shares`) and nothing more; a host that does not listen is left
    * with a row that draws, takes a click and does nothing at all. Off by
@@ -578,7 +578,7 @@ export interface ExplorerConfig {
    *                          three view modes, on top of the shell below.
    *   'simple'             — one pane, one folder, list and grid only. The tab
    *                          strip and the split pane are off, the gallery view
-   *                          mode is hidden, and the "How to connect" /
+   *                          mode is hidden, and the "Connections" /
    *                          "API keys" entries default to off.
    *
    * There is no third value and no alias. ⚠ Anything else that arrives here —
@@ -628,7 +628,7 @@ export interface ExplorerConfig {
   sideNav?: boolean;
 
   /**
-   * Show the navigation panel's **Connections** entries — "How to connect"
+   * Show the navigation panel's **Connections** section — "Connections"
    * (the storage list and the per-protocol guides: WebDAV · SFTP · FTPS · S3 ·
    * NFS · `filex mount`) and **API keys** (mint and revoke the tokens three of
    * those protocols sign in with).
@@ -662,7 +662,7 @@ export interface ExplorerConfig {
    * `'user'` (a signed-in human, or their own API token) draws everything.
    * `'app'` suppresses the surfaces that only mean something for ONE person:
    * **API keys**, **Recent**, **Starred** and **Shared with me**. Upload, the
-   * storage list, Trash and "How to connect" stay — an embed's users still
+   * storage list, Trash and "Connections" stay — an embed's users still
    * upload files and still need mount instructions.
    *
    * Why it exists: a filex API token authenticates AS its owner, and the embeds
@@ -697,6 +697,20 @@ export interface ExplorerConfig {
    * FilePane.onViewClick + composables/useRowTouch.
    */
   openTrigger?: 'single' | 'double';
+
+  /**
+   * Keep this person's LOOK - light or dark, palette, density - on their
+   * account, for this surface, as the web app does for `web` (task #258: the
+   * desktop app, `{ surface: 'desktop' }`). The explorer points core's
+   * preferences store (lib/prefs) at `GET/PUT /api/me/prefs?surface=<surface>`
+   * on its server with its own credential, paints what the account says once
+   * mounted, and writes a change made in the settings dialog or the "⋯" back.
+   *
+   * The server keeps one document per surface, `web` or `desktop`. Absent (an
+   * embed): the look stays this browser's, as it always was. ⚠ One explorer
+   * per window may set it: the store is the window's.
+   */
+  accountPrefs?: { surface: 'web' | 'desktop' };
 
   /**
    * Hand the OPEN of a file to the host instead of opening the in-page
@@ -831,6 +845,14 @@ export interface ExplorerConfig {
     label?: string;
     driver?: string;
     readOnly?: boolean;
+    /**
+     * #117 — the caller's level at the storage's ROOT, as the server says it
+     * (`storage_info[].perm` on the manager's listings). Whoever owns the root
+     * is offered "Access…" on the storage's row (the whole storage given to
+     * people and groups). Absent = what the explorer's own listings said, and
+     * without either only an administrator is offered it.
+     */
+    perm?: 'none' | 'viewer' | 'editor' | 'owner';
     /**
      * #57 — the administrator's position for this storage (the server's
      * `sort_order`, set on the admin Storages page; 1 = first). Null or absent
@@ -1029,13 +1051,20 @@ export interface ExplorerConfig {
      * The person's own settings — the admin app's user settings dialog
      * (UserSettingsDialog), opened IN this explorer from a "User settings" row
      * the explorer puts first. It talks to the account's own endpoints with
-     * this explorer's credential. Rows only some surfaces have (language,
-     * start page, one click or two, desktop-app downloads, browser
-     * notifications) are not drawn here. With it, the "⋯" rows whose control
-     * it carries (theme, compact view, time zone) leave the menu, as they do
-     * on the web.
+     * this explorer's credential. With it, the "⋯" rows whose control it
+     * carries (theme, compact view, time zone, keyboard shortcuts —
+     * lib/accountMenu SETTINGS_DIALOG_ROWS) leave the menu, as they do on the
+     * web.
+     *
+     * `true`: the dialog with the rows every surface has. An OBJECT: the same
+     * dialog, plus the rows only this host can carry out
+     * (ExplorerAccountSettings) - the desktop app gives its language, its
+     * click setting and its own notifications this way (task #258), so they
+     * sit in the one dialog instead of a second settings screen. Rows a host
+     * does not give are not drawn (the start page, the desktop-app downloads,
+     * the browser's own notifications are the admin app's).
      */
-    settings?: boolean;
+    settings?: boolean | ExplorerAccountSettings;
     /** Rows above the explorer's — this account's own doors (the admin
      *  console). A function so the host can decide per person (an
      *  administrator gets one more). */
@@ -1060,6 +1089,29 @@ export interface ExplorerConfig {
      *  time zone). */
     person?: AccountPerson | null;
   };
+}
+
+/**
+ * The user settings dialog's rows that only the host can carry out
+ * (`account.settings` as an object, task #258). Each one given is drawn; each
+ * one left out is not. The dialog writes what is the ACCOUNT's (the language
+ * goes to the profile too); the hook applies it on this device.
+ */
+export interface ExplorerAccountSettings {
+  /**
+   * The interface language (Preferences → Account → Language). `pick` applies
+   * it on this host - the desktop app's window, its tray menu, its sync
+   * engine's messages; the dialog also writes it to the account, so every
+   * device opens in it (uygulama dili = hesap dili).
+   */
+  language?: { pick(code: string): void };
+  /** One click or two to open a file, on this device (Preferences → This
+   *  device). `set` must take effect on this explorer (a new `config` with
+   *  `openTrigger`), not remount it: the dialog is open inside it. */
+  openTrigger?: { get(): 'single' | 'double'; set(v: 'single' | 'double'): void };
+  /** The operating system's own notifications while the app runs - the
+   *  desktop app's toasts (Notifications → This device). */
+  deviceNotifications?: { enabled(): boolean; setEnabled(on: boolean): void | Promise<void> };
 }
 
 /** One signed-in account, as the palette's group badge draws it. */

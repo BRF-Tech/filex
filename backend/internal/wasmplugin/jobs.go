@@ -103,6 +103,12 @@ type UIRef struct {
 	Engine bool `json:"engine"`
 	// Version is the app's version (the "updated" note compares it).
 	Version string `json:"version"`
+	// EditorLang is the language the administrator fixed for document
+	// editors (filex 0.57, #214: External services → ONLYOFFICE → Editor
+	// language, FILEX_ONLYOFFICE_LANG), "" while each person's own language
+	// decides. Set per request by the list's handler; the interface is told
+	// it as `session.editor_lang`.
+	EditorLang string `json:"editor_lang,omitempty"`
 }
 
 // GatedRule is one "offered once X is there" part of an action's rule.
@@ -464,6 +470,11 @@ func classifyJobError(status, text string) (code, engine string) {
 	// administrator sets up under External services (office.go).
 	if m := officeUnconfiguredRe.FindStringSubmatch(text); m != nil {
 		return "office_unconfigured", enginebin.Canonical(m[1])
+	}
+	// Or it is there, and still being compiled (office.go): a moment's wait,
+	// not a missing piece.
+	if m := officePreparingRe.FindStringSubmatch(text); m != nil {
+		return "office_preparing", enginebin.Canonical(m[1])
 	}
 	switch text {
 	case msgJobTimeout:

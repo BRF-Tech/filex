@@ -42,9 +42,9 @@ afterEach(() => {
 /** The server's sentences (`capabilities.newdoc_withheld`, #217), as an
  *  administrator's capabilities carry them. */
 const WORDS = {
-  onlyoffice: 'Office documents need a document server (ONLYOFFICE), which is not set up here.',
+  onlyoffice: 'Office documents need an office engine, the Office editor app or ONLYOFFICE, and neither is set up here.',
   drawio: 'Diagrams need draw.io, which is not set up here.',
-  admin: 'Set them up in the admin panel under External services.',
+  admin: 'Set them up in the admin panel under Apps or External services.',
 };
 
 async function open(existing: string[] = [], types: NewDocType[] = TYPES, extra: Record<string, unknown> = {}) {

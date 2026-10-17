@@ -24,7 +24,8 @@ Config in use:
   DB:    {{ if .Values.postgresql.enabled }}bundled PostgreSQL{{ else if ne .Values.database.driver "sqlite" }}external {{ .Values.database.driver }}{{ else }}SQLite (on the PVC){{ end }}
   Queue: {{ if .Values.redis.enabled }}bundled Redis{{ else }}{{ .Values.queue.driver }}{{ end }}
   S3:    {{ if .Values.versitygw.enabled }}bundled versitygw (add as S3 storage: http://{{ include "filex.fullname" . }}-versitygw:7070, region us-east-1, bucket {{ .Values.versitygw.bucket }}){{ else }}off{{ end }}
-  OnlyOffice: {{ if and .Values.onlyoffice.enabled .Values.onlyoffice.url }}{{ .Values.onlyoffice.url }}{{ else }}off{{ end }}
+  Office:     the Office editor app edits office documents (install it under Admin -> Plugins -> Apps)
+  OnlyOffice: {{ if and .Values.onlyoffice.enabled .Values.onlyoffice.url }}{{ .Values.onlyoffice.url }}{{ else }}not connected (optional){{ end }}
   Drawio:     {{ if and .Values.drawio.enabled .Values.drawio.url }}{{ .Values.drawio.url }}{{ else }}off{{ end }}
   Antivirus:  {{- with .Values.extraEnv }}{{ with index . "FILEX_CLAMAV_ADDR" }} clamd at {{ . }}{{ else }} off (run clamav/clamav and set extraEnv.FILEX_CLAMAV_ADDR){{ end }}{{ else }} off (run clamav/clamav and set extraEnv.FILEX_CLAMAV_ADDR){{ end }}
 

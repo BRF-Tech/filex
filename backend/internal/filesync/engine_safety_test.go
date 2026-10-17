@@ -239,6 +239,6 @@ func TestAConflictCopyIsOnBothSidesAndRemembered(t *testing.T) {
 		t.Fatalf("a copy deleted on the server came back: %+v", res)
 	}
 	if r.localExists(side) {
-		t.Fatal("the server's delete must be followed here (into the local sync trash)")
+		t.Fatal("the server's delete must be followed here (deleted, restored from the server's trash)")
 	}
 }

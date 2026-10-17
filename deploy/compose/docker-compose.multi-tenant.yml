@@ -52,6 +52,10 @@ services:
       # network's gateway, never the LAN). A CDN in front of it is a public
       # hop: list its ranges (a list REPLACES the default, so keep auto), or
       # every tenant's visitors share the edge's sign-in counter.
+      # ⚠ A SEED since 0.57: the first start writes this list into the setting,
+      # and from then on it is kept on Admin -> Settings -> Sign-in security; a
+      # changed value here is not read again (a start says so in its log) until
+      # `filex settings reseed login.trusted_proxies` writes it over the saved one.
       # docs/CONFIGURATION.md -> "Trusted proxies".
       # FILEX_TRUSTED_PROXIES: "auto, 173.245.48.0/20"
       # Every tenant also at <realm>.tenants.filex.example, and a tenant's own

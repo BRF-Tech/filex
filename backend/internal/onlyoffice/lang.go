@@ -222,6 +222,21 @@ func (s *Service) EditorLocale(ctx context.Context, user *model.User, requested,
 	return ChooseEditorLocale(setting, requested, acceptLanguage, account, def)
 }
 
+// FixedEditorLang is the language the administrator fixed for every document
+// editor (step 1 of the rule above), "" when it is "auto" - each person's own
+// language decides. An app's office editor is told the same (filex 0.57:
+// UIRef.EditorLang, the interface's `session.editor_lang`), so a fixed
+// language holds whichever editor opens the document.
+func (s *Service) FixedEditorLang(ctx context.Context) string {
+	if s == nil || s.LiveEditorLang == nil {
+		return ""
+	}
+	if lang, ok := NormalizeEditorLang(s.LiveEditorLang(ctx)); ok && lang != EditorLangAuto {
+		return lang
+	}
+	return ""
+}
+
 // matchEditorLang finds the language ONLYOFFICE offers that a tag means, and
 // the regional setting that goes with it. ok is false for a tag ONLYOFFICE
 // has nothing for.

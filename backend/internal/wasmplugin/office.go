@@ -16,10 +16,13 @@ import (
 
 // ── The office engine ──────────────────────────────────────────────────
 //
-// Since 0.50 office documents are converted by the OnlyOffice Document
-// Server filex is connected to, through its conversion API. LibreOffice left
-// the images, and a soffice installed next to a bare binary is not run either:
-// one office engine, the same on every install.
+// Office documents are converted by the office engine an app brings (the
+// Office editor's, internal/officeengine, filex 0.57) or by the ONLYOFFICE
+// Document Server filex is connected to, through its conversion API - which
+// one, when both are there, is the administrator's (Default apps). The
+// server wires the chooser in as this package's OfficeConverter; a job never
+// knows which back end converted it. LibreOffice left the images in 0.50,
+// and a soffice installed next to a bare binary is not run either.
 //
 // An app reaches it as `engines:office`, or as `engines:libreoffice`, the
 // name it had until 0.50 (enginebin.Canonical). Both take the request an app
@@ -31,15 +34,16 @@ import (
 //
 // What the document server cannot do is said, not guessed at: a conversion it
 // refuses comes back as a failed run (exit 1, the reason in stderr_tail),
-// exactly as a failed soffice did, and an office engine with no document
-// server configured is `unavailable` with a sentence that says what to
-// connect.
+// exactly as a failed soffice did, and an office engine with no back end is
+// `unavailable` with a sentence that says what to install or connect (or,
+// while an app's engine is still being compiled, that it is).
 
-// OfficeConverter is the office engine's back end: the connected document
-// server (wired by the server from internal/onlyoffice; a fake in tests).
+// OfficeConverter is the office engine's back end: the server's chooser
+// between the app's engine and the connected document server (a fake in
+// tests).
 type OfficeConverter interface {
-	// Ready reports whether a document server is configured right now. It is
-	// read on every availability question, so it must be cheap (no network).
+	// Ready reports whether a back end converts right now. It is read on
+	// every availability question, so it must be cheap (no network).
 	Ready(ctx context.Context) bool
 	// Convert turns one file into another format and writes the result to
 	// req.Dst. A refusal by the document server is an *OfficeError; no server
@@ -67,8 +71,20 @@ type OfficeRequest struct {
 	MaxBytes int64
 }
 
-// ErrOfficeUnconfigured: no document server is configured.
-var ErrOfficeUnconfigured = errors.New("office engine: no document server is configured")
+// ErrOfficeUnconfigured: nothing converts office documents here (no app
+// brings an engine, no document server is configured).
+var ErrOfficeUnconfigured = errors.New("office engine: no back end is configured")
+
+// ErrOfficePreparing: the engine an app brings is still being compiled, and
+// nothing else takes the job meanwhile.
+var ErrOfficePreparing = errors.New("office engine: being prepared")
+
+// OfficePreparer is an OfficeConverter that can say its engine is being
+// prepared (the server's chooser does): Ready is false, and the answer says
+// "being prepared" rather than "not configured".
+type OfficePreparer interface {
+	OfficePreparing(ctx context.Context) bool
+}
 
 // ErrOfficeTooLarge: the result is over the per-file limit.
 var ErrOfficeTooLarge = errors.New("office engine: the result exceeds the per-file limit")
@@ -89,14 +105,29 @@ func (e *OfficeError) Error() string {
 }
 
 // officeUnconfiguredMessage is the host's answer when the office engine is
-// asked for and no document server is connected. It names the remedy, which
-// is not "install a program": classifyJobError reads it as
+// asked for and nothing converts office documents here. It names the remedy,
+// which is not "install a program": classifyJobError reads it as
 // `office_unconfigured`, and the client says it in the person's language.
-func officeUnconfiguredMessage(engine string) string {
-	return "engine " + engine + " is not configured on this host: office documents are converted by ONLYOFFICE Document Server, and none is connected (an administrator connects one under External services)"
-}
+// The sentence is officecmd's, so the test host says the same.
+func officeUnconfiguredMessage(engine string) string { return officecmd.UnconfiguredMessage(engine) }
 
-var officeUnconfiguredRe = regexp.MustCompile(`engine ([A-Za-z0-9_.-]+) is not configured on this host`)
+// officePreparingMessage is the answer while an app's engine is being
+// compiled (`office_preparing`).
+func officePreparingMessage(engine string) string { return officecmd.PreparingMessage(engine) }
+
+var (
+	officeUnconfiguredRe = regexp.MustCompile(`engine ([A-Za-z0-9_.-]+) is not configured on this host`)
+	officePreparingRe    = regexp.MustCompile(`engine ([A-Za-z0-9_.-]+) is being prepared on this host`)
+)
+
+// unavailableMessage is why the office engine is not available now: being
+// prepared, or not there at all.
+func (e *engineSet) officeUnavailableMessage(ctx context.Context, engine string) string {
+	if p, ok := e.office.(OfficePreparer); ok && e.office != nil && p.OfficePreparing(ctx) {
+		return officePreparingMessage(engine)
+	}
+	return officeUnconfiguredMessage(engine)
+}
 
 // parseOfficeArgs reads a soffice command line (officecmd, the one reader
 // the test host shares). It is judged before the engine's availability, like
@@ -152,14 +183,16 @@ func (e *engineSet) runOffice(ctx context.Context, s *Scope, engine, runDir stri
 		switch {
 		case errors.Is(err, ErrOfficeUnconfigured):
 			return hostErr(wire.ErrUnavailable, officeUnconfiguredMessage(engine))
+		case errors.Is(err, ErrOfficePreparing):
+			return hostErr(wire.ErrUnavailable, officePreparingMessage(engine))
 		case ctx.Err() != nil:
 			return hostErr(wire.ErrTimeout, engine+" exceeded its time budget")
 		case errors.Is(err, ErrOfficeTooLarge):
 			return hostErr(wire.ErrTooLarge, out+" exceeds the per-file limit")
 		case errors.As(err, &oe) && oe.Code == -2:
-			return hostErr(wire.ErrTimeout, "the document server ran out of time converting "+in)
+			return hostErr(wire.ErrTimeout, "the office engine ran out of time converting "+in)
 		case errors.As(err, &oe) && oe.Code == -10:
-			return hostErr(wire.ErrTooLarge, in+" is larger than the document server converts")
+			return hostErr(wire.ErrTooLarge, in+" is larger than the office engine converts")
 		}
 		res.Exit = 1
 		failures = append(failures, officeFailure(in, from, job.To, err))

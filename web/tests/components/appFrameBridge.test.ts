@@ -714,3 +714,145 @@ describe('an interface saving a large file', () => {
     expect(calls[0].url).not.toContain('chunk=');
   });
 });
+
+// ── a .csv: how it is written (filex 0.57, lib/textDialect) ────────────────
+
+describe('a .csv through the frame', () => {
+  const DIALECT = JSON.stringify({ delimiter: ';', bom: false, crlf: true, encoding: 'windows-1254' });
+
+  it('hands the interface the dialect the server read, and reads text in the file’s own encoding', async () => {
+    // "şeker" in windows-1254: 0xFE is ş.
+    const bytes = new Uint8Array([0x61, 0x3b, 0x62, 0x0d, 0x0a, 0xfe, 0x65, 0x6b, 0x65, 0x72, 0x3b, 0x31, 0x0d, 0x0a]);
+    const pluginUIRead = vi.fn(async () => new Response(bytes, { headers: { 'content-length': String(bytes.length), 'X-Filex-Text-Dialect': DIALECT } }));
+    const { port } = await connectFrame({
+      api: apiStub({ pluginUIRead }),
+      files: [{ path: 'main://eski.csv', name: 'eski.csv', size: bytes.length }],
+    });
+    const text = await ask(port, 1, 'file.read', { as: 'text' });
+    expect(text.result.text).toBe('a;b\r\nşeker;1\r\n');
+    expect(text.result.text_dialect).toEqual({ delimiter: ';', bom: false, crlf: true, encoding: 'windows-1254' });
+    const raw = await ask(port, 2, 'file.read', { as: 'bytes' });
+    expect(new Uint8Array(raw.result.bytes)).toEqual(bytes);
+    expect(raw.result.text_dialect.encoding).toBe('windows-1254');
+  });
+
+  it('hands nothing on when the server said nothing, or something that is not a dialect', async () => {
+    for (const header of [undefined, '{"delimiter":"x","bom":false,"crlf":false,"encoding":"utf-8"}', 'not json']) {
+      unmountAll();
+      const pluginUIRead = vi.fn(async () => new Response('a;b', { headers: header ? { 'X-Filex-Text-Dialect': header } : {} }));
+      const { port } = await connectFrame({ api: apiStub({ pluginUIRead }), files: [{ path: 'main://x.csv', name: 'x.csv', size: 3 }] });
+      const r = await ask(port, 1, 'file.read', { as: 'text' });
+      expect(r.result.text).toBe('a;b');
+      expect(r.result).not.toHaveProperty('text_dialect');
+    }
+  });
+
+  it('passes the interface’s csv declaration on with the save, and refuses one that is not one', async () => {
+    const { port, api } = await connectFrame({ files: [{ path: 'main://liste.csv', name: 'liste.csv', size: 3 }] });
+    const csv = { delimiter: ';', encoding: 'utf-8', bom: false, eol: 'lf' };
+    expect((await ask(port, 1, 'file.save', { data: 'a;b\n', csv })).result).toEqual({ saved: true, size: 2 });
+    expect(api.pluginUISave).toHaveBeenCalledWith('sketch', 'editor', { path: 'main://liste.csv' }, expect.any(Blob), { csv });
+
+    for (const bad of [{ delimiter: '::' }, { eol: 'cr' }, { bom: 'yes' }, 'semicolon']) {
+      expect((await ask(port, 2, 'file.save', { data: 'x', csv: bad })).error.code).toBe('invalid');
+    }
+    expect(api.pluginUISave).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends the declaration as the save’s query (useFileApi.pluginUISave)', async () => {
+    const { useFileApi } = await import('@brftech/filex-core/src/composables/useFileApi');
+    const urls: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ saved: true, path: 'main://liste.csv', name: 'liste.csv', size: 4 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const api = useFileApi({ apiBase: '' } as never);
+    await api.pluginUISave('sheet', 'editor', { path: 'main://liste.csv' }, new Blob(['a\tb\n']), { csv: { delimiter: '\t', bom: true, eol: 'crlf', encoding: 'utf-8' } });
+    const q = new URL(urls[0], 'http://x').searchParams;
+    expect(q.get('csv_delimiter')).toBe('\t');
+    expect(q.get('csv_encoding')).toBe('utf-8');
+    expect(q.get('csv_bom')).toBe('1');
+    expect(q.get('csv_eol')).toBe('crlf');
+  });
+});
+
+// ── saving beside the file, conflict copies (filex 0.57, lib/appSaveAside) ──
+
+describe('a save that does not go over the opened file', () => {
+  it('passes beside and conflict on, hands back where it went, and saves the opening there from then on', async () => {
+    const pluginUISave = vi.fn(async (..._a: unknown[]) => ({ saved: true, path: 'main://docs/rapor.docx', name: 'rapor.docx', size: 4, modified: 1700, beside: true }));
+    const { port } = await connectFrame({
+      api: apiStub({ pluginUISave }),
+      files: [{ path: 'main://docs/rapor.doc', name: 'rapor.doc', size: 9 }],
+    });
+    const first = await ask(port, 1, 'file.save', { data: 'PK..', beside: 'docx' });
+    expect(first.result).toEqual({ saved: true, size: 4, name: 'rapor.docx', beside: true });
+    expect(pluginUISave.mock.calls[0][2]).toEqual({ path: 'main://docs/rapor.doc' });
+    expect(pluginUISave.mock.calls[0][4]).toEqual({ extra: { beside: 'docx' } });
+    expect(JSON.stringify(first.result)).not.toContain('main://');
+
+    await ask(port, 2, 'file.save', { data: 'PK..', beside: 'docx' });
+    expect(pluginUISave.mock.calls[1][2]).toEqual({ path: 'main://docs/rapor.docx' });
+
+    for (const bad of [{ beside: 'do cx' }, { conflict: 'yes' }]) {
+      expect((await ask(port, 3, 'file.save', { data: 'x', ...bad })).error.code).toBe('invalid');
+    }
+    expect(pluginUISave).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks for a conflict copy with the version the read handed over, and names the copy', async () => {
+    const pluginUIRead = vi.fn(async () => new Response('doc body', { headers: { 'content-length': '8', 'X-Filex-Version': '8:1690' } }));
+    const pluginUISave = vi.fn(async (..._a: unknown[]) => ({
+      saved: true, path: 'main://docs/teklif.filex-conflict-20261016T090000.docx', name: 'teklif.filex-conflict-20261016T090000.docx', size: 4, modified: 1800,
+      conflict: 'teklif.filex-conflict-20261016T090000.docx',
+    }));
+    const { port } = await connectFrame({
+      api: apiStub({ pluginUIRead, pluginUISave }),
+      files: [{ path: 'main://docs/teklif.docx', name: 'teklif.docx' }],
+    });
+    await ask(port, 1, 'file.read', { as: 'bytes' });
+    const saved = await ask(port, 2, 'file.save', { data: 'PK..', conflict: 'copy' });
+    expect(pluginUISave.mock.calls[0][4]).toEqual({ extra: { conflict: 'copy' }, expect: '8:1690' });
+    expect(saved.result).toEqual({
+      saved: true, size: 4, name: 'teklif.filex-conflict-20261016T090000.docx', conflict: 'teklif.filex-conflict-20261016T090000.docx',
+    });
+    await ask(port, 3, 'file.save', { data: 'PK..', conflict: 'copy' });
+    expect(pluginUISave.mock.calls[1][2]).toEqual({ path: 'main://docs/teklif.filex-conflict-20261016T090000.docx' });
+    expect(pluginUISave.mock.calls[1][4]).toEqual({ extra: { conflict: 'copy' }, expect: '4:1800' }, 'the copy, as this frame last saved it');
+  });
+
+  it('sends no expect for an app that asks for no conflict copy (0.56 behaviour)', async () => {
+    const pluginUIRead = vi.fn(async () => new Response('doc body', { headers: { 'X-Filex-Version': '8:1690' } }));
+    const api = apiStub({ pluginUIRead });
+    const { port } = await connectFrame({ api });
+    await ask(port, 1, 'file.read', { as: 'bytes' });
+    await ask(port, 2, 'file.save', { data: 'v2' });
+    expect(api.pluginUISave).toHaveBeenCalledWith('sketch', 'editor', { path: 'main://doc.sketch' }, expect.any(Blob));
+  });
+
+  it('refuses a save beside a file of an encrypted folder in the page itself', async () => {
+    const { port, api } = await connectFrame({
+      files: [{ path: 'main://kasa/rapor.doc', name: 'rapor.doc', size: 3, encrypted: 'folder', plaintext: true }],
+      e2e: { open: vi.fn(), seal: vi.fn(), ledger: vi.fn() },
+      ui: { ...UI, grants: [...UI.grants, 'files:e2e-plaintext'] },
+    });
+    const r = await ask(port, 1, 'file.save', { data: 'PK..', beside: 'docx' });
+    expect(r.error.code).toBe('unavailable');
+    expect(api.pluginUISave).not.toHaveBeenCalled();
+  });
+});
+
+describe('the language document editors are fixed to (filex 0.57, #214)', () => {
+  it('is the interface’s session.editor_lang when the server’s list says one', async () => {
+    const { port } = await connectFrame({ ui: { ...UI, editor_lang: 'de' } });
+    expect((await ask(port, 1, 'session.get')).result.editor_lang).toBe('de');
+  });
+
+  it('is absent while each person’s own language decides', async () => {
+    const { port } = await connectFrame();
+    expect((await ask(port, 1, 'session.get')).result).not.toHaveProperty('editor_lang');
+  });
+});

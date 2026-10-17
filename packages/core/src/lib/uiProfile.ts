@@ -7,7 +7,7 @@
  * Files sections, the info panel's tabs, the storage line — is what filex IS;
  * nothing reads a profile to decide whether to draw it. `'simple'` turns OFF
  * the tab strip, the split pane, the gallery view mode and the panel's
- * "How to connect" / "API keys" entries, and removes nothing from the build.
+ * "Connections" / "API keys" entries, and removes nothing from the build.
  *
  * ⚠⚠ WHY THERE IS A RESOLVER AND NOT A UNION CHECK AT EACH CALL SITE. This
  * value comes from OUTSIDE: a `config` object typed by an embedder who may not

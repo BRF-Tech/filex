@@ -23,6 +23,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { announce } from '../lib/notify.mjs';
+import { loadSettings } from '../lib/settings.mjs';
 import {
   bumpKind,
   chainVerdict,
@@ -55,6 +57,7 @@ import {
   workspacePackages,
 } from './checks.mjs';
 import { bold, dim, git, gitOut, lsRemote, revParse, run, slash, yellow } from './engine.mjs';
+import { SURFACES_LINE, affectedSurfaces, publishes, releaseSurfaces, serverPatch, surfacesOfTagMessage, tagMessages } from './surfaces.mjs';
 
 // `builtin` names the gates this file runs itself, whatever the plan says —
 // printed by `--plan` so the whole sequence is readable in one place.
@@ -97,14 +100,25 @@ export const STAGES = [
       'a part red on the runner (its setup, a checkout, a toolchain, an artifact, the browser install) is re-run once, by itself; a red test never is',
       'GitHub not answering (a 5xx, a timeout) is asked again at the next poll, ten times in a row at most',
       'GitHub Actions down (--gate circleci): the CircleCI workflow `ci` on the export commit instead, recorded as the source; no dry run',
+      "a server patch (#252): ci.yml's build part alone, no dry run - the full matrix runs behind the release (scripts/release/matrix-watch.mjs)",
     ],
   },
   {
     id: 'sign', title: 'sign', what: 'signed tags on the commits that were tested — a person',
-    builtin: ['private tag: annotated, good signature by the release key, on the release commit', 'public tag: signed, on the export commit GitHub tested, not the private one', 'backend/ tag (optional): signed, backend/ identical'],
+    builtin: [
+      'private tag: annotated, good signature by the release key, on the release commit',
+      'public tag: signed, on the export commit GitHub tested, not the private one',
+      "a server patch's public tag says `surfaces: server`, and no other release's says any surfaces (#252)",
+      'backend/ tag (optional): signed, backend/ identical',
+    ],
   },
   { id: 'push', title: 'push', what: 'the tags, one ref at a time — a person', builtin: ['private remote: the tag is the release commit', 'public remote: the tag is the export commit — a tag naming the private commit is the lesson #55 leak'] },
-  { id: 'ci', title: 'ci', what: 'what the release workflow published', builtin: ["(with the plan's tagRunWait) waits for the tag's run to finish, then reads"] },
+  {
+    id: 'ci',
+    title: 'ci',
+    what: 'what the release workflow published',
+    builtin: ["(with the plan's tagRunWait) waits for the tag's run to finish, then reads", 'a red gate a store holds (`held`: the Snap Store\'s review) is said to a person at once'],
+  },
   { id: 'deploy', title: 'deploy', what: 'servers, feeds, embeds, docs — a person, then verified', builtin: ['waits for: --ack deploy', 'lists what the pretag deferred to another machine, until it is recorded as done'] },
 ];
 
@@ -323,6 +337,22 @@ export async function preflight(R) {
         return { ok: true, detail: prev ? `${bumpKind(R.version, prev)} step from ${prev}` : 'first release' };
       },
     });
+    // #252: the server lane is for a patch whose changes reach the server
+    // alone (scripts/release/surfaces.mjs): no interface, no desktop app, no
+    // CLI command, no migration, and every changed file placed.
+    if (R.profile === 'server') {
+      gates.push({
+        name: `--profile server: ${R.version} is a server patch`,
+        check: () => {
+          const kind = prev ? bumpKind(R.version, prev) : null;
+          if (kind !== 'patch') return { ok: false, detail: `${R.version} is ${kind ? `a ${kind} step from ${prev}` : 'the first release'}: the server lane is for X.Y.Z+1 alone. Drop --profile server.` };
+          const lane = serverPatch(affectedSurfaces(changedSince(R, prev) ?? []));
+          return lane.ok
+            ? { ok: true, detail: `${lane.why} since ${prev}` }
+            : { ok: false, detail: `${lane.why}. A patch of every surface: pnpm release ${R.version} --profile patch` };
+        },
+      });
+    }
     // A patch profile tests only what changed since the last release, so it
     // is for X.Y.Z+1 alone (#172; memory rule of 2026-09-25: "a patch is a
     // patch"). A minor or major always takes the minor profile or more.
@@ -386,6 +416,60 @@ export async function preflight(R) {
 
 // ── 2. audit (a person) ─────────────────────────────────────────────────────
 
+/**
+ * What the audit asks of a person (docs/CONTRIBUTING.md → Release process,
+ * steps 1-3), from what changed since the last release.
+ *
+ * #252 (the owner, 2026-10-12): the three document checks go by the changed
+ * files. A patch step that changes no file of the interface or the desktop
+ * app (scripts/release/surfaces.mjs: no `ui`, no `desktop`, every file
+ * placed) passes the README and the screenshots with that reason, and the
+ * documentation check is the pages that describe what changed. The
+ * CHANGELOG and the Releases-page summary are asked for always.
+ */
+export function auditAsks({ version, prev, commits, touched, docSurfaces = [] }) {
+  const range = prev ? `${prev}..HEAD` : 'HEAD';
+  const hit = docSurfaces.filter((g) => touched.some((f) => globMatch(g, f)));
+  const miss = docSurfaces.filter((g) => !hit.includes(g));
+  const reach = prev && bumpKind(version, prev) === 'patch' ? affectedSurfaces(touched) : null;
+  const noInterface = !!reach && !reach.unmatched.length && !reach.surfaces.some((s) => s === 'ui' || s === 'desktop');
+  const end = ['', 'When it is done:', `    pnpm release ${version} --resume --ack audit`];
+  if (noInterface) {
+    return [
+      `A patch that changes no file of the interface or the desktop app since ${prev} (${commits} commit(s)): one thing no script can (docs/CONTRIBUTING.md → Release process, step 3):`,
+      '',
+      touched.some((f) => /^README(\.[\w-]+)?\.md$/.test(f))
+        ? '  1. README.md: it changed in this range - read it against what changed'
+        : '  1. README.md: not asked - no interface file changed (#252)',
+      '  2. Screenshots: not asked - nothing they show changed (#252)',
+      `  3. The pages that describe what changed, and that they are still true: ${hit.length ? hit.join(', ') : 'none of the pages that describe the product was touched - read the ones this change is about'}`,
+      `     git log --oneline ${range}`,
+      '  The CHANGELOG entry and the Releases-page summary (docs-site/data/release-highlights.json) are asked for as always.',
+      ...end,
+    ];
+  }
+  return [
+    `A person has to do three things no script can (docs/CONTRIBUTING.md → Release process, steps 1-3):`,
+    ``,
+    `  1. README.md against what shipped since ${prev ?? 'the beginning'} — ${commits} commit(s):`,
+    `       git log --oneline ${range}`,
+    `  2. Screenshots: bump SHOTS_RELEASE in e2e/shots/release.mjs, take them in the build host's test chain - every scene, in one typeface:`,
+    `       CHAIN_EXTRAS=shots bash scripts/chain/run.sh --profile targeted --src <the release checkout>`,
+    `     and OPEN the contact sheet — it lists only the changed and new pictures: English, current, nothing covering them.`,
+    `     Then: node scripts/shots-site.mjs upload && node scripts/shots-site.mjs accept --looked`,
+    `  3. Every surface that describes the product, not a fixed list — and the old pages are still true.`,
+    ...(docSurfaces.length
+      ? [
+          `     touched in this range: ${hit.length ? hit.join(', ') : 'none of them'}`,
+          `     NOT touched:           ${miss.length ? miss.join(', ') : '—'}`,
+        ]
+      : []),
+    ``,
+    `When all three are done:`,
+    `    pnpm release ${version} --resume --ack audit`,
+  ];
+}
+
 export async function audit(R) {
   const S = R.state;
   if (S.releaseCommit) return done({ head: S.stages.audit?.head, note: 'confirmed before the stamp' });
@@ -395,31 +479,8 @@ export async function audit(R) {
   const h = head(R.repo);
   const range = S.prev ? `${S.prev}..HEAD` : 'HEAD';
   const commits = git(R.repo, 'rev-list', '--count', range).stdout.trim();
-  const touched = new Set(git(R.repo, 'diff', '--name-only', S.prev ?? '4b825dc642cb6eb9a060e54bf8d69288fbee4904', 'HEAD').stdout.split('\n').filter(Boolean));
-  const surfaces = R.plan.docSurfaces ?? [];
-  const hit = surfaces.filter((g) => [...touched].some((f) => globMatch(g, f)));
-  const miss = surfaces.filter((g) => !hit.includes(g));
-
-  const instructions = [
-    `A person has to do three things no script can (docs/CONTRIBUTING.md → Release process, steps 1-3):`,
-    ``,
-    `  1. README.md against what shipped since ${S.prev ?? 'the beginning'} — ${commits} commit(s):`,
-    `       git log --oneline ${range}`,
-    `  2. Screenshots: bump SHOTS_RELEASE in e2e/shots/release.mjs, take them in the build host's test chain - every scene, in one typeface:`,
-    `       CHAIN_EXTRAS=shots bash scripts/chain/run.sh --profile targeted --src <the release checkout>`,
-    `     and OPEN the contact sheet — it lists only the changed and new pictures: English, current, nothing covering them.`,
-    `     Then: node scripts/shots-site.mjs upload && node scripts/shots-site.mjs accept --looked`,
-    `  3. Every surface that describes the product, not a fixed list — and the old pages are still true.`,
-    ...(surfaces.length
-      ? [
-          `     touched in this range: ${hit.length ? hit.join(', ') : 'none of them'}`,
-          `     NOT touched:           ${miss.length ? miss.join(', ') : '—'}`,
-        ]
-      : []),
-    ``,
-    `When all three are done:`,
-    `    pnpm release ${R.version} --resume --ack audit`,
-  ];
+  const touched = git(R.repo, 'diff', '--name-only', S.prev ?? '4b825dc642cb6eb9a060e54bf8d69288fbee4904', 'HEAD').stdout.split('\n').filter(Boolean);
+  const instructions = auditAsks({ version: R.version, prev: S.prev, commits, touched, docSurfaces: R.plan.docSurfaces ?? [] });
 
   if (R.acks.has('audit')) S.acks.audit = { head: h, at: new Date().toISOString() };
   if (S.acks.audit?.head === h) return done({ head: h, note: `confirmed by a person at ${S.acks.audit.at}` });
@@ -661,7 +722,7 @@ function describeProfile(R, profile, sel, stage) {
   const S = R.state;
   const source = R.gateSource ?? 'github';
   let changed = '';
-  if (stage === 'pretag' && profile === 'patch') changed = R.changed ? `, ${R.changed.length} file(s) changed since ${S.prev}` : ', nothing to compare with: every gate runs';
+  if (stage === 'pretag' && (profile === 'patch' || profile === 'server')) changed = R.changed ? `, ${R.changed.length} file(s) changed since ${S.prev}` : ', nothing to compare with: every gate runs';
   console.log(`  ${dim('profile ')}  ${bold(profile)}${dim(changed)}`);
   if (stage !== 'pretag') return;
   for (const g of sel.remote) console.log(`  ${dim(source.padEnd(8))}  ${g.name} ${dim(`- ${readFrom(g, source)} on the export commit, read at the gate stage`)}`);
@@ -683,7 +744,7 @@ export async function pretag(R) {
     return red();
   }
   if (R.dry) console.log(`  ${dim('dry run: the chain runs on HEAD as it is — the stamp above was only a scratch copy')}`);
-  R.changed = profile === 'patch' ? changedSince(R, S.prev) : null;
+  R.changed = profile === 'patch' || profile === 'server' ? changedSince(R, S.prev) : null;
   const sel = selectGates(R.plan, profile, R.changed, { source: R.gateSource ?? 'github' });
   describeProfile(R, profile, sel, 'pretag');
   // #248: a gate this machine cannot run is never run and never skipped in
@@ -1155,6 +1216,8 @@ export async function gate(R) {
   const dispatch = { workflow: wf.release, ref: branch, inputs: { publish: 'false' } };
   const title = dryRunTitle(sha ?? '<export commit>');
   const startCmd = gh?.command ? gh.command(dispatch) : `gh workflow run ${wf.release} --ref ${branch} -f publish=false`;
+  // #252: a server patch waits for ci.yml's build part alone, and no dry run.
+  if (R.profile === 'server') return gateServer(R);
   const covered = selectGates(R.plan, R.profile ?? 'minor', R.profile === 'patch' ? (R.changed ?? changedSince(R, S.prev)) : null, { source }).remote;
   const matrix = R.plan.githubMatrix ?? null;
   const promotion = R.plan.promotion ?? null;
@@ -1492,6 +1555,93 @@ export async function gate(R) {
 }
 
 /**
+ * The gate stage of a SERVER patch (#252): GitHub has built the export commit
+ * - ci.yml's parts the plan names in `serverGate` (the module vetted and
+ * built), the same the tag run's `verify` asks for a server patch - and
+ * nothing more is waited for. No dry run is started: a server patch's tag run
+ * builds its two images itself and promotes nothing. The rest of the full
+ * matrix runs on, behind the release; scripts/release/matrix-watch.mjs reads
+ * it and switches the update manifest's auto_ok on once it is green.
+ */
+async function gateServer(R) {
+  const S = R.state;
+  const sha = S.exportHead;
+  const gh = R.plan.github;
+  const want = R.plan.serverGate?.parts ?? [];
+  const wait = { pollMs: 30_000, timeoutMs: 45 * 60_000, unansweredMax: 10, ...(R.plan.serverGate ?? {}) };
+  const line = `ci.yml on the export commit: ${want.join(', ') || '(no part named)'}; the full matrix runs behind the release (scripts/release/matrix-watch.mjs)`;
+  if (R.dry) return waiting([`A server patch: GitHub builds the export commit (${line}), and no dry run is started.`], { dry: true });
+  if ((R.gateSource ?? 'github') !== 'github') {
+    await R.gates.one('gate', {
+      name: 'a server patch is gated on GitHub',
+      check: () => ({ ok: false, detail: `the server lane reads ci.yml on GitHub, and its tag run's verify asks GitHub too: with GitHub Actions down, release it as a patch of every surface (pnpm release ${R.version} --resume --profile patch --gate circleci)` }),
+    }, R.ctx());
+    return red();
+  }
+  if (!sha) {
+    console.log(`  ${bold('FAILED')}  no export commit is recorded — the land stage records it`);
+    return red();
+  }
+  const prevRun = S.stages.gate;
+  if (prevRun?.status === 'done' && prevRun.exportHead === sha && prevRun.profile === 'server') return done({ ...prevRun, note: `GitHub built ${short(sha)}` });
+  if (!gh?.runs || !gh.jobs || !want.length) {
+    await R.gates.one('gate', { name: 'the server gate can ask GitHub', check: () => ({ ok: false, detail: "the plan names no GitHub reader or no serverGate parts" }) }, R.ctx());
+    return red();
+  }
+  console.log(`  ${dim('github  ')}  ${line}`);
+  const t0 = Date.now();
+  let shown = '';
+  let unanswered = 0;
+  for (;;) {
+    const ci = gh.runs({ workflow: R.plan.gateWorkflows?.ci ?? 'ci.yml', sha, event: 'push' });
+    let verdict = null;
+    let run = null;
+    let error = ci.error ?? '';
+    if (!error) {
+      run = runVerdict(ci.runs).run;
+      if (run) {
+        const jr = gh.jobs({ runId: run.id });
+        if (jr.error) error = jr.error;
+        else verdict = partsVerdict(jr.jobs, want, { finished: run.status === 'completed' });
+      }
+    }
+    if (error) {
+      if (transientGithubError(error) && unanswered < wait.unansweredMax) {
+        unanswered += 1;
+        await sleep(wait.pollMs);
+        continue;
+      }
+      await R.gates.one('gate', { name: 'GitHub answered', check: () => ({ ok: false, detail: `could not ask GitHub (${error}) — whether ${short(sha)} built is unknown, and unknown does not pass` }) }, R.ctx());
+      return red();
+    }
+    unanswered = 0;
+    const said = run ? `${run.url ?? `run ${run.id}`}: ${verdict ? partsLine(verdict) : 'no parts yet'}` : 'no ci.yml run of the push yet';
+    if (said !== shown) {
+      console.log(`  ${dim('github  ')}  ${said}`);
+      shown = said;
+    }
+    if (verdict && (verdict.state === 'success' || verdict.state === 'failure' || verdict.state === 'incomplete')) {
+      const ok = await R.gates.one('gate', {
+        name: `ci.yml built ${short(sha)}: ${want.join(', ')}`,
+        check: () =>
+          verdict.state === 'success'
+            ? { ok: true, detail: `${run.url ?? `run ${run.id}`} - ${partsLine(verdict)}` }
+            : {
+                ok: false,
+                detail: `${verdict.failed.map((p) => `${p.name} (${p.conclusion ?? p.state}${p.url ? `, ${p.url}` : ''})`).concat(verdict.missing.map((p) => `${p.name} never ran`)).join('; ')}. Nothing is tagged, and ${R.tag} is not spent: a flake - gh run rerun ${run.id} --failed -R BRF-Tech/filex, then --resume; a fault - fix it on main, then --resume`,
+              },
+      }, R.ctx());
+      if (!ok.ok) return red();
+      return done({ exportHead: sha, source: 'github', profile: 'server', ci: run.url ?? null, parts: partsLine(verdict), matrix: 'behind' });
+    }
+    if (Date.now() - t0 >= wait.timeoutMs) {
+      return waiting([`GitHub has not built ${short(sha)} yet (waited ${Math.round((Date.now() - t0) / 60_000)} min): ${said}`, '', `Carry on waiting with:  pnpm release ${R.version} --resume`]);
+    }
+    await sleep(wait.pollMs);
+  }
+}
+
+/**
  * The push run's state with its parts read (#174): a red part is red at once,
  * even while the run goes on; a run that passed without every part is
  * `incomplete`, never success. Without parts, the run's own state.
@@ -1682,14 +1832,19 @@ export async function sign(R) {
   // The CI the gate stage read: its record says (a record from before #181
   // has no source, and was GitHub's).
   const tester = ciName(S.stages.gate?.source ?? R.gateSource);
+  // #252: a server patch's tags say so; release.yml's `plan` reads the line
+  // from the public tag and publishes the server's surface alone.
+  const server = R.profile === 'server';
+  const message = tagMessages(tag, { server }).map((m) => `-m "${m}"`).join(' ');
   const commands = [
     `# ${tester} has tested the export commit: tag exactly what was tested.`,
+    ...(server ? [`# a server patch: both tags carry "${SURFACES_LINE}" (release.yml publishes the server's surface alone)`] : []),
     `# the private tree — the release commit the chain passed on:`,
-    `git -C ${slash(R.repo)} tag -s ${tag} -m "${tag}" ${releaseCommit}`,
+    `git -C ${slash(R.repo)} tag -s ${tag} ${message} ${releaseCommit}`,
     `git -C ${slash(R.repo)} tag -v ${tag}`,
     ``,
     `# the public checkout — the export commit, already on ${R.plan.branch}:`,
-    `git -C ${slash(exp)} tag -s ${tag} -m "${tag}" ${exportCommit}`,
+    `git -C ${slash(exp)} tag -s ${tag} ${message} ${exportCommit}`,
     `git -C ${slash(exp)} tag -v ${tag}`,
     `# only when the Go module is published this time:  git -C ${slash(exp)} tag -s ${backendTag} -m "${backendTag}" ${exportCommit}`,
     ``,
@@ -1725,7 +1880,14 @@ export async function sign(R) {
         if (exportTag === S.releaseCommit) return { ok: false, detail: `${tag} in the public checkout names the PRIVATE release commit — that is the leak of lesson #55` };
         if (exportTag !== S.exportHead) return { ok: false, detail: `${tag} is on ${short(exportTag)}, not the export commit ${tester} tested, ${short(S.exportHead)}. Delete the LOCAL tag (git -C ${slash(exp)} tag -d ${tag}) and tag ${short(S.exportHead)}.` };
         const bad = verifyTag(exp, `refs/tags/${tag}`, R.plan.signingKeys);
-        return bad ? { ok: false, detail: bad } : { ok: true };
+        if (bad) return { ok: false, detail: bad };
+        // #252: the line release.yml reads. A server patch's tag without it
+        // would publish every surface from a run that tested one; any other
+        // release's tag WITH it would leave its desktop app and packages out.
+        const line = surfacesOfTagMessage(git(exp, 'cat-file', 'tag', `refs/tags/${tag}`).stdout);
+        if (server && line !== SURFACES_LINE) return { ok: false, detail: `${tag} is a server patch, and its message does not say "${SURFACES_LINE}" (it says ${line ? `"${line}"` : 'nothing of its surfaces'}): delete the LOCAL tag and tag again with ${message}` };
+        if (!server && line) return { ok: false, detail: `${tag} says "${line}", and this release (${R.profile ?? 'minor'}) publishes every surface: delete the LOCAL tag and tag again with -m "${tag}" alone` };
+        return { ok: true, detail: server ? SURFACES_LINE : '' };
       },
     },
     {
@@ -1872,18 +2034,80 @@ export async function waitForTagRun(R) {
   }
 }
 
+/**
+ * What the red gates of a stage that mark themselves `held` say to a person
+ * (#265): a channel the release does not control - the Snap Store holding an
+ * upload for its review - is told at once, through the maintainers'
+ * notifications (scripts/lib/notify.mjs), instead of waiting in a log for
+ * somebody to read it. `results` are the stage's gate records (Gates.results);
+ * a gate's `held(rec)` gives { title, message }. Pure: the caller sends them.
+ */
+export function heldNotices(stage, specs, results) {
+  const out = [];
+  for (const spec of specs) {
+    if (typeof spec.held !== 'function') continue;
+    const rec = [...results].reverse().find((r) => r.stage === stage && r.name === spec.name);
+    if (!rec || rec.ok) continue;
+    out.push({ gate: spec.name, ...spec.held(rec), result: 'waiting' });
+  }
+  return out;
+}
+
+/** Sends heldNotices through the release train's settings (FILEX_NOTIFY_*, FILEX_WAKE_*); a notification that cannot go is logged. */
+async function sayHeld(R, notices) {
+  const send =
+    R.announce ??
+    ((n) => {
+      const settings = loadSettings({ envVar: 'FILEX_TRAIN_ENV', fallback: 'filex-train.env' });
+      return announce(settings.env, n, { log: (l) => console.log(`  ${dim(`notify: ${l}`)}`) });
+    });
+  for (const n of notices) {
+    console.log(`  ${yellow('held  ')}  ${n.gate}: ${dim('not ours to hurry - said to a person now')}`);
+    try {
+      await send({ title: n.title, message: n.message, result: n.result });
+    } catch (e) {
+      console.log(`  ${yellow('note  ')}  the notification for "${n.gate}" could not be sent: ${e?.message ?? e}`);
+    }
+  }
+}
+
+/**
+ * The gates of a list that are this release's: those of no surface (every
+ * release's) and those of a surface it publishes (#252: a server patch reads
+ * back nothing of the desktop app, the CLI's package managers or npm, which
+ * it does not publish). The rest are named, never passed in silence.
+ */
+export function ofThisRelease(R, gates) {
+  const surfaces = releaseSurfaces(R.state);
+  const out = [];
+  for (const g of gates) {
+    if (publishes(surfaces, g.surface)) out.push(g);
+    else console.log(`  ${dim('not this')}  ${g.name} ${dim(`- ${R.tag} publishes ${surfaces.join(', ')}, not ${g.surface}`)}`);
+  }
+  return out;
+}
+
 export async function ci(R) {
   const lines = (R.plan.ciWatch ?? []).map((l) => l.replaceAll('{tag}', R.tag).replaceAll('{version}', R.version));
-  if (R.dry) return waiting(['The release workflow runs on the pushed tag; then this checks what it published:', ...R.plan.published.map((g) => `  - ${g.name}`), ...lines], { dry: true });
+  const published = ofThisRelease(R, R.plan.published);
+  if (R.dry) return waiting(['The release workflow runs on the pushed tag; then this checks what it published:', ...published.map((g) => `  - ${g.name}`), ...lines], { dry: true });
   if (lines.length) for (const l of lines) console.log(`  ${dim(l)}`);
   const tagRun = await waitForTagRun(R);
   if (tagRun.going) {
     return waiting([`The ${R.tag} run has not finished yet:`, `  ${tagRun.going}`, '', `Carry on waiting with:  pnpm release ${R.version} --resume`]);
   }
-  const ok = await R.gates.all('ci', R.plan.published, R.ctx());
+  const ok = await R.gates.all('ci', published, R.ctx());
   if (!ok) {
+    const held = heldNotices('ci', published, R.gates.results);
+    if (held.length) await sayHeld(R, held);
+    const reds = R.gates.results.filter((r) => r.stage === 'ci' && !r.ok).map((r) => r.name);
+    // Only what a store holds is red: everything this release controls was
+    // published. The record says so, for whoever drives the release next
+    // (a person, or scripts/train/auto.mjs), and the deploy checks can run.
+    const onlyHeld = held.length > 0 && reds.every((n) => held.some((h) => h.gate === n));
     console.log(`\n  ${dim(`If the workflow is still running, wait for it and run: pnpm release ${R.version} --resume`)}`);
-    return red();
+    if (onlyHeld) console.log(`  ${dim(`Only a store holds it: the deploy checks run without it - pnpm release ${R.version} --resume --only deploy`)}`);
+    return red(onlyHeld ? { held: held.map((h) => h.gate) } : {});
   }
   return done();
 }
@@ -1904,8 +2128,9 @@ export async function deploy(R) {
     `The automatic checks below must be green; what they cannot see (embeds, replies) is yours to confirm:`,
     `    pnpm release ${R.version} --resume --ack deploy`,
   ];
-  if (R.dry) return waiting([...instructions, '', ...R.plan.deployed.map((g) => `  check: ${g.name}`)], { dry: true });
-  const ok = await R.gates.all('deploy', R.plan.deployed, R.ctx());
+  const deployed = ofThisRelease(R, R.plan.deployed);
+  if (R.dry) return waiting([...instructions, '', ...deployed.map((g) => `  check: ${g.name}`)], { dry: true });
+  const ok = await R.gates.all('deploy', deployed, R.ctx());
   if (!ok) {
     console.log('');
     for (const l of instructions) console.log(`  ${l}`);

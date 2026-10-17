@@ -30,6 +30,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { versionResourceProblems, writeVersionResource } from '../../scripts/lib/winres.mjs';
 import { cliLdflags, goModulePath } from './lib/cli-version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -112,12 +113,18 @@ const goos = platform === 'win32' ? 'windows' : platform;
 // explicit GOARCH still wins for cross-builds.
 // --arch, when given, wins over both.
 const goarch = requestedArch || process.env.GOARCH || (process.arch === 'arm64' ? 'arm64' : 'amd64');
+const version = JSON.parse(fs.readFileSync(path.join(DESKTOP, 'package.json'), 'utf8')).version;
+// #259: a Windows filex.exe carries its version resource (VERSIONINFO) -
+// the same one the CLI's zip carries (scripts/lib/winres.mjs). Written
+// before the build, removed after it: no other build of this tree links it.
+let resource = [];
 try {
+  if (goos === 'windows') resource = writeVersionResource({ backend: BACKEND, version, arches: [goarch] });
   // Stamped like the released CLI (goreleaser): without it the app's sync
   // engine answered `filex --version` with "0.1.0-dev" in every package.
   const ldflags = cliLdflags({
     module: goModulePath(fs.readFileSync(path.join(BACKEND, 'go.mod'), 'utf8')),
-    version: JSON.parse(fs.readFileSync(path.join(DESKTOP, 'package.json'), 'utf8')).version,
+    version,
     commit: shortCommit(),
     date: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
   });
@@ -128,10 +135,20 @@ try {
   });
 } catch (err) {
   console.error(
-    '\nCould not produce the filex CLI, and the desktop app cannot sync without it.\n' +
+    `\n${err?.message ?? err}\nCould not produce the filex CLI, and the desktop app cannot sync without it.\n` +
       'Either install Go, or point FILEX_CLI_BIN at a built binary for this platform.\n',
   );
   process.exit(1);
+} finally {
+  for (const f of resource) fs.rmSync(f, { force: true });
+}
+// The resource is read back off the binary: the version string is in it.
+if (goos === 'windows') {
+  const problems = versionResourceProblems(fs.readFileSync(dest), version);
+  if (problems.length) {
+    console.error(`${path.relative(DESKTOP, dest)} carries no proper version resource: ${problems.join('; ')}`);
+    process.exit(1);
+  }
 }
 
 fs.chmodSync(dest, 0o755);

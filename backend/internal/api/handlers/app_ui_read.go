@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/apierr"
+	"github.com/brf-tech/filex/backend/internal/officesave"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
 
@@ -27,7 +28,7 @@ import (
 // through the encrypted folder's door (`e2e=1`, app_ui_e2e.go), where a file
 // whose stored name is ciphertext (level 2) is not held to a kind the server
 // cannot read: the browser asked the administrator's rule of the decrypted
-// name.
+// name. A .csv's answer carries how it is written (officesave.TextDialectHeader).
 func (h *AppPlugins) UIRead(w http.ResponseWriter, r *http.Request) {
 	if h.off(w, r) {
 		return
@@ -40,7 +41,7 @@ func (h *AppPlugins) UIRead(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusForbidden, "not_granted", apierr.Params{"permission": string(wasmplugin.PermFilesRead)})
 		return
 	}
-	target := strings.TrimSpace(r.URL.Query().Get("path"))
+	target := keptPath(r.URL.Query().Get("path"))
 	if target == "" {
 		writeError(w, r, http.StatusBadRequest, "bad_path", nil)
 		return
@@ -81,5 +82,17 @@ func (h *AppPlugins) UIRead(w http.ResponseWriter, r *http.Request) {
 	q.Set("path", target)
 	r2 := r.Clone(r.Context())
 	r2.URL.RawQuery = q.Encode()
+	// A .csv's answer says how it is written (app_ui_csv.go): its delimiter,
+	// byte order mark, line ends and encoding, so the app opens it right. Set
+	// only on the file's own answer, once the read was allowed.
+	if !wantsE2E(r) && isCSV(name) {
+		w = &okHeader{ResponseWriter: w, name: officesave.TextDialectHeader, value: func() (string, bool) { return h.csvDialectOf(r, target) }}
+	}
+	// The version handed over (filex 0.57), as a save's `expect` names it:
+	// a save made after somebody else changed the file is not written over
+	// it unseen (app_ui_beside.go).
+	if !wantsE2E(r) {
+		w = &okHeader{ResponseWriter: w, name: uiVersionHeader, value: func() (string, bool) { return h.readVersion(r, target) }}
+	}
 	h.Preview(w, r2)
 }

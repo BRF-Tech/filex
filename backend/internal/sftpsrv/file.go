@@ -18,6 +18,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -245,10 +246,18 @@ func (f *fs) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 	if t.isRoot() || t.Rel == "" {
 		return nil, os.ErrInvalid
 	}
-	if !f.canDo(t, f.writeNeed(t)) {
+	need := f.writeNeed(t)
+	if !f.canDo(t, need) {
 		// PermissionDenied, unlike a read: a write that cannot happen must SAY
 		// so, or a client retries forever against a path it can see.
 		return nil, sftp.ErrSSHFxPermissionDenied
+	}
+	// A new file's name, asked at the open - before a byte is spooled - and
+	// not at Close, after the whole upload (internal/leafname).
+	if need == perm.FilesCreate {
+		if err := refuseName(t.Rel); err != nil {
+			return nil, err
+		}
 	}
 	drv, err := f.driverFor(t)
 	if err != nil {

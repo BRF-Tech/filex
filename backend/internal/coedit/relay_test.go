@@ -387,6 +387,50 @@ func TestOpen_ASavedEmptySessionMakesWayForANewFileOrBuild(t *testing.T) {
 	}
 }
 
+// filex 0.57: a session whose save went beside its file (a .doc saved as
+// rapor.docx, a conflict copy) keeps saving there, and its file - never
+// written by it - still opens: joined while people are in it, a new
+// session once nobody is and every change is saved (as a Document Server's
+// next opening after a save beside the document).
+func TestSavedTo_ASessionSavedBesideItsFileKeepsItsSavesThere(t *testing.T) {
+	g := newRig(t)
+	r := g.relay()
+	a := started(t, r, "rapor.doc", person(7, true))
+	lease(t, r, a.SID, a.Me.Client, 0)
+	seq, err := r.Append(ctx, a.SID, a.Me.Client, AppendRequest{Kind: KindChanges, Base: head(t, r, a.SID), Ctr: 1, CT: []byte("c")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.SavedTo(ctx, a.SID, a.Me.Client, seq, "4096:9", "rapor.docx"); err != nil {
+		t.Fatal(err)
+	}
+	s, err := r.Session(ctx, a.SID)
+	if err != nil || s.SavedTo != "rapor.docx" || s.SavedSig != "4096:9" {
+		t.Fatalf("the session's saves go beside the file: %+v %v", s, err)
+	}
+	// A later save "over the file" never takes it back.
+	if _, err := r.Saved(ctx, a.SID, a.Me.Client, seq, "4100:10"); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ = r.Session(ctx, a.SID); s.SavedTo != "rapor.docx" {
+		t.Fatalf("still beside: %+v", s)
+	}
+	// rapor.doc is as it was (the base): an opener joins while a member is in.
+	n, err := r.Open(ctx, docReq("rapor.doc"), person(8, true))
+	if err != nil || n.SID != a.SID {
+		t.Fatalf("joined the session in progress: %+v %v", n, err)
+	}
+	for _, m := range []string{a.Me.Client, n.Me.Client} {
+		if err := r.Leave(ctx, a.SID, m, "left"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fresh, err := r.Open(ctx, docReq("rapor.doc"), person(9, true))
+	if err != nil || !fresh.Created || fresh.SID == a.SID {
+		t.Fatalf("nobody in it, everything saved beside: the file opens in a new session: %+v %v", fresh, err)
+	}
+}
+
 func TestSaved_MovesForwardAndNeverPastTheLog(t *testing.T) {
 	g := newRig(t)
 	r := g.relay()

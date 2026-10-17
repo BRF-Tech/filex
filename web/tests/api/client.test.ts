@@ -346,6 +346,21 @@ describe('api/client', () => {
     expect(onError, 'and a 500 is the caller’s to report, not the network’s').not.toHaveBeenCalled();
   });
 
+  // task #260: a cancelled request is not a lost connection - not even a
+  // write. axios says ERR_CANCELED for its own cancel and ECONNABORTED
+  // "Request aborted" for an XHR the browser aborted (a page being left).
+  it('a cancelled request raises nothing, and says nothing', async () => {
+    const { core, onError, handler } = await withClient();
+    for (const err of [
+      { config: { method: 'post' }, response: undefined, code: 'ERR_CANCELED', name: 'CanceledError', message: 'canceled' },
+      { config: { method: 'get' }, response: undefined, code: 'ECONNABORTED', message: 'Request aborted' },
+    ]) {
+      await expect(handler.rejected(err)).rejects.toBe(err);
+    }
+    expect(onError).not.toHaveBeenCalled();
+    expect(core.connectionDown.value).toBe(false);
+  });
+
   it('installAxiosInterceptors is idempotent', async () => {
     const { api, installAxiosInterceptors } = await freshClient();
     installAxiosInterceptors({ router: fakeRouter() });

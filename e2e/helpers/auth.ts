@@ -90,6 +90,49 @@ export async function loginAs(page: Page, email = ADMIN_EMAIL, password = ADMIN_
   await page.waitForURL(/\/admin\/(home|dashboard)([?#]|$)/);
 }
 
+/**
+ * Signed in through the page's own cookie jar, with `url` as the FIRST page
+ * the tab opens - the way into a page under test for any spec that does not
+ * test the sign-in form itself.
+ *
+ * ⚠⚠ Why not `loginAs` then `goto` (task #182): the form lands on the start
+ * page, and a `goto` right after leaves that page while it is still asking
+ * the server for things (the bell, the start page's lists, the socket).
+ * WebKit drops its network process on such a navigation now and then - "WebKit
+ * encountered an internal error" on the `goto` (207, full chain
+ * gl-2924679562), every request after it failing (filex lesson #1541) - and in
+ * every engine the page under test can be reached before what it waits for
+ * has answered.
+ *
+ * `answer` names a GET the page under test makes on its own as it starts (the
+ * app rows' `/api/files/plugins/actions`, say): it is waited for, by its
+ * answer and not by a quiet network (lesson #1508), before this returns.
+ */
+export async function openSignedIn(
+  page: Page,
+  url: string,
+  { email = ADMIN_EMAIL, password = ADMIN_PASSWORD, answer = '' }: { email?: string; password?: string; answer?: string } = {},
+) {
+  await dismissInstallBanner(page);
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('filex.tourDone', '1');
+    } catch {
+      /* storage blocked - the tour will just be offered */
+    }
+  });
+  const res = await page.request.post('/api/auth/login', { data: { email, password } });
+  if (!res.ok()) throw new Error(`sign-in as ${email}: ${res.status()} ${await res.text()}`);
+  const answered = answer
+    ? page.waitForResponse((r) => r.url().includes(answer) && r.request().method() === 'GET', { timeout: 20_000 })
+    : null;
+  await page.goto(url);
+  if (answered) {
+    const r = await answered;
+    if (!r.ok()) throw new Error(`${answer} answered ${r.status()}`);
+  }
+}
+
 /** Network errors that come from the machine's own network stack. */
 const HOST_NETWORK_ERRORS = /ERR_NO_BUFFER_SPACE|ERR_ADDRESS_IN_USE|ERR_INSUFFICIENT_RESOURCES/;
 

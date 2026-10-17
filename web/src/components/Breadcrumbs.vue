@@ -29,6 +29,9 @@ interface Crumb {
  * screenshot pass). A crumb that names the route the previous crumb already
  * names is dropped — which leaves the dashboard a single crumb and hides the
  * trail there, and also covers a page whose `meta.parent` is the dashboard.
+ * A crumb that SAYS what the previous one says goes the same way: the
+ * Settings page is the "General" page of the General column (task #258), and
+ * "General › General" names one place twice.
  */
 const crumbs = computed<Crumb[]>(() => {
   const out: Crumb[] = [{ label: t('nav.dashboard'), name: 'dashboard', to: { name: 'dashboard' } }];
@@ -45,7 +48,7 @@ const crumbs = computed<Crumb[]>(() => {
   if (route.meta?.breadcrumb) {
     out.push({ label: t(route.meta.breadcrumb as string), name: String(route.name ?? '') });
   }
-  return out.filter((c, i) => i === 0 || c.name !== out[i - 1].name);
+  return out.filter((c, i) => i === 0 || (c.name !== out[i - 1].name && c.label !== out[i - 1].label));
 });
 
 const single = computed(() => crumbs.value.length <= 1);

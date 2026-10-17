@@ -96,6 +96,7 @@ async function router(at: string) {
       { path: '/audit', name: 'audit', component: Blank },
       { path: '/sync', name: 'sync', component: Blank, meta: { parent: 'dashboard', breadcrumb: 'nav.sync' } },
       { path: '/storages/new', name: 'storages.new', component: Blank },
+      { path: '/settings', name: 'settings', component: Blank, meta: { breadcrumb: 'nav.general' } },
     ],
   });
   await r.push(at);
@@ -195,6 +196,12 @@ describe('breadcrumbs', () => {
   it('names the menu section between the dashboard and the page', async () => {
     expect(await crumbs('/storages')).toEqual(['Dashboard', 'Storage', 'Storages']);
     expect(await crumbs('/storages/8')).toEqual(['Dashboard', 'Storage', 'Storages', 'Edit storage']);
+  });
+
+  // Task #258: the Settings page is the "General" page of the Settings
+  // menu's General column - the trail says "General" once, not twice.
+  it('a step that says what the previous one says is not repeated', async () => {
+    expect(await crumbs('/settings')).toEqual(['Dashboard', 'General']);
   });
 
   it('the section is words, not a link: a menu heading is not a page', async () => {

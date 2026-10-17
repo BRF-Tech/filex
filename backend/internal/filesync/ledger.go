@@ -237,7 +237,9 @@ func (l *ledger) resolvePending(ctx context.Context) {
 		byDir[d] = append(byDir[d], rel)
 	}
 	for d, rels := range byDir {
-		listing, err := l.e.API.List(ctx, joinRemote(l.e.Pair.Remote, d))
+		// Rows are kept in this computer's names; the listing is the
+		// server's (localnames.go).
+		listing, err := l.e.API.List(ctx, l.e.remotePath(d))
 		if err != nil {
 			continue
 		}
@@ -246,7 +248,7 @@ func (l *ledger) resolvePending(ctx context.Context) {
 			seen[f.Basename] = f
 		}
 		for _, rel := range rels {
-			f, ok := seen[path.Base(rel)]
+			f, ok := seen[path.Base(l.e.names.remoteRel(rel))]
 			if !ok || f.IsDir {
 				continue
 			}

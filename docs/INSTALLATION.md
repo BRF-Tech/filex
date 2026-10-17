@@ -6,7 +6,7 @@ Pick the path that matches how far you want to go. Trying it out?
 | Path | What you get | Best for |
 |---|---|---|
 | [**Minimal**](#minimal) | One container, SQLite, a local folder. No external services. | Trying it out, small/personal use |
-| [**Full stack (Compose)**](#full-stack-docker-compose) | filex + PostgreSQL + Redis + OnlyOffice + an S3 server + Caddy (auto-HTTPS). | Real self-hosting, teams |
+| [**Full stack (Compose)**](#full-stack-docker-compose) | filex + PostgreSQL + Redis + an S3 server + Caddy (auto-HTTPS); an ONLYOFFICE Document Server optional. | Real self-hosting, teams |
 | [**Kubernetes (Helm)**](#kubernetes-helm) | Helm chart with toggles for the same components. | Clusters |
 | [**App stores**](#app-stores) | Ready-made packages for Umbrel, CasaOS, Runtipi, Unraid, Portainer. | Home servers / NAS |
 | [**Binary**](#binary) | A single static binary. | No Docker, systemd, edge devices |
@@ -68,17 +68,27 @@ WebDAV, FTP, SMB - are added from the admin UI (see [STORAGE.md](STORAGE.md)).
 
 > Set `FILEX_PUBLIC_URL` to the URL people actually open. Behind a reverse proxy
 > that's your `https://…` domain - it's baked into share links, the OIDC
-> redirect, and OnlyOffice callbacks.
+> redirect, and the callbacks of an ONLYOFFICE Document Server, if you connect
+> one.
+
+**Office documents.** To edit Word, Excel and PowerPoint files, install the
+**Office editor app** once you are signed in (*Admin → Plugins → Apps*, or
+from the [filex Apps](https://apps.filex.sh) store): it edits them in the
+browser, alone or together, and needs no other container; from its 0.4.0 it
+also brings the office engine filex runs on the server for office thumbnails
+and the apps' office conversions. filex does not install it by itself. See
+[ONLYOFFICE.md → The Office editor app](ONLYOFFICE.md#the-office-editor-app).
 
 ---
 
 ## Full stack (Docker Compose)
 
 A production-shaped, one-command stack: filex + **PostgreSQL** (database) +
-**Redis** (queue) + **OnlyOffice** (document editing) + an **S3 server** (Versity S3 Gateway) +
-**Caddy** (reverse proxy with automatic HTTPS), and optionally **ClamAV**
-(antivirus - the filex image ships no scanner, so it runs as its own container
-under the `clamav` profile). Files in [`deploy/compose/`](../deploy/compose/).
+**Redis** (queue) + an **S3 server** (Versity S3 Gateway) + **Caddy** (reverse
+proxy with automatic HTTPS), and optionally **ClamAV** (antivirus - the filex
+image ships no scanner, so it runs as its own container under the `clamav`
+profile) and an **ONLYOFFICE Document Server** (the `onlyoffice` profile).
+Files in [`deploy/compose/`](../deploy/compose/).
 
 **1. Configure.**
 
@@ -88,10 +98,9 @@ cp .env.example .env
 $EDITOR .env          # set domains + secrets
 ```
 
-Set `FILEX_DOMAIN` / `ONLYOFFICE_DOMAIN` and strong secrets
-(`openssl rand -hex 24`). The **`ONLYOFFICE_JWT_SECRET` must be identical**
-between filex and OnlyOffice - the compose file already wires the same variable
-to both.
+Set `FILEX_DOMAIN` and strong secrets (`openssl rand -hex 24`).
+`COMPOSE_PROFILES` picks the add-ons; the default runs draw.io and the S3
+server.
 
 > **Zero-touch config.** The admin account, SSO/LDAP/header auth, SMTP, branding
 > and an initial storage can all be set through `FILEX_*` env in `.env`, so the
@@ -99,8 +108,8 @@ to both.
 > [CONFIGURATION.md](CONFIGURATION.md) (Authentication + Zero-touch seeding) and
 > the [`deploy/compose/`](../deploy/compose/) examples.
 
-**2. DNS.** Point `FILEX_DOMAIN` and `ONLYOFFICE_DOMAIN` at the host. Open
-ports **80 and 443** so Caddy can issue certificates.
+**2. DNS.** Point `FILEX_DOMAIN` (and the domain of every add-on you turned
+on) at the host. Open ports **80 and 443** so Caddy can issue certificates.
 
 **3. Launch.**
 
@@ -126,8 +135,24 @@ Add** an S3 storage:
 What it is, and how to move off the MinIO an older stack bundled:
 [STORAGE.md → A local S3 server](STORAGE.md#a-local-s3-server).
 
-OnlyOffice is already connected - open any Office file to edit it. See
-[ONLYOFFICE.md](ONLYOFFICE.md) and [STORAGE.md](STORAGE.md).
+**5. Office documents.** Install the **Office editor app** (*Admin → Plugins
+→ Apps*, or the [filex Apps](https://apps.filex.sh) store): Word, Excel and
+PowerPoint files then open in it, in the browser, with no Document Server
+([ONLYOFFICE.md → The Office editor app](ONLYOFFICE.md#the-office-editor-app)).
+
+**Optional: an ONLYOFFICE Document Server** - the Office editor app (0.4.0)
+does what one did for filex (office thumbnails, the apps' office conversions,
+the older `.doc`/`.xls`/`.ppt` formats and `.csv`); connect one to edit in
+it, or for the fonts added to it
+([ONLYOFFICE.md → Where it differs from a Document Server](ONLYOFFICE.md#where-it-differs-from-a-document-server)). Add `onlyoffice` to `COMPOSE_PROFILES`, uncomment
+`ONLYOFFICE_DOMAIN`, `FILEX_ONLYOFFICE_URL` and `ONLYOFFICE_JWT_SECRET` in
+`.env` (the **`ONLYOFFICE_JWT_SECRET` must be identical** between filex and
+the Document Server - the compose file already wires the same variable to
+both), point `ONLYOFFICE_DOMAIN` at the host, and run the `up -d` again. The
+image is pinned to the version filex is tested against (`ONLYOFFICE_IMAGE`
+picks another). See
+[ONLYOFFICE.md → The ONLYOFFICE Document Server](ONLYOFFICE.md#the-onlyoffice-document-server-optional)
+and [STORAGE.md](STORAGE.md).
 
 > **Want a lighter "full"?** Delete the services you don't need from the compose
 > file and drop the matching `FILEX_*` env from the `filex` service - everything
@@ -139,7 +164,9 @@ OnlyOffice is already connected - open any Office file to edit it. See
 
 The chart is in the BRF-Tech Helm repository, published with every release. It
 deploys filex with a PVC for `/data` and an Ingress, and can pull in PostgreSQL,
-Redis, OnlyOffice and an S3 server (Versity S3 Gateway) as optional dependencies.
+Redis and an S3 server (Versity S3 Gateway) as optional dependencies, and wire
+filex to an ONLYOFFICE Document Server you run yourself. Office documents need
+none: install the Office editor app.
 
 ```bash
 helm repo add brf-tech https://helm.brf.sh
@@ -163,9 +190,13 @@ bundled dependencies:
 ```bash
 helm pull brf-tech/filex --untar          # writes ./filex/values-full.yaml
 helm install filex brf-tech/filex -f filex/values-full.yaml \
-  --set ingress.host=files.example.com \
-  --set onlyoffice.ingress.host=office.example.com
+  --set ingress.host=files.example.com
 ```
+
+An ONLYOFFICE Document Server you run (pin `onlyoffice/documentserver:9.4.0.1`,
+JWT on) is wired with `--set onlyoffice.enabled=true`,
+`--set onlyoffice.url=https://office.example.com` and
+`--set onlyoffice.jwtSecret=<its JWT_SECRET>`.
 
 **Versions.** The chart has its own version; its `APP VERSION` is the filex
 release it installs (the image tag follows it unless you set `image.tag`).
@@ -189,7 +220,11 @@ toggles: `postgresql.enabled`, `redis.enabled`, `onlyoffice.enabled`,
 `./deploy/helm/filex` works wherever these examples say `brf-tech/filex`.
 
 `trustedProxies` sets `FILEX_TRUSTED_PROXIES`, the proxies whose
-`X-Forwarded-For` filex believes. Empty, it is `auto`: in a pod, the pod's own
+`X-Forwarded-For` filex believes - a
+[seed](CONFIGURATION.md#variables-that-seed-a-stored-setting) since 0.57:
+written into the **Sign-in security** list at the first start, so a later
+`helm upgrade` that changes it needs the page or `kubectl exec <pod> --
+filex settings reseed login.trusted_proxies`. Empty, it is `auto`: in a pod, the pod's own
 interface subnet - a node's `/24` with flannel, the pod alone (`/32`) with
 Calico or Cilium - so an ingress controller on **another node** is not trusted
 and every visitor would resolve to its address. List your cluster's pod
@@ -295,11 +330,13 @@ sudo apt install ffmpeg ghostscript poppler-utils \
   imagemagick libheif-plugin-libde265
 ```
 
-Office documents are not a program here: their previews, and the apps' office
-conversions (the Convert app's Word/Excel/PowerPoint/OpenDocument targets),
-come from the ONLYOFFICE Document Server you connect under **External
-services** ([ONLYOFFICE.md](ONLYOFFICE.md)). filex runs no LibreOffice, even
-one installed on this machine.
+Office documents are not a program here: they are edited in the Office editor
+app, and their previews and the apps' office conversions (the Convert app's
+Word/Excel/PowerPoint/OpenDocument targets) come from an office engine - the
+one the Office editor app brings (0.4.0), run on the server, or an ONLYOFFICE
+Document Server you connect under **External services**
+([ONLYOFFICE.md](ONLYOFFICE.md#the-office-engine-without-a-document-server)). filex runs no LibreOffice, even one
+installed on this machine.
 
 ⚠ `libheif-plugin-libde265` is the HEVC decoder a HEIC photo needs. Ubuntu
 24.04's `libheif1` only *suggests* it, so `apt install imagemagick` alone
@@ -402,7 +439,9 @@ Forward `/` to `filex:5212` and:
   a trusted proxy (`FILEX_TRUSTED_PROXIES`; by default `auto`: this machine
   and, in a container, the other containers on its network - list a proxy on
   the host in front of the container, on another machine, or a CDN in front of
-  your proxy - [Trusted proxies](CONFIGURATION.md#trusted-proxies)),
+  your proxy; since 0.57 the variable seeds the **Sign-in security** list at
+  the first start, and that list wins after it -
+  [Trusted proxies](CONFIGURATION.md#trusted-proxies)),
 - allow large bodies (e.g. `5G`) and long timeouts for uploads,
 - allow WebSocket/SSE upgrades - `/api/ws` (the socket an open explorer runs
   on; blocked, it silently falls back to re-listing every 12 s) and the MCP
@@ -463,6 +502,63 @@ across. Nothing is deleted for you, and the chart refuses to render until you
 have kept the old volume - follow
 [STORAGE.md → Moving off the bundled MinIO](STORAGE.md#moving-off-the-bundled-minio)
 before you upgrade.
+
+---
+
+## Nightly builds
+
+To try what the next release brings before it ships:
+
+```bash
+docker pull ghcr.io/brf-tech/filex:nightly              # the server, the newest
+docker pull ghcr.io/brf-tech/filex:nightly-20261014     # one night's, kept
+sudo snap install filex-app --edge                      # the desktop app (x64 and arm64)
+```
+
+The desktop app of the same night, for Windows (x64, arm64), macOS and Linux
+(AppImage, `.deb`, `.rpm`; x64 and arm64), is at
+**[filex.sh/nightly](https://filex.sh/nightly/)**: the night, the commit, a
+download per platform and the checksums. The last nights are kept as OCI
+artifacts:
+
+```bash
+oras pull ghcr.io/brf-tech/filex-desktop-nightly:nightly            # the newest night's packages
+oras pull ghcr.io/brf-tech/filex-desktop-nightly:nightly-20261014   # one night's
+```
+
+A nightly is the tip of the source after the nightly test run passed on it -
+every suite, every browser - built only on a night with a change since the
+last one: the server image (the full one, x64), the snap on the Snap Store's
+`edge` channel ([DESKTOP.md → The Snap Store's channels](DESKTOP.md#the-snap-stores-channels))
+and the desktop packages, made from the same public tree. The desktop
+packages are not signed: Windows SmartScreen and macOS Gatekeeper warn
+before they open one (on macOS: right-click the app, *Open*).
+
+**Which commit it is**, read off the image itself:
+
+```bash
+docker run --rm --entrypoint /usr/local/bin/filex ghcr.io/brf-tech/filex:nightly --version
+docker inspect --format '{{json .Config.Labels}}' ghcr.io/brf-tech/filex:nightly
+```
+
+The version is the next minor as a pre-release, with the night and the commit
+(`0.57.0-nightly.20261014+2ca25999`); the admin panel's *About* shows it too,
+and so does filex.sh/nightly (the desktop packages and the snap carry the
+same, cut to the Snap Store's 32 characters when it is longer). The
+labels say the same commit (`org.opencontainers.image.revision`), the
+released public commit it was built on (`sh.filex.nightly.public-base`: a
+nightly is that release plus what [CHANGELOG.md](../CHANGELOG.md) lists under
+*Unreleased*) and its night's test result (`sh.filex.nightly.tests`).
+
+> ⚠ **Not supported, and not for the data you keep.** A nightly may carry a
+> database migration the release it is heading for still changes, and a
+> release's own migration may not run cleanly over it: going from a nightly
+> back to a release is not a supported path. Run it on a copy - a fresh
+> volume, or a backup restored for the purpose ([Data & backup](#data--backup)).
+> An instance on a nightly is offered the release it leads to when that ships
+> (the version sorts below it, [UPDATES.md](UPDATES.md)); a newer nightly is
+> a `docker pull` of `:nightly` again. A desktop app from filex.sh/nightly does
+> not update itself to the next nightly: download the next one.
 
 ---
 

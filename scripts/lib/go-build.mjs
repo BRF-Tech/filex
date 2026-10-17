@@ -20,7 +20,7 @@
 // scripts/release/plan.mjs (which toolchain runs the release's Go gates).
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 
@@ -136,11 +136,42 @@ export function goToolchain() {
  * The release's Go gates (scripts/release/plan.mjs) and the train's merge
  * queue (scripts/train/merge-queue.mjs) both run Go through this.
  */
-export function goShellArgv({ dir, checkout, script, more = '', toolchain = goToolchain(), bash = 'bash' }) {
+/**
+ * The Go version the module in `dir` asks for, as a GOTOOLCHAIN value
+ * ("go1.25.0"), or null when no go.mod can be read. `dir` may be the module
+ * directory or one below it.
+ *
+ * WHY every Go gate is pinned to it: the machine's own Go is not the Go the
+ * release ships. The images build with golang:1.25 and CI reads
+ * `go-version-file: backend/go.mod`, while a workstation or a release
+ * workspace may have anything newer. Go 1.26 changed http.Client (a jar's
+ * cookies are now chosen by req.Host), which turned two passing tests red on
+ * a 1.27 machine for a release built with 1.25 (task #254): the gate was
+ * answering about a toolchain nobody ships. go.mod is the single source.
+ */
+export function goModToolchain(dir) {
+  let at = path.resolve(String(dir ?? '.'));
+  for (let up = 0; up < 4; up++) {
+    const f = path.join(at, 'go.mod');
+    if (existsSync(f)) {
+      const m = /^go\s+(\d+)\.(\d+)(?:\.(\d+))?\s*$/m.exec(readFileSync(f, 'utf8'));
+      return m ? `go${m[1]}.${m[2]}.${m[3] ?? '0'}` : null;
+    }
+    const parent = path.dirname(at);
+    if (parent === at) break;
+    at = parent;
+  }
+  return null;
+}
+
+export function goShellArgv({ dir, checkout, script, more = '', toolchain = goToolchain(), bash = 'bash', gotoolchain = goModToolchain(dir) }) {
+  // GOTOOLCHAIN from the module's go.mod, so the gate answers about the Go
+  // the release ships, not about the machine's (task #254).
+  const pin = gotoolchain ? ` GOTOOLCHAIN=${gotoolchain}` : '';
   const fwd = (p) => String(p).split('\\').join('/');
-  if (toolchain === 'native') return [bash, '-c', `export FILEX_CHECKOUT=${shq(fwd(checkout))}${more} && cd ${shq(fwd(dir))} && ${script}`];
+  if (toolchain === 'native') return [bash, '-c', `export FILEX_CHECKOUT=${shq(fwd(checkout))}${pin}${more} && cd ${shq(fwd(dir))} && ${script}`];
   if (toolchain === 'wsl') {
-    return ['wsl', '-e', 'bash', '-lc', `${wslMirrorCd(dir)} && export PATH=/usr/local/go/bin:$PATH GOFLAGS=-buildvcs=false FILEX_CHECKOUT=${shq(toWslPath(checkout))}${more} && ${script}`];
+    return ['wsl', '-e', 'bash', '-lc', `${wslMirrorCd(dir)} && export PATH=/usr/local/go/bin:$PATH GOFLAGS=-buildvcs=false FILEX_CHECKOUT=${shq(toWslPath(checkout))}${pin}${more} && ${script}`];
   }
   return ['node', '-e', 'console.error("no Go toolchain: go is not on PATH, and WSL has none either"); process.exit(1)'];
 }

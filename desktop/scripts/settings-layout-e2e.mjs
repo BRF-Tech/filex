@@ -19,7 +19,7 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
-import { SHOTS, check, finish, launchApp, signIn, sleep } from './lib/harness.mjs';
+import { SHOTS, check, finish, launchApp, setAccountLanguage, signIn, sleep } from './lib/harness.mjs';
 
 fs.mkdirSync(SHOTS, { recursive: true });
 const { app } = await launchApp({ lang: 'en-US' });
@@ -71,7 +71,7 @@ try {
   }, [w, h]);
 
   for (const lang of ['en', 'tr']) {
-    await win.evaluate((l) => document.querySelector(`#settings [data-locale="${l}"]`)?.click(), lang);
+    await setAccountLanguage(win, lang);
     await sleep(1200);
     for (const [w, h] of [[720, 600], [1440, 900]]) {
       await resize(w, h);

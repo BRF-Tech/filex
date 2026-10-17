@@ -4,7 +4,7 @@
  * ⚠⚠ THE BUG. The owner, testing v0.43.0: "explore kısmında api anahtarlarında
  * ya da nasıl bağlanılar (yani popup ekranlar) içindeki aksiyon tuşlarının
  * menüsü popup'ın altında kalıyor ve açılmıyor gibi gözüküyor" — in the
- * explorer's pop-up screens (API keys, How to connect) the row Actions menu
+ * explorer's pop-up screens (API keys, Connections) the row Actions menu
  * looks as if it does not open at all.
  *
  * It opened every single time. `ContextMenu` teleports itself to `<body>` so
@@ -160,7 +160,7 @@ test.describe('a row menu opened inside a dialog', () => {
     await dismissInstallBanner(page);
     await expect(page.getByTestId('sidenav')).toBeVisible({ timeout: 25_000 });
 
-    // ── 1. "How to connect" → the credential panel the guides need ────────
+    // ── 1. "Connections" → the credential panel the guides need ────────
     await page.getByTestId('sidenav-connect').click();
     await expect(page.getByTestId('connections-panel')).toBeVisible();
     await pickOption(page.getByTestId('guide-protocol'), 'webdav');
@@ -177,7 +177,7 @@ test.describe('a row menu opened inside a dialog', () => {
 
     const connRow = tokens.locator('.fe-list__row').first();
     await expect(connRow).toBeVisible();
-    await measureEscapes(page, 'How to connect', connRow);
+    await measureEscapes(page, 'Connections', connRow);
 
     // The dialog closing takes the menu with it — a teleported node outliving
     // its opener would be a ghost menu floating over the file list.

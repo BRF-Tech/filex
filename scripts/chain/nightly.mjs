@@ -8,6 +8,8 @@
 //   node scripts/chain/nightly.mjs build   --env FILE [--force]   the nightly build of the last green night, now
 //   node scripts/chain/nightly.mjs publish --env FILE [--force]   push the last nightly build (NIGHTLY_PUSH_REPO)
 //   node scripts/chain/nightly.mjs status  --env FILE             tonight and the last nights
+//   node scripts/chain/nightly.mjs follow  --env FILE             GitHub's desktop packages of the last
+//                                  source, and the filex.sh/nightly page (report.mjs does it each morning)
 //   node scripts/chain/nightly.mjs s3-live --env FILE --s3-env CREDS
 //                                  the live S3 tests on main now, with these credentials
 //
@@ -34,14 +36,26 @@
 //      first one too. `manual` (the code's default, for a checkout that names
 //      no registry) leaves `publish` to a person; a push that fails is in the
 //      morning report, and `publish` pushes that build again;
-//   5. keeps the night's record and prunes old runs and images.
+//   5. with a nightly build made, its desktop side (#266,
+//      scripts/chain/nightly-desktop.sh, from the same public form): the
+//      amd64 snap, uploaded to the Snap Store's edge channel
+//      (NIGHTLY_SNAP=edge), and that public form as a source archive pushed
+//      to ghcr (NIGHTLY_DESKTOP=github, NIGHTLY_DESKTOP_SRC_REPO), from which
+//      GitHub's runners make every desktop package and the arm64 snap
+//      (.github/workflows/nightly-desktop.yml) - followed up, and put on
+//      filex.sh/nightly, in the morning (`follow`). An upload the Store holds
+//      for a review is said in every morning report until edge serves it;
+//   6. keeps the night's record and prunes old runs, images and desktop runs.
 //
 // What it leaves under <CHAIN_ROOT>/nightly/: tonight.json (the night so far,
 // rewritten at each step), history.jsonl (one line per night), state.json
-// (the last nightly build, the last realenv night, the commit the S3 code is
-// measured from), nightly.lock (this
-// process, while it runs). The chain's own runs/<run-id>/ and
-// runs/latest-nightly.json are under <CHAIN_ROOT>/runs/, as for any run.
+// (the last nightly build, the last nightly snap, the last source pushed and
+// the last page published, the last realenv night, the commit the S3 code is
+// measured from), nightly.lock
+// (this process, while it runs). The chain's own runs/<run-id>/ and
+// runs/latest-nightly.json are under <CHAIN_ROOT>/runs/, as for any run; the
+// desktop runs under NIGHTLY_DESKTOP_DIR (<CHAIN_ROOT>/desktop/<date>-<commit>/:
+// files/, SHA256SUMS, the logs; site/: the last page made).
 //
 // Exit: 0 the night was recorded green or did not need to run, 1 it was
 // recorded red, 2 it could not run (see tonight.json).
@@ -61,8 +75,14 @@ import { mergeEnv, parseEnvFile } from './env.mjs';
 import {
   S3_LIVE_KEYS,
   decideBuild,
+  decideDesktop,
   decideRun,
   decideS3Live,
+  desktopDirsToPrune,
+  desktopVersion,
+  followLines,
+  followTrouble,
+  followVerdict,
   expectedRunMin,
   extrasFor,
   imagesToPrune,
@@ -70,22 +90,25 @@ import {
   lastRan,
   localDate,
   nightRecord,
+  nightlyLabels,
   nightlyRunId,
   nightlySettings,
   nightlyTags,
   nightlyVersion,
   nextS3LiveState,
   registryLogin,
+  renderNightlyPage,
   resultFields,
   runsToPrune,
   s3LiveFile,
   s3Touched,
+  snapEdgeState,
   startWindow,
 } from './nightly-lib.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-const USAGE = `usage: node scripts/chain/nightly.mjs <run|build|publish|status|s3-live> [options]
+const USAGE = `usage: node scripts/chain/nightly.mjs <run|build|publish|status|follow|s3-live> [options]
 
   run       tonight's nightly run (what its timer starts)
   build     the nightly build of the last green night, now (--force: even
@@ -93,6 +116,9 @@ const USAGE = `usage: node scripts/chain/nightly.mjs <run|build|publish|status|s
   publish   push the last nightly build to NIGHTLY_PUSH_REPO under
             :nightly and :nightly-<date> (--force: again)
   status    tonight and the last nights
+  follow    GitHub's desktop packages of the last source pushed: built,
+            building or failed; built, the filex.sh/nightly page is made and
+            published (NIGHTLY_SITE_CMD) - what report.mjs does every morning
   s3-live   the live S3 tests on the tip of main, now, with the credentials
             in --s3-env (the build and its fast gates, then s3-live alone);
             green, the nightly run measures the S3 code from that commit
@@ -114,7 +140,7 @@ export function parseNightlyArgs(argv) {
     args.cmd = argv[0];
     i = 1;
   }
-  if (!['run', 'build', 'publish', 'status', 's3-live'].includes(args.cmd)) throw new Error(`unknown command ${args.cmd}`);
+  if (!['run', 'build', 'publish', 'status', 'follow', 's3-live'].includes(args.cmd)) throw new Error(`unknown command ${args.cmd}`);
   for (; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--env') {
@@ -289,6 +315,11 @@ async function runNight(cfg, args, envFile) {
     // the next night main has not moved.
     const lastResult = last?.result ? readJson(last.result) : null;
     tonight.build = await buildIfDue(cfg, { result: lastResult, state, stateFile, runDir: last?.run_id ? path.join(cfg.runs, last.run_id) : null, deadline: null, envFile, dry: args.dryRun, retry: true });
+    if (tonight.build?.decision === 'built') {
+      tonight.desktop = await desktopIfDue(cfg, { build: tonight.build, state, stateFile, deadline: null });
+    }
+    // A snap the Store holds for review is said every morning (#266).
+    if (!args.dryRun) tonight.snapEdge = await snapEdgeCheck(cfg, state, tonight.desktop);
     record({ decision: 'skipped', why: d.why });
     return 0;
   }
@@ -355,6 +386,12 @@ async function runNight(cfg, args, envFile) {
   tonight.phase = 'build';
   save();
   tonight.build = await buildIfDue(cfg, { result, state, stateFile, runDir, deadline: win.deadline, envFile });
+
+  // 6. Its desktop side (#266): the snap for edge, the weekly packages.
+  tonight.phase = 'desktop';
+  save();
+  tonight.desktop = await desktopIfDue(cfg, { build: tonight.build, state, stateFile, deadline: win.deadline });
+  tonight.snapEdge = await snapEdgeCheck(cfg, state, tonight.desktop);
   record({});
   prune(cfg, runId, state);
   if (result?.ok) return 0;
@@ -480,7 +517,8 @@ async function buildIfDue(cfg, { result, state, stateFile, runDir, deadline, env
     return { decision: 'skipped', why: `dry run (${d.why})` };
   }
   log(`nightly build of ${short(result.sha)}: ${d.why}`);
-  const rec = await buildImage(cfg, { sha: result.sha, runDir: runDir ?? path.join(cfg.state, 'builds', short(result.sha)), deadline });
+  const labels = nightlyLabels({ counts: result.counts, runId: result.run_id ?? (runDir ? path.basename(runDir) : '') });
+  const rec = await buildImage(cfg, { sha: result.sha, runDir: runDir ?? path.join(cfg.state, 'builds', short(result.sha)), deadline, labels });
   rec.why = d.why;
   if (rec.decision !== 'built') return rec;
   state.last_build_sha = result.sha;
@@ -541,10 +579,12 @@ function runGroup(cmd, argv, { cwd, env, logFile, timeoutMs }) {
 }
 
 /** scripts/chain/nightly-build.sh from tonight's tree, under the build lock: the image, tagged <NIGHTLY_IMAGE>:<sha8>. */
-async function buildImage(cfg, { sha, runDir, deadline }) {
+async function buildImage(cfg, { sha, runDir, deadline, labels = {} }) {
   const out = path.join(runDir, 'nightly-build');
   fs.mkdirSync(out, { recursive: true });
   const logFile = path.join(out, 'build.log');
+  const labelsFile = path.join(out, 'labels.txt');
+  fs.writeFileSync(labelsFile, Object.entries(labels).map(([k, v]) => `${k}=${v}\n`).join(''));
   const head = git(cfg.src, ['rev-parse', 'HEAD']).stdout.trim();
   if (head !== sha) return { decision: 'failed', why: `the checkout is at ${short(head)}, not at ${short(sha)}, the commit that ran green`, sha };
   const nowMs = Date.now();
@@ -556,15 +596,11 @@ async function buildImage(cfg, { sha, runDir, deadline }) {
     return { decision: 'failed', why: e.message, sha };
   }
   const tag = short(sha);
-  const script = path.join(cfg.src, 'scripts', 'chain', 'nightly-build.sh');
-  const budgetMs = deadline ? Math.max(60_000, deadline - nowMs) : 120 * 60_000;
-  const waitSecs = Math.max(0, Math.floor(Math.min(30 * 60_000, budgetMs - cfg.build.expectMin * 60_000) / 1000));
-  const [cmd, argv] = cfg.lock === 'none' ? ['bash', [script]] : ['flock', ['-E', '75', '-w', String(waitSecs), cfg.lock, 'bash', script]];
-  const r = await runGroup(cmd, argv, {
-    cwd: cfg.src,
+  const r = await runLocked(cfg, 'nightly-build.sh', {
     logFile,
-    timeoutMs: budgetMs,
-    env: childEnv({
+    deadline,
+    expectMin: cfg.build.expectMin,
+    env: {
       NB_SRC: cfg.src,
       NB_SHA: sha,
       NB_PUBLIC_DIR: cfg.build.publicDir,
@@ -575,15 +611,33 @@ async function buildImage(cfg, { sha, runDir, deadline }) {
       NB_VERSION: version,
       NB_DATE: iso(nowMs),
       NB_DOCKERFILE: cfg.build.dockerfile,
-    }),
+      NB_LABELS_FILE: labelsFile,
+    },
   });
-  if (r.status === 75) return { decision: 'failed', why: `the build lock ${cfg.lock} was not free within ${Math.round(waitSecs / 60)} min`, sha, log: logFile };
-  if (r.timedOut || r.status === null) {
-    return { decision: 'failed', why: `stopped after ${Math.round((Date.now() - nowMs) / 60_000)} min (${r.timedOut ? 'out of time before the quiet window' : r.signal})`, sha, log: logFile };
-  }
+  if (r.trouble) return { decision: 'failed', why: r.trouble, sha, log: logFile };
   if (r.status !== 0) return { decision: 'failed', why: `nightly-build.sh exited ${r.status}: ${tailOf(logFile, 2)}`, sha, log: logFile };
   const id = spawnSync('docker', ['image', 'inspect', '--format', '{{.Id}}', `${cfg.build.image}:${tag}`], { encoding: 'utf8' }).stdout.trim();
   return { decision: 'built', image: `${cfg.build.image}:${tag}`, id, version, tag, ymd, sha, at: iso(), log: logFile };
+}
+
+/**
+ * A script of tonight's tree (scripts/chain/<name>) under the build lock, in
+ * a process group of its own, until `deadline` (or two hours): it waits for
+ * the lock at most as long as it could still end in time. `trouble` says why
+ * it did not finish - the lock never came free, or it was stopped - and is ''
+ * when it ran to its own exit code (`status`).
+ */
+async function runLocked(cfg, name, { env, logFile, deadline, expectMin }) {
+  const startedMs = Date.now();
+  const script = path.join(cfg.src, 'scripts', 'chain', name);
+  const budgetMs = deadline ? Math.max(60_000, deadline - startedMs) : 120 * 60_000;
+  const waitSecs = Math.max(0, Math.floor(Math.min(30 * 60_000, budgetMs - expectMin * 60_000) / 1000));
+  const [cmd, argv] = cfg.lock === 'none' ? ['bash', [script]] : ['flock', ['-E', '75', '-w', String(waitSecs), cfg.lock, 'bash', script]];
+  const r = await runGroup(cmd, argv, { cwd: cfg.src, logFile, timeoutMs: budgetMs, env: childEnv(env) });
+  let trouble = '';
+  if (r.status === 75) trouble = `the build lock ${cfg.lock} was not free within ${Math.round(waitSecs / 60)} min`;
+  else if (r.timedOut || r.status === null) trouble = `stopped after ${Math.round((Date.now() - startedMs) / 60_000)} min (${r.timedOut ? 'out of time before the quiet window' : r.signal})`;
+  return { ...r, trouble };
 }
 
 /**
@@ -594,18 +648,36 @@ async function buildImage(cfg, { sha, runDir, deadline }) {
  * only it refuses (registryLogin).
  */
 function publishImage(cfg, build) {
-  const { pushRepo, registryUser, registryTokenFile } = cfg.build;
+  const { pushRepo } = cfg.build;
   if (!pushRepo) throw new Error('NIGHTLY_PUSH_REPO is not set: say where the nightly build goes');
   if (!build?.image) throw new Error('no nightly build to publish');
-  const login = registryLogin({ registryUser, registryTokenFile });
   const refs = nightlyTags(build.ymd).map((t) => `${pushRepo}:${t}`);
   for (const ref of refs) {
     const r = spawnSync('docker', ['tag', build.image, ref], { encoding: 'utf8' });
     if (r.status !== 0) throw new Error(`docker tag ${build.image} ${ref} failed: ${lastLine(r.stderr)}`);
   }
-  const registry = pushRepo.split('/')[0];
+  withRegistry(cfg, pushRepo.split('/')[0], (config) => {
+    for (const ref of refs) {
+      log(`pushing ${ref}`);
+      const r = spawnSync('docker', config ? ['--config', config, 'push', ref] : ['push', ref], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      if (r.status !== 0) throw new Error(`docker push ${ref} failed: ${lastLine(r.stderr || r.stdout)}`);
+    }
+  });
+  const digests = spawnSync('docker', ['image', 'inspect', '--format', '{{join .RepoDigests " "}}', refs[0]], { encoding: 'utf8' }).stdout.trim();
+  return { refs, digest: digests.split(' ').find((d) => d.startsWith(`${pushRepo}@`)) ?? '', at: iso() };
+}
+
+/**
+ * Runs `fn` signed in to `registry`: with NIGHTLY_REGISTRY_USER and
+ * NIGHTLY_REGISTRY_TOKEN_FILE, in a Docker config of its own (`fn` gets its
+ * directory), removed afterwards - no credential stays in the host's Docker
+ * config; without either, with the host's (`fn` gets ''); with one of them
+ * only it refuses (registryLogin). The image push and the source push share it.
+ */
+function withRegistry(cfg, registry, fn) {
+  const { registryUser, registryTokenFile } = cfg.build;
+  const login = registryLogin({ registryUser, registryTokenFile });
   let config = '';
-  const withConfig = (a) => (config ? ['--config', config, ...a] : a);
   try {
     if (login === 'own') {
       config = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-nightly-docker-'));
@@ -613,19 +685,352 @@ function publishImage(cfg, build) {
       const r = spawnSync('docker', ['--config', config, 'login', registry, '-u', registryUser, '--password-stdin'], { input: token, encoding: 'utf8' });
       if (r.status !== 0) throw new Error(`docker login ${registry} failed: ${lastLine(r.stderr)}`);
     }
-    for (const ref of refs) {
-      log(`pushing ${ref}`);
-      const r = spawnSync('docker', withConfig(['push', ref]), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-      if (r.status !== 0) throw new Error(`docker push ${ref} failed: ${lastLine(r.stderr || r.stdout)}`);
-    }
+    return fn(config);
   } finally {
     if (config) {
       spawnSync('docker', ['--config', config, 'logout', registry], { encoding: 'utf8' });
       fs.rmSync(config, { recursive: true, force: true });
     }
   }
-  const digests = spawnSync('docker', ['image', 'inspect', '--format', '{{join .RepoDigests " "}}', refs[0]], { encoding: 'utf8' }).stdout.trim();
-  return { refs, digest: digests.split(' ').find((d) => d.startsWith(`${pushRepo}@`)) ?? '', at: iso() };
+}
+
+/**
+ * The ORAS client (NIGHTLY_ORAS_IMAGE) in a container, `dir` mounted as its
+ * working directory and, when given, a Docker config to sign in with
+ * (mounted read-only; `--registry-config` points at it). Returns spawnSync's.
+ */
+function oras(cfg, args, { dir = '', config = '', timeoutMs = 30 * 60_000 } = {}) {
+  const mounts = [...(dir ? ['-v', `${dir}:/w`, '-w', '/w'] : []), ...(config ? ['-v', `${config}:/auth:ro`] : [])];
+  const auth = config ? ['--registry-config', '/auth/config.json'] : [];
+  const [sub, ...rest] = args;
+  const words = sub === 'manifest' || sub === 'blob' ? [sub, rest[0], ...auth, ...rest.slice(1)] : [sub, ...auth, ...rest];
+  // As root in the container: the Docker config a login writes is 0600, and
+  // the image's own user could not read it.
+  return spawnSync('docker', ['run', '--rm', '--user', '0:0', ...mounts, cfg.desktop.oras, ...words], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs });
+}
+
+// ── the desktop side (#266) ─────────────────────────────────────────────────
+
+/**
+ * The desktop side of tonight's nightly build, when decideDesktop says one is
+ * due: scripts/chain/nightly-desktop.sh (from tonight's tree, under the build
+ * lock) makes the amd64 snap and the source archive from the public form of
+ * the commit; then the snap goes to the Snap Store's edge channel and the
+ * source to ghcr, for GitHub's runners (pushSource). Never throws:
+ * every outcome is a record for the morning report, and nothing here turns a
+ * green night red - a warning at most.
+ */
+async function desktopIfDue(cfg, { build, state, stateFile, deadline }) {
+  const asked = cfg.snap.mode !== 'off' || cfg.desktop.mode !== 'off';
+  const d = decideDesktop({ built: build?.decision === 'built', snapMode: cfg.snap.mode, desktopMode: cfg.desktop.mode });
+  if (!d.targets.length) return asked && build?.decision === 'built' ? { decision: 'skipped', why: d.why, asked } : undefined;
+  let version;
+  try {
+    version = desktopVersion(build.version);
+  } catch (e) {
+    return { decision: 'failed', why: e.message, asked };
+  }
+  if (!deadline) {
+    const w = startWindow({ nowMs: Date.now(), windows: cfg.quiet, expectMin: cfg.desktop.expectMin, marginMin: cfg.marginMin, lockWaitMin: 30 });
+    if (!w.ok) return { decision: 'skipped', why: `the desktop side waits: ${w.why}`, asked };
+    deadline = w.deadline;
+  }
+  if (deadline && Date.now() + cfg.desktop.expectMin * 60_000 > deadline) {
+    return { decision: 'skipped', why: `no time left before the quiet window (the desktop side takes ~${cfg.desktop.expectMin} min)`, asked };
+  }
+  const head = git(cfg.src, ['rev-parse', 'HEAD']).stdout.trim();
+  if (head !== build.sha) return { decision: 'failed', why: `the checkout is at ${short(head)}, not at ${short(build.sha)}, the commit built tonight`, asked };
+  const dir = path.join(cfg.desktop.out, `${build.ymd}-${short(build.sha)}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const logFile = path.join(dir, 'desktop.log');
+  log(`desktop side of ${short(build.sha)} (${version}): ${d.targets.join(', ')} - ${d.why}`);
+  const c = cfg.desktop.cache;
+  const r = await runLocked(cfg, 'nightly-desktop.sh', {
+    logFile,
+    deadline,
+    expectMin: cfg.desktop.expectMin,
+    env: {
+      ND_SRC: cfg.src,
+      ND_SHA: build.sha,
+      ND_PUBLIC_DIR: cfg.desktop.publicDir,
+      ND_PUBLIC_REMOTE: cfg.build.publicRemote,
+      ND_OUT: dir,
+      ND_VERSION: version,
+      ND_TARGETS: d.targets.join(','),
+      ND_IMAGE: cfg.desktop.image,
+      ND_GOROOT: c.goroot,
+      ND_GOMODCACHE: c.gomod,
+      ND_GOCACHE: c.gocache,
+      ND_PNPM_STORE: c.pnpm,
+      ND_ELECTRON_CACHE: c.electron,
+      ND_SNAPCRAFT: cfg.snap.snapcraft,
+    },
+  });
+  const base = { version, sha: build.sha, dir, log: logFile, asked, at: iso() };
+  if (r.trouble) return { ...base, decision: 'failed', why: r.trouble };
+  const targets = Object.fromEntries(
+    readText(path.join(dir, 'targets.txt'))
+      .split('\n')
+      .map((l) => l.trim().split(/\s+/))
+      .filter((p) => p.length === 2)
+      .map(([t, s]) => [t, s]),
+  );
+  const built = d.targets.filter((t) => targets[t] === 'built');
+  const rec = {
+    ...base,
+    decision: built.length === d.targets.length ? 'built' : built.length ? 'partial' : 'failed',
+    why: built.length === d.targets.length ? d.why : `nightly-desktop.sh exited ${r.status}: ${tailOf(logFile, 2)}`,
+    targets: Object.fromEntries(d.targets.map((t) => [t, targets[t] ?? 'failed'])),
+  };
+  if (d.targets.includes('snap')) {
+    rec.snap = targets.snap === 'built' ? uploadSnap(cfg, path.join(dir, 'files', 'filex-desktop-amd64.snap'), version) : { state: 'skipped', why: 'the snap was not packed tonight' };
+    if (['released', 'review'].includes(rec.snap.state)) {
+      state.last_snap = { version, revision: rec.snap.revision ?? null, state: rec.snap.state, sha: build.sha, dir, at: iso() };
+    }
+  }
+  if (targets.source === 'built') {
+    try {
+      rec.source = pushSource(cfg, { build, file: path.join(dir, 'files', 'filex-nightly-src.tar.gz'), version });
+      state.last_source = { revision: build.sha, version, ymd: build.ymd, ref: rec.source.ref, at: iso() };
+    } catch (e) {
+      rec.source = { error: e.message };
+    }
+  }
+  writeJson(stateFile, state);
+  pruneDesktop(cfg, state);
+  return rec;
+}
+
+/**
+ * Uploads a night's snap to the Snap Store's edge channel (amd64; the
+ * release puts its own revisions on every channel, edge included). The
+ * credential is the output of `snapcraft export-login`, read from
+ * NIGHTLY_SNAP_CREDENTIALS_FILE into snapcraft's environment for this one
+ * command and never logged. A revision the Store holds for its review is
+ * `review`, not a failure: edge keeps its old revision until the review
+ * passes, and the morning report says so until edge serves it.
+ */
+function uploadSnap(cfg, file, version) {
+  // Asked for and not possible is a warning, not a quiet skip: a channel that
+  // stops getting builds is found months later otherwise.
+  if (!cfg.snap.credentialsFile) return { state: 'failed', why: 'NIGHTLY_SNAP_CREDENTIALS_FILE is not set: the snap was packed and not uploaded', name: cfg.snap.name };
+  let creds = '';
+  try {
+    creds = fs.readFileSync(cfg.snap.credentialsFile, 'utf8').trim();
+  } catch (e) {
+    return { state: 'failed', why: `the Snap Store credential could not be read (${e.code ?? e.message})`, name: cfg.snap.name };
+  }
+  if (!creds) return { state: 'failed', why: `${cfg.snap.credentialsFile} is empty`, name: cfg.snap.name };
+  log(`snapcraft upload --release=edge ${path.basename(file)} (${version})`);
+  // The upload itself is the one GitHub's arm64 runner makes too
+  // (scripts/chain/nightly-snap-edge.mjs, from tonight's tree): the same
+  // command, the same reading of snapcraft's answer.
+  const result = path.join(path.dirname(path.dirname(file)), 'snap-upload.json');
+  const r = spawnSync(process.execPath, [path.join(cfg.src, 'scripts', 'chain', 'nightly-snap-edge.mjs'), file, result], {
+    encoding: 'utf8',
+    env: childEnv({ SNAPCRAFT_STORE_CREDENTIALS: creds, SNAPCRAFT: cfg.snap.snapcraft }),
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 50 * 60_000,
+  });
+  fs.writeFileSync(path.join(path.dirname(path.dirname(file)), 'snap-upload.log'), `${r.stdout ?? ''}\n${r.stderr ?? ''}`.split(creds).join('<credential>'));
+  const v = readJson(result) ?? { state: 'failed', why: `nightly-snap-edge.mjs exited ${r.status ?? r.signal} and left no result` };
+  return { ...v, name: cfg.snap.name };
+}
+
+/**
+ * Pushes the night's source archive (the public tree) to
+ * NIGHTLY_DESKTOP_SRC_REPO as :nightly, with what GitHub's runners need in
+ * its annotations: the commit (org.opencontainers.image.revision), the
+ * version every package carries, the night. The workflow takes it within the
+ * hour (.github/workflows/nightly-desktop.yml) - a new revision there is a
+ * new build. Signs in as the image push does (withRegistry). Throws.
+ */
+function pushSource(cfg, { build, file, version }) {
+  if (!fs.existsSync(file)) throw new Error(`no source archive at ${file}`);
+  const ref = `${cfg.desktop.srcRepo}:nightly`;
+  const annotations = {
+    'org.opencontainers.image.revision': build.sha,
+    'org.opencontainers.image.version': build.version,
+    'sh.filex.nightly.desktop-version': version,
+    'sh.filex.nightly.date': `${build.ymd.slice(0, 4)}-${build.ymd.slice(4, 6)}-${build.ymd.slice(6, 8)}`,
+  };
+  const words = Object.entries(annotations).flatMap(([k, v]) => ['--annotation', `${k}=${v}`]);
+  return withRegistry(cfg, ref.split('/')[0], (config) => {
+    log(`pushing the source archive to ${ref}`);
+    const r = oras(cfg, ['push', ref, ...words, `${path.basename(file)}:application/gzip`], { dir: path.dirname(file), config });
+    if (r.status !== 0) throw new Error(`oras push ${ref} failed: ${lastLine(r.stderr || r.stdout) || r.error?.message || `exit ${r.status}`}`);
+    const digest = /Digest:\s*(sha256:[0-9a-f]{64})/.exec(`${r.stdout}\n${r.stderr}`)?.[1] ?? '';
+    return { ref, digest, at: iso() };
+  });
+}
+
+/** A manifest's annotations, read anonymously (the packages are public): {} when there is none. */
+function annotationsOf(cfg, ref) {
+  const r = oras(cfg, ['manifest', 'fetch', ref], { timeoutMs: 120_000 });
+  if (r.status !== 0) return { error: lastLine(r.stderr) || `exit ${r.status}` };
+  try {
+    const m = JSON.parse(r.stdout);
+    return { annotations: m.annotations ?? {}, layers: m.layers ?? [] };
+  } catch (e) {
+    return { error: `not a manifest: ${e.message}` };
+  }
+}
+
+/** The newest run of the nightly desktop workflow (GitHub's public API, no token), or null. */
+async function newestRun(cfg) {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${cfg.desktop.workflowRepo}/actions/workflows/${cfg.desktop.workflow}/runs?per_page=1`, {
+      headers: { accept: 'application/vnd.github+json', 'user-agent': 'filex-nightly' },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return null;
+    const run = (await res.json())?.workflow_runs?.[0];
+    return run ? { status: run.status, conclusion: run.conclusion, url: run.html_url } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The morning's follow-up of the last source pushed (#266): what GitHub's
+ * runners made of it (followVerdict); built, the night's manifest read from
+ * the artifact, the filex.sh/nightly page made from it and site/nightly.src.html
+ * (renderNightlyPage) and published by NIGHTLY_SITE_CMD once per revision;
+ * and whether edge serves the arm64 snap the workflow uploaded. Never throws:
+ * a record for the morning report (followLines).
+ */
+export async function followDesktop(cfg, { nowMs = Date.now(), dry = false } = {}) {
+  if (cfg.desktop.mode !== 'github') return null;
+  const stateFile = path.join(cfg.state, 'state.json');
+  const state = readJson(stateFile) ?? {};
+  const source = state.last_source;
+  if (!source) return null;
+  const nightly = annotationsOf(cfg, `${cfg.desktop.repo}:nightly`);
+  const attempted = annotationsOf(cfg, `${cfg.desktop.repo}:attempted`);
+  const rev = (a) => (a.annotations ? { revision: a.annotations['org.opencontainers.image.revision'] } : null);
+  const f = followVerdict({ source, built: rev(nightly), attempted: rev(attempted), run: await newestRun(cfg), nowMs });
+  if (!f || f.state !== 'built') return f;
+  // The night's manifest, from the artifact itself.
+  const layer = (nightly.layers ?? []).find((l) => l.annotations?.['org.opencontainers.image.title'] === 'nightly.json');
+  let manifest = null;
+  if (layer) {
+    const r = oras(cfg, ['blob', 'fetch', `${cfg.desktop.repo}@${layer.digest}`, '--output', '-'], { timeoutMs: 120_000 });
+    try {
+      manifest = r.status === 0 ? JSON.parse(r.stdout) : null;
+    } catch {
+      manifest = null;
+    }
+  }
+  if (!manifest) return { ...f, state: 'unknown', why: `${cfg.desktop.repo}:nightly carries no readable nightly.json` };
+  f.rows = manifest.rows ?? {};
+  f.platforms = [...new Set((manifest.files ?? []).map((x) => x.platform))];
+  f.url = manifest.run ?? '';
+  f.snapArm64 = manifest.snap?.arm64 ?? null;
+  if (f.snapArm64?.state === 'released' || f.snapArm64?.state === 'review') {
+    try {
+      const res = await fetch(`https://api.snapcraft.io/v2/snaps/info/${cfg.snap.name}?fields=version,revision`, { headers: { 'Snap-Device-Series': '16' }, signal: AbortSignal.timeout(30_000) });
+      if (res.ok) f.edgeArm64 = snapEdgeState((await res.json())?.['channel-map'] ?? [], { version: manifest.version, revision: f.snapArm64.revision, at: manifest.built_at }, { arch: 'arm64', nowMs }) ?? undefined;
+    } catch {
+      /* the Store is asked again tomorrow */
+    }
+    if (f.edgeArm64?.state === 'live') f.edgeArm64 = undefined;
+  }
+  // The page, once per revision.
+  if (state.last_site?.revision === source.revision) {
+    f.site = { state: 'same' };
+    return f;
+  }
+  let template = '';
+  try {
+    template = fs.readFileSync(path.join(cfg.src, 'site', 'nightly.src.html'), 'utf8');
+  } catch {
+    f.site = { state: 'failed', detail: `no site/nightly.src.html in ${cfg.src}` };
+    return f;
+  }
+  const siteDir = path.join(cfg.desktop.out, 'site');
+  try {
+    fs.rmSync(siteDir, { recursive: true, force: true });
+    fs.mkdirSync(siteDir, { recursive: true });
+    fs.writeFileSync(path.join(siteDir, 'index.html'), renderNightlyPage({ template, manifest }));
+    fs.writeFileSync(path.join(siteDir, 'nightly.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  } catch (e) {
+    f.site = { state: 'failed', detail: e.message };
+    return f;
+  }
+  if (!cfg.desktop.siteCmd) {
+    f.site = { state: 'kept', detail: `NIGHTLY_SITE_CMD is not set; the page is in ${siteDir}` };
+    return f;
+  }
+  if (dry) {
+    f.site = { state: 'kept', detail: `dry run; the page is in ${siteDir}` };
+    return f;
+  }
+  const digest = nightlyDigest(cfg);
+  const r = spawnSync('sh', ['-c', `${cfg.desktop.siteCmd} "$1"`, 'nightly-site', siteDir], {
+    encoding: 'utf8',
+    env: childEnv({ NIGHTLY_SITE_REF: digest ? `${cfg.desktop.repo}@${digest}` : `${cfg.desktop.repo}:nightly`, NIGHTLY_ORAS_IMAGE: cfg.desktop.oras }),
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 30 * 60_000,
+  });
+  const last = lastLine(r.stdout) || lastLine(r.stderr);
+  if (r.status === 0) {
+    f.site = { state: 'published', detail: last || `${manifest.version} published` };
+    state.last_site = { revision: source.revision, version: manifest.version, at: iso() };
+    writeJson(stateFile, state);
+  } else f.site = { state: 'failed', detail: `exit ${r.status ?? r.signal}: ${lastLine(r.stderr) || last}` };
+  return f;
+}
+
+/** The digest `nightly` names now, so the page and the files it lists are one artifact. */
+function nightlyDigest(cfg) {
+  const r = oras(cfg, ['resolve', `${cfg.desktop.repo}:nightly`], { timeoutMs: 120_000 });
+  const d = r.status === 0 ? r.stdout.trim() : '';
+  return /^sha256:[0-9a-f]{64}$/.test(d) ? d : '';
+}
+
+/**
+ * Whether edge serves the last nightly snap (snapEdgeState), read from the
+ * public channel map - every night, the quiet ones too, so an upload the
+ * Store holds is said each morning until it is not. A snap uploaded tonight is
+ * the desktop record's to report. Never throws.
+ */
+async function snapEdgeCheck(cfg, state, tonightDesktop) {
+  if (cfg.snap.mode === 'off' || !state.last_snap) return undefined;
+  if (tonightDesktop?.snap && ['released', 'review'].includes(tonightDesktop.snap.state)) return undefined;
+  if (state.last_snap.state === 'live') return undefined;
+  let map = [];
+  try {
+    const res = await fetch(`https://api.snapcraft.io/v2/snaps/info/${cfg.snap.name}?fields=version,revision`, {
+      headers: { 'Snap-Device-Series': '16' },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return { state: 'unknown', why: `api.snapcraft.io answered HTTP ${res.status}` };
+    map = (await res.json())?.['channel-map'] ?? [];
+  } catch (e) {
+    return { state: 'unknown', why: `api.snapcraft.io: ${e?.cause?.code ?? e?.message ?? e}` };
+  }
+  const s = snapEdgeState(map, state.last_snap, { nowMs: Date.now() });
+  if (s?.state === 'live') {
+    state.last_snap = { ...state.last_snap, state: 'live', live_at: iso() };
+    writeJson(path.join(cfg.state, 'state.json'), state);
+  }
+  return s ?? undefined;
+}
+
+/** The local desktop runs beyond NIGHTLY_DESKTOP_KEEP. Never the last one. */
+function pruneDesktop(cfg, state) {
+  let names = [];
+  try {
+    names = fs.readdirSync(cfg.desktop.out, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    return;
+  }
+  const protect = [state.last_snap?.dir].filter(Boolean).map((d) => path.basename(d));
+  for (const name of desktopDirsToPrune(names, cfg.desktop.keep, protect)) {
+    log(`pruning the desktop run ${name}`);
+    fs.rmSync(path.join(cfg.desktop.out, name), { recursive: true, force: true });
+  }
 }
 
 // ── build / publish / status by hand ────────────────────────────────────────
@@ -755,6 +1160,9 @@ function status(cfg) {
   if (state.last_build) {
     out.push(`last nightly build: ${state.last_build.image} ${state.last_build.version}${state.last_build.published ? `, published ${state.last_build.published.refs.join(', ')}` : ', not published'}`);
   }
+  if (state.last_snap) out.push(`last nightly snap: ${state.last_snap.version}${state.last_snap.revision ? ` revision ${state.last_snap.revision}` : ''}, ${state.last_snap.state} (${state.last_snap.at})`);
+  if (state.last_source) out.push(`last source for GitHub's desktop packages: ${state.last_source.version} (${short(state.last_source.revision)}), ${state.last_source.ref} at ${state.last_source.at}`);
+  if (state.last_site) out.push(`last filex.sh/nightly page: ${state.last_site.version} at ${state.last_site.at}`);
   if (state.last_realenv_at) out.push(`last realenv night: ${state.last_realenv_at}`);
   if (state.s3_live) out.push(`S3 code measured from: ${state.s3_live.sha ? short(state.s3_live.sha) : 'nothing yet'} (${state.s3_live.by}, ${state.s3_live.at})`);
   console.log(out.join('\n'));
@@ -808,6 +1216,11 @@ async function main() {
     return 2;
   }
   if (args.cmd === 'status') return status(cfg);
+  if (args.cmd === 'follow') {
+    const f = await followDesktop(cfg, { dry: !!args.dryRun });
+    console.log(f ? followLines(f).join('\n') || f.state : 'nothing to follow: NIGHTLY_DESKTOP is not github, or no source was pushed yet');
+    return f && followTrouble(f) ? 1 : 0;
+  }
   if (process.platform !== 'linux') {
     console.error('the nightly run runs on Linux with Docker (status works anywhere)');
     return 2;

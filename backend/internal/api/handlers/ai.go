@@ -407,7 +407,7 @@ func (h *AI) Unzip(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	n, refused, err := h.ops.Unzip(withPlaintextConsent(r.Context(), body.AllowPlaintext), body.Src, body.Dest)
+	n, refused, skips, err := h.ops.Unzip(withPlaintextConsent(r.Context(), body.AllowPlaintext), body.Src, body.Dest)
 	if err != nil {
 		resp := aiErrorBody(err)
 		if errors.Is(err, errAISnapshotRefused) {
@@ -423,7 +423,9 @@ func (h *AI) Unzip(w http.ResponseWriter, r *http.Request) {
 	// refused: members the pre-write guard turned away, distinct from a
 	// permanent skip (zip-slip, kind conflict). Surfaced on an otherwise-200
 	// partial batch too, not only on the all-refused case above.
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "extracted": n, "refused": refused})
+	// skipped / skipped_more: the members left out for their names, one by
+	// one (archive_skips.go, task #238).
+	writeJSON(w, http.StatusOK, skips.fields(map[string]any{"ok": true, "extracted": n, "refused": refused}))
 }
 
 // writeAIError is the one shape of a refused AI REST call: aiStatus for the
@@ -442,11 +444,21 @@ func writeAIError(w http.ResponseWriter, err error) {
 }
 
 func aiErrorBody(err error) map[string]any {
-	body := map[string]any{"error": err.Error()}
+	body := map[string]any{"error": aiErrText(err)}
 	if code := aiErrCode(err); code != "" {
 		body["code"] = code
 	}
 	return body
+}
+
+// aiErrText is the words an agent reads for err: its own text, except a
+// storage's "name too long", whose text is the driver's and carries the
+// server's disk path (task #238).
+func aiErrText(err error) string {
+	if storage.IsNameTooLong(err) {
+		return "the name is too long for this storage"
+	}
+	return err.Error()
 }
 
 // aiStatus maps an aiOps error to an HTTP status code, reusing the driver

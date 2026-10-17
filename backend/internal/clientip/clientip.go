@@ -22,8 +22,10 @@
 //
 // The trusted list is the `login.trusted_proxies` setting, else
 // FILEX_TRUSTED_PROXIES, else `auto` (the setting wins over the environment,
-// which wins over the default). Besides addresses and CIDR networks it takes
-// four words:
+// which wins over the default). Since 0.57 the variable SEEDS the setting at
+// the first start where it holds nothing (loginguard proxyseed.go), so the
+// environment is the answer only until then. Besides addresses and CIDR
+// networks it takes four words:
 //
 //	auto        what filex works out about where it runs (auto.go)
 //	loopback    netip.Addr.IsLoopback        — this machine

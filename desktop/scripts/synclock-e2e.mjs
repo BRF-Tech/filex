@@ -29,7 +29,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   DESKTOP, SERVER, STORAGE,
-  api, check, finish, launchApp, signIn, sleep,
+  api, check, finish, launchApp, setAccountLanguage, signIn, sleep,
 } from './lib/harness.mjs';
 
 const REMOTE = `${STORAGE}://synclock-e2e`;
@@ -193,10 +193,10 @@ try {
   // ⚠ The engine says the sentence (`--lang`, #213): a new language starts
   // the watcher again, and the new engine reports the folder busy only after
   // its grace (synclock.go lockGrace, 10 s).
-  await win.evaluate(() => document.querySelector('#settings [data-locale="tr"]')?.click());
+  await setAccountLanguage(win, 'tr');
   const tr = await until(async () => { const c = await card(win); return { ok: c?.line === BUSY_TR, c }; }, 30000);
   check('in Turkish, with Turkish letters', tr.ok, tr.c?.line ?? 'no card');
-  await win.evaluate(() => document.querySelector('#settings [data-locale="system"]')?.click());
+  await setAccountLanguage(win, 'en');
   const back = await until(async () => { const c = await card(win); return { ok: c?.line === BUSY_EN, c }; }, 30000);
   check('…and back in English once the engine speaks it again', back.ok, back.c?.line ?? 'no card');
   // The engine that now holds the account: the takeover below must be ITS.

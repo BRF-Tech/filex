@@ -34,6 +34,14 @@
 
 !define FILEX_PROGID "filex.OfficeDocument"
 
+; The kinds of file the apps on the person's servers open (a .psd where a
+; server has an app that opens PSD files) are registered by the RUNNING app,
+; not here: they come and go with the servers' apps (src/os-assoc.ts
+; windowsAssocReg). Same two halves as the office types below, under a ProgId
+; of their own - a .psd is not an "Office document". The uninstaller takes
+; back whatever the app left (customUnInstall).
+!define FILEX_APP_PROGID "filex.AppDocument"
+
 ; One extension, added to filex's candidate list and to filex's own supported
 ; types. Both halves are needed: OpenWithProgids is what Explorer's "Open with"
 ; submenu reads, SupportedTypes is what the "Choose another app" dialog reads.
@@ -95,6 +103,31 @@
   !insertmacro filexReleaseExt ".odp"
   !insertmacro filexReleaseExt ".rtf"
   !insertmacro filexReleaseExt ".csv"
+
+  ; The kinds the running app registered: every extension in filex's
+  ; SupportedTypes loses its filex.AppDocument entry (an office one has none,
+  ; so nothing of the above is touched twice). BEFORE the Applications key
+  ; goes, since that list is what says which. Not on an update: the new copy
+  ; keeps them, and re-asserts its registration at its first start anyway
+  ; (the key below goes on an update too).
+  ${ifNot} ${isUpdated}
+    Push $R8
+    Push $R9
+    StrCpy $R8 0
+    filexUnclaimApps:
+      ClearErrors
+      EnumRegValue $R9 SHELL_CONTEXT "Software\Classes\Applications\${APP_EXECUTABLE_FILENAME}\SupportedTypes" $R8
+      IfErrors filexUnclaimAppsDone
+      StrCmp $R9 "" filexUnclaimAppsDone
+      DeleteRegValue SHELL_CONTEXT "Software\Classes\$R9\OpenWithProgids" "${FILEX_APP_PROGID}"
+      IntOp $R8 $R8 + 1
+      Goto filexUnclaimApps
+    filexUnclaimAppsDone:
+    Pop $R9
+    Pop $R8
+    DeleteRegKey SHELL_CONTEXT "Software\Classes\${FILEX_APP_PROGID}"
+  ${endIf}
+
   DeleteRegKey SHELL_CONTEXT "Software\Classes\${FILEX_PROGID}"
   DeleteRegKey SHELL_CONTEXT "Software\Classes\Applications\${APP_EXECUTABLE_FILENAME}"
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'

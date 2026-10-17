@@ -136,7 +136,7 @@ function.
 | `actions[]` | menu rows: `applies` (`kind` file/dir/any, `ext` lower-case no dot, `mime` exact or `image/*`, `multi`, `min`, `max`, **`state` / `no_state`** - bare keys you keep with `StateSet`; the row is offered only where one of `state` is set and none of `no_state` is), optional `view` opened first, `confirm` text, `min_role` viewer/editor/owner, `danger`, `output.mode` sibling/version/none with `output.name` pattern (`{stem}`, `{ext}`, `{name}`), `limits.timeout_s`, **`hidden`** (never in a menu - only a surface's `job` or a page starts it: the second half of a flow), **`requires`** (since 0.49.0: the id of one of your `user_permissions` - only people who hold it see and run the action). **`applies.engine_ext`** `{engine: [ext…]}` adds extensions that apply only while that engine is installed and granted (office documents only while the office engine - the connected ONLYOFFICE Document Server - is there); it adds to a non-empty `ext`/`mime` list |
 | `views[]` | screens: `placement` modal (dialog) / **page** (full page in a new tab - a wizard with the document beside it) / inspector (details panel, needs `applies`) / home (a row under Apps in the navigation). **`requires`** (since 0.49.0), as on an action: the screen - its opening, its events and every job it queues - is refused to people without that user permission |
 | `public_pages[]` | the screens an outside participant may be sent to: `pin` optional/required/none, TTL default and ceiling in days. Opening one mints a **share** (`/s/<token>`, see *Public links, end to end*); a page you never declare cannot be opened. **`purpose`** `{label, revoke, section}` names what its links are in My shares / Shares ("Signing request"), what revoking one does, and the section of your `home` view that shows it. `ShareCreate` takes the same `Purpose` for one link - it wins over the page's, and a page-less link (a plain share of a file) has no other way to say what it is |
-| `limits` | `memory_pages` (default 1024 = 64 MiB, ceiling 4096), `call_timeout_s` for screens (default 15, ceiling 60); jobs default 300 s, ceiling 900 |
+| `limits` | `memory_pages` (default 1024 = 64 MiB, ceiling 4096), `call_timeout_s` for screens (default 15, ceiling 60; `describe` gets at least 60); jobs default 300 s, ceiling 900 |
 | `messages` | texts filex says on your behalf long after the call is over, in each reader's language: `{"lock.collecting": {"en": …, "tr": …}}`. A file lock's reason is kept as a key plus arguments (`pluginkit.FileLockMessage`) and read back on the admin page and in the `423` a refused write gets. Every declared language is required, and a key the manifest does not declare is refused |
 | `wasm` | where an installer fetches the module (`{tag}` = the ref) and its sha256 - required for GitHub/URL installs of an app with a module; absent for a language pack |
 
@@ -258,7 +258,7 @@ the module and the manifest.
 | `files:lock` | `file_lock` / `file_unlock` - freeze a file read-only for everyone (administrators included) until you lift it or the TTL passes; your own jobs still write into it |
 | `state` | `state_get` / `state_set` / `state_list` - small per-file records (≤ 64 KiB) keyed by the file; they move and vanish with it, and `state_list` finds them again |
 | `settings` | `settings_get` - the admin's values, secrets opened here only |
-| `engines:<name>` | `engine_run` / `engine_available` for `ffmpeg`, `imagemagick`, `office`, `ghostscript`, `poppler`, `rsvg`. `office` is the connected ONLYOFFICE Document Server, and `libreoffice` (its name before 0.50) is the same engine and the same grant - see [The office engine](#the-office-engine) |
+| `engines:<name>` | `engine_run` / `engine_available` for `ffmpeg`, `imagemagick`, `office`, `ghostscript`, `poppler`, `rsvg`. `office` is the office engine - the one an app brings (the Office editor app's, 0.57) or the connected ONLYOFFICE Document Server - and `libreoffice` (its name before 0.50) is the same engine and the same grant - see [The office engine](#the-office-engine) |
 | `users:lookup` | `users_lookup` - the caller's directory (tenant-scoped, ≤ 20 rows); also lets the `people-picker` screen part search |
 | `notify:send` | `notify_send` - a `plugin.notice` notification |
 | `mail:send` | `mail_send` - plain text through the server's SMTP, 60/hour |
@@ -356,7 +356,7 @@ JSON in Extism's buffers (`pluginkit` does the plumbing).
 
 | Export | Input | Output | When |
 |---|---|---|---|
-| `describe` | `{host_version, locale}` | the manifest | at install and every load; must match the installed manifest's `name`, `version`, `manifest_version`, and its permissions must be a subset - else the app is *refused* |
+| `describe` | `{host_version, locale}` | the manifest | at install and every load, with a budget of a minute (your `call_timeout_s` when longer); must match the installed manifest's `name`, `version`, `manifest_version`, and its permissions must be a subset - else the app is *refused* (`describe_mismatch`). A module that does not start or answer is `load_failed`, one that runs out of the budget `load_timeout` |
 | `action_run` | `ActionRunInput` | `ActionRunOutput` | a queued job; the only export that may write files, create pages, issue certificates |
 | `view_event` | `ViewEventInput` | `Surface` | a screen event: `open`, `change`, `submit`, `action` |
 | `page_event` | `ViewEventInput` | `Surface` | the same for an outside participant on a public link (`data.page` carries `{subject, state, visits, visitor_ip}`) |
@@ -698,8 +698,10 @@ tells the one case apart.
 
 ### The office engine
 
-Since 0.50 the office engine is the ONLYOFFICE Document Server filex is
-connected to - an administrator connects one under **External services**.
+The office engine is the one the Office editor app brings (filex runs it on
+the server, [ONLYOFFICE.md → The office engine without a Document Server](ONLYOFFICE.md#the-office-engine-without-a-document-server))
+or the ONLYOFFICE Document Server filex is connected to - whichever the
+administrator put first under **Default apps**; your app does not see which.
 filex ships no LibreOffice and runs none, not even one installed next to a
 bare binary. Ask for it as `engines:office`. `engines:libreoffice`, its name
 before 0.50, is the same engine and the same grant: an app built for
@@ -733,15 +735,17 @@ What comes back:
 | Situation | Answer |
 |---|---|
 | converted | `exit 0`, the result among `outputs` |
-| the document server refuses: a format it does not make from that one, a damaged or password-protected file | `exit 1`, no output, the reason in `stderr_tail` (`converting in.xlsx to html failed: ONLYOFFICE does not convert xlsx to html (error -7)`) - the shape a failed soffice had |
-| no document server connected | `unavailable`, `engine office is not configured on this host: ...`; a job that fails on it is shown to people as "office documents are converted by ONLYOFFICE, and none is connected" (`office_unconfigured`) |
-| the job's clock, or the document server's own (its error -2) | `timeout` |
-| a result over the per-file limit, or a file over the document server's own limit (-10) | `too_large` |
+| the engine refuses: a format it does not make from that one, a damaged or password-protected file | `exit 1`, no output, the reason in `stderr_tail` (`converting in.xlsx to html failed: ONLYOFFICE does not convert xlsx to html (error -7)`) - the shape a failed soffice had, the same from either back end |
+| nothing converts office documents here: no app brings an engine and no document server is connected | `unavailable`, `engine office is not configured on this host: ...`; a job that fails on it is shown to people as "office documents are converted by the Office editor app's engine or by an ONLYOFFICE Document Server, and this server has neither" (`office_unconfigured`) |
+| the app's engine is still being compiled (a few minutes after it is installed or updated) and no document server takes the job | `unavailable`, `engine office is being prepared on this host: ...`; a failed job is classified `office_preparing` - ask again later, nothing is missing |
+| the job's clock, or the engine's own (its error -2) | `timeout` |
+| a result over the per-file limit, or a file over the engine's own limit or memory (-10) | `too_large` |
 
 `engine_available`, the call's `engines` map and `applies.engine_ext` follow
-the connection live: connecting ONLYOFFICE turns office conversions on
-without restarting filex, and the install review says the office engine is a
-server to connect, not a program to install.
+the engine live: the app's engine becoming ready, or ONLYOFFICE being
+connected, turns office conversions on without restarting filex, and the
+install review says the office engine is an app to install or a server to
+connect, not a program.
 
 **What ONLYOFFICE does not do that LibreOffice did** (measured on Document
 Server 9.4): HTML from a spreadsheet or a presentation (`-7`); one CSV per
@@ -1714,7 +1718,8 @@ a kit that lies.
 | `h.Host.InstallEngine("ffmpeg")` | what this server *has* (the grant is the manifest's) |
 | `h.Host.SetSetting`, `AddUser`, `MailPerHour`, `SignBudget`, `MaxInputBytes`, `SignUnavailable` | the rest of the instance |
 | `h.Host.EngineFn` / `HTTPFn` | script an engine's or an endpoint's answer, including failures |
-| `h.Host.InstallEngine("office")` + `h.Host.OfficeFn` | a connected document server: `OfficeFn` gets each file of a `--convert-to` line the kit has already read the way filex does (`From`, `To` - `pdfa` for PDF/A -, `Delimiter`, `CodePage`, the bytes) and answers the result, or `&plugintest.OfficeRefusal{Code: -7}` for a refusal (a failed run, as on filex). Without `InstallEngine` the office engine is `unavailable` with filex's sentence |
+| `h.Host.InstallEngine("office")` + `h.Host.OfficeFn` | an office engine that runs (an app's, or a connected document server): `OfficeFn` gets each file of a `--convert-to` line the kit has already read the way filex does (`From`, `To` - `pdfa` for PDF/A -, `Delimiter`, `CodePage`, the bytes) and answers the result, or `&plugintest.OfficeRefusal{Code: -7}` for a refusal (a failed run, as on filex). Without `InstallEngine` the office engine is `unavailable` with filex's sentence |
+| `h.Host.PrepareOfficeEngine()` | the office engine an app brings, still being compiled (as on filex for a few minutes after it is installed or updated): `EngineAvailable("office")` is false and a run is `unavailable` with filex's "being prepared" sentence, which a job is classified by as `office_preparing` - not `office_unconfigured`. `InstallEngine("office")` makes it ready |
 | `h.Host.Network[url] = bytes`, `h.Host.Offline`, `h.Host.Downloads` | what `asset_fetch` can download, an installation with no internet (the cache still answers), and every URL actually downloaded - a cached call adds nothing, so "fetched once" is one line to assert |
 | `h.Select(files…)`, `h.Open` / `Change` / `Submit` / `Act`, `h.Do`, `h.Queue`, `h.Page` | drive the plugin |
 | `h.Press(view, screen, button, values)` | press a footer button **the way filex does** (0.50): the primary one arrives as `submit`, every other as `action`, with the screen's `state` and the values its forms hold. It refuses what filex never sends - a button the screen does not draw, a disabled one, the primary one while a visible required field is empty. Prefer it to `Submit` / `Act` for anything a person clicks: those let the test pick the event, and filex-sign 0.1.0 shipped primary buttons that listened for `action` only and stayed green because their tests pressed them with `Act` |

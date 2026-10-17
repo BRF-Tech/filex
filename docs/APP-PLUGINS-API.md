@@ -115,9 +115,9 @@ reader cannot run; the doors above still decide.
 **Engine-gated extensions (v3.1).** A manifest rule may add
 `"engine_ext": {"office": ["docx", "odt", …]}` to a non-empty
 `ext`/`mime` list: those extensions apply only while that engine is
-installed AND granted to the app (the office engine: while an ONLYOFFICE
-Document Server is connected; `libreoffice`, its name before 0.50, is
-accepted as the same key). The host folds them into `ext` before this
+installed AND granted to the app (the office engine: while it runs - an
+app's engine or a connected ONLYOFFICE Document Server; `libreoffice`, its
+name before 0.50, is accepted as the same key). The host folds them into `ext` before this
 listing and before the run check (`wasmplugin.withEngineExt`), so the rule a
 client receives never carries `engine_ext`. An empty `ext`/`mime` list means
 "any file" and cannot be added to - the manifest is refused.
@@ -133,7 +133,8 @@ action on such a file as a greyed row whose tooltip says what is missing
 ("ImageMagick is not installed on this server - install it and restart
 filex."); everybody else gets no `gated` and sees no row. `needs.kind` is
 `engine` for a program to install and, since 0.50, `office` for the office
-engine - a document server to connect, no restart (`{"kind": "office", "id":
+engine - since 0.57 the Office editor app to install or a document server to
+connect, no restart either way (`{"kind": "office", "id":
 "office", "name": "ONLYOFFICE"}`, "Office documents need ONLYOFFICE, which is
 not connected to this server - connect it under External services."); a
 client shows a generic sentence for a kind it does not know.
@@ -577,6 +578,7 @@ prints them and builds none of its own. The exact bytes:
 Three bodies:
 1. multipart: `wasm` (file), `manifest` (file, filex-app.json), optional
    `ui` (the interface bundle, a zip - [An app's own interface](#an-apps-own-interface-v4)),
+   optional `engine` (the office engine, a zip - [An app's office engine](#an-apps-office-engine-enginesoffice-057)),
    optional `signature` (hex/base64 ed25519 over the wasm's sha256 hex), plus
    a JSON field `grant` = `{"permissions": [...]}`.
 2. JSON `{"github_repo": "BRF-Tech/filex-sign", "ref": "v1.0.0", "permissions": [...]}` -
@@ -589,7 +591,7 @@ A **language pack** takes each body without its module: no `wasm` part, no
 (no module)* below). The manifest part is read up to 16 MiB and a larger one
 is refused `413 too_large` rather than truncated.
 
-`?dry_run=1` answers `200 {"manifest": {…}, "permissions": [{"id": "files:read", "label": "…", "reason": {"en": "…"}}], "wasm_sha256": "…", "wasm_bytes": N, "signed": bool, "kind": "app"|"language_pack", "manifest_sha256": "…", "languages": [{"code", "keys", "translated", "unknown", "total", "percent", "rtl"}], "compat": {"requires", "ok", "filex", "message"?}}` without installing - the wizard's permission-review step. `reason` is the manifest's `permission_reasons[id]` (may be absent). `compat` (absent without a range) with `ok: false` means the install will be refused `incompatible`, and its `message` is the review's sentence for it in the reader's language (0.55; the wizard prints it as it came). `engines_missing: [{"id", "name", "kind"?}]` lists the engines the manifest asks for that this server lacks; `kind: "office"` (0.50) marks the office engine, a document server to connect rather than a program to install. `…/{id}/upgrade?dry_run=1` answers the same shape plus `"upgrade"` - the version it leaves, how the grant changes (`added` is what the administrator approves), and what else the version changes:
+`?dry_run=1` answers `200 {"manifest": {…}, "permissions": [{"id": "files:read", "label": "…", "reason": {"en": "…"}}], "wasm_sha256": "…", "wasm_bytes": N, "signed": bool, "kind": "app"|"language_pack", "manifest_sha256": "…", "languages": [{"code", "keys", "translated", "unknown", "total", "percent", "rtl"}], "compat": {"requires", "ok", "filex", "message"?}}` without installing - the wizard's permission-review step. `reason` is the manifest's `permission_reasons[id]` (may be absent). `compat` (absent without a range) with `ok: false` means the install will be refused `incompatible`, and its `message` is the review's sentence for it in the reader's language (0.55; the wizard prints it as it came). `engines_missing: [{"id", "name", "kind"?}]` lists the engines the manifest asks for that this server lacks; `kind: "office"` (0.50) marks the office engine, an app to install (the Office editor brings one) or a document server to connect rather than a program to install. `…/{id}/upgrade?dry_run=1` answers the same shape plus `"upgrade"` - the version it leaves, how the grant changes (`added` is what the administrator approves), and what else the version changes:
 
 ```json
 "upgrade": {"from": "1.1.0", "added": ["public_pages"], "removed": ["mail:send"], "adds_module": false,
@@ -609,7 +611,8 @@ the counts whole; `filex_*` are the ranges as the review reads them; `notes`
 are the source's release notes (the `Review update` path), the release's
 Markdown as text: the panel draws it through the explorer preview's Markdown
 pipeline and the document sanitizer (`markdownToSafeHtml`), never as markup of
-its own. The exact bytes: `testdata/wire/app-plugin-upgrade-review.json`.
+its own; a picture in them from another server waits behind a placeholder until
+the administrator loads it. The exact bytes: `testdata/wire/app-plugin-upgrade-review.json`.
 
 **File types (0.50).** An install's dry run also answers `file_types` when
 the app opens or draws kinds of file: one row per kind and capability,
@@ -641,6 +644,8 @@ does, answers `request.association_errors`, and writes them into the
 `400 {"error": "permissions_incomplete", "missing": [...]}`. Success `201` with
 the row as in the list. Errors: `400 manifest_invalid`, `400 sha256_mismatch`,
 `400 signature_required|signature_invalid`, `409 name_taken`, `409 describe_mismatch`,
+`409 load_failed` (the module did not compile, start or answer `describe`),
+`503 load_timeout` (it ran out of time doing so: a busy server, try again),
 `409 incompatible` (the manifest's `filex` range leaves this filex out:
 `{"error": "incompatible", "requires": ">=0.48.0", "filex": "0.47.0"}`).
 
@@ -772,6 +777,46 @@ needs a signed-in administrator (`403 session_required` for an API key), is
 refused on a demo, and is audited `app_plugin.thumbnail_limits` (before and
 after). `404` for an app that draws no thumbnails.
 
+### `GET …/{id}/extras`, `PUT` / `DELETE …/{id}/extras/<path>` (0.57)
+
+The files an administrator added to the app (see [Files an administrator adds
+to an app](#files-an-administrator-adds-to-an-app-extra)).
+
+`GET` → `{"files": [{"path": "dictionaries/pl_PL/pl_PL.dic.txt", "kind":
+"dictionaries", "size": 1234, "modified": "…"}], "bytes": 1234,
+"max_file_bytes": 134217728, "max_bytes": 1073741824, "kinds":
+["dictionaries"], "read": true}`. `read` is false for an app not granted
+`ui:package-fetch`: nothing can be added to it.
+
+`PUT …/extras/<path>`: the body, whole, is the file; `<path>` is under
+`extra/` (`dictionaries/pl_PL/pl_PL.aff.txt`). Adds it or replaces it (written
+beside its place and renamed into it once whole) and answers the file with its
+`sha256`. Refusals: `400 extra_path` (not a path of a kind filex takes; the
+answer lists `kinds`), `409 extras_unused` (the app does not read added files),
+`413 too_large`, `422 extra_not_text`, `507 extras_full` (the app's ceiling).
+
+`DELETE …/extras/<path>` → `204`; `404 not_found` when it is not there.
+
+`GET …/extras-catalog/{kind}` → `{"kind": "dictionaries", "items": [{"id":
+"pl_PL", "label": "Polski", "license": "…", "size": 4483566, "files": 3,
+"installed": false, "partial": false}]}` - what the app's release offers
+(`installed`: every file of the item is added at the catalog's size;
+`partial`: some are). `POST …/extras-catalog/{kind}/{item}` downloads the
+item, every file checked, adds it and answers `{"files": [AddedFile…]}`.
+Refusals: `409 extras_unused` (the app does not name the kind),
+`404 extras_no_catalog` (it offers no catalog, or this install has no address
+to read it from), `404 not_found` (no such item), `502 extras_catalog` (the
+catalog or a file could not be downloaded, or is not what the manifest or the
+catalog pins; nothing added). The `GET …/extras` answer names the kinds the
+manifest declares (`kinds`) and those with a catalog (`catalogs`).
+
+Both writes need a signed-in administrator (`403 session_required` for an API
+key; the list stays open to an admin-scoped key), are refused on a demo and to
+a tenant's administrator (`403 supertenant_only`: apps are the platform's),
+and are audited `app_plugin.extra_add` (the path, its size and sha256; an
+item from the catalog: `catalog`, every path and sha256) and
+`app_plugin.extra_remove` (the path).
+
 ### Default apps (0.50)
 
 `GET /api/admin/file-types` → `{"kinds": [{"ext": "drawio", "mime": "…",
@@ -781,8 +826,9 @@ an app handles (its extensions, and the known extensions of its media
 types), `csv` while OnlyOffice is configured (0.51), and every kind with a
 rule. A `Handler` is `{"id", "app"?, "view"?, "version"?, "label"?}`; `id` is
 `builtin`, `app:<app>/<view>` (open), `app:<app>` (thumbnail) or `onlyoffice`
-(the document server: a thumbnail handler for the office kinds, and an open
-handler for `csv` since 0.51). `editable` is false for an API key and on a
+(ONLYOFFICE: a thumbnail handler for the office kinds, drawn by whichever
+office engine runs, and the document server's open handler for `csv` since
+0.51). `editable` is false for an API key and on a
 demo.
 
 `PUT /api/admin/file-types/{ext}` `{"open"?: {"order": [...], "off": [...]} | null,
@@ -793,6 +839,33 @@ puts both back. Supertenant only (`403 supertenant_only`), a signed-in
 administrator (`403 session_required` for an API key), refused on a demo,
 audited `file_association.update` / `file_association.reset` with `ext`,
 `before` and `after`. Removing an app takes its handlers out of every rule.
+
+**The engine (0.57).** A third capability, `engine`, is not about a kind of
+file: it is which back end runs an engine filex offers its apps - today the
+office engine. The same `GET` answers it beside the kinds:
+
+```json
+"engines": [{"engine": "office",
+             "on": [{"id": "app:office-editor", "app": "office-editor", "version": "0.4.0", "label": {…}},
+                    {"id": "onlyoffice"}],
+             "off": [], "custom": false,
+             "states": {"app:office-editor": {"state": "preparing", "since": "2026-10-16T09:12:03Z"},
+                        "onlyoffice": {"state": "ready"}}}]
+```
+
+`on` are the back ends in the order a job asks them - by default the engines
+apps bring (`app:<app>`, by app name), then the Document Server (`onlyoffice`)
+while it is configured - and the first one that runs takes the job. `states`
+says how each stands: `ready`, `preparing` (an app's engine, compiled once
+after an install or an update), `failed` (with `error`), `idle` (an app's
+engine that is not the one running: only the first app on the list runs) or
+`off` (a Document Server that is not connected) - on the screen *Ready*,
+*Being prepared*, *Failed*, *Not running* and *Not connected*. `PUT
+/api/admin/file-types/engines/office` `{"order": [...], "off": [...]}` and
+`DELETE /api/admin/file-types/engines/office` change it and put it back, with
+the same rules and the same audit rows (with `engine` in place of `ext`).
+Office thumbnails follow this order too; their handler on the kinds stays
+`onlyoffice` whichever back end draws ([An app's office engine](#an-apps-office-engine-enginesoffice-057)).
 
 **The server's own line.** An interface switched off for a kind is refused on
 a file of it - its save (`PUT …/ui/{plugin}/{view}/save`, the file's name or
@@ -819,7 +892,8 @@ no sentence of its own ([API-ERRORS.md → App install refusals](API-ERRORS.md#a
 Codes: `manifest_invalid`
 (400), `sha256_mismatch` (400), `sha256_required` (400), `signature_required` /
 `signature_invalid` (400), `permissions_incomplete` (400, `missing`), `name_taken`
-(409), `describe_mismatch` (409), `permissions_changed` (409, upgrade, `missing`),
+(409), `describe_mismatch` (409), `load_failed` (409), `load_timeout` (503),
+`permissions_changed` (409, upgrade, `missing`),
 `too_large` (413), `fetch_failed` (502, `reason` one of `bad_repo`,
 `manifest_not_found`, `module_not_found`, `unreachable`, `http_status`,
 `bad_url`, `missing_url`, `too_large`, `changed`), `incompatible` (409,
@@ -1363,19 +1437,25 @@ path separator, `..`, `@list` or a `file:`/`http:`-style scheme is refused
 before the engine is even looked up.
 
 **The office engine (0.50).** `engines:office` - and `engines:libreoffice`,
-its name before 0.50, which is the same engine and the same grant - is the
-connected ONLYOFFICE Document Server, not a program: filex runs no
-LibreOffice anywhere. `engine_run` reads the soffice line an app sent
-LibreOffice (`--convert-to <format>[:<filter>[:<options>]] <file>`, the
-desktop-session switches ignored, anything else `invalid`), hands each file
-to the document server's conversion API and writes the result into the run
-directory as `<stem>.<format>`. The document server downloads the input from
-filex's own fetch door (`/api/files/onlyoffice/fetch?o=<token>&exp&p=convert&sig`)
-for the length of that one conversion. A refusal is a failed run (`exit 1`,
-the reason in `stderr_tail`); no document server connected is `unavailable`
-and classifies the job as `office_unconfigured`; the document server's own
-clock and size limit are `timeout` and `too_large`. The call's `engines` map
-carries both names with the same answer, read live. The kit:
+its name before 0.50, which is the same engine and the same grant - is not a
+program: it is the office engine an app brings (the Office editor's, 0.57 -
+[An app's office engine](#an-apps-office-engine-enginesoffice-057)) or the
+connected ONLYOFFICE Document Server, whichever the administrator put first
+under Default apps; filex runs no LibreOffice anywhere. `engine_run` reads the
+soffice line an app sent LibreOffice (`--convert-to <format>[:<filter>[:<options>]] <file>`,
+the desktop-session switches ignored, anything else `invalid`), hands each
+file to that back end and writes the result into the run directory as
+`<stem>.<format>`. A Document Server downloads the input from filex's own
+fetch door (`/api/files/onlyoffice/fetch?o=<token>&exp&p=convert&sig`) for the
+length of that one conversion; an app's engine reads it on this machine. A
+refusal is a failed run (`exit 1`, the reason in `stderr_tail`), the same for
+both back ends; nothing to convert with is `unavailable` and classifies the
+job as `office_unconfigured`; an app's engine still being compiled, with no
+Document Server to take the job, is `unavailable` with
+`engine office is being prepared on this host: ...` and classifies it as
+`office_preparing`; the back end's own clock and size limit are `timeout` and
+`too_large`. The call's `engines` map carries both names with the same answer,
+read live. The kit:
 [PLUGIN-KIT → The office engine](PLUGIN-KIT.md#the-office-engine).
 
 **`state_list` (v3, permission `state`).** `{key, limit}` → `{items: [{path,
@@ -1702,6 +1782,16 @@ share_create {
   purpose: {label, revoke?, section?}  // what THIS link is, in a list of links (v3.1)
 } -> {token, url, pin?, expires_at}
 ```
+
+A link hands over only what the person the job runs for may download
+(`files.download`, as a download link from the Share dialog): a page-less
+link asks its document, a link of one of the job's outputs and a page with
+`files` copies ask every input of the job, and the answer otherwise is
+`permission_denied`. A page with no `files` is the app's own content and is
+not asked. At every visit the copies answer the same question about the
+page's document, as its creator: when it says no they are neither listed nor
+served (the page itself still opens), and a page-less link answers `404`
+([RBAC.md](RBAC.md#every-file-in-a-folder-answers-the-download-rule)).
 
 **What a link IS, in a list of links (v3.1).** A `public_pages[]` entry may
 declare `"purpose": {"label": {…}, "revoke": {…}, "section": "<home section>"}`,
@@ -2476,9 +2566,9 @@ a draft until its first save (issue #71), like any other new document.
   `{path, name, type: "app:drawio:drawio", exact_name}`).
 - A family an app's row makes is not said to be missing: with no document
   server, an app offering `.docx` rows means the dialog does not say "Office
-  documents need a document server" (`capabilities.newdoc_withheld`, #217).
+  documents need an office engine" (`capabilities.newdoc_withheld`, #217).
 
-![New document with an office app installed: its .docx, .xlsx and .pptx rows, and no line asking for a document server](https://filex.sh/shots/officeapp/newdoc-office-app-1280.70ef3ae038a7.png)
+![New document with an office app installed: its .docx, .xlsx and .pptx rows, and no line asking for a document server](https://filex.sh/shots/officeapp/newdoc-office-app-1280.5346ee2d09b2.png)
 
 ### Permissions an interface adds
 
@@ -2492,7 +2582,7 @@ grant them, an upgrade that adds one answers `permissions_changed`.
 | `ui` | Runs its own interface in your browser, in a sandbox |
 | `ui:eval` | Its interface may run code it builds while it runs (`unsafe-eval`) |
 | `ui:wasm-eval` | Its interface may compile WebAssembly in the page (`wasm-unsafe-eval`) |
-| `ui:package-fetch` | Its interface reads its own package - the files of this version, nothing else (`ui.package_fetch`) |
+| `ui:package-fetch` | Its interface reads its own package - the files of this version and the ones an administrator adds to it, nothing else (`ui.package_fetch`) |
 | `ui:download` | Its interface can save files to your computer - each time you allow it (`ui.download`) |
 | `ui:frame-package` | Its interface opens pages of its own package in frames inside it - this version's pages only, each in the same sandbox and under the same rules as the interface (`ui.frame_package`) |
 | `ui:connect-blob` | Its interface reads `blob:` addresses it created itself in your browser - such an address reaches no server (`ui.connect_blob`) |
@@ -2584,6 +2674,130 @@ opening. An error is `no-store`.
   request with `Origin: null`. The files are public; no credentials are
   involved.
 
+### Files an administrator adds to an app (`extra/`)
+
+Some of what an interface can use is too large to ship in every package. The
+office editor carries the spell-check and hyphenation dictionaries of filex's
+interface languages and reads any other language from its own package
+address:
+
+```
+<package>/extra/dictionaries/<lang>/<lang>.aff.txt
+<package>/extra/dictionaries/<lang>/<lang>.dic.txt
+<package>/extra/dictionaries/<lang>/hyph_<lang>.dic.txt
+```
+
+`<package>` is the address the interface is served from
+(`/_appui/<app>/<sha16>/`). An administrator adds those files on the app's
+page (*Dictionaries*): installed with one click from the catalog the app's
+release offers (below), or uploaded. filex serves them under that address:
+
+- **Only to an app that names the kind** in its manifest, `ui.extras`
+  (0.57), and is granted `ui:package-fetch`. The interface reads them as it
+  reads its own files (its policy's `connect-src` is its package path, a
+  worker started from a `blob:` address inherits it), so there is no new
+  permission. An app that names no kind (draw.io reads its package and takes
+  no dictionary) is given no added file, and its page shows no Dictionaries
+  section; a file left on disk is not served to it.
+- **Only where the package has no file of that path.** A package's own,
+  reviewed file is never shadowed by an added one.
+- **Only of a kind filex knows**, each a fixed pattern and a fixed type, never
+  a page, a script or an image: `dictionaries/<lang>/<file>.(aff|dic).txt`
+  (`<lang>` and `<file>` are letters and `_`, 2-16 and 2-32 characters),
+  served as `text/plain; charset=utf-8` like the bundle's own copies. Anything
+  else under `extra/` is a 404.
+- **Served like the package**, with no sign-in, to anybody who has the address
+  (`Access-Control-Allow-Origin: *`, `X-Content-Type-Options: nosniff`,
+  `Content-Security-Policy: default-src 'none'; sandbox`). Unlike a package
+  file an added file can be replaced under the same address, so it is
+  `Cache-Control: no-cache` with an `ETag`, never immutable. Add only public
+  material (a published dictionary).
+- **Kept outside the package**, beside the installed apps
+  (`FILEX_DATA_DIR/app-plugins/_extras/<app>/`): an upgrade and a rollback
+  keep them, removing the app removes them. Like the app's package they are on
+  the node that took the request; a replica serves them when it shares that
+  folder.
+- **Ceilings:** 128 MiB a file, 1 GiB and 2,000 files an app. A text kind whose
+  bytes hold a NUL in the first 8 KiB (a zip picked by mistake) is refused.
+
+An app that wants an administrator to add files of a kind filex does not know
+yet (the office engine's fonts, `extra/fonts/`, are the next one) asks for the
+kind in filex first: the list is closed, like the permission set.
+
+#### In the manifest (`ui.extras`)
+
+```json
+"ui": {
+  "bundle": {"url": "…", "sha256": "…"},
+  "package_fetch": true,
+  "extras": {
+    "dictionaries": {
+      "catalog": {
+        "url": "https://github.com/<owner>/<repo>/releases/download/{tag}/dictionaries.json",
+        "sha256": "<64 hex: the catalog file's sha256>"
+      }
+    }
+  }
+}
+```
+
+- The keys are kinds filex takes (`dictionaries` today); another is refused
+  at install, and so is `extras` without `package_fetch`.
+- `catalog` is optional. Without it the administrator uploads the files.
+  With it, `url` is where the release publishes its catalog: `{tag}` is the
+  tag the app was installed from (as in `ui.bundle.url`), a relative address
+  is the repository's file at that tag (a URL install: beside its
+  manifest). An app uploaded as files has no such address, so its catalog is
+  not offered (`404 extras_no_catalog`); the upload still works.
+- `sha256` pins the catalog file like the bundle: one byte more and nothing
+  is offered (`502 extras_catalog`).
+- Naming a kind is no permission and adds none to the review: the
+  administrator decides what is added.
+
+#### The catalog file (`filex-extras/1`)
+
+```json
+{
+  "format": "filex-extras/1",
+  "kind": "dictionaries",
+  "items": [
+    {
+      "id": "pl_PL",
+      "label": "Polski",
+      "license": "LGPL-2.1-or-later",
+      "files": [
+        {"path": "pl_PL/pl_PL.aff.txt", "url": "dict-pl_PL.aff", "size": 251234, "sha256": "<64 hex>"},
+        {"path": "pl_PL/pl_PL.dic.txt", "url": "dict-pl_PL.dic", "size": 4210987, "sha256": "<64 hex>"},
+        {"path": "pl_PL/hyph_pl_PL.dic.txt", "url": "dict-hyph_pl_PL.dic", "size": 21345, "sha256": "<64 hex>"}
+      ]
+    }
+  ]
+}
+```
+
+- `format` is `filex-extras/1`, `kind` the manifest's key; at most 1 MiB,
+  500 items. Unknown fields are ignored.
+- An item is one thing an administrator installs at once: a dictionary's
+  language. `id` is the language folder (letters and `_`, 2-16, each once);
+  `label` and `license` are shown beside it (the screen names the language
+  in the reader's own words from `id` when `label` is absent).
+- An item has 1 to 8 files. `path` is where the file goes under the kind's
+  folder and starts with the item's `id`; with the kind in front it is one of
+  the kind's places (`dictionaries/pl_PL/pl_PL.dic.txt`), never anything
+  else. `url` is https, or relative to the catalog's own address (a release
+  asset beside the catalog). `size` (bytes, up to 128 MiB) and `sha256` are
+  the file's.
+- **Installing** an item downloads every one of its files through the
+  guarded client every app download takes (public addresses only, https),
+  holds each to its `size` and `sha256`, and stores them only when all of
+  them match - a file that does not leaves nothing new behind - then as an
+  upload is stored (the same places, ceilings and atomic writes). A
+  language's files are replaced when it is installed again.
+- The office editor's release publishes one item per language its bundle
+  does not carry, the files as the Document Server ships them (Hunspell
+  `.aff` and `.dic`, hyphenation `hyph_<lang>.dic`), their licences beside
+  them.
+
 ### How an interface is opened
 
 `GET /api/files/plugins/actions` → each `views[]` row, and each action row
@@ -2653,9 +2867,9 @@ driver's words.
 
 | Method | Params → result | Needs |
 |---|---|---|
-| `session.get` | → `{v, app: {name, version}, view: {id, placement}, locale, dir, theme: {mode, tokens}, user: {name}, files: [{index, name, ext, size, mime, readOnly, encrypted?}], grants, settings?}`. `encrypted` (0.55) is `"folder"` for a file in an end-to-end encrypted folder, `"vault"` in a vault and `"file"` for a single encrypted file (`.fxe`), as the server stamps the file's row - in every view the file can be opened from ([Which rows say `encrypted`](#which-rows-say-encrypted)); absent for a file that is not encrypted. ⚠ On its own it is information, not plaintext: such a file's `readOnly` is `true`, `file.read` is refused (`failed`, `encrypted`) and so is a save. `plaintext: true` (0.56) beside `encrypted: "folder"` or `"vault"`: filex hands this file over in the clear - the app's manifest asks for it (`encrypted_folders`) and the folder is unlocked in the person's browser ([A file of an encrypted folder, in the clear](#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)) | - |
-| `file.read` | `{index?, as: stream / bytes / text}` → `{name, size, mime, stream / bytes / text}`. A stream is transferred (`ReadableStream<Uint8Array>`); text is UTF-8 and refused over 32 MiB. A file handed over in the clear (`plaintext`, 0.56) is decrypted by filex in the page, whole, at most `LIMITS.maxEncryptedBytes` (200 MiB, `too_large` past it); `bytes` is transferred, so the page keeps no copy; `unavailable` when the folder was locked meanwhile, `failed` when it cannot be decrypted. A vault's file is read from the vault in the page, never through the server ([In a vault](#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)). | `files:read` |
-| `file.save` | `{index?, data: ReadableStream / ArrayBuffer / string, mime?, through?}` → `{saved: true, size}`. Only over a file the interface was opened with - a new version of it, or the draft it is. `through` (editing together, 0.56): the last log entry the saved document holds - filex records the save in the session's log with the file's signature the server reads after the write; ignored outside a session. A file handed over in the clear (`plaintext`, 0.56): filex encrypts what the app hands over in the page and sends only the ciphertext, over the file as it was opened - `failed` with `changed` when another version was written meanwhile (open it again); at most `LIMITS.maxEncryptedBytes`. A vault's file (0.56) is written as the vault's next generation, under its write lock: `failed` with `vault_locked` while somebody else writes the vault, `failed` with `vault_lock_lost` when the write lock ended before the commit (nothing was written), `not_found` when the file is no longer in the vault. `size` is what the app handed over. | `files:write` |
+| `session.get` | → `{v, app: {name, version}, view: {id, placement}, locale, dir, theme: {mode, tokens}, user: {name}, editor_lang?, files: [{index, name, ext, size, mime, readOnly, encrypted?}], grants, settings?}`. `user.name` is the person's display name, else their username, never their e-mail ('' on a page nobody is signed in to); an editor writes it as the author of comments and tracked changes ([Who is looking](#who-is-looking-and-in-which-language)). `editor_lang` (0.57): the language the administrator fixed for document editors, absent while each person's own language decides. `encrypted` (0.55) is `"folder"` for a file in an end-to-end encrypted folder, `"vault"` in a vault and `"file"` for a single encrypted file (`.fxe`), as the server stamps the file's row - in every view the file can be opened from ([Which rows say `encrypted`](#which-rows-say-encrypted)); absent for a file that is not encrypted. ⚠ On its own it is information, not plaintext: such a file's `readOnly` is `true`, `file.read` is refused (`failed`, `encrypted`) and so is a save. `plaintext: true` (0.56) beside `encrypted: "folder"` or `"vault"`: filex hands this file over in the clear - the app's manifest asks for it (`encrypted_folders`) and the folder is unlocked in the person's browser ([A file of an encrypted folder, in the clear](#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)) | - |
+| `file.read` | `{index?, as: stream / bytes / text}` → `{name, size, mime, stream / bytes / text, text_dialect?}`. A stream is transferred (`ReadableStream<Uint8Array>`); text is refused over 32 MiB. `text_dialect` (0.57): how a `.csv` is written - `{delimiter, bom, crlf, encoding}`, read by the server from the file's bytes; text is then decoded in that encoding (UTF-8 otherwise), bytes and a stream come as they are ([CSV files: how they are written](#csv-files-how-they-are-written)). A file handed over in the clear (`plaintext`, 0.56) is decrypted by filex in the page, whole, at most `LIMITS.maxEncryptedBytes` (200 MiB, `too_large` past it); `bytes` is transferred, so the page keeps no copy; `unavailable` when the folder was locked meanwhile, `failed` when it cannot be decrypted. A vault's file is read from the vault in the page, never through the server ([In a vault](#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)). | `files:read` |
+| `file.save` | `{index?, data: ReadableStream / ArrayBuffer / string, mime?, through?, csv?, beside?, conflict?}` → `{saved: true, size, name?, beside?, conflict?}`. Only over a file the interface was opened with - a new version of it, or the draft it is - or, when the app asks (0.57), beside it: `beside: 'docx'` (a format the file cannot hold, written beside it under a name filex chooses) and `conflict: 'copy'` (a file changed since it was read gets the save as a conflict copy instead of a refusal); `name` then says where it went ([Saving beside the file, conflict copies](#saving-beside-the-file-conflict-copies)). `csv` (0.57): how the CSV saved over a `.csv` is written, `{delimiter?, encoding?, bom?, eol?}` - checked against the bytes; the file is written in its own way whatever the app wrote ([CSV files: how they are written](#csv-files-how-they-are-written)); `invalid` when it is not of that shape. `through` (editing together, 0.56): the last log entry the saved document holds - filex records the save in the session's log with the file's signature the server reads after the write; ignored outside a session. A file handed over in the clear (`plaintext`, 0.56): filex encrypts what the app hands over in the page and sends only the ciphertext, over the file as it was opened - `failed` with `changed` when another version was written meanwhile (open it again); at most `LIMITS.maxEncryptedBytes`. A vault's file (0.56) is written as the vault's next generation, under its write lock: `failed` with `vault_locked` while somebody else writes the vault, `failed` with `vault_lock_lost` when the write lock ended before the commit (nothing was written), `not_found` when the file is no longer in the vault. `size` is what the app handed over. | `files:write` |
 | `file.saveAs` | `{name, data, mime?}` → `{saved: true, name, size}`. A NEW file, in a folder the person picks in filex's own folder dialog - the one *Move to…* uses, titled with the app's name and the file's. It opens in the folder of the file the interface was opened with (a draft: the folder it will be saved to; no file: the folder the person is in, else the list of storages), never in one of filex's own folders, and only a folder the person may write into can be chosen. A view-only opening (where `file.save` is `read_only`) may still save as: the new file goes elsewhere, and the server checks that folder. The same in every placement and every host (the web app, the desktop app, an embed). `name` is a file name, no folder (`invalid` otherwise); the answer's `name` is the one it was saved under (a taken name gets a free one beside it). `cancelled` when the person closes the dialog, `unavailable` while the frame's previous save-as dialog is still open. The server holds it to the view's kind of file (`invalid` / `not_applicable`) and keeps it out of an encrypted folder (`failed` / `encrypted`) - the `PUT …/save` section below. `unavailable` while a file of an encrypted folder is open in the clear (0.56): a copy elsewhere would leave the folder decrypted. | `files:write` |
 | `ui.dirty` | `{dirty: bool}` | - |
 | `ui.title` | `{text}` - the frame's title | - |
@@ -3161,7 +3375,11 @@ server's log.
   says it (Unix ms): with `size`, the `expect` of the next save.
 - `&expect=<size>:<ms>` (0.56) - only over the file as it was listed then
   (upload_expect's rule): another version written meanwhile answers
-  `412 {"error": "changed"}` and nothing is written.
+  `412 {"error": "changed"}` and nothing is written - or, with
+  `&conflict=copy` (0.57), is answered with a conflict copy.
+- `&beside=<ext>` and `&conflict=copy` (0.57) - a save written beside the
+  file instead of over it, under a name the server chooses
+  ([Saving beside the file, conflict copies](#saving-beside-the-file-conflict-copies)).
 - `&e2e=1` (0.56) - a file of an end-to-end encrypted folder, for an app
   granted `files:e2e-plaintext`: the body is ALREADY encrypted in the browser
   with the folder key, and one that does not start like a file of an
@@ -3183,6 +3401,9 @@ server's log.
   person chose in the frame's folder dialog; nothing in the request proves
   that, so it is checked like any folder (`files.create` on the new name).
 - The body is the content, as it is. Up to `FILEX_APP_PLUGIN_MAX_OUTPUT_MB`.
+  A `.csv` (0.57) is written in the file's own way, and
+  `&csv_delimiter=&csv_encoding=&csv_bom=&csv_eol=` say how the body is
+  written ([CSV files: how they are written](#csv-files-how-they-are-written)).
 - **Chunked**, for anything over 8 MiB (the explorer does it by itself): the
   first chunk with `&chunk=start` → `202 {session, received}`; the next ones
   with `&session=<id>&offset=<received>`; the last one adds `&final=1` and is
@@ -3220,12 +3441,148 @@ are encrypted (level 2), the administrator's rule for the kind
 (`403 handler_off`) is not asked of a stored name the server cannot read:
 the browser asked it of the decrypted name.
 
+A `.csv`'s answer (0.57) carries `X-Filex-Text-Dialect`: how the file is
+written, as JSON (`{"delimiter": ";", "bom": false, "crlf": true,
+"encoding": "windows-1254"}`). It is set only on the file's own answer, never
+on a refusal, and never for `&e2e=1`.
+
+Every answer that is the file (0.57) carries `X-Filex-Version: <size>:<ms>`,
+the version handed over as a save's `expect` names it: the explorer's frame
+sends it back with the app's next save that asks for a conflict copy, so a
+change made after the read is noticed. Never on a refusal, never for
+`&e2e=1` (the frame knows that file's version from its listing).
+
 An interface's kept state (`state.get` / `state.set`) lives in the person's
 preference document; one app may keep up to `limits.app_state_max_bytes`
 (16 KiB of JSON) there, which `PUT /api/me/prefs` enforces
 (`413 APP_STATE_TOO_LARGE`) and the frame says as `too_large` before it saves.
 The sealed store of an encrypted session (`appStateE2e`, 0.56) is a second
 share under the same number, measured on the ciphertext the server keeps.
+
+### CSV files: how they are written
+
+A spreadsheet hands a CSV back its own way: the Office editor's engine, like
+the ONLYOFFICE Document Server it comes from, writes the whole table with its
+own delimiter, line ends and encoding, and every cell as the sheet shows it
+(`007` as `7`). filex writes a save over a `.csv` in the FILE's way instead,
+the same rules for an app and for the Document Server (`internal/officesave`;
+[docs/ONLYOFFICE.md → CSV files](ONLYOFFICE.md#csv-files)):
+
+- **Opening.** `file.read` of a `.csv` answers `text_dialect`
+  `{delimiter, bom, crlf, encoding}`, read by the server from the file's first
+  64 KiB. `delimiter` is one of `,` `;` `\t` `|`; `encoding` is a name a
+  browser's `TextDecoder` takes: `utf-8`, `utf-16le`, `utf-16be`, or a code
+  page filex recognises from the file's letters (`windows-1250` Central
+  European, `windows-1251` Cyrillic, `windows-1252` Western, `windows-1253`
+  Greek, `windows-1254` Turkish, `windows-1257` Baltic). `as: 'text'` is already
+  decoded with it; with `bytes` or a stream the app decodes them itself
+  (`new TextDecoder(text_dialect.encoding)`). The SDK's `file.read(as)`
+  answers the whole result, `text_dialect` included.
+- **Saving.** The app saves the CSV as it likes: UTF-8 text, any of the four
+  delimiters, either line end. It may say how (`file.save` `csv`, the SDK's
+  `fx.save(data, {csv})`):
+
+  | Field | Value |
+  |---|---|
+  | `delimiter` | `,` `;` `\t` or `\|` |
+  | `encoding` | a `TextDecoder` name; `utf-8` for a string the SDK sends |
+  | `bom` | the bytes start with a byte order mark |
+  | `eol` | `crlf` or `lf` |
+
+  The server reads the same from the bytes - the encoding from a byte order
+  mark or UTF-8's own rules (bytes that are not UTF-8 and say nothing are
+  read in the file's own code page), the line ends outside quotes, the
+  delimiter as the one under which the save reads as the file's table - and
+  refuses a save the declaration contradicts: `422 {"error": "csv_dialect",
+  "field": "delimiter" | "encoding" | "bom" | "eol"}`, nothing written. A
+  field left out is not checked; no `csv` at all is read from the bytes alone,
+  so an app written before 0.57 keeps working.
+- **What is written.** The save in the file's own delimiter, byte order mark
+  (or none), line ends and encoding. Every record nobody changed is written
+  byte for byte, every cell nobody changed with its own text (`007`, a date
+  as it was spelled). A file in a code page or in UTF-16 stays in it; a
+  character its encoding cannot hold refuses the save:
+  `422 {"error": "csv_encoding", "encoding": "windows-1254"}`, the message
+  naming the character (save a copy in UTF-8 with `file.saveAs`). A
+  spreadsheet package (XLSX, ODS, XLS bytes) is `422 {"error": "csv_not_text"}`;
+  a declaration that is not of the shape above `400 {"error":
+  "csv_declaration"}`. The bridge hands these on as `invalid` with the code as
+  its message.
+- **Editing together** saves through the same door, so a session's save is
+  written the same way. A **new** `.csv` (`file.saveAs`) has no file to be
+  written the way of: it is written as the app sent it, once it is what the
+  declaration says. A file of an **encrypted folder** never reaches these
+  rules (the server holds its ciphertext only): `text_dialect` is absent and
+  `csv` is ignored.
+
+### Saving beside the file, conflict copies
+
+Two rules a Document Server's save has always had in filex are an app's too
+(0.57), written by the same code (`internal/officesave`, the callback and the
+app door alike), so a document behaves the same whichever editor saved it
+([docs/ONLYOFFICE.md](ONLYOFFICE.md)).
+
+**A format the file cannot hold** (`file.save` `beside`, the SDK's
+`fx.save(data, {beside: 'docx'})`): the office editor opens a `.doc`,
+`.xls` or `.ppt` (and the other kinds it reads but cannot write) and saves
+OOXML. The app says so, and filex writes the save BESIDE the file, which is
+left as it was:
+
+- the name is filex's: the file's own name with that extension
+  (`rapor.doc` → `rapor.docx`), or the next free `rapor (2).docx`;
+- `beside` is one of `docx`, `xlsx`, `pptx`, `docm`, `xlsm`, `pptm`, `odt`,
+  `ods`, `odp`, and the bytes are that package (a zip): `400 bad_request` /
+  `422 not_applicable` otherwise, nothing written. The same extension as the
+  file's own is an ordinary save over it;
+- only for a person who may create files in that folder (`files.create` on
+  the new name, as every door that creates a file asks): otherwise `403
+  permission_denied`, nothing written - the app keeps the document, the
+  person can download it;
+- the answer is `{saved, size, name: "rapor.docx", beside: true}`; the person
+  is told in the bell too, and the audit has `file.app_saved_beside`;
+- later saves of the same opening go to that file: the explorer's frame
+  saves over the name it was given, an editing session records it on the
+  server (every member's save lands there);
+- never for a file of an encrypted folder: there a file is saved in its own
+  format only (`unavailable` in the page, `422 encrypted` at the server).
+
+**A file that changed since the app read it** (`file.save` `conflict:
+'copy'`): somebody else saved it, a sync client wrote it. Without the option
+such a save is what it was in 0.56 (refused with `failed` / `changed` where
+filex checks it: a file of an encrypted folder, an editing session); with it,
+filex writes the save as a conflict copy beside the file -
+`<name>.filex-conflict-<UTC time>.<ext>` (`teklif.filex-conflict-20261016T091500.docx`),
+in the save's format (`beside`'s, when given) - keeps the other change in the
+file, and answers `{saved, size, name, conflict: "<the copy's name>"}`. The
+change is noticed against the version the app read: every read's answer
+names it (`X-Filex-Version`) and the frame sends it with the save; in an
+editing session the session's own record decides. The same creator rule
+holds (`403 permission_denied` when the person may not create files there);
+later saves of the opening go to the copy; the audit has
+`file.app_saved_conflict`. Not for a file of an encrypted folder: refused as
+before.
+
+An app written for 0.56 asks for neither, and nothing changes for it.
+
+### Who is looking, and in which language
+
+`session.user.name` is the person's display name, else their username -
+never their e-mail address, never a token - on every page that mounts an
+app's interface (the explorer, the standalone editor, the app pages, the
+desktop app's windows) and in an embed that sets `userName`
+([INTEGRATION.md](INTEGRATION.md)). It is not a permission: the name is what
+the people the file is shared with already see, the frame has no network to
+send it anywhere, and the app's module is told who asked on every call
+anyway (`context.actor`). The office editor writes it as the author of its
+comments and tracked changes; '' (nobody signed in) leaves the app's own word.
+
+`session.locale` is the reader's language, for the app's own words.
+`session.editor_lang` (0.57) is the language the administrator fixed for
+document editors (*Admin → External services → ONLYOFFICE → Editor
+language*, `FILEX_ONLYOFFICE_LANG`; a code such as `de`, `pt-PT`, `zh-TW`):
+an app that draws a document editor draws it in that language, as the
+Document Server does, and keeps its own words in `locale`. Absent while each
+person's own language decides (`auto`).
 
 ### `POST /api/files/plugins/ui/{plugin}/{view}/call`
 
@@ -3235,6 +3592,191 @@ the person asking exactly like a view's (confinement, ACL viewer, not in an
 encrypted folder and not a `.fxe`) and handed to the module as
 `context.inputs` (file refs,
 never paths). A module without `ui_call` answers `404 unsupported`.
+
+## An app's office engine (`engines.office`, 0.57)
+
+An app may bring an engine for filex to run **on the server**: today an
+office engine, which does what an ONLYOFFICE Document Server does for filex -
+the conversions apps ask for (`engines:office`) and office thumbnails. The
+Office editor app brings one. Operators read
+[ONLYOFFICE.md → The office engine without a Document Server](ONLYOFFICE.md#the-office-engine-without-a-document-server);
+this is the contract.
+
+### The `engines.office` block
+
+```json
+"engines": {
+  "office": {
+    "url": "https://github.com/BRF-Tech/filex-office-editor/releases/download/{tag}/engine.zip",
+    "sha256": "9b1e…",
+    "editor": "editor"
+  }
+}
+```
+
+- `url` - where `engine.zip` is; `{tag}` expands like `wasm.url`, and a
+  relative address is read against the repository (an install from GitHub)
+  or the manifest's own address (an install from an address). An upload
+  carries the zip itself, as the multipart part `engine`.
+- `sha256` - **required**, the zip's SHA-256 (64 hex digits, read lower-case):
+  the engine runs code on the server, so it is always pinned. The pin is in
+  the manifest, so a signed manifest (an app with no module) or a module whose
+  `describe` declares the same block (an app with one; a different pin is
+  refused like a different `ui`) covers it.
+- `editor` - the directory of the interface bundle that holds the editor's
+  `sdkjs/` and `fonts/` (`editor` when left out): the engine reads them from
+  the installed bundle rather than carrying a second copy.
+
+The block needs a `ui` block, whose bundle must hold files under
+`editor/sdkjs/` and `editor/fonts/` (with the directory `editor` names),
+checked at install. It derives the permission **`office-engine`**, which the
+review says in its own sentence; naming it in `permissions` is refused. It
+needs no module: an app that is only an interface may bring an engine.
+`engines` with no `office` in it is refused. filex before 0.57.0 does not know
+the field and refuses the manifest - declare `filex: ">=0.57.0"`.
+
+### `engine.zip`
+
+| Entry | What |
+|---|---|
+| `x2t-server.wasm` | ONLYOFFICE's converter, the server build: a WASI command ([How x2t runs](#how-x2t-runs)) |
+| `layout-host.wasm` | QuickJS as a WASI command, which runs `layout/worker.js` |
+| `layout/worker.js` | the page layout's worker ([The layout worker](#the-layout-worker)); the scripts it loads that the editor's bundle does not carry go beside it in `layout/` |
+
+Checked at install: files only (no links), clean relative names unique
+ignoring case, stored or deflated, every entry read to its end, a `.wasm`
+entry must be WebAssembly, at most **256 MiB** zipped, **160 MiB** per entry
+and **512 MiB** unpacked; the three entries above must be there. The zip is
+written to the app's directory as it came and is **never unpacked**: the
+engine process reads it in place, and holds it - and the interface bundle -
+to its pin when the app loads and every time a process starts. An upgrade
+keeps the replaced version's `engine.zip` with it, so *Back to …* puts the old
+engine back too. Refusals: `manifest_invalid` (no engine supplied, or a rule
+above), `sha256_mismatch`, `too_large`; an unreadable multipart part answers
+`engine_unreadable`'s sentence.
+
+### The engine process
+
+filex runs the engine in a process of its own - `filex office-engine`, a
+hidden command of the same binary - and never inside its own: the engine is
+the app's code, not filex's. The process gets its configuration as JSON in
+the environment variable `FILEX_OFFICE_ENGINE_CONFIG` and nothing of filex's
+own environment (no `FILEX_*`, no secrets):
+
+```json
+{"engine": "…/app-plugins/office-editor/engine.zip", "engine_sha256": "…",
+ "package": "…/app-plugins/office-editor/ui.zip", "package_sha256": "…",
+ "editor_dir": "editor", "cache": "…/office-engine", "work": "…/filex-office-1234",
+ "max_mb": 2048, "prepare": false}
+```
+
+Its **first line** on stdout is a hello: `{"ready": true, "compile_ms": 940}`,
+or `{"error": "…"}` and an exit when a package does not hash to its pin or a
+module does not compile. A **prepare run** (`"prepare": true`) compiles both
+modules into the cache, starts a worker of each kind once (which writes the
+layout's bytecode), says `{"prepared": true, "compile_ms": …}` and exits; filex
+runs one after an install, an upgrade or a new filex, and calls the engine
+*preparing* until it ends. After the hello, filex writes **one request per
+line** on stdin and reads **one answer per line** on stdout, in order, one job
+at a time; closing stdin ends the process. Nothing else is written to
+stdout.
+
+```json
+{"id": 7, "op": "convert", "in": "…/run-1/in.docx", "from": "docx", "to": "pdf",
+ "out": "…/run-1/in.pdf", "max_bytes": 536870912}
+{"id": 8, "op": "thumbnail", "in": "…/document.xlsx", "from": "xlsx", "out": "…/page.png",
+ "size": 320, "params": {"spreadsheetLayout": {"fitToWidth": 1, "gridLines": true}}, "max_bytes": 4194304}
+```
+
+`to` is the conversion API's output type (an extension, or `pdfa`);
+`delimiter` and `code_page` are its CSV knobs when the app named them
+(`1` tab, `2` semicolon, `3` colon, `4` comma, `5` space; `65001`); `out` must
+not exist - the result is created there. A thumbnail is a PNG of the first
+page fitted into `size` x `size`, laid out with `params` (the editor's json
+parameters: a sheet's page layout, the one a Document Server is asked for).
+
+```json
+{"id": 7, "ok": true, "bytes": 70870, "pages": 3, "ms": {"to_bin": 410, "layout": 2310, "from_bin": 160}}
+{"id": 8, "ok": false, "code": -3, "what": "x2t-86", "error": "…"}
+```
+
+A failure's `code` is the number a Document Server's conversion API would
+have answered, so filex says both back ends' failures with one table; `what`
+is its short name (what a thumbnail row records):
+
+| `code` | When |
+|---|---|
+| `-5` | a password (x2t's 90, 91) or DRM (85) |
+| `-7` | a target this engine does not make from that document (x2t's 82, 88; HTML, EPUB and Markdown are made from text documents only) |
+| `-9` | x2t could not tell what the input is (89, 95) |
+| `-10` | too large: x2t's own limits (93, 94, 96), the memory cap (`memory`), or a result over `max_bytes` (`over: true`, nothing written) |
+| `-2` | x2t's own clock (83) |
+| `-3` | anything else x2t answers (80, 84, 86 ...), a trap (`x2t-trap`), a function the build lacks (`x2t-missing`), the layout failing (`layout-<stage>`) |
+| `-1` | x2t's 81; the process ended without an answer (`crash`, asked again later) |
+
+The job's deadline is filex's: when it passes, filex kills the process (the
+job is `timeout`) and the next job starts another. Memory: every module's is
+capped by `max_mb` (`FILEX_OFFICE_ENGINE_MAX_MB`) and x2t's is reserved up to
+the cap when it starts (address space only: what x2t writes is backed, and
+given back when the job ends); filex ends a process holding about twice the
+cap (read on Linux and Windows).
+
+**What a conversion runs.** Office to office (docx, odt, rtf, txt, xlsx, ods,
+csv, pptx, odp, their templates and macro-enabled kinds): x2t alone. PDF,
+PDF/A, PNG, JPEG, HTML, EPUB and Markdown: x2t into the editor's format, the
+layout, then x2t into the target (a PNG or JPEG is the first page at its own
+size, the Document Server's default for a picture). A CSV is read and written
+in UTF-8, with the delimiter asked for - read from its first line when none
+is, written with a comma.
+
+### How x2t runs
+
+A new instance of `x2t-server.wasm` per run, on a directory of the job's own
+mounted at `/w`, with the arguments `x2t /w/params.xml`, `TMPDIR=/w/tmp`, a
+random source of the system's, and the conversion order written the way a
+Document Server writes it (`m_sFileFrom`, `m_sFileTo`, `m_sTempDir`,
+`m_bIsNoBase64`, `m_sFontDir`, `m_sJsonParams`, `m_oThumbnail`,
+`m_nCsvTxtEncoding` and `m_nCsvDelimiter`). `m_nFormatTo` is always the
+target's type: by the extension alone x2t writes a plain `.docx` for a
+template and refuses a `.doc`, `.xls`, `.ppt` or `.csv` into the editor's
+format. The module is compiled without wazero's context watch (2 to 4.6 times
+faster; it is stopped by ending its process). What it imports from `env` is
+answered the way emscripten's JavaScript answers it: `invoke_<sig>` through
+the module's own `fx_dyncall_<sig>` export, with `fx_unwind` and `setThrew`
+after a longjmp (`_emscripten_throw_longjmp`); a module without
+`fx_dyncall_*` gets wazero's emscripten invokes;
+`emscripten_notify_memory_growth` does nothing; any other `env` import is a
+function the link left undefined, and reaching it ends the run
+(`x2t-missing`).
+
+### The layout worker
+
+`layout-host.wasm` runs with the arguments
+`layout-host /e/layout/worker.js /e <kind>` (`word`, `cell` or `slide`) and
+`LAYOUT_CACHE=/c`, and sees three directories:
+
+| Path | What |
+|---|---|
+| `/e` | read only: `engine.zip`'s `layout/` as `/e/layout`, and the bundle's `editor/sdkjs/` and `editor/fonts/` as `/e/sdkjs` and `/e/fonts`, read from the zips in place |
+| `/j` | the engine process's work directory: each job's files, in a directory of its own |
+| `/c` | the layout's bytecode cache (shared by the engine processes, written by the prepare run) |
+
+Its first line on stdout is `{"ready": true}` (or `{"ready": false, "error":
+"…"}`). Then it takes one job per line on stdin -
+`{"in": "/j/j3/Editor.bin", "out": "/j/j3/pdf.bin", "fonts": "/j/j3/fonts", "mode": "pdf", "json": null}`,
+`mode` being `pdf` (the pages' drawing), `image` (a picture) or `html` (the
+document's HTML, at `out`) - and answers one line: `{"ok": true, "pages": 3}`
+or `{"ok": false, "stage": "open", "error": "…"}` (`open`, `calculate` or
+`save`; an error that says *out of memory* is the cap). The images of the
+document are in `media/` beside `in`; the worker writes the fonts the pages
+were drawn with into `fonts` as `<id>.ttf`, which x2t reads for the PDF. A
+worker stays warm for its kind and is started again after 20 documents or
+once its memory passes 1.5 GiB.
+
+**The cache**, in `<data dir>/office-engine/`: `wazero/` (the compiled
+modules, keyed by the module, wazero's version and the machine),
+`bytecode/` (per engine and bundle) and `prepared/` (a marker per engine,
+bundle, filex version and machine that has been prepared).
 
 ## Interface preferences
 

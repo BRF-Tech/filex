@@ -18,8 +18,8 @@ SSO/LDAP, multi-tenant, encrypted folders, embeddable web component, desktop app
 **English** · [Türkçe](README.tr.md) · [Deutsch](README.de.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.e032d7456831.png">
-  <img src="https://filex.sh/shots/explorer-grid-light.de398671d43b.png" alt="filex explorer - thumbnail grid" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.ff7a02b49f27.png">
+  <img src="https://filex.sh/shots/explorer-grid-light.475b0b61faab.png" alt="filex explorer - thumbnail grid" width="900">
 </picture>
 
 </div>
@@ -79,7 +79,7 @@ The same UI as a Vue 3 component, a React component and a `<filex-explorer>` web
 
 **🤖 Apps and AI agents**
 
-Sandboxed apps - e-Signature, Convert, draw.io - and a built-in MCP server an agent can drive.
+Sandboxed apps - e-Signature, Convert, draw.io - a built-in MCP server an agent can drive, and an AI assistant in the explorer that can run fully local.
 
 [Apps →](#apps) · [AI agents / MCP →](#ai-agents--mcp)
 
@@ -109,6 +109,8 @@ docker run -p 5212:5212 \
 Open http://localhost:5212/admin - the first run prints admin credentials and embed
 instructions to the console. That URL is the operator's; the people you give accounts to
 get **http://localhost:5212/drive**, the same file manager without the panel around it.
+For Word, Excel and PowerPoint, install the [office editor app](#apps) from
+*Admin → Plugins → Apps*: it edits them in the browser and needs no other container.
 
 <details>
 <summary><b>What that command mounts, and which user it runs as</b></summary>
@@ -186,7 +188,7 @@ full, with its limits and the guide that documents it, is in [docs/FEATURES.md](
 
 Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURES.md#the-explorer).
 
-<p align="center"><img src="https://filex.sh/shots/driveshell/driveshell-hero-1440.16ace59f07c3.png" alt="The filex shell" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/driveshell/driveshell-hero-1440.6410104e072c.png" alt="The filex shell" width="860"></p>
 
 <details>
 <summary><b>Screenshots of the explorer</b> - the shell, search, navigation, tags, the trash, the bell, themes, symlinks, CSV in ONLYOFFICE</summary>
@@ -195,14 +197,14 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 <tr>
 <td width="50%" valign="top">
 
-![The filex shell](https://filex.sh/shots/driveshell/driveshell-hero-1440.16ace59f07c3.png)
+![The filex shell](https://filex.sh/shots/driveshell/driveshell-hero-1440.6410104e072c.png)
 
 <sub>The shell - what everybody lands on</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Searching a folder](https://filex.sh/shots/driveshell/driveshell-search-1440.c0f3ceda0ec4.png)
+![Searching a folder](https://filex.sh/shots/driveshell/driveshell-search-1440.2536c373425f.png)
 
 <sub>Searching this folder; `⌘K` / `Ctrl K` hands the query to the palette</sub>
 
@@ -211,14 +213,14 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 <tr>
 <td width="50%" valign="top">
 
-![Navigation panel](https://filex.sh/shots/sidenav/sidenav-expanded-1440.461d5aaaff2a.png)
+![Navigation panel](https://filex.sh/shots/sidenav/sidenav-expanded-1440.e96ea7e98388.png)
 
 <sub>Navigation panel - Home, Shared with me, My shares, Recent, Starred, Trash, and the storages you can reach</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Collapsed to a rail](https://filex.sh/shots/sidenav/sidenav-rail-1440.843a2158380d.png)
+![Collapsed to a rail](https://filex.sh/shots/sidenav/sidenav-rail-1440.9269e026d29a.png)
 
 <sub>Collapsed to the icon rail</sub>
 
@@ -227,14 +229,14 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 <tr>
 <td width="50%" valign="top">
 
-![Personal and team tags](https://filex.sh/shots/tags/tags-kinds-1440.64e4d6a5ccbc.png)
+![Personal and team tags](https://filex.sh/shots/tags/tags-kinds-1440.a4504c43e5cb.png)
 
 <sub>Tags - your own, or your team's; a tag opens every file carrying it, from every folder they live in</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![The trash view](https://filex.sh/shots/sidenav/view-trash-1440.ab3cfb3b01cf.png)
+![The trash view](https://filex.sh/shots/sidenav/view-trash-1440.40f8904b147f.png)
 
 <sub>Trash - what was deleted, where it came from, and how long is left before it goes</sub>
 
@@ -243,14 +245,14 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 <tr>
 <td width="50%" valign="top">
 
-![The bell with its unread badge, open](https://filex.sh/shots/signing/bell-badge-1440.61396b9ab714.png)
+![The bell with its unread badge, open](https://filex.sh/shots/signing/bell-badge-1440.e9232b261511.png)
 
 <sub>The bell - the unread count on it, every row going where it says</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![The full notification list over the explorer](https://filex.sh/shots/signing/notifications-list-1440.3176161f2110.png)
+![The full notification list over the explorer](https://filex.sh/shots/signing/notifications-list-1440.669ce56b62d7.png)
 
 <sub>All of your notifications, inside the explorer - for everybody, not only administrators</sub>
 
@@ -259,14 +261,14 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 <tr>
 <td width="50%" valign="top">
 
-![The theme editor](https://filex.sh/shots/appearance/theme-editor-1440.5b28006557f8.png)
+![The theme editor](https://filex.sh/shots/appearance/theme-editor-1440.867a94807e72.png)
 
 <sub>Appearance - compose a theme in your own colours, previewed as you type</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![The explorer wearing the operator's theme](https://filex.sh/shots/appearance/themed-explorer-1440.dbe464fc39c7.png)
+![The explorer wearing the operator's theme](https://filex.sh/shots/appearance/themed-explorer-1440.abc278616daa.png)
 
 <sub>Made the default, it is what everybody's explorer wears…</sub>
 
@@ -275,14 +277,14 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.98801a84bea2.png)
+![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.b891c6431444.png)
 
 <sub>…and the sign-in page, before anybody has signed in</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![A symlink that leaves the storage, badged](https://filex.sh/shots/symlinks/symlink-badge-1440.0d128385d287.png)
+![A symlink that leaves the storage, badged](https://filex.sh/shots/symlinks/symlink-badge-1440.82a105d4239e.png)
 
 <sub>A symlink filex will not follow says so - in the listing, and in words in its details</sub>
 
@@ -327,7 +329,7 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 
 Every storage and protocol feature in full: [docs/FEATURES.md → Storage and protocols](docs/FEATURES.md#storage-and-protocols).
 
-<p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.8bfbe35780f4.png" alt="How to connect" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png" alt="Connections: the guides" width="860"></p>
 
 <details>
 <summary><b>Screenshots of storage and protocols</b> - the connection guides, API keys and a storage plugin</summary>
@@ -336,14 +338,14 @@ Every storage and protocol feature in full: [docs/FEATURES.md → Storage and pr
 <tr>
 <td width="50%" valign="top">
 
-![How to connect](https://filex.sh/shots/sidenav/connect-1440.8bfbe35780f4.png)
+![Connections: the guides](https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png)
 
-<sub>How to connect - the guides, built from *your* deployment</sub>
+<sub>Connections - the guides, built from *your* deployment</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.cfc100f30069.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.3464cb59b2f8.png)
 
 <sub>API keys - mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry)</sub>
 
@@ -352,14 +354,14 @@ Every storage and protocol feature in full: [docs/FEATURES.md → Storage and pr
 <tr>
 <td width="50%" valign="top">
 
-![Connection guide](https://filex.sh/shots/connections-guide.98a4f82ecd9d.png)
+![Connection guide](https://filex.sh/shots/connections-guide.3999cf32c3d9.png)
 
 <sub>Reaching filex from anything - S3, SFTP, FTPS, NFS, WebDAV. Every command is built from *your* deployment</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Plugins](https://filex.sh/shots/admin-plugins.c25fa69cfc7c.png)
+![Plugins](https://filex.sh/shots/admin-plugins.6bd96bf65745.png)
 
 <sub>A storage filex does not ship - installed as a plugin on **Plugins → Storage plugins**, describing its own config form</sub>
 
@@ -377,7 +379,8 @@ Every storage and protocol feature in full: [docs/FEATURES.md → Storage and pr
 
 - Public links with a PIN, an expiry and a download limit, and file requests for what should
   come in. **My shares** lists every link you created, to copy or to revoke.
-- Share a folder with a person or a group and it appears under their **Shared with me**. The
+- Share a folder with a person or a group and it appears under their **Shared with me**, or
+  give them a whole storage from its **Access** section, on every protocol at once. The
   storage needs **Per-item access control (RBAC)** switched on, which it is not by default.
 - Deletes are reversible within a retention window and writes keep snapshots, both inside the
   storage you already mounted.
@@ -396,7 +399,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Share modal](https://filex.sh/shots/share-modal.d6f6572228ea.png)
+![Share modal](https://filex.sh/shots/share-modal.87cb16a1a6f0.png)
 
 <sub>Sharing - PIN, expiry, download limit, one-line `curl`</sub>
 
@@ -428,14 +431,14 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.330fcc5fda73.png)
+![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.0fffdc146eb1.png)
 
 <sub>Every admin table - one pinned **Actions** menu per row, the same menu the explorer's ⋮ opens</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Admin → Encryption: the approval policy and three requests waiting](https://filex.sh/shots/encryption/admin-encryption-1440.b74163acb93c.png)
+![Admin → Encryption: the approval policy and three requests waiting](https://filex.sh/shots/encryption/admin-encryption-1440.35606d99b816.png)
 
 <sub>Who may encrypt - off, administrators only, everyone whose role allows it, or after an administrator's approval; the requests waiting, with who asked and why ([who may encrypt](docs/E2E-ENCRYPTION.md#who-may-encrypt))</sub>
 
@@ -463,8 +466,8 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 - Sign in with a local password, OIDC, LDAP / Active Directory, an authenticating proxy, or
   the Windows or Linux account of the machine filex runs on.
 - Everyone has one role - Administrator, User, Viewer or one of your own - built from named
-  permissions. Groups carry folder access and a role, can follow your directory's groups,
-  and per-person exceptions beat the role.
+  permissions. Groups carry folder access - up to a whole storage - and a role, can follow
+  your directory's groups, and per-person exceptions beat the role.
 - Guessing a password is slow: wrong passwords are counted per account and per address, on
   the web form, WebDAV, FTPS and SFTP alike.
 - Multi-tenant by design, behind one switch: each tenant has its own sign-in providers, its
@@ -472,7 +475,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 
 Every feature for people and access in full: [docs/FEATURES.md → People and access](docs/FEATURES.md#people-and-access).
 
-<p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png" alt="Admin → Roles: the built-in roles and two custom ones" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png" alt="Admin → Roles: the built-in roles and two custom ones" width="860"></p>
 
 <details>
 <summary><b>Screenshots of people and access</b> - roles, groups, sign-in security, a locked account, the admin panel and its menu</summary>
@@ -481,14 +484,14 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Roles: the built-in roles and two custom ones](https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png)
+![Admin → Roles: the built-in roles and two custom ones](https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png)
 
 <sub>Roles - Administrator, User, Viewer and roles of your own: who holds each, what it allows, where it differs by folder, its limits ([docs/PERMISSIONS.md](docs/PERMISSIONS.md))</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Admin → Groups](https://filex.sh/shots/groups/groups-list-1440.73224b70e40b.png)
+![Admin → Groups](https://filex.sh/shots/groups/groups-list-1440.22ff57b029f5.png)
 
 <sub>Groups - named sets of people with folder access and a role; members by hand or kept in step with the groups a sign-in carries ([docs/GROUPS.md](docs/GROUPS.md))</sub>
 
@@ -504,7 +507,7 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 </td>
 <td width="50%" valign="top">
 
-![Admin → Sign-in security](https://filex.sh/shots/loginsecurity/login-security-1440.077cec3f1b0a.png)
+![Admin → Sign-in security](https://filex.sh/shots/loginsecurity/login-security-1440.70f2a2a76257.png)
 
 <sub>Sign-in security - the attempt limit and the addresses it never counts; trusted proxies, the locks and the sign-in trail follow on the same page ([sign-in attempt limits](docs/CONFIGURATION.md#sign-in-attempt-limits))</sub>
 
@@ -513,14 +516,14 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.3f4c6d3233f3.png)
+![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.42e1fe6f1937.png)
 
 <sub>…and what a locked account's sign-in form says, counting the lock down on its button</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Admin dashboard](https://filex.sh/shots/admin-dashboard.d94a065baab6.png)
+![Admin dashboard](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
 
 <sub>Admin panel</sub>
 
@@ -529,16 +532,16 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <tr>
 <td width="50%" valign="top">
 
-![Demo landing](https://filex.sh/shots/demo-landing.bb2b8d97d4ff.png)
+![Demo landing](https://filex.sh/shots/demo-landing.64f23c6f8cb3.png)
 
 <sub>Demo landing</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![The People & security panel of the admin menu, open over Admin → Users](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png)
+![The Settings panel of the admin menu, open over Admin → Settings → General](https://filex.sh/shots/megamenu/settings-panel-1440.23a710915f9c.png)
 
-<sub>The admin menu - every page in three panels, **Files & storage**, **People & security** and **System**, with a short line under each; a phone gets the same pages in a drawer ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
+<sub>The admin menu - every page in four panels, **Files & storage**, **People**, **Settings** (General, Security & data, File processing & integrations) and **Maintenance & records**, with a short line under each; a phone gets the same pages in a drawer ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
 
 </td>
 </tr>
@@ -557,7 +560,8 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 - Right-click a folder → **Keep on this computer** and it stays in step with the server in
   both directions, in about a second. Everything else stays online-only in the window.
 - It signs in through your browser, so SSO and MFA behave as they do on the web, and it opens
-  Office documents from your own disk in the editor your server runs.
+  Office documents from your own disk in the editor your server runs - and any kind of file an
+  app on one of your servers opens.
 - Headless machines get the same engine: `filex sync` and `filex client`.
 
 **Install it** from the Microsoft Store (Windows 10/11) or the Snap Store (Ubuntu and
@@ -580,8 +584,9 @@ sudo snap install filex-app                 # the same snap as the badge above
 
 The Store build (*filex File Manager*) is the one Windows copy that is code-signed -
 Microsoft signs it - and the Store keeps it up to date. The desktop app's winget package
-(`BRFTech.filex-app`) is submitted with every release and is waiting for its first review
-by the winget moderators, so `winget install BRFTech.filex-app` does not find it yet.
+(`BRFTech.filex-app`) is waiting for its first review by the winget moderators - until it is
+accepted a release leaves the submission as it is - so `winget install BRFTech.filex-app`
+does not find it yet.
 Installer, portable `.exe`, AppImage, `.deb`, `.rpm` and `.dmg` are attached to the
 [latest release](https://github.com/BRF-Tech/filex/releases/latest) - not code-signed yet,
 so expect a SmartScreen prompt from the Windows installer. Details:
@@ -628,7 +633,7 @@ takes two lines:
 <filex-explorer api-base="http://localhost:5212" sidenav connections ui-profile="simple"></filex-explorer>
 ```
 
-<p align="center"><img src="https://filex.sh/shots/sidenav/embed-webcomponent-1440.c8c25d893d24.png" alt="Embedded web component" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/sidenav/embed-webcomponent-1440.b802d5b6ab56.png" alt="Embedded web component" width="860"></p>
 
 <details>
 <summary><b>Vue 3 and React</b> - the other two wrappers, and where the details are</summary>
@@ -666,14 +671,14 @@ server on one version ([docs/API.md](docs/API.md)).
 <tr>
 <td width="50%" valign="top">
 
-![Shared with me](https://filex.sh/shots/sidenav/view-shared-1440.475ec2d8b49f.png)
+![Shared with me](https://filex.sh/shots/sidenav/view-shared-1440.faf6f6668c20.png)
 
 <sub>Shared with me - folders other people granted you, no mount instructions</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Embedded web component](https://filex.sh/shots/sidenav/embed-webcomponent-1440.c8c25d893d24.png)
+![Embedded web component](https://filex.sh/shots/sidenav/embed-webcomponent-1440.b802d5b6ab56.png)
 
 <sub>Embedded in another product's page</sub>
 
@@ -698,7 +703,7 @@ trusted store on its **App store** screen and ask you for an app or a storage pl
 |---|---|
 | [e-Signature](https://github.com/BRF-Tech/filex-sign) | Sign a PDF, or ask others to: people on this filex sign inside it, anybody else by a private link, behind a PIN by default |
 | [Convert](https://github.com/BRF-Tech/filex-convert) | **Convert…** on any file or selection: images, video, audio, documents, e-books, archives, data, subtitles and fonts |
-| [Office editor](https://github.com/BRF-Tech/filex-office-editor) | Word, Excel and PowerPoint documents in ONLYOFFICE's editor, running in the browser with no Document Server; its 0.2.0 and 0.3.0, made for filex 0.56, add encrypted folders and several people at once |
+| [Office editor](https://github.com/BRF-Tech/filex-office-editor) | Word, Excel and PowerPoint documents in ONLYOFFICE's editor, running in the browser with no Document Server; its 0.2.0 and 0.3.0, made for filex 0.56, add encrypted folders and several people at once, and its 0.4.0, made for filex 0.57, every kind a Document Server opens (`.doc`, `.xls`, `.ppt`, `.csv`...) and an office engine filex runs on the server for office thumbnails and conversions ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#the-office-engine-without-a-document-server)) |
 | [filextext](https://github.com/BRF-Tech/filextext-app) | An end-to-end encrypted text workspace in a single `.fxtxt` file |
 | [draw.io](https://github.com/BRF-Tech/filex-drawio) | The draw.io diagram editor, on `.drawio` and `.dio` files |
 
@@ -756,7 +761,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.9f93226381ed.png)
+![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.54c60e832ced.png)
 
 <sub>While it is out - the document frozen for everybody, who has signed in its details</sub>
 
@@ -772,7 +777,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![An installed app's detail](https://filex.sh/shots/apps/apps-detail-1440.4e27b40c5ce7.png)
+![An installed app's detail](https://filex.sh/shots/apps/apps-detail-1440.b7f6ec845458.png)
 
 <sub>An installed app - where it came from, its fingerprint, and every permission it holds in plain words (its settings and its actions follow, further down the page)</sub>
 
@@ -788,7 +793,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The install review of an app with its own interface](https://filex.sh/shots/apps/app-interface-review-1440.51df0aa460ad.png)
+![The install review of an app with its own interface](https://filex.sh/shots/apps/app-interface-review-1440.877a89c82359.png)
 
 <sub>An app that brings its own interface - the review shows the package's fingerprint, every address outside it (a live one is a permission, in yellow) and what a browser cannot promise</sub>
 
@@ -827,7 +832,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 </td>
 <td width="50%" valign="top">
 
-![Plugins → Default apps](https://filex.sh/shots/defaultapps/default-apps-1440.27d3c64fe457.png)
+![Plugins → Default apps](https://filex.sh/shots/defaultapps/default-apps-1440.0dd62b519f8f.png)
 
 <sub>Default apps - every kind of file something besides filex handles: who opens it and who draws its thumbnail, in the order you set ([Default apps](docs/APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail))</sub>
 
@@ -836,14 +841,14 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![Folders drawn with their newest files](https://filex.sh/shots/thumbnails/folders-grid-1440.2b408fb54f7e.png)
+![Folders drawn with their newest files](https://filex.sh/shots/thumbnails/folders-grid-1440.dd7653d6edca.png)
 
 <sub>Folder previews - each folder drawn with the three files that came into it last; the SVGs are drawn by filex's built-in engine ([docs/thumbnails.md](docs/thumbnails.md#folder-previews))</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![The install review opened from a store's link](https://filex.sh/shots/store/store-review-1440.d93b2b571d93.png)
+![The install review opened from a store's link](https://filex.sh/shots/store/store-review-1440.36cf3bbc2a50.png)
 
 <sub>Installing from a store - the same review, marked **From store**, the paid app's license key shown by its first characters ([Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 
@@ -852,14 +857,14 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The first link from a store: trust it?](https://filex.sh/shots/store/store-trust-1440.94bebecac9fe.png)
+![The first link from a store: trust it?](https://filex.sh/shots/store/store-trust-1440.8fb07862db1a.png)
 
 <sub>The first link from a store - its address and the fingerprints of its keys, to compare before you trust it ([Trusted stores](docs/APP-PLUGINS.md#trusted-stores))</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![A paid app held, the band on an admin page](https://filex.sh/shots/store/store-license-held-1440.2dd9518d7e87.png)
+![A paid app held, the band on an admin page](https://filex.sh/shots/store/store-license-held-1440.6fd145640e0f.png)
 
 <sub>A license the store revoked - the app held, *Unlicensed*, nothing removed, and a band on every admin page ([Paid apps](docs/APP-PLUGINS.md#paid-apps))</sub>
 
@@ -881,6 +886,12 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
   it hands out can be wider than the key itself.
 - A large file goes through an **upload ticket**: a short-lived, single-use URL, so its bytes
   never travel through the model's context.
+- An **AI assistant in the explorer**, off until an administrator sets it up: Anthropic,
+  OpenAI or any OpenAI-compatible server, or a local Ollama so nothing leaves your network.
+  It works through the same MCP tools as the person who asks; a change carries **Undo**, a
+  public link or an access change waits on an **approval card**, encrypted folders never
+  reach a model and every file content it sends is in the audit log
+  ([docs/AI-ASSISTANT.md](docs/AI-ASSISTANT.md)).
 
 ```bash
 claude mcp add filex --transport http https://files.example.com/api/ai/mcp \
@@ -889,7 +900,7 @@ claude mcp add filex --transport http https://files.example.com/api/ai/mcp \
 
 What an agent can do, what a key can never hand out, encrypted folders and upload tickets:
 [docs/FEATURES.md → AI agents and MCP](docs/FEATURES.md#ai-agents-and-mcp); the reference is
-[docs/MCP.md](docs/MCP.md).
+[docs/MCP.md](docs/MCP.md), and the assistant's is [docs/AI-ASSISTANT.md](docs/AI-ASSISTANT.md).
 
 <br>
 
@@ -945,18 +956,25 @@ ready-made stacks live in [`deploy/`](deploy/):
 - **[`deploy/compose/`](deploy/compose/)** - Docker Compose:
   - **minimal** - filex + SQLite + local disk (one service, zero dependencies).
   - **full** - filex + PostgreSQL + Redis + Caddy (auto-HTTPS), plus toggleable
-    add-ons: **OnlyOffice**, **Drawio** and an **S3 server** (Versity S3 Gateway). Turn each on/off with
-    a Compose profile in `.env`. Conversion is the [Convert app](#apps), not a
-    side-car.
+    add-ons: **Drawio**, an **S3 server** (Versity S3 Gateway) and an optional
+    **ONLYOFFICE Document Server**, pinned to the version filex is tested against.
+    Turn each on/off with a Compose profile in `.env`. Office documents need none
+    of them (the [office editor app](#apps) edits them in the browser, and its engine
+    draws their thumbnails and converts them on the server), and
+    conversion is the [Convert app](#apps), not a side-car.
 - **[`deploy/helm/filex/`](deploy/helm/filex/)** - a Helm chart for Kubernetes
   (Deployment + PVC + optional Ingress), published with every release:
   `helm repo add brf-tech https://helm.brf.sh`, then `helm install filex brf-tech/filex`
   (or `oci://ghcr.io/brf-tech/charts/filex`). Every add-on above is an `enabled`
-  toggle in `values.yaml` - bundle PostgreSQL / Redis / an S3 server, or wire external
-  OnlyOffice / Drawio.
+  toggle in `values.yaml` - bundle PostgreSQL / Redis / an S3 server, or wire an
+  external ONLYOFFICE Document Server / Drawio.
 
 Step-by-step instructions for each tier are in
-[docs/INSTALLATION.md](docs/INSTALLATION.md).
+[docs/INSTALLATION.md](docs/INSTALLATION.md). To try what the next release brings,
+there is a nightly build of every change that passed the nightly tests -
+`ghcr.io/brf-tech/filex:nightly`, the desktop app on [filex.sh/nightly](https://filex.sh/nightly/) and the Snap Store's `edge` channel -
+not supported, and not for the data you keep
+([docs/INSTALLATION.md → Nightly builds](docs/INSTALLATION.md#nightly-builds)).
 
 filex runs at the root of a host of its own or under a path of one it shares
 (`https://example.com/filex/`): one setting, `FILEX_BASE_PATH`, and a proxy
@@ -989,9 +1007,10 @@ entry with its limits and its guide.
 | **Sharing** | Public links with a PIN, an expiry and a download limit, file requests and share invites by email ([Sharing](docs/SHARING.md)) |
 | **Protection** | Trash and version history, optional ClamAV scanning, end-to-end encrypted folders, replication to a second storage (with an initial copy of what is already there) and an audit log ([Trash & versioning](docs/TRASH-VERSIONING.md), [Protection](docs/PROTECTION.md), [E2E encryption](docs/E2E-ENCRYPTION.md), [Replication](docs/REPLICATION.md), [Audit log](docs/BACKEND.md#admin-audit-log)) |
 | **Viewers and editors** | Images, video, audio, PDF, Markdown, code (Monaco), Office documents in the office editor app or through ONLYOFFICE, draw.io diagrams, Mermaid diagrams drawn and edited as text, 3D models, and archives in ZIP, 7z and TAR ([ONLYOFFICE](docs/ONLYOFFICE.md), [Archives](docs/ARCHIVES.md)) |
-| **Search and thumbnails** | Embedded full-text search that respects permissions, and thumbnails for images, video, PDF, folders and, with ONLYOFFICE connected, Office documents ([Search](docs/SEARCH.md), [Thumbnails](docs/thumbnails.md)) |
+| **Search and thumbnails** | Embedded full-text search that respects permissions, and thumbnails for images, video, PDF, folders and Office documents - drawn on the server by the office editor app's engine or a connected ONLYOFFICE ([Search](docs/SEARCH.md), [Thumbnails](docs/thumbnails.md)) |
 | **Real-time** | Presence and live file updates over WebSocket, and editing a file together in an app, through filex's relay ([Realtime](docs/REALTIME.md), [Editing together](docs/APP-PLUGINS-API.md#editing-together-coedit-056)) |
 | **Clients** | A desktop app with folder sync, a web app a phone installs under your instance's name and logo, a CLI, Vue / React / web component embeds, a REST API and an MCP server ([Desktop](docs/DESKTOP.md), [Sync](docs/SYNC.md), [CLI](docs/CLI.md), [Integration](docs/INTEGRATION.md), [MCP](docs/MCP.md)) |
+| **AI assistant** | An assistant in the explorer, off until you set it up, against Anthropic, OpenAI or an OpenAI-compatible server, or a local Ollama; it works as the person who asks, with Undo for changes, approval cards for what cannot be undone, and never sends an encrypted folder to a model ([AI assistant](docs/AI-ASSISTANT.md)) |
 | **Apps and languages** | Sandboxed apps (e-Signature, Convert, the office editor, filextext, draw.io) that print through filex, edit a file together through its relay and open a file of an encrypted folder only when you allow it, decrypted in your browser; language packs and a right-to-left layout ([Apps](docs/APP-PLUGINS.md), [Editing in an app](docs/E2E-ENCRYPTION.md#editing-in-an-app), [RTL](docs/RTL.md)) |
 | **Running it** | One binary or one container; SQLite, PostgreSQL or MySQL; an admin panel with one search for every page, setting and record; webhooks, an in-app bell and Web Push to phones and browsers, with an optional digest; a usage and cost view (Backblaze B2 today); update checks, with patch releases that install themselves once you allow it ([Databases](docs/DATABASES.md), [Admin panel](docs/ADMIN-PANEL.md), [Notifications](docs/NOTIFICATIONS.md), [Usage](docs/USAGE.md), [Updates](docs/UPDATES.md)) |
 

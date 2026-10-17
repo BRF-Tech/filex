@@ -156,6 +156,25 @@ export function inlineEndX(r: { left: number; right: number }, dir: TextDirectio
 }
 
 /**
+ * Where a sideways scroller stands: scrolled off its START edge, and is there
+ * more of it past its END edge. Read the same way in both directions.
+ *
+ * ⚠⚠ RTL: `scrollLeft` is 0 at the start edge and goes NEGATIVE as a
+ * right-to-left box scrolls toward its end (the CSSOM rule every current
+ * engine follows), so `scrollLeft > 0` is never true there. This reads the
+ * distance from the start, either way. One reading for every scroller that
+ * draws an edge or a fade by it (the table's frozen cells, the filter row's
+ * track), so two of them cannot disagree about the same scroll.
+ */
+export function scrollEdges(el: { scrollLeft: number; scrollWidth: number; clientWidth: number }): {
+  start: boolean;
+  end: boolean;
+} {
+  const from = Math.abs(el.scrollLeft);
+  return { start: from > 0, end: el.scrollWidth - el.clientWidth - from > 1 };
+}
+
+/**
  * The physical `left` of a floating box opened at `anchor` (a viewport x):
  * it opens toward the inline END — down-right of the pointer in LTR,
  * down-LEFT in RTL — flips to the other side of the anchor when that would

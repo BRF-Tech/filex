@@ -334,6 +334,7 @@ export type JobErrorCode =
   | 'action_removed'
   | 'engine_missing'
   | 'office_unconfigured'
+  | 'office_preparing'
   | 'cancelled'
   | 'app';
 

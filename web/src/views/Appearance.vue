@@ -64,6 +64,7 @@ import Textarea from '@/components/ui/Textarea.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
+import FolderViewCard from '@/components/settings/FolderViewCard.vue';
 
 const CUSTOM_CSS_KEY = 'ui.custom_css';
 const CUSTOM_CSS_ENABLED_KEY = 'ui.custom_css_enabled';
@@ -71,7 +72,7 @@ const DEFAULT_THEME_KEY = 'ui.default_theme';
 const CUSTOM_CSS_MAX_BYTES = 64 * 1024;
 
 const { t, locale } = useI18n();
-const { enabled: tenancyOn } = useTenancy();
+const { enabled: tenancyOn, tenantAdmin } = useTenancy();
 const settings = useSettingsStore();
 const toast = useToastStore();
 
@@ -624,6 +625,12 @@ onBeforeUnmount(() => {
           <p class="text-xs text-zinc-500 dark:text-zinc-400">{{ t('appearance.previewHelp') }}</p>
         </div>
       </section>
+
+      <!-- ── The default folder view (task #258: moved here from Settings) ──
+           The instance's answer, refused to a tenant's administrator by the
+           server (allowSettingWrite), so it is not drawn for one. An ordinary
+           form: nothing here touches the stylesheet guard above. -->
+      <FolderViewCard v-if="!tenantAdmin" />
 
       <!-- ── The escape hatch ── -->
       <section class="card card-body space-y-3" data-testid="custom-css-panel">

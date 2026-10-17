@@ -42,7 +42,9 @@ import { describe, expect, it } from 'vitest';
 import {
   DIR,
   KEYS,
+  SNAP_UPLOAD,
   TAG_SHA,
+  WINGET_PUBLISHING,
   bash,
   builds,
   code,
@@ -168,7 +170,7 @@ describe('a run that sends a release to the stores (only=stores)', () => {
     const desktop = job(code(), 'desktop');
     const [win, linux] = storesRows();
     const w = storesRun(win);
-    expect(w.publishing).toEqual(['Submit to winget', 'Sign the CLA on the winget pull request', 'Close the superseded winget pull requests']);
+    expect(w.publishing).toEqual(WINGET_PUBLISHING);
     const order = [FETCH, 'Package-manager manifests', 'Validate the winget manifests', 'Submit to winget', 'Keep the manifests'];
     const at = order.map((s) => w.runs.indexOf(s));
     for (const [i, a] of at.entries()) expect(a, order[i]).toBeGreaterThanOrEqual(0);
@@ -186,16 +188,11 @@ describe('a run that sends a release to the stores (only=stores)', () => {
     expect(l.publishing).toEqual(['Upload to the Snap Store']);
     const snap = stepNamed(desktop, 'Upload to the Snap Store');
     expect(snap.text).toMatch(/\n\s+snap=desktop\/release\/filex-desktop-amd64\.snap\n/);
-    expect(snap.text).toMatch(/snapcraft upload --release=stable "\$snap"/);
+    expect(snap.text).toMatch(SNAP_UPLOAD);
 
     // A full release and the other partial runs are what they were.
     const fullWin = row('windows');
-    expect(desktopRuns(code(), desktopEnv({ publish: true, full: true, only: 'all' }, fullWin, KEYS), fullWin).publishing).toEqual([
-      'Attach to the release',
-      'Submit to winget',
-      'Sign the CLA on the winget pull request',
-      'Close the superseded winget pull requests',
-    ]);
+    expect(desktopRuns(code(), desktopEnv({ publish: true, full: true, only: 'all' }, fullWin, KEYS), fullWin).publishing).toEqual(['Attach to the release', ...WINGET_PUBLISHING]);
     for (const only of ['arm64', 'macos', 'snap-arm64']) {
       const r = desktopRuns(code(), desktopEnv({ publish: true, full: false, only }, { ...fullWin, script: '' }, KEYS), { ...fullWin, script: '' });
       expect(r.runs, only).not.toContain('Package-manager manifests');

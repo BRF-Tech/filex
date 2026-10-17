@@ -59,6 +59,30 @@ export function sameItems(a: HandlerItem[], b: HandlerItem[]): boolean {
   return a.length === b.length && a.every((x, i) => x.handler.id === b[i].handler.id && x.on === b[i].on);
 }
 
+/* ── the office engine's back ends (filex 0.57) ── */
+
+/**
+ * A back end of the office engine as a person reads it: the Document Server
+ * by its whole name (on this screen "ONLYOFFICE" alone would not say it is
+ * the server, not the app's engine, which is ONLYOFFICE's code too); an app's
+ * engine by the app's name.
+ */
+export function engineBackendLabel(h: FileTypeHandler, t: Translate, locale: string): string {
+  if (h.id === ONLYOFFICE_HANDLER) return t('defaultApps.engine.documentServer');
+  return handlerLabel(h, t, locale);
+}
+
+/**
+ * The rule that asks `first` first: it is switched on and put on top, and
+ * every other back end keeps its place and its on or off.
+ */
+export function firstRule(on: FileTypeHandler[], off: FileTypeHandler[], first: string): FileTypeRule {
+  const items = itemsOf(on, off);
+  const pick = items.find((i) => i.handler.id === first);
+  if (!pick) return ruleOf(items);
+  return ruleOf([{ handler: pick.handler, on: true }, ...items.filter((i) => i !== pick)]);
+}
+
 /* ── the File types group (an install, an upgrade, an approved request) ── */
 
 /** One row of the File types group, as a key. */

@@ -416,6 +416,8 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 
 	// RBAC: drop storages the caller can't see (admin + RBAC-off keep all).
 	// A non-admin sees an RBAC-on storage only if they hold ≥1 grant there.
+	// The level at each root is kept for storage_info (#117).
+	rootLevel := map[int64]string{}
 	if h.ACL != nil {
 		user := auth.UserFrom(r.Context())
 		vis := storages[:0]
@@ -427,6 +429,7 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 			}
 			if set.StorageVisible() {
 				vis = append(vis, s)
+				rootLevel[s.ID] = set.Effective("").String()
 			}
 		}
 		storages = vis
@@ -436,7 +439,7 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 	infos := make([]storageInfo, 0, len(storages))
 	for _, s := range storages {
 		storageNames = append(storageNames, s.Name)
-		infos = append(infos, storageInfo{Name: s.Name, ReadOnly: s.ReadOnly, SortOrder: s.SortOrder, Coverage: h.coverageOf(r.Context(), s)})
+		infos = append(infos, storageInfo{Name: s.Name, ReadOnly: s.ReadOnly, SortOrder: s.SortOrder, Coverage: h.coverageOf(r.Context(), s), Perm: rootLevel[s.ID]})
 	}
 	r = r.WithContext(withStorageInfo(r.Context(), infos))
 
@@ -625,7 +628,10 @@ func (h *Manager) streamBody(w http.ResponseWriter, r *http.Request, s *model.St
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "storage offline"})
 		return
 	}
-	rel = strings.TrimSpace(strings.TrimPrefix(rel, "/"))
+	// ⚠ The slash only, never spaces: ` notes.txt` and `report.txt ` are
+	// names of their own, and trimming them served the SIBLING without the
+	// space, or a 404 for a file the listing shows (task #238).
+	rel = strings.TrimPrefix(rel, "/")
 	if rel == "" || pathHasDotDot(rel) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
 		return
@@ -1968,6 +1974,13 @@ type storageInfo struct {
 	// absent when it has none. `storages` is already in this order
 	// (ListEnabledStorages), so a client need not sort by it.
 	SortOrder *int64 `json:"sort_order,omitempty"`
+	// Perm is the caller's level at the storage's ROOT (acl, "owner" for an
+	// administrator), absent when access control is not wired. The explorer
+	// offers "Access…" on a storage row to whoever owns the root (#117): the
+	// panel routes let an owner of the root manage who else has the whole
+	// storage, so a surface that offered it to administrators alone would
+	// hide from that owner what the API lets them do.
+	Perm string `json:"perm,omitempty"`
 }
 
 type storageInfoKey struct{}

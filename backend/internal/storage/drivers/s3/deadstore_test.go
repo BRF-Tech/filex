@@ -20,6 +20,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/stall"
+	"github.com/brf-tech/filex/backend/internal/testutil/refusedport"
 )
 
 // Issue #44: a drop into an S3 folder while Hetzner's object storage was down
@@ -83,13 +84,7 @@ func deadStoreDriverWith(t *testing.T, endpoint string, overrides map[string]any
 // once, so the whole cost is the retry schedule.
 func refusedEndpoint(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := l.Addr().String()
-	_ = l.Close()
-	return "http://" + addr
+	return "http://" + refusedport.Addr(t)
 }
 
 // silentEndpoint accepts connections and never says a word: the request goes

@@ -41,10 +41,11 @@ app adds the five things a browser tab cannot do:
    system has one.
 4. **It keeps itself up to date, quietly.** See *Updates* below.
 5. **It can be the app that opens a document.** Double-click a `.docx` on the
-   disk and it opens in the server's ONLYOFFICE editor, with the edits written
+   disk and it opens in the server's office editor, with the edits written
    back over the local file (or beside it, when the editor saves another
-   format) - see *Open with filex* below. A browser tab cannot be a file
-   handler at all.
+   format); a `.psd` opens the same way where one of your servers has an app
+   that opens it - every kind an app on your servers opens - see *Open with
+   filex* below. A browser tab cannot be a file handler at all.
 
 The top bar ends as the web app's does, in the **notification bell** and the
 **avatar** - the web app's own components, which the explorer draws itself
@@ -58,8 +59,8 @@ does (the explorer's `revealNotification`). The avatar carries *User settings*
 (the web app's settings dialog, opened in this window - `config.account
 .settings`), *Admin panel ↗* for an administrator and the file list's shortcut
 and tour rows. It carries no *Sign out*: signing an account out of the app is
-an app setting, in Settings → Accounts, beside the language, sync and the
-other accounts. When the server shows a person the **App store** screen
+an app setting, in App settings → Accounts, beside sync and the other
+accounts (the language is a row of *User settings* since 0.57). When the server shows a person the **App store** screen
 (0.53), the navigation panel's *Apps → App store* is drawn under the same rule
 as in the web app (core `lib/appStoreRow`) and opens the server's page in a
 window of its own ([docs/DESKTOP.md → The App
@@ -85,7 +86,10 @@ bundled CLI also mounts a real drive letter (`filex mount Z:`, needs the free
 | `src/browser-auth.ts` | Browser sign-in (PKCE) + deep-link/manual code exchange |
 | `src/sync.ts` | Supervises one `filex sync run --watch` per account; pairs, trash, status |
 | `src/openwith.ts` | "Open with filex", the parts that can lose a document: argv classification, local path → synced twin, scratch naming, the atomic write-back, the sweeps. No Electron import - that is what makes it testable |
-| `src/openwith-io.ts` | The six server calls that round trip does (list, stat, mkdir, upload, download, delete) |
+| `src/openwith-io.ts` | The six server calls that round trip does (list, stat, mkdir, upload, download, delete), and the two reads that say what a server opens (`readServerApps`) |
+| `src/app-kinds.ts` | The kinds of file "Open with filex" takes, gathered over every signed-in server's apps, and which server opens a given file (`candidatesFor`, `pickCandidate`); the record `openwith-apps.json`. No Electron import |
+| `src/os-assoc.ts` | Telling the OS those kinds: the Windows `.reg` document, the Linux media types, desktop entry and type package, the route per package. No Electron import |
+| `scripts/app-kinds.mjs` + `build/app-kinds.json` | The kinds the app store's apps open, for the packages that declare them at build time (macOS, Store, snap): `refresh` reads the signed catalog, `write` (run by `pnpm run build`) renders it into `electron-builder.yml` and `build/appx-extensions.xml` |
 | `src/remote-search.ts` | ⌘K across the rail: the search and download addresses the main process uses for an account the window is NOT showing, with that account's token (`config.accountSearch` in the shared component). No Electron import |
 | `src/preload-app.cts` | The window's only bridge: `window.filexApp` (state, settings, sync, updates) |
 | `src/preload-shell.cts` | The narrower bridge for the chrome (rail/settings) |
@@ -381,8 +385,9 @@ How, in `src/portable.ts`:
   line written, which is why `portable-e2e.mjs` asserts the log location: it is
   the one thing that catches a `setPath` that ran a moment too late.
 - ⚠ The sync engine is the exception that had to be handled separately. It
-  keeps its pairs, baselines and **local trash - real copies of files it
-  deleted** - in `~/.filex/sync`, which on a borrowed machine is somebody
+  keeps its pairs and baselines - and, from a version before 0.57, a **local
+  trash of real copies of files it deleted**, swept after 30 days - in
+  `~/.filex/sync`, which on a borrowed machine is somebody
   else's home directory. `sync.ts` therefore passes **`FILEX_SYNC_DIR`** (new
   in the Go CLI, mirroring the existing `FILEX_CLI_CONFIG`) so that store lands
   inside `filex-data` too.
@@ -415,7 +420,8 @@ The app has no language of its own since 0.54: it speaks the language of the
 account on screen (`users.locale`, read from `/api/auth/me` at start, on an
 account switch and on focus at most once a minute, cached as
 `Account.locale`; `src/account-locale.ts`), and the operating system's with
-nobody signed in. *Settings → Language* - English / Türkçe, no *System* -
+nobody signed in. *User settings → Preferences → Language* (the app's own
+*Settings → Language* up to 0.56) - English / Türkçe, no *System* -
 writes the account's language (`PUT /api/me/prefs?surface=desktop`), so the
 web app follows; an install from before 0.54 hands its pinned choice to an
 account that had none, once. Three surfaces read the answer: this window, the
@@ -429,7 +435,9 @@ buttons are disabled: there is no account to write to. Covered by
 
 ## Open with filex
 
-Double-clicking a `.docx` opens it in the server's ONLYOFFICE editor. The user
+Double-clicking a `.docx` opens it in the server's office editor - the Office
+editor app, or ONLYOFFICE's Document Server - and since 0.57 any kind an app
+on one of the signed-in servers opens, in that app. The user
 story and the OS-by-OS limits are in
 [docs/DESKTOP.md](../docs/DESKTOP.md#opening-documents-from-your-computer); what
 matters when working on this code:
@@ -476,6 +484,18 @@ matters when working on this code:
   **`rank: Alternate`** for the same reason; Linux uses `linux.mimeTypes` (not
   `fileAssociations`, which would also ship our own `<mime-type>` XML
   redeclaring types shared-mime-info already defines).
+- **The kinds the servers' apps open are not a list kept here** (the owner,
+  2026-10-16: a server with a PSD editor opens a `.psd` from the desktop).
+  `src/app-kinds.ts` asks every signed-in server
+  (`GET /api/files/plugins/actions` + capabilities) at start, on an account
+  change, on focus, every half hour and before a double-click; a server that
+  cannot be asked keeps its last answer. Where the OS lets a running app
+  register types (the NSIS install, `.deb`/`.rpm`/AUR, AppImage) `src/os-assoc.ts`
+  adds and removes them as the servers change; macOS, the Store and the snap
+  declare the app store's kinds at build time (`build/app-kinds.json`, regions
+  between `app-kinds` markers - never edit those by hand,
+  `test/app-kinds-build.test.ts` fails). A file no server opens is refused
+  with a message, before anything is uploaded.
 - **The extension list lives in five places** - `OFFICE_EXTENSIONS` in
   `src/openwith.ts`, `mac.fileAssociations` + `linux.mimeTypes` in
   `electron-builder.yml`, `build/installer.nsh` and `build/appx-extensions.xml`
@@ -564,6 +584,17 @@ Releases are **unsigned** by design for now - Windows SmartScreen and macOS
 Gatekeeper will warn. A code-signing certificate is a separate, paid decision,
 not a defect. The one signed Windows build is the Microsoft Store package, and
 Microsoft signs it (see *Microsoft Store*).
+
+Unsigned is not anonymous, though: every Windows `filex.exe` - the sync engine
+in `resources\bin` and the CLI in the release's zip - carries a version
+resource (CompanyName "BRF Tech", ProductName "filex", a FileDescription, its
+OriginalFilename and its version), which Windows shows in its Properties and
+security products read (#259). One source makes it for both:
+`scripts/lib/winres.mjs` (go-winres, pinned, run with `go run`), called by
+`scripts/fetch-cli.mjs` for each Windows CLI it builds - which then reads the
+version back off the binary and fails the build when it is not there - and by
+`.goreleaser.yml`'s `before` hook. The `.syso` files it writes are build
+output (`.gitignore`).
 
 macOS specifics, because the failure mode there is not a warning but a wall:
 

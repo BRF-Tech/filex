@@ -46,6 +46,10 @@ type Grants struct {
 	// on the operator's host that login cannot succeed, and the operator's
 	// hostname leaks to every tenant that adds a user.
 	Tenants tenanturl.Resolver
+	// Branding names the instance in the mails (its Display name, Admin →
+	// Settings → Branding): the tenant's own on a tenant's host. Nil: the
+	// platform's `branding.name`, read from the store.
+	Branding *BrandingSource
 
 	// mailRate holds each account to shareMailHourlyRecipients addresses an
 	// hour (share_mail.go), made on first use so a Grants built as a literal
@@ -56,6 +60,10 @@ type Grants struct {
 
 // AttachTenants wires the shared per-request origin resolver (internal/tenanturl).
 func (h *Grants) AttachTenants(rv tenanturl.Resolver) { h.Tenants = rv }
+
+// AttachBranding wires the shared branding source the mails name the
+// instance by (wiring:e1).
+func (h *Grants) AttachBranding(b *BrandingSource) { h.Branding = b }
 
 // NewGrants constructs the permissions handler.
 func NewGrants(store db.Store, resolver *acl.Resolver) *Grants {
@@ -984,18 +992,22 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "sharing is not enabled"})
 		return
 	}
+	// This branch mints a PUBLIC link, so it asks the one rule every door
+	// that mints a link asks (public_link_rule.go): share.links - the
+	// share.users that got the caller this far is about people with accounts -
+	// and edit rights, never filex's own names, never an encrypted folder,
+	// never a storage root (#117: a whole storage goes to people, by a grant).
+	// It used to ask the permission alone, after the catalogue lookup: an
+	// invitation on a storage root answered "not indexed yet", and nothing
+	// but that missing row stood between it and a link to the whole storage.
+	if err := publicLinkRefusal(r.Context(), h.ACL, h.Store, st.ID, rel, perm.ShareLinks); err != nil {
+		writeLinkRefusal(w, r, err)
+		return
+	}
 	hash := pathkey.Hash(st.ID, normalizeDBPath(rel))
 	node, nerr := h.Store.GetNodeByPath(r.Context(), st.ID, hash)
 	if nerr != nil || node == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "item not indexed yet - open it once, then retry"})
-		return
-	}
-	// This branch mints a PUBLIC link, which is share.links — the
-	// share.users that got the caller this far is about people with accounts.
-	if v := aclCanID(r.Context(), h.ACL, h.Store, st.ID, rel, perm.ShareLinks); !v.ok {
-		if !v.WritePerm(w, r) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
-		}
 		return
 	}
 	opts := share.CreateOpts{NodeID: node.ID, CreatedBy: createdBy}
@@ -1018,7 +1030,7 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 	if node.Type != model.NodeTypeDirectory {
 		size = node.Size
 	}
-	subject, body := shareMailText(lang, h.siteName(r.Context()), baseName(rel), node.Type == model.NodeTypeDirectory,
+	subject, body := shareMailText(lang, h.siteName(r), baseName(rel), node.Type == model.NodeTypeDirectory,
 		size, url, pin, false, linkDaysLeft(sh.ExpiresAt, time.Now()))
 	emailed := h.tryMail(mailer.WithLanguage(r.Context(), lang), email, subject, body)
 	writeJSON(w, http.StatusOK, map[string]any{"mode": "shared", "url": url, "emailed": emailed})
@@ -1033,9 +1045,20 @@ func baseName(rel string) string {
 	return rel
 }
 
-// siteName reads the operator's configured site name (used to brand emails).
-func (h *Grants) siteName(ctx context.Context) string {
-	v, _ := h.Store.GetSetting(ctx, "site_name")
+// siteName is the name the mails give the instance: its Display name
+// (`branding.name`, Admin → Settings → Branding), the tenant's own on a
+// tenant's host - the one name the sign-in page and the public pages show
+// too. Empty: the mail names no site.
+//
+// ⚠ It used to read a second setting, `site_name` (the old Settings page's
+// "Site name"), which nothing else showed: an operator could brand every page
+// "Acme Cloud" and still send mails "via filex". 0.57 merged the two (task
+// #258); server/seed.go carries an old `site_name` over on upgrade.
+func (h *Grants) siteName(r *http.Request) string {
+	if h.Branding != nil {
+		return strings.TrimSpace(h.Branding.ForRequest(r).Name)
+	}
+	v, _ := h.Store.GetSetting(r.Context(), "branding.name")
 	return strings.TrimSpace(v)
 }
 

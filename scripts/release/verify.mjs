@@ -118,7 +118,11 @@ export function updateManifest(name, url, opts = {}) {
       if (newest !== c.tag) {
         return { ok: false, detail: `${url} says the newest release is ${newest ?? 'nothing'}, not ${c.tag} — no install will be offered this release` };
       }
-      return { ok: true, detail: `${url}: newest ${newest}` };
+      // #252: a server patch goes out with auto_ok false, and GitHub's full
+      // matrix behind it turns it on (matrix-watch.mjs): said, not judged.
+      const entry = (doc?.releases ?? []).find((r) => r?.version === c.tag);
+      const auto = entry && entry.auto_ok === false ? '; auto_ok false: installs take it when asked, not by themselves (yet)' : '';
+      return { ok: true, detail: `${url}: newest ${newest}${auto}` };
     },
   };
 }
@@ -309,12 +313,31 @@ export function windowsFeedArches(name, url, opts = {}) {
 }
 
 /**
- * A snap's revision for THIS version is on a channel for every architecture
- * (api.snapcraft.io, no account needed). Each release uploads one revision
- * per architecture; a job that failed or skipped leaves that architecture's
- * users on the previous version, and nothing else says so.
+ * The Snap Store channels a release puts its revisions on (#265), and the
+ * ones the release tool reads back. A release is the newest build there is
+ * on the day it ships, so it goes to every channel; the nightly run then
+ * puts a newer amd64 build on edge (scripts/chain/nightly.mjs), which is
+ * why edge is not read back: by the time a slow tag run is read, the night
+ * may have moved it on.
+ *
+ * ⚠ Up to 0.56.3 a release went to stable alone, and candidate, beta and
+ * edge sat on 0.52.0 for four minor releases - amd64 only, arm64 never had a
+ * revision there - so anyone who followed a preview channel ran a release a
+ * month old, and nothing said so.
  */
-export function snapChannel(name, snap, arches, { channel = 'stable', ...opts } = {}) {
+export const SNAP_RELEASE_CHANNELS = ['stable', 'candidate', 'beta', 'edge'];
+export const SNAP_CHECKED_CHANNELS = ['stable', 'candidate', 'beta'];
+
+/**
+ * A snap's revision for THIS version is on each channel for every
+ * architecture (api.snapcraft.io, no account needed). Each release uploads
+ * one revision per architecture; a job that failed or skipped, or an upload
+ * the Store holds for a review, leaves that architecture's users on the
+ * previous version, and nothing else says so. `channels` (default: the one
+ * `channel`) are all read; the detail names every channel and architecture
+ * that lags.
+ */
+export function snapChannel(name, snap, arches, { channel = 'stable', channels = [channel], ...opts } = {}) {
   return {
     name,
     check: async (c) => {
@@ -328,18 +351,35 @@ export function snapChannel(name, snap, arches, { channel = 'stable', ...opts } 
       } catch (e) {
         return { ok: false, detail: `could not check — ${url}: ${e?.cause?.code ?? e?.message ?? e}` };
       }
-      const map = doc?.['channel-map'] ?? [];
-      const lines = [];
-      const problems = [];
-      for (const arch of arches) {
-        const entry = map.find((m) => m?.channel?.name === channel && m?.channel?.architecture === arch);
-        if (!entry) problems.push(`${channel}/${arch}: no revision`);
-        else if (entry.version !== c.version) problems.push(`${channel}/${arch}: ${entry.version} (revision ${entry.revision}), not ${c.version}`);
-        else lines.push(`${channel}/${arch}: ${entry.version} (revision ${entry.revision})`);
-      }
-      return problems.length ? { ok: false, detail: problems.join('\n') } : { ok: true, detail: lines.join(', ') };
+      const v = snapChannelVerdict(doc?.['channel-map'] ?? [], { channels, arches, version: c.version });
+      return v.problems.length ? { ok: false, detail: v.problems.join('\n') } : { ok: true, detail: v.lines.join(', ') };
     },
   };
+}
+
+/**
+ * The channel map of api.snapcraft.io/v2/snaps/info read against a version:
+ * `lines` for each channel and architecture on it, `problems` for each that
+ * is not (no revision there - a closed channel is not in the map - or another
+ * version), and `lagging`, the same as { channel, arch, version, revision }.
+ */
+export function snapChannelVerdict(map, { channels, arches, version }) {
+  const lines = [];
+  const problems = [];
+  const lagging = [];
+  for (const channel of channels) {
+    for (const arch of arches) {
+      const entry = map.find((m) => m?.channel?.name === channel && m?.channel?.architecture === arch);
+      if (!entry) {
+        problems.push(`${channel}/${arch}: no revision`);
+        lagging.push({ channel, arch, version: null, revision: null });
+      } else if (entry.version !== version) {
+        problems.push(`${channel}/${arch}: ${entry.version} (revision ${entry.revision}), not ${version}`);
+        lagging.push({ channel, arch, version: entry.version, revision: entry.revision });
+      } else lines.push(`${channel}/${arch}: ${entry.version} (revision ${entry.revision})`);
+    }
+  }
+  return { lines, problems, lagging };
 }
 
 /**

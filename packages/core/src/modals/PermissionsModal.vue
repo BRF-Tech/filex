@@ -48,6 +48,7 @@ import { actionIconSvg } from '../lib/actionIcons';
 import { fileIconTile } from '../lib/fileIcons';
 import { gateOnService } from '../lib/serviceGate';
 import { ALL_SHARING, type SharingHeld } from '../lib/sharingHeld';
+import { isStorageRootPath, sharingAtTarget } from '../lib/storageRoot';
 import ChoiceSelect, { type SelectOption } from '../components/ChoiceSelect.vue';
 import { availableLocales } from '../lib/uiLocales';
 import ChoiceButtons, { type ChoiceOption } from '../components/ChoiceButtons.vue';
@@ -103,7 +104,11 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
-const mayShare = computed<SharingHeld>(() => props.sharing ?? ALL_SHARING);
+/* #117 — the dialog on a storage's ROOT is the whole storage given to people
+   and groups: no link, no file request (lib/storageRoot). Decided from the
+   path, so every host that opens it there gets the same dialog. */
+const atStorageRoot = computed(() => isStorageRootPath(props.path));
+const mayShare = computed<SharingHeld>(() => sharingAtTarget(props.path, props.sharing ?? ALL_SHARING));
 
 /**
  * "Send by email", when mail cannot be sent — the owner's rule for a missing
@@ -128,6 +133,8 @@ const pathParts = computed(() => {
 // The type tile beside the title — the same badge the listing draws, so the
 // dialog is visibly about the row the user right-clicked.
 const titleTile = computed(() => {
+  // A storage root is drawn as the storage it is, the tile its row has.
+  if (atStorageRoot.value) return fileIconTile({ type: 'dir', mime_type: 'inode/storage' });
   const name = pathParts.value.name;
   const dot = name.lastIndexOf('.');
   return fileIconTile({
@@ -135,6 +142,11 @@ const titleTile = computed(() => {
     extension: !props.isDir && dot > 0 ? name.slice(dot + 1) : '',
   });
 });
+const dialogTitle = computed(() =>
+  atStorageRoot.value
+    ? t('access.title_storage', { name: pathParts.value.name })
+    : t('access.title', { name: pathParts.value.name }),
+);
 
 type Section = 'link' | 'people' | 'drop';
 const open = ref<Record<Section, boolean>>({ link: false, people: false, drop: false });
@@ -385,11 +397,13 @@ onMounted(async () => {
   // grants are one click away with their own state ("2 people") readable from
   // the closed heading. A caller that explicitly wants the grants still says
   // so, and "Request files" still lands on the drop link.
+  // #117 — on a storage root the people section is the whole dialog, so it
+  // opens with it; there are no links there to list.
   if (props.initialTab === 'drop') open.value = { ...open.value, drop: true };
-  else if (props.initialTab === 'perms') open.value = { ...open.value, people: true };
+  else if (props.initialTab === 'perms' || atStorageRoot.value) open.value = { ...open.value, people: true };
   document.addEventListener('keydown', onKey);
   await reload();
-  await reloadShares();
+  if (!atStorageRoot.value) await reloadShares();
 });
 onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer);
@@ -926,12 +940,15 @@ async function nativeShare(body: SheetWords | null) {
   <div class="fx-perm-overlay fe-share__scrim" @click.self="emit('close')">
     <!-- ⚠ `fx-perm-modal` is kept alongside the new class: e2e/shots/capture.mjs
          and the embedders' own harnesses address the dialog by it. -->
-    <div class="fx-perm-modal fe-share" role="dialog" aria-modal="true" :aria-label="t('access.title', { name: pathParts.name })">
+    <div class="fx-perm-modal fe-share" role="dialog" aria-modal="true" :aria-label="dialogTitle">
       <header class="fe-share__head">
         <span class="fe-share__tile" aria-hidden="true" v-html="titleTile"></span>
         <div class="fe-share__headtext">
-          <h3 class="fe-share__title">{{ t('access.title', { name: pathParts.name }) }}</h3>
-          <span class="fe-share__path" :title="path"><bdi>{{ pathParts.adapter }}</bdi></span>
+          <h3 class="fe-share__title">{{ dialogTitle }}</h3>
+          <span class="fe-share__path" :title="path">
+            <template v-if="atStorageRoot">{{ t('access.ui.whole_storage') }}</template>
+            <bdi v-else>{{ pathParts.adapter }}</bdi>
+          </span>
         </div>
         <button type="button" class="fe-share__close" :aria-label="t('access.close')" :title="t('access.close')" @click="emit('close')">
           <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
@@ -1142,6 +1159,9 @@ async function nativeShare(body: SheetWords | null) {
               <div v-if="addBlocked" class="fe-share__warn" data-testid="share-rbac-off">
                 {{ t('access.ui.rbac_off_here') }}
               </div>
+              <p v-if="atStorageRoot" class="fe-share__hint" data-testid="share-storage-root-hint">
+                {{ t('access.ui.storage_root_hint') }}
+              </p>
               <div v-if="err" class="fe-share__warn">{{ err }}</div>
               <p v-if="loading" class="fe-share__hint">{{ t('access.ui.loading') }}</p>
               <template v-else>
@@ -1257,8 +1277,9 @@ async function nativeShare(body: SheetWords | null) {
                     <span class="fe-share__av fe-share__av--dim" :class="{ 'fe-share__av--group': isGroup(g) }">{{ ginitial(g) }}</span>
                     <span class="fe-share__person" :title="gtitle(g)">{{ glabel(g) }}<span v-if="isGroup(g)" class="fe-share__kind">{{ t('access.ui.group') }}</span></span>
                     <span class="fe-share__badge">{{ levelLabel(g.level) }}</span>
-                    <span class="fe-share__from" :title="t('access.ui.inherited_from') + ': ' + (g.path_prefix || '/')">
-                      {{ g.path_prefix || '/' }}
+                    <!-- #117 — a grant on the storage root is "the whole storage", not "/" -->
+                    <span class="fe-share__from" :title="t('access.ui.inherited_from') + ': ' + (g.path_prefix || t('access.ui.whole_storage'))">
+                      {{ g.path_prefix || t('access.ui.whole_storage') }}
                     </span>
                   </div>
                 </div>

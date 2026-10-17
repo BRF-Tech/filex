@@ -27,6 +27,7 @@ import StoragePluginsTab from '@/components/plugins/StoragePluginsTab.vue';
 import AppPluginsTab from '@/components/plugins/AppPluginsTab.vue';
 import PluginRequestsPanel from '@/components/plugins/PluginRequestsPanel.vue';
 import DefaultAppsTab from '@/components/plugins/DefaultAppsTab.vue';
+import InstanceSettingsCard from '@/components/settings/InstanceSettingsCard.vue';
 
 type Tab = 'storage' | 'apps' | 'defaults';
 const TABS: Tab[] = ['storage', 'apps', 'defaults'];
@@ -90,6 +91,10 @@ const generation = ref(0);
     </div>
     <div v-show="activeTab === 'apps'" role="tabpanel">
       <AppPluginsTab :key="`apps-${generation}`" @loaded="onAppsLoaded" />
+      <!-- The apps' size limits, install requests' life and co-editing
+           (FILEX_APP_PLUGIN_MAX_*, FILEX_PLUGIN_REQUEST_TTL_DAYS, FILEX_COEDIT_*
+           until 0.57, task #258). -->
+      <InstanceSettingsCard group="apps" class="mt-4" />
     </div>
     <!-- Mounted when first opened, then kept; it reads its list again each
          time it is opened, because an install on the Apps tab changes it. -->

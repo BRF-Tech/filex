@@ -18,6 +18,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/stall"
+	"github.com/brf-tech/filex/backend/internal/testutil/refusedport"
 )
 
 // Issue #73: the FTP driver bounded only the TCP connect (15 s). Once
@@ -357,13 +358,7 @@ func (s *fakeFTP) sendDownload(dc net.Conn, body []byte) {
 
 func refusedAddr(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := l.Addr().String()
-	_ = l.Close()
-	return addr
+	return refusedport.Addr(t)
 }
 
 type ftpCall struct {

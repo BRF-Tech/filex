@@ -114,6 +114,12 @@ describe('names the dialog refuses before the server does', () => {
     expect(docNameProblem('a/b', txt, ALL)).toEqual({ kind: 'slash' });
     expect(docNameProblem('a\\b', txt, ALL)).toEqual({ kind: 'slash' });
     expect(docNameProblem('..', txt, ALL)).toEqual({ kind: 'dots' });
+    // Task #238: the server's leaf rule - `...`, a NUL and a control character
+    // (built from code points, never typed) are refused before the click.
+    expect(docNameProblem('...', txt, ALL)).toEqual({ kind: 'dots' });
+    expect(docNameProblem('a' + String.fromCodePoint(0) + 'b', txt, ALL)).toEqual({ kind: 'invalid' });
+    expect(docNameProblem('a' + String.fromCodePoint(9) + 'b', txt, ALL)).toEqual({ kind: 'invalid' });
+    expect(docNameProblem('a' + String.fromCodePoint(0x7f) + 'b', txt, ALL)).toEqual({ kind: 'invalid' });
     expect(docNameProblem('.txt', txt, ALL)).toEqual({ kind: 'bare_ext' });
     expect(docNameProblem('.docx', docx, ALL)).toEqual({ kind: 'bare_ext' });
   });

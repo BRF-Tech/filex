@@ -79,15 +79,19 @@ describe('the Markdown preview draws inline HTML inert', () => {
     });
   }
 
-  it('a normal README keeps its headings, table, code, picture, link and details', async () => {
+  it('a normal README keeps its headings, table, code, picture (held), link and details', async () => {
     const el = await renderedMarkdown(BENIGN_MARKDOWN);
     expect(activeContent(el)).toEqual([]);
     expect(el.querySelector('h1')?.textContent).toBe('Project title');
     expect(el.querySelectorAll('table td').length).toBe(2);
     expect(el.querySelector('pre code')?.textContent).toContain('const x = 1 < 2;');
-    const img = el.querySelector('img');
-    expect(img?.getAttribute('src')).toBe('https://example.test/logo.png');
-    expect(img?.getAttribute('width')).toBe('72');
+    // A picture from another server waits behind a placeholder that keeps
+    // what it needs to be drawn once the person asks (previewRemoteImages).
+    expect(el.querySelector('img')).toBeNull();
+    const held = el.querySelector('.fe-remote-img');
+    expect(held?.getAttribute('data-remote-image')).toBe('https://example.test/logo.png');
+    expect(held?.getAttribute('data-remote-width')).toBe('72');
+    expect(held?.textContent).toContain('logo');
     expect(el.querySelector('a')?.getAttribute('href')).toBe('https://example.test/docs');
     expect(el.querySelector('details summary')?.textContent).toBe('More');
     expect((el.querySelector('p[style]') as HTMLElement | null)?.style.color).toBe('red');

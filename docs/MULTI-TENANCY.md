@@ -99,8 +99,8 @@ checkable. §16 lists what is still open.
 
 ## 3. Mode gating (backward-compat is non-negotiable)
 
-Since 0.53 the mode is a switch: **Admin → Multi-tenant mode** (System →
-Customization), the platform operator's alone. It is decided once, at start,
+Since 0.53 the mode is a switch: **Admin → Settings → Multi-tenant mode**
+(the General column), the platform operator's alone. It is decided once, at start,
 in this order:
 
 1. `FILEX_MULTI_TENANT`, when it is set at all - `1` or `true` (any case) is
@@ -418,7 +418,7 @@ the form has no field):
 
 | The platform's page: the Realm field empty and free | A tenant's own address: the field filled in and read-only |
 |---|---|
-| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.8f475089f640.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.6aab246c7428.png) |
+| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.04c63e0ba149.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.ad0cd828c6ac.png) |
 
 **The handoff to a tenant's own address.** The session cookie belongs to the
 host it was set on. A realm typed on the platform's page for a tenant that has
@@ -682,6 +682,7 @@ is the honest form of that proof.
 | Surface | What one tenant admin could otherwise do to everyone |
 |---|---|
 | `/api/admin/protection` | Turn antivirus **off** for the instance, or point clamd at a host they control. The READ is gated too: it returns the clamd address and a live reachability probe. |
+| `/api/admin/instance-settings` | The server's defaults (0.57): switch notifications off for every tenant, change the default language, the sync interval, the file cache, the apps' limits. Reads gated too. |
 | `/api/admin/external` | Repoint the shared OnlyOffice / converter at their own host **and overwrite the shared JWT secret** - every tenant's documents in transit. |
 | `/api/admin/auth-providers` | Rewrite the global `auth.*` rows (OIDC issuer + client secret, LDAP bind) - who can sign in at all. |
 | `/api/admin/login-security` | The [sign-in attempt limits](CONFIGURATION.md#sign-in-attempt-limits): switch them off, allow-list an address so it is never limited and may enter any locked account, choose which proxy's forwarded address is believed, unlock other tenants' accounts. Every verb is gated, reads included (the lock list names accounts and addresses). |
@@ -768,7 +769,8 @@ section 16.
 
 ## 12. Per-tenant settings & branding
 
-Each tenant on its own host wants its own `site_name`, logo, default locale,
+Each tenant on its own host wants its own name (the Display name,
+`branding.name`, which the mails use too), logo, default locale,
 external-service URLs, and mail sender identity. Branding shipped without a
 schema change ([§4](#4-data-model)): a tenant's values are kept under
 `tenant.<id>.branding.*` keys in the global `settings` table, and

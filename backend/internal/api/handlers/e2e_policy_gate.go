@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"mime/multipart"
 	"net/http"
 	"path"
 	"strings"
@@ -268,7 +267,7 @@ func e2eActor(ctx context.Context, store db.Store, st *model.Storage, id *int64)
 // 2026-10-03): an approval is the creator's, for an encryption of their own,
 // and a visitor must not use it up. Under the approval policy such a file is
 // refused as approval_required, and the approval stays unused.
-func (h *Drop) refusesE2E(w http.ResponseWriter, r *http.Request, sh *model.Share, st *model.Storage, subRel string, files []*multipart.FileHeader) bool {
+func (h *Drop) refusesE2E(w http.ResponseWriter, r *http.Request, sh *model.Share, st *model.Storage, subRel string, names []string) bool {
 	svc := h.Manager.E2EPolicy
 	if svc == nil {
 		return false
@@ -277,9 +276,8 @@ func (h *Drop) refusesE2E(w http.ResponseWriter, r *http.Request, sh *model.Shar
 		creator *model.User
 		looked  bool
 	)
-	for _, fh := range files {
-		name, ok := sanitizeUploadName(fh.Filename)
-		if !ok || !e2epolicy.IsEncryptionName(name) {
+	for _, name := range names {
+		if !e2epolicy.IsEncryptionName(name) {
 			continue
 		}
 		var err error

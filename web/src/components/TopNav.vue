@@ -15,8 +15,8 @@ import { useAuthStore } from '@/stores/auth';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { signOut } from '@/lib/signOut';
 import { useSettingsDeepLink } from '@/composables/useSettingsDeepLink';
-// gorunum:v3-shell — ⚠ no LocaleSwitcher and no DarkModeToggle here any more.
-// Both did a job the user-settings modal already does, one click away in the
+// gorunum:v3-shell — ⚠ no language switcher and no dark-mode toggle here any
+// more (both components were deleted in 0.57, task #258). Both did a job the user-settings modal already does, one click away in the
 // account menu below (Preferences → Language, Preferences → Theme), and the
 // owner's rule for this wave is that no two controls may do the same job —
 // "aynı işlevi yapan iki buton olmaması lazım, context menü butonları

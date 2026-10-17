@@ -127,15 +127,30 @@ export function guardFixture(app: AppFixture, testSkip: (condition: boolean, rea
 export const APP_INSTALL_ALLOWANCE_MS = 90_000;
 
 /**
+ * ⚠⚠ How long the review may take to come back, in every app spec.
+ *
+ * "Review permissions" uploads the files (sign's module is 21 MB) and the
+ * server reads, hashes and reviews them before the permission rows are
+ * drawn. Measured on the 0.57 chain (2026-10-16, WebKit, 113 install): the
+ * review answered in 6.0 s on a machine stalled on disk while two race-test
+ * jobs started beside the suite, 0.3 s on the retry - and the step waited
+ * the 5 s an `expect` waits by default, so the install was red before the
+ * review arrived. Firefox's 96 and 97 reviews took 2.8 s and 4.4 s in the
+ * same minutes.
+ */
+export const APP_REVIEW_ALLOWANCE_MS = 30_000;
+
+/**
  * Install the app the way an administrator does: the wizard, the permission
  * review, the "I understand" tick. It is the only supported install path, so
  * the specs use it rather than a back door.
  *
- * It extends the running test's timeout by `APP_INSTALL_ALLOWANCE_MS`, so a
- * spec calls it and sets no timeout of its own for the install.
+ * It extends the running test's timeout by `APP_REVIEW_ALLOWANCE_MS` and
+ * `APP_INSTALL_ALLOWANCE_MS`, so a spec calls it and sets no timeout of its
+ * own for the review or the install.
  */
 export async function installThroughWizard(page: Page, app: AppFixture) {
-  test.info().setTimeout(test.info().timeout + APP_INSTALL_ALLOWANCE_MS);
+  test.info().setTimeout(test.info().timeout + APP_REVIEW_ALLOWANCE_MS + APP_INSTALL_ALLOWANCE_MS);
   await page.addInitScript(() => localStorage.setItem('filex.tourDone', '1'));
   await page.goto('/admin/plugins');
   await page.getByTestId('plugins-tab-apps').click();
@@ -147,9 +162,14 @@ export async function installThroughWizard(page: Page, app: AppFixture) {
   await page.getByTestId('app-plugin-manifest').setInputFiles(app.manifestPath);
   await page.getByTestId('app-plugin-review').click();
 
-  // Nothing is granted without being read first.
+  // Nothing is granted without being read first. The review or its refusal,
+  // whichever comes: a refused review says why at once.
   const rows = page.getByTestId('app-plugin-permissions');
-  await expect(rows).toBeVisible();
+  const failure = page.getByTestId('app-plugin-wizard-error');
+  await expect(rows.or(failure), `the review of ${app.name}`).toBeVisible({ timeout: APP_REVIEW_ALLOWANCE_MS });
+  if (!(await rows.isVisible())) {
+    throw new Error(`the install wizard refused the review of the ${app.name} module: ${(await failure.textContent())?.trim()}`);
+  }
   for (const perm of app.manifest?.permissions ?? []) {
     await expect(rows, `permission ${perm} is reviewed before it is granted`).toContainText(perm);
   }
@@ -157,6 +177,16 @@ export async function installThroughWizard(page: Page, app: AppFixture) {
   await expect(install).toBeDisabled();
   await page.getByLabel(/I understand|Anladım/).check();
   await expect(install).toBeEnabled();
+  // The install's own answer, for a refusal: its code and the server's
+  // English detail say what the wizard's sentence cannot (0.57: two
+  // installs refused on an overloaded machine read "the build and the
+  // manifest do not belong together", and the hunt went to the files).
+  const answered = page
+    .waitForResponse(
+      (r) => r.request().method() === 'POST' && /\/api\/admin\/app-plugins(\?|$)/.test(r.url()) && !r.url().includes('dry_run'),
+      { timeout: APP_INSTALL_ALLOWANCE_MS },
+    )
+    .catch(() => null);
   await install.click();
 
   /**
@@ -172,12 +202,16 @@ export async function installThroughWizard(page: Page, app: AppFixture) {
    * the difference between a five-minute fix and an afternoon.
    */
   const installed = page.getByTestId(`app-plugin-${app.name}`);
-  const failure = page.getByTestId('app-plugin-wizard-error');
   const deadline = Date.now() + APP_INSTALL_ALLOWANCE_MS;
   for (;;) {
     if (await installed.isVisible().catch(() => false)) break;
     const said = (await failure.textContent().catch(() => null))?.trim();
-    if (said) throw new Error(`the install wizard refused the ${app.name} module: ${said}`);
+    if (said) {
+      const res = await Promise.race([answered, page.waitForTimeout(2_000).then(() => null)]);
+      const body = res && !res.ok() ? ((await res.json().catch(() => ({}))) as { error?: string; detail?: string }) : {};
+      const why = body.error ? ` [${res?.status()} ${body.error}: ${body.detail ?? ''}]` : '';
+      throw new Error(`the install wizard refused the ${app.name} module: ${said}${why}`);
+    }
     if (Date.now() > deadline) break;
     await page.waitForTimeout(250);
   }

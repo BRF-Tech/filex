@@ -2,12 +2,17 @@
  * The admin panel's navigation, in ONE place: which pages exist, how they are
  * grouped, and who sees which (GitHub #82, 0.51.0).
  *
- * The owner's grouping (2026-10-03): the dashboard as a plain link, then
- * three top entries, each a panel whose sections are columns -
+ * The owner's grouping (2026-10-15, task #258, renewing the three-entry menu
+ * of 2026-10-03): the dashboard as a plain link, then four top entries, each
+ * a panel whose sections are columns -
  *
- *   Files & storage     Files · Apps (when an app has a screen) · Storage
- *   People & security   People & access · Security
- *   System              Plugins & integrations · Customization · Maintenance & records
+ *   Files & storage        Files · Apps (when an app has a screen) · Storage
+ *   People                 People & access
+ *   Settings               General · Security & data · File processing & integrations (the AI assistant's page is there)
+ *   Maintenance & records  Maintenance & records
+ *
+ * Settings holds every page that changes how the instance behaves; the
+ * other three hold the things the instance HAS (files, people, its records).
  *
  * The drawing is core's `MegaMenu` (the same component on a wide screen and,
  * as a headed list, in a phone's drawer); this module only says WHAT it
@@ -57,6 +62,7 @@ import {
   Shield,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Tag,
   Trash2,
   UserCog,
@@ -81,9 +87,17 @@ export interface AdminNavPage {
   /**
    * Shown only on a multi-tenant install, and only to one of its two kinds
    * of administrator: `tenants` to the platform operator, `tenantSelf` to a
-   * tenant's own administrator (docs/TENANT-ADMIN.md). `platform`: to the
-   * administrator who may configure the instance, on every install (the
-   * Multi-tenant mode switch, task #167).
+   * tenant's own administrator (docs/TENANT-ADMIN.md).
+   *
+   * `platform`: a page about the INSTANCE, whose API refuses everybody inside
+   * a tenant (`requireSupertenant`, `allowSettingWrite`: 403 on read and on
+   * write). Offered on every single-tenant install and, on a multi-tenant
+   * one, to the readers who stand in the platform's own scope - never to a
+   * tenant's administrator, who could neither read it nor change anything on
+   * it (task #258, checked page by page against the handlers; the list is in
+   * docs/ADMIN-PANEL.md → Who sees which page). The page's own rule still
+   * applies on top (`pageOpenTo`): Multi-tenant mode is an administrator's,
+   * Usage & cost an admin.monitor holder's too.
    */
   only?: 'tenants' | 'tenantSelf' | 'platform';
 }
@@ -126,7 +140,7 @@ export const ADMIN_NAV: AdminNavEntry[] = [
           { route: 'trash', label: 'nav.trash', hint: 'nav.hint.trash', icon: Trash2 },
           { route: 'tagged', label: 'nav.tagged', hint: 'nav.hint.tagged', icon: Tag },
           { route: 'duplicates', label: 'nav.duplicates', hint: 'nav.hint.duplicates', icon: Copy },
-          { route: 'search', label: 'nav.search', hint: 'nav.hint.search', icon: Search },
+          { route: 'search', label: 'nav.search', hint: 'nav.hint.search', icon: Search, only: 'platform' },
         ],
       },
       // An app is a PLACE you go, like a storage - not a setting. The
@@ -140,8 +154,8 @@ export const ADMIN_NAV: AdminNavEntry[] = [
           { route: 'storages', label: 'nav.storages', hint: 'nav.hint.storages', icon: Database },
           { route: 'connections', label: 'nav.connections', hint: 'nav.hint.connections', icon: Cable },
           { route: 'sync', label: 'nav.sync', hint: 'nav.hint.sync', icon: RefreshCcw },
-          { route: 'replica', label: 'nav.replica', hint: 'nav.hint.replica', icon: GitBranch },
-          { route: 'usage', label: 'nav.usage', hint: 'nav.hint.usage', icon: BarChart3 },
+          { route: 'replica', label: 'nav.replica', hint: 'nav.hint.replica', icon: GitBranch, only: 'platform' },
+          { route: 'usage', label: 'nav.usage', hint: 'nav.hint.usage', icon: BarChart3, only: 'platform' },
         ],
       },
     ],
@@ -159,6 +173,26 @@ export const ADMIN_NAV: AdminNavEntry[] = [
           { route: 'roles', label: 'nav.roles', hint: 'nav.hint.roles', icon: UserCog },
           { route: 'grants', label: 'nav.grants', hint: 'nav.hint.grants', icon: ShieldCheck },
           { route: 'tenants', label: 'nav.tenants', hint: 'nav.hint.tenants', icon: Building2, only: 'tenants' },
+        ],
+      },
+    ],
+  },
+  {
+    // Every page that changes how the instance behaves, in one place. The
+    // pages kept their addresses; only where the menu shows them moved. The
+    // Settings page itself is the column's "General": a page called Settings
+    // under a menu called Settings would name nothing.
+    id: 'settings',
+    label: 'nav.top.settings',
+    sections: [
+      {
+        id: 'general',
+        label: 'nav.section.general',
+        pages: [
+          { route: 'settings', label: 'nav.general', hint: 'nav.hint.settings', icon: Settings, only: 'platform' },
+          { route: 'branding', label: 'nav.branding', hint: 'nav.hint.branding', icon: Palette },
+          { route: 'appearance', label: 'nav.appearance', hint: 'nav.hint.appearance', icon: Brush, only: 'platform' },
+          { route: 'tenancy', label: 'nav.tenancy', hint: 'nav.hint.tenancy', icon: Network, only: 'platform' },
           { route: 'tenant-self', label: 'nav.myTenant', hint: 'nav.hint.myTenant', icon: Building2, only: 'tenantSelf' },
         ],
       },
@@ -166,48 +200,39 @@ export const ADMIN_NAV: AdminNavEntry[] = [
         id: 'security',
         label: 'nav.section.security',
         pages: [
-          { route: 'auth-providers', label: 'nav.authProviders', hint: 'nav.hint.authProviders', icon: Fingerprint },
-          { route: 'login-security', label: 'nav.loginSecurity', hint: 'nav.hint.loginSecurity', icon: ShieldAlert },
+          { route: 'auth-providers', label: 'nav.authProviders', hint: 'nav.hint.authProviders', icon: Fingerprint, only: 'platform' },
+          { route: 'login-security', label: 'nav.loginSecurity', hint: 'nav.hint.loginSecurity', icon: ShieldAlert, only: 'platform' },
           { route: 'encryption', label: 'nav.encryption', hint: 'nav.hint.encryption', icon: Lock },
-          { route: 'protection', label: 'nav.protection', hint: 'nav.hint.protection', icon: Shield },
+          { route: 'protection', label: 'nav.protection', hint: 'nav.hint.protection', icon: Shield, only: 'platform' },
+        ],
+      },
+      {
+        id: 'integrations',
+        label: 'nav.section.integrations',
+        pages: [
+          { route: 'archives', label: 'nav.archives', hint: 'nav.hint.archives', icon: Archive, only: 'platform' },
+          { route: 'plugins', label: 'nav.plugins', hint: 'nav.hint.plugins', icon: Blocks, only: 'platform' },
+          { route: 'external', label: 'nav.external', hint: 'nav.hint.external', icon: PlugZap, only: 'platform' },
+          { route: 'webhooks', label: 'nav.webhooks', hint: 'nav.hint.webhooks', icon: Webhook, only: 'platform' },
+          { route: 'notifications', label: 'nav.notifications', hint: 'nav.hint.notifications', icon: Bell },
           { route: 'api-mcp', label: 'nav.apiMcp', hint: 'nav.hint.apiMcp', icon: KeyRound },
+          { route: 'ai-assistant', label: 'nav.aiAssistant', hint: 'nav.hint.aiAssistant', icon: Sparkles, only: 'platform' },
         ],
       },
     ],
   },
   {
-    id: 'system',
-    label: 'nav.top.system',
+    id: 'maintenance',
+    label: 'nav.top.maintenance',
     sections: [
-      {
-        id: 'integrations',
-        label: 'nav.section.integrations',
-        pages: [
-          { route: 'plugins', label: 'nav.plugins', hint: 'nav.hint.plugins', icon: Blocks },
-          { route: 'external', label: 'nav.external', hint: 'nav.hint.external', icon: PlugZap },
-          { route: 'webhooks', label: 'nav.webhooks', hint: 'nav.hint.webhooks', icon: Webhook },
-          { route: 'notifications', label: 'nav.notifications', hint: 'nav.hint.notifications', icon: Bell },
-        ],
-      },
-      {
-        id: 'customize',
-        label: 'nav.section.customize',
-        pages: [
-          { route: 'settings', label: 'nav.settings', hint: 'nav.hint.settings', icon: Settings },
-          { route: 'tenancy', label: 'nav.tenancy', hint: 'nav.hint.tenancy', icon: Network, only: 'platform' },
-          { route: 'branding', label: 'nav.branding', hint: 'nav.hint.branding', icon: Palette },
-          { route: 'appearance', label: 'nav.appearance', hint: 'nav.hint.appearance', icon: Brush },
-          { route: 'archives', label: 'nav.archives', hint: 'nav.hint.archives', icon: Archive },
-        ],
-      },
       {
         id: 'maintenance',
         label: 'nav.section.maintenance',
         pages: [
-          { route: 'queue', label: 'nav.queue', hint: 'nav.hint.queue', icon: ListChecks },
+          { route: 'queue', label: 'nav.queue', hint: 'nav.hint.queue', icon: ListChecks, only: 'platform' },
           { route: 'tools', label: 'nav.tools', hint: 'nav.hint.tools', icon: Wrench },
           { route: 'audit', label: 'nav.audit', hint: 'nav.hint.audit', icon: ScrollText },
-          { route: 'updates', label: 'nav.updates', hint: 'nav.hint.updates', icon: ArrowUpCircle },
+          { route: 'updates', label: 'nav.updates', hint: 'nav.hint.updates', icon: ArrowUpCircle, only: 'platform' },
           { route: 'about', label: 'nav.about', hint: 'nav.hint.about', icon: Info },
         ],
       },
@@ -279,9 +304,10 @@ export interface AdminNavContext {
   /** A multi-tenant install, read by one of its tenants' administrators. */
   tenantSelf: boolean;
   /**
-   * The reader may configure the instance (capabilities `caller_admin`):
-   * the platform operator on a multi-tenant install, any administrator on a
-   * single-tenant one. Absent: no such page is offered.
+   * The reader stands in the platform's scope (capabilities
+   * `caller_platform`): everybody on a single-tenant install, the
+   * supertenant's people on a multi-tenant one - never a tenant's. Absent:
+   * no `platform` page is offered.
    */
   platform?: boolean;
   apps: AdminNavApp[];

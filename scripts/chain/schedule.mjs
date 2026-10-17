@@ -8,8 +8,11 @@
 //
 // The model:
 //   - The browser round (the "track") runs one job at a time, in list order,
-//     from the moment the build is green. While it runs it holds a fixed
-//     share of the memory budget (its biggest job plus the Document Server).
+//     from the moment the build is green. While it runs it holds a share of
+//     the memory budget: its heaviest line still to run, plus the Document
+//     Server while a line still to run needs it (plan.mjs trackShare, one
+//     share per line: `trackShares`). The share only shrinks as the round
+//     goes, so the round never waits for memory the pool took.
 //   - Every other job is in the "pool". A pool job starts when its needs have
 //     passed, it fits the memory left over, and fewer than `maxJobs` pool jobs
 //     are running. A job that does not fit RESERVES its weight, so the
@@ -164,7 +167,7 @@ export function pickJobs({ ready, running, budget, maxJobs, ceiling = budget, io
  * a heavy line waits for the heavy pool jobs running, and holds the pool's
  * heavy jobs back while it waits.
  */
-export function simulate(plan, { memGb, trackGb, dbGb, poolMax, minutes, dsStart = 2, ioMax = 0 }) {
+export function simulate(plan, { memGb, trackGb, trackShares = [], dbGb, poolMax, minutes, dsStart = 2, ioMax = 0 }) {
   const status = Object.fromEntries(plan.pool.map((j) => [j.name, 'pending']));
   const dbJobs = plan.pool.filter((j) => j.db).map((j) => j.name);
   const timeline = [];
@@ -180,6 +183,9 @@ export function simulate(plan, { memGb, trackGb, dbGb, poolMax, minutes, dsStart
   let maxRunning = 0;
   let maxHeavy = 0;
   const settled = (n) => ['passed', 'failed', 'skipped'].includes(status[n]);
+  // The round's share while its line `i` runs (or, between two lines, the
+  // line that just ended): `trackGb` for a plan that gives none per line.
+  const shareAt = (i) => trackShares[Math.max(0, i)] ?? trackGb;
 
   for (let guard = 0; guard < 100000; guard += 1) {
     const buildPassed = plan.pool.filter((j) => j.kind === 'build').every((j) => status[j.name] === 'passed');
@@ -209,7 +215,8 @@ export function simulate(plan, { memGb, trackGb, dbGb, poolMax, minutes, dsStart
     }
     const trackActive = buildPassed && !trackDone;
     const dbUp = dbJobs.some((n) => !settled(n));
-    const budget = poolBudget({ memGb, trackActive, trackGb, dbUp, dbGb });
+    const share = shareAt(trackIndex);
+    const budget = poolBudget({ memGb, trackActive, trackGb: share, dbUp, dbGb });
     const ceiling = poolCeiling({ memGb, dbUp, dbGb });
     const { ready } = readyJobs(plan.pool, status);
     const ioHeld = trackIoWait !== null || trackJob?.job.io === 'heavy' ? 1 : 0;
@@ -219,7 +226,7 @@ export function simulate(plan, { memGb, trackGb, dbGb, poolMax, minutes, dsStart
       running.push(r);
       timeline.push({ name: job.name, lane: 'pool', start: t, end: r.end });
     }
-    const held = running.reduce((s, r) => s + r.job.weight, 0) + (trackActive ? trackGb : 0) + (dbUp ? dbGb : 0);
+    const held = running.reduce((s, r) => s + r.job.weight, 0) + (trackActive ? share : 0) + (dbUp ? dbGb : 0);
     peak = Math.max(peak, held);
     maxRunning = Math.max(maxRunning, running.length);
     const heavyNow = running.filter((r) => r.job.io === 'heavy').length + (trackJob?.job.io === 'heavy' && trackJob.start <= t ? 1 : 0);

@@ -8,14 +8,16 @@ before.
 > **What an account may *do*** - delete, share, download, use SFTP, manage users -
 > is the roles and per-user permission layer on top of this, in
 > [PERMISSIONS.md](PERMISSIONS.md). A file action needs both: the grant level
-> described here, and the permission.
+> described here, and the permission. The explorer's
+> [AI assistant](AI-ASSISTANT.md) (permission `ai.assistant`) is held to both
+> as well: each tool it calls runs as the person who asked.
 >
 > In the admin panel the grants are **Admin → Folder access** (*Klasör
 > erişimi*) - every per-file and per-folder grant, who has what, where - and
 > the roles are **Admin → Roles**. (Before 0.49 the grants page was called
 > *Permissions*.)
 
-![Admin → Folder access: every per-folder grant - who, which storage, which path, which level](https://filex.sh/shots/roles/folder-access-1440.693f0707339e.png)
+![Admin → Folder access: every per-folder grant - who, which storage, which path, which level](https://filex.sh/shots/roles/folder-access-1440.dec921e0eed0.png)
 
 > A grant can also be given to a **group** - every member holds it, the
 > highest covering level still wins and the account ceiling still caps it.
@@ -99,6 +101,7 @@ On each surface:
 |---|---|
 | `/api/files`, `/api/shares`, `/api/notifications`, `/api/me` (the explorer, `filex client`, an embed's proxy) | every route asks `read`; the routes that change files add `write`, those that remove files add `delete`. Two routes decide by the request: the manager's `?action=` (`delete` asks `delete`, `allowed` - the question the explorer asks before it offers an action - asks `read`, every other action `write`) and the operations queue's job kind |
 | `/api/ai` REST and MCP | each route and each `file_*` tool asks the verb of its REST twin; `tools/list` leaves out the tools the token cannot use ([MCP.md](MCP.md#mcp-endpoint-apiaimcp)) |
+| `/api/files/assistant` (the explorer's AI assistant, a person's own key only) | its routes ask `read` - a conversation is the person's own, like their preferences - and the assistant is offered only the tools the key's verbs allow, each asking the verb of its REST twin as an agent's call does: a read-only key's assistant reads and changes nothing ([AI-ASSISTANT.md](AI-ASSISTANT.md#what-the-assistant-can-do)) |
 | WebDAV, SFTP, FTPS (a token as the password) | `read` to list and download, `write` to create, change, rename and move, `delete` to remove |
 | S3 access keys and NFS exports **minted from a token** | carry that token's verbs the same way; one minted from a browser session carries every verb, as before |
 
@@ -206,8 +209,11 @@ A public link - a download link or a file-drop link - hands the item to people
 who have no account, so it needs **editor** on the item, and the account's
 `share.links` permission (`share.upload_links` for a file drop), whichever door
 makes it: the explorer (`POST /api/files/share`), `POST /api/ai/share`, or the
-MCP `file_share` tool - and a token making it needs `write`. filex's own
-folders (the trash, open-with copies) are never linked.
+MCP `file_share` tool - and a token making it needs `write`. A download link
+also needs `files.download` on the item: a link cannot hand out what its
+creator may not download. filex's own folders (the trash, open-with copies)
+are never linked, and neither is a whole storage
+([below](#a-whole-storage-for-people-and-groups)).
 
 The link keeps needing them: it answers only while its creator still holds
 that permission at the editor level on the item, and answers `404` from the
@@ -215,6 +221,32 @@ moment they do not - revoking a person's grant on a folder closes the links
 they made in it, and giving it back opens them again. Links an app opened, and
 links whose creator's account was deleted, are not affected
 ([PERMISSIONS.md → Public links follow their creator](PERMISSIONS.md#public-links-follow-their-creator)).
+
+### Every file in a folder answers the download rule
+
+`files.download` is asked of each file on its own path, not only of the
+folder that was picked. A rule that refuses it on one file or one subfolder
+(a custom role's part for some folders, [PERMISSIONS.md](PERMISSIONS.md#custom-roles))
+applies to archives and folder downloads as well:
+
+- a folder archive - the selection download (`POST /api/files/archive/download`
+  and its `/z/` link), Compress (`archive/create`), `archive/add`, the agent
+  zip (`POST /api/ai/zip`, MCP `file_zip`) and a folder link's ZIP - leaves
+  that file out and packs the rest. A `/z/` link asks again, as the account
+  that made it, when it is opened;
+- a folder link serves, lists and packs only the files its creator may
+  download;
+- a link an app opens hands over only what the person its job runs for may
+  download, and an app page's copies are withheld once its creator may no
+  longer download the page's document (the page itself stays).
+
+The rule is about the file's bytes, not one spelling of its path: a copy, a
+move, a rename, an extraction or an app's result that would put a file the
+account may not download where it could download it is refused, on every
+door (the explorer, the agent API, WebDAV, SFTP, FTPS, NFS and S3). The same
+operation inside the refused area, or by an account whose `files.download`
+is the same everywhere, works as before. The document editor opens such a
+file without its own Download as.
 
 ### Administration and plugins need a session
 
@@ -242,6 +274,78 @@ An administrator signed in to the admin panel does all of them as before.
 Managing accounts that are not administrators, taking a permission away, and
 reading plugins stay open to an admin-scoped token.
 
+## A whole storage for people and groups
+
+To give a person or a group an entire storage, open **Admin → Storages →**
+the storage → **Access**, pick them and a level, and they are in: every file
+and folder of the storage, however deep, with no folder grant of its own. The
+explorer offers the same on a storage row of its top level to whoever may
+manage it - an administrator, or a person given the storage as **owner**:
+right-click the storage → **Access…** opens the access dialog on the storage
+itself. The storage list says each caller's level at every root
+(`storage_info[].perm` on the manager's listings), which is how the explorer
+knows.
+
+![Admin → Storages → a storage → Access: two people and a group given the whole storage, each level changed in its row, and Revoke all access](https://filex.sh/shots/storageaccess/storage-access-1440.c3a292fe253f.png)
+
+![The explorer's storage list: Access… on a storage row's menu](https://filex.sh/shots/storageaccess/storage-row-access-1440.50058378992c.png)
+
+Under the hood it is an ordinary grant on the storage's **root** - the path
+`<storage>://`, stored with an empty path prefix - so nothing else knows it is
+special:
+
+- **Every surface agrees.** The web interface, the desktop app, WebDAV, SFTP,
+  FTPS, NFS, the S3-compatible API and an AI agent all ask the same resolver
+  (`internal/acl`), and a grant on the root covers every path in the storage.
+  The storage appears in the person's storage list, on a mounted drive and at
+  `/` of an SFTP session.
+- **The higher level counts.** Where a storage-wide grant and a folder grant
+  both cover a path, the higher of the two applies. A folder grant can raise
+  access inside a storage-wide one; nothing narrows it - there is no deny. To
+  give someone less than the whole storage, give them folders instead.
+- **The account's role is still the ceiling.** A viewer account given a
+  storage as editor reads it and changes nothing; the panel offers a viewer
+  account the viewer level only, and the server refuses more (`400`).
+- **Revoking leaves folder grants alone.** Revoking a storage-wide
+  assignment deletes that one row. **Revoke all access** deletes every
+  storage-wide assignment of the storage, one row at a time; a folder grant of
+  the same person is another row, and it stays and still answers. Folder grants
+  are listed under **Folder access**, where the storage-wide ones read
+  **Whole storage**.
+- **Per-item access control must be on.** With it off everyone opens the
+  storage by their role, so a grant would change nothing and the server
+  refuses one (`409`). The Access section says so and offers **Turn on
+  per-item access** in place. Turning it on hides the storage from every
+  non-administrator who holds no grant in it, so the dialog first asks who
+  keeps access, then turns it on and gives them the storage in the same press.
+  Assignments made before it was turned off apply again.
+
+![Turn on per-item access: what turning it on does, and the person chosen to keep access before anything changes](https://filex.sh/shots/storageaccess/storage-access-turn-on-1440.ce2ac42b892b.png)
+
+**No public link to a whole storage.** A link would hand everything in the
+storage to whoever holds the address, so the access dialog on a storage offers
+people and groups only - no link switch, no file request - and every door that
+makes a link refuses the storage root: the share door (`POST
+/api/files/share`, `404`, a storage root is not a file or folder it can name),
+the invitation's link for an address with no account (`POST
+/api/files/permissions/invite`, `400 root_link`), and the agent's (`POST
+/api/ai/share` answers `400`, the MCP `file_share` tool the same refusal). A
+folder inside the storage is shared as any folder is.
+
+![The access dialog on a storage: the people and groups given it, no link switch and no file request](https://filex.sh/shots/storageaccess/storage-root-dialog-1440.82451b79ed68.png)
+
+From the API, an assignment is a grant at the root:
+
+```bash
+# give a person the whole storage "team" (a group: "group_id" instead)
+curl -X POST "$FILEX/api/files/permissions" -H "Authorization: Bearer $TOKEN" \
+  -d '{"path": "team://", "user_id": 12, "level": "editor"}'
+# the storage-wide assignments are the root's own ("direct") grants
+curl "$FILEX/api/files/permissions?path=team://" -H "Authorization: Bearer $TOKEN"
+```
+
+![Admin → Folder access: a grant on a whole storage reads Whole storage, beside a folder grant](https://filex.sh/shots/storageaccess/folder-access-whole-1440.a7fe716f5196.png)
+
 ## Endpoints - permissions panel (`/api/files/permissions`)
 
 Mounted in the authenticated group. Every write requires the caller to be admin
@@ -250,7 +354,7 @@ Mounted in the authenticated group. Every write requires the caller to be admin
 | Method | Path | Body / query | Notes |
 |--------|------|--------------|-------|
 | GET | `/api/files/permissions?path=<adapter>://<rel>` | - | `{direct[], inherited[], storage_rbac, effective}`; each grant carries `kind`: `user` or `group`. Owner/admin only. |
-| POST | `/api/files/permissions` | `{path, user_id \| group_id, level}` | Upsert a grant, to a person or to a group. 409 if storage RBAC off; 400 if granting a viewer account >viewer (a group takes any level; each member's account still caps it). Whether the grant is a folder's (`is_dir`) is read from the item in the catalogue - a path it has not seen counts as a folder; an `is_dir` in the body is not read (since 0.54). |
+| POST | `/api/files/permissions` | `{path, user_id \| group_id, level}` | Upsert a grant, to a person or to a group; `path: "<storage>://"` gives the whole storage ([above](#a-whole-storage-for-people-and-groups)). 409 if storage RBAC off; 400 if granting a viewer account >viewer (a group takes any level; each member's account still caps it). Whether the grant is a folder's (`is_dir`) is read from the item in the catalogue - a path it has not seen counts as a folder; an `is_dir` in the body is not read (since 0.54). |
 | PATCH | `/api/files/permissions/{id}` | `{level}` | Change a person's grant's level. |
 | DELETE | `/api/files/permissions/{id}` | - | Revoke a person's grant. |
 | PATCH | `/api/files/permissions/groups/{id}` | `{level}` | Change a group's grant's level (a `kind: "group"` row; its own id space). |
@@ -258,7 +362,7 @@ Mounted in the authenticated group. Every write requires the caller to be admin
 | GET | `/api/files/permissions/resolve?email=` | - | `{found, user?}` - existing account or not. |
 | GET | `/api/files/permissions/users?q=` | - | `{users[]}` autocomplete of existing accounts. |
 | GET | `/api/files/permissions/groups?q=` | - | `{groups[]}` - up to 10 groups, matched by name, that the caller could grant to. |
-| POST | `/api/files/permissions/invite` | `{path, email, level, create_user?, role?}` | Existing user → grant; admin+`create_user` → new account+grant (temp password); else public share link. `{mode, url?, temp_password?, emailed}`. Mail sent only when SMTP is verified, else the link/password is returned for on-screen display. |
+| POST | `/api/files/permissions/invite` | `{path, email, level, create_user?, role?}` | Existing user → grant; admin+`create_user` → new account+grant (temp password); else public share link - asked like every link (edit rights, `share.links`, never an encrypted folder), and never for a storage root (`400 root_link`). `{mode, url?, temp_password?, emailed}`. Mail sent only when SMTP is verified, else the link/password is returned for on-screen display. |
 | POST | `/api/files/permissions/share-mail` | `{share \| share_id, email \| emails[], locale?}` | E-mail a public link the caller manages; the server writes the message from the link and never mails its PIN. At most 20 addresses per send, 100 an hour per account. [SHARING.md → Emailing a link](SHARING.md#emailing-a-link). |
 | GET | `/api/files/permissions/share-message?share=<token>&lang=` | - | The same message, `{subject, body, pin_withheld}`, without sending it (the OS share sheet). |
 
@@ -373,4 +477,11 @@ permission on every door, the default, the key screens' level),
 `backend/internal/tokenperm/tokenperm_test.go` (every permission states its
 default; the guard),
 `backend/internal/api/handlers/grants_test.go` (end-to-end: owner grant, viewer
-ceiling, owner-only panel, self-token limits, admin overview, non-admin 403).
+ceiling, owner-only panel, self-token limits, admin overview, non-admin 403),
+`backend/internal/acl/acl_storage_root_test.go` and
+`backend/internal/api/handlers/grants_storage_root_test.go` (a whole storage:
+the root grant's row, its reach, revoke keeps folder grants, RBAC off, the
+ceiling, the tenant, a `root:` key, no public link),
+`backend/internal/dav/dav_storage_root_test.go` and
+`backend/internal/sftpsrv/storage_root_grant_test.go` (the same grant over
+WebDAV and SFTP), and the browser run `e2e/tests/247-storage-level-access.spec.ts`.

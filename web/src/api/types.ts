@@ -314,6 +314,9 @@ export interface DemoMode {
 export interface Capabilities {
   version: string;
   build: string;
+  /** The AI assistant (task #269): its state for the caller and whether the
+   *  explorer draws its button. */
+  assistant?: { state: 'on' | 'off' | 'not_configured'; permitted: boolean; button: boolean };
   /** 0.54 (#211, audit A11): the release (`v0.54.0`), the commit and the
    *  build time, apart - no page parses `version` any more. `commit` and
    *  `built` are absent when the build did not stamp them. */
@@ -403,6 +406,11 @@ export interface Capabilities {
   /** The caller could configure the instance (the server's answer — the
    *  same checks the admin routes apply, supertenant included). */
   caller_admin?: boolean;
+  /** The caller stands in the platform's scope: every caller of a
+   *  single-tenant install, the supertenant's people on a multi-tenant one
+   *  (the scope `requireSupertenant` lets through). The admin menu's
+   *  `platform` pages follow it (lib/adminNav, task #258). */
+  caller_platform?: boolean;
 }
 
 /** One SSO button of the sign-in page (docs/TENANT-ADMIN.md). */
@@ -421,8 +429,9 @@ export interface LoginMethods {
 }
 
 export interface SettingsMap {
-  // free-form, but a few well-known keys
-  site_name?: string;
+  // free-form, but a few well-known keys. ⚠ `site_name` (the old "Site
+  // name") is gone: 0.57 merged it into `branding.name`, the Display name
+  // (task #258; server/seed.go carries an old value over at boot).
   // ⚠ `public_url`, `sync_interval_seconds`, `log_level`, `default_locale`
   // and `default_timezone` were declared here and offered on the Settings
   // page. Nothing on the server ever read those rows — the live values come

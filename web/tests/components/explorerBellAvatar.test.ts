@@ -179,7 +179,11 @@ describe('the desktop avatar: interface settings, no Sign out', () => {
   });
 
   it('…and opens User settings IN the window, not in a browser', () => {
-    expect(block).toMatch(/settings: true/);
+    // Task #258: with the rows only this window can carry out - its language,
+    // one click or two, its own notifications (ExplorerAccountSettings).
+    expect(block).toMatch(/settings: \{\s*language: \{ pick:/);
+    expect(block).toMatch(/openTrigger: \{ get: openTriggerPref, set: setOpenTrigger \}/);
+    expect(block).toMatch(/deviceNotifications: \{/);
     expect(block).not.toMatch(/user-settings/);
     expect(app).not.toMatch(/openUserSettings/);
     expect(read('desktop/src/preload-app.cts')).not.toMatch(/openUserSettings/);
@@ -191,11 +195,39 @@ describe('the desktop avatar: interface settings, no Sign out', () => {
     expect(rows.map((r) => r.key)).toEqual(['admin', 'fe:tour']);
   });
 
+  // Task #258: `account.settings` may be an OBJECT of the rows only the host
+  // can carry out; the explorer's dialog host reads them from it, and nothing
+  // else. A host that writes `true` gets the dialog without them, as before.
+  it('the explorer hands the dialog the host’s own rows from account.settings, and nothing for `true`', () => {
+    const fe = read('packages/core/src/FileExplorer.vue');
+    const host = fe.slice(fe.indexOf('const settingsHost: UserSettingsHost'), fe.indexOf('function pickThemeMode'));
+    for (const row of ['language', 'openTrigger', 'deviceNotifications']) {
+      expect(host).toMatch(new RegExp(`get ${row}\\(\\) \\{\\s*return accountSettingsHooks\\(\\)\\?\\.${row};`));
+    }
+    expect(fe).toMatch(/return s && typeof s === 'object' \? s : undefined;/);
+    expect(read('packages/core/src/types/ExplorerConfig.ts')).toMatch(/settings\?: boolean \| ExplorerAccountSettings;/);
+  });
+
+  it('a host that names its surface keeps the look on the account, and a pick is written back', () => {
+    const fe = read('packages/core/src/FileExplorer.vue');
+    expect(fe).toMatch(/configurePrefs\(\{ surface, base: connectionsBase\(props\.config\), headers: \(\) => api\.authHeaders\(\) \}\)/);
+    expect(fe).toMatch(/if \(props\.config\.accountPrefs\?\.surface && \(m === 'light' \|\| m === 'dark' \|\| m === 'auto'\)\) savePref\('theme', m\);/);
+    // The dialog's mode switch and the "⋯" theme menu both go through it.
+    expect(fe).toMatch(/set: \(v\) => pickThemeMode\(v\)/);
+    expect(fe).toMatch(/@mode="\(m: ThemeModePref\) => pickThemeMode\(m\)"/);
+  });
+
   it('the explorer opens its own settings row, first, and leaves out what the dialog carries', () => {
     const fe = read('packages/core/src/FileExplorer.vue');
     const rows = fe.slice(fe.indexOf('const accountRows'), fe.indexOf('function onAccountSelect'));
     expect(rows).toMatch(/acc\.settings\s*\?\s*\[\{ key: SETTINGS_ROW, label: t\('userSettings\.open'\)/);
-    expect(fe).toMatch(/const SETTINGS_DIALOG_ROWS = \['theme', 'density', 'timezone'\]/);
+    // One list, in core (task #258 added the keyboard shortcuts' editor).
+    expect(fe).toMatch(/SETTINGS_DIALOG_ROWS,\n\s*accountMenuRows,/);
+    expect(fe).not.toMatch(/const SETTINGS_DIALOG_ROWS =/);
+    expect(read('packages/core/src/lib/accountMenu.ts')).toMatch(
+      /export const SETTINGS_DIALOG_ROWS: readonly string\[\] = \['theme', 'density', 'timezone', 'shortcut-settings'\]/,
+    );
+    expect(read('web/src/views/Explore.vue')).toMatch(/\.\.\.SETTINGS_DIALOG_ROWS,/);
     expect(fe).toMatch(/<UserSettingsDialog\s+v-if="settingsOpen"/);
     const select = fe.slice(fe.indexOf('function onAccountSelect'), fe.indexOf('const SETTINGS_ROW'));
     expect(select).toMatch(/key === SETTINGS_ROW && props\.config\.account\?\.settings/);

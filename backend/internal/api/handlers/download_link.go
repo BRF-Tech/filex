@@ -22,8 +22,10 @@ package handlers
 // file, streamed as itself through the manager's own download path) and how
 // much the redeem trusts the mint:
 //
-//   - an ARCHIVE ticket carries a finished member list and is not re-judged at
-//     the redeem — the walk that built it was the authorization;
+//   - an ARCHIVE ticket carries a finished member list; the redeem acts as its
+//     owner again (ticketOwner: the account may still sign in, the token
+//     still exists) and asks every member the rule the walk asked
+//     (memberRule), leaving out one it refuses now;
 //   - a FILE link is re-judged at the redeem as its OWNER: the account must
 //     still be able to sign in, a token it was minted with must still exist,
 //     the storage must still be the owner's tenant's, the request must arrive
@@ -270,19 +272,10 @@ func (a *Archive) redeemFileLink(w http.ResponseWriter, r *http.Request, tok str
 		return
 	}
 
-	owner, err := a.Store.GetUser(ctx, fl.OwnerID)
-	if err != nil || owner == nil || !auth.LoginAllowed(ctx, a.Store, a.MultiTenant, owner) {
-		refuse(http.StatusForbidden, "account", "this download link is no longer valid")
+	owner, token, reason := a.ticketOwner(ctx, fl.OwnerID, fl.TokenID)
+	if reason != "" {
+		refuse(http.StatusForbidden, reason, "this download link is no longer valid")
 		return
-	}
-	var token *model.APIToken
-	if fl.TokenID != 0 {
-		token, err = a.Store.GetAPITokenByID(ctx, fl.TokenID)
-		if err != nil || token == nil || token.UserID != owner.ID ||
-			(token.ExpiresAt != nil && !token.ExpiresAt.After(time.Now())) {
-			refuse(http.StatusForbidden, "token", "this download link is no longer valid")
-			return
-		}
 	}
 	if a.hostProvider(r) != fl.HostProvider {
 		refuse(http.StatusForbidden, "host", "this download link belongs to another address")
@@ -291,14 +284,8 @@ func (a *Archive) redeemFileLink(w http.ResponseWriter, r *http.Request, tok str
 
 	// From here on the request IS the owner — the same context the explorer's
 	// own Download runs with.
-	uctx := auth.WithUser(ctx, owner)
-	if token != nil {
-		uctx = auth.WithToken(uctx, token)
-	}
-	if a.MultiTenant {
-		uctx = tenant.WithScope(uctx, auth.ScopeForUser(uctx, a.Store, owner))
-	}
-	ur := r.WithContext(uctx)
+	ur := a.asOwner(r, owner, token)
+	uctx := ur.Context()
 
 	st, err := a.Store.GetStorage(uctx, fl.StorageID)
 	if err != nil || st == nil || !st.Enabled || !ownsStorageQuiet(ur, st.ID) {
@@ -324,6 +311,42 @@ func (a *Archive) redeemFileLink(w http.ResponseWriter, r *http.Request, tok str
 		return
 	}
 	a.Tickets.consume(tok)
+}
+
+// ticketOwner re-reads the account a ticket acts for, and the API token it was
+// minted with (0 for a session): what a redeem asks again before it serves
+// anything, because the redeem itself carries no credential. reason is ""
+// when both still stand, otherwise the audit word for what fell: "account"
+// (gone, or may no longer sign in) or "token" (revoked, expired, or no longer
+// the owner's).
+func (a *Archive) ticketOwner(ctx context.Context, ownerID, tokenID int64) (*model.User, *model.APIToken, string) {
+	owner, err := a.Store.GetUser(ctx, ownerID)
+	if err != nil || owner == nil || !auth.LoginAllowed(ctx, a.Store, a.MultiTenant, owner) {
+		return nil, nil, "account"
+	}
+	var token *model.APIToken
+	if tokenID != 0 {
+		token, err = a.Store.GetAPITokenByID(ctx, tokenID)
+		if err != nil || token == nil || token.UserID != owner.ID ||
+			(token.ExpiresAt != nil && !token.ExpiresAt.After(time.Now())) {
+			return nil, nil, "token"
+		}
+	}
+	return owner, token, ""
+}
+
+// asOwner is r as the ticket's owner: their account, the token they minted it
+// with (its `root:` folder and verbs) and, on a multi-tenant install, their
+// tenant's scope - the context the explorer's own requests run with.
+func (a *Archive) asOwner(r *http.Request, owner *model.User, token *model.APIToken) *http.Request {
+	uctx := auth.WithUser(r.Context(), owner)
+	if token != nil {
+		uctx = auth.WithToken(uctx, token)
+	}
+	if a.MultiTenant {
+		uctx = tenant.WithScope(uctx, auth.ScopeForUser(uctx, a.Store, owner))
+	}
+	return r.WithContext(uctx)
 }
 
 // auditFileLink writes the redeem's audit row. ⚠ The link itself never goes

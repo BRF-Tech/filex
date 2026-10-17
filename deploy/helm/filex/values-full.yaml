@@ -1,5 +1,7 @@
-# Full install: bundled Postgres + Redis + S3 server, plus external ONLYOFFICE and
-# draw.io wired in. Every add-on is a toggle — flip `enabled` to add/remove it.
+# Full install: bundled Postgres + Redis + S3 server, plus external draw.io wired
+# in. Every add-on is a toggle - flip `enabled` to add/remove it. Office
+# documents need no add-on: install the Office editor app (Admin -> Plugins ->
+# Apps); an ONLYOFFICE Document Server is optional (below, off).
 #
 # Usage (this file ships inside the chart; `helm pull brf-tech/filex --untar`
 # writes it to ./filex/values-full.yaml):
@@ -48,11 +50,14 @@ storage:
 #   from: no-reply@example.com
 
 # ── External integrations (run separately; the chart wires filex) ───────
-# Flip enabled=false to remove one later (e.g. drop ONLYOFFICE tomorrow).
+# Flip enabled=false to remove one later.
+# ONLYOFFICE Document Server: optional, off. Turn it on for office thumbnails
+# and the apps' office conversions (docs/ONLYOFFICE.md). Deploy it yourself
+# from onlyoffice/documentserver:9.4.0.1 (never `latest`), JWT on.
 onlyoffice:
-  enabled: true
-  url: https://office.example.com   # deploy a Document Server separately
-  jwtSecret: change-me-onlyoffice   # must match the Document Server's JWT_SECRET
+  enabled: false
+  url: ""                           # https://office.example.com - browser-facing
+  jwtSecret: ""                     # must match the Document Server's JWT_SECRET
 
 drawio:
   enabled: true

@@ -30,4 +30,35 @@ fi
 if [ -L '/usr/bin/${executable}' ] && [ ! -e '/usr/bin/${executable}' ]; then
   rm -f '/usr/bin/${executable}'
 fi
+
+# The kinds of file the apps on a person's filex servers open are registered
+# by the RUNNING app, in that person's own data folder (src/os-assoc.ts): a
+# hidden desktop entry and, for the extensions the system had no type for, a
+# type package of filex's own. A package cannot see anyone's $XDG_DATA_HOME,
+# so the default place is cleaned, in every home: exactly those two files,
+# by name, and the caches rebuilt as their owner. (The entry carries TryExec,
+# so a desktop ignores one left anywhere else once the app is gone.)
+if type getent >/dev/null 2>&1; then
+  getent passwd | while IFS=: read -r name _ uid _ _ home _; do
+    case "$uid" in ''|*[!0-9]*) continue ;; esac
+    [ "$uid" -ge 1000 ] || [ "$uid" -eq 0 ] || continue
+    case "$home" in /?*) ;; *) continue ;; esac
+    share="$home/.local/share"
+    [ -d "$share" ] || continue
+    entry="$share/applications/filex-app-openwith.desktop"
+    types="$share/mime/packages/filex-app-openwith.xml"
+    if [ -f "$entry" ]; then
+      rm -f "$entry"
+      if type runuser >/dev/null 2>&1 && type update-desktop-database >/dev/null 2>&1; then
+        runuser -u "$name" -- update-desktop-database "$share/applications" >/dev/null 2>&1 || true
+      fi
+    fi
+    if [ -f "$types" ]; then
+      rm -f "$types"
+      if type runuser >/dev/null 2>&1 && type update-mime-database >/dev/null 2>&1; then
+        runuser -u "$name" -- update-mime-database "$share/mime" >/dev/null 2>&1 || true
+      fi
+    fi
+  done
+fi
 exit 0

@@ -1,5 +1,7 @@
 import { defineConfig, devices, type Project } from '@playwright/test';
 
+import { recordSettings } from './helpers/record';
+
 /**
  * Playwright config for the filex e2e suite.
  *
@@ -101,13 +103,23 @@ function selectedBrowsers(): string[] {
   return names;
 }
 
+/** What this run records of its tests (E2E_RECORD; helpers/record.ts). */
+const RECORD = recordSettings(process.env.E2E_RECORD, { ci: !!process.env.CI });
+
 export default defineConfig({
   testDir: './tests',
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: false,         // serialize: shared admin user state
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // What is recorded, and the retry that goes with it: E2E_RECORD
+  // (helpers/record.ts; the build host's chain records on retry, task #194).
+  retries: RECORD.retries,
+  failOnFlakyTests: RECORD.failOnFlakyTests,
+  // E2E_REPEAT_EACH=N runs every selected test N times - how a spec that was
+  // red once in a while is shown to be green every time, rather than once
+  // (task #260: 179 on WebKit, ten times over).
+  repeatEach: Math.max(1, Math.floor(Number(process.env.E2E_REPEAT_EACH)) || 1),
   workers: 1,                   // single worker — backend isn't yet
                                 // multi-tenant safe within a single DB
 
@@ -141,9 +153,14 @@ export default defineConfig({
     // come back) left no trace at all. A blank sign-in page seen once in a
     // full run (task #81) could not be read browser-side for exactly this
     // reason: was the missing chunk requested, pending or refused?
-    trace: 'retain-on-failure',
+    //
+    // ⚠ Unless E2E_RECORD=retry (helpers/record.ts): the build host's chain
+    // records nothing on a first attempt, because the worker that runs a
+    // whole line kept 3.4 GiB of recording every test (task #194). A red test
+    // there runs again, recorded, and the run stays red.
+    trace: RECORD.trace,
     screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    video: RECORD.video,
     actionTimeout: 10_000,
     navigationTimeout: 15_000,
   },

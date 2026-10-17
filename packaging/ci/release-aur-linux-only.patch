@@ -1,0 +1,96 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index cb807227d68a76968a3b61886a45cebd266778ae..11812226b3fd70d79c2e93f6c972d5d8d07e315b 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -2268,17 +2268,58 @@ jobs:
+   #
+   # The PKGBUILD repackages the .deb just attached, so it runs after `desktop`
+   # and hashes THAT file. packaging/aur/update-pkgbuild.sh sets pkgver and the
+-  # checksums and regenerates .SRCINFO; both are kept as a run artifact either
+-  # way. The push needs the SSH key registered with the AUR account — without
+-  # it the run says so (warning + summary) instead of pretending.
++  # checksums and regenerates .SRCINFO; both are kept as a run artifact.
++  #
++  # ⚠ It needs the Linux packages, not the whole desktop matrix (task #145):
++  # with `needs: desktop` alone, a Windows row that failed skipped the AUR as
++  # well, though the .deb it repackages was on the Release. So it runs once
++  # every row has ended, however each ended (!cancelled()), as long as verify
++  # passed (named here too: a status function in `if:` drops the implicit
++  # wait for it) and the desktop job ran at all (one that verify or binaries
++  # stopped has nothing to package), and its first step asks the Release for
++  # the Linux packages: the
++  # .deb and the AppImage there, it goes on; missing, the Linux row did not
++  # publish, and that is red.
++  #
++  # ⚠ Without AUR_SSH_PRIVATE_KEY (the AUR's account registration was closed
++  # when filex-app-bin was to be published) there is nothing to push: the job
++  # says "skipped: no AUR key" and does nothing else - green, never red.
+   aur:
+     name: AUR package (filex-app-bin)
+-    needs: [plan, desktop]
+-    if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.full == 'true'
++    needs: [plan, verify, desktop]
++    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.verify.result == 'success' && needs.plan.outputs.publish == 'true' && needs.plan.outputs.full == 'true' && needs.desktop.result != 'skipped' }}
+     runs-on: ubuntu-latest
++    env:
++      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+     steps:
++      - name: The AUR key
++        shell: bash
++        run: |
++          if [ -z "${AUR_SSH_PRIVATE_KEY:-}" ]; then
++            echo "skipped: no AUR key"
++            echo "::notice title=AUR::skipped: no AUR key (AUR_SSH_PRIVATE_KEY is not set) - filex-app-bin is not packaged or pushed"
++            echo "### AUR: skipped: no AUR key" >> "$GITHUB_STEP_SUMMARY"
++            echo "AUR_SKIP=1" >> "$GITHUB_ENV"
++          fi
+       - uses: actions/checkout@v4
++        if: env.AUR_SKIP != '1'
++      - name: The Linux packages are on the Release
++        if: env.AUR_SKIP != '1'
++        shell: bash
++        env:
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          set -euo pipefail
++          have=$(gh release view "${GITHUB_REF_NAME}" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
++          for f in filex-desktop-amd64.deb filex-desktop-x86_64.AppImage; do
++            if ! grep -qx "$f" <<< "$have"; then
++              echo "::error title=AUR::${GITHUB_REF_NAME} has no $f: the Linux row of the desktop job did not publish, and the AUR package repackages it"
++              exit 1
++            fi
++          done
++          echo "the Linux packages are on ${GITHUB_REF_NAME}"
+       - name: PKGBUILD and .SRCINFO for this tag
++        if: env.AUR_SKIP != '1'
+         shell: bash
+         env:
+           GH_TOKEN: ${{ github.token }}
+@@ -2288,6 +2329,7 @@ jobs:
+           bash packaging/aur/update-pkgbuild.sh "${GITHUB_REF_NAME}" --deb "$RUNNER_TEMP/rel/filex-desktop-amd64.deb"
+           cat packaging/aur/filex-app-bin/.SRCINFO
+       - uses: actions/upload-artifact@v4
++        if: env.AUR_SKIP != '1'
+         with:
+           name: aur-filex-app-bin
+           path: |
+@@ -2295,18 +2337,10 @@ jobs:
+             packaging/aur/filex-app-bin/.SRCINFO
+           include-hidden-files: true
+       - name: Push to the AUR
++        if: env.AUR_SKIP != '1'
+         shell: bash
+-        env:
+-          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+         run: |
+           set -euo pipefail
+-          if [ -z "${AUR_SSH_PRIVATE_KEY:-}" ]; then
+-            msg="AUR_SSH_PRIVATE_KEY is not set: filex-app-bin was NOT pushed to the AUR. PKGBUILD and .SRCINFO are in this run's artifacts."
+-            echo "::warning title=AUR: not pushed::$msg"
+-            echo "### AUR: not pushed (no SSH key)" >> "$GITHUB_STEP_SUMMARY"
+-            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+-            exit 0
+-          fi
+           # The committed PKGBUILD is a template (SKIP checksums) until the
+           # step above has rewritten it for this tag; never push that.
+           if grep -q "'SKIP'" packaging/aur/filex-app-bin/PKGBUILD; then

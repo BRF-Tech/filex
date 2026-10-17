@@ -51,7 +51,7 @@ import {
   readPressure,
 } from './host.mjs';
 import { S3_LIVE_KEYS, STALL, hostLine, pauseWords, s3LiveFile, stallWords } from './nightly-lib.mjs';
-import { CHAIN_DIR, PROFILES, WEIGHTS, argsEnv, argsShown, buildPlan, expectedMinutes, loadLists, trackWeight } from './plan.mjs';
+import { CHAIN_DIR, PROFILES, WEIGHTS, argsEnv, argsShown, buildPlan, expectedMinutes, loadLists, trackShare, trackWeight } from './plan.mjs';
 import { hostBudget, ioWaits, pickJobs, poolBudget, poolCeiling, readyJobs, simulate } from './schedule.mjs';
 
 const REPO = path.resolve(CHAIN_DIR, '..', '..');
@@ -166,7 +166,10 @@ function settings(env, args) {
     src,
     lock: env.CHAIN_LOCK || path.join(root, 'lock'),
     prefix: env.CHAIN_PREFIX || 'fxchain',
-    memGb: num('CHAIN_MEM_GB', 8),
+    // ⚠ 10 since #194's third part: the weights say what the jobs hold, and
+    // the build host gives 9.75-10.25 above the reserve (8 was its share
+    // while the weights were 2 GiB short).
+    memGb: num('CHAIN_MEM_GB', 10),
     reserveGb: num('CHAIN_MEM_RESERVE_GB', 1),
     memWaitMin: num('CHAIN_MEM_WAIT_MIN', 20),
     poolMax: num('CHAIN_POOL_MAX', 3),
@@ -198,6 +201,11 @@ function settings(env, args) {
     // The most a Playwright line's /tmp may hold, in GiB: tmpfs (KIND
     // `browserTmp`; 0: on the disk, as before #194's third part).
     browserTmpGb: num('CHAIN_BROWSER_TMPFS_GB', 6),
+    // What a Playwright line records of its tests (E2E_RECORD,
+    // e2e/helpers/record.ts): `retry` - nothing on a first attempt, a failed
+    // test once more, recorded, the line red all the same - or `failures`
+    // (every test recorded, as before #194's fourth part).
+    e2eRecord: e2eRecordOf(env.CHAIN_E2E_RECORD),
     cpus: num('CHAIN_CPUS', Math.min(12, os.cpus().length)),
     goUser: { uid, gid },
     images: {
@@ -306,8 +314,16 @@ function git(src, args) {
 
 function budgetOf(cfg, plan, memGb = cfg.memGb) {
   const trackGb = trackWeight(plan.track);
+  // The round's share while each of its lines runs (plan.mjs trackShare).
+  const trackShares = plan.track.map((_, i) => trackShare(plan.track, i));
   const dbGb = plan.pool.some((j) => j.db) ? WEIGHTS.db : 0;
-  return { memGb, trackGb, dbGb, poolMax: cfg.poolMax, ioMax: cfg.ioHeavyMax };
+  return { memGb, trackGb, trackShares, dbGb, poolMax: cfg.poolMax, ioMax: cfg.ioHeavyMax };
+}
+
+/** The round's shares as a run goes, for chain.log and --plan: "6.5, then 6.25, 1.75, 0.75 as its lines end". */
+function sharesShown(b) {
+  const later = [...new Set(b.trackShares)].filter((g) => g !== b.trackGb);
+  return later.length ? `${b.trackGb}, then ${later.join(', ')} as its lines end` : `${b.trackGb}`;
 }
 
 function hm(minutes) {
@@ -328,7 +344,7 @@ function printPlan(cfg, plan) {
   out.push(`profile ${plan.profile} · ${cfg.src} (${sha})`);
   out.push(
     `memory budget ${b.memGb} GiB${hb.cut ? ` (CHAIN_MEM_GB ${cfg.memGb}, but MemAvailable is ${avail.toFixed(1)} GiB now, less the ${cfg.reserveGb} GiB reserve)` : ''}: ` +
-      `browser round ${b.trackGb}, databases ${b.dbGb} while a Go or migration job is left, ` +
+      `browser round ${sharesShown(b)}, databases ${b.dbGb} while a Go or migration job is left, ` +
       `the pool the rest (at most ${b.poolMax} jobs at once); a job also waits while MemAvailable is under its weight + ${cfg.reserveGb} GiB`,
   );
   if (cfg.hooks.pause) {
@@ -424,6 +440,20 @@ function docker(args, opts = {}) {
  * time. Only a red test's files stay, and e2e.sh copies them to the run
  * before the container ends.
  */
+/**
+ * CHAIN_E2E_RECORD: `retry` (the default) or `failures`.
+ *
+ * ⚠⚠ Task #194, the build host on 2026-10-15: the one Playwright worker of a
+ * Chromium line that records every test (`failures`) grew to 3.4 GiB, and the
+ * line held 7.15 GiB; recording nothing it held 4.15. `retry` records only a
+ * test that failed, on its second attempt (e2e/helpers/record.ts).
+ */
+export function e2eRecordOf(v) {
+  const m = String(v ?? '').trim() || 'retry';
+  if (!['retry', 'failures'].includes(m)) throw new Error(`CHAIN_E2E_RECORD=${m}: retry or failures`);
+  return m;
+}
+
 export const KIND = {
   build: { image: 'node', script: 'build.sh', mem: '10g', goroot: true, env: { NODE_OPTIONS: '--max-old-space-size=5120' } },
   // ⚠ The CPU weight of a browser: vitest holds every test to a wall-clock
@@ -524,6 +554,9 @@ class Chain {
     this.dsUp = false;
     this.vgwUp = false;
     this.trackDone = plan.track.length === 0;
+    // The round's line now (runTrack): the pool gets the share that line
+    // and the ones after it leave (plan.mjs trackShare).
+    this.trackAt = 0;
     this.trackWaiting = false;
     // The round's line writes heavily, or is about to start and will: the
     // pool starts no heavy job meanwhile (runTrack, runPool).
@@ -679,7 +712,7 @@ class Chain {
     this.diskPrev = this.disk ? { c: this.disk, t: Date.now() } : null;
     const why = hb.cut ? ` - CHAIN_MEM_GB is ${this.cfg.memGb}, but MemAvailable is ${avail.toFixed(1)} GiB, less the ${this.cfg.reserveGb} GiB reserve` : '';
     this.log(
-      `budget ${this.budget.memGb} GiB${why}: browser round ${this.budget.trackGb}, databases ${this.budget.dbGb}, pool max ${this.budget.poolMax}, ` +
+      `budget ${this.budget.memGb} GiB${why}: browser round ${sharesShown(this.budget)}, databases ${this.budget.dbGb}, pool max ${this.budget.poolMax}, ` +
         `heavy writers at once ${this.budget.ioMax || 'any'}; ` +
         `MemAvailable now ${Number.isFinite(avail) ? avail.toFixed(1) : '?'} of ${(os.totalmem() / 2 ** 30).toFixed(1)} GiB`,
     );
@@ -880,6 +913,8 @@ class Chain {
         DS_FILEX_IP: filex,
         DS_SECRET_FILE: '/w/run/etc/ds.secret',
         REQUIRE_APPS: c.requireApps ? '1' : '0',
+        // A Playwright line (KIND `results`): what it records of its tests.
+        ...(k.results ? { E2E_RECORD: c.e2eRecord } : {}),
       });
     }
     if (k.dsEnv) {
@@ -1174,6 +1209,7 @@ class Chain {
     for (let i = 0; i < track.length && !this.stopping; i += 1) {
       const job = track[i];
       const later = track.slice(i + 1);
+      this.trackAt = i;
       try {
         if (job.ds && !this.dsUp && !(await this.dsStart())) {
           this.skip({ ...job, lane: 'e2e' }, 'the Document Server did not become healthy');
@@ -1216,11 +1252,12 @@ class Chain {
       for (const job of skip) this.skip({ ...job, lane: 'pool' }, `needs ${job.needs.filter((n) => this.status[n] !== 'passed').join(', ')}`);
       if (this.dbUp && dbJobs.every(settled)) this.dbDown();
       const trackActive = this.status.build === 'passed' && !this.trackDone;
-      const budget = poolBudget({ memGb: this.budget.memGb, trackActive, trackGb: this.budget.trackGb, dbUp: this.dbUp, dbGb: this.budget.dbGb });
+      const trackGb = this.budget.trackShares[this.trackAt] ?? this.budget.trackGb;
+      const budget = poolBudget({ memGb: this.budget.memGb, trackActive, trackGb, dbUp: this.dbUp, dbGb: this.budget.dbGb });
       const ceiling = poolCeiling({ memGb: this.budget.memGb, dbUp: this.dbUp, dbGb: this.budget.dbGb });
       const runningPool = [...this.running.values()].map((r) => r.job).filter((j) => pool.includes(j));
       let avail = memAvailableGb();
-      const holding = runningPool.reduce((s, j) => s + j.weight, 0) + (trackActive ? this.budget.trackGb : 0) + (this.dbUp ? this.budget.dbGb : 0);
+      const holding = runningPool.reduce((s, j) => s + j.weight, 0) + (trackActive ? trackGb : 0) + (this.dbUp ? this.budget.dbGb : 0);
       this.peakHeldGb = Math.max(this.peakHeldGb, holding);
       const ioHeld = this.trackIo ? 1 : 0;
       const picks = this.trackWaiting ? [] : pickJobs({ ready, running: runningPool, budget, ceiling, maxJobs: this.cfg.poolMax, ioMax: this.cfg.ioHeavyMax, ioHeld });

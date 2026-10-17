@@ -24,10 +24,12 @@ v0.31.0) and **~550 MB** for `full`. Both numbers are real; the compressed one
 is what a registry page shows you and the other is what your disk loses, so
 neither belongs in a sentence alone.
 
-⚠ **0.50 took LibreOffice out of `full`.** Office documents - their thumbnails
-and the apps' office conversions - come from the ONLYOFFICE Document Server
-you connect under External services, on every tag, and filex runs no
-LibreOffice anywhere. The full recipe with LibreOffice and its Java runtime
+⚠ **No image carries an office suite.** Office documents are edited in the
+Office editor app, in the browser; their thumbnails and the apps' office
+conversions come from the office engine that app brings (0.4.0, run by filex
+in a process of its own) or from an ONLYOFFICE Document Server you connect
+under External services, on every tag, and filex runs no LibreOffice anywhere. The
+full recipe with LibreOffice and its Java runtime
 measured **642 MB** compressed and **1.6 GB** on disk on alpine:3.24; without
 them, **225 MB** and **550 MB** (the gzip and the size of the image's
 filesystem, built from `docker/Dockerfile` on 2026-10-02).
@@ -35,7 +37,7 @@ filesystem, built from `docker/Dockerfile` on 2026-10-02).
 | Tag | Size | Includes |
 |---|---|---|
 | `ghcr.io/brf-tech/filex:latest` | ~241 MB | The full toolchain. Alias for `full`. |
-| `ghcr.io/brf-tech/filex:full` | ~241 MB | + ffmpeg, ghostscript, poppler-utils, ImageMagick with `imagemagick-heic` and libheif's HEVC decoder `libheif-libde265` (HEIC, HEIF and AVIF thumbnails through libheif, since 0.50; +3 MB), rsvg-convert (the SVG fallback; SVG thumbnails are built in on every image since 0.50), fonts. No LibreOffice and no JRE since 0.50: office documents are the connected ONLYOFFICE's on every tag. On `:slim` a file whose tool is missing is listed under Admin → Tools → Thumbnail repair with the tool it needs. |
+| `ghcr.io/brf-tech/filex:full` | ~241 MB | + ffmpeg, ghostscript, poppler-utils, ImageMagick with `imagemagick-heic` and libheif's HEVC decoder `libheif-libde265` (HEIC, HEIF and AVIF thumbnails through libheif, since 0.50; +3 MB), rsvg-convert (the SVG fallback; SVG thumbnails are built in on every image since 0.50), fonts. No LibreOffice and no JRE: office thumbnails come from a connected ONLYOFFICE Document Server, on every tag. On `:slim` a file whose tool is missing is listed under Admin → Tools → Thumbnail repair with the tool it needs. |
 | `ghcr.io/brf-tech/filex:slim` | **~62 MB** | The Go binary and the embedded admin UI. Nothing else. |
 | `:vX.Y.Z` / `:full-vX.Y.Z` | ~241 MB | Pinned full. |
 | `:slim-vX.Y.Z` | ~62 MB | Pinned slim. |
@@ -44,8 +46,10 @@ The Go binary is identical in both - `slim` simply has none of the programs the
 thumbnailer shells out to.
 
 **Which one do you want?** `latest` if you want previews of PDFs, video and
-audio, which is most people (office documents are previewed by a connected
-ONLYOFFICE on either). `slim` if filex is a file manager
+audio, which is most people (office documents are edited by the Office editor
+app and previewed by its office engine or a connected ONLYOFFICE Document
+Server, on either). `slim`
+if filex is a file manager
 for you and not a preview generator: it pulls in seconds and carries a fraction
 of the attack surface. Image thumbnails work in both, because those are
 produced in pure Go.
@@ -97,7 +101,7 @@ docker build \
 |---------------|--------------|-------|
 | `filex`       | (default)    | Slim image, SQLite + local storage |
 | `filex-full`  | `full`       | Full image with thumbnail tools |
-| `onlyoffice`  | `onlyoffice` | OnlyOffice Document Server |
+| `onlyoffice`  | `onlyoffice` | ONLYOFFICE Document Server - optional: the Office editor app edits office documents without it. Pinned to the version filex is tested against; `ONLYOFFICE_IMAGE` picks another, never `latest` |
 | `postgres`    | `postgres`   | Postgres 16 (set `FILEX_DB_DRIVER=postgres`) |
 | `versitygw`   | `versitygw`  | S3 server (Versity S3 Gateway; [STORAGE.md → A local S3 server](STORAGE.md#a-local-s3-server)) |
 
@@ -131,7 +135,7 @@ Bring up with:
 ```bash
 docker compose up                                     # filex slim only
 docker compose --profile full up                      # filex with thumb tools
-docker compose --profile onlyoffice up                # filex + OnlyOffice
+docker compose --profile onlyoffice up                # filex + an optional Document Server
 docker compose --profile postgres --profile versitygw up  # full self-hosted stack
 ```
 
@@ -154,10 +158,10 @@ FILEX_OIDC_CLIENT_SECRET=changeme
 FILEX_DB_DRIVER=postgres
 FILEX_DB_DSN=postgres://filex:changeme@postgres:5432/filex?sslmode=disable
 
-# --- OnlyOffice ---
-ONLYOFFICE_JWT_SECRET=please-change-me-shared-with-filex
-FILEX_ONLYOFFICE_URL=https://docs.example.com
-FILEX_ONLYOFFICE_JWT=please-change-me-shared-with-filex
+# --- ONLYOFFICE Document Server (optional, --profile onlyoffice) ---
+# ONLYOFFICE_JWT_SECRET=please-change-me-shared-with-filex
+# FILEX_ONLYOFFICE_URL=https://docs.example.com
+# FILEX_ONLYOFFICE_JWT=please-change-me-shared-with-filex
 
 # --- Postgres ---
 POSTGRES_PASSWORD=changeme
@@ -178,8 +182,8 @@ have no safe default use `${VAR:?msg}` and will fail-fast if missing.
 ./data                       # FILEX_DATA_DIR - sqlite, search.bleve, thumbs,
                              #   cache, uploads, ssh, ftps, plugins, dav
 ./storage-local              # default 'local' driver root (mounted into /var/lib/filex/local-storage)
-filex-onlyoffice-data/       # docker volume (OnlyOffice docs)
-filex-onlyoffice-logs/       # docker volume
+filex-onlyoffice-data/       # docker volume (onlyoffice profile only)
+filex-onlyoffice-logs/       # docker volume (onlyoffice profile only)
 filex-postgres-data/         # docker volume
 filex-s3-data/               # docker volume (S3 objects, plain files)
 filex-s3-versions/           # docker volume (older object versions)
@@ -312,6 +316,8 @@ two ways:
   address, never the LAN. It is the address the sign-in attempt limit counts
   by and the access and audit logs record. Up to 0.49 this header was believed
   from anyone ([CONFIGURATION.md → Trusted proxies](CONFIGURATION.md#trusted-proxies)).
+  Since 0.57 the variable seeds the **Sign-in security** list at the first
+  start, and the saved list wins after that (below).
 - **`X-Forwarded-Proto`**: `https` from any peer marks the session cookie
   `Secure` (it can only add the flag). `http`, which makes a tenant's links -
   the ones filex mails, too - `http://`, is believed **only from a trusted
@@ -346,6 +352,13 @@ networks:
       config:
         - subnet: 172.30.0.0/24   # a fixed subnet, so the gateway stays 172.30.0.1
 ```
+
+⚠ Since 0.57 the variable is a
+[seed](CONFIGURATION.md#variables-that-seed-a-stored-setting): it is written
+into the **Sign-in security** list on the first start where that list holds
+nothing, and the saved list wins from then on. On an install that already
+has one, add the address on the page, or change the variable and run
+`docker compose exec filex filex settings reseed login.trusted_proxies`.
 
 Trust the gateway **only when the published port is reachable by your proxy
 alone** - published on `127.0.0.1` (`127.0.0.1:5212:5212`) or firewalled:

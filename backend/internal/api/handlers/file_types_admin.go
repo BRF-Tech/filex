@@ -3,9 +3,11 @@
 // Admin → Plugins → Default apps (internal/assoc, docs/APP-PLUGINS.md →
 // Default apps):
 //
-//	GET    /api/admin/file-types           - every kind something besides filex handles, and every kind with a rule
+//	GET    /api/admin/file-types           - every kind something besides filex handles, and every kind with a rule; and the engines
 //	PUT    /api/admin/file-types/{ext}     - {open?: {order, off} | null, thumbnail?: {order, off} | null}; null = back to the default
 //	DELETE /api/admin/file-types/{ext}     - both capabilities back to the default
+//	PUT    /api/admin/file-types/engines/{engine} - {order, off}: which back end runs an engine (filex 0.57: `office`)
+//	DELETE /api/admin/file-types/engines/{engine} - back to the default order
 //
 // ⚠ Instance-wide, like the apps whose handlers it orders: a tenant
 // administrator gets 403 supertenant_only. A change needs an administrator
@@ -17,11 +19,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -35,6 +39,34 @@ type FileTypesAdmin struct {
 	Assoc *assoc.Service
 	// Demo refuses every change (the admin account of a demo is public).
 	Demo bool
+	// EngineStates says how each back end of an engine stands now (the
+	// server's office engine: an app's engine preparing, ready or failed; the
+	// Document Server connected or not). Nil: none is said.
+	EngineStates func(ctx context.Context) map[string]EngineBackendState
+	// EnginesChanged is told after an engine's order changed (the server runs
+	// the engine of the app now first).
+	EnginesChanged func()
+}
+
+// EngineBackendState is one back end of an engine as Default apps shows it:
+// `ready`, `preparing` (an app's engine, compiled once after an install or an
+// update), `failed` (Error says why), `idle` (an app's engine that is not the
+// one running) or `off` (a Document Server that is not connected).
+type EngineBackendState struct {
+	State string     `json:"state"`
+	Error string     `json:"error,omitempty"`
+	Since *time.Time `json:"since,omitempty"`
+}
+
+// EngineRow is one engine on the Default apps screen: its back ends in the
+// order they are asked, the ones switched off, whether an administrator's
+// rule decided it, and how each stands.
+type EngineRow struct {
+	Engine string                        `json:"engine"`
+	On     []assoc.Handler               `json:"on"`
+	Off    []assoc.Handler               `json:"off"`
+	Custom bool                          `json:"custom"`
+	States map[string]EngineBackendState `json:"states"`
 }
 
 // NewFileTypesAdmin constructs the handler. A nil service (app plugins off)
@@ -56,15 +88,100 @@ type fileTypesBody struct {
 	// Editable: this caller may change it (a signed-in administrator, not on
 	// a demo).
 	Editable bool `json:"editable"`
+	// Engines are the engines filex offers apps and the back ends that run
+	// them (filex 0.57: the office engine). An engine with no back end at all
+	// is listed too, with none, so the screen can say what to install.
+	Engines []EngineRow `json:"engines"`
 }
 
 func (h *FileTypesAdmin) body(r *http.Request) fileTypesBody {
-	b := fileTypesBody{Kinds: []assoc.Kind{}, Enabled: h.Assoc != nil}
+	b := fileTypesBody{Kinds: []assoc.Kind{}, Enabled: h.Assoc != nil, Engines: []EngineRow{}}
 	if h.Assoc != nil {
 		b.Kinds = h.Assoc.Kinds(r.Context())
+		ch := h.Assoc.EngineChain(r.Context(), assoc.EngineOffice)
+		row := EngineRow{Engine: assoc.EngineOffice, On: nonNilHandlers(ch.On), Off: nonNilHandlers(ch.Off), Custom: ch.Custom, States: map[string]EngineBackendState{}}
+		if h.EngineStates != nil {
+			row.States = h.EngineStates(r.Context())
+		}
+		b.Engines = append(b.Engines, row)
 	}
 	b.Editable = b.Enabled && !h.Demo && auth.TokenFrom(r.Context()) == nil
 	return b
+}
+
+func nonNilHandlers(hs []assoc.Handler) []assoc.Handler {
+	if hs == nil {
+		return []assoc.Handler{}
+	}
+	return hs
+}
+
+// engineParam is the engine a route names, "" when it names none filex has.
+func engineParam(r *http.Request) string {
+	e := strings.ToLower(strings.TrimSpace(chi.URLParam(r, "engine")))
+	if e != assoc.EngineOffice {
+		return ""
+	}
+	return e
+}
+
+// PutEngine answers PUT /api/admin/file-types/engines/{engine}: the order its back
+// ends are asked in, and the ones switched off.
+func (h *FileTypesAdmin) PutEngine(w http.ResponseWriter, r *http.Request) {
+	if !h.writable(w, r, "changing which back end runs an engine") {
+		return
+	}
+	engine := engineParam(r)
+	if engine == "" {
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "rule_unknown", nil)
+		return
+	}
+	var rule assoc.Rule
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&rule); err != nil {
+		writeErrorSaid(w, r, http.StatusBadRequest, "bad_json", "rule_shape", apierr.Params{"capability": assoc.CapEngine}, "field", assoc.CapEngine)
+		return
+	}
+	ctx := r.Context()
+	before := ruleOrDefault(h.Assoc.Rule(ctx, assoc.CapEngine, engine))
+	stored, err := h.Assoc.Put(ctx, assoc.CapEngine, engine, rule, actorIDOf(r))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if h.EnginesChanged != nil {
+		h.EnginesChanged()
+	}
+	auth.SetAuditTarget(ctx, engine, engine)
+	auth.AddAuditDetail(ctx, "engine", engine)
+	auth.AddAuditDetail(ctx, "before", before)
+	auth.AddAuditDetail(ctx, "after", stored)
+	writeJSON(w, http.StatusOK, h.body(r))
+}
+
+// ResetEngine answers DELETE /api/admin/file-types/engines/{engine}: back to the
+// default order (the apps' engines first, the Document Server after them).
+func (h *FileTypesAdmin) ResetEngine(w http.ResponseWriter, r *http.Request) {
+	if !h.writable(w, r, "changing which back end runs an engine") {
+		return
+	}
+	engine := engineParam(r)
+	if engine == "" {
+		writeErrorSaid(w, r, http.StatusNotFound, "not_found", "rule_unknown", nil)
+		return
+	}
+	ctx := r.Context()
+	before := ruleOrDefault(h.Assoc.Rule(ctx, assoc.CapEngine, engine))
+	if _, err := h.Assoc.Reset(ctx, assoc.CapEngine, engine); err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if h.EnginesChanged != nil {
+		h.EnginesChanged()
+	}
+	auth.SetAuditTarget(ctx, engine, engine)
+	auth.AddAuditDetail(ctx, "engine", engine)
+	auth.AddAuditDetail(ctx, "before", before)
+	writeJSON(w, http.StatusOK, h.body(r))
 }
 
 // List answers GET /api/admin/file-types.

@@ -18,8 +18,10 @@ cannot read your storages, call home or run a program on your server. The
 heavy engines an app may need (ffmpeg, ImageMagick, Ghostscript, poppler,
 rsvg) are the server's own binaries, one permission each, with the arguments
 checked so they can only name the files the app was handed. Office documents
-go through the **office engine**: the ONLYOFFICE Document Server you connect
-under External services - filex ships and runs no LibreOffice.
+go through the **office engine**: the one the Office editor app brings (from
+its 0.4.0), which filex runs on the server in a process of its own, or an
+ONLYOFFICE Document Server you connect under External services - filex ships
+and runs no LibreOffice ([The office engine](#the-office-engine)).
 
 ```
 Admin → Plugins → Apps → Install an app      Explorer: right-click a file
@@ -49,10 +51,11 @@ The sections after that are reference.
 
 ## The apps that ship alongside filex
 
-All four are public repositories - read them before you install them, fork
+All five are public repositories - read them before you install them, fork
 them, or use them as the starting point for your own. e-Signature and Convert
-are modules; filextext and draw.io are [only an interface](#an-apps-own-interface),
-with nothing that runs on the server.
+are modules; filextext, draw.io and the Office editor are
+[only an interface](#an-apps-own-interface), with nothing that runs on the
+server.
 
 | App | Repository | What it adds |
 |---|---|---|
@@ -60,6 +63,7 @@ with nothing that runs on the server.
 | **Convert** | [`BRF-Tech/filex-convert`](https://github.com/BRF-Tech/filex-convert) | **Convert…** on any file or selection: images, video, audio, documents, e-books, archives, data, subtitles and fonts. See [Converting files](#converting-files). |
 | **filextext** | [`BRF-Tech/filextext-app`](https://github.com/BRF-Tech/filextext-app) | An end-to-end encrypted text workspace in one `.fxtxt` file - pages and folders, AFFiNE's BlockSuite editor - encrypted in the browser with filex's own [end-to-end keys](E2E-ENCRYPTION.md), so the server stores ciphertext only. Opens `.fxtxt` in place of the preview and adds *Encrypted workspace (.fxtxt)* to **New document**. In English and Turkish. |
 | **draw.io** | [`BRF-Tech/filex-drawio`](https://github.com/BRF-Tech/filex-drawio) | The draw.io diagram editor: `.drawio` and `.dio` open in it in place of the preview, **Save** writes a new version, **New document** gets *draw.io diagram*. Loads its translations, shapes and templates from its own package (`ui:package-fetch`) and reaches nothing else. |
+| **Office editor** | [`BRF-Tech/filex-office-editor`](https://github.com/BRF-Tech/filex-office-editor) | ONLYOFFICE's editor in the browser, with no Document Server: Word, Excel and PowerPoint documents and their OpenDocument, legacy and template kinds open in it in place of the preview, several people edit one at once through filex's relay, a file of an unlocked encrypted folder too. **Save** writes a new version; a format it cannot write (`.doc`, `.xls`, `.ppt`) is saved beside the file, a file changed meanwhile gets a conflict copy, as with a Document Server. **New document** gets the office rows. From its 0.4.0 it also brings the [office engine](#the-office-engine) filex runs on the server - office conversions for apps and office thumbnails, with no Document Server - and [dictionaries](#dictionaries-for-the-office-editor) for more languages. AGPL-3.0. See [docs/ONLYOFFICE.md → The Office editor app](ONLYOFFICE.md#the-office-editor-app). |
 
 ## Install one
 
@@ -69,7 +73,7 @@ with nothing that runs on the server.
 | Source | What you give | What filex does |
 |---|---|---|
 | **GitHub repository** | `owner/name` (a pasted `https://github.com/…` address is trimmed) and the **tag** of the release you want | Fetches `filex-app.json` from the repository at that ref, reads `wasm.url` (where `{tag}` stands for the ref you gave) and `wasm.sha256` - for an interface, `ui.bundle.url` and `ui.bundle.sha256` - downloads the module or the package and refuses it unless the hash matches |
-| **Upload files** | the `.wasm` module and its `filex-app.json`, plus a detached signature when the instance requires one | Installs what you uploaded; the hash is recorded |
+| **Upload files** | its `filex-app.json` and the files it names, each in its own field: the `.wasm` module (none for a language pack or an app that is only an interface), the interface bundle `ui.zip` for a manifest with a `ui` block, the office engine `engine.zip` for one with an `engines.office` block (the [Office editor](#the-office-engine) from 0.4.0), plus a detached signature when the instance requires one | Installs what you uploaded; the hashes are recorded. A manifest that names `ui.zip` or `engine.zip` without the file chosen is said at once, before anything is uploaded |
 | **From a URL** | the module's URL, the manifest's URL and the module's SHA-256 | The GitHub path with the two addresses spelled out |
 
 An app is a public repository whose root holds `filex-app.json`. Installed
@@ -175,7 +179,7 @@ license.
 4. **Install**, or close the dialog. Either way the store is told how the link
    ended (`installed` or `cancelled`), and the link is used up on this filex.
 
-![The install review opened from a store's link, marked From store](https://filex.sh/shots/store/store-review-1440.d93b2b571d93.png)
+![The install review opened from a store's link, marked From store](https://filex.sh/shots/store/store-review-1440.36cf3bbc2a50.png)
 
 The rest of the store side is reference, under [Stores in detail](#stores-in-detail):
 what filex checks before the review opens, what a store link is held to,
@@ -221,7 +225,7 @@ says what it is and, per language, how much of this filex it translates.
 **Details** opens the app's own page - `/admin/plugins/apps/<name>`, one
 section per card, **Back** returns to the Apps tab:
 
-![An installed app's details](https://filex.sh/shots/apps/apps-detail-1440.4e27b40c5ce7.png)
+![An installed app's details](https://filex.sh/shots/apps/apps-detail-1440.b7f6ec845458.png)
 
 - **The facts** - name, version, the version kept to go back to, source (for
   a GitHub install, `https://github.com/<repo>@<tag>`), signed or unsigned,
@@ -251,8 +255,8 @@ section per card, **Back** returns to the Apps tab:
     extensions and MIME types you added and removed, and what you set
     differently - and applied to the rule the app declares *now*, with the
     engines present *now*. Extensions offered only while an engine is on the
-    server (`applies.engine_ext`, such as an office file while ONLYOFFICE is
-    connected to convert it) are listed in the editor with the rest, marked;
+    server (`applies.engine_ext`, such as an office file while an office
+    engine runs to convert it) are listed in the editor with the rest, marked;
     they appear when the engine is there and go when it is not, unless you
     took them out. An upgrade that adds an extension reaches a customised
     action too, and the manifest's own conditions (e-Signature's "only on a
@@ -282,7 +286,7 @@ person, like the permissions filex has itself. A signing app can put
 *Request signatures* behind one: everybody may sign what they were sent, and
 only the roles you choose may send documents round for signature.
 
-![Admin → Roles → the User role: the Apps group, e-Signature's "Request signatures" set to Default (allowed)](https://filex.sh/shots/apppermissions/role-user.8cd405c6b49b.png)
+![Admin → Roles → the User role: the Apps group, e-Signature's "Request signatures" set to Default (allowed)](https://filex.sh/shots/apppermissions/role-user.d6760b3bb4da.png)
 
 - **Where you decide.** **Admin → Roles**: every role's editor has an
   **Apps** group (*Default (…)* / *Allow* / *Deny* per app permission), and a
@@ -350,7 +354,8 @@ whether a module arrives where there was none), with the interface files
 added, removed and changed in a list you can open; the filex range and the
 signature when they change; and the source's **release notes** - a GitHub
 release's body, drawn as Markdown through the explorer's preview pipeline
-and its sanitizer, so nothing in it runs.
+and its sanitizer, so nothing in it runs, and a picture in it from another
+server waits behind a placeholder until you load it, as in a preview.
 
 **Upgrade** installs it for everybody once you have ticked the box. A newer
 version is fetched and checked exactly as an install is - HTTPS only, public
@@ -681,7 +686,7 @@ app, written for these pictures): the two permissions filex derives from its
 manifest - `files:e2e-plaintext` and `files:co-edit` - in filex's own words,
 under the author's reasons:
 
-![The install review of an app that edits office documents: files:e2e-plaintext and files:co-edit in filex's own words](https://filex.sh/shots/officeapp/office-app-review-1440.0431e9a31479.png)
+![The install review of an app that edits office documents: files:e2e-plaintext and files:co-edit in filex's own words](https://filex.sh/shots/officeapp/office-app-review-1440.9ad60d04a53e.png)
 
 ### What a person sees
 
@@ -752,7 +757,7 @@ under the author's reasons:
 
 | The review of an app with its own interface | Its kind of file in **New document**, under **Apps** |
 |---|---|
-| ![The install review's Interface group](https://filex.sh/shots/apps/app-interface-review-1440.51df0aa460ad.png) | ![New document offering the app's kind of file](https://filex.sh/shots/apps/app-new-document-1440.3d03f7fa7b67.png) |
+| ![The install review's Interface group](https://filex.sh/shots/apps/app-interface-review-1440.877a89c82359.png) | ![New document offering the app's kind of file](https://filex.sh/shots/apps/app-new-document-1440.ce889271cba2.png) |
 
 | …and the interface open on its file type, where filex's preview would be (a small example app, written for these pictures) |
 |---|
@@ -773,7 +778,7 @@ her cursor reach him as she types:
 Excel and PowerPoint rows under **Apps**, and no line saying office documents
 need ONLYOFFICE - only the one about draw.io, in the server's words:
 
-![New document with an office app installed: its .docx, .xlsx and .pptx rows, and no line asking for a document server](https://filex.sh/shots/officeapp/newdoc-office-app-1280.70ef3ae038a7.png)
+![New document with an office app installed: its .docx, .xlsx and .pptx rows, and no line asking for a document server](https://filex.sh/shots/officeapp/newdoc-office-app-1280.5346ee2d09b2.png)
 
 On a phone the app's interface takes the viewer's whole width; the previous
 and next arrows lie over its edges:
@@ -834,13 +839,19 @@ desktop does: every kind of file (by its **extension**, with its type) has two
 | Capability | Handlers | Who chooses |
 |---|---|---|
 | **Open** | filex's own viewer (*built-in*), every app interface that opens the kind (a `viewer` view: [An app's own interface](#an-apps-own-interface)) and, for `.csv` while OnlyOffice is configured, ONLYOFFICE's spreadsheet editor (*ONLYOFFICE*: [ONLYOFFICE.md → CSV files](ONLYOFFICE.md#csv-files)) | the administrator says which are **on** and in which order; each person picks among those, and may say "always open this kind with this one" |
-| **Thumbnail** | the OnlyOffice document server (*ONLYOFFICE*, for the office kinds while OnlyOffice is configured: [thumbnails.md → Office through OnlyOffice](thumbnails.md#office-through-onlyoffice)), filex's own drawer (*built-in*, for the kinds it draws) and every app that declares the kind in its `thumbnails` block | the administrator alone; the first in the list that draws the file wins, the next one is asked when it cannot ([thumbnails.md → Thumbnails drawn by apps](thumbnails.md#thumbnails-drawn-by-apps-one-chain-per-kind)) |
+| **Thumbnail** | ONLYOFFICE (*ONLYOFFICE*, for the office kinds while an office engine runs - the one the Office editor app brings, or a connected Document Server: [thumbnails.md → Office through OnlyOffice](thumbnails.md#office-through-onlyoffice)), filex's own drawer (*built-in*, for the kinds it draws) and every app that declares the kind in its `thumbnails` block | the administrator alone; the first in the list that draws the file wins, the next one is asked when it cannot ([thumbnails.md → Thumbnails drawn by apps](thumbnails.md#thumbnails-drawn-by-apps-one-chain-per-kind)) |
 
 **Handlers** are named the same way everywhere (the API, the audit log, the
-rows): `builtin`; `onlyoffice` for the OnlyOffice document server (one of
-filex's own, not an app: a thumbnail handler for the office kinds, and an
-open handler for `.csv` only); `app:<app>/<view>` for an app's interface that
-opens files; `app:<app>` for an app that draws thumbnails.
+rows): `builtin`; `onlyoffice` for ONLYOFFICE (one of filex's own, not an
+app: a thumbnail handler for the office kinds, drawn by whichever office
+engine runs, and an open handler for `.csv` only, the Document Server's
+spreadsheet editor); `app:<app>/<view>` for an app's interface that opens
+files; `app:<app>` for an app that draws thumbnails.
+
+Below the kinds, the **Office engine** section orders the office engines
+themselves - the one an app brings and the connected Document Server - for
+the office conversions apps ask for and the office thumbnails
+([The office engine](#the-office-engine), below).
 
 ### The default order
 
@@ -852,20 +863,21 @@ Until an administrator changes it:
   `.csv` opens in ONLYOFFICE first while OnlyOffice is configured, then in
   the apps that open `.csv`, filex's table last; an app installed for `.csv`
   lands after ONLYOFFICE unless the install review puts it first.
-- **Thumbnail**: the OnlyOffice document server first for an office kind
-  while OnlyOffice is configured, then filex's own drawer when it draws the
-  kind, then the apps by name. An app that draws `.png` thumbnails is asked
-  only for a file filex could not draw; an app that draws `.jar` thumbnails
-  (filex draws none) is asked first; an app that draws `.docx` thumbnails is
-  asked after OnlyOffice, or first when OnlyOffice is not configured.
+- **Thumbnail**: ONLYOFFICE first for an office kind while an office engine
+  runs, then filex's own drawer when it draws the kind, then the apps by
+  name. An app that draws `.png` thumbnails is asked only for a file filex
+  could not draw; an app that draws `.jar` thumbnails (filex draws none) is
+  asked first; an app that draws `.docx` thumbnails is asked after
+  ONLYOFFICE, or first when no office engine runs.
 
-While OnlyOffice is not configured, `onlyoffice` is in neither list and a new
-rule naming it is refused. An **Open** rule written while it was there is
+`onlyoffice` is in the thumbnail list only while an office engine runs, and
+in the open list (for `.csv`) only while a Document Server is configured; a
+new rule naming it where it is not is refused. An **Open** rule written while it was there is
 kept, and the kind opens in the next handler that is on until it is back.
 
 ### What the administrator decides
 
-![Admin → Plugins → Default apps: every kind something besides filex handles, who opens it and who draws its thumbnails](https://filex.sh/shots/defaultapps/default-apps-1440.27d3c64fe457.png)
+![Admin → Plugins → Default apps: every kind something besides filex handles, who opens it and who draws its thumbnails](https://filex.sh/shots/defaultapps/default-apps-1440.0dd62b519f8f.png)
 
 **Admin → Plugins → Default apps** lists every kind something other than
 filex handles (`.csv` too while OnlyOffice is configured), plus every kind
@@ -899,6 +911,25 @@ handler off gets no thumbnail (`skipped`, `no_handler`).
   (`file_association.update`, `file_association.reset`). The wire shapes:
   [APP-PLUGINS-API.md → Default apps](APP-PLUGINS-API.md#default-apps-050).
 
+### The office engine
+
+The office conversions apps ask for (the Convert app's office targets, MCP's
+`file_convert`) and the thumbnails of office documents are made by an
+**office engine**: the one an app brings - the Office editor app's, from its
+0.4.0, run on this server in a process of its own - or a Document Server
+connected under External services. The **Office engine** section of
+*Default apps* lists the ones there are, each with how it stands (*Ready*,
+*Being prepared* for a few minutes after an install or an update, *Failed*
+with the reason, *Not connected*), in the order they are asked: an app's
+engine first by default, the Document Server after it, so the Document
+Server takes the work while the app's engine is being prepared. **Runs
+first** picks the one asked first, and **Back to the default order** undoes
+it; with neither engine, the section says to install the Office editor app or
+connect a Document Server. Through the API a rule may also switch one off
+(`GET /api/admin/file-types` → `engines`, `PUT` / `DELETE
+/api/admin/file-types/engines/office`;
+[ONLYOFFICE.md → The engine and a Document Server](ONLYOFFICE.md#the-engine-and-a-document-server)).
+
 ### What a person sees
 
 - **Opening a file** (a double click, Enter) opens it in the person's choice
@@ -920,7 +951,7 @@ handler off gets no thumbnail (`skipped`, `no_handler`).
   on opens it, and the choice is kept for where it can. (It is not part of a
   surface's own preferences - theme, density, language - which stay per
   surface.)
-- **Settings → Preferences → Default apps** lists the person's choices: the
+- **User settings → Preferences → Default apps** lists the person's choices: the
   kind, the app, a **Change** and a **Reset**, and **Reset all**. A choice
   whose handler the administrator switched off, or whose app was removed, is
   not lost: it says *no longer available - opens with …* and the file opens
@@ -939,6 +970,36 @@ The person's choices are `/api/me/open-with`, one kind at a time, so a
 surface that saves its theme cannot undo a choice made on another one; the
 administrator's rules are `/api/admin/file-types`
 ([APP-PLUGINS-API.md → Default apps](APP-PLUGINS-API.md#default-apps-050)).
+
+### Dictionaries for the office editor
+
+The office editor checks spelling and hyphenates in the languages it brings
+with it (filex's interface languages: English, Turkish, German, Spanish,
+French, Arabic). The other languages its release offers are listed on the
+app's page, *Admin → Plugins → Apps → Office editor → Dictionaries*: a row
+each, **Install** in its menu. filex downloads the language's files from the
+app's release and checks each against the release's sha256 before it keeps
+any of them; the row then says *Installed*.
+
+A language the release does not offer can still be added by hand, with
+*Add dictionary*:
+
+1. Get the dictionary. ONLYOFFICE publishes one folder per language in its
+   `dictionaries` repository on GitHub (`pl_PL`, `de_AT`, `sr_Latn_RS`...),
+   each with `<lang>.aff`, `<lang>.dic` and, for many, `hyph_<lang>.dic`; the
+   LibreOffice dictionaries are the same Hunspell files.
+2. In the dialog, type the folder's name as the language (`pl_PL`), pick the
+   `.aff` and the `.dic` file, and the hyphenation file if there is one.
+3. *Add dictionary*. The editor uses it the next time a document is opened.
+
+A language added again is replaced; *Remove* in the row's menu takes it away
+for everybody. The files are kept outside the app's package, so an update of
+the app keeps them; removing the app removes them. They are served under the
+app's address without a sign-in, like the app itself: add only public
+dictionaries. The section shows only for an app that says it reads
+dictionaries (its manifest names them) and reads its own package
+(`ui:package-fetch`); draw.io has none
+([APP-PLUGINS-API.md → Files an administrator adds to an app](APP-PLUGINS-API.md#files-an-administrator-adds-to-an-app-extra)).
 
 ### Thumbnail limits per app
 
@@ -1051,7 +1112,7 @@ in its name. A key the store retires leaves the trust, and one published as
 *next* becomes usable when the store makes it active, without anybody: they
 do not widen the trust.
 
-![The first link from a store: its address and its keys' fingerprints](https://filex.sh/shots/store/store-trust-1440.94bebecac9fe.png)
+![The first link from a store: its address and its keys' fingerprints](https://filex.sh/shots/store/store-trust-1440.8fb07862db1a.png)
 
 **Admin → Plugins → Apps → Trusted stores** lists them: where the trust comes
 from (who trusted it and when, or *Configured*) and the key fingerprints.
@@ -1138,9 +1199,9 @@ and when it is next, the store, the key's prefix and the last failed check;
 there you enter a new key and press **Verify now**. An app reads its own
 status with [`fx.license.get()`](APP-PLUGINS-API.md#the-app-reads-its-license).
 
-![An app's License section: valid, licensed to, seats, dates, the key's prefix](https://filex.sh/shots/store/store-license-1440.3d8a74fb5c85.png)
+![An app's License section: valid, licensed to, seats, dates, the key's prefix](https://filex.sh/shots/store/store-license-1440.04e822850a62.png)
 
-![The same app held after the store revoked its license, the band on an admin page](https://filex.sh/shots/store/store-license-held-1440.2dd9518d7e87.png)
+![The same app held after the store revoked its license, the band on an admin page](https://filex.sh/shots/store/store-license-held-1440.6fd145640e0f.png)
 
 ### The store screen
 
@@ -1212,7 +1273,7 @@ Installing closes the request as approved; cancelling leaves it waiting. A
 paid app's license key may be given with the approval (the store takes it
 only for a license with a seat for this filex) or in the review.
 
-![A request from the store screen on Install requests: from the store, Approve opens the store review](https://filex.sh/shots/store/store-request-review-1440.e1250043359d.png)
+![A request from the store screen on Install requests: from the store, Approve opens the store review](https://filex.sh/shots/store/store-request-review-1440.85fcea0c021c.png)
 
 Nothing here opens a door that was closed: reading a link, trusting a store,
 connecting to one and installing stay the platform operator's, signed in to
@@ -1248,7 +1309,7 @@ replaces the key; **Disconnect** forgets it and tells the store to forget it
 too. A store the screen shows but this filex is not connected to still takes
 requests; they wait until it is connected.
 
-![Trusted stores with the store connected, its key's fingerprint, and the Store screen settings under it](https://filex.sh/shots/store/store-connected-1440.edf7052b6ba0.png)
+![Trusted stores with the store connected, its key's fingerprint, and the Store screen settings under it](https://filex.sh/shots/store/store-connected-1440.519365a75e34.png)
 
 ## Install requests
 
@@ -1326,9 +1387,9 @@ when that install ends ([The store screen](#the-store-screen)). **Reject**
 works as for any request, and the person reads the reason on their *My
 requests*.
 
-![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.ec6723def503.png)
+![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.8ef4a069b344.png)
 
-![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.4f18ee6e170c.png)
+![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.117cf2a960f7.png)
 
 ### Leaving one
 
@@ -1519,7 +1580,7 @@ files to keep.
   audit trail saved - by anybody who may edit the document, not only the
   requester.
 
-  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.9f93226381ed.png)
+  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.54c60e832ced.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* - and,
@@ -1706,7 +1767,7 @@ its own permission:
 |---|---|
 | ffmpeg | video, audio, animated images, frames, waveform and spectrogram pictures |
 | ImageMagick | HEIC, PSD, XCF, DDS, EXR and AVIF, in or out |
-| ONLYOFFICE (the office engine) | office documents with their layout kept - Word, Excel, PowerPoint and OpenDocument to PDF (PDF/A too) and to each other, EPUB and `.odg` drawings in. Connect a Document Server under External services; until then these targets say so |
+| ONLYOFFICE (the office engine) | office documents with their layout kept - Word, Excel, PowerPoint and OpenDocument to PDF (PDF/A too) and to each other, EPUB and `.odg` drawings in. Install the Office editor app (its engine runs on the server, 0.4.0) or connect a Document Server under External services; until then these targets say so |
 | Ghostscript | PDF compression, PDF/A, PostScript/EPS |
 | poppler | PDF to images, text or SVG |
 | rsvg | SVG to PNG, PDF, PS or EPS |
@@ -1716,7 +1777,7 @@ hidden**: the Format step names the missing engines and lists what they would
 add (*Image · AVIF - needs imagemagick*), so a person can tell "this server
 cannot" from "this app has never heard of it". An engine installed on the
 server is seen after filex restarts; the office engine as soon as ONLYOFFICE
-is connected. Jobs are bounded like every app's ([Limits](#limits-and-what-they-protect))
+is connected, or the Office editor app's engine is prepared. Jobs are bounded like every app's ([Limits](#limits-and-what-they-protect))
 and by the app's own limits - its README lists them.
 
 **From an agent**: the MCP tool `file_convert {path, target}` and its REST
@@ -1839,13 +1900,13 @@ admin surface refuses installs regardless.
 | Variable | Default | Meaning |
 |---|---|---|
 | `FILEX_APP_PLUGINS_DISABLED` | `0`, **`1` in demo mode** | Turns the runtime off: nothing under `<data-dir>/app-plugins` is loaded, the file menu shows no app rows, no app is woken, the admin tab explains why |
-| `FILEX_APP_PLUGIN_MAX_INPUT_MB` | `256` | Per-file input ceiling for a job |
+| `FILEX_APP_PLUGIN_MAX_INPUT_MB` | `256` | Per-file input ceiling for a job. [Seeds](CONFIGURATION.md#variables-that-seed-a-stored-setting) the setting on **Admin → Settings → Plugins → Apps** (applies at the next start), like the three below |
 | `FILEX_APP_PLUGIN_MAX_OUTPUT_MB` | `512` | Per-file output ceiling for a job |
 | `FILEX_APP_PLUGIN_MAX_WASM_MB` | `64` | Largest module an install accepts |
 | `FILEX_APP_PLUGIN_MAX_UI_MB` | `128` | Largest interface bundle (zipped) an install accepts |
 | `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every app's source for a newer version and **tells the administrators** - it installs nothing ([Updates](#updates)). `0` = no request leaves the server for it; **Check for updates** still works. Off on a demo regardless |
 | `FILEX_PLUGIN_TRUSTED_KEYS` | - | Shared with storage plugins: set it and every module must carry a detached ed25519 signature over its sha256 |
-| `FILEX_PLUGIN_REQUEST_TTL_DAYS` | `14` | How long an [install request](#install-requests) waits for an administrator before it expires (both kinds of plugin) |
+| `FILEX_PLUGIN_REQUEST_TTL_DAYS` | `14` | How long an [install request](#install-requests) waits for an administrator before it expires (both kinds of plugin). [Seeds](CONFIGURATION.md#variables-that-seed-a-stored-setting) the setting on **Admin → Settings → Plugins → Apps** |
 | `FILEX_APP_STORE_URLS` / `FILEX_APP_STORE_KEYS` | - | Stores trusted by configuration, and the keys they sign with ([Trusted stores](#trusted-stores)) |
 | `FILEX_APP_GITHUB_RAW_BASE` | `https://raw.githubusercontent.com` | Where a GitHub install and a store link read a repository's files (a mirror; the guard applies) |
 | `FILEX_APP_CLOCK` | - | ⚠ Screenshots and tests only: an RFC 3339 instant the apps' clock starts at - the time inside every module, and the host's times handed to an app (a lock's end, a link's expiry, a wake-up's window). What filex stores stays on the real clock ([CONFIGURATION.md](CONFIGURATION.md)) |
@@ -1937,7 +1998,8 @@ decided on the roles API with the rest ([App permissions](#app-permissions)).
 
 A refusal carries a code the wizard switches on (`manifest_invalid`,
 `sha256_mismatch`, `signature_required`, `permissions_incomplete`,
-`name_taken`, `describe_mismatch`, `incompatible`, `up_to_date` and the rest:
+`name_taken`, `describe_mismatch`, `load_failed`, `load_timeout`,
+`incompatible`, `up_to_date` and the rest:
 [APP-PLUGINS-API.md → Errors](APP-PLUGINS-API.md#errors)) and the server's
 sentence for it in the reader's language (`message`).
 
@@ -1968,6 +2030,8 @@ for an interface); to start your own, copy the template repository
 | Install answers `sha256_mismatch` | the module at the manifest's address is not the one the manifest describes - the release asset and the manifest at that tag disagree |
 | Install answers `signature_required` | the instance sets `FILEX_PLUGIN_TRUSTED_KEYS`; install with **Upload files** and the detached signature |
 | Install answers `describe_mismatch` | the module was built from a different manifest than the one installed - rebuild, or fix `name`/`version`/`permissions`; a `schedule` grant also needs a `tick` export |
+| Install answers `load_timeout` | the module did not start and describe itself within a minute (or its `call_timeout_s`, when longer): the server is busy - try again; the server's log says `install refused, the module did not load` with the detail |
+| Install answers `load_failed` | the module did not compile, did not start or crashed in `describe`; `detail` says which - an app's own bug, not its manifest |
 | A menu row never appears | the action's *applies* rule (extension, MIME, multi) - check the override; the action may be switched off or reserved to administrators; it may need one of the app's own permissions the person does not hold ([App permissions](#app-permissions)); a read-only storage hides writing actions; encrypted folders hide everything |
 | An action or screen answers `403 permission_denied` with `permission: "app.<app>.<id>"` | the person does not hold that app permission; `source` says which layer decided - their exception, their custom role, the built-in role or the app's default ([App permissions](#app-permissions)) |
 | An install of a newer app answers `manifest_invalid` … `unknown field "user_permissions"` | this filex is older than 0.49.0, and the app declares its own permissions - upgrade filex, or install a version of the app from before them |

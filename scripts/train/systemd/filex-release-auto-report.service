@@ -1,0 +1,14 @@
+# The autonomous release round's morning report (scripts/train/auto.mjs
+# report): the rounds since the last report and what they left to a person.
+# A template: scripts/train/install-auto.sh fills @NODE@, @BIN@ and @ENV@.
+[Unit]
+Description=filex autonomous release round: the morning report
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=HOME=/root
+ExecStart=@NODE@ @BIN@/train/auto-host.mjs report --env @ENV@
+TimeoutStartSec=10min

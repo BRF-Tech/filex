@@ -29,6 +29,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -278,3 +279,19 @@ func (s *Service) DrawThumbnail(ctx context.Context, r ThumbRequest) ([]byte, er
 // isSheetOnly: spreadsheet kinds DocumentType does not list (the editor does
 // not open them) that the converter still reads.
 func isSheetOnly(ext string) bool { return ext == "numbers" }
+
+// ThumbLayoutParams are the editor's json parameters (m_sJsonParams) a
+// thumbnail of a file of this extension is laid out with where no Document
+// Server draws it - the office engine an app brings (internal/officeengine):
+// a sheet's page layout, the very one DrawThumbnail asks the Document Server
+// for, so both draw the same picture; nil for any other document.
+func ThumbLayoutParams(ext string) json.RawMessage {
+	if DocumentType(ext) != "cell" && !isSheetOnly(ext) {
+		return nil
+	}
+	b, err := json.Marshal(map[string]any{"spreadsheetLayout": sheetLayout})
+	if err != nil {
+		return nil
+	}
+	return b
+}

@@ -372,7 +372,7 @@ failed transfer the staging area holds the only copy of its contents.
 |---|---|---|
 | `FILEX_UPLOAD_STAGING_DIR` | `<data_dir>/uploads` | where in-flight parts live |
 | `FILEX_UPLOAD_CHUNK_SIZE` | `8388608` (8 MiB) | default part size when the client does not ask |
-| `FILEX_UPLOAD_STAGING_TTL` | `24h` | idle time before the sweeper removes a staging directory |
+| `FILEX_UPLOAD_STAGING_TTL` | `24h` | idle time before the sweeper removes a staging directory. Since 0.57 a [seed](CONFIGURATION.md#variables-that-seed-a-stored-setting) of `upload.staging_ttl_hours` (**Admin → Settings → General**): the first start writes it, the stored value wins after that |
 
 Client-side (the CLI and anything embedding it):
 

@@ -29,6 +29,7 @@ import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { findBash } from '../../../scripts/release/engine.mjs';
+import { SNAP_UPLOAD, jobIf, topLevelTerms } from '../helpers/releaseWorkflow';
 
 const REPO = path.resolve(__dirname, '../../..');
 const DIR = [process.env.FILEX_WORKFLOWS_DIR, path.join(REPO, '.github', 'workflows')].find(
@@ -194,7 +195,8 @@ describe('the release ships arm64', () => {
     const s = step(code('release.yml'), 'Upload to the Snap Store');
     expect(cond(s)).toMatch(/startsWith\(matrix\.label, 'linux'\)/);
     expect(s).toMatch(/\[ "\$LABEL" = linux-arm64 \] && snap=desktop\/release\/filex-desktop-arm64\.snap/);
-    expect(s).toMatch(/snapcraft upload --release=stable "\$snap"/);
+    // #265: to stable and to every preview channel at once.
+    expect(s).toMatch(SNAP_UPLOAD);
   });
 
   it.runIf(!!DIR)('runs the arm64 CLI, server and images on arm64 machines', () => {
@@ -298,7 +300,7 @@ describe('the release ships arm64', () => {
 
   it.runIf(!!DIR)('a snap waiting for the Snap Store review does not fail the release', () => {
     const s = step(code('release.yml'), 'Upload to the Snap Store');
-    expect(s).toMatch(/out=\$\(snapcraft upload --release=stable "\$snap" 2>&1\)/);
+    expect(s).toMatch(/out=\$\(snapcraft upload --release=stable,candidate,beta,edge "\$snap" 2>&1\)/);
     expect(s).toMatch(/grep -qi 'manual review'/);
     expect(s).toMatch(/::warning title=Snap Store: manual review::/);
     // Since 0.52 the snap asks for no allow-sandbox: a review is no longer
@@ -366,9 +368,11 @@ describe('a release run started by hand', () => {
     // module's backend/vX tag: goreleaser picked that one and --snapshot
     // failed ("current tag is not semver", dry run 36372592649).
     expect(release).toMatch(/GORELEASER_CURRENT_TAG: v\$\{\{ needs\.plan\.outputs\.version \}\}/);
-    // And jobs that only ever publish.
+    // And jobs that only ever publish: whatever else their `if:` says (the
+    // AUR's waits for every desktop row to end, #145), publish is one of the
+    // terms all of it needs.
     for (const j of ['docker-manifest', 'npm', 'aur']) {
-      expect(job(release, j), j).toMatch(/\n {4}if: needs\.plan\.outputs\.publish == 'true'/);
+      expect(topLevelTerms(jobIf(job(release, j))), j).toContain("needs.plan.outputs.publish == 'true'");
     }
   });
 
@@ -404,7 +408,11 @@ describe('winget keeps only the newest pull request open', () => {
     const submit = step(release, 'Submit to winget');
     const close = step(release, 'Close the superseded winget pull requests');
     expect(close).toMatch(/winget-supersede\.sh BRFTech\.filex-app "\$\{VER\}"/);
-    expect(cond(close)).toBe(cond(submit));
+    // #68: while the desktop app's first pull request waits for a
+    // moderator, neither a new one is submitted nor any closed.
+    const pending = step(release, 'Does the desktop app wait for a winget moderator?');
+    expect(cond(close)).toBe(`${cond(pending)} && env.WINGET_DESKTOP_SKIP == ''`);
+    expect(cond(submit)).toBe(`${cond(pending)} && env.WINGET_DESKTOP_SKIP == ''`);
     expect(release.indexOf('- name: Close the superseded winget pull requests')).toBeGreaterThan(
       release.indexOf('- name: Sign the CLA on the winget pull request'),
     );
@@ -415,17 +423,29 @@ describe('winget keeps only the newest pull request open', () => {
 
   const bash = findBash();
 
-  /** Runs winget-supersede.sh against a fake `gh`; returns what it closed. */
-  function supersede(id: string, ver: string, open: Array<[number, string]>) {
+  /**
+   * Runs winget-supersede.sh against a fake `gh`; returns what it closed.
+   * `onWinget`: whether winget-pkgs' master has the package (#68) - `yes`,
+   * `no` (HTTP 404) or `unknown` (GitHub not answering).
+   */
+  function supersede(id: string, ver: string, open: Array<[number, string]>, onWinget: 'yes' | 'no' | 'unknown' = 'yes') {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'winget-supersede-'));
     try {
       const log = path.join(tmp, 'closed.log');
       fs.writeFileSync(path.join(tmp, 'open.tsv'), open.map(([n, t]) => `${n}\t${t}\n`).join(''));
+      fs.writeFileSync(path.join(tmp, 'on-winget'), onWinget);
       fs.writeFileSync(
         path.join(tmp, 'gh'),
         [
           '#!/usr/bin/env bash',
           'dir="$(cd "$(dirname "$0")" && pwd)"',
+          'if [ "$1" = api ]; then',
+          '  case "$(cat "$dir/on-winget")" in',
+          '    yes) echo 3; exit 0 ;;',
+          '    no) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;',
+          '    *) echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1 ;;',
+          '  esac',
+          'fi',
           'if [ "$1 $2" = "pr close" ]; then echo "$3 $*" >> "$dir/closed.log"; exit 0; fi',
           'for a in "$@"; do',
           '  case "$a" in',
@@ -475,6 +495,28 @@ describe('winget keeps only the newest pull request open', () => {
     expect(none.code).toBe(0);
     expect(none.closed).toEqual([]);
     expect(none.out).toMatch(/::warning title=winget::no open pull request titled "New version: BRFTech\.filex-app 0\.48\.2"/);
+  });
+
+  it.runIf(!!DIR && !!bash)('closes no pull request of a package winget does not have yet, and none when it cannot tell (#68)', () => {
+    // The desktop app's first submission waits in the moderators' queue: of
+    // fourteen, none was approved, the queue starting again with each closed
+    // one. Until winget has the package, the release does not touch it
+    // (winget-pending.sh skips the closing step too), and this script, run
+    // anyway, closes nothing.
+    const open: Array<[number, string]> = [
+      [451746, 'New version: BRFTech.filex-app 0.56.3'],
+      [452000, 'New version: BRFTech.filex-app 0.57.0'],
+    ];
+    const pending = supersede('BRFTech.filex-app', '0.57.0', open, 'no');
+    expect(pending.code, pending.out).toBe(0);
+    expect(pending.closed).toEqual([]);
+    expect(pending.out).toMatch(/BRFTech\.filex-app is not on winget yet: its first pull request keeps its place in the queue, and nothing is closed/);
+    const unknown = supersede('BRFTech.filex-app', '0.57.0', open, 'unknown');
+    expect(unknown.code).toBe(0);
+    expect(unknown.closed).toEqual([]);
+    expect(unknown.out).toMatch(/::warning title=winget::could not ask whether BRFTech\.filex-app is on winget yet .*HTTP 502.*; nothing is closed\./);
+    // Accepted, it closes the older one as it always did.
+    expect(supersede('BRFTech.filex-app', '0.57.0', open, 'yes').closed).toEqual([451746]);
   });
 
   it.runIf(!!DIR && !!bash)('compares winget versions as semver', () => {

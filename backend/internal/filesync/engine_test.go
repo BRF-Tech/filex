@@ -373,49 +373,126 @@ func TestEngineDeletesLocallyWhenTheServerLostAFile(t *testing.T) {
 	}
 }
 
-// ⚠ The engine must never os.Remove user content outright.
-func TestLocalDeletesAreRecoverableFromTrash(t *testing.T) {
+// ⚠⚠ Task #259: a file deleted on the server is DELETED here - not moved into
+// a local trash in the profile (copied and removed across drives), which is
+// what Bitdefender's ransomware heuristic stopped filex.exe for. The server's
+// trash holds it; nothing of it may be left on this computer.
+func TestALocalDeleteIsADeleteNotACopy(t *testing.T) {
 	r := newRig(t)
 	r.writeLocal("payslip.pdf", "important")
+	r.writeLocal("Reports/q1.txt", "q1")
 	r.run()
 	delete(r.srv.files, "payslip.pdf")
-	r.run()
+	delete(r.srv.files, "Reports/q1.txt")
+	delete(r.srv.dirs, "Reports")
+	res := r.run()
 
-	items, err := r.engine.Store.ListTrash("p1")
-	if err != nil {
-		t.Fatal(err)
+	if r.localExists("payslip.pdf") || r.localExists("Reports") {
+		t.Fatal("what the server deleted is still in the sync folder")
 	}
-	if len(items) != 1 {
-		t.Fatalf("want 1 recoverable item, got %d", len(items))
+	if res.DeletedLocal < 2 {
+		t.Errorf("DeletedLocal = %d, want the file and the folder's content", res.DeletedLocal)
 	}
-	if items[0].Rel != "payslip.pdf" {
-		t.Errorf("trashed path = %q", items[0].Rel)
-	}
-	b, err := os.ReadFile(items[0].Path)
-	if err != nil || string(b) != "important" {
-		t.Errorf("the trashed copy must still hold the content, got %q (%v)", b, err)
+	if _, err := os.Stat(filepath.Join(r.engine.Store.Dir, "trash")); !os.IsNotExist(err) {
+		t.Errorf("a local trash was written (%v): no copy of a deleted file may be kept here", err)
 	}
 }
 
-func TestTrashIsPrunedAfterTheRetentionWindow(t *testing.T) {
+// What an OLDER filex put in the local trash keeps the promise it was put
+// there under - 30 days - and is then swept, by every pass, as before.
+func TestTheOldLocalTrashIsSweptAfterItsThirtyDays(t *testing.T) {
 	r := newRig(t)
-	r.writeLocal("old.txt", "x")
-	r.run()
-	delete(r.srv.files, "old.txt")
-	r.run()
-
-	// Nothing expires before the window is up.
-	n, err := r.engine.Store.PruneTrash("p1", TrashRetentionDays, r.clock.AddDate(0, 0, TrashRetentionDays-1))
+	stamp := r.clock.UTC().Format("20060102-150405")
+	old := filepath.Join(r.engine.Store.Dir, "trash", "p1", stamp)
+	if err := os.MkdirAll(old, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(old, "kept.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	n, err := r.engine.Store.SweepLegacyTrash("p1", LegacyTrashDays, r.clock.AddDate(0, 0, LegacyTrashDays-1))
 	if err != nil || n != 0 {
-		t.Fatalf("pruned too early: n=%d err=%v", n, err)
+		t.Fatalf("swept too early: n=%d err=%v", n, err)
 	}
-	n, err = r.engine.Store.PruneTrash("p1", TrashRetentionDays, r.clock.AddDate(0, 0, TrashRetentionDays+1))
+	n, err = r.engine.Store.SweepLegacyTrash("p1", LegacyTrashDays, r.clock.AddDate(0, 0, LegacyTrashDays+1))
 	if err != nil || n != 1 {
-		t.Fatalf("expired item was not pruned: n=%d err=%v", n, err)
+		t.Fatalf("the expired run was not swept: n=%d err=%v", n, err)
 	}
-	items, _ := r.engine.Store.ListTrash("p1")
-	if len(items) != 0 {
-		t.Errorf("trash should be empty, got %d", len(items))
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("still there: %v", err)
+	}
+}
+
+// A folder deleted on the server goes with filex's and the system's
+// leftovers in it - a partial download, Thumbs.db, desktop.ini - and a
+// symbolic link (never what it points to).
+func TestRemoveLocal_AFolderGoesWithItsLeftovers(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "Reports")
+	if err := os.MkdirAll(f, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Thumbs.db", "desktop.ini", ".DS_Store", ".filex-part-123"} {
+		if err := os.WriteFile(filepath.Join(f, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := filepath.Join(dir, "elsewhere.txt")
+	if err := os.WriteFile(target, []byte("not mine to delete"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linked := os.Symlink(target, filepath.Join(f, "link")) == nil
+	if err := RemoveLocal(f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(f); !os.IsNotExist(err) {
+		t.Fatalf("the folder is still there: %v", err)
+	}
+	if linked {
+		if b, err := os.ReadFile(target); err != nil || string(b) != "not mine to delete" {
+			t.Fatalf("a link's target was deleted with the folder: %q %v", b, err)
+		}
+	}
+}
+
+// ⚠⚠ Nothing that was never on the server is deleted: a folder that holds
+// something sync does not carry (here a folder sync ignores by name) stays,
+// and the action says so instead of deleting what nobody else has a copy of.
+func TestRemoveLocal_AFolderHoldingWhatSyncDoesNotCarryStays(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "Reports")
+	inner := filepath.Join(f, ".versions")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(inner, "only-here.txt"), []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := RemoveLocal(f)
+	if !errors.Is(err, ErrLocalChanged) {
+		t.Fatalf("err = %v, want ErrLocalChanged", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(inner, "only-here.txt")); err != nil || string(b) != "mine" {
+		t.Fatalf("a file that was never synced was deleted: %q %v", b, err)
+	}
+}
+
+// A file marked read-only is deleted all the same: a move used to carry it,
+// and Windows refuses to delete one without the mark cleared first.
+func TestRemoveLocal_AReadOnlyFileIsDeleted(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "locked.txt")
+	if err := os.WriteFile(f, []byte("x"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveLocal(f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(f); !os.IsNotExist(err) {
+		t.Fatalf("still there: %v", err)
+	}
+	// Gone already is not an error.
+	if err := RemoveLocal(f); err != nil {
+		t.Fatalf("an absent path: %v", err)
 	}
 }
 
@@ -751,7 +828,7 @@ func TestFilePairUploadsALocalEdit(t *testing.T) {
 	}
 }
 
-func TestFilePairRemoteDeleteTrashesTheLocalCopy(t *testing.T) {
+func TestFilePairRemoteDeleteDeletesTheLocalCopy(t *testing.T) {
 	r, eng := fileRig(t)
 	r.srv.files["a.txt"] = []byte("short-lived")
 	r.srv.mod["a.txt"] = r.srv.clock
@@ -766,14 +843,13 @@ func TestFilePairRemoteDeleteTrashesTheLocalCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.DeletedLocal != 1 {
-		t.Fatalf("want the local copy trashed, got %+v", res)
+		t.Fatalf("want the local copy deleted, got %+v", res)
 	}
 	if _, err := os.Stat(eng.Pair.Local); !os.IsNotExist(err) {
 		t.Fatalf("local copy should be gone: %v", err)
 	}
-	items, err := eng.Store.ListTrash("f1")
-	if err != nil || len(items) != 1 {
-		t.Fatalf("want 1 trashed item, got %v %v", items, err)
+	if _, err := os.Stat(filepath.Join(eng.Store.Dir, "trash")); !os.IsNotExist(err) {
+		t.Fatalf("a local trash was written: %v", err)
 	}
 }
 

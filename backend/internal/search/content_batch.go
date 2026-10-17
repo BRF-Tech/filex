@@ -86,6 +86,13 @@ type memoryGate struct {
 	// limit is the memory, in bytes, the process may hold before content
 	// writes wait: its baseline plus the budget. 0 = no budget.
 	limit atomic.Uint64
+	// baseline is what the process held the FIRST time a budget was set,
+	// taken once (based) and kept: the Search page sets the budget again
+	// while filex runs (task #261), and a baseline read then would count the
+	// index's own memory as the starting point and quietly raise the limit
+	// every time the percent was saved.
+	baseline atomic.Uint64
+	based    atomic.Bool
 	// inUse reads the memory the process holds (sysmem.InUse; tests swap it).
 	inUse func() uint64
 	// collect hands garbage back while writes are held (tests swap it).
@@ -99,14 +106,19 @@ type memoryGate struct {
 }
 
 // SetMemoryBudget sets the search budget: content writes and rebuild batches
-// wait while the process holds more than its memory right now (its baseline,
-// taken before indexing starts) plus budget bytes. 0 removes the budget.
+// wait while the process holds more than its baseline (what it held the first
+// time a budget was set, before indexing starts) plus budget bytes. 0 removes
+// the budget. Setting it again keeps the first baseline.
 func (i *Index) SetMemoryBudget(budget uint64) {
+	if !i.mem.based.Load() {
+		i.mem.baseline.Store(i.memInUse())
+		i.mem.based.Store(true)
+	}
 	if budget == 0 {
 		i.mem.limit.Store(0)
 		return
 	}
-	i.mem.limit.Store(i.memInUse() + budget)
+	i.mem.limit.Store(i.mem.baseline.Load() + budget)
 }
 
 // MemoryLimit is the memory, in bytes, the process may hold before content

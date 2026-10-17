@@ -134,7 +134,10 @@ export function installAxiosInterceptors(opts: InterceptorOpts): void {
         // message, because a failed upload or rename is something they are
         // waiting on. Read vs write is the whole test (`kindOfMethod`).
         // ⚠ Not `err.message`: axios writes "Network Error" in English.
-        if (noteRequestFailed(kindOfMethod(err.config?.method)) === 'say') {
+        // ⚠ The error goes along: a request the page cancelled, or one the
+        // browser dropped because the page is being left, is not a lost
+        // connection and raises nothing (core lib/connection, task #260).
+        if (noteRequestFailed(kindOfMethod(err.config?.method), Date.now(), err) === 'say') {
           opts.onError?.(t('errors.network'));
         }
       }

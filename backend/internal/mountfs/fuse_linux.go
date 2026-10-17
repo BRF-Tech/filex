@@ -499,6 +499,10 @@ func errnoOf(err error) syscall.Errno {
 		return syscall.ENOSPC
 	case ErrTooBig:
 		return syscall.EFBIG
+	case ErrBadName:
+		return syscall.EINVAL
+	case ErrNameTooLong:
+		return syscall.ENAMETOOLONG
 	}
 	return syscall.EIO
 }

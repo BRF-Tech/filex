@@ -576,18 +576,36 @@ func (s *Set) storageID() int64 {
 
 // BlockedExtension returns the extension of rel's name that a permission
 // rule binding this caller blocks ("exe", "tar.gz"), or "". Compared on the
-// lowercase name, so "Setup.EXE" is caught by "exe".
+// lowercase name, so "Setup.EXE" is caught by "exe", and on every form the
+// name can take once SAVED (savedForms), so "Setup.exe." is caught too.
 func (s *Set) BlockedExtension(rel string) string {
 	if s == nil || s.perms == nil || len(s.perms.Settings.BlockedExtensions) == 0 {
 		return ""
 	}
-	name := strings.ToLower(path.Base(CleanRel(rel)))
-	for _, ext := range s.perms.Settings.BlockedExtensions {
-		if strings.HasSuffix(name, "."+ext) {
-			return ext
+	for _, name := range savedForms(strings.ToLower(path.Base(CleanRel(rel)))) {
+		for _, ext := range s.perms.Settings.BlockedExtensions {
+			if strings.HasSuffix(name, "."+ext) {
+				return ext
+			}
 		}
 	}
 	return ""
+}
+
+// savedForms is a name as it may end up on a disk: itself; without the
+// trailing dots and spaces Windows (and a browser saving a download) drops;
+// and, cut at the first colon, the file an NTFS stream name writes into
+// (`x.exe:s`, `x.exe::$DATA`). A blocked type must not arrive under a
+// spelling that becomes it once saved (task #238).
+func savedForms(name string) []string {
+	forms := []string{name}
+	if t := strings.TrimRight(name, ". "); t != name {
+		forms = append(forms, t)
+	}
+	if i := strings.IndexByte(name, ':'); i > 0 {
+		forms = append(forms, strings.TrimRight(name[:i], ". "))
+	}
+	return forms
 }
 
 // Allows reports whether the caller holds per-user permission p, regardless

@@ -37,8 +37,11 @@ var userPermIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 const (
 	DefaultMemoryPages = 1024 // 64 MiB
 	MaxMemoryPages     = 4096 // 256 MiB
-	DefaultCallTimeout = 15   // seconds, views/pages/describe
+	DefaultCallTimeout = 15   // seconds, views/pages
 	MaxCallTimeout     = 60
+	// MinDescribeTimeout is the least describe gets (seconds), at install,
+	// upgrade and every load (DescribeBudget).
+	MinDescribeTimeout = 60
 	DefaultJobTimeout  = 300 // seconds, action_run
 	MaxJobTimeout      = 900
 	// MaxTickTimeout caps the hourly wake-up. It is deliberately tighter
@@ -307,6 +310,9 @@ func (m *Manifest) Validate() error {
 		return err
 	}
 	if err := m.checkCoEdit(); err != nil {
+		return err
+	}
+	if err := m.checkOfficeEngine(); err != nil {
 		return err
 	}
 	for i := range m.PublicPages {

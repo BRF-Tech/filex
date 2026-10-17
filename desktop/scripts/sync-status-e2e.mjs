@@ -20,7 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   STORAGE,
-  api, check, finish, launchApp, signIn, sleep,
+  api, check, finish, launchApp, setAccountLanguage, signIn, sleep,
 } from './lib/harness.mjs';
 
 const REMOTE_A = `${STORAGE}://status-e2e-a`;
@@ -131,14 +131,14 @@ try {
   check('…because the file really went up', up.ok && (await up.text()).length === 4097);
 
   // ── the same card in Turkish ──────────────────────────────────────
-  await win.evaluate(() => document.querySelector('#settings [data-locale="tr"]')?.click());
+  await setAccountLanguage(win, 'tr');
   const tr = await until(async () => {
     const a = await card(win, REMOTE_A);
     return { ok: /Bu bilgisayarda yapılan değişiklikler 30 saniyelik kontrolde bulunur/.test(a?.localText ?? ''), a };
   }, 30000); // the engine says it (#213): a new language restarts the watcher
   check('the note speaks Turkish with Turkish letters', tr?.ok === true, tr?.a?.localText ?? 'no card');
   check('…and so does the live word', /^Canlı/.test(tr?.a?.live ?? ''), tr?.a?.live ?? '');
-  await win.evaluate(() => document.querySelector('#settings [data-locale="system"]')?.click());
+  await setAccountLanguage(win, 'en');
 } catch (e) {
   check('flow completed', false, String(e && e.message).split('\n')[0]);
 } finally {

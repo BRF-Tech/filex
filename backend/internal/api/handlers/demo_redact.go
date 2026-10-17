@@ -288,6 +288,9 @@ func (h *LoginSecurity) maskViewForDemo(resp *loginSecurityResponse) {
 	resp.Settings.IPAllowlist = maskAddressList(resp.Settings.IPAllowlist)
 	resp.Settings.TrustedProxies = maskAddressList(resp.Settings.TrustedProxies)
 	resp.TrustedProxiesEffective = maskAddressList(resp.TrustedProxiesEffective)
+	if c := resp.TrustedProxiesConfigured; c != nil {
+		c.Entries = maskAddressList(c.Entries)
+	}
 	resp.TrustedAddresses = maskAddressList(resp.TrustedAddresses)
 	maskProxyAutoForDemo(resp)
 }

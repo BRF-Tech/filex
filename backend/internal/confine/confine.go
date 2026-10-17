@@ -73,8 +73,14 @@ func split(raw string) (adapter, rel string) {
 }
 
 // splitRaw is split without the cleaning: the rel as the client wrote it.
+//
+// ⚠ Not trimmed. A space at either end of a path is part of a file's name
+// (` notes.txt`, `report.txt `), and an unconfined caller's path keeps it;
+// trimming it here sent a confined caller to the twin without the space -
+// `report.txt` read, overwritten or deleted in place of `report.txt `
+// (task #238). A root spec read from a token or the header is trimmed by
+// parseRoot, before it gets here.
 func splitRaw(raw string) (adapter, rel string) {
-	raw = strings.TrimSpace(raw)
 	if i := strings.Index(raw, "://"); i >= 0 {
 		return raw[:i], raw[i+3:]
 	}

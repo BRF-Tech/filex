@@ -22,6 +22,7 @@ import { panelSearchGroups, panelSearchRows, parsePanelQuery } from '@brftech/fi
 import {
   ADMIN_SEARCH_SETTINGS,
   ADMIN_SEARCH_TABS,
+  INSTANCE_SEARCH_SETTINGS,
   adminSearchItems,
   fileItem,
   remoteItem,
@@ -59,7 +60,7 @@ const META: Record<string, { requiresAdmin?: boolean; adminPerm?: string }> = {
 };
 
 /** The search's context for a reader, the menu built the way useAdminNav builds it. */
-function searchCtx(opts: { locale?: 'en' | 'tr'; isAdmin?: boolean; perms?: string[] } = {}): AdminSearchContext {
+function searchCtx(opts: { locale?: 'en' | 'tr'; isAdmin?: boolean; perms?: string[]; platform?: boolean; tenantSelf?: boolean } = {}): AdminSearchContext {
   const isAdmin = opts.isAdmin ?? true;
   const perms = new Set(opts.perms ?? []);
   const t = textIn(opts.locale === 'en' ? en : tr);
@@ -74,7 +75,10 @@ function searchCtx(opts: { locale?: 'en' | 'tr'; isAdmin?: boolean; perms?: stri
     },
     current: { name: 'dashboard', params: {} },
     tenants: false,
-    tenantSelf: false,
+    tenantSelf: opts.tenantSelf ?? false,
+    // A single-tenant install unless a test says otherwise: everybody stands
+    // in the platform's scope there (capabilities `caller_platform`).
+    platform: opts.platform ?? true,
     apps: isAdmin ? [{ key: 'convert/queue', plugin: 'convert', view: 'queue', label: 'Dönüştürmeler', icon: 'convert' }] : [],
   };
   const entries: MegaMenuEntry[] = buildAdminNav(nav);
@@ -104,6 +108,18 @@ describe('who finds what - the menu’s own rule', () => {
     expect(theirs).toContain('setting:storage-quota'); // on the Users page, which they may open
     expect(theirs).not.toContain('setting:require-2fa'); // on Roles, which they may not
     expect(theirs).not.toContain('page:app-convert/queue');
+  });
+
+  // Task #258: the pages about the instance are not a tenant administrator's
+  // (their API answers 403), and neither are their tabs and settings.
+  it('a tenant’s administrator finds neither the pages about the instance nor what is on them', () => {
+    const theirs = ids(searchCtx({ platform: false, tenantSelf: true }));
+    for (const id of ['page:settings', 'page:protection', 'page:plugins', 'tab:plugins:apps', 'tab:auth-providers:ldap', 'setting:smtp', 'setting:trash-retention', 'setting:default-webhook']) {
+      expect(theirs, id).not.toContain(id);
+    }
+    for (const id of ['page:branding', 'page:tenant-self', 'page:encryption', 'page:notifications', 'page:users', 'setting:who-may-encrypt']) {
+      expect(theirs, id).toContain(id);
+    }
   });
 
   it('what a delegated administrator types for a page they may not open finds nothing', () => {
@@ -145,11 +161,49 @@ describe('two languages and the synonyms', () => {
     expect(firstFor(ctx, 'mağaza')).toBeDefined();
   });
 
+  // Task #258: each setting goes to the one page that holds it, and to its
+  // card on a long page - the thumbnail settings' one home is General, the
+  // default folder view moved to Appearance.
+  it('a setting goes to its page, and to its card on that page', () => {
+    const rows = adminSearchItems(searchCtx({ locale: 'en' }));
+    const target = (id: string) => (rows.find((i) => i.id === `setting:${id}`)!.target as { route: unknown }).route;
+    expect(target('thumbnails')).toEqual({ name: 'settings', hash: '#thumb-limits' });
+    expect(target('folder-previews')).toEqual({ name: 'settings', hash: '#thumb-limits' });
+    expect(target('folder-view')).toEqual({ name: 'appearance', hash: '#folder-view' });
+    expect(target('store-screen')).toEqual({ name: 'plugins', query: { tab: 'apps' } });
+    expect(firstFor(searchCtx({ locale: 'en' }), 'svg')?.id).toBe('setting:thumbnails');
+    // The row says where it is: the page's own name in the menu.
+    expect(rows.find((i) => i.id === 'setting:thumbnails')!.detail).toBe(en.nav.general);
+  });
+
   it('a page row shows the menu’s short line, in the interface’s language', () => {
     const users = adminSearchItems(searchCtx({ locale: 'tr' })).find((i) => i.id === 'page:users')!;
     expect(users.label).toBe(tr.nav.users);
     expect(users.detail).toBe(tr.nav.hint.users);
     expect(users.terms).toContain(en.nav.users);
+  });
+});
+
+describe('the settings that left the environment (task #258)', () => {
+  it('are the server’s list, key for key, each in both catalogues', () => {
+    const go = readFileSync(path.join(WEB, '../backend/internal/instancesettings/instancesettings.go'), 'utf8');
+    // An entry names its key as `Key: "…", Group:`, or as appMB's first argument.
+    const backend = [...go.matchAll(/\bKey: "([a-z_.]+)", Group:|appMB\("([a-z_.]+)"/g)].map((m) => m[1] ?? m[2]).sort();
+    expect(backend.length).toBeGreaterThan(10);
+    expect(INSTANCE_SEARCH_SETTINGS.map((s) => s.id.replace(/^instance-/, '')).sort()).toEqual(backend);
+    for (const s of INSTANCE_SEARCH_SETTINGS) {
+      expect(textIn(en)(s.label), `en ${s.label}`).not.toBe('');
+      expect(textIn(tr)(s.label), `tr ${s.label}`).not.toBe('');
+    }
+  });
+
+  it('a search finds one by its own name and goes to its card', () => {
+    const rows = adminSearchItems(searchCtx({ locale: 'en' }));
+    const target = (id: string) => (rows.find((i) => i.id === `setting:${id}`)!.target as { route: unknown }).route;
+    expect(target('instance-sync.default_interval_minutes')).toEqual({ name: 'settings', hash: '#instance-settings-general' });
+    expect(target('instance-coedit.max_members')).toEqual({ name: 'plugins', query: { tab: 'apps' }, hash: '#instance-settings-apps' });
+    expect(target('search-settings')).toEqual({ name: 'settings', hash: '#search-settings' });
+    expect(firstFor(searchCtx({ locale: 'en' }), 'default language')?.id).toBe('setting:instance-instance.default_locale');
   });
 });
 

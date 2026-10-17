@@ -25,11 +25,12 @@ import type { StorageInfo } from '../lib/catalogCoverage';
 import type { EncryptedKind } from '../lib/encryptedRow';
 import type { MeasuredDrive } from '../lib/storageLine';
 import type { ExplorerConfig, AuthConfig, EndpointMap, SearchAccount } from '../types/ExplorerConfig';
-import type { LicenseInfo } from '@brftech/filex-app-ui/protocol';
+import type { CsvDeclaration, LicenseInfo } from '@brftech/filex-app-ui/protocol';
 import { resolveLocale } from '../locales/resolve';
 import { listingAddress } from '../lib/internalPaths';
 import { serverLimit, takeServerRules } from '../lib/serverRules';
 import { draftsClient, type DraftDto } from '../lib/drafts';
+import { csvDeclarationQuery } from '../lib/textDialect';
 import { localeTag } from './useLocale';
 import { networkFailure, requestFailure } from '../lib/errorWords';
 // ⚠ The same folding rule the web app's axios layer applies, applied by the
@@ -582,8 +583,10 @@ export function useFileApi(config: ExplorerConfig) {
       // No answer at all: said as a network failure, not as the browser's
       // "TypeError: Failed to fetch".
       // ⚠ Told to the shared notice as well, so an embedded explorer folds a
-      // storm of failed listings and thumbnails the same way the panel does.
-      noteRequestFailed(kindOfMethod(init.method));
+      // storm of failed listings and thumbnails the same way the panel does
+      // - with the error, so a request dropped because the page is being
+      // left raises nothing (lib/connection, task #260).
+      noteRequestFailed(kindOfMethod(init.method), Date.now(), e);
       throw networkFailure(lang(), e);
     }
     // Any answer — a 404 and a 500 included — means the connection is not
@@ -1153,6 +1156,16 @@ export function useFileApi(config: ExplorerConfig) {
     for (const f of files) {
       fd.append('file[]', f, f.name);
     }
+    // ⚠ The name again, as a plain field, one per file in the same order
+    // (task #238). A browser escapes a multipart FILENAME: `"` becomes `%22`,
+    // a line break `%0A` (the HTML form-data rules), and the server cannot
+    // undo that - a file really named `100%22.txt` exists too. So
+    // `say "hi".txt` was stored as `say %22hi%22.txt`, while the same file
+    // over 8 MiB (the chunked path, its name in JSON) kept its quotes. The
+    // server takes `name[]` when it is there and the counts match.
+    for (const f of files) {
+      fd.append('name[]', f.name);
+    }
     const headers = await authHeaders();
     return new Promise<ManagerResponse>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -1401,14 +1414,22 @@ export function useFileApi(config: ExplorerConfig) {
      * key (the door refuses anything else); `expect` - write only over the
      * file as it was opened, "<size>:<ms>" as its listing said it; `extra` -
      * more of the query: editing together's `coedit`, `client`, `token`,
-     * `through` (which part of the session's log the save holds).
+     * `through` (which part of the session's log the save holds), and filex
+     * 0.57's `beside` / `conflict` (backend app_ui_beside.go); `csv` -
+     * filex 0.57, what the app says about the CSV it saves over a `.csv`
+     * (`csv_delimiter`, `csv_encoding`, `csv_bom`, `csv_eol`: the server
+     * checks it against the bytes, backend app_ui_csv.go).
+     *
+     * The answer's `path` and `name` are where the save went: the file, or -
+     * `beside: true`, `conflict: <name>` - a file beside it (filex 0.57).
      */
-    opts?: { e2e?: boolean; expect?: string; extra?: Record<string, string> },
-  ): Promise<{ saved: boolean; path: string; name: string; size: number; modified?: number }> {
+    opts?: { e2e?: boolean; expect?: string; extra?: Record<string, string>; csv?: CsvDeclaration },
+  ): Promise<{ saved: boolean; path: string; name: string; size: number; modified?: number; beside?: boolean; conflict?: string }> {
     if (!endpoints.pluginUISave) throw new Error('pluginUISave endpoint not configured');
-    const more = opts?.extra
-      ? Object.entries(opts.extra).map(([k, v]) => `&${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('')
-      : '';
+    const params = { ...(opts?.extra ?? {}), ...(csvDeclarationQuery(opts?.csv) ?? {}) };
+    const more = Object.entries(params)
+      .map(([k, v]) => `&${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join('');
     const q = ('path' in target
       ? `path=${encodeURIComponent(target.path)}`
       : `dir=${encodeURIComponent(target.dir)}&name=${encodeURIComponent(target.name)}`) + more;
@@ -2140,6 +2161,9 @@ export function useFileApi(config: ExplorerConfig) {
     authHeadersSync,
     credentialsMode,
     jsonFetch,
+    // One request with this client's credential and language, answered as
+    // the Response (a stream's reader: the AI assistant, lib/assistant).
+    rawRequest,
     withScreenLang,
   };
 }

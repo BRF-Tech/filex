@@ -18,6 +18,7 @@
  */
 import type { NewDocType } from '../types/FileNode';
 import { isInternalName } from './internalPaths';
+import { nameRefusal } from './nameRule';
 
 /**
  * Must a file of this type carry its extension?
@@ -90,6 +91,8 @@ export function finalDocName(name: string, ty: NewDocType): string {
 export type DocNameProblem =
   | { kind: 'slash' }
   | { kind: 'dots' }
+  /* A NUL or another control character (lib/nameRule, task #238). */
+  | { kind: 'invalid' }
   | { kind: 'bare_ext' }
   | { kind: 'reserved'; name: string }
   | { kind: 'ext_needs_type'; ext: string };
@@ -106,8 +109,17 @@ export type DocNameProblem =
 export function docNameProblem(name: string, ty: NewDocType, all: NewDocType[]): DocNameProblem | null {
   const n = name.trim();
   if (!n) return null;
-  if (/[\\/]/.test(n)) return { kind: 'slash' };
-  if (/^\.+$/.test(n)) return { kind: 'dots' };
+  // The server's leaf rule (lib/nameRule, backend leafname) - the same one
+  // Rename and New folder ask (task #238).
+  switch (nameRefusal(n)) {
+    case 'separator':
+      return { kind: 'slash' };
+    case 'nul':
+    case 'control':
+      return { kind: 'invalid' };
+    case 'dots':
+      return { kind: 'dots' };
+  }
   const final = finalDocName(n, ty);
   if (final.toLowerCase() === '.' + ty.ext.toLowerCase()) return { kind: 'bare_ext' };
   if (isInternalName(final)) return { kind: 'reserved', name: final };

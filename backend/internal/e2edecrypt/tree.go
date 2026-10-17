@@ -12,7 +12,7 @@ import (
 	"runtime"
 	"strings"
 
-	"golang.org/x/text/unicode/norm"
+	"github.com/brf-tech/filex/backend/internal/localname"
 )
 
 // Decrypting a downloaded encrypted folder (or a .zip of one, or a single
@@ -624,10 +624,9 @@ func (j *Job) outputName(name string, taken map[string]bool, rel string) string 
 }
 
 // collisionKey compares names the way NTFS and APFS do (case-insensitive,
-// Unicode-normalised), because that is where the output may land.
-func collisionKey(name string) string {
-	return strings.ToLower(norm.NFC.String(name))
-}
+// Unicode-normalised), because that is where the output may land. The rule
+// is internal/localname's, shared with the sync engine.
+func collisionKey(name string) string { return localname.Fold(name) }
 
 func numbered(name string, n int) string {
 	ext := path.Ext(name)
@@ -637,40 +636,11 @@ func numbered(name string, n int) string {
 	return fmt.Sprintf("%s (%d)%s", strings.TrimSuffix(name, ext), n, ext)
 }
 
-var windowsReserved = map[string]bool{
-	"CON": true, "PRN": true, "AUX": true, "NUL": true,
-	"COM1": true, "COM2": true, "COM3": true, "COM4": true, "COM5": true,
-	"COM6": true, "COM7": true, "COM8": true, "COM9": true,
-	"LPT1": true, "LPT2": true, "LPT3": true, "LPT4": true, "LPT5": true,
-	"LPT6": true, "LPT7": true, "LPT8": true, "LPT9": true,
-}
-
 // safeOutputName adapts a name to the rules of the output OS. Only Windows
 // has rules a legitimate name breaks (`a:b.txt` is a fine name on Linux and
-// in filex).
-func safeOutputName(name, goos string) string {
-	if goos != "windows" {
-		return name
-	}
-	b := []rune(name)
-	for i, r := range b {
-		if r < 0x20 || strings.ContainsRune(`<>:"|?*\/`, r) {
-			b[i] = '_'
-		}
-	}
-	for i := len(b) - 1; i >= 0 && (b[i] == '.' || b[i] == ' '); i-- {
-		b[i] = '_'
-	}
-	s := string(b)
-	stem := s
-	if i := strings.IndexByte(stem, '.'); i >= 0 {
-		stem = stem[:i]
-	}
-	if windowsReserved[strings.ToUpper(strings.TrimRight(stem, " "))] {
-		s = "_" + s
-	}
-	return s
-}
+// in filex). The rule is internal/localname's, shared with the sync engine
+// and (in TypeScript) the desktop app's drag-out.
+func safeOutputName(name, goos string) string { return localname.Safe(name, goos) }
 
 func isFile(p string) bool {
 	fi, err := os.Stat(p)

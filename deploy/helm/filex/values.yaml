@@ -1,6 +1,7 @@
 # Default values for filex — a minimal install: one filex pod, SQLite on a PVC,
-# an Ingress. Enable the toggles below (or use values-full.yaml) for Postgres,
-# Redis and ONLYOFFICE.
+# an Ingress. Enable the toggles below (or use values-full.yaml) for Postgres
+# and Redis. Office documents need nothing here: install the Office editor app
+# (Admin -> Plugins -> Apps); an ONLYOFFICE Document Server is optional.
 
 # Every object is named `<release>-<nameOverride|chart name>`. Override it when
 # the chart name is not what you want in the object names — e.g. two installs
@@ -27,7 +28,10 @@ publicURL: "https://files.example.com"
 basePath: ""
 
 # The proxies whose X-Forwarded-For / X-Real-IP filex believes (sets
-# FILEX_TRUSTED_PROXIES; docs/CONFIGURATION.md -> "Trusted proxies"). The
+# FILEX_TRUSTED_PROXIES; docs/CONFIGURATION.md -> "Trusted proxies"). A seed
+# since 0.57: written into the Sign-in security list at the first start; a
+# later change here needs that page or
+# `filex settings reseed login.trusted_proxies` in the pod. The
 # address it settles is what the sign-in attempt limit counts by and what the
 # audit log records. Empty = "auto": the pod's own interface subnet - a node's
 # /24 with flannel, the pod alone (/32) with Calico or Cilium - never its
@@ -112,9 +116,14 @@ redis:
 # `url` an Ingress + DNS. Set enabled=false to hide the feature in filex — e.g.
 # drop ONLYOFFICE later by flipping one flag.
 
-# ONLYOFFICE — edit Word / Excel / PowerPoint in the browser.
-# ⚠ v0.43.0 REFUSES an unsigned save callback: the Document Server must run
-# with JWT_ENABLED=true and the same jwtSecret, or its saves fail.
+# ONLYOFFICE Document Server - OPTIONAL, off by default. Editing Word / Excel /
+# PowerPoint needs none: the Office editor app does it in the browser. Wire a
+# Document Server you run yourself when you want what still asks for one today:
+# office thumbnails and the apps' office conversions (docs/ONLYOFFICE.md).
+# Run the image filex is tested against, onlyoffice/documentserver:9.4.0.1 -
+# never `latest`, which moves under you (Docs 10.0 changed how a CSV is saved).
+# ⚠ filex REFUSES an unsigned save callback: the Document Server must run with
+# JWT_ENABLED=true and the same jwtSecret, or its saves fail.
 onlyoffice:
   enabled: false
   url: ""                 # https://office.example.com — browser-facing
@@ -216,7 +225,8 @@ smtp:
   from: ""
   tls: "starttls"         # starttls | tls | none
 
-# Branding + trash policy.
+# Branding + trash policy. siteName seeds the instance's Display name
+# (Admin → Settings → Branding), shown on its pages and in its mails.
 siteName: ""
 trashRetentionDays: ""
 

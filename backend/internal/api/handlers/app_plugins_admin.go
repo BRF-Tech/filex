@@ -15,6 +15,7 @@
 //	GET/PUT /api/admin/app-plugins/{id}/overrides
 //	GET    /api/admin/app-plugins/{id}/logs?after=N
 //	GET/PUT /api/admin/app-plugins/{id}/thumbnails - the app's thumbnail limits (internal/wasmplugin/thumbnails.go)
+//	GET     /api/admin/app-plugins/{id}/extras, PUT/DELETE …/extras/<path> - the files an administrator adds to it (app_plugins_extras.go)
 //
 // ⚠ Instance-wide, never tenant-scoped, for the same reason storage plugins
 // are: a plugin's actions appear in every tenant's file menu. Only the
@@ -97,14 +98,15 @@ func (h *AppPluginsAdmin) disabledMessage() string {
 // wasmplugin/compat.go). `update_check`: the daily update check runs;
 // `updates_checked_at`: when the last check ran (absent: never).
 func (h *AppPluginsAdmin) runtimeFacts(r *http.Request) map[string]any {
-	facts := h.runtimeFactsOf(r.Context())
+	facts := h.runtimeFactsOf(r.Context(), langOf(r))
 	// The tab's header in the reader's words, on the reader's clock (0.55).
 	facts["said"] = runtimeSaid(langOf(r), func(t time.Time) string { return readerClock(r, t) }, facts)
 	return facts
 }
 
-// runtimeFactsOf is the list answer's header: the platform's facts.
-func (h *AppPluginsAdmin) runtimeFactsOf(ctx context.Context) map[string]any {
+// runtimeFactsOf is the list answer's header: the platform's facts, the
+// engines' names in lang.
+func (h *AppPluginsAdmin) runtimeFactsOf(ctx context.Context, lang string) map[string]any {
 	if h.Registry == nil {
 		return map[string]any{
 			"enabled": false, "arch_ok": wasmplugin.ArchSupported(), "disabled_reason": h.disabledMessage(),
@@ -115,7 +117,7 @@ func (h *AppPluginsAdmin) runtimeFactsOf(ctx context.Context) map[string]any {
 	facts := map[string]any{
 		"enabled": true, "arch_ok": true, "disabled_reason": "",
 		"requires_signature": h.Registry.RequiresSignature(), "engines": h.Registry.Engines(ctx),
-		"engine_names":    engineNames(),
+		"engine_names":    engineNames(lang),
 		"dir":             h.Registry.Dir(),
 		"filex_version":   wasmplugin.FilexVersion(),
 		"compat_enforced": wasmplugin.CompatEnforced(),
@@ -132,13 +134,15 @@ func (h *AppPluginsAdmin) runtimeFactsOf(ctx context.Context) map[string]any {
 // install review's "LibreOffice", "librsvg" for the same programs. ONE
 // spelling, the server's, so the panel keeps no list of its own. An engine's
 // old name (`libreoffice`) is in it too, read as the engine it stands for: an
-// app built before 0.50 still names it in its permissions.
-func engineNames() map[string]string {
+// app built before 0.50 still names it in its permissions. The office engine
+// reads as "Office engine" in lang, not ONLYOFFICE (wasmplugin.EngineLabel):
+// since 0.57 the Office editor app's engine is one too.
+func engineNames(lang string) map[string]string {
 	out := map[string]string{}
 	for _, id := range enginebin.Names() {
-		out[id] = enginebin.DisplayName(id)
+		out[id] = wasmplugin.EngineLabel(lang, id)
 		for _, alias := range enginebin.AliasesOf(id) {
-			out[alias] = enginebin.DisplayName(alias)
+			out[alias] = wasmplugin.EngineLabel(lang, alias)
 		}
 	}
 	return out
@@ -370,6 +374,24 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 			}
 			uiR = bytes.NewReader(b)
 		}
+		// The office engine (engine.zip), when the manifest has an
+		// `engines.office` block (wasmplugin.stageEngine decides).
+		var engineR io.Reader
+		ef, _, err := r.FormFile("engine")
+		switch {
+		case errors.Is(err, http.ErrMissingFile):
+		case err != nil:
+			writeInstallRefusal(w, r, http.StatusBadRequest, wasmplugin.ErrCodeManifestInvalid, "engine_unreadable", "office engine unreadable", nil)
+			return nil, false
+		default:
+			b, rerr := io.ReadAll(io.LimitReader(ef, wasmplugin.MaxOfficeEngineBytes+1))
+			ef.Close()
+			if rerr != nil {
+				writeInstallRefusal(w, r, http.StatusBadRequest, wasmplugin.ErrCodeManifestInvalid, "engine_unreadable", "office engine unreadable", nil)
+				return nil, false
+			}
+			engineR = bytes.NewReader(b)
+		}
 		var granted []string
 		if g := strings.TrimSpace(r.FormValue("grant")); g != "" {
 			var body struct {
@@ -389,7 +411,7 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 			}
 		}
 		return &wasmplugin.InstallInput{
-			Manifest: manifest, Wasm: wasmR, UI: uiR, Signature: r.FormValue("signature"),
+			Manifest: manifest, Wasm: wasmR, UI: uiR, Engine: engineR, Signature: r.FormValue("signature"),
 			Source: "upload", Granted: granted, DryRun: dry, Lang: langOf(r), ActorID: actorIDOf(r),
 			Placements: placements,
 		}, true

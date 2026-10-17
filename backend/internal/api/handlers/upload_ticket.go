@@ -233,7 +233,11 @@ func (a *aiOps) CreateUploadTicket(ctx context.Context, req uploadTicketRequest)
 	if err := a.gate(ctx, s, writegate.Writes(rel)); err != nil {
 		return nil, err
 	}
-	if err := a.can(ctx, s, rel, a.writeNeed(ctx, s, rel)); err != nil {
+	need := a.writeNeed(ctx, s, rel)
+	if err := a.can(ctx, s, rel, need); err != nil {
+		return nil, err
+	}
+	if err := newLeafErr(need, rel); err != nil {
 		return nil, err
 	}
 	ctx = withPlaintextConsent(ctx, req.AllowPlaintext)

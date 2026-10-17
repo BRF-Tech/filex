@@ -27,6 +27,7 @@ import {
   pickOpenHandler,
   takeServerRules,
   useFileApi,
+  visibleName,
   type EditKinds,
   type ExplorerConfig,
   type FileNode,
@@ -221,7 +222,7 @@ function onDraftSaved(saved: { path: string; name: string }) {
   } catch {
     /* an address the browser would not take — the reload is the only loss */
   }
-  document.title = saved.name;
+  document.title = visibleName(saved.name);
 }
 
 /* === #184 — the desktop app's "Open with filex" window ====================
@@ -248,12 +249,20 @@ if (outsideBridge) {
   });
 }
 /* Hello once the viewer is on the page: a change that arrived before it would
- * be a prop it was mounted with, not a change it saw happen. */
+ * be a prop it was mounted with, not a change it saw happen.
+ *
+ * ⚠ Only from a page whose viewer takes the change: filex's own (ONLYOFFICE's
+ * editor reloads or asks, PreviewModal takeChange). An app's interface owns
+ * its document and follows no outside change - a page that said hello with
+ * one on it would leave the change unanswered and every save held. Without
+ * the hello the desktop asks the person itself and loads the version they
+ * chose into the same app (desktop/src/main.ts askNatively). */
 let saidHello = false;
 watch(
   () => !!node.value && capsLoaded.value && appsLoaded.value,
   (ready) => {
     if (!ready || saidHello || !outsideBridge) return;
+    if (appViewer.value) return;
     saidHello = true;
     void nextTick(() => outsideBridge?.hello(1));
   },
@@ -302,7 +311,9 @@ onMounted(() => {
   // The tab is named after the document (same as the router's afterEach in
   // lib/documentTitle and the desktop's document windows) — just the file name,
   // no " — filex" suffix, so all three surfaces read the same.
-  if (n) document.title = n.basename;
+  // Through `visibleName` (task #238): a bidi control in the name cannot
+  // hide the true extension in the tab either.
+  if (n) document.title = visibleName(n.basename);
   void loadCapabilities();
   void loadAppViews();
 });

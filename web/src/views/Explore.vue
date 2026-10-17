@@ -20,6 +20,7 @@ import {
   ConnectionsPanel,
   EXPLORER_DRAWN_ROWS,
   FileExplorer,
+  SETTINGS_DIALOG_ROWS,
   accountMenuRows,
   explorerRowKey,
   qualifiedFromHash,
@@ -76,7 +77,7 @@ const storages = useStoragesStore();
 // `web/src/components/SelfTokensModal.vue` and `web/src/api/self-tokens.ts` are
 // gone, because two implementations of one credential screen is how one of them
 // mints tokens the other cannot see.
-// gorunum:v2-topbar — "How to connect" is NOT a button in this page's chrome
+// gorunum:v2-topbar — "Connections" is NOT a button in this page's chrome
 // any more. The explorer's navigation panel has carried the same door since
 // gezinti:g1 (`sidenav-connect`, and it renders the very same
 // ConnectionsPanel), so this page held a second implementation of one screen —
@@ -164,9 +165,10 @@ let runExplorerRow: ((key: string) => void) | null = null;
  * the product it belongs to.
  */
 const ROWS_WITH_ANOTHER_DOOR = new Set([
-  'theme',
-  'density',
-  'timezone',
+  // Appearance, Compact list, Time zone and the keyboard shortcuts: the user
+  // settings dialog carries them (core SETTINGS_DIALOG_ROWS, the one list the
+  // explorer's own avatar drops too).
+  ...SETTINGS_DIALOG_ROWS,
   // view-list/grid/gallery, inspector, nav — the controls the explorer draws
   // itself; core names them once (EXPLORER_DRAWN_ROWS), and the desktop app's
   // avatar leaves out the same ones.
@@ -490,7 +492,11 @@ const explorerRef = ref<{ openAppTarget?: (p: Record<string, unknown>) => Promis
  * codebase keeps confusing, and their conversion lives with its inverse in
  * lib/notificationTarget.
  */
-const appPathFromQuery = computed(() => selectFromQuery.value || qualifiedFromHash(route.hash));
+// ⚠ `decoded`: vue-router hands `route.hash` over decoded already; a second
+// decode turned a folder named `100%41` into `100A` (task #238).
+const appPathFromQuery = computed(
+  () => selectFromQuery.value || qualifiedFromHash(route.hash, { decoded: true }),
+);
 
 /** Reveal the row (if there is one), then open whatever the app asked for. */
 async function revealAndOpen(): Promise<void> {
@@ -772,7 +778,7 @@ function firstAdminPage(): string {
          Where each one went:
            · Back + Admin panel → ONE `admin` button in the cluster below
              (they pushed the same route).
-           · How to connect     → the navigation panel's own entry
+           · Connections        → the navigation panel's own entry
              (`sidenav-connect`), which opens the same ConnectionsPanel.
            · Refresh            → the explorer's own Refresh, two rows down.
            · Dark mode          → settings modal, Preferences → Theme.

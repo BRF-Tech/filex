@@ -284,8 +284,13 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 	// The editor's language is the server's choice (onlyoffice/lang.go): the
 	// administrator's fixed one, else `lang`, the screen's (Accept-Language),
 	// the account's, the instance's - one rule for every screen.
-	cfg, err := h.Service.BuildConfigForNode(r.Context(), node, user, lang, mode, onlyoffice.WithHead(head),
-		onlyoffice.WithAcceptLanguage(r.Header.Get("Accept-Language")))
+	opts := []onlyoffice.ConfigOption{onlyoffice.WithHead(head), onlyoffice.WithAcceptLanguage(r.Header.Get("Accept-Language"))}
+	// The editor's Download as is a download: offered only where the person's
+	// files.download allows it, as every other download door answers.
+	if node != nil && h.ACL != nil && !aclCanID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, perm.FilesDownload).ok {
+		opts = append(opts, onlyoffice.WithoutDownload())
+	}
+	cfg, err := h.Service.BuildConfigForNode(r.Context(), node, user, lang, mode, opts...)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

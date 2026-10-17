@@ -18,6 +18,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/stall"
+	"github.com/brf-tech/filex/backend/internal/testutil/refusedport"
 )
 
 // Issue #73: the WebDAV driver's http.Client{Timeout: 60 * time.Second}
@@ -64,13 +65,7 @@ func davDriver(t *testing.T, base string, overrides map[string]any) *Driver {
 
 func refusedEndpoint(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := l.Addr().String()
-	_ = l.Close()
-	return "http://" + addr
+	return "http://" + refusedport.Addr(t)
 }
 
 // silentEndpoint accepts connections and never says a word.

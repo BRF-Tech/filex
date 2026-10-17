@@ -1,4 +1,4 @@
-// baglan:b1 — the way IN to "How to connect" for a person with NO storage.
+// baglan:b1 — the way IN to "Connections" for a person with NO storage.
 //
 // The guide itself is the package's (`ConnectionsPanel`) and is measured in
 // e2e/tests/25-connections.spec.ts; this file is about the door, and about the

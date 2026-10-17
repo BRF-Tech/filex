@@ -99,10 +99,12 @@ var (
 	// TrustedProxiesSetting lists the reverse proxies whose X-Forwarded-For /
 	// X-Real-IP filex believes: addresses, CIDR networks and the words
 	// `auto`, `loopback`, `private`, `link-local` (clientip.ParseList); `none`
-	// trusts no proxy. Empty = the environment's FILEX_TRUSTED_PROXIES, and
-	// when that is empty too, `auto` (loopback, plus the container networks
-	// filex is attached to minus their gateways). A value here wins over the
-	// environment.
+	// trusts no proxy. FILEX_TRUSTED_PROXIES (or config.yaml trusted_proxies)
+	// SEEDS it on a start where it holds nothing (proxyseed.go, 0.57); from
+	// then on this row is the list in force and the variable is not read
+	// again. Empty = the configuration's list, and when there is none either,
+	// `auto` (loopback, plus the container networks filex is attached to
+	// minus their gateways).
 	TrustedProxiesSetting = dbsetting.StringSpec{
 		Key: KeyTrustedProxy, Default: "",
 		Check: func(v string) error { _, err := clientip.ParseList(v); return err },
@@ -276,7 +278,9 @@ func (g *Guard) Invalidate() {
 
 // TrustedProxySource builds the function clientip.SetSource wants: the
 // `login.trusted_proxies` setting in memory when it holds a list, else env
-// (the text of FILEX_TRUSTED_PROXIES), else nil (clientip's default: `auto`).
+// (the configuration's list: FILEX_TRUSTED_PROXIES over config.yaml - the
+// fallback for a start that could not seed it, proxyseed.go), else nil
+// (clientip's default: `auto`).
 // It is asked once per request and reads memory only; a saved change is in
 // force for the next request.
 func (g *Guard) TrustedProxySource(env string) func() *clientip.Set {

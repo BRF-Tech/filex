@@ -32,7 +32,8 @@
 //   hold      items held for a decision (params.count)
 //   pass      a pass finished (params.failed > 0: it had errors, which follow)
 //   error     a failure: of one action, of the pass, of the pair's lock
-//   note      worth reading in a terminal, not state
+//   note      worth reading in a terminal, not state - but pass.name.synced_as
+//             (an item synced here under another name) is kept: PairHealth.renamed
 //   lock      lock.busy (another process syncs the pair) / lock.acquired
 //   local     local.watched / local.too_large / local.unavailable
 //   live      how SERVER changes reach the engine (params.state)
@@ -129,8 +130,28 @@ export interface PairBusy {
   message: string;
 }
 
+/**
+ * A server item the engine keeps on this computer under another name (its
+ * own cannot be held here: `rapor:2024.txt` on Windows, the second of two
+ * names that are one name here) - the engine's `pass.name.synced_as` note,
+ * task #238. Information, not a failure: the item IS synced.
+ */
+export interface RenamedItem {
+  /** The server's path, inside the synced folder. */
+  name: string;
+  /** Its path here. */
+  local: string;
+  /** The engine's sentence for it, in the account's language: what the card
+   *  shows (#213 - the window words none of the engine's reports). */
+  message: string;
+}
+
 /** One pair's health, as its card shows it. */
 export interface PairHealth {
+  /** Items synced here under another name, as the last full pass reported
+   *  them (a targeted pass adds to the list; the next full pass replaces it,
+   *  and one that reports none clears it). */
+  renamed?: RenamedItem[];
   /** Its last failure (the engine's sentence) — until a later pass of the
    *  SAME pair completes clean. */
   error: string | null;
@@ -255,6 +276,7 @@ export function pairView(st: SyncStatus, pairId: string): PairHealth {
     local: h?.local ?? null,
     busy: h?.busy ?? null,
     passed: h?.passed === true,
+    renamed: h?.renamed ?? [],
   };
 }
 
@@ -473,9 +495,22 @@ export function absorbEvent(st: SyncStatus, ev: EngineEvent, now = new Date()): 
       // it, on the same ordered stream.
       st.lastError = null;
       if (!(num(ev.params.failed) ?? 0)) h.error = null;
+      // Its names-here notes follow it on the same ordered stream: a full
+      // pass starts the list afresh (none following clears it); a targeted
+      // pass (`full: false`) only adds to it.
+      if (ev.params.full !== false) h.renamed = [];
+      return;
+    case 'note':
+      if (ev.code === 'pass.name.synced_as') {
+        const item = { name: str(ev.params.name), local: str(ev.params.local), message: ev.message };
+        if (item.name && item.local) {
+          h.renamed = [...(h.renamed ?? []).filter((r) => r.name !== item.name), item];
+        }
+      }
+      // Every other note is worth reading in a terminal, not state.
       return;
     default:
-      // note, and anything a newer engine adds: worth reading in a terminal.
+      // Anything a newer engine adds: worth reading in a terminal.
       return;
   }
 }

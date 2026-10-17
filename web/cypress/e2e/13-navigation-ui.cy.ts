@@ -2,8 +2,9 @@
 // href regressions.
 //
 // Since 0.51 (GitHub #82) the menu is a mega menu: the dashboard is a plain
-// link and every other page sits in one of three panels (Files & storage,
-// People & security, System), opened by its entry's button. Each case opens
+// link and every other page sits in one of four panels (Files & storage,
+// People, Settings, Maintenance & records - task #258), opened by its entry's
+// button. Each case opens
 // the panel the way a person would, then presses the page's link, found by
 // its test id (the route name) rather than its words.
 //
@@ -21,13 +22,13 @@ describe('admin menu navigation', () => {
   const navTargets: Array<{ entry: string; page: string; url: string }> = [
     { entry: 'files', page: 'storages', url: '/admin/storages' },
     { entry: 'people', page: 'users', url: '/admin/users' },
-    { entry: 'system', page: 'settings', url: '/admin/settings' },
-    { entry: 'system', page: 'audit', url: '/admin/audit' },
+    { entry: 'settings', page: 'settings', url: '/admin/settings' },
+    { entry: 'maintenance', page: 'audit', url: '/admin/audit' },
     { entry: 'files', page: 'sync', url: '/admin/sync' },
     { entry: 'files', page: 'shares', url: '/admin/shares' },
     { entry: 'files', page: 'trash', url: '/admin/trash' },
     { entry: 'files', page: 'replica', url: '/admin/replica' },
-    { entry: 'system', page: 'queue', url: '/admin/queue' },
+    { entry: 'maintenance', page: 'queue', url: '/admin/queue' },
   ];
 
   for (const t of navTargets) {

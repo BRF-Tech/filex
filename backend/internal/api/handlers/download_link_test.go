@@ -398,6 +398,10 @@ func doReqHost(t *testing.T, client *http.Client, method, url, host string, body
 	b, _ := json.Marshal(body)
 	req, err := http.NewRequest(method, url, strings.NewReader(string(b)))
 	require.NoError(t, err)
+	// The cookies first, the Host after: since Go 1.26 http.Client reads the
+	// jar by req.Host, so a request under another Host arrives signed out
+	// (task #254).
+	testutil.AttachJarCookies(client, req)
 	req.Host = host
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)

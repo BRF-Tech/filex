@@ -72,9 +72,10 @@ counts for nothing until the digest that carries it is written. Every row is
 still written the moment its event happens, and every webhook still receives
 it then.
 
-> **Master switch.** `FILEX_NOTIFY_ENABLED` (default **true**) toggles the whole
-> subsystem. When **false**, `Service.Send` is a no-op and every
-> `/api/notifications/…` endpoint returns **503 `{"error":"notifications
+> **Master switch.** *Notifications* on **Admin → Settings → Notifications**
+> (default **on**; `FILEX_NOTIFY_ENABLED` [seeds](CONFIGURATION.md#variables-that-seed-a-stored-setting) it) toggles the whole
+> subsystem, from the next start. When **off**, `Service.Send` is a no-op and
+> every `/api/notifications/…` endpoint returns **503 `{"error":"notifications
 > offline"}`**. Leave it on unless you have a reason not to.
 
 ---
@@ -230,10 +231,10 @@ optional - the defaults give you a working in-app bell with no outbound webhook.
 
 | Env var | YAML | Default | Meaning |
 |---|---|---|---|
-| `FILEX_NOTIFY_ENABLED` | `notify.enabled` | `true` | Master switch. `1`/`true` enables; any other value disables (503 + no-op). |
+| `FILEX_NOTIFY_ENABLED` | `notify.enabled` | `true` | [Seeds](CONFIGURATION.md#variables-that-seed-a-stored-setting) the master switch (the setting `notify.enabled`, **Admin → Settings → Notifications**; applies at the next start). `1`/`true` enables; any other value disables (503 + no-op). |
 | `FILEX_WEBHOOK_URL` | `notify.webhook_url` | `""` | Where each event is POSTed. **Empty = webhook skipped** (the bell still records). |
 | `FILEX_WEBHOOK_TOKEN` | `notify.webhook_token` | `""` | Optional secret. Sent as `Authorization: Bearer <token>` on every webhook POST. |
-| `FILEX_WEBHOOK_LANG` | `notify.webhook_lang` | `""` | The language the legacy webhook's `title` and `body` are said in (`tr`, `en`, a language pack's). Empty = the instance's (`FILEX_DEFAULT_LOCALE`, else English). A webhook v2 target has its own setting. |
+| `FILEX_WEBHOOK_LANG` | `notify.webhook_lang` | `""` | [Seeds](CONFIGURATION.md#variables-that-seed-a-stored-setting) the language the legacy webhook's `title` and `body` are said in (the setting `notify.webhook_lang`, **Admin → Settings → Webhooks**; applies at once): `tr`, `en`, a language pack's. Empty = the instance's default language, else English. A webhook v2 target has its own setting. |
 | `FILEX_PUSH_ENABLED` | `notify.push.enabled` | `true` | [Web Push](#web-push). Works only with `FILEX_SECRET_KEY` set: the key pushes are signed with is stored sealed with it. |
 | `FILEX_PUSH_SUBJECT` | `notify.push.subject` | `FILEX_PUBLIC_URL` (https) | The contact a push service may write to about this server: `mailto:ops@example.com` or an https address. Without an https public address: `mailto:filex@<its host>`. |
 | `FILEX_PUSH_HOSTS` | `notify.push.hosts` | `""` | Push services accepted besides the browsers' own, comma separated; `*` accepts any https host that is a name, never an address. |
@@ -1227,6 +1228,21 @@ visible in one place; **Notifications** keeps the history and points there.
 
 ## Per-user settings
 
+A person sets these in **User settings → Notifications**, in two parts that
+say where each switch is saved:
+
+- **My account** - the bell (*In-app notifications*) and *What to tell me
+  about*: one switch per kind, with **Urgent** beside it when the digest is
+  on. Saved on the account (below), so every browser and the desktop app
+  agree.
+- **This device** - how this device tells you: *Browser notifications* (the
+  web app in a tab), *Push notifications on this device* ([Web Push](#web-push))
+  and, in the desktop app, *Desktop notifications* (its own toasts). Each is
+  this device's, and another device keeps its own. The part is drawn only
+  where the device has one of them.
+
+![User settings, Notifications in Turkish, dark: Hesabım, with the in-app bell's switch and the events it tells about](https://filex.sh/shots/usersettings/notifications-tr-dark-1440.457bc34d15a0.png)
+
 `GET`/`PATCH /api/notifications/settings` stores one preference row per user:
 
 ```json
@@ -1316,8 +1332,9 @@ Check, in order:
    the env var. Set the URL (env, or `PATCH …/webhook-config`) or add a target
    in **Admin → Webhooks**.
 2. **Subsystem enabled?** If the `/api/notifications/…` endpoints return **503
-   `notifications offline`**, `FILEX_NOTIFY_ENABLED` is off - nothing is sent at
-   all. Turn it back on.
+   `notifications offline`**, notifications are switched off (**Admin →
+   Settings → Notifications**) - nothing is sent at all. Turn them back on and
+   restart filex.
 3. **Receiver reachable?** Rows marked `failed` carry the last error in
    `webhook_error` (e.g. `HTTP 500`, a connection error, or a DNS failure).
    Confirm the receiver is up and reachable from filex's network, then re-test
@@ -1345,8 +1362,11 @@ event". The legacy global webhook has no filter of its own - for that one,
 filter on `event`/`severity` at your receiver (the payload carries both).
 
 ### Test button says the subsystem is offline
-`POST /api/admin/notifications/test` returning 503 means
-`FILEX_NOTIFY_ENABLED` is false. Enable it and restart, then re-test.
+`POST /api/admin/notifications/test` returning 503 means notifications are
+switched off (**Admin → Settings → Notifications**). Switch them on and restart,
+then re-test. ⚠ Setting `FILEX_NOTIFY_ENABLED=true` in compose does not switch
+a stored *off* back on: the variable only seeds the setting
+(`filex settings reseed notify.enabled` writes it again).
 
 ### Push notifications do not arrive
 

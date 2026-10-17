@@ -93,6 +93,8 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	s.DraftSQL = &db.DraftSQL{Pool: sqlDB}
 	// Recent searches (00090), the same way.
 	s.RecentSearchSQL = &db.RecentSearchSQL{Pool: sqlDB}
+	// The AI assistant's conversations (00126), the same way.
+	s.AssistantSQL = &db.AssistantSQL{Pool: sqlDB}
 	// Rows deleted where they stood (issue #74), the same way.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB}
 	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB}
@@ -164,6 +166,9 @@ type Store struct {
 	// A person's recent searches (internal/db recent_searches_sql.go,
 	// migration 00090).
 	*db.RecentSearchSQL
+	// A person's conversations with the AI assistant (internal/db
+	// assistant_sql.go, migration 00126).
+	*db.AssistantSQL
 	// ListVanishedNodeIDs, CountChildRows (internal/db vanished_sql.go).
 	*db.VanishedSQL
 	// MarkNodeUnavailable, ClearNodeUnavailable, UnavailableAt (internal/db

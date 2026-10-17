@@ -120,6 +120,15 @@ const props = defineProps<{
   /* koru:k1 — inspector (details panel) toggle state, for the pressed style. */
   inspectorOpen?: boolean;
   /**
+   * The AI assistant's button (task #269): drawn only when the server says so
+   * (`capabilities.assistant.button` - on, set up, not hidden by the
+   * administrator, and the person holds ai.assistant). Absent or false: no
+   * button at all, not a disabled one.
+   */
+  assistantButton?: boolean;
+  /** The assistant's panel is open, for the pressed style. */
+  assistantOpen?: boolean;
+  /**
    * gezinti:g1 — navigation panel state, for the pressed style on the toggle.
    * The panel has its own collapse control, but a narrow explorer renders it
    * as a drawer that is off screen when closed, so the only way back to it is
@@ -187,6 +196,7 @@ const emit = defineEmits<{
   (e: 'open-recents'): void;
   (e: 'update:density', v: Density): void;
   (e: 'toggle-inspector'): void /* koru:k1 */;
+  (e: 'toggle-assistant'): void;
   (e: 'toggle-nav'): void /* gezinti:g1 */;
   (e: 'open-theme'): void /* wiring:c1 — tema galerisi */;
   (e: 'open-shortcut-settings'): void /* wiring:c2 */;
@@ -1197,8 +1207,8 @@ function onMoreSelect(a: ContextAction) {
     </div>
 
     <!-- gorunum:v2-topbar — the trailing cluster. Refresh and the "⋯" are the
-         explorer's own; the AI mark is drawn but not yet wired; the host's
-         account-level doors arrive through the slot. -->
+         explorer's own; the AI assistant's button when the server offers it;
+         the host's account-level doors arrive through the slot. -->
     <div class="fe-toolbar__tail">
       <button
         type="button"
@@ -1210,43 +1220,23 @@ function onMoreSelect(a: ContextAction) {
         <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
         <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('refresh')"></span>
       </button>
-      <!-- gorunum:v2-topbar — the AI assistant, announced and not pretending.
-           ⚠ `disabled`, not "opens an empty panel": a control that answers a
-           click with nothing is read as broken, and the next thing that
-           happens is a bug report about a feature that was never claimed. It
-           says what it is and that it is not here yet, in both languages, and
-           it will become live in place — the glyph does not move under
-           anybody's finger the day it starts working. -->
-      <span class="fe-toolbar__soon-wrap">
-        <button
-          type="button"
-          class="fe-btn fe-btn--icon-only fe-toolbar__soon"
-          disabled
-          :aria-label="t('ai.assistant.soon')"
-          aria-disabled="true"
-          data-testid="header-ai"
-          @click.prevent
-        >
-          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
-          <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('ai')"></span>
-        </button>
-        <!-- gorunum:v4-hostmenu — the words, on hover, and nowhere else at
-             rest. Owner's decision, 2026-09-13, verbatim: *"Coming soon
-             yazısını kaldıralım, üstüne gelince gözüksün."*
-             ⚠ `aria-hidden`, and the button keeps `aria-label` with the SAME
-             sentence: hover is a mouse gesture that a touch screen and a
-             keyboard do not have, so the words have to be in the accessible
-             name — and if they were in both, a screen reader would read the
-             sentence twice.
-             ⚠ The native `title` went with the pill. It is not an accessible
-             name (the label above is), it never appears on touch, and leaving
-             it would stack the OS tooltip on top of this one. -->
-        <span
-          class="fe-toolbar__soon-tip"
-          aria-hidden="true"
-          data-testid="header-ai-tip"
-        >{{ t('ai.assistant.soon') }}</span>
-      </span>
+      <!-- The AI assistant (task #269): a real button, drawn only when the
+           server says this person may use it - otherwise there is none, not
+           a disabled one. -->
+      <button
+        v-if="assistantButton"
+        type="button"
+        class="fe-btn fe-btn--icon-only"
+        :class="{ 'is-active': assistantOpen }"
+        :title="t('ai.assistant')"
+        :aria-label="t('ai.assistant')"
+        :aria-pressed="assistantOpen ? 'true' : 'false'"
+        data-testid="header-ai"
+        @click="emit('toggle-assistant')"
+      >
+        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+        <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('ai')"></span>
+      </button>
       <!-- Density, theme, the shortcut editor, the tour and the other view
            modes. Everything the header does not draw is one click away here;
            nothing is removed from the build. A menu is the one place a
@@ -1345,29 +1335,20 @@ function onMoreSelect(a: ContextAction) {
              that is on screen at 1440 and unreachable at 390 is a capability
              split, not a layout, so the AI mark and the host's doors come
              along; only Refresh stays behind (it is in the "⋯"). -->
-        <span class="fe-toolbar__soon-wrap">
-          <button
-            type="button"
-            class="fe-btn fe-btn--icon-only fe-toolbar__soon"
-            disabled
-            :aria-label="t('ai.assistant.soon')"
-            aria-disabled="true"
-            data-testid="header-ai"
-            @click.prevent
-          >
-            <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
-            <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('ai')"></span>
-          </button>
-          <!-- gorunum:v4-hostmenu — the same affordance as the wide header, to
-               the glyph. ⚠ A phone has no hover at all, so here the accessible
-               name is the ONLY door to these words — which is exactly why it
-               carries the whole sentence and not a `title`. -->
-          <span
-            class="fe-toolbar__soon-tip"
-            aria-hidden="true"
-            data-testid="header-ai-tip"
-          >{{ t('ai.assistant.soon') }}</span>
-        </span>
+        <button
+          v-if="assistantButton"
+          type="button"
+          class="fe-btn fe-btn--icon-only"
+          :class="{ 'is-active': assistantOpen }"
+          :title="t('ai.assistant')"
+          :aria-label="t('ai.assistant')"
+          :aria-pressed="assistantOpen ? 'true' : 'false'"
+          data-testid="header-ai"
+          @click="emit('toggle-assistant')"
+        >
+          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+          <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('ai')"></span>
+        </button>
         <button
           v-if="menuActions.length > 0"
           ref="moreBtnEl"

@@ -30,6 +30,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 
@@ -44,6 +45,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
@@ -237,6 +239,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL = &u
 	}
 	r = noteQuotaAsked(r)
+	ctx, note := withNameNote(r.Context())
+	r = r.WithContext(ctx)
 	dh := &webdav.Handler{
 		Prefix:     base + Prefix,
 		FileSystem: newFS(h, p),
@@ -248,7 +252,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		},
 	}
-	dh.ServeHTTP(w, r)
+	dh.ServeHTTP(&tooLongWriter{ResponseWriter: w, note: note}, r)
 }
 
 // ───────────────────────────── authentication ─────────────────────────────
@@ -312,19 +316,36 @@ func methodScope(m string) (scope string, write bool, ok bool) {
 }
 
 // splitDavPath splits a /dav URL path into (storage-name, storage-relative
-// path). Both are cleaned; ok=false only for paths outside the prefix.
+// path), the way the FileSystem will (splitStoragePath); ok=false only for
+// paths outside the prefix.
 func splitDavPath(p string) (name, rel string, ok bool) {
 	if p != Prefix && !strings.HasPrefix(p, Prefix+"/") {
 		return "", "", false
 	}
-	rest := strings.Trim(strings.TrimPrefix(p, Prefix), "/")
-	if rest == "" {
-		return "", "", true // the /dav root collection
+	name, rel = splitStoragePath(strings.TrimPrefix(p, Prefix))
+	return name, rel, true
+}
+
+// splitStoragePath is the ONE way a path under /dav becomes (storage, rel):
+// the WHOLE path is cleaned, and only then is the first segment taken as the
+// storage. Empty name means the /dav root collection.
+//
+// ⚠⚠ The pre-gate (preGate, via splitDavPath) and the FileSystem (davFS.split)
+// both call it, and must: they used to clean differently - the gate split
+// off the storage first and cleaned the rest, the FileSystem cleaned first -
+// so a `..` that climbed above the storage segment had the gate judge one
+// storage and path while the FileSystem acted on another, and what only the
+// gate asks (files.download, a folder's app lock, the snapshot before an
+// overwrite) was asked about the wrong file (task #238).
+func splitStoragePath(p string) (name, rel string) {
+	rest := strings.Trim(path.Clean("/"+p), "/")
+	if rest == "" || rest == "." {
+		return "", ""
 	}
 	if i := strings.IndexByte(rest, '/'); i >= 0 {
-		return rest[:i], acl.CleanRel(rest[i+1:]), true
+		return rest[:i], rest[i+1:]
 	}
-	return rest, "", true
+	return rest, ""
 }
 
 // preGate applies the deterministic authorization layer BEFORE the webdav
@@ -364,7 +385,6 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 		// is meaningless — storages are created in the admin panel.
 		return http.StatusMethodNotAllowed, "the /dav root is read-only"
 	}
-
 	ctx := r.Context()
 	// Same tenant gate the FileSystem applies (GetStorageByName is not one of
 	// the methods tenantstore confines). Without it the pre-gate stays an
@@ -373,6 +393,18 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 	st, err := storageref.Resolve(ctx, h.cfg.Store, name)
 	if err != nil || st == nil || !st.Enabled || !scopeOf(ctx).CanAccessStorage(st.ID) {
 		return http.StatusNotFound, "storage not found"
+	}
+	// A request that gives an entry its name asks the one rule every door
+	// asks of a new name (internal/leafname): no backslash, no NUL, no control
+	// character, not only dots. Here, where the answer can be a 400 that says
+	// why - past this point x/net/webdav would turn the refusal into a 404 or
+	// a 405. MKCOL always makes a new entry; PUT and LOCK make one only when
+	// nothing is there.
+	switch r.Method {
+	case "MKCOL", http.MethodPut, "LOCK":
+		if err := h.newNameRefused(ctx, st, rel, r.Method != "MKCOL"); err != nil {
+			return http.StatusBadRequest, err.Error()
+		}
 	}
 	if status, msg := h.gateWrite(ctx, p, st, rel, r.Method, false); status != 0 {
 		return status, msg
@@ -433,6 +465,13 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 		if !inBase || !ok || dname == "" {
 			return http.StatusBadGateway, "destination outside /dav"
 		}
+		// RFC 4918 §9.8.5: a destination that IS the source is 403. Compared
+		// as the FileSystem will read them: x/net/webdav compares the paths
+		// as written, so `./a.txt` or `a//a.txt` passed as another file and
+		// the copy removed the destination - the source - before reading it.
+		if dname == name && drel == rel {
+			return http.StatusForbidden, "the destination is the source"
+		}
 		if r.Method == "MOVE" && dname != name {
 			// Rename cannot span drivers; COPY can (it streams through the
 			// composite FileSystem), MOVE would need copy+delete orchestration.
@@ -444,6 +483,12 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 				!scopeOf(ctx).CanAccessStorage(dst.ID) {
 				return http.StatusConflict, "destination storage not found"
 			}
+		}
+		// The destination's name is the name the MOVE gives or the COPY
+		// makes: the same rule, and the same exception for a file already
+		// there, which the request replaces under the name it has.
+		if err := h.newNameRefused(ctx, dst, drel, true); err != nil {
+			return http.StatusBadRequest, err.Error()
 		}
 		if status, msg := h.gateWrite(ctx, p, dst, drel, r.Method, true); status != 0 {
 			return status, msg
@@ -479,7 +524,7 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 			}
 			for _, need := range perm.RelocateNeeds(st.ID, rel, st.ID, drel) {
 				if !set.AllowsAt(rel, need) || !set.AllowsAt(drel, need) {
-					return http.StatusForbidden, "permission denied: your account lacks the " + string(need) + " permission"
+					return http.StatusForbidden, lacksPermission(need)
 				}
 			}
 			// Who may encrypt (internal/e2epolicy): a MOVE onto a key file's
@@ -498,8 +543,72 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 				return status, msg
 			}
 		}
+		// Either one puts the source's bytes at the destination: not where
+		// they would become downloadable while they are not where they are.
+		if status, msg := h.gateDownloadLift(ctx, p, st, rel, dst, drel); status != 0 {
+			return status, msg
+		}
 	}
 	return 0, ""
+}
+
+// newNameRefused is the name rule (internal/leafname) for rel's last
+// segment, the name a request gives. replaces says the request may land on
+// an entry already there (a PUT, a LOCK, a MOVE's or a COPY's destination):
+// then an entry that already has the name keeps it - whatever made it, a tab
+// or a backslash planted on the disk included - and stays readable,
+// deletable and writable (the owner's rule for 0.57: only a NEW name is
+// refused). A MKCOL always makes a new entry.
+func (h *Handler) newNameRefused(ctx context.Context, st *model.Storage, rel string, replaces bool) error {
+	if rel == "" {
+		return nil
+	}
+	err := leafname.Check(path.Base(rel))
+	if err == nil || !replaces {
+		return err
+	}
+	if drv, derr := h.cfg.Resolver(st.ID); derr == nil {
+		if _, serr := drv.Stat(ctx, rel); serr == nil {
+			return nil
+		}
+	}
+	return err
+}
+
+// gateDownloadLift refuses a COPY or a MOVE that would put bytes the caller
+// may not download where they could: files.download refused on the source -
+// on a folder, on any file below it - and allowed at the same place under the
+// destination (protoperm.TreeDownloadLifted). Without it a role's part that
+// refuses files.download on a path or a name is undone by copying the file,
+// or renaming it, to a path the part does not name.
+func (h *Handler) gateDownloadLift(ctx context.Context, p *principal, st *model.Storage, rel string, dst *model.Storage, drel string) (int, string) {
+	srcSet, err := h.cfg.ACL.LoadSet(ctx, p.User, st)
+	if err != nil || srcSet == nil {
+		return http.StatusInternalServerError, "acl load failed"
+	}
+	dstSet := srcSet
+	if dst.ID != st.ID {
+		if dstSet, err = h.cfg.ACL.LoadSet(ctx, p.User, dst); err != nil || dstSet == nil {
+			return http.StatusInternalServerError, "acl load failed"
+		}
+	}
+	drv, err := h.cfg.Resolver(st.ID)
+	if err != nil {
+		return http.StatusInternalServerError, "storage driver unavailable"
+	}
+	_, lifted, err := protoperm.TreeDownloadLifted(ctx, drv, srcSet, rel, dstSet, drel)
+	if err != nil {
+		return http.StatusInternalServerError, "could not list the source folder"
+	}
+	if lifted {
+		return http.StatusForbidden, lacksPermission(perm.FilesDownload)
+	}
+	return 0, ""
+}
+
+// lacksPermission is the refusal sentence for a per-user permission p.
+func lacksPermission(p perm.Perm) string {
+	return "permission denied: your account lacks the " + string(p) + " permission"
 }
 
 // gateWrite enforces the write-side policy on one (storage, rel) target:
@@ -565,7 +674,7 @@ func (h *Handler) gateWrite(ctx context.Context, p *principal, st *model.Storage
 		return http.StatusForbidden, "insufficient permissions"
 	}
 	if need := davPerm(ctx, drv, method, rel, dest); need != "" && !set.AllowsAt(rel, need) {
-		return http.StatusForbidden, "permission denied: your account lacks the " + string(need) + " permission"
+		return http.StatusForbidden, lacksPermission(need)
 	}
 	// Who may encrypt (internal/e2epolicy): a request that CREATES an
 	// encrypted folder's key file or a `.fxe` needs the policy and
@@ -665,7 +774,7 @@ func (h *Handler) gateDownload(ctx context.Context, p *principal, name, rel stri
 		return 0, ""
 	}
 	if set.Effective(rel) >= acl.LevelViewer && !set.AllowsAt(rel, perm.FilesDownload) {
-		return http.StatusForbidden, "permission denied: your account lacks the " + string(perm.FilesDownload) + " permission"
+		return http.StatusForbidden, lacksPermission(perm.FilesDownload)
 	}
 	return 0, ""
 }

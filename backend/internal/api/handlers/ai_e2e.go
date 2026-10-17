@@ -31,9 +31,11 @@ import (
 	"errors"
 
 	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/quota"
+	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/writegate"
 )
@@ -89,6 +91,12 @@ func aiErrCode(err error) string {
 		return "FILE_TOO_LARGE"
 	case errors.Is(err, quota.ErrQuotaExceeded):
 		return "QUOTA_EXCEEDED"
+	case errors.Is(err, leafname.ErrRefused):
+		// The explorer's codes for a name the one name rule refuses and
+		// one the storage cannot hold (writeNameRefusal, task #238).
+		return "NAME_NOT_ALLOWED"
+	case storage.IsNameTooLong(err):
+		return "NAME_TOO_LONG"
 	}
 	return ""
 }

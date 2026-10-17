@@ -206,7 +206,7 @@ const emit = defineEmits<{
   (e: 'plugin-open', payload: { plugin: string; req: { path: string; action?: string; view?: string } }): void;
 }>();
 
-const { t, formatSize, formatNodeSize, nodeSizeHint, formatDate: formatDateOf, nodeDisplayName } = useLocale(
+const { t, formatSize, formatNodeSize, nodeSizeHint, formatDate: formatDateOf, nodeDisplayName, nodeName } = useLocale(
   () => props.locale,
 );
 
@@ -790,7 +790,7 @@ watch(
         :title="t('inspector.copy_name')"
         :aria-label="t('inspector.copy_name')"
         data-testid="inspector-copy-name"
-        @click="copyText(headName)"
+        @click="copyText(single ? nodeName(single) : headName)"
       >
         <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
         <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>

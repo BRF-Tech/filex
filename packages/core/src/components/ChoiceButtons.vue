@@ -34,7 +34,7 @@
  * dialog's access levels: "yan yana düğmeler, üzerine gelince açıklaması
  * yazar"):
  *   - the cell's hover tip, shown on a resting pointer AND on keyboard focus
- *     — the header's hover-tip look (`.fe-toolbar__soon-tip` in base.css),
+ *     — the product's hover-tip look (`.fe-choice__tip` in base.css),
  *     one rule for both, not a tooltip of its own;
  *   - the cell's `aria-describedby`, so a screen reader hears it with the
  *     cell (the tip itself is `aria-hidden`, or it would be read twice);

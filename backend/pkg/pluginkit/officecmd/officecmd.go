@@ -186,3 +186,21 @@ const (
 
 // IsEngine reports whether name is the office engine under either name.
 func IsEngine(name string) bool { return name == Engine || name == LegacyEngine }
+
+// UnconfiguredMessage is the host's answer when the office engine is asked
+// for and nothing here converts office documents: no app brings an office
+// engine and no Document Server is connected. It names the remedy, which is
+// not "install a program"; the host classifies a job that fails on it as
+// `office_unconfigured` (its sentence in the person's language). The host
+// and the test host (plugintest) say the same words.
+func UnconfiguredMessage(engine string) string {
+	return "engine " + engine + " is not configured on this host: office documents are converted by the Office editor app's engine or by an ONLYOFFICE Document Server, and neither is here (an administrator installs the Office editor app under Apps, or connects a Document Server under External services)"
+}
+
+// PreparingMessage is the host's answer while the office engine an app
+// brings is still being compiled (once after it is installed or updated, a
+// few minutes) and no Document Server takes the job meanwhile: classified as
+// `office_preparing`.
+func PreparingMessage(engine string) string {
+	return "engine " + engine + " is being prepared on this host: the office engine an app brings is compiled once after it is installed or updated, which takes a few minutes - try again then"
+}

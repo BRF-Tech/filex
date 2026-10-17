@@ -45,6 +45,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/memcache"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/officesave"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -324,6 +325,14 @@ type ConfigOption func(*configExtras)
 type configExtras struct {
 	head           []byte
 	acceptLanguage string
+	noDownload     bool
+}
+
+// WithoutDownload turns the editor's own Download as off: the person may open
+// the document (a preview stays open) but not save a copy of it - files.download
+// refused on its path, the answer every other download door gives.
+func WithoutDownload() ConfigOption {
+	return func(x *configExtras) { x.noDownload = true }
 }
 
 // WithHead hands over the first bytes of the document (CSVSniffBytes is
@@ -396,7 +405,7 @@ func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user
 		"fileType": fileType,
 		"permissions": map[string]any{
 			"edit":     canEdit,
-			"download": true,
+			"download": !extras.noDownload,
 			"print":    true,
 			"comment":  canEdit,
 			"review":   canEdit,
@@ -406,7 +415,7 @@ func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user
 	// encoding and delimiter, read from its first bytes, go in the config
 	// (csv.go). A file that is not UTF-8 gets none, and the dialog asks.
 	if fileType == "csv" && extras.head != nil {
-		if o := SniffCSV(extras.head).OpenOptions(); o != nil {
+		if o := OpenOptions(officesave.SniffCSV(extras.head)); o != nil {
 			document["options"] = o
 		}
 	}
@@ -707,7 +716,7 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 	// beside the file and never over it.
 	var saved io.Reader = resp.Body
 	savedSize := resp.ContentLength
-	want, got := docExt(node.Name), strings.ToLower(strings.TrimSpace(p.FileType))
+	want, got := officesave.DocExt(node.Name), strings.ToLower(strings.TrimSpace(p.FileType))
 	switch {
 	case want == "csv":
 		data, err := s.csvSave(r.Context(), drv, node, resp.Body, got)
@@ -720,8 +729,8 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 		}
 		saved, savedSize = bytes.NewReader(data), int64(len(data))
 	case got != "" && got != want:
-		if !besideTypes[got] {
-			s.refuseSave(r.Context(), node, s.sessionEditors(keyOf(p), p.Users), got, notWritten(refusedOtherType, srvtextVars("format", formatName(got), "ext", want)))
+		if !officesave.BesideFormats[got] {
+			s.refuseSave(r.Context(), node, s.sessionEditors(keyOf(p), p.Users), got, notWritten(refusedOtherType, srvtextVars("format", officesave.FormatName(got), "ext", want)))
 			return map[string]any{"error": 1, "message": "the saved document is not in a format filex keeps"}, nil
 		}
 		answer, err := s.saveBeside(r.Context(), drv, writer, node, resp.Body, resp.ContentLength, got, keyOf(p), p.Users)

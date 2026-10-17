@@ -82,6 +82,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.DraftSQL = &db.DraftSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Recent searches (00090), the same way.
 	s.RecentSearchSQL = &db.RecentSearchSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// The AI assistant's conversations (00126), the same way.
+	s.AssistantSQL = &db.AssistantSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Rows deleted where they stood (issue #74), written once in internal/db.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
@@ -151,6 +153,9 @@ type Store struct {
 	// A person's recent searches (internal/db recent_searches_sql.go,
 	// migration 00090).
 	*db.RecentSearchSQL
+	// A person's conversations with the AI assistant (internal/db
+	// assistant_sql.go, migration 00126).
+	*db.AssistantSQL
 	// ListVanishedNodeIDs, CountChildRows (internal/db vanished_sql.go).
 	*db.VanishedSQL
 	// MarkNodeUnavailable, ClearNodeUnavailable, UnavailableAt (internal/db

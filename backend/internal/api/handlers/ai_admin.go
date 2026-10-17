@@ -106,6 +106,9 @@ type AIAdmin struct {
 	// archives: the archive engine's settings (formats, limits) - the Archives
 	// page's handler. Nil when no engine is wired.
 	archives *ArchiveAdmin
+	// assistant: the AI assistant's settings - the AI assistant page's
+	// handler. Nil when none is wired.
+	assistant *AssistantAdmin
 }
 
 // AIAdminDeps carries the shared services the wrapped admin handlers need.
@@ -178,6 +181,9 @@ type AIAdminDeps struct {
 	// ArchiveEngine backs the archive settings tools: the same engine the
 	// panel's Archives page reads and probes. Nil = those tools answer 503.
 	ArchiveEngine *archivecli.Service
+	// Assistant backs the AI assistant settings tools: the page's own
+	// settings (and its sealed key). Nil = those tools answer 503.
+	Assistant *AssistantConfig
 }
 
 // newTrashWithOps is the trash handler with the queue "empty the trash now"
@@ -222,7 +228,28 @@ func NewAIAdmin(d AIAdminDeps) *AIAdmin {
 		webhooks:    NewWebhooksAdmin(d.Store, d.Notify),
 		protection:  NewProtection(d.Store),
 		archives:    newAIArchiveAdmin(d),
+		assistant:   newAIAssistantAdmin(d),
 	}
+}
+
+// newAIAssistantAdmin is the AI assistant page's handler, nil when no
+// settings are wired (assistantOr answers 503 then).
+func newAIAssistantAdmin(d AIAdminDeps) *AssistantAdmin {
+	if d.Assistant == nil {
+		return nil
+	}
+	return &AssistantAdmin{Config: d.Assistant}
+}
+
+// assistantOr is the assistant settings handler pick names, or a 503 when
+// this server has none.
+func (a *AIAdmin) assistantOr(pick func(*AssistantAdmin) http.HandlerFunc) http.HandlerFunc {
+	if a.assistant == nil {
+		return func(w http.ResponseWriter, r *http.Request) {
+			writeError(w, r, http.StatusServiceUnavailable, "assistant_not_configured", nil)
+		}
+	}
+	return pick(a.assistant)
 }
 
 // newAIArchiveAdmin is the Archives page's handler over the panel's engine,
@@ -345,6 +372,8 @@ func (a *AIAdmin) Register(r chi.Router) {
 	r.Route("/search", func(r chi.Router) {
 		r.Get("/stats", a.searchAdm.Stats)
 		r.Post("/rebuild", a.searchAdm.Rebuild)
+		r.Get("/settings", a.searchAdm.Settings)
+		r.Patch("/settings", a.searchAdm.UpdateSettings)
 	})
 
 	r.Route("/auth-providers", func(r chi.Router) {
@@ -426,6 +455,11 @@ func (a *AIAdmin) Register(r chi.Router) {
 	r.Get("/archives", a.archivesOr(func(h *ArchiveAdmin) http.HandlerFunc { return h.Get }))
 	r.Patch("/archives", a.archivesOr(func(h *ArchiveAdmin) http.HandlerFunc { return h.Patch }))
 	r.Post("/archives/test", a.archivesOr(func(h *ArchiveAdmin) http.HandlerFunc { return h.Test }))
+	// The AI assistant page (task #269): the same handler, the key sealed
+	// and never answered.
+	r.Get("/assistant", a.assistantOr(func(h *AssistantAdmin) http.HandlerFunc { return h.Get }))
+	r.Patch("/assistant", a.assistantOr(func(h *AssistantAdmin) http.HandlerFunc { return h.Patch }))
+	r.Post("/assistant/test", a.assistantOr(func(h *AssistantAdmin) http.HandlerFunc { return h.Test }))
 
 	r.Route("/audit", func(r chi.Router) {
 		r.Get("/", a.audit.List)
@@ -935,6 +969,14 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(_ adminVoidIn) reqSpec {
 			return reqSpec{handler: a.searchAdm.Rebuild, method: http.MethodPost, path: "/api/ai/admin/search/rebuild"}
 		})
+	regAdminTool(r, "admin_search_settings_get", "The search settings (Admin, Search): content (extract file text into the index), content_max_mb (larger files are not extracted), memory_percent (share of the memory filex was given that indexing may take, with the budget it came to), auto_rebuild (repair an older index at startup), each with its bounds; index_enabled says whether the index is open at all (FILEX_SEARCH_ENABLED, environment only). The platform operator's only in multi-tenant mode.",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.searchAdm.Settings, method: http.MethodGet, path: "/api/ai/admin/search/settings"}
+		})
+	regAdminTool(r, "admin_search_settings_update", "Change search settings, validated as the Search page validates them (a number out of bounds is refused, not stored). body: any of {content (bool), content_max_mb (1-1024), memory_percent (1-50), auto_rebuild (bool)}. content, content_max_mb and memory_percent apply at once; auto_rebuild at the next start.",
+		func(in adminBodyIn) reqSpec {
+			return reqSpec{handler: a.searchAdm.UpdateSettings, method: http.MethodPatch, path: "/api/ai/admin/search/settings", body: in.Body}
+		})
 
 	// ── auth providers ──
 	regAdminTool(r, "admin_auth_providers_list", "List auth drivers + their (redacted) config.",
@@ -1216,6 +1258,20 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 	regAdminTool(r, "admin_archives_test", "Probe the archive provider now: pack and unpack a small password-protected 7z in the work folder, and answer what happened.",
 		func(_ adminVoidIn) reqSpec {
 			return reqSpec{handler: a.archivesOr(func(h *ArchiveAdmin) http.HandlerFunc { return h.Test }), method: http.MethodPost, path: "/api/ai/admin/archives/test"}
+		})
+
+	// ── the AI assistant (task #269) ──
+	regAdminTool(r, "admin_ai_assistant_get", "The AI assistant settings (Admin, Settings, AI assistant): enabled, hide_button (the explorer shows no assistant button to anybody), provider (anthropic, openai - any OpenAI-compatible server too - or ollama), base_url, model, the budgets (max_tool_rounds, max_output_tokens, max_request_tokens, timeout_seconds, requests_per_minute), retention_days, has_key (whether an API key is stored - the key itself is never answered), state (on, off, not_configured) and each provider's default address and suggested models. Who may use it is the ai.assistant permission (Roles). The platform operator's only in multi-tenant mode.",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.assistantOr(func(h *AssistantAdmin) http.HandlerFunc { return h.Get }), method: http.MethodGet, path: "/api/ai/admin/assistant"}
+		})
+	regAdminTool(r, "admin_ai_assistant_update", "Change the AI assistant settings, validated as the page validates them (a number out of its bounds is refused). body: any of {enabled, hide_button, provider, base_url, model, max_tool_rounds, max_output_tokens, max_request_tokens, timeout_seconds, requests_per_minute, retention_days, api_key (sealed with FILEX_SECRET_KEY, never answered back; refused with assistant_no_secret_key when the server has none), clear_api_key}. Turning it on sends what people ask, and the files the assistant reads for them, to the provider.",
+		func(in adminBodyIn) reqSpec {
+			return reqSpec{handler: a.assistantOr(func(h *AssistantAdmin) http.HandlerFunc { return h.Patch }), method: http.MethodPatch, path: "/api/ai/admin/assistant", body: in.Body}
+		})
+	regAdminTool(r, "admin_ai_assistant_test", "Test the AI assistant's provider: list its models and ask the model for a one-word reply with a tool on offer (a model that cannot call tools fails here). body (optional): {provider, base_url, model, api_key} to test values not saved yet; the stored key is used only for the address it was saved for.",
+		func(in adminBodyIn) reqSpec {
+			return reqSpec{handler: a.assistantOr(func(h *AssistantAdmin) http.HandlerFunc { return h.Test }), method: http.MethodPost, path: "/api/ai/admin/assistant/test", body: in.Body}
 		})
 
 	registerPluginTools(r, a)

@@ -262,10 +262,10 @@ try {
   const heading = (await menu.locator('.fx-acctmenu__who').innerText()).trim();
   check('the avatar says who is signed in', !!who && heading === who.trim(), `heading "${heading}", /api/auth/me "${who}"`);
   check('…offers User settings first, then the admin console', rows[0] === 'explore-user-settings' && rows[1] === 'explore-admin', rows.join(','));
-  check('…then the file list’s own rows the dialog does not carry', rows.includes('explore-fe:tour') && rows.includes('explore-fe:shortcut-settings'), rows.join(','));
+  check('…then the file list’s own rows the dialog does not carry (the tour)', rows.includes('explore-fe:tour'), rows.join(','));
   check('…and no Sign out: that is an app setting (⚙ → Accounts)', !rows.some((r) => /signout/.test(r ?? '')) && !/Sign out|Çıkış yap|Oturumu kapat/.test(menuText), rows.join(','));
-  check('…nor a row whose control is on screen or in the dialog (views, ⓘ, theme, density, time zone)',
-    !rows.some((r) => /^explore-fe:(view-|inspector$|nav$|theme$|density$|timezone$)/.test(r ?? '')), rows.join(','));
+  check('…nor a row whose control is on screen or in the dialog (views, ⓘ, theme, density, time zone, keyboard shortcuts)',
+    !rows.some((r) => /^explore-fe:(view-|inspector$|nav$|theme$|density$|timezone$|shortcut-settings$)/.test(r ?? '')), rows.join(','));
   check('…with the server’s version at its foot', /filex v?\d+\.\d+\.\d+/.test(menuText), menuText.slice(-40));
   await shot(win, '06-account-menu');
 
@@ -298,7 +298,8 @@ try {
   const headNow = (await waitUntil(async () => ((await avatarName()) === newName ? newName : null), 3000)) ?? (await avatarName());
   check('…and the avatar says the new name without a reload', headNow === newName, headNow);
 
-  // Preferences: what every surface has, and none of what the app keeps in ⚙.
+  // Preferences: what every surface has, plus what this window hands in
+  // (task #258: language, one click or two), and none of the web app's own.
   await dlg.locator('[data-testid="user-settings-tab-preferences"]').click();
   const prefs = await win.evaluate(() => {
     const d = document.querySelector('[data-testid="user-settings-dialog"]');
@@ -312,16 +313,34 @@ try {
       openTrigger: has('[data-testid^="user-settings-opentrigger-"]'),
       startPage: has('[data-testid^="user-settings-start-"]'),
       downloads: has('[data-testid="user-settings-desktop-app"]'),
+      shortcuts: has('[data-testid="user-settings-prefs-device"] [data-testid="user-settings-shortcuts"]'),
+      langInAccount: has('[data-testid="user-settings-prefs-account"] [data-testid="user-settings-locale"]'),
+      clickOnDevice: has('[data-testid="user-settings-prefs-device"] [data-testid^="user-settings-opentrigger-"]'),
     };
   });
   check('Preferences carry time zone, appearance, compact list and the folder default',
     prefs.timezone && prefs.appearance && prefs.density && prefs.folderView, JSON.stringify(prefs));
-  check('…and none of what the app keeps in ⚙ or has no use for (language, clicks, start page, downloads)',
-    !prefs.language && !prefs.openTrigger && !prefs.startPage && !prefs.downloads, JSON.stringify(prefs));
+  check('…the language under Account and one click or two under This device, moved here from ⚙',
+    prefs.langInAccount && prefs.clickOnDevice, JSON.stringify(prefs));
+  check('…the keyboard shortcuts under This device',
+    prefs.shortcuts, JSON.stringify(prefs));
+  check('…and none of what this app has no use for (start page, downloads)',
+    !prefs.startPage && !prefs.downloads, JSON.stringify(prefs));
+  check('App settings (⚙) keeps no language, click or notification row',
+    await win.evaluate(() => !document.querySelector('#settings [data-locale], #settings [data-opentrigger], #settings #notifs')));
   const modeBefore = await win.evaluate(() => document.querySelector('filex-explorer .fe')?.classList.contains('fe--theme-dark'));
   await dlg.locator(modeBefore ? '[data-testid="user-settings-theme-light"]' : '[data-testid="user-settings-theme-dark"]').click();
   const modeAfter = await waitUntil(() => win.evaluate(() => document.querySelector('filex-explorer .fe')?.classList.contains('fe--theme-dark')).then((d) => (d !== modeBefore ? 'flipped' : null)), 5000);
   check('the appearance switch repaints the file list behind the dialog', modeAfter === 'flipped');
+  // Task #258: the look is the ACCOUNT's on the desktop too (surface=desktop).
+  const wantTheme = modeBefore ? 'light' : 'dark';
+  const savedTheme = await waitUntil(async () => {
+    const r = await api('/api/me/prefs?surface=desktop', {}, adminToken);
+    const p = r.ok ? await r.json() : {};
+    const v = p?.prefs?.theme ?? p?.theme;
+    return v === wantTheme ? v : null;
+  }, 5000);
+  check('…and is written to the account’s desktop preferences', savedTheme === wantTheme, String(savedTheme));
   await shot(win, '08-settings-preferences');
   await dlg.locator(modeBefore ? '[data-testid="user-settings-theme-dark"]' : '[data-testid="user-settings-theme-light"]').click();
 

@@ -8,16 +8,26 @@
  * from @brftech/filex-core: markdown-it, then the document sanitizer
  * (sanitizeHtml 'document', DOMPurify). Only its answer reaches v-html. While
  * it loads, or where markdown-it cannot be loaded, the notes are plain text -
- * never the raw string as markup.
+ * never the raw string as markup. A picture in them from another server waits
+ * behind a placeholder until the administrator asks for it, as in a preview
+ * (core's useRemoteImages and its dialog).
  */
-import { onBeforeUnmount, ref, watch } from 'vue';
-import { markdownToSafeHtml } from '@brftech/filex-core';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { markdownToSafeHtml, RemoteImageDialog, useRemoteImages } from '@brftech/filex-core';
+import { i18n } from '@/i18n';
 
 const props = defineProps<{
   notes: string;
   /** data-testid of the rendered notes. */
   testid?: string;
 }>();
+
+// The admin panel's language (its i18n instance, not useI18n: the notes are
+// also drawn where no i18n plugin is installed).
+const locale = computed(() => String(i18n.global.locale.value));
+const remoteImages = useRemoteImages(() => locale.value);
+const notesEl = ref<HTMLElement | null>(null);
+remoteImages.watchRoot(notesEl);
 
 const html = ref<string | null>(null);
 let seq = 0;
@@ -26,8 +36,9 @@ watch(
   async (notes) => {
     const mine = ++seq;
     html.value = null;
+    remoteImages.reset();
     if (!notes.trim()) return;
-    const out = await markdownToSafeHtml(notes);
+    const out = await markdownToSafeHtml(notes, 'document', { remoteImages: remoteImages.policy() });
     if (mine === seq) html.value = out === null ? null : linksOutward(out);
   },
   { immediate: true },
@@ -58,9 +69,19 @@ function linksOutward(markup: string): string {
 </script>
 
 <template>
-  <!-- eslint-disable-next-line vue/no-v-html -- sanitized by markdownToSafeHtml (sanitizeHtml 'document') -->
-  <div v-if="html !== null" class="fx-release-notes mt-1 max-h-40 overflow-auto break-words text-xs text-zinc-600 dark:text-zinc-400" :data-testid="testid" v-html="html"></div>
+  <!-- eslint-disable vue/no-v-html -- sanitized by markdownToSafeHtml (sanitizeHtml 'document') -->
+  <div
+    v-if="html !== null"
+    ref="notesEl"
+    class="fx-release-notes mt-1 max-h-40 overflow-auto break-words text-xs text-zinc-600 dark:text-zinc-400"
+    :data-testid="testid"
+    @click="remoteImages.onClick"
+    @keydown="remoteImages.onKeydown"
+    v-html="html"
+  ></div>
   <p v-else class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs text-zinc-600 dark:text-zinc-400">{{ notes }}</p>
+  <!-- eslint-enable vue/no-v-html -->
+  <RemoteImageDialog :gate="remoteImages" :locale="locale" />
 </template>
 
 <style scoped>

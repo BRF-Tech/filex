@@ -33,6 +33,11 @@ import (
 // is a permission like any other, and an administrator who takes it away has
 // taken it away.
 //
+// A key that is new ground but meant for everyone (grantOnAdd: ai.assistant)
+// is given the same way, once, to every saved list that may hold it, whatever
+// else the list allows. A person's own exceptions are left alone: without one
+// for the key they follow their role, which now has it.
+//
 // ⚠ A save on a version without the key takes it away too, without a word,
 // and looks the same: 0.50 did that to files.encrypt (PR #86). The merge does
 // not run again; gaps.go points such lists out instead, and foreign.go keeps a
@@ -42,7 +47,8 @@ import (
 // older one, that older key. "Carved out" means every action the added key
 // allows needs the older key as well — which is why a Deny of the older key
 // needs no twin (inheritAllows). A key added with no entry here is new
-// ground: recorded as known, and given to no saved list.
+// ground: recorded as known, and given to no saved list - unless grantOnAdd
+// names it.
 var inheritOnAdd = map[Perm]Perm{
 	// Encrypting is creating the folder's marker file or a .fxe, which needs
 	// files.create too. A rename, a move or a copy onto those names needs
@@ -51,6 +57,19 @@ var inheritOnAdd = map[Perm]Perm{
 	// (CHANGELOG, the upgrade note).
 	FilesEncrypt: FilesCreate,
 }
+
+// grantOnAdd are the keys added after v0.49.0 that every role is given when
+// they first appear, carved out of nothing: the first start that finds one
+// missing from the recorded catalogue adds it to every saved list - the
+// built-in User and Viewer roles' and every custom role's own list - where
+// the list may hold it. Once: an administrator who takes it away afterwards
+// has taken it away, and the next upgrade does not give it back.
+var grantOnAdd = Of(
+	// The explorer's AI assistant (0.57, task #269). Everyone may use it the
+	// day it exists; the assistant itself is off until an administrator sets
+	// it up, so the key alone sends nothing anywhere.
+	AIAssistant,
+)
 
 // v049Catalogue is the catalogue of v0.49.0, the release that introduced
 // saved roles: what an install knew before it recorded a catalogue of its
@@ -92,7 +111,8 @@ type UpgradeReport struct {
 
 // UpgradeCatalogue gives every saved role, and every person's own exceptions,
 // the keys this version added that they held through an older key
-// (inheritOnAdd), and records the catalogue.
+// (inheritOnAdd), gives every saved role the keys added for everyone
+// (grantOnAdd), and records the catalogue.
 // Call it at start, after the migrations and before serving; a start that
 // finds the catalogue it recorded changes nothing.
 //
@@ -103,13 +123,13 @@ type UpgradeReport struct {
 // edits before the next start looks like one saved before the key existed:
 // the retry gives it the key as well.
 func UpgradeCatalogue(ctx context.Context, store db.Store) (UpgradeReport, error) {
-	return upgradeCatalogue(ctx, store, inheritOnAdd)
+	return upgradeCatalogue(ctx, store, inheritOnAdd, grantOnAdd)
 }
 
 // inheritance is one added key and the older key it follows.
 type inheritance struct{ key, from Perm }
 
-func upgradeCatalogue(ctx context.Context, store db.Store, inherit map[Perm]Perm) (UpgradeReport, error) {
+func upgradeCatalogue(ctx context.Context, store db.Store, inherit map[Perm]Perm, grant Set) (UpgradeReport, error) {
 	var rep UpgradeReport
 	err := store.WithTx(ctx, func(ctx context.Context) error {
 		known, recorded, err := knownCatalogue(ctx, store)
@@ -117,6 +137,7 @@ func upgradeCatalogue(ctx context.Context, store db.Store, inherit map[Perm]Perm
 			return err
 		}
 		var follow []inheritance
+		var grants []Perm
 		for _, d := range catalogue {
 			if known[d.Key] {
 				continue
@@ -124,6 +145,8 @@ func upgradeCatalogue(ctx context.Context, store db.Store, inherit map[Perm]Perm
 			rep.Added = append(rep.Added, d.Key)
 			if from, ok := inherit[d.Key]; ok {
 				follow = append(follow, inheritance{key: d.Key, from: from})
+			} else if grant.Has(d.Key) {
+				grants = append(grants, d.Key)
 			}
 		}
 		if recorded && len(rep.Added) == 0 {
@@ -132,13 +155,15 @@ func upgradeCatalogue(ctx context.Context, store db.Store, inherit map[Perm]Perm
 			// forget the keys only the later version knows (recordCatalogue).
 			return nil
 		}
+		if len(follow) > 0 || len(grants) > 0 {
+			if rep.DefaultsChanged, err = upgradeBuiltinRoles(ctx, store, follow, grants); err != nil {
+				return err
+			}
+			if rep.RolesChanged, err = upgradeCustomRoles(ctx, store, follow, grants); err != nil {
+				return err
+			}
+		}
 		if len(follow) > 0 {
-			if rep.DefaultsChanged, err = upgradeBuiltinRoles(ctx, store, follow); err != nil {
-				return err
-			}
-			if rep.RolesChanged, err = upgradeCustomRoles(ctx, store, follow); err != nil {
-				return err
-			}
 			if rep.ExceptionsChanged, err = upgradeExceptions(ctx, store, follow); err != nil {
 				return err
 			}
@@ -213,9 +238,10 @@ func recordCatalogue(ctx context.Context, store db.Store, known map[Perm]bool) e
 }
 
 // upgradeBuiltinRoles gives the built-in roles' saved lists the keys they
-// follow. A list never saved stays unsaved: the role reads its preset, which
-// the catalogue builds with the added keys already in it.
-func upgradeBuiltinRoles(ctx context.Context, store db.Store, follow []inheritance) (bool, error) {
+// follow and the keys added for everyone. A list never saved stays unsaved:
+// the role reads its preset, which the catalogue builds with the added keys
+// already in it.
+func upgradeBuiltinRoles(ctx context.Context, store db.Store, follow []inheritance, grants []Perm) (bool, error) {
 	changed := false
 	for _, b := range builtinLists {
 		raw, err := store.GetSetting(ctx, b.key)
@@ -230,7 +256,8 @@ func upgradeBuiltinRoles(ctx context.Context, store db.Store, follow []inheritan
 			return false, fmt.Errorf("%s: %w", b.key, err)
 		}
 		list, grew := inheritInto(list, follow, b.room)
-		if !grew {
+		list, granted := grantInto(list, grants, b.room)
+		if !grew && !granted {
 			continue
 		}
 		out, err := json.Marshal(list)
@@ -246,8 +273,10 @@ func upgradeBuiltinRoles(ctx context.Context, store db.Store, follow []inheritan
 }
 
 // upgradeCustomRoles gives every custom role — switched off or not, of any
-// tenant — the keys it follows, in its own list and in its folder part.
-func upgradeCustomRoles(ctx context.Context, store db.Store, follow []inheritance) (int, error) {
+// tenant — the keys it follows, in its own list and in its folder part, and
+// the keys added for everyone in its own list (a folder part names only what
+// differs there, and a key that is not path-checked has no place in it).
+func upgradeCustomRoles(ctx context.Context, store db.Store, follow []inheritance, grants []Perm) (int, error) {
 	rules, err := store.ListPermissionRules(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("roles: %w", err)
@@ -255,8 +284,9 @@ func upgradeCustomRoles(ctx context.Context, store db.Store, follow []inheritanc
 	n := 0
 	for _, r := range rules {
 		list, grewList := inheritInto(r.Permissions, follow, listable)
+		list, granted := grantInto(list, grants, listable)
 		grewPart := !r.Conditions.Empty() && inheritAllows(r.Effects, follow, conditionable)
-		if !grewList && !grewPart {
+		if !grewList && !granted && !grewPart {
 			continue
 		}
 		r.Permissions = list
@@ -285,6 +315,29 @@ func inheritInto(list []string, follow []inheritance, room Set) ([]string, bool)
 			has[string(f.key)] = true
 			grew = true
 		}
+	}
+	return out, grew
+}
+
+// grantInto returns list with every key of grants it does not hold yet,
+// within room, and whether it grew. list itself is never changed.
+func grantInto(list []string, grants []Perm, room Set) ([]string, bool) {
+	has := make(map[string]bool, len(list))
+	for _, k := range list {
+		has[k] = true
+	}
+	out := list
+	grew := false
+	for _, k := range grants {
+		if has[string(k)] || !room.Has(k) {
+			continue
+		}
+		if !grew {
+			out = append([]string(nil), list...)
+			grew = true
+		}
+		out = append(out, string(k))
+		has[string(k)] = true
 	}
 	return out, grew
 }

@@ -26,6 +26,7 @@ import { computed } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { fileIconTile } from '../lib/fileIcons';
+import { visibleName } from '../lib/nameRule';
 import { useServerNameFilter, type MatchNamesFn } from '../lib/nameFilter';
 import type { DraftDto } from '../lib/drafts';
 import DataTable, { type DataColumn } from './DataTable.vue';
@@ -199,7 +200,7 @@ const countLine = computed(() =>
             :data-testid="`draft-open-${row.key}`"
             @click.stop="emit('open', row)"
           >
-            <bdi>{{ row.name }}</bdi>
+            <bdi>{{ visibleName(row.name) }}</bdi>
           </button>
         </span>
       </template>

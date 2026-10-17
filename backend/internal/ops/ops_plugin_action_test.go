@@ -104,6 +104,13 @@ func TestOps_Cancel_PendingRowNeverRuns(t *testing.T) {
 	assert.False(t, again, "a finished row is not cancellable")
 }
 
+// opsWait is the ceiling these tests give a state they expect in
+// milliseconds. It is deliberately far above the real wait: a shared CI
+// runner under -race schedules goroutines late, and a tight ceiling turns a
+// correct service into a red build (0.56.1 gate, 8.24s). A broken service
+// still fails here, it just takes longer to say so.
+const opsWait = 30 * time.Second
+
 func TestOps_Cancel_RunningRowEndsTheContext(t *testing.T) {
 	f := newOpsFixture(t)
 	r := &fakeRunner{block: true, started: make(chan struct{})}
@@ -117,27 +124,25 @@ func TestOps_Cancel_RunningRowEndsTheContext(t *testing.T) {
 	defer f.svc.Stop()
 	select {
 	case <-r.started:
-	case <-time.After(3 * time.Second):
+	case <-time.After(opsWait):
 		t.Fatal("runner never started")
 	}
-	cur, _ := f.svc.Get(context.Background(), op.ID)
-	assert.Equal(t, ops.StatusRunning, cur.Status)
-	assert.Equal(t, int64(1), cur.BytesDone, "live progress from the runner")
-	assert.Equal(t, int64(4), cur.BytesTotal)
+	// The runner closes `started` BEFORE its first live() call, so the row's
+	// progress lands a moment later: reading it straight away is a race the
+	// -race build loses on a loaded runner (CI run 38174576369). Wait for the
+	// state, never for a duration.
+	var cur *ops.Op
+	require.Eventually(t, func() bool {
+		cur, _ = f.svc.Get(context.Background(), op.ID)
+		return cur != nil && cur.Status == ops.StatusRunning && cur.BytesDone == 1 && cur.BytesTotal == 4
+	}, opsWait, 15*time.Millisecond, "the running row carries the runner's live progress")
 
 	ok, err := f.svc.Cancel(context.Background(), op.ID)
 	require.NoError(t, err)
 	assert.True(t, ok)
-	deadline := time.Now().Add(3 * time.Second)
-	for {
+	require.Eventually(t, func() bool {
 		cur, _ = f.svc.Get(context.Background(), op.ID)
-		if cur.Status == ops.StatusCancelled {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("op did not end as cancelled; status=%s", cur.Status)
-		}
-		time.Sleep(15 * time.Millisecond)
-	}
+		return cur != nil && cur.Status == ops.StatusCancelled
+	}, opsWait, 15*time.Millisecond, "a cancelled run ends as cancelled")
 	assert.Empty(t, cur.Error, "cancelled is not an error")
 }

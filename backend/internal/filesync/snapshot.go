@@ -37,19 +37,21 @@ type ListedFile struct {
 	LastModified int64 // Unix millis; 0 = the storage does not report one
 }
 
-// skipNames are never synced in either direction.
+// skipNames are never synced in either direction, in any letter case (keys
+// lower-case): Windows writes `Thumbs.db` and `THUMBS.DB` alike, and both are
+// the same junk.
 //
 // ⚠ The state directory has to be excluded or the engine syncs its own
 // bookkeeping, which then changes, which schedules another sync — a loop that
 // grows a file on the server forever.
 var skipNames = map[string]bool{
 	".filex-sync":               true, // this engine's own state + trash
-	".DS_Store":                 true,
-	"Thumbs.db":                 true,
+	".ds_store":                 true,
+	"thumbs.db":                 true,
 	"desktop.ini":               true,
-	".Trash-1000":               true,
-	"$RECYCLE.BIN":              true,
-	"System Volume Information": true,
+	".trash-1000":               true,
+	"$recycle.bin":              true,
+	"system volume information": true,
 }
 
 // skipName is the ONE question every reader asks of a name: the engine's own
@@ -63,7 +65,7 @@ var skipNames = map[string]bool{
 // pass and answered 403 every time — an error under the folder that nothing
 // the person could do would clear. Ignored, it simply stays on this computer.
 func skipName(name string) bool {
-	return skipNames[name] || syspath.IsName(name)
+	return skipNames[strings.ToLower(name)] || syspath.IsName(name)
 }
 
 // WalkLocal snapshots a directory tree. Unreadable entries are skipped rather

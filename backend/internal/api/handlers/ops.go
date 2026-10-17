@@ -219,6 +219,9 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 	if writesDest && !o.opAllow(w, r, destID, drel, opDestPerm(req.Kind), "insufficient permission (dest)") {
 		return
 	}
+	if writesDest && o.refuseDownloadLifts(w, r, req.StorageID, rels, destID, req.Dest) {
+		return
+	}
 
 	/* wiring:e2 — same boundary rule for the unified endpoint. */
 	ctx := r.Context()
@@ -425,6 +428,9 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 		if !o.opAllow(w, r, destStorageID, strings.Trim(dest, "/"), opDestPerm(kind), "insufficient permission (dest)") {
 			return
 		}
+		if o.refuseDownloadLifts(w, r, storageID, sources, destStorageID, dest) {
+			return
+		}
 	}
 
 	if o.gateOp(w, r, kind, storageID, destStorageID, sources, dest) {
@@ -535,17 +541,13 @@ func (o *Ops) refuseE2ECopy(w http.ResponseWriter, r *http.Request, storageID in
 			srcDrv = d
 		}
 	}
-	into := strings.HasSuffix(dest, "/")
 	var (
 		settled []string
 		dstSt   *model.Storage
 	)
 	u := auth.UserFrom(ctx)
 	for _, src := range sources {
-		dst := bareRel(dest)
-		if into {
-			dst = strings.Trim(path.Join(dst, path.Base("/"+strings.Trim(src, "/"))), "/")
-		}
+		dst := opLandsAt(dest, src)
 		isDir, err := svc.SourceIsFolder(ctx, storageID, srcDrv, src)
 		if err != nil {
 			return ctx, answerE2E(w, r, &model.Storage{ID: destStorageID}, err)
@@ -569,6 +571,37 @@ func (o *Ops) refuseE2ECopy(w http.ResponseWriter, r *http.Request, storageID in
 		}
 	}
 	return ops.WithEncryptionSettled(ctx, settled), false
+}
+
+// opLandsAt is where one source of a queued copy or move lands, storage
+// relative: under its own name in dest when dest is a folder (a trailing
+// slash, joinIntoDir's drop-into form), dest itself otherwise. A copy may
+// land beside a taken name (`…-copy`), which keeps the name's extension and
+// its folder.
+func opLandsAt(dest, src string) string {
+	if !strings.HasSuffix(dest, "/") {
+		return bareRel(dest)
+	}
+	return strings.Trim(path.Join(bareRel(dest), path.Base("/"+strings.Trim(src, "/"))), "/")
+}
+
+// refuseDownloadLifts asks every source of a queued copy or move, at the path
+// it lands at, the download rule (downloadLift, download_lift.go): bytes the
+// caller may not download where they are are not carried to where they could
+// be. A folder is asked file by file. Asked before anything is queued, as the
+// other checks are: the worker runs as nobody, so this is the only moment
+// there is a person to judge, and one refusal refuses the batch. It reports
+// true when it answered the request.
+func (o *Ops) refuseDownloadLifts(w http.ResponseWriter, r *http.Request, storageID int64, sources []string, destStorageID int64, dest string) bool {
+	if destStorageID == 0 {
+		destStorageID = storageID
+	}
+	for _, src := range sources {
+		if refuseDownloadLift(w, r, o.ACL, o.Store, o.StorageResolver, storageID, bareRel(src), destStorageID, opLandsAt(dest, src)) {
+			return true
+		}
+	}
+	return false
 }
 
 // badTransferName says what is wrong with a caller-chosen transfer name, or ""

@@ -51,6 +51,37 @@ export interface SearchIndexStats {
   last_rebuild_error?: string;
 }
 
+/**
+ * The search settings (task #261, `GET/PATCH /api/admin/search/settings`):
+ * settings-table rows, db -> env -> default. The bounds travel with the
+ * values; the memory_* figures are what the percent came to in the running
+ * server.
+ */
+export interface SearchSettings {
+  /** Extract file text into the index. Live. */
+  content: boolean;
+  /** Larger source files are not extracted. Live. */
+  content_max_mb: number;
+  content_max_mb_min: number;
+  content_max_mb_max: number;
+  /** Share of the given memory indexing may take. Applied at once. */
+  memory_percent: number;
+  memory_percent_min: number;
+  memory_percent_max: number;
+  memory_budget_bytes: number;
+  memory_given_bytes: number;
+  /** The log's wording of where the memory figure came from. */
+  memory_from: string;
+  /** The same, as a word the page translates. */
+  memory_from_kind: 'container' | 'host' | '';
+  /** Repair an outdated index at startup. Applies at the next start. */
+  auto_rebuild: boolean;
+  /** Whether this server opened the index at all (environment only). */
+  index_enabled: boolean;
+}
+
+export type SearchSettingsPatch = Partial<Pick<SearchSettings, 'content' | 'content_max_mb' | 'memory_percent' | 'auto_rebuild'>>;
+
 export const SearchApi = {
   async query(params: SearchParams): Promise<SearchPage> {
     // The backend exposes search at `/api/files/search` (admin route
@@ -113,6 +144,16 @@ export const SearchApi = {
 
   async rebuild(): Promise<{ accepted: boolean }> {
     const { data } = await api.post<{ accepted: boolean }>('/admin/search/rebuild');
+    return data;
+  },
+
+  async settings(): Promise<SearchSettings> {
+    const { data } = await api.get<SearchSettings>('/admin/search/settings');
+    return data;
+  },
+
+  async updateSettings(patch: SearchSettingsPatch): Promise<SearchSettings> {
+    const { data } = await api.patch<SearchSettings>('/admin/search/settings', patch);
     return data;
   },
 };

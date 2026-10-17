@@ -28,6 +28,13 @@ type Source interface {
 	ThumbnailHandlers() []AppHandler
 }
 
+// EngineSource is a Source that also lists the engines running apps bring
+// (CapEngine): each handler's Ext names the engine (EngineOffice). The app
+// registry implements it; a Source without it brings none.
+type EngineSource interface {
+	EngineHandlers() []AppHandler
+}
+
 // rulesTTL is how long the rules read from the database are trusted before
 // they are read again. A change made here drops them at once (Put, Reset);
 // the interval only matters to a second server on the same database.
@@ -50,6 +57,9 @@ type Service struct {
 	// and type now, as one choice among others: OnlyOffice is configured and
 	// it is a kind of OnlyOfficeOpens (filex 0.51). Nil: it opens nothing here.
 	ooOpen func(name, mime string) bool
+	// ooEngine reports whether the document server is configured now, as the
+	// office engine's back end (CapEngine). Nil: it is not one.
+	ooEngine func() bool
 
 	rulesMu sync.Mutex
 	rules   map[string]map[string]*Rule
@@ -96,6 +106,30 @@ func (s *Service) SetOnlyOfficeOpen(f func(name, mime string) bool) {
 	s.mu.Unlock()
 }
 
+// SetOnlyOfficeEngine attaches the answer to "is the document server a back
+// end of the office engine now" (OnlyOffice configured). Read on every engine
+// chain, so it must answer from memory.
+func (s *Service) SetOnlyOfficeEngine(f func() bool) {
+	s.mu.Lock()
+	s.ooEngine = f
+	s.mu.Unlock()
+}
+
+// onlyOfficeEngine reports whether the document server is an office engine
+// back end now.
+func (s *Service) onlyOfficeEngine() bool {
+	s.mu.RLock()
+	f := s.ooEngine
+	s.mu.RUnlock()
+	return f != nil && f()
+}
+
+// EngineChain is the back ends of an engine (EngineOffice): the ones that
+// are on, in the order they are asked, and the ones switched off.
+func (s *Service) EngineChain(ctx context.Context, engine string) Chain {
+	return s.Chain(ctx, CapEngine, "engine."+engine, "")
+}
+
 // OnlyOfficeOpen reports whether the document server opens a file of this
 // name and type now, as one choice among others.
 func (s *Service) OnlyOfficeOpen(name, mime string) bool {
@@ -140,9 +174,14 @@ func (s *Service) appHandlers(capability string) []AppHandler {
 		return nil
 	}
 	var hs []AppHandler
-	if capability == CapOpen {
+	switch capability {
+	case CapOpen:
 		hs = src.OpenHandlers()
-	} else {
+	case CapEngine:
+		if es, ok := src.(EngineSource); ok {
+			hs = es.EngineHandlers()
+		}
+	default:
 		hs = src.ThumbnailHandlers()
 	}
 	out := append([]AppHandler(nil), hs...)
@@ -179,7 +218,7 @@ func (s *Service) load(ctx context.Context) map[string]map[string]*Rule {
 		}
 		return s.rules
 	}
-	next := map[string]map[string]*Rule{CapOpen: {}, CapThumbnail: {}}
+	next := map[string]map[string]*Rule{CapOpen: {}, CapThumbnail: {}, CapEngine: {}}
 	for _, row := range rows {
 		if !ValidCapability(row.Capability) {
 			continue
@@ -225,8 +264,11 @@ func (s *Service) Available(capability, name, mime string) []Handler {
 			apps = append(apps, a.Handler)
 		}
 	}
-	if capability == CapThumbnail {
+	switch capability {
+	case CapThumbnail:
 		return ThumbDefault(s.OnlyOfficeThumb(name, mime), s.BuiltinThumb(name, mime), apps)
+	case CapEngine:
+		return EngineDefault(ext == EngineOffice && s.onlyOfficeEngine(), apps)
 	}
 	return OpenDefault(s.OnlyOfficeOpen(name, mime), apps)
 }
@@ -379,8 +421,11 @@ func (s *Service) Reset(ctx context.Context, capability, ext string) (bool, erro
 }
 
 func verbOf(capability string) string {
-	if capability == CapOpen {
+	switch capability {
+	case CapOpen:
 		return "open"
+	case CapEngine:
+		return "run the engine for"
 	}
 	return "draw thumbnails of"
 }

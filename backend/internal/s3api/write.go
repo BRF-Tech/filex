@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"path"
@@ -138,7 +139,7 @@ func (h *Handler) putObject(w http.ResponseWriter, r *http.Request, p *protocola
 			WriteError(w, r, status, code, ErrDecodedLength.Error())
 			return
 		}
-		WriteError(w, r, statusForStorageErr(err), codeForWriteErr(err), err.Error())
+		h.storageFailed(w, r, true, err)
 		return
 	}
 	// ⚠ The size the quota and the per-file limit were asked with is the one
@@ -239,7 +240,7 @@ func (h *Handler) putDirectoryMarker(w http.ResponseWriter, r *http.Request, p *
 		return
 	}
 	if err := mk.Mkdir(ctx, dir); err != nil {
-		WriteError(w, r, statusForStorageErr(err), codeForWriteErr(err), err.Error())
+		h.storageFailed(w, r, true, err)
 		return
 	}
 	h.sync().Mkdir(context.WithoutCancel(ctx), st, dir)
@@ -258,9 +259,9 @@ func (h *Handler) putDirectoryMarker(w http.ResponseWriter, r *http.Request, p *
 func (h *Handler) deleteObject(w http.ResponseWriter, r *http.Request, p *protocolauth.Principal, st *model.Storage, key string) {
 	ctx := r.Context()
 	// A client removing a folder deletes its marker. The slash is the client's
-	// spelling of the same path, so it is dropped and the folder itself is
-	// trashed — the alternative is a "file" named `foo/` that no other surface
-	// can see.
+	// spelling of the same path, so it is dropped below; whether the folder
+	// goes is deletesNothing's to say - only an EMPTY one does.
+	named := key
 	key = strings.TrimSuffix(key, "/")
 	if key == "" {
 		WriteError(w, r, http.StatusBadRequest, "InvalidRequest", "a key may not be empty")
@@ -283,6 +284,15 @@ func (h *Handler) deleteObject(w http.ResponseWriter, r *http.Request, p *protoc
 	drv, err := h.cfg.Resolver(st.ID)
 	if err != nil {
 		WriteError(w, r, http.StatusInternalServerError, "InternalError", "storage unavailable")
+		return
+	}
+	// S3 deletes at most the one object named, never what is under a prefix
+	// (deletesNothing): a folder that still holds anything stays, and so does
+	// a directory asked for without its slash. The answer is the success S3
+	// gives a delete of a key it does not hold.
+	if deletesNothing(ctx, drv, named) {
+		w.Header().Set("x-amz-request-id", requestID(r))
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
@@ -317,11 +327,11 @@ func (h *Handler) deleteObject(w http.ResponseWriter, r *http.Request, p *protoc
 			}
 			return nil
 		}); derr != nil {
-			WriteError(w, r, statusForStorageErr(derr), codeForWriteErr(derr), derr.Error())
+			h.storageFailed(w, r, true, derr)
 			return
 		}
 	default:
-		WriteError(w, r, statusForStorageErr(terr), codeForWriteErr(terr), terr.Error())
+		h.storageFailed(w, r, true, terr)
 		return
 	}
 
@@ -407,19 +417,6 @@ func mimeFor(r *http.Request, key string) string {
 		}
 	}
 	return "application/octet-stream"
-}
-
-func codeForWriteErr(err error) string {
-	switch {
-	case errors.Is(err, storage.ErrNotFound):
-		return "NoSuchKey"
-	case errors.Is(err, storage.ErrReadOnly):
-		return "AccessDenied"
-	case errors.Is(err, storage.ErrUnsupported):
-		return "NotImplemented"
-	default:
-		return "InternalError"
-	}
 }
 
 // ─────────────────────────── bulk delete ───────────────────────────
@@ -509,22 +506,46 @@ func (h *Handler) deleteObjects(w http.ResponseWriter, r *http.Request, p *proto
 			out.Errors = append(out.Errors, DeleteErrorEntry{Key: o.Key, Code: "InvalidRequest", Message: "empty key"})
 			continue
 		}
-		if !h.writable(p, set, key, perm.FilesDelete) {
+		// The same rule as a single DeleteObject (keyError): a key that is a
+		// second spelling of another path names nothing here.
+		if kerr := keyError(key); kerr != nil {
+			code, msg := keyErrorCode(kerr)
+			out.Errors = append(out.Errors, DeleteErrorEntry{Key: o.Key, Code: code, Message: msg})
+			continue
+		}
+		rel := strings.TrimSuffix(key, "/")
+		if rel == "" {
+			out.Errors = append(out.Errors, DeleteErrorEntry{Key: o.Key, Code: "InvalidRequest", Message: "empty key"})
+			continue
+		}
+		if !h.writable(p, set, rel, perm.FilesDelete) {
 			out.Errors = append(out.Errors, DeleteErrorEntry{Key: o.Key, Code: "AccessDenied", Message: "no write access to this key"})
+			continue
+		}
+		// The one object named, as a single DeleteObject (deletesNothing): a
+		// folder that still holds anything is not deleted, and the entry is
+		// reported Deleted all the same - S3 reports success for a key it
+		// does not hold.
+		if deletesNothing(ctx, drv, key) {
+			if !req.Quiet {
+				out.Deleted = append(out.Deleted, DeletedEntry{Key: o.Key})
+			}
 			continue
 		}
 		// Each key's bytes and rows under the storage's row gate
 		// (Syncer.Discard, issue #201) - one key at a time, so a scan waits
 		// for one object, not for the whole batch.
-		res, terr := h.sync().Discard(ctx, st, drv, key)
+		res, terr := h.sync().Discard(ctx, st, drv, rel)
 		switch {
 		case terr == nil && res.Trashed:
 		case terr == nil && res.Missing:
 			// Already gone counts as deleted — see deleteObject.
 		default:
-			out.Errors = append(out.Errors, DeleteErrorEntry{
-				Key: o.Key, Code: codeForWriteErr(terr), Message: errString(terr),
-			})
+			_, code, msg := storageAnswer(terr)
+			if code == "InternalError" {
+				slog.Warn("s3api: bulk delete", slog.String("key", key), slog.Any("err", terr))
+			}
+			out.Errors = append(out.Errors, DeleteErrorEntry{Key: o.Key, Code: code, Message: msg})
 			continue
 		}
 		if !req.Quiet {
@@ -532,13 +553,6 @@ func (h *Handler) deleteObjects(w http.ResponseWriter, r *http.Request, p *proto
 		}
 	}
 	WriteXML(w, r, http.StatusOK, out)
-}
-
-func errString(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
 }
 
 // requestBody returns the object's real bytes and its real size, unwrapping

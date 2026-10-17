@@ -62,7 +62,7 @@ const config = {
   theme: 'auto',
   trashVisible: true,
   sideNav: true,          // the navigation panel (default on)
-  connections: true,      // its "How to connect" + "API keys" entries
+  connections: true,      // its "Connections" + "API keys" entries
   uiProfile: 'standard',  // 'simple' - one pane, list/grid, no tabs
 };
 </script>
@@ -213,7 +213,7 @@ shown to: the host says only that it has the page. `<filex-explorer>` and
 component and the React adapter do not forward them yet, so switching the keys
 on there would draw a row that goes nowhere.
 
-The panel's last section is how **How to connect** (the per-protocol guides,
+The panel's last section is how **Connections** (the per-protocol guides,
 built from your deployment) and **API keys** (mint and revoke the tokens
 WebDAV, FTPS and `filex mount` sign in with) become reachable from inside the
 explorer at all - `ConnectionsPanel` and `TokensPanel` were exported from this
@@ -235,7 +235,7 @@ connect", Upload, the storages and Trash stay. See
 
 `uiProfile: 'simple'` is a preset, not a feature switch - nothing is removed
 from the build. It turns off the tab strip and the split pane, reduces the view
-switcher to list + grid, and defaults the panel's "How to connect" / "API keys"
+switcher to list + grid, and defaults the panel's "Connections" / "API keys"
 entries off, for the people who want a file drive rather than a file manager.
 It does not gate the navigation panel: that ships in every profile, and only
 the viewer's own collapse choice moves it.

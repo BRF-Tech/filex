@@ -6,9 +6,13 @@
 #
 #   docker compose up                                            # filex slim only
 #   docker compose --profile full up                             # filex + thumbnail tools
-#   docker compose --profile onlyoffice up                       # filex + ONLYOFFICE editor
 #   docker compose --profile postgres --profile versitygw up     # full self-hosted stack
-#   docker compose --profile full --profile onlyoffice --profile postgres up
+#
+# Office documents: install the Office editor app (Admin -> Plugins -> Apps,
+# or the App store) - it edits Word, Excel and PowerPoint in the browser and
+# needs no container here. An ONLYOFFICE Document Server is optional (profile
+# `onlyoffice`, off unless you ask for it; docs/ONLYOFFICE.md):
+#   docker compose --profile onlyoffice up                       # + Document Server
 #
 # Copy `.env.example` -> `.env` and edit before going to prod.
 
@@ -57,6 +61,8 @@ services:
       FILEX_DEFAULT_STORAGE_PATH: ${FILEX_DEFAULT_STORAGE_PATH:-/var/lib/filex/local-storage}
 
       # --- Plug & play services (URL = enabled) ---
+      # An ONLYOFFICE Document Server is optional (the Office editor app
+      # needs none): blank = not connected.
       FILEX_ONLYOFFICE_URL: ${FILEX_ONLYOFFICE_URL:-}
       FILEX_ONLYOFFICE_JWT: ${FILEX_ONLYOFFICE_JWT:-}
       FILEX_DRAWIO_URL: ${FILEX_DRAWIO_URL:-}
@@ -74,8 +80,9 @@ services:
 
   # ---------------------------------------------------------------------
   # filex (full) — the registry's default tag; thumbnail toolchain included
-  # (~241 MB; no LibreOffice since 0.50 - office documents are the connected
-  # ONLYOFFICE's). The lean alternative is ghcr.io/brf-tech/filex:slim (~62 MB),
+  # (~241 MB; no LibreOffice - office documents are edited by the Office
+  # editor app, and thumbnailed by an ONLYOFFICE Document Server when one is
+  # connected). The lean alternative is ghcr.io/brf-tech/filex:slim (~62 MB),
   # which has the same binary and none of the programs the thumbnailer shells
   # out to.
   # Activate with `--profile full` and stop the `filex` service first
@@ -122,12 +129,19 @@ services:
       - filex-net
 
   # ---------------------------------------------------------------------
-  # ONLYOFFICE Document Server (profile: onlyoffice)
-  # Required only if you want office-doc editing in the file manager.
+  # ONLYOFFICE Document Server (profile: onlyoffice) - OPTIONAL, off by
+  # default. Office editing needs none: the Office editor app does it in the
+  # browser. What still asks for a Document Server today is filex's own work
+  # on an office file on the server: office thumbnails and the apps' office
+  # engine (docs/ONLYOFFICE.md). Then set FILEX_ONLYOFFICE_URL /
+  # FILEX_ONLYOFFICE_JWT above (or Settings -> External services).
+  # The image is pinned to the version filex is tested against; never
+  # `latest`, which moves under you (Docs 10.0 changed how a CSV is saved).
+  # ONLYOFFICE_IMAGE in .env picks another one on purpose.
   # ---------------------------------------------------------------------
   onlyoffice:
     profiles: ["onlyoffice"]
-    image: onlyoffice/documentserver:latest
+    image: ${ONLYOFFICE_IMAGE:-onlyoffice/documentserver:9.4.0.1}
     container_name: filex-onlyoffice
     restart: unless-stopped
     ports:

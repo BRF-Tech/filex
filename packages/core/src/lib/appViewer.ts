@@ -43,6 +43,7 @@ import { rowIsEncrypted, type EncryptedRowLike } from './encryptedRow';
 import { appliesItemOf, appliesMatches, stateKeysOf, type AppliesNodeLike } from './pluginApplies';
 import { e2eMimeForExt } from './e2emime';
 import { extensionOf } from './e2enames';
+import { isOfficeExt } from './serverRules';
 
 /**
  * The grant an app holds to be handed a file of an encrypted folder in the
@@ -392,7 +393,25 @@ export function pickOpenHandler(
   opts?: OpenHandlerOptions | null,
 ): OpenHandler | null {
   if (!node || node.type !== 'file') return null;
-  return chosen(openHandlersFor(views, node, rules, opts).on, choice, personal);
+  return chosen(withoutDeadOfficeViewer(openHandlersFor(views, node, rules, opts).on, node, opts), choice, personal);
+}
+
+/**
+ * filex 0.57: an office document (docx, xlsx, pptx and the rest the server's
+ * `edit_kinds.office` names) opens in filex's own viewer only through a
+ * Document Server. With none configured that viewer can only say one is
+ * missing, so where an app's interface opens the kind (the Office editor
+ * app), filex's own viewer is not chosen - not by the tab's choice, not by a
+ * person's or an administrator's earlier pick, not as the first. The same on
+ * every surface that asks this rule: the explorer, the editor tab, the
+ * desktop app's document windows. With a Document Server, or for a kind
+ * filex's own viewer opens by itself (a CSV's table), the handlers stay as
+ * they are; it still is in "Open with" either way.
+ */
+function withoutDeadOfficeViewer(on: OpenHandler[], node: NodeLike, opts?: OpenHandlerOptions | null): OpenHandler[] {
+  const kind = openKindOf(node);
+  if (opts?.onlyOffice || !isOfficeExt(kind) || officeOpensKind(kind) || !on.some((h) => h.view)) return on;
+  return on.filter((h) => h.id !== BUILTIN_VIEWER);
 }
 
 /** The handler among those on: the choice, else the person's, else the first. */

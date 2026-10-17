@@ -4,6 +4,7 @@ import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import { isInternalName } from '../lib/internalPaths';
+import { nameRefusal, trimName } from '../lib/nameRule';
 import Modal from './Modal.vue';
 
 const props = defineProps<{
@@ -57,12 +58,16 @@ watch(
 
 function submit() {
   if (props.busy) return;
-  const clean = name.value.trim();
-  if (!clean) {
+  const clean = trimName(name.value);
+  // The server's rule (lib/nameRule, backend leafname): before 0.57 this box
+  // let `...` through, and the folder it made answered "bad path" to every
+  // way of opening, renaming or deleting it.
+  const refusal = nameRefusal(clean);
+  if (refusal === 'empty') {
     err.value = t('modal.newfolder.placeholder');
     return;
   }
-  if (/[\\/]/.test(clean) || clean === '.' || clean === '..') {
+  if (refusal) {
     err.value = t('modal.newfolder.invalid');
     return;
   }

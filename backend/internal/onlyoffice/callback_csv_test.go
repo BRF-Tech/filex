@@ -37,6 +37,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/officesave"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/staging"
@@ -337,8 +338,8 @@ func TestCSVCallback_EverySaveOfASessionKeepsThem(t *testing.T) {
 }
 
 func TestCSVCallback_AFileTooLargeToCompareIsWrittenAsBefore(t *testing.T) {
-	defer func(n int64) { csvKeepMaxBytes = n }(csvKeepMaxBytes)
-	csvKeepMaxBytes = 16
+	defer func(n int64) { officesave.KeepMaxBytes = n }(officesave.KeepMaxBytes)
+	officesave.KeepMaxBytes = 16
 	h := newCSVHarness(t, crlf("kod;tel", "007;05320000001"))
 	resp := h.save(t, ds("kod,tel", "7,5320000001"), "csv")
 	assert.Equal(t, 0, resp["error"])
@@ -346,30 +347,104 @@ func TestCSVCallback_AFileTooLargeToCompareIsWrittenAsBefore(t *testing.T) {
 		"the file's delimiter and line ends, ONLYOFFICE's values: a save is never refused over this")
 }
 
-// A file in a legacy code page (Windows-1254 here): its text cannot be
-// compared with the UTF-8 ONLYOFFICE saved. It is written as 0.51.0 wrote it,
-// in UTF-8 with a byte order mark, and is a UTF-8 file from then on.
-func TestCSVCallback_AFileThatIsNotUTF8IsWrittenAsBefore(t *testing.T) {
+// A file in a code page (Windows-1254 here, "ş" is 0xFE) is written back in
+// it: the UTF-8 ONLYOFFICE saved is encoded in the file's code page and its
+// cells are kept like a UTF-8 file's. 0.51 to 0.56 wrote it in UTF-8 with a
+// byte order mark, and it was a UTF-8 file from then on.
+func TestCSVCallback_AFileInACodePageIsWrittenBackInIt(t *testing.T) {
 	h := newCSVHarness(t, "kod;ad\r\n007;\xFEeker\r\n")
-	resp := h.save(t, ds("kod,ad", "7,şeker"), "csv")
+	resp := h.save(t, ds("kod,ad", "7,şeker", "9,ığdır"), "csv")
 	assert.Equal(t, 0, resp["error"])
-	assert.Equal(t, "\xEF\xBB\xBF"+crlf("kod;ad", "7;şeker"), h.disk(t))
-
-	// The next save is compared: its rows are the file's own bytes, without
-	// the empty cell ONLYOFFICE ends them with.
-	resp = h.save(t, ds("kod,ad,", "7,şeker,", "9,nar,"), "csv")
-	assert.Equal(t, 0, resp["error"])
-	assert.Equal(t, "\xEF\xBB\xBF"+crlf("kod;ad", "7;şeker", "9;nar"), h.disk(t))
+	assert.Equal(t, "kod;ad\r\n007;\xFEeker\r\n9;\xFD\xF0d\xFDr\r\n", h.disk(t),
+		"windows-1254 still, its own record byte for byte, the new one in its code page")
 }
 
-// The sniff reads the first 64 KiB. A file that is ASCII that far and a legacy
-// code page after it is not UTF-8 either.
-func TestCSVCallback_AFileThatIsNotUTF8AfterItsHeadIsWrittenAsBefore(t *testing.T) {
+// A letter the file's code page cannot hold is a save refused, never one
+// written as `?`: the file does not change, the editors are told why.
+func TestCSVCallback_ALetterTheCodePageCannotHoldIsRefused(t *testing.T) {
+	const original = "kod;ad\r\n007;\xFEeker\r\n"
+	h := newCSVHarness(t, original)
+	resp := h.save(t, ds("kod,ad", "7,şeker", "8,日本"), "csv", "7")
+	assert.Equal(t, 1, resp["error"])
+	assert.Equal(t, original, h.disk(t))
+	e := h.sink.wait(t)
+	assert.Equal(t, notify.EventFileUploadFailed, e.Event)
+	assert.Contains(t, e.Meta["body_en"], "windows-1254")
+	assert.Contains(t, e.Meta["body_en"], "日")
+}
+
+// A UTF-16 file (what a spreadsheet's "Unicode text" export writes) is
+// written back in UTF-16, its byte order mark kept.
+func TestCSVCallback_AUTF16FileIsWrittenBackInUTF16(t *testing.T) {
+	le := func(s string) string {
+		var b strings.Builder
+		b.WriteString("\xFF\xFE")
+		for _, r := range s {
+			b.WriteByte(byte(r))
+			b.WriteByte(byte(r >> 8))
+		}
+		return b.String()
+	}
+	h := newCSVHarness(t, le("kod\tad\r\n007\tşeker\r\n"))
+	resp := h.save(t, ds("kod,ad", "7,şeker", "9,nar"), "csv")
+	assert.Equal(t, 0, resp["error"])
+	assert.Equal(t, le("kod\tad\r\n007\tşeker\r\n9\tnar\r\n"), h.disk(t))
+}
+
+// The sniff reads the first 64 KiB, the encoding is read from all of the
+// file: ASCII that far and a code page after it is a code page's file, and
+// its cells are kept.
+func TestCSVCallback_AFileInACodePageAfterItsHeadIsStillKept(t *testing.T) {
 	original := strings.Repeat("a;007\r\n", 70<<10/7) + "b;\xFDeker\r\n"
 	h := newCSVHarness(t, original)
 	resp := h.save(t, ds("a,7"), "csv")
 	assert.Equal(t, 0, resp["error"])
-	assert.Equal(t, "a;7\r\n", h.disk(t))
+	assert.Equal(t, "a;007\r\n", h.disk(t), "0.56 wrote a;7: it gave up on a file that is not UTF-8")
+}
+
+// ⚠ Task #255: ONLYOFFICE Docs 10.0 keeps the file's own delimiter when it
+// saves a CSV. 0.51 to 0.56 read every save as comma-separated: a Docs 10
+// save of this semicolon file was one column, and every row was written as
+// one quoted field (`"elma;42;""a; b"";7;5320000001;1/2/2026"`, e2e 199 on
+// Docs 10.0, ci run 38276862982). The save's delimiter is read from it now.
+func TestCSVCallback_ADocs10SaveKeepsTheFilesColumns(t *testing.T) {
+	original := crlf("ad;adet;not;kod;tel;tarih",
+		`elma;3;"a; b";007;05320000001;01.02.2026`,
+		"armut;5;şeker;042;05330000002;15.03.2026")
+	want := strings.Replace(original, "elma;3;", "elma;42;", 1)
+	for name, bom := range map[string]bool{"with a byte order mark": true, "without one": false} {
+		t.Run(name, func(t *testing.T) {
+			h := newCSVHarness(t, original)
+			resp := h.save(t, ds10(bom, "ad;adet;not;kod;tel;tarih",
+				`elma;42;"a; b";7;5320000001;1/2/2026`,
+				"armut;5;şeker;42;5330000002;15.03.2026"), "csv", "7")
+			assert.Equal(t, 0, resp["error"])
+			assert.Equal(t, want, h.disk(t))
+		})
+	}
+}
+
+// Docs 9.4's comma save and Docs 10's save in the file's delimiter of the
+// measured file both come back as the same file. Its cells hold decimal
+// commas: a Docs 10 line has as many commas as semicolons in places, so a
+// count of delimiters cannot tell; the cells can.
+func TestCSVCallback_Docs94AndDocs10SavesWriteTheSameFile(t *testing.T) {
+	docs10 := ds10(false,
+		"Ad;Telefon;Kimlik No;Kart No;Tarih;Tutar;Kod;Not",
+		"Çağrı Öztürk;5320000001;12345678901;1234567890123456;1/2/2026;3,5;7;degisti;",
+		"Şule Iğdır;5330000002;10987654321;9999888877776666;15.03.2026;1250,75;42;ığüşöç İĞÜŞÖÇ;",
+		"Deneme Üç;5050000003;11111111111;4000000000000002;31.12.2025;0,5;0;boş değil;",
+		"",
+		";bunu deneme için masaüstünden girip yazıyorum",
+	)
+	for name, saved := range map[string]string{"Docs 9.4": measuredSaved, "Docs 10": docs10} {
+		t.Run(name, func(t *testing.T) {
+			h := newCSVHarness(t, measuredOriginal)
+			resp := h.save(t, saved, "csv", "7")
+			assert.Equal(t, 0, resp["error"])
+			assert.Equal(t, measuredWant, h.disk(t))
+		})
+	}
 }
 
 func TestCSVCallback_AFileGoneFromTheStorageIsWrittenTheServersWay(t *testing.T) {
@@ -521,10 +596,10 @@ func TestCSVCallback_AFileLongerThanItsRowSaysIsNotComparedCutShort(t *testing.T
 	// Longer than the head the dialect is read from, and than the bound.
 	longer := crlf("kod;tel") + strings.Repeat("007;05320000001\r\n", (80<<10)/17)
 	require.NoError(t, os.WriteFile(filepath.Join(h.root, h.node.Name), []byte(longer), 0o644))
-	defer func(n int64) { csvKeepMaxBytes = n }(csvKeepMaxBytes)
-	csvKeepMaxBytes = 72 << 10
-	require.Less(t, h.node.Size, csvKeepMaxBytes, "the row still says the short file")
-	require.Greater(t, int64(len(longer)), csvKeepMaxBytes)
+	defer func(n int64) { officesave.KeepMaxBytes = n }(officesave.KeepMaxBytes)
+	officesave.KeepMaxBytes = 72 << 10
+	require.Less(t, h.node.Size, officesave.KeepMaxBytes, "the row still says the short file")
+	require.Greater(t, int64(len(longer)), officesave.KeepMaxBytes)
 	log := captureLog(t)
 
 	resp := h.save(t, ds("kod,tel", "7,5320000001"), "csv")
@@ -548,7 +623,7 @@ func TestCSVCallback_ASaveFilexFailedToKeepIsAWarning(t *testing.T) {
 	assert.Contains(t, logLine(t, log(), "CSV cells not kept", "why=check_failed"), "level=WARN")
 
 	log = captureLog(t)
-	csvNotKept(h.node, CSVKept{Why: "panic", Panic: "index out of range [3] with length 3\ngoroutine 7 [running]:"})
+	csvNotKept(h.node, officesave.CSVKept{Why: "panic", Panic: "index out of range [3] with length 3\ngoroutine 7 [running]:"})
 	line := logLine(t, log(), "CSV cells not kept", "why=panic")
 	assert.Contains(t, line, "level=WARN")
 	assert.Contains(t, line, "path=/list.csv")
@@ -556,9 +631,9 @@ func TestCSVCallback_ASaveFilexFailedToKeepIsAWarning(t *testing.T) {
 	assert.Contains(t, line, "goroutine 7", "and where")
 
 	log = captureLog(t)
-	csvNotKept(h.node, CSVKept{Why: "not_utf8"})
+	csvNotKept(h.node, officesave.CSVKept{Why: "not_utf8"})
 	assert.Contains(t, logLine(t, log(), "CSV cells not kept", "why=not_utf8"), "level=INFO")
 	log = captureLog(t)
-	csvNotKept(h.node, CSVKept{Why: "empty"})
+	csvNotKept(h.node, officesave.CSVKept{Why: "empty"})
 	assert.Empty(t, log(), "an empty file has no cell to keep: nothing to say")
 }

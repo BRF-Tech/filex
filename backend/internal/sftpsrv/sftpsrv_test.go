@@ -540,43 +540,8 @@ func TestLargeFileRoundTripIsByteIdentical(t *testing.T) {
 // A Turkish name has to survive the round trip. SFTP v3 has no defined
 // filename charset, and a client that sniffs badly shows mojibake — so the
 // bytes filex emits must be plain UTF-8 and must come back unchanged.
-func TestTurkishFilenamesSurvive(t *testing.T) {
-	hz := newHarness(t)
-	hz.user(t, "sftp@example.com")
-	st := hz.storage(t, "main")
-	cl := hz.mustDial(t, "sftp@example.com", testPassword)
-
-	const name = "/main/gölge dosya şğüöç.txt"
-	w, err := cl.Create(name)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	w.Write([]byte("türkçe"))
-	if err := w.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-
-	entries, err := cl.ReadDir("/main")
-	if err != nil {
-		t.Fatalf("readdir: %v", err)
-	}
-	found := false
-	for _, e := range entries {
-		if e.Name() == "gölge dosya şğüöç.txt" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("the Turkish name is not in the listing: %v", names(entries))
-	}
-	if _, err := cl.Stat(name); err != nil {
-		t.Fatalf("stat by the same name failed: %v", err)
-	}
-	// And on disk with the same bytes, not a re-encoded approximation.
-	if _, err := os.Stat(filepath.Join(hz.rootOf(t, st), "gölge dosya şğüöç.txt")); err != nil {
-		t.Fatalf("the file is not on disk under its own name: %v", err)
-	}
-}
+// The Turkish-name round trip that stood here is TestHostileNamesSurvive
+// (hostile_names_test.go), which walks the shared hostile names (task #238).
 
 func names(entries []os.FileInfo) []string {
 	out := make([]string, 0, len(entries))

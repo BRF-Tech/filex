@@ -146,9 +146,3 @@ func TestSessionBase_ASecondOpenerJoinsTheRunningSessionsVersion(t *testing.T) {
 	stale, _ := h.svc.SessionState(ctx, h.node, first)
 	assert.True(t, stale, "the second opener moved the base to a version the session never had")
 }
-
-func TestConflictName(t *testing.T) {
-	at := time.Date(2026, 10, 6, 13, 15, 0, 0, time.FixedZone("TRT", 3*3600))
-	assert.Equal(t, "Bütçe Özeti.filex-conflict-20261006T101500.xlsx", conflictName("Bütçe Özeti.xlsx", at), "UTC, like the desktop's")
-	assert.Equal(t, "README.filex-conflict-20261006T101500", conflictName("README", at))
-}

@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -112,18 +115,194 @@ func TestSyncConfirm_EndsTheHold(t *testing.T) {
 	require.FileExists(t, file, "confirm touches no file")
 }
 
-func TestSyncDiscard_MovesTheHeldFilesToTheLocalTrash(t *testing.T) {
-	st, _, file := holdingPair(t)
+// ── discard: only what the server still has (task #259) ──────────────────
+//
+// The owner's decision of 2026-10-15: "Delete from this computer" deletes a
+// held file only when the server holds an identical copy of it (sha256) - in
+// the person's trash, or elsewhere in the pair's storage. A held file is held
+// BECAUSE the server does not have it at that path; without the copy the
+// deletion would be the last copy of it gone.
 
-	err, out, _ := runSync(t, context.Background(), "discard", "pair-1")
+const staleBody = "cleaned up on the server"
+
+// copyServer is the server a discard asks: the trash listing, the trash's
+// own comparison (POST /trash/same), the search, and the download.
+type copyServer struct {
+	*httptest.Server
+	trash        map[int64]string  // trash entry id -> its bytes (name stale.txt)
+	live         map[string]string // storage-relative path -> bytes, in docs://
+	searchStatus int               // non-zero: the search answers this
+	same         atomic.Int64      // POST /trash/same requests
+	downloads    atomic.Int64
+}
+
+func newCopyServer(t *testing.T) *copyServer {
+	t.Helper()
+	cs := &copyServer{trash: map[int64]string{}, live: map[string]string{}}
+	cs.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/files/manager/trash":
+			var entries []map[string]any
+			for id, b := range cs.trash {
+				entries = append(entries, map[string]any{"id": id, "storage_id": 1, "storage_name": "docs",
+					"path": "/work/stale.txt", "name": "stale.txt", "size": len(b)})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"entries": entries, "total": len(entries), "limit": 500, "offset": 0})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/files/manager/trash/same":
+			cs.same.Add(1)
+			var req struct {
+				Items []struct {
+					ID     int64  `json:"id"`
+					SHA256 string `json:"sha256"`
+				} `json:"items"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			var out []map[string]any
+			for _, it := range req.Items {
+				b, ok := cs.trash[it.ID]
+				out = append(out, map[string]any{"id": it.ID, "same": ok && sumOf([]byte(b)) == it.SHA256, "checked": true})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": out})
+		case r.URL.Path == "/api/files/search":
+			if cs.searchStatus != 0 {
+				w.WriteHeader(cs.searchStatus)
+				_, _ = w.Write([]byte(`{"error":"search_disabled"}`))
+				return
+			}
+			q := r.URL.Query()
+			var hits []map[string]any
+			for rel, b := range cs.live {
+				if path.Base(rel) == q.Get("q") && strconv.Itoa(len(b)) == q.Get("min_size") {
+					hits = append(hits, map[string]any{"id": 9, "storage_id": 1, "name": path.Base(rel), "path": "/" + rel, "type": "file", "size": len(b)})
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"results": hits, "total": len(hits)})
+		case r.URL.Path == "/api/files/manager" && r.URL.Query().Get("action") == "download":
+			cs.downloads.Add(1)
+			b, ok := cs.live[strings.TrimPrefix(r.URL.Query().Get("path"), "docs://")]
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+			_, _ = w.Write([]byte(b))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"not_found"}`))
+		}
+	}))
+	t.Cleanup(cs.Close)
+	return cs
+}
+
+func (cs *copyServer) discard(t *testing.T, extra ...string) (error, string) {
+	t.Helper()
+	err, out, _ := runSync(t, context.Background(), append([]string{"discard", "pair-1", "--url", cs.URL, "--token", "t"}, extra...)...)
+	return err, out
+}
+
+func stillHeld(t *testing.T, st *filesync.Store) filesync.Pair {
+	t.Helper()
+	pairs, err := st.LoadPairs()
 	require.NoError(t, err)
-	require.Equal(t, "pair-1: moved 1 held file(s) to the local sync trash.\n", out)
+	return pairs[0]
+}
+
+// Its identical copy is in the person's trash on the server: deleted here.
+func TestSyncDiscard_DeletesAHeldFileTheServersTrashHolds(t *testing.T) {
+	st, _, file := holdingPair(t)
+	cs := newCopyServer(t)
+	cs.trash[7] = staleBody
+
+	err, out := cs.discard(t)
+	require.NoError(t, err)
+	require.Equal(t, "pair-1: deleted 1 held file(s) from this computer - the server holds an identical copy of each.\n", out)
 	require.NoFileExists(t, file)
-	items, err := st.ListTrash("pair-1")
+	// Deleted, not moved into a local trash (task #259).
+	require.NoDirExists(t, filepath.Join(st.Dir, "trash"))
+	require.False(t, stillHeld(t, st).HoldNew, "nothing is left to decide about")
+}
+
+// Its identical copy is a live file elsewhere in the pair's storage: deleted
+// here too, after its bytes were downloaded and compared.
+func TestSyncDiscard_DeletesAHeldFileTheStorageHoldsElsewhere(t *testing.T) {
+	st, _, file := holdingPair(t)
+	cs := newCopyServer(t)
+	cs.live["archive/2025/stale.txt"] = staleBody
+
+	err, out := cs.discard(t, "--json", "--lang", "en")
 	require.NoError(t, err)
-	require.Len(t, items, 1)
-	pairs, _ := st.LoadPairs()
-	require.False(t, pairs[0].HoldNew)
+	require.NoFileExists(t, file)
+	evs := streamEvents(t, out)
+	require.Equal(t, "hello", evs[0]["code"])
+	require.Equal(t, "discard.deleted", evs[1]["code"])
+	require.Equal(t, "stale.txt", param(evs[1], "path"))
+	require.Equal(t, "docs://archive/2025/stale.txt", param(evs[1], "where"))
+	require.Equal(t, "discard.done", evs[len(evs)-1]["code"])
+	require.EqualValues(t, 1, param(evs[len(evs)-1], "deleted"))
+	require.False(t, stillHeld(t, st).HoldNew)
+}
+
+// ⚠⚠ The point of the rule. The trash has a file of the same name and size,
+// with other bytes, and the storage has nothing: the server holds no copy, so
+// the file stays - and stays HELD (released, the next run would upload it) -
+// and the person is told why.
+func TestSyncDiscard_KeepsAHeldFileTheServerHasNoCopyOf(t *testing.T) {
+	st, _, file := holdingPair(t)
+	cs := newCopyServer(t)
+	cs.trash[7] = strings.Repeat("x", len(staleBody)) // same size, other bytes
+
+	err, out := cs.discard(t)
+	require.NoError(t, err)
+	require.FileExists(t, file)
+	require.Contains(t, out, "  stale.txt - the server has no identical copy of it\n")
+	require.Contains(t, out, "pair-1: deleted 0 held file(s) from this computer")
+	require.Contains(t, out, "1 item(s) stay here and are still held")
+	p := stillHeld(t, st)
+	require.True(t, p.HoldNew, "a file kept here must stay held, or the next run uploads it")
+	require.Equal(t, 1, p.Held)
+	require.EqualValues(t, 1, cs.same.Load(), "the trash entry of its size was compared on the server")
+}
+
+// A file that changed after it was held is not what the person decided
+// about: it stays, held, and the server is not even asked.
+func TestSyncDiscard_KeepsAFileThatChangedAfterItWasHeld(t *testing.T) {
+	st, _, file := holdingPair(t)
+	cs := newCopyServer(t)
+	cs.trash[7] = staleBody
+	require.NoError(t, os.WriteFile(file, []byte("written here since, much longer than before"), 0o644))
+
+	err, out := cs.discard(t, "--json", "--lang", "tr")
+	require.NoError(t, err)
+	require.FileExists(t, file)
+	evs := streamEvents(t, out)
+	var kept map[string]any
+	for _, ev := range evs {
+		if ev["code"] == "discard.kept_changed" {
+			kept = ev
+		}
+	}
+	require.NotNil(t, kept, out)
+	require.Equal(t, "stale.txt: burada kalıyor; bekletildikten sonra değişti", kept["message"])
+	require.Zero(t, cs.same.Load(), "a changed file is not compared")
+	require.True(t, stillHeld(t, st).HoldNew)
+}
+
+// The server could not search its storage (search off) and the trash does
+// not have it: "no copy" cannot be said, so the file stays, and the reason
+// says the server could not be asked - not that it has no copy.
+func TestSyncDiscard_KeepsAFileWhenTheServerCannotSearch(t *testing.T) {
+	st, _, file := holdingPair(t)
+	cs := newCopyServer(t)
+	cs.searchStatus = http.StatusServiceUnavailable
+
+	err, out := cs.discard(t)
+	require.NoError(t, err)
+	require.FileExists(t, file)
+	require.Contains(t, out, "  stale.txt - the server could not be asked whether it has a copy: ")
+	require.True(t, stillHeld(t, st).HoldNew)
 }
 
 func TestSyncList_JSONCarriesTheHold(t *testing.T) {

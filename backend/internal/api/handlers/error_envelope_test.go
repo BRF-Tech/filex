@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -90,6 +93,39 @@ func TestErrorEnvelope_EveryCodeIsSaidInBothLanguages(t *testing.T) {
 			assert.NotEmpty(t, apierr.Text(lang, code, apierr.Params{"name": "x", "max": "2", "limit": "3"}), "%s %s", lang, code)
 		}
 		assert.NotEqual(t, apierr.Text("en", code, nil), apierr.Text("tr", code, nil), "%s is not translated", code)
+	}
+}
+
+// Every code a handler writes as a literal - writeError(w, r, status, "code",
+// ...) - has its sentence in both shipped languages: Map answers an unknown
+// code with "message": "", and every client prints that empty string.
+//
+// RED PROOF (int/057-wave 60f73d64): POST /manager/trash/same (#259) answered
+// 400 {"error":"trash_same_items","message":""} - the route and its code came
+// in without a server.error.trash_same_items sentence.
+func TestErrorEnvelope_EveryLiteralCodeAHandlerWritesHasItsSentence(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+	call := regexp.MustCompile(`writeError\(\s*w\s*,\s*r\s*,\s*[^,]+,\s*"([a-z0-9_]+)"`)
+	seen := map[string]string{}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(f)
+		require.NoError(t, err)
+		for _, m := range call.FindAllStringSubmatch(string(src), -1) {
+			seen[m[1]] = f
+		}
+	}
+	require.Greater(t, len(seen), 50, "the pattern still finds the handlers' refusals")
+	for code, f := range seen {
+		if !assert.True(t, apierr.Known(code), "%s (%s) has no server.error.%s sentence", code, f, code) {
+			continue
+		}
+		en, tr := apierr.Text("en", code, nil), apierr.Text("tr", code, nil)
+		assert.NotEmpty(t, tr, "%s (%s) has no Turkish sentence", code, f)
+		assert.NotEqual(t, en, tr, "%s (%s) is not translated", code, f)
 	}
 }
 

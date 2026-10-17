@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 // The TAR family and the bare single-stream compressors are read by filex
@@ -385,6 +386,9 @@ func (s *Service) extractStream(ctx context.Context, archivePath, logicalName, d
 		switch {
 		case isDir:
 			if err := os.MkdirAll(target, 0o700); err != nil {
+				if nameTooLong(err) {
+					continue
+				}
 				return err
 			}
 		case isFile:
@@ -392,12 +396,22 @@ func (s *Service) extractStream(ctx context.Context, archivePath, logicalName, d
 				return extractionLimitError()
 			}
 			if err := writeMember(ctx, target, tr, budget); err != nil {
+				if nameTooLong(err) {
+					continue
+				}
 				return err
 			}
 		}
 	}
 	return src.failed()
 }
+
+// nameTooLong reports a member the workspace's disk cannot hold under its
+// name (ENAMETOOLONG: over 255 bytes in one name). That member is skipped and
+// the rest extracted, as the ZIP reader skips a member the storage refuses
+// (task #238): one long name used to fail the whole job. tar.Reader.Next
+// skips the member's unread bytes by itself.
+func nameTooLong(err error) bool { return errors.Is(err, syscall.ENAMETOOLONG) }
 
 // byteBudget is the exact limit: Write refuses the whole chunk that would
 // cross it, so the bytes on disk never exceed MaxExpandedBytes.
@@ -459,7 +473,9 @@ func CleanMemberPath(name string) (string, error) {
 	if clean == "" {
 		return "", errors.New("empty after sanitize")
 	}
-	if len(clean) >= 2 && clean[1] == ':' {
+	// A drive letter is a LETTER and a colon (`C:x`); `1:1 notes.txt` is a
+	// name (task #238).
+	if len(clean) >= 2 && clean[1] == ':' && (clean[0]|0x20) >= 'a' && (clean[0]|0x20) <= 'z' {
 		return "", fmt.Errorf("absolute path: %q", name)
 	}
 	for _, part := range strings.Split(clean, "/") {
@@ -468,7 +484,9 @@ func CleanMemberPath(name string) (string, error) {
 		}
 	}
 	clean = strings.TrimLeft(path.Clean("/"+clean), "/")
-	if clean == "" || strings.HasPrefix(clean, "..") {
+	// `..` itself or a `../` start, not a name that begins with two dots
+	// (`..notes`, task #238).
+	if clean == "" || clean == ".." || strings.HasPrefix(clean, "../") {
 		return "", fmt.Errorf("clean rejected: %q", name)
 	}
 	return clean, nil

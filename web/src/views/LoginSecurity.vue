@@ -285,10 +285,23 @@ const proxyDirty = computed(() => {
 const trustsNobody = computed(() => ALL_KEYS.every((k) => !proxyClasses[k]) && proxyDraft.value.length === 0);
 const forwarders = computed(() => state.value?.untrusted_forwarders ?? []);
 
-const SOURCES = ['setting', 'env', 'auto'];
+const SOURCES = ['seeded', 'setting', 'env', 'auto'];
+/** The configuration's list (FILEX_TRUSTED_PROXIES), the seed of the saved one. */
+const configured = computed(() => state.value?.trusted_proxies_configured ?? null);
 const sourceText = computed(() => {
   const s = state.value?.trusted_proxies_source;
-  return s && SOURCES.includes(s) ? t(`loginSecurity.proxies.source.${s}`) : '';
+  if (!s || !SOURCES.includes(s)) return '';
+  return t(`loginSecurity.proxies.source.${s}`, { source: configured.value?.source ?? 'FILEX_TRUSTED_PROXIES' });
+});
+/** The saved list overrules the configuration's: said, with the command that applies it. */
+const configuredDiffers = computed(() => {
+  const c = configured.value;
+  if (!c?.differs) return '';
+  return t('loginSecurity.proxies.configuredDiffers', {
+    source: c.source,
+    list: c.entries.join(', '),
+    command: 'filex settings reseed login.trusted_proxies',
+  });
 });
 const classLabels = computed<Record<keyof TrustedClasses, { label: string; desc: string }>>(() => ({
   auto: { label: t('loginSecurity.proxies.class.auto'), desc: t('loginSecurity.proxies.class.autoHint') },
@@ -692,6 +705,13 @@ onBeforeUnmount(() => clearInterval(timer));
           <span class="font-medium">{{ t('loginSecurity.proxies.inForce') }}</span>
           <Badge size="xs" tone="sky" data-testid="login-proxies-source">{{ sourceText }}</Badge>
         </div>
+        <p
+          v-if="configuredDiffers"
+          class="text-sm text-zinc-600 dark:text-zinc-300"
+          data-testid="login-proxies-configured"
+        >
+          {{ configuredDiffers }}
+        </p>
         <Toggle
           v-model="proxyClasses.auto"
           name="login-proxies-class-auto"

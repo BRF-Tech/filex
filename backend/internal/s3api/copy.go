@@ -12,6 +12,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
@@ -78,6 +79,13 @@ func (h *Handler) copyObject(w http.ResponseWriter, r *http.Request, p *protocol
 		WriteError(w, r, http.StatusBadRequest, "InvalidArgument", "x-amz-copy-source is malformed or names a version")
 		return
 	}
+	// The source is a key like any other (keyError): `./a.txt` or `a//a.txt`
+	// is a.txt spelled again, and a copy onto a.txt from that spelling passed
+	// the same-object test below and emptied the file it read from.
+	if err := keyError(src.Key); err != nil {
+		writeKeyError(w, r, err)
+		return
+	}
 
 	// ── the destination must be writable ──
 	if dstKey == "" || strings.HasSuffix(dstKey, "/") {
@@ -118,6 +126,14 @@ func (h *Handler) copyObject(w http.ResponseWriter, r *http.Request, p *protocol
 		WriteError(w, r, http.StatusNotFound, "NoSuchKey", "the source key does not exist")
 		return
 	}
+	// A copy that would make an object downloadable where it is not - its
+	// files.download refused at the source, allowed at the destination - is
+	// refused as GetObject refuses the download (protoperm.DownloadLifted).
+	// AccessDenied, after readable: this caller may already see the key.
+	if protoperm.DownloadLifted(srcSet, src.Key, dstSet, dstKey) {
+		WriteError(w, r, http.StatusForbidden, "AccessDenied", "permission denied: your account lacks the files.download permission")
+		return
+	}
 
 	srcDrv, err := h.cfg.Resolver(srcSt.ID)
 	if err != nil {
@@ -132,7 +148,7 @@ func (h *Handler) copyObject(w http.ResponseWriter, r *http.Request, p *protocol
 
 	stat, err := srcDrv.Stat(ctx, src.Key)
 	if err != nil {
-		WriteError(w, r, statusForStorageErr(err), codeForStorageErr(err), "the source key does not exist")
+		h.storageFailed(w, r, true, err)
 		return
 	}
 	if stat.Kind == storage.KindDirectory {
@@ -190,14 +206,14 @@ func (h *Handler) copyObject(w http.ResponseWriter, r *http.Request, p *protocol
 		var refused *overwriteRefusedError
 		if errors.As(err, &refused) {
 			// The S3 surface's own way of saying "refused, not failed": the
-			// write never happened. statusForStorageErr/codeForWriteErr do not
-			// recognise this error -- it is neither ErrNotFound, ErrReadOnly
-			// nor ErrUnsupported -- and would default it to a bare 500.
+			// write never happened. storageAnswer does not recognise this
+			// error -- it is neither ErrNotFound, ErrReadOnly nor
+			// ErrUnsupported -- and would default it to a bare 500.
 			WriteError(w, r, http.StatusServiceUnavailable, "ServiceUnavailable",
 				"could not preserve the existing object: "+refused.err.Error())
 			return
 		}
-		WriteError(w, r, statusForStorageErr(err), codeForWriteErr(err), err.Error())
+		h.storageFailed(w, r, true, err)
 		return
 	}
 

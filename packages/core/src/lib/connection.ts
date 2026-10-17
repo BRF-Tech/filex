@@ -64,13 +64,75 @@ export const connectionDownSince: ComputedRef<number> = computed(() => downSince
 export const connectionFolded: ComputedRef<number> = computed(() => folded.value);
 
 /**
+ * THE PAGE'S OWN FAILURES ARE NOT A LOST CONNECTION (task #260).
+ *
+ * Two kinds of request end with no answer while the server is perfectly
+ * reachable, and neither may raise the notice:
+ *
+ *   - one the page CANCELLED - an AbortController, axios' cancel
+ *     (`ERR_CANCELED`, or `ECONNABORTED` "Request aborted" for an XHR the
+ *     browser aborted). A timeout is NOT one of them: axios says ECONNABORTED
+ *     for that too, with "timeout of N ms exceeded", and a server that does
+ *     not answer in time is exactly what the notice is for;
+ *   - one the BROWSER dropped because the page is being left. WebKit fails
+ *     every request in flight with a bare "Load failed" TypeError the moment
+ *     a navigation starts - indistinguishable from a dead network by its
+ *     error alone - and it did so on the 0.56.3 GitHub gate: the person's
+ *     explorer was opened while the start page was still asking for things,
+ *     and the strip said "The server could not be reached" (e2e 179, webkit).
+ *     So the page's own departure is remembered (`beforeunload`/`pagehide`)
+ *     and a failure in the next LEAVE_GRACE_MS is the departure's, not the
+ *     network's. The grace is short on purpose: a `beforeunload` that does
+ *     not end in leaving (a download link, a cancelled prompt) must not mute
+ *     a real outage for long, and `pageshow` (back from the bfcache) ends it.
+ */
+export const LEAVE_GRACE_MS = 3000;
+
+let leftAt = 0;
+
+/** The page has started to go away (the listeners below; a test calls it). */
+export function notePageLeaving(now: number = Date.now()): void {
+  leftAt = now || 1;
+}
+
+/** The page is here after all (`pageshow`, a test). */
+export function notePageStaying(): void {
+  leftAt = 0;
+}
+
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('beforeunload', () => notePageLeaving());
+  window.addEventListener('pagehide', () => notePageLeaving());
+  window.addEventListener('pageshow', () => notePageStaying());
+}
+
+/** Is `cause` a cancellation, as opposed to a request nobody answered? */
+export function wasCancelled(cause: unknown): boolean {
+  const e = cause as { name?: unknown; code?: unknown; message?: unknown } | null | undefined;
+  if (!e || typeof e !== 'object') return false;
+  if (e.name === 'AbortError' || e.name === 'CanceledError' || e.code === 'ERR_CANCELED') return true;
+  return e.code === 'ECONNABORTED' && typeof e.message === 'string' && /aborted/i.test(e.message);
+}
+
+/** Did this failure come from the page itself (cancelled, or the page is being left)? */
+export function failureIsThePagesOwn(cause?: unknown, now: number = Date.now()): boolean {
+  if (wasCancelled(cause)) return true;
+  return leftAt !== 0 && now - leftAt < LEAVE_GRACE_MS;
+}
+
+/**
  * A request got no answer at all. Raises the shared notice and says whether
  * this particular failure is the caller's to report.
  *
  * ⚠ An ACTION raises the notice too. The connection is down either way, and
  * the person's own message ("could not be renamed") does not explain why.
+ *
+ * ⚠ A failure that is the page's own (`failureIsThePagesOwn`: cancelled, or
+ * the page is being left) raises nothing and is not the caller's to report
+ * either: the person cancelled it or is already somewhere else.
  */
-export function noteRequestFailed(kind: RequestKind, now: number = Date.now()): FailureVerdict {
+export function noteRequestFailed(kind: RequestKind, now: number = Date.now(), cause?: unknown): FailureVerdict {
+  if (failureIsThePagesOwn(cause, now)) return 'folded';
   if (downSince.value === 0) downSince.value = now || 1;
   if (kind === 'background') {
     folded.value += 1;
@@ -94,6 +156,7 @@ export function noteRequestSucceeded(): void {
 export function resetConnectionNotice(): void {
   downSince.value = 0;
   folded.value = 0;
+  leftAt = 0;
 }
 
 /**

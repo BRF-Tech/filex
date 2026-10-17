@@ -338,8 +338,10 @@ func TestUISec_PackageFetchReadsItsOwnVersionOnly(t *testing.T) {
 			}
 		}
 	}
-	assert.Equal(t, "Its interface reads its own package - the files of this version, nothing else", labels["en"])
-	assert.Equal(t, "Arayüzü kendi paketini okur - yalnız bu sürümün dosyalarını, başka hiçbir şeyi değil", labels["tr"])
+	// 0.57: and the files an administrator adds to the app (extras.go), which
+	// it reads under its own package path - the review says so.
+	assert.Equal(t, "Its interface reads its own package - the files of this version and the ones an administrator adds to it, nothing else", labels["en"])
+	assert.Equal(t, "Arayüzü kendi paketini okur - yalnız bu sürümün dosyalarını ve bir yöneticinin ona eklediklerini, başka hiçbir şeyi değil", labels["tr"])
 
 	plain, err := ParseManifest(uiManifest(t, nil))
 	require.NoError(t, err)

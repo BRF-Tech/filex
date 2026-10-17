@@ -1298,7 +1298,12 @@ Smaller files can use `POST /api/files/manager?action=upload` (single-shot
 `multipart/form-data`); anything larger, and anything that should survive a
 dropped connection, is the staged upload, `POST /api/files/upload/begin`
 ([UPLOADS.md](UPLOADS.md)). Both ask the account's quota and the per-file
-upload limit before anything is stored.
+upload limit before anything is stored, and every file's name
+([File names](FILE-NAMES.md#the-names-filex-refuses)) before the first byte of
+the batch is written. The single-shot form takes, beside each `file[]` part,
+an optional `name[]` field with the file's exact name, in the same order: a
+browser writes `"`, CR and LF in a part's filename as `%22`, `%0D`, `%0A`, and
+filex never guesses which `%22` was meant.
 
 The presigned S3 multipart upload (`POST /api/files/upload/init`, `/finalize`
 and `/abort`) was **removed in 0.54.0**: no filex client spoke it any more. A
@@ -1376,7 +1381,11 @@ is refused when extracted).
 `dest` defaults to the archive's own folder and must be on the **same
 storage** (`400` otherwise). `members` extracts just those entries; omit it for
 the whole archive. Needs viewer on the archive and `files.create` (editor) on
-`dest`.
+`dest`. An archive the caller may not download is not extracted where its
+members could be downloaded (`403 permission_denied`, `files.download`); a
+member that would be downloadable where it lands, from an archive that is
+not, is skipped and counted in the result's `withheld`
+([RBAC.md](RBAC.md#every-file-in-a-folder-answers-the-download-rule)).
 
 **Response 202** - the work is queued, with progress and Cancel in the
 operations center:
@@ -1836,8 +1845,12 @@ The same gate, the same cookie and the same statuses as the `/s/` PIN.
 
 ### `POST /api/public/d/{token}/upload` ![public](https://img.shields.io/badge/-public-lightgrey)
 
-`multipart/form-data` with `file[]` (and `name` when `ask_name`). The PIN may
-be a form field or already answered on this browser (the cookie). Same ingest,
+`multipart/form-data` with `file[]` (or `file`), and optionally one `name[]`
+field per file, in the same order, carrying the file's exact name (a browser
+writes a `"` in a part's filename as `%22`; see
+[File names](FILE-NAMES.md#what-each-surface-does)), and `name` when
+`ask_name`. The PIN may be a form field or already answered on this browser
+(the cookie). Same ingest,
 limits, quota accounting and owner notification as the no-JS form - there is
 one upload path. **401** `bad_pin` · **429** `locked` / `rate_limited` ·
 **410** `expired` · **404** `not_found` (also when the link's creator no longer
@@ -1845,7 +1858,8 @@ holds `share.upload_links` there) · **413** `file_too_large` (the link's own
 limit, or its creator's largest file) · **415** `ext_not_allowed` (outside the
 link's list, or a type its creator's role blocks) · **422** `too_many_files` /
 `exceeds_remaining` · **400** `name_too_long` (an uploader name over
-`limits.name_max`). Every refusal carries `message`, the server's sentence in
+`limits.name_max`) · **400** `bad_name` (a file name no door accepts) ·
+**400** `file_name_too_long` (a file name longer than the storage holds). Every refusal carries `message`, the server's sentence in
 the visitor's language.
 
 ### Which answer `/s/` and `/d/` give
@@ -3053,7 +3067,7 @@ account's history and quota intact, prefer `enabled: false` over deletion.
 
 ## Admin: roles and permissions
 
-What each account may **do** - the 29 permissions, the built-in and custom
+What each account may **do** - the 30 permissions, the built-in and custom
 roles, a person's exceptions and the permissions installed apps declare. The
 model, the limits and every body are in
 [PERMISSIONS.md → API](PERMISSIONS.md#api); the routes:
@@ -3256,9 +3270,10 @@ administers everything. See
 `LastState` is one of `ok | unreachable | disabled | unconfigured | unknown`.
 Secrets are never returned - a configured one reads `"***"`.
 
-`env_managed` says the service is pinned by env/`config.yaml`. Its row is
-re-asserted from there at every boot, so a `PATCH` to it applies immediately but
-does not survive a restart.
+`env_managed` says env/`config.yaml` names the service. They SEED its row
+(first value only, since 0.57); a `PATCH` applies immediately and stands across
+restarts, and `filex settings reseed --external` writes the environment's
+values again.
 
 The `onlyoffice` row also carries the editor's language
 ([ONLYOFFICE.md → The editor's language](ONLYOFFICE.md#the-editors-language)):
@@ -3372,6 +3387,33 @@ arbitrary command execution. It stays in `FILEX_CLAMAV_BIN`. Full semantics:
 
 ---
 
+## Admin: server defaults (instance settings)
+
+The settings that were environment-only up to 0.56 - the default language,
+the sync interval, unfinished uploads, the file cache, the thumbnail cache's
+upkeep, the version-before-overwrite switch, the apps' limits, co-editing,
+the notifications switch and the default webhook's language - are rows of the
+`settings` table, seeded once from their variable
+([CONFIGURATION.md](CONFIGURATION.md#variables-that-seed-a-stored-setting)).
+One endpoint serves every card that draws them. ⚠ **Supertenant-only** on
+every verb (`403 supertenant_only` for a tenant's administrator).
+
+### `GET /api/admin/instance-settings?group=general` ![admin](https://img.shields.io/badge/-admin-red)
+`{"items": [...]}`, one per setting of the group (`general`, `protection`,
+`apps`, `notifications`, `webhooks`; none = every group): `key`, `group`,
+`kind` (`int` / `bool` / `language`), `value` (in force), `default`, `min` /
+`max` and `unit` for a number, `env` (the variable that gave the first value),
+`restart` (read at start) and `restart_pending` (a stored change this process
+does not run with yet).
+
+### `PATCH /api/admin/instance-settings` ![admin](https://img.shields.io/badge/-admin-red)
+`{"<key>": <value>, ...}`. Every value is checked against its setting first; one
+refused is a `400` with `field` (its key) and `message` (in the reader's
+language), and **nothing** is written. Answers the `GET` of `?group`. A live
+setting (`notify.webhook_lang`) applies at once; the others at the next start.
+
+---
+
 ## Admin: sign-in security
 
 ⚠ **Instance-wide, supertenant-only** in multi-tenant mode, on every verb: a
@@ -3393,6 +3435,7 @@ limits](CONFIGURATION.md#sign-in-attempt-limits).
   "limits": { "account_max_fails": { "min": 1, "max": 1000, "default": 5 }, "…": {} },
   "trusted_proxies_effective": ["loopback", "172.18.0.0/16"],
   "trusted_proxies_source": "auto",
+  "trusted_proxies_configured": null,
   "trusted_defaults": { "auto": true, "loopback": false, "private": false, "link_local": false },
   "trusted_addresses": [],
   "trusted_proxies_auto": {
@@ -3420,8 +3463,15 @@ brings, `private`, `link-local`), then the container networks `auto` resolved
 to, then its own addresses and networks; inside them,
 `trusted_proxies_auto.excluded_gateways` and `excluded_self` are never trusted
 when `auto` is in use. `trusted_proxies_source` says where the list came from:
-`setting`, `env` (`FILEX_TRUSTED_PROXIES`) or `auto` (neither is set - the
-built-in default). The same list, taken apart: `trusted_defaults` says which
+`seeded` (the saved list is `FILEX_TRUSTED_PROXIES`'s own, written at a first
+start - the variable is a seed since 0.57), `setting` (saved on the page),
+`env` (nothing saved: `FILEX_TRUSTED_PROXIES`, until the next start writes it
+in) or `auto` (neither is set - the
+built-in default). `trusted_proxies_configured` is the configuration's own
+list - `{source, entries, differs}`, `source` being `FILEX_TRUSTED_PROXIES` or
+`config.yaml trusted_proxies` - and `null` when it names none; `differs` is
+true when the saved list overrules it (`filex settings reseed
+login.trusted_proxies` writes it over the saved one). The same list, taken apart: `trusted_defaults` says which
 words it takes - `auto`, and the three classes, each Go's `net/netip` definition
 (`IsLoopback`, `IsPrivate` (the RFC 1918 / RFC 4193 private ranges),
 `IsLinkLocalUnicast`), not a range list of filex's own - and `trusted_addresses`

@@ -86,6 +86,9 @@ type Index struct {
 	// the process is over the search memory budget (content_batch.go).
 	cq  contentQueue
 	mem memoryGate
+	// budget is the last memory budget ApplyMemoryPercent set, for the
+	// Search page (settings.go).
+	budget budgetNote
 }
 
 // Open returns an Index ready to use. Pass empty path to disable.
@@ -117,8 +120,7 @@ func Open(path string) (*Index, error) {
 	// middle of a rebuild or a swap. See recoverInterrupted.
 	recoverInterrupted(path)
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		mapping := bleve.NewIndexMapping()
-		bx, err := bleve.New(path, mapping)
+		bx, err := bleve.New(path, indexMapping())
 		if err != nil {
 			return nil, err
 		}

@@ -15,13 +15,14 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-import { ciParts, completeName, gateParts } from '../ci-parts.mjs';
+import { FIXED, ciParts, completeName, gateParts } from '../ci-parts.mjs';
 import { goShellArgv, goToolchain } from '../lib/go-build.mjs';
 import { dockerfileSources, goPackageDirs } from './checks.mjs';
 import { docker, dockerImageId, run, shq, slash } from './engine.mjs';
 import { circleciPipelines } from './circleci.mjs';
 import { githubActions } from './github.mjs';
-import { desktopFeeds, docsSite, readmePictures, runningRelease, snapChannel, storeListing, updateManifest, windowsFeedArches } from './verify.mjs';
+import { ALL_SURFACES, publishes } from './surfaces.mjs';
+import { SNAP_CHECKED_CHANNELS, desktopFeeds, docsSite, readmePictures, runningRelease, snapChannel, storeListing, updateManifest, windowsFeedArches } from './verify.mjs';
 
 // The Store's version for a release (0.52.0 -> 1.0.5200.0), the same function the
 // Store build stamps into the package.
@@ -138,6 +139,9 @@ const ECHO = 'go: echo.wasm fixture';
 const BUILD_UI_SH = "pnpm -r --filter './packages/*' build && pnpm --filter ./web build && node scripts/sync-embed.mjs";
 const STORE_COPY = 'desktop: the Store package works as a Store copy';
 const STORE_COPY_SH = 'cd desktop && pnpm run build && node scripts/fetch-cli.mjs --platform win32 && node scripts/store-e2e.mjs';
+// #252: a server patch sends nothing to the Microsoft Store - nothing to
+// check on Windows, and nothing to defer off it.
+const STORE_COPY_SERVER_SKIP = 'a server patch sends nothing to the Microsoft Store';
 
 /**
  * #248 (the bridge until a Windows machine runs it for the release tool): on
@@ -222,12 +226,42 @@ const WORKFLOW_GUARDS = [
   // 0.48.1: only the newest winget pull request per package stays open.
   'closes superseded winget pull requests after the new one, for the CLI and the desktop app',
   'closes only older versions of the same package, and nothing when the new pull request is missing',
+  // #68: until winget has the desktop app, the release does not touch it -
+  // its first pull request waits for a moderator, and nothing opens, moves,
+  // signs or closes anything of the package (packaging/ci/release-winget-first-package.patch,
+  // web/tests/deploy/wingetFirstPackage.test.ts).
+  'closes no pull request of a package winget does not have yet, and none when it cannot tell (#68)',
+  'leaves the desktop app alone on winget while its first pull request waits for a moderator',
+  "says 'skipped: BRFTech.filex-app waits for a moderator on #<number>' while winget lacks it and our pull request is open, and touches nothing",
+  // #145: the AUR package needs the Linux packages, not the whole desktop
+  // matrix, and a run without its key says it skipped instead of failing
+  // (packaging/ci/release-aur-linux-only.patch,
+  // web/tests/deploy/releaseAurLinuxOnly.test.ts).
+  'the AUR waits for every desktop row to end and runs past a Windows row that failed, never past verify (#145)',
+  'without its key the AUR job says "skipped: no AUR key", stays green and does nothing else (#145)',
+  'the AUR job goes on only when the Release has the Linux packages it repackages (#145)',
+  // #266: the nightly desktop packages on GitHub's runners, every hour that
+  // the build host pushed a new source - nothing a release publishes
+  // (packaging/ci/nightly-desktop.patch, web/tests/deploy/nightlyDesktop.test.ts).
+  'the nightly desktop workflow runs every hour and by hand, and publishes nothing a release does',
+  'every row is made by the nightly job script from the source, unsigned, and the arm64 snap goes to edge alone',
+  "the night goes to ghcr as one artifact with its manifest, as nightly-<date> and nightly; old nights go without failing the run, a missing row fails it",
+  // #252: a server patch's tag run publishes the server's surface alone,
+  // once GitHub built its commit (packaging/ci/release-surfaces.patch,
+  // web/tests/deploy/releaseSurfaces.test.ts).
+  "a tag that says surfaces: server publishes the server's surface alone: plan reads it, npm and the desktop job do not run",
+  'verify publishes a server patch once ci.yml built its commit, and nothing when the build part failed or never came',
+  "a server patch's Release is not the latest, and carries no CLI package manager",
   // 0.50: the .deb and the AppImage open with Chromium's sandbox on, or
   // refuse. 0.52: the snap opens confined by snapd instead, and asks the
   // Store for no allow-sandbox (packaging/ci/release-snap-confinement.patch).
   "opens the .deb and the AppImage sandboxed, the AppImage's refusal, the snap confined",
   'installs the AppArmor profile docs/DESKTOP.md gives, word for word',
   'a snap waiting for the Snap Store review does not fail the release',
+  // #265: one upload to every channel, so the preview channels never lag a
+  // release (packaging/ci/release-snap-channels.patch,
+  // web/tests/deploy/releaseSnapChannels.test.ts).
+  'sends each Linux snap to stable, candidate, beta and edge in one upload, and says so',
   "tells a sandboxed app from one running without it, from /proc",
   "tells an app confined by its snap from one that is not, from /proc",
   // 0.52.0: GitHub Actions was down at the tag, and every channel but macOS
@@ -324,23 +358,75 @@ const WORKFLOW_GUARDS = [
  * carry. arm64 from 0.48.1: Linux and Windows desktop packages, the Linux
  * arm64 update feed, and the arm64 CLI the smoke tests ran.
  */
-export function releaseAssets(version) {
-  return [
-    'checksums.txt', 'latest.yml', 'latest-mac.yml', 'latest-linux.yml', 'latest-linux-arm64.yml',
+export function releaseAssets(version, surfaces = ALL_SURFACES) {
+  // What goreleaser publishes (the `binaries` job): every release's.
+  const binaries = [
+    'checksums.txt',
+    `filex_${version}_linux_x86_64.tar.gz`, `filex_${version}_windows_x86_64.zip`, `filex_${version}_darwin_arm64.tar.gz`,
+    `filex_${version}_linux_arm64.tar.gz`, `filex_${version}_windows_arm64.zip`,
+    'filex-linux-arm64', 'filex-windows-arm64.exe', 'filex-darwin-arm64',
+    'filex-linux-amd64', 'filex-windows-amd64.exe', 'filex-darwin-amd64',
+  ];
+  // What the desktop job attaches: a release of the desktop surface only
+  // (#252: a server patch attaches none, and GitHub's "latest" stays on the
+  // last release that has them, so every download link keeps working).
+  // 0.50: every file a download link names (the install prompt, Settings,
+  // DESKTOP.md, CLI.md, filex.sh) is on this list, so a release that drops
+  // one fails here instead of leaving a 404 behind a link
+  // (web/tests/composables/installDownloads.test.ts holds the links to it).
+  const desktop = [
+    'latest.yml', 'latest-mac.yml', 'latest-linux.yml', 'latest-linux-arm64.yml',
     'filex-desktop-x64.exe', 'filex-desktop-portable-x64.exe', 'filex-desktop-x86_64.AppImage',
     'filex-desktop-amd64.deb', 'filex-desktop-arm64.dmg',
     'filex-desktop-arm64.exe', 'filex-desktop-portable-arm64.exe', 'filex-desktop-arm64.AppImage',
     'filex-desktop-arm64.deb', 'filex-desktop-aarch64.rpm', 'filex-desktop-amd64.snap', 'filex-desktop-arm64.snap',
-    `filex_${version}_linux_x86_64.tar.gz`, `filex_${version}_windows_x86_64.zip`, `filex_${version}_darwin_arm64.tar.gz`,
-    `filex_${version}_linux_arm64.tar.gz`, `filex_${version}_windows_arm64.zip`,
-    'filex-linux-arm64', 'filex-windows-arm64.exe', 'filex-darwin-arm64',
-    // 0.50: every file a download link names (the install prompt, Settings,
-    // DESKTOP.md, CLI.md, filex.sh) is on this list, so a release that drops
-    // one fails here instead of leaving a 404 behind a link
-    // (web/tests/composables/installDownloads.test.ts holds the links to it).
     'filex-desktop-x86_64.rpm',
-    'filex-linux-amd64', 'filex-windows-amd64.exe', 'filex-darwin-amd64',
   ];
+  return publishes(surfaces, 'desktop') ? [...binaries, ...desktop] : binaries;
+}
+
+/**
+ * What a person is told when the Snap Store channels lag the release (#265):
+ * the Store holds the upload for a review, or the tag run never sent one -
+ * and the channels stay on the previous version until somebody looks. The
+ * release is not stopped for it (the rest is published by then); the
+ * commands to look and to release a revision by hand come with it.
+ */
+export function snapHeld(tag, version, rec) {
+  return {
+    title: `filex ${tag}: the Snap Store does not offer ${version} on every channel yet`,
+    message: [
+      String(rec?.detail ?? '').trim(),
+      '',
+      `The tag run's "Upload to the Snap Store" step says whether the Store holds the revision for a review ("waiting for manual review") or the upload failed.`,
+      'Revisions and their state:  snapcraft status filex-app  (or the Releases page on dashboard.snapcraft.io)',
+      'A revision that passed review but is not on a channel:  snapcraft release filex-app <revision> stable,candidate,beta,edge',
+      `The rest of ${tag} is read back without the stores:  pnpm release ${version} --resume --only deploy`,
+    ].join('\n'),
+  };
+}
+
+/**
+ * Whether a winget package waits for a moderator (task #68): it is not on
+ * winget-pkgs' master, and a first pull request of ours for it is open.
+ * { pr } (the oldest open one), {} when the package is on winget or none of
+ * ours is open, { error } when GitHub could not be asked. The release's
+ * winget-pending.sh asks the same two things before it touches the package.
+ */
+export function wingetWaits(id, { gh = (args) => run('gh', args) } = {}) {
+  const [publisher, ...rest] = id.split('.');
+  const dir = `manifests/${id[0].toLowerCase()}/${publisher}/${rest.join('.')}`;
+  const on = gh(['api', `repos/microsoft/winget-pkgs/contents/${dir}`, '--jq', 'length']);
+  if (on.status === 0) return {};
+  if (!/HTTP 404/.test(`${on.stderr}${on.stdout}`)) return { error: `is ${id} on winget? gh: ${(on.stderr || on.stdout).trim()}` };
+  const open = gh(['pr', 'list', '--repo', 'microsoft/winget-pkgs', '--author', 'brkfun', '--state', 'open', '--search', `${id} in:title`,
+    '--json', 'number,title,createdAt', '--jq', 'sort_by(.createdAt) | .[] | "\\(.number)\\t\\(.title)"']);
+  if (open.status !== 0) return { error: `open pull requests of ${id}: gh: ${(open.stderr || open.stdout).trim()}` };
+  for (const line of open.stdout.split('\n')) {
+    const [num, title = ''] = line.split('\t');
+    if (num && (title.startsWith(`New version: ${id} `) || title.startsWith(`New package: ${id} `))) return { pr: num };
+  }
+  return {};
 }
 
 /**
@@ -361,6 +447,15 @@ function wingetArches(version) {
         if (list.status !== 0) return { ok: false, detail: `could not check — gh: ${(list.stderr || list.stdout).trim()}` };
         const pr = list.stdout.trim().split(/\s+/)[0];
         if (!pr) {
+          // #68: until winget has the desktop app, the release touches
+          // nothing of it while its first pull request waits for a moderator
+          // (winget-pending.sh) - said here in one line, not a red gate.
+          const waits = id === 'BRFTech.filex-app' ? wingetWaits(id) : null;
+          if (waits?.error) return { ok: false, detail: `could not check — ${waits.error}` };
+          if (waits?.pr) {
+            lines.push(`${id}: skipped - waits for a moderator on #${waits.pr} (not on winget yet: nothing submitted, moved or closed)`);
+            continue;
+          }
           problems.push(`${id}: no pull request titled "${title}"`);
           continue;
         }
@@ -583,6 +678,12 @@ export default function plan({ repo, version, tag, platform = process.platform }
       // Commit dates, not pixels: fails only past six releases of drift, and
       // lists the drifting pictures for the person doing step 2.
       { name: 'README pictures are not left behind (shop window)', cmd: ['node', 'scripts/check-shop-window.mjs', '--pictures'] },
+      // The macOS, Store and snap packages declare "Open with filex" for every
+      // kind the app store's apps open, fixed when they are built
+      // (desktop/build/app-kinds.json, desktop/src/os-assoc.ts): red when the
+      // store's signed index has apps opening kinds the file lacks; a store
+      // that cannot be reached says nothing and passes.
+      { name: 'desktop: "Open with filex" kinds are the app store\'s', cmd: ['node', '--experimental-strip-types', 'desktop/scripts/app-kinds.mjs', 'check'] },
       // #176: the README, the docs and filex.sh show the pictures published on
       // filex.sh/shots. Every link must be the manifest's current file and
       // answer with exactly its bytes - read back over the network, because
@@ -642,19 +743,20 @@ export default function plan({ repo, version, tag, platform = process.platform }
       // 2026-09-14: a binary with a 16-hour-old UI passed every API check.
       { name: 'the binary serves the UI just built, byte for byte', lane: 'build', always: true, after: [BUILD_BIN], cmd: ['node', 'scripts/check-embed.mjs', '--binary', bin] },
       // Lesson #448: v0.43.0's CI failed a test a UTC+3 machine had hidden.
-      { name: 'TZ=UTC takes effect for node here', lane: 'web', always: true, cmd: ['node', '-e', 'process.exit(new Date().getTimezoneOffset() === 0 ? 0 : 1)'], env: { TZ: 'UTC' } },
+      { name: 'TZ=UTC takes effect for node here', lane: 'web', always: true, serverSkip: 'it is for the unit suites a server patch does not run', cmd: ['node', '-e', 'process.exit(new Date().getTimezoneOffset() === 0 ? 0 : 1)'], env: { TZ: 'UTC' } },
       // The web suite reads the core package's build (lesson #1075).
       {
         name: 'web unit (TZ=UTC, like CI)',
         lane: 'web',
+        serverSkip: 'a server patch changes no interface; GitHub runs the unit suite behind it',
         after: [BUILD_UI],
         inputs: ALL,
         cacheExtra: (c) => workflowsTree(c.exportDir),
         vitest: { cwd: 'web', files: [], env: (c) => ({ TZ: 'UTC', FILEX_WORKFLOWS_DIR: workflowsOf(c.exportDir) }), mustPass: WORKFLOW_GUARDS },
       },
-      { name: 'packages unit (TZ=UTC)', lane: 'web', after: [BUILD_UI], inputs: ALL, sh: "pnpm --filter './packages/*' test", env: { TZ: 'UTC' } },
+      { name: 'packages unit (TZ=UTC)', lane: 'web', after: [BUILD_UI], inputs: ALL, serverSkip: 'a server patch publishes no package', sh: "pnpm --filter './packages/*' test", env: { TZ: 'UTC' } },
       // 0.43.x shipped a desktop window whose script never parsed (#52).
-      { name: 'desktop: typecheck + unit', lane: 'desktop', always: true, after: [BUILD_UI], inputs: ALL, sh: 'cd desktop && npx tsc --noEmit -p . && pnpm test' },
+      { name: 'desktop: typecheck + unit', lane: 'desktop', always: true, after: [BUILD_UI], inputs: ALL, serverSkip: 'a server patch publishes no desktop app', sh: 'cd desktop && npx tsc --noEmit -p . && pnpm test' },
       // A Store package proves itself only once Windows has installed AND
       // activated it, and the GitHub runner never has (v0.44.2 to v0.46.1 its
       // activation checks only warned). release.yml sends the package it
@@ -673,6 +775,7 @@ export default function plan({ repo, version, tag, platform = process.platform }
             name: STORE_COPY,
             lane: 'desktop',
             always: true,
+            serverSkip: STORE_COPY_SERVER_SKIP,
             after: [BUILD_BIN],
             inputs: ALL,
             sh: STORE_COPY_SH,
@@ -682,6 +785,7 @@ export default function plan({ repo, version, tag, platform = process.platform }
             name: STORE_COPY,
             lane: 'desktop',
             always: true,
+            serverSkip: STORE_COPY_SERVER_SKIP,
             deferred: storeCopyDeferred('bin/filex-release-e2e.exe'),
             check: () => ({ ok: false, detail: 'store-e2e installs an MSIX: it runs on Windows with Developer Mode, or the pretag defers it (--ack store-deferred)' }),
           },
@@ -758,6 +862,18 @@ export default function plan({ repo, version, tag, platform = process.platform }
         }),
         lane: 'go',
         patchOnly: true,
+        inputs: GO_INPUTS,
+      },
+      // #252: a SERVER patch's Go suite - the packages it changed and their
+      // importers, under -race (the race detector is what the server's
+      // concurrency needs, and GitHub's -race parts run only behind it).
+      // CGO and a C compiler on the machine (go-targeted.sh says when not).
+      {
+        ...goGate('go: vet + test -race, the packages a server patch changed and their importers', (c) => path.join(c.repo, 'backend'), `${ECHO_FIXTURE} >/dev/null && ${GO_TARGETED}`, {
+          exportsOf: (c) => ` FILEX_GO_DIRS=${shq(changedGoDirs(c))} FILEX_GO_RACE=1`,
+        }),
+        lane: 'go',
+        serverOnly: true,
         inputs: GO_INPUTS,
       },
       // A migration that only works on sqlite bricks the first boot after an
@@ -898,6 +1014,11 @@ export default function plan({ repo, version, tag, platform = process.platform }
             'tests/deploy/releaseArm64.test.ts',
             'tests/deploy/releaseMacosOnly.test.ts',
             'tests/deploy/releaseSnapArm64Only.test.ts',
+            'tests/deploy/releaseSnapChannels.test.ts',
+            'tests/deploy/wingetFirstPackage.test.ts',
+            'tests/deploy/releaseAurLinuxOnly.test.ts',
+            'tests/deploy/nightlyDesktop.test.ts',
+            'tests/deploy/releaseSurfaces.test.ts',
             'tests/deploy/releaseNpmTrusted.test.ts',
             'tests/deploy/ciFullMatrix.test.ts',
             'tests/deploy/releasePromote.test.ts',
@@ -919,6 +1040,13 @@ export default function plan({ repo, version, tag, platform = process.platform }
     // takes about as long as a release run; four hours is a stuck runner.
     github: githubActions('BRF-Tech/filex'),
     gateWait: { pollMs: 60_000, timeoutMs: 4 * 3600_000, appearMs: 10 * 60_000 },
+    // #252: a SERVER patch's gate stage waits for this much of ci.yml on the
+    // export commit - the module vetted and built, which the tag run's
+    // `verify` asks for too - and starts no dry run: the rest of the full
+    // matrix runs behind the release, and the update manifest offers the
+    // patch to automatic updates only once it passed (matrix-watch.mjs).
+    serverGate: { parts: [FIXED.vet], pollMs: 30_000, timeoutMs: 45 * 60_000 },
+    matrixWatch: { pollMs: 60_000, timeoutMs: 3 * 3600_000, appearMs: 15 * 60_000 },
     // #173/#174: the push run of ci.yml is read part by part - every job of
     // its full matrix (scripts/ci-parts.mjs) must have run and passed, the
     // last of them `All tests (full)`, which is also what a tag run's
@@ -957,36 +1085,54 @@ export default function plan({ repo, version, tag, platform = process.platform }
         // A Release with its CLI binaries but without the desktop packages is
         // what 0.44.0 and 0.44.1 were: the job after GoReleaser failed.
         name: `GitHub Release ${tag} carries the installers, the feeds and the CLI`,
-        check: () => {
+        // #252: a server patch's Release carries the server archives and the
+        // CLI binaries alone (its desktop job does not run).
+        check: (c) => {
           const r = run('gh', ['release', 'view', tag, '-R', 'BRF-Tech/filex', '--json', 'assets', '--jq', '.assets[].name']);
           if (r.status !== 0) return { ok: false, detail: `gh release view ${tag}: ${(r.stderr || r.stdout).trim()}` };
           const have = new Set(r.stdout.split('\n').map((s) => s.trim()).filter(Boolean));
-          const want = releaseAssets(version);
+          const want = releaseAssets(version, c?.surfaces ?? ALL_SURFACES);
           const missing = want.filter((w) => !have.has(w));
           return missing.length ? { ok: false, detail: `${have.size} asset(s); missing: ${missing.join(', ')}` } : { ok: true, detail: `${have.size} assets` };
         },
       },
       // 0.48.1: the arm64 installer joined the x64 one in the ONE feed
       // Windows reads; x64 first, or every existing install is offered arm64.
-      windowsFeedArches(`GitHub Release ${tag}: latest.yml offers the x64 and the arm64 installer, x64 first`, `https://github.com/BRF-Tech/filex/releases/download/${tag}/latest.yml`),
-      { name: `ghcr: filex:${tag} and filex:slim-${tag}`, sh: `docker manifest inspect ghcr.io/brf-tech/filex:${tag} >/dev/null && docker manifest inspect ghcr.io/brf-tech/filex:slim-${tag} >/dev/null` },
+      {
+        ...windowsFeedArches(`GitHub Release ${tag}: latest.yml offers the x64 and the arm64 installer, x64 first`, `https://github.com/BRF-Tech/filex/releases/download/${tag}/latest.yml`),
+        surface: 'desktop',
+      },
+      { name: `ghcr: filex:${tag} and filex:slim-${tag}`, surface: 'server', sh: `docker manifest inspect ghcr.io/brf-tech/filex:${tag} >/dev/null && docker manifest inspect ghcr.io/brf-tech/filex:slim-${tag} >/dev/null` },
       // Each image for both architectures, each smoke-tested on its own
       // machine before docker-manifest joined them.
       {
         name: `ghcr: filex:${tag} and filex:slim-${tag} are amd64 + arm64`,
+        surface: 'server',
         sh: ['', 'slim-'].map((p) => `docker manifest inspect ghcr.io/brf-tech/filex:${p}${tag} | grep -q '"architecture": "arm64"' && docker manifest inspect ghcr.io/brf-tech/filex:${p}${tag} | grep -q '"architecture": "amd64"'`).join(' && '),
       },
       // #174: promoted, not rebuilt - the tag's commit, and its --version.
-      promotedImages(tag),
-      // One revision per architecture, both on stable (0.48.1: arm64).
-      snapChannel(`Snap Store: filex-app ${version} on stable for amd64 and arm64`, 'filex-app', ['amd64', 'arm64']),
-      wingetArches(version),
-      storeBundle(tag, version),
+      { ...promotedImages(tag), surface: 'server' },
+      // One revision per architecture (0.48.1: arm64), on stable and the two
+      // preview channels after it (#265: up to 0.56.3 only stable moved, and
+      // candidate and beta sat on 0.52.0). Red here is the Snap Store
+      // holding an upload (its review) or a job that never sent one - not
+      // ours to hurry, so it is said to a person at once (`held`) and the
+      // deploy checks can still be read: --resume --only deploy.
+      {
+        ...snapChannel(`Snap Store: filex-app ${version} on ${SNAP_CHECKED_CHANNELS.join(', ')} for amd64 and arm64`, 'filex-app', ['amd64', 'arm64'], {
+          channels: SNAP_CHECKED_CHANNELS,
+        }),
+        held: (rec) => snapHeld(tag, version, rec),
+        surface: 'desktop',
+      },
+      { ...wingetArches(version), surface: 'desktop' },
+      { ...storeBundle(tag, version), surface: 'desktop' },
       {
         // Every package under packages/ — what release.yml publishes
         // (`pnpm publish --filter='./packages/*'`). A written list missed
         // @brftech/filex-app-ui (0.48), which filex-core depends on.
         name: `npm: every package under packages/ at ${version} (${npmPackages(repo).join(', ')})`,
+        surface: 'ui',
         sh: npmPackages(repo).map((p) => `test "$(npm view ${p}@${version} version)" = ${shq(version)}`).join(' && '),
       },
     ],
@@ -1006,13 +1152,16 @@ export default function plan({ repo, version, tag, platform = process.platform }
       '7. replies on the issues and pull requests this release answers (no "Fixes #N")',
     ],
     deployed: [
-      runningRelease(`fm.example.com runs ${tag}, built from the export commit`, 'https://fm.example.com'),
-      runningRelease(`demo.filex.sh runs ${tag}, built from the export commit`, 'https://demo.filex.sh'),
-      updateManifest(`filex.sh/updates/stable.json offers ${tag}`, 'https://filex.sh/updates/stable.json'),
-      desktopFeeds(`desktop feeds offer ${version} and serve the bytes they promise`, 'https://filex.sh/desktop', ['latest.yml', 'latest-mac.yml', 'latest-linux.yml', 'latest-linux-arm64.yml'], {
-        mustExist: ['filex-desktop-portable-x64.exe', 'filex-desktop-portable-arm64.exe'],
-      }),
-      windowsFeedArches('filex.sh/desktop/latest.yml offers the x64 and the arm64 installer, x64 first', 'https://filex.sh/desktop/latest.yml'),
+      { ...runningRelease(`fm.example.com runs ${tag}, built from the export commit`, 'https://fm.example.com'), surface: 'server' },
+      { ...runningRelease(`demo.filex.sh runs ${tag}, built from the export commit`, 'https://demo.filex.sh'), surface: 'server' },
+      { ...updateManifest(`filex.sh/updates/stable.json offers ${tag}`, 'https://filex.sh/updates/stable.json'), surface: 'server' },
+      {
+        ...desktopFeeds(`desktop feeds offer ${version} and serve the bytes they promise`, 'https://filex.sh/desktop', ['latest.yml', 'latest-mac.yml', 'latest-linux.yml', 'latest-linux-arm64.yml'], {
+          mustExist: ['filex-desktop-portable-x64.exe', 'filex-desktop-portable-arm64.exe'],
+        }),
+        surface: 'desktop',
+      },
+      { ...windowsFeedArches('filex.sh/desktop/latest.yml offers the x64 and the arm64 installer, x64 first', 'https://filex.sh/desktop/latest.yml'), surface: 'desktop' },
       docsSite(`docs.filex.sh serves ${tag}'s pages, not a snapshot`, 'https://docs.filex.sh'),
       { name: 'shop window: the published surfaces', cmd: ['node', 'scripts/check-shop-window.mjs', '--published'] },
     ],

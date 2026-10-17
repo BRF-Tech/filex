@@ -33,7 +33,7 @@ requests").
 
 `message` is written in the first of:
 
-1. the language of the account making the request (Settings → Language);
+1. the language of the account making the request (User settings → Preferences → Language);
 2. the request's `Accept-Language`;
 3. the instance default (`FILEX_DEFAULT_LOCALE`);
 4. English.
@@ -53,19 +53,22 @@ The codes the server says with a catalogue sentence (`server.error.<code>` in
 | `read_only` | A write to a storage marked read-only. (The manager's verbs answer 403, the app and public doors 409, as before.) |
 | `quota_exceeded` | A write over the owner's quota (413 with `code: QUOTA_EXCEEDED`, 507 on the app doors). |
 | `name_taken` | Something already has the name (a rename, a restore). |
+| `name_not_allowed` | A new name no door accepts: empty or only spaces, holding `/`, `\`, NUL or another control character, or only dots and spaces with at least one dot (`.`, `..`, `. .`) ([File names](FILE-NAMES.md#the-names-filex-refuses)); 400, `code: NAME_NOT_ALLOWED`, `reason` (`empty`, `separator`, `nul`, `control`, `dots`). |
+| `name_too_long` | The storage cannot hold a name that long (a local disk: 255 bytes of UTF-8 in one name); 400, `code: NAME_TOO_LONG`. |
 | `locked` | An app holds the file ([423](#app-locks)). |
 | `reserved_name` | A name filex keeps for itself (`.filex-trash`, `.versions` …); `code: RESERVED_NAME`, `name`. |
 | `not_cancellable`, `finished` | A queued operation that cannot be stopped once it runs / is already over (`code: NOT_CANCELLABLE`, `FINISHED`). |
 | `bad_kind` | The queue does not take that kind of job on that door (`code: BAD_KIND`). |
 | `not_applicable` | An app's action does not fit the selected files (422; its `applies` rule names other kinds). |
 | `too_many` | A restore of more entries than one request may name (`code: TOO_MANY`, `max`). |
+| `trash_same_items` | `POST /api/files/manager/trash/same` with no entries, more than `params.max` (`max`), or a value that is not a sha256 in 64 lower-case hex digits. |
 | `drafts_unavailable`, `draft_limit`, `draft_folder_gone` | Drafts ([BACKEND.md → Drafts](BACKEND.md#drafts)); `code` as before. |
 | `entry_unavailable` | The storage could not say whether the entry still exists (`code: ENTRY_UNAVAILABLE`, `path`, `reason`). |
 | `no_secret_key` | The server has no encryption key, so it cannot issue an access key (`admin_hint` for an administrator). |
 | `e2e_policy_undecided` | The encryption policy could not be checked (500). |
 | `kind_mismatch`, `not_requestable`, `path_missing`, `too_many_pending` | An encryption request that no longer fits the folder ([BACKEND.md → Encryption policy](BACKEND.md#encryption-policy)). `not_requestable` with a `reason` says the rule's own sentence. |
 | `not_in_trash`, `restarted` | A queued job's failure: the entry left the trash meanwhile / the server restarted before an archive job finished. |
-| `timeout`, `out_of_memory`, `crashed`, `app_removed`, `action_removed`, `engine_missing`, `office_unconfigured` | Why an app's job failed. An administrator reads the form that says what to fix. |
+| `timeout`, `out_of_memory`, `crashed`, `app_removed`, `action_removed`, `engine_missing`, `office_unconfigured`, `office_preparing` | Why an app's job failed. An administrator reads the form that says what to fix. |
 | `storage_unavailable` | The storage cannot be reached right now (503, an app's doors). |
 | `handler_off` | An administrator turned the app off for that file type (403; `params.ext`). |
 | `not_granted` | The app was not given the right the call needs when it was installed (403; `params.permission`, e.g. `files:write`). |
@@ -75,6 +78,7 @@ The codes the server says with a catalogue sentence (`server.error.<code>` in
 | `internal_error` | A fault on the server (500); the error's own words are in `detail`, for the log. |
 | `bad_json`, `bad_body`, `bad_multipart`, `bad_id`, `bad_path`, `bad_name` | A request filex could not read: a body that is not JSON (a `field` names the part, when one does), a form that is not multipart, an id that is not a number, a path or a name an app's save does not take. |
 | `paths_required`, `too_many_paths`, `root_not_input`, `bad_output_mode` | An app's run or screen with no file, more files than one job takes (`params.max`, `max`), a whole storage as an input, a result kind filex does not know (`params.mode`). |
+| `root_link` | A public link asked for a whole storage - the invitation's link for an address with no account, on a storage root (400). A storage goes to people and groups by a grant on its root ([RBAC.md → A whole storage](RBAC.md#a-whole-storage-for-people-and-groups)). |
 | `storage_required`, `unknown_storage`, `mixed_storages` | An app's files named without a storage, with one that is not there (`params.name`), or across storages. |
 | `params_too_large`, `too_large`, `offset` | What one job may carry (`params.max`); a save larger than the app may write (`params.max`); a chunked save that continues from another byte (`received`). |
 | `queue_unavailable`, `spool_unavailable`, `app_plugins_disabled`, `app_store_disabled`, `signing_unavailable` | Something this server is not running (503, or 500 for the save spool); `detail` may say why. |
@@ -85,6 +89,11 @@ The codes the server says with a catalogue sentence (`server.error.<code>` in
 | `supertenant_only` | A tenant's administrator at a door the platform operator keeps (403); what was refused is `detail`. |
 | `plugins_disabled`, `file_required`, `plugin_source_missing`, `from_source_required`, `plugin_patch_shape`, `request_too_large` | The storage plugins' admin routes: plugins off, an upload with no file, an install that names no source, an upgrade that sends neither a file nor `from_source`, a change that names neither `enabled` nor `source`, a body over the limit (`params.max`). |
 | `install_failed`, `upgrade_failed`, `change_failed` | A storage plugin that could not be installed, upgraded (the version that ran before stays; `plugin` is what runs now) or changed: the sentence carries the plugin layer's own English (`params.detail`, also `detail`). |
+| `assistant_off`, `assistant_not_configured`, `assistant_not_found`, `assistant_busy`, `assistant_conflict` | The AI assistant ([AI-ASSISTANT.md](AI-ASSISTANT.md)): off or its button hidden (404), not set up (404), a conversation that is not the caller's (404), more requests than a person may send in a minute (429), the conversation is answering another request (409). |
+| `assistant_empty`, `assistant_message_long`, `assistant_too_many_paths`, `assistant_encrypted`, `assistant_out_of_root` | A message the assistant does not take: empty (400), longer than it takes (413, `params.max`), more selected items than go with one (400, `params.max`), an encrypted folder or file or the vault selected - encrypted content never reaches a model - or an item outside the caller's root (403). |
+| `assistant_nothing_waiting`, `assistant_no_undo`, `assistant_undo_failed` | An approval with no step waiting, an Undo of a step that cannot be undone, an Undo that could not put it back (409; `params.detail`). |
+| `assistant_provider`, `assistant_provider_key`, `assistant_no_tools`, `assistant_timeout`, `assistant_too_long` | The model's provider failed (its own words in `params.detail`), refused the key, has a model that cannot call tools or did not answer in time - said in the stream's `error` event and by the connection test - or the conversation grew longer than it keeps (413). |
+| `assistant_no_secret_key`, `assistant_out_of_bounds`, `assistant_bad_value` | The AI assistant page: no `FILEX_SECRET_KEY` to seal the API key with, a limit outside its bounds (`params.field`, `params.min`, `params.max`), a value it does not take (`params.field`). |
 
 ### One code, the sentence that says why
 

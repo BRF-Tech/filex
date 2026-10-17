@@ -1,19 +1,24 @@
 package thumb
 
-// Office documents are drawn by OnlyOffice (filex 0.50, docs/thumbnails.md →
+// Office documents are drawn by ONLYOFFICE (filex 0.50, docs/thumbnails.md →
 // Office through OnlyOffice).
 //
 // The thumbnail of a Word, Excel, PowerPoint or OpenDocument file is a picture
-// of its first page made by the OnlyOffice document server filex is
-// configured with: its conversion service is asked for a PNG of the first
-// page (internal/onlyoffice: Service.DrawThumbnail), which downloads the
-// document from filex through a fetch address signed for that purpose. filex
-// ships no office suite of its own: LibreOffice left the image in 0.50, and
-// with it the `soffice` path that used to live here. An install without
-// OnlyOffice draws no office thumbnails, and says so: the file is skipped as
-// "no_tool:office" (the Thumbnail repair tab: "OnlyOffice is not
-// configured"), never given the placeholder card, and drawn once OnlyOffice
-// is configured (Assess, toolReturned and the chain).
+// of its first page made by ONLYOFFICE's converter: the office engine an app
+// brings (the Office editor's, run on this server by internal/officeengine,
+// filex 0.57), or the Document Server filex is connected to (its conversion
+// service downloads the document from filex through a fetch address signed
+// for that purpose, internal/onlyoffice: Service.DrawThumbnail). Which one
+// draws is the office engine's choice (Default apps → the `engine`
+// capability); either way the chain's handler is "onlyoffice" - the same
+// drawer, the same parameters (320 x 320, the first page, a sheet laid out
+// 120 mm wide) - so a picture one of them drew does not go stale when the
+// other takes over. filex ships no office suite of its own: LibreOffice left
+// the image in 0.50. An install where neither runs draws no office
+// thumbnails, and says so: the file is skipped as "no_tool:office" (the
+// Thumbnail repair tab), never given the placeholder card, and drawn once one
+// runs (Assess, toolReturned and the chain) - an app's engine after it is
+// prepared, a few minutes after it is installed.
 //
 // The pipeline does not import the onlyoffice package (it imports this one
 // through protocolsync); the server hands it an OfficeDrawer, the same way it
@@ -43,6 +48,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -56,14 +62,13 @@ import (
 )
 
 // OfficeDrawer is what the pipeline asks to draw an office document's first
-// page (the server's adapter over internal/onlyoffice).
+// page (the server's adapter over the office engine's back ends).
 type OfficeDrawer interface {
-	// Ready reports whether OnlyOffice is configured right now. From memory
-	// (the configuration is cached): Assess asks it for every listed office
-	// file.
+	// Ready reports whether a back end draws right now. From memory (the
+	// configuration is cached): Assess asks it for every listed office file.
 	Ready(ctx context.Context) bool
-	// DrawPage asks the document server for a PNG of the document's first
-	// page. A failure is an *OfficeError; any other error is transient.
+	// DrawPage asks for a PNG of the document's first page. A failure is an
+	// *OfficeError; any other error is transient.
 	DrawPage(ctx context.Context, page OfficePage) ([]byte, error)
 }
 
@@ -81,6 +86,10 @@ type OfficePage struct {
 	Attempt    int
 	// MaxBytes is the largest answer accepted.
 	MaxBytes int64
+	// Source opens the document's bytes through the pipeline's own reader
+	// (which refuses end-to-end encrypted content): a back end that draws on
+	// this machine reads them here; the Document Server fetches them itself.
+	Source func(ctx context.Context) (io.ReadCloser, error)
 }
 
 // The classes of an OfficeError.
@@ -399,6 +408,7 @@ func (p *Pipeline) drawOffice(ctx context.Context, node *model.Node, drv storage
 	answer, err := p.office.DrawPage(dctx, OfficePage{
 		NodeID: node.ID, StorageID: node.StorageID, Name: node.Name,
 		ContentSig: sig, Attempt: attempt, MaxBytes: wire.ThumbnailMaxOutputBytes,
+		Source: func(ctx context.Context) (io.ReadCloser, error) { return p.openSource(ctx, drv, node) },
 	})
 	if err != nil {
 		out := officeOutcome(err, attempt)

@@ -3,9 +3,11 @@ package nfssrv
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path"
 	"strings"
+	"syscall"
 	"time"
 
 	billy "github.com/go-git/go-billy/v5"
@@ -13,9 +15,11 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -81,7 +85,34 @@ func (f *fs) Root() string { return "/" }
 
 // Join is billy's path join. Kept to `path` (not `filepath`) so a server
 // running on Windows still speaks the protocol's own separator.
-func (f *fs) Join(elem ...string) string { return path.Join(elem...) }
+//
+// ⚠⚠ It is also the one place a NAME the client sent is still a name. go-nfs
+// joins the file name of a CREATE, MKDIR, RENAME, REMOVE, RMDIR, LOOKUP, LINK
+// or SYMLINK onto the folder's path segments through this method and hands
+// the file system only the joined path - and its handlers are package-private
+// (nfs.HandleFunc takes an unexported type), so filex cannot put its own in
+// front of them. A name holding a `/` would become folders on the way (a
+// CREATE of `a/b` made `a`), and `.` or `..` the folder itself or its parent.
+// The segments go-nfs passes otherwise are names that already passed here, so
+// none of them legitimately is either: such a join answers refusedPath, which
+// resolve refuses (errRefusedName, NFS3ERR_ACCES - go-nfs reaches no other
+// refusal; a LOOKUP finds nothing). Task #238.
+func (f *fs) Join(elem ...string) string {
+	for _, e := range elem {
+		if e == "." || e == ".." || strings.Contains(e, "/") {
+			return refusedPath
+		}
+	}
+	return path.Join(elem...)
+}
+
+// refusedPath is what Join answers for a name that is not one: no path.Join
+// result starts with two slashes, so nothing else can be it.
+const refusedPath = "//refused-name"
+
+// errRefusedName is resolve's answer to refusedPath: a permission error, the
+// one refusal every go-nfs handler passes through (NFS3ERR_ACCES).
+var errRefusedName = &os.PathError{Op: "name", Path: "", Err: os.ErrPermission}
 
 // Chroot is part of billy.Filesystem and is not something NFS asks for.
 // Refusing keeps one path model rather than two.
@@ -93,9 +124,27 @@ type target struct {
 	Storage *model.Storage
 	Set     *acl.Set
 	Rel     string
+	// Mount is the export's own root: for an export rooted inside a folder,
+	// Rel is that folder. It is read and listed like any folder and is never
+	// the object of a change - see changeable.
+	Mount bool
 }
 
 func (t target) isRoot() bool { return t.Storage == nil }
+
+// changeable reports whether t may be created, removed or renamed: not the
+// virtual root, not a storage's root, and not the export's own root.
+//
+// ⚠ The last one is why this exists. go-nfs joins the name a client sends
+// onto the folder's path and hands this file system the joined path, so a
+// REMOVE, RMDIR or RENAME of `.` or `..` on the mount's root would arrive
+// here as the root itself; for an export of `main/projects/acme` that is the
+// folder `projects/acme`, which Rel alone cannot tell from a subfolder's.
+// Join refuses those names first (refusedPath); this is the second guard,
+// for any path that cleans to the mount's root. No client sends it on purpose
+// (the Linux kernel never does), and none may: the mount is the folder it was
+// given, not a folder in it (task #238).
+func (t target) changeable() bool { return !t.isRoot() && t.Rel != "" && !t.Mount }
 
 // split turns a mount-relative path into a storage name and a relative path,
 // honouring the rooted-inside-one-storage case.
@@ -135,6 +184,9 @@ func (f *fs) resolve(p string) (target, error) {
 		// data loss.
 		return target{}, os.ErrPermission
 	}
+	if p == refusedPath {
+		return target{}, errRefusedName
+	}
 	name, rel := f.split(p)
 	if name == "" {
 		return target{}, nil
@@ -164,7 +216,8 @@ func (f *fs) resolve(p string) (target, error) {
 	if !set.StorageVisible() {
 		return target{}, os.ErrNotExist
 	}
-	return target{Storage: st, Set: set, Rel: rel}, nil
+	mount := strings.Trim(path.Clean("/"+p), "/") == ""
+	return target{Storage: st, Set: set, Rel: rel, Mount: mount}, nil
 }
 
 // aclSet is the principal's own cached lookup, and nothing more.
@@ -345,9 +398,45 @@ func (f *fs) ReadDir(name string) ([]os.FileInfo, error) {
 		if !t.Set.CanSee(rel) {
 			continue
 		}
+		if !listable(o.Name) {
+			continue
+		}
 		out = append(out, objectInfo(o, t.Set.Effective(rel), f.readOnly))
 	}
 	return out, nil
+}
+
+// listable reports whether a name can stand in an NFSv3 directory listing.
+//
+// ⚠ NFSv3 names are at most 255 bytes (go-nfs refuses a longer one with
+// NFS3ERR_NAMETOOLONG on every verb that takes one), and the Linux client
+// rejects a READDIR reply holding a longer name as a whole: one long name on
+// an object store - which holds names a local disk refuses - would make the
+// whole folder unreadable. A NUL ends the name for every C client. Such an
+// entry is left out, like one the caller may not see; it cannot be opened
+// over NFS anyway, and the other surfaces still show it (task #238).
+func listable(name string) bool {
+	return len(name) <= nfs.PathNameMax && strings.IndexByte(name, 0) < 0
+}
+
+// refuseName asks the one rule (internal/leafname) of the name rel would give
+// an entry, before anything is written: the list's refused names - a
+// backslash, a NUL, a control character, `...` - are refused on every door,
+// so a file never exists on one surface that the next cannot open (task
+// #238). A file that already has such a name is not asked: it stays
+// readable, writable and removable. (A `/`, `.` or `..` never gets this far:
+// Join refuses it.)
+//
+// ⚠ A permission error, NFS3ERR_ACCES: go-nfs answers every failed CREATE
+// and MKDIR with ACCES whatever the error, and a RENAME's only other answer
+// is NFS3ERR_IO, which tells a client to retry; NFS3ERR_INVAL cannot be
+// reached through a billy file system.
+func refuseName(rel string) error {
+	if err := leafname.Check(path.Base(rel)); err != nil {
+		slog.Debug("nfs: name refused", slog.String("reason", leafname.Reason(err)))
+		return &os.PathError{Op: "name", Path: leafname.Reason(err), Err: os.ErrPermission}
+	}
+	return nil
 }
 
 // ─────────────────────────── mutation ───────────────────────────
@@ -357,11 +446,14 @@ func (f *fs) MkdirAll(name string, _ os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	if t.isRoot() || t.Rel == "" {
+	if !t.changeable() {
 		return os.ErrPermission
 	}
 	if !f.canDo(t, perm.FilesCreate) {
 		return os.ErrPermission
+	}
+	if err := refuseName(t.Rel); err != nil {
+		return err
 	}
 	drv, err := f.driverFor(t)
 	if err != nil {
@@ -384,7 +476,7 @@ func (f *fs) Remove(name string) error {
 	if err != nil {
 		return err
 	}
-	if t.isRoot() || t.Rel == "" {
+	if !t.changeable() {
 		return os.ErrPermission
 	}
 	if !f.canDo(t, perm.FilesDelete) {
@@ -392,6 +484,16 @@ func (f *fs) Remove(name string) error {
 	}
 	drv, err := f.driverFor(t)
 	if err != nil {
+		return err
+	}
+	// A folder goes only when it is empty (protocolsync.CheckRmdir). go-nfs
+	// sends REMOVE and RMDIR to this one method, and RMDIR of a folder with
+	// something in it is "directory not empty", never the trash taking the
+	// tree; a file's REMOVE is not asked. ⚠ The client reads NFS3ERR_IO:
+	// go-nfs answers every error of a REMOVE or RMDIR but "not there" and
+	// "not allowed" with IO, and NFS3ERR_NOTEMPTY cannot be reached through a
+	// billy file system.
+	if err := protocolsync.CheckRmdir(f.ctx, drv, t.Rel); errors.Is(err, syscall.ENOTEMPTY) {
 		return err
 	}
 	// The bytes and the rows under the storage's row gate (Syncer.Discard,
@@ -435,7 +537,7 @@ func (f *fs) Rename(oldpath, newpath string) error {
 	if err != nil {
 		return err
 	}
-	if src.isRoot() || dst.isRoot() || src.Rel == "" || dst.Rel == "" {
+	if !src.changeable() || !dst.changeable() {
 		return os.ErrPermission
 	}
 	// ⚠ Both ends: a rename moves a file OUT of one subtree and INTO another.
@@ -450,6 +552,13 @@ func (f *fs) Rename(oldpath, newpath string) error {
 	if f.writeNeed(dst) == perm.FilesModify && !f.canDo(dst, perm.FilesModify) {
 		return os.ErrPermission
 	}
+	// A NEW name is asked of the one rule (internal/leafname); moving an item
+	// into another folder under the name it already has gives it nothing new.
+	if path.Base(dst.Rel) != path.Base(src.Rel) {
+		if err := refuseName(dst.Rel); err != nil {
+			return err
+		}
+	}
 	if src.Storage.ID != dst.Storage.ID {
 		return billy.ErrNotSupported
 	}
@@ -460,6 +569,16 @@ func (f *fs) Rename(oldpath, newpath string) error {
 	mover, ok := drv.(storage.Mover)
 	if !ok {
 		return billy.ErrNotSupported
+	}
+	// A RENAME puts the source's bytes at the new path: not where they would
+	// become downloadable while they are not where they are
+	// (protoperm.TreeDownloadLifted - a folder by every file below it).
+	_, lifted, lerr := protoperm.TreeDownloadLifted(f.ctx, drv, src.Set, src.Rel, dst.Set, dst.Rel)
+	if lerr != nil {
+		return mapErr(lerr)
+	}
+	if lifted {
+		return os.ErrPermission
 	}
 	// Who may encrypt (internal/e2epolicy): a RENAME onto a key file's or a
 	// `.fxe`'s name is asked as the CREATE of the file there would be (onto a

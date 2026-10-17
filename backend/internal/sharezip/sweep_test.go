@@ -338,7 +338,7 @@ func TestRun_AbandonsWhenTheShareDiesMidBuild(t *testing.T) {
 	c.Track(active)
 
 	ctx := context.Background()
-	cachePath, files, err := c.Plan(ctx, drv, "/shared", 7)
+	cachePath, files, err := c.Plan(ctx, drv, "/shared", 7, nil)
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -392,7 +392,7 @@ func TestRun_AbandonsPartWayThroughOneLongFile(t *testing.T) {
 	c.Track(active)
 
 	ctx := context.Background()
-	cachePath, files, err := c.Plan(ctx, drv, "/shared", 7)
+	cachePath, files, err := c.Plan(ctx, drv, "/shared", 7, nil)
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestRun_SurvivesAShareViewOlderThanItself(t *testing.T) {
 	// ...and now the share is created and its zip is built on demand.
 	list.set(DirShare{StorageID: 1, Path: "/shared", NodeID: 7})
 	ctx := context.Background()
-	cachePath, files, err := c.Plan(ctx, drv, "/shared", 7)
+	cachePath, files, err := c.Plan(ctx, drv, "/shared", 7, nil)
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestRun_BuildsALiveShareToCompletion(t *testing.T) {
 	c.Track(active)
 
 	ctx := context.Background()
-	did, err := c.Warm(ctx, drv, "/shared", 7)
+	did, err := c.Warm(ctx, drv, "/shared", 7, nil)
 	if err != nil {
 		t.Fatalf("warm: %v", err)
 	}
@@ -492,7 +492,7 @@ func TestRun_BuildsALiveShareToCompletion(t *testing.T) {
 	if len(left) != 1 || !strings.HasPrefix(left[0], "7-") {
 		t.Fatalf("cache contains %v, want one published 7-*.zip", left)
 	}
-	if again, err := c.Warm(ctx, drv, "/shared", 7); err != nil || again {
+	if again, err := c.Warm(ctx, drv, "/shared", 7, nil); err != nil || again {
 		t.Fatalf("second warm did=%v err=%v, want false/nil (cache is fresh)", again, err)
 	}
 }

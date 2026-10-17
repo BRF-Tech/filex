@@ -6,7 +6,7 @@
 // already in progress". The page now looks again while the rebuild runs, keeps
 // the button busy, and says when the new index is live.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { flushPromises, mount, RouterLinkStub, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { createI18n } from 'vue-i18n';
 
@@ -59,7 +59,8 @@ async function mountPage() {
     { flush: 'sync' },
   );
   const i18n = createI18n({ legacy: false, locale: 'en', fallbackLocale: 'en', messages: { en } });
-  const w = mount(SearchTest, { global: { plugins: [i18n] } });
+  // The page links to the search settings on Settings (#258): a link, no router here.
+  const w = mount(SearchTest, { global: { plugins: [i18n], stubs: { RouterLink: RouterLinkStub } } });
   mounted.push(w);
   await flushPromises();
   return w;

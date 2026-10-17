@@ -897,10 +897,24 @@ func (d *Driver) Mkdir(ctx context.Context, p string) error {
 
 // PresignDownload implements storage.Presigner.
 func (d *Driver) PresignDownload(ctx context.Context, p string, ttl time.Duration) (string, error) {
-	req, err := d.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+	return d.PresignDownloadAs(ctx, p, ttl, "")
+}
+
+// PresignDownloadAs is PresignDownload with the Content-Disposition the
+// object store answers the visitor with (S3's signed
+// response-content-disposition), "" for none. A public link's redirect asks
+// it (handlers/share.go) so the name a browser saves is the one filex chose -
+// httpx.ContentDisposition: the real name in filename*, no bidi control -
+// and not whatever the browser makes of the URL's last segment (task #238).
+func (d *Driver) PresignDownloadAs(ctx context.Context, p string, ttl time.Duration, disposition string) (string, error) {
+	in := &s3.GetObjectInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(d.key(p)),
-	}, s3.WithPresignExpires(ttl))
+	}
+	if disposition != "" {
+		in.ResponseContentDisposition = aws.String(disposition)
+	}
+	req, err := d.presigner.PresignGetObject(ctx, in, s3.WithPresignExpires(ttl))
 	if err != nil {
 		return "", err
 	}

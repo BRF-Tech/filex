@@ -1,9 +1,10 @@
 /**
  * 198 - the admin panel's mega menu (GitHub #82, 0.51.0).
  *
- * The owner's shape (2026-10-03): the dashboard as a plain link, then three
- * top entries - Files & storage, People & security, System - each opening a
- * panel whose sections are columns, every page with a short line under it.
+ * The owner's shape (2026-10-15, task #258, renewing the three entries of
+ * 2026-10-03): the dashboard as a plain link, then four top entries - Files &
+ * storage, People, Settings, Maintenance & records - each opening a panel
+ * whose sections are columns, every page with a short line under it.
  * On a phone, a drawer with the same pages as a headed list, all open.
  * Addresses unchanged; opens on a click, never on hover.
  *
@@ -21,10 +22,14 @@ const EVERY_PAGE = [
   '/admin/storages', '/admin/connections', '/admin/sync', '/admin/replica', '/admin/usage',
   '/admin/users', '/admin/groups', '/admin/roles', '/admin/grants',
   '/admin/auth-providers', '/admin/login-security', '/admin/encryption', '/admin/protection', '/admin/api-mcp',
-  '/admin/plugins', '/admin/external', '/admin/webhooks', '/admin/notifications',
+  '/admin/plugins', '/admin/external', '/admin/webhooks', '/admin/notifications', '/admin/ai-assistant',
   '/admin/settings', '/admin/tenancy', '/admin/branding', '/admin/appearance', '/admin/archives',
   '/admin/queue', '/admin/tools', '/admin/audit', '/admin/updates', '/admin/about',
 ];
+
+/** The four top entries, in the bar's order: the bar reads Dashboard, Files &
+ *  storage, People, Settings, Maintenance & records. */
+const ENTRIES = ['files', 'people', 'settings', 'maintenance'];
 
 /**
  * ⚠ The app root keys its view by the path (web/src/App.vue), so a navigation
@@ -75,10 +80,16 @@ test.describe('Admin mega menu - a wide screen', () => {
     await expect(page.getByTestId('crumb-section')).toHaveText(/people & access|kişiler ve erişim/i);
   });
 
-  test('every page of the panel is in one of the three panels, at its old address', async ({ page }) => {
+  test('every page of the panel is in one of the four panels, at its old address', async ({ page }) => {
     await openPanel(page);
+    // The bar's order, as the owner approved it.
+    const order = await page
+      .getByTestId('mega-menu')
+      .locator('[data-testid^="nav-top-"]')
+      .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
+    expect(order).toEqual(ENTRIES.map((e) => `nav-top-${e}`));
     const hrefs: string[] = [];
-    for (const entry of ['files', 'people', 'system']) {
+    for (const entry of ENTRIES) {
       await page.getByTestId(`nav-top-${entry}`).click();
       const panel = page.getByTestId(`nav-panel-${entry}`);
       await expect(panel).toBeVisible();
@@ -94,23 +105,29 @@ test.describe('Admin mega menu - a wide screen', () => {
     await page.goto('/admin/login-security');
     await expect(page.getByTestId('account-menu')).toBeVisible({ timeout: 20_000 });
     await settled(page);
-    await expect(page.getByTestId('nav-top-people')).toHaveClass(/is-current/);
-    await page.getByTestId('nav-top-people').click();
+    await expect(page.getByTestId('nav-top-settings')).toHaveClass(/is-current/);
+    await page.getByTestId('nav-top-settings').click();
     await expect(page.getByTestId('nav-login-security')).toHaveAttribute('aria-current', 'page');
   });
 
   test('the keyboard: ↓ enters, ↓ walks, Esc returns to the button, ← / → along the bar', async ({ page }) => {
     await openPanel(page);
-    const system = page.getByTestId('nav-top-system');
-    await system.focus();
+    const settings = page.getByTestId('nav-top-settings');
+    await settings.focus();
     await page.keyboard.press('ArrowDown');
-    await expect(page.getByTestId('nav-panel-system')).toBeVisible();
-    await expect(page.getByTestId('nav-plugins')).toBeFocused();
+    await expect(page.getByTestId('nav-panel-settings')).toBeVisible();
+    // The General column's first page is the Settings page, named "General".
+    await expect(page.getByTestId('nav-settings')).toBeFocused();
     await page.keyboard.press('ArrowDown');
-    await expect(page.getByTestId('nav-external')).toBeFocused();
+    await expect(page.getByTestId('nav-branding')).toBeFocused();
     await page.keyboard.press('Escape');
-    await expect(page.getByTestId('nav-panel-system')).toBeHidden();
-    await expect(system).toBeFocused();
+    await expect(page.getByTestId('nav-panel-settings')).toBeHidden();
+    await expect(settings).toBeFocused();
+    // The bar's order: People ← Settings → Maintenance & records.
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByTestId('nav-top-maintenance')).toBeFocused();
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.getByTestId('nav-top-settings')).toBeFocused();
     await page.keyboard.press('ArrowLeft');
     await expect(page.getByTestId('nav-top-people')).toBeFocused();
     await page.keyboard.press('Enter');
@@ -152,7 +169,9 @@ test.describe('Admin mega menu - the narrowest wide screen', () => {
     const header = page.getByTestId('mega-menu').locator('xpath=ancestor::header[1]');
     const fits = await header.evaluate((h) => h.scrollWidth <= h.clientWidth);
     expect(fits, 'the top bar overflows').toBe(true);
-    for (const entry of ['files', 'people', 'system']) {
+    // Four entries since task #258: the widest bar the panel has had. The
+    // Settings panel's three columns must also end inside the window.
+    for (const entry of ENTRIES) {
       await page.getByTestId(`nav-top-${entry}`).click();
       const box = await page.getByTestId(`nav-panel-${entry}`).boundingBox();
       expect(box!.x, entry).toBeGreaterThanOrEqual(0);

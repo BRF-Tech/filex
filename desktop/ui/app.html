@@ -476,6 +476,9 @@
         background: var(--fe-bg);
       }
       .hold .row { margin-top: var(--fe-gap-sm); }
+      /* The same notice, for information: items synced here under another
+         name (task #238) are synced - nothing waits on a decision. */
+      .hold.info { border-inline-start-color: var(--fe-primary); }
       .row { display: flex; gap: var(--fe-gap-sm); align-items: center; }
       .label { font-size: var(--fe-text-sm); font-weight: 500; color: var(--fe-text); }
       .muted { color: var(--fe-text-muted); font-size: var(--fe-text-xs); }
@@ -624,7 +627,7 @@
       }
       .switch.is-on .switch__knob { transform: translateX(14px); }
 
-      /* ── dialogs (folder picker, the sync trash listing) ──────────
+      /* ── dialogs (the folder picker) ──────────
          ⚠ Above #settings (200). Both are opened FROM settings, so a lower
          stacking order put them behind the panel that launched them — the
          dialog was there, just invisible under a full-screen surface. */
@@ -681,15 +684,6 @@
       </div>
     </div></div>
 
-    <!-- What the sync engine removed from THIS computer and is still holding.
-         It used to be an `alert()` — a native modal box printing a plain-text
-         list, which is both the one surface in this window the product cannot
-         theme and a blocking call on the renderer. -->
-    <div id="trash" class="dlg"><div class="panel">
-      <div class="between"><strong id="tr-title"></strong><button class="icon-btn" id="tr-close" aria-label="Close"></button></div>
-      <div class="muted" id="tr-sub"></div>
-      <ul id="tr-list"></ul>
-    </div></div>
 
     <script type="module">
       import * as filexWc from './filex.js';
@@ -910,25 +904,19 @@
         'boot.reconnect':       ['Reconnect', 'Yeniden bağlan'],
 
         'rail.add':             ['Add another account', 'Başka bir hesap ekle'],
-        'rail.settings':        ['Settings', 'Ayarlar'],
+        'rail.settings':        ['App settings', 'Uygulama ayarları'],
 
         'win.minimize':         ['Minimize', 'Küçült'],
         'win.maximize':         ['Maximize', 'Büyüt'],
         'win.close':            ['Close', 'Kapat'],
 
-        'set.open_trigger':     ['Open files with', 'Dosyaları açma'],
-        'set.open_trigger_sub': ['How a mouse opens a file. A single tap always opens on touchscreens.',
-                                 'Farenin dosyayı nasıl açtığı. Dokunmatik ekranda tek dokunuş her zaman açar.'],
-        'set.open_double':      ['Double-click', 'Çift tık'],
-        'set.open_single':      ['Single-click', 'Tek tık'],
-
-        'set.title':            ['Settings', 'Ayarlar'],
-        'set.sub':              ["This app's settings, plus the storage connections of the server you are signed in to.",
-                                 'Bu uygulamanın ayarları ve bağlı olduğunuz sunucunun depo bağlantıları.'],
-        'set.connections':      ['Storage connections', 'Depo bağlantıları'],
+        'set.title':            ['App settings', 'Uygulama ayarları'],
+        'set.sub':              ['What this computer does: the accounts signed in on it, the folders it syncs, how it starts and updates. Your language, one click or two and notifications are in User settings, under your picture.',
+                                 'Bu bilgisayarın yaptıkları: burada oturum açmış hesaplar, eşitlediği klasörler, nasıl başlayıp güncellendiği. Diliniz, tek ya da çift tık ve bildirimler resminizin altındaki Kullanıcı ayarları\'nda.'],
+        'set.connections':      ['Connections', 'Bağlantılar'],
         'set.connections_sub':  ['See how to reach this server from this computer - mount it, or connect with an S3 client, over SFTP or with this app. Storages themselves are created and edited in the admin panel.',
                                  'Bu sunucuya bu bilgisayardan nasıl erişileceğini görün - bağlayın ya da bir S3 istemcisi, SFTP veya bu uygulamayla erişin. Depoların kendisi yönetim panelinde oluşturulur ve düzenlenir.'],
-        'set.connections_open': ['How to connect', 'Nasıl bağlanılır'],
+        'set.connections_open': ['Open Connections', 'Bağlantıları aç'],
         // "Mount as a drive" (WebDAV) — the one-click counterpart of the guide.
         'drive.title':          ['Mount as a drive', 'Sürücü olarak bağla'],
         'drive.sub':            ['Attach this server as a drive on this computer over WebDAV, so your files appear in your file manager. Files open on demand; nothing is downloaded up front.',
@@ -971,7 +959,7 @@
                                        'Sürücünün bağlanacağı {dir} klasörü oluşturulamadı. Orada klasör oluşturabildiğini denetleyip yeniden dene.'],
         'drive.err.failed':           ['The drive could not be mounted. {detail}',
                                        'Sürücü bağlanamadı. {detail}'],
-        'set.close':            ['Close settings', 'Ayarları kapat'],
+        'set.close':            ['Close app settings', 'Uygulama ayarlarını kapat'],
         // ⚠ Names the rail's + rather than drawing a second one. See the note
         // over settingsHtml().
         'set.add_hint':         ['Use + on the left to sign in to another server.',
@@ -1014,23 +1002,17 @@
         'set.sync_root_none':   ['Not chosen yet - you will be asked at the first "Keep on this computer".',
                                  'Henüz seçilmedi - ilk "Bilgisayarda tut" dediğinde sorulur.'],
         'set.sync_root_change': ['Change…', 'Değiştir…'],
-        // ⚠ Named for the ACTOR, not for the act. "Recently deleted" is what
-        // the file list's own Trash holds — the server's — and two entries in
-        // one window called the same thing are two entries nobody can tell
-        // apart. This one holds local copies the SYNC ENGINE removed from this
-        // computer, which is a different thing kept in a different place.
-        'set.trash':            ['Removed by sync', 'Eşitlemenin sildikleri'],
-        'set.trash_sub':        ['Files sync removed from this computer. Kept for 30 days.',
-                                 'Eşitlemenin bu bilgisayardan kaldırdığı dosyalar. 30 gün saklanır.'],
-        'set.sync_note':        ['The first sync of a folder merges both sides and deletes nothing. After that deletes carry across; anything removed from this computer is kept for 30 days.',
-                                 'Bir klasörün ilk eşitlemesi iki tarafı birleştirir, hiçbir şeyi silmez. Sonrasında silmeler karşı tarafa geçer; bu bilgisayardan silinen her şey 30 gün saklanır.'],
+        // ⚠ task #259: no "Removed by sync" any more. The engine keeps no
+        // local copy of what it deletes - that copy, moved into a hidden folder
+        // of the profile, is what an antivirus took for ransomware - and the
+        // server's Trash, in the file list, is where a deletion on either side
+        // is restored from.
+        'set.sync_note':        ['The first sync of a folder merges both sides and deletes nothing. After that deletes carry across in both directions; a deleted file is restored from the Trash in the file list.',
+                                 'Bir klasörün ilk eşitlemesi iki tarafı birleştirir, hiçbir şeyi silmez. Sonrasında silmeler iki yönde de karşı tarafa geçer; silinen bir dosya, dosya listesindeki Çöp kutusundan geri yüklenir.'],
         'set.this_app':         ['This app', 'Bu uygulama'],
         'set.background':       ['Keep running in the background', 'Arka planda çalışmaya devam et'],
         'set.background_sub':   ['Closing the window leaves filex in the tray so folders keep syncing.',
                                  'Pencereyi kapatınca filex sistem tepsisinde kalır, klasörler eşitlenmeye devam eder.'],
-        'set.notifications':    ['Notifications', 'Bildirimler'],
-        'set.notifications_sub':['Show a notification when something new lands in your bell. Clicking it opens the file, folder or share it is about.',
-                                 'Çanınıza yeni bir şey düştüğünde bildirim göster. Bildirime tıklayınca konusu olan dosya, klasör ya da paylaşım açılır.'],
         'set.autostart':        ['Start when I sign in', 'Oturum açtığımda başlat'],
         'set.autostart_refused':['Requested, but the system did not accept it.', 'İstendi ama sistem kabul etmedi.'],
         'set.autostart_sub':    ['Launches minimised to the tray.', 'Sistem tepsisine küçültülmüş olarak açılır.'],
@@ -1051,15 +1033,31 @@
         // the commands. The snap is the one published as filex-app.
         'set.other_copy_snap_sub': ['The Snap Store copy of filex is installed on this computer as well. It keeps its own accounts and its own sync history, so a folder paired in both is synced by two apps that do not know about each other - duplicate uploads, conflict copies, a delete reaching the side that did not ask for it. Keep one: remove the snap with "sudo snap remove filex-app", or remove this copy with your package manager.',
                                     'filex\'in Snap Store kopyası da bu bilgisayarda kurulu. Kendi hesaplarını ve kendi senkron geçmişini tuttuğu için ikisinde de eşlenen bir klasörü birbirinden habersiz iki uygulama senkronlar: aynı dosya iki kez yüklenir, çakışma kopyaları oluşur, bir silme istemeyen tarafa ulaşabilir. Birini tutun: snap\'i "sudo snap remove filex-app" komutuyla ya da bu kopyayı paket yöneticinizle kaldırın.'],
-        'set.language':         ['Language', 'Dil'],
-        'set.language_sub':     ['Your account\'s language: this window, the tray menu, the file list and your notifications everywhere follow it.',
-                                 'Hesabının dili: bu pencere, tepsi menüsü, dosya listesi ve her yerdeki bildirimlerin bu dili kullanır.'],
-        'set.language_signed_out': ['Sign in to choose: the language belongs to your account. Until then the app uses the system language.',
-                                    'Seçmek için giriş yap: dil hesabına aittir. O zamana kadar uygulama sistemin dilini kullanır.'],
         'ow.title':             ['Open documents with filex', 'Belgeleri filex ile aç'],
-        'ow.idea':              ['Double-click a Word, Excel, PowerPoint or CSV file and it opens here, in the editor your filex server runs - no Office needed on this computer.',
-                                 'Bir Word, Excel, PowerPoint ya da CSV dosyasına çift tıkla; filex sunucunun çalıştırdığı düzenleyicide burada açılsın - bu bilgisayarda Office gerekmez.'],
-        'ow.types':             ['Handles: {types}', 'Açtığı türler: {types}'],
+        'ow.idea':              ['Double-click a file on this computer and it opens here, in an app one of your filex servers runs: a Word, Excel, PowerPoint or CSV file in its office editor, and every other kind an app on your servers opens - a PSD in an image editor, say. No Office needed on this computer.',
+                                 'Bu bilgisayardaki bir dosyaya çift tıkla; filex sunucularından birinin çalıştırdığı bir uygulamada burada açılsın: Word, Excel, PowerPoint ya da CSV dosyası ofis düzenleyicisinde, sunucularındaki uygulamaların açtığı diğer her tür de, örneğin bir PSD bir görsel düzenleyicide. Bu bilgisayarda Office gerekmez.'],
+        'ow.types':             ['Office documents: {types}', 'Ofis belgeleri: {types}'],
+        // The kinds the apps on the person's servers open (src/app-kinds.ts).
+        'ow.apps_count':        ['Kinds filex opens: {n}, from the apps on your servers', 'filex ile açılabilen türler: {n}, sunuculardaki uygulamalardan'],
+        'ow.apps_sub_dynamic':  ['When an app on one of your servers opens a kind of file, filex is listed under "Open with" for it on this computer, and leaves that list again once no server opens it.',
+                                 'Sunucularından birindeki bir uygulama bir dosya türünü açıyorsa filex bu bilgisayarda o tür için “Birlikte aç” listesinde görünür; hiçbir sunucu açmayınca listeden çıkar.'],
+        'ow.apps_sub_build':    ['This {platform} package lists the {n} kinds the app store\'s apps open under "Open with" - it can only declare them when it is built. A double-click opens one when a server of yours has the app, and says so when none has.',
+                                 'Bu {platform} paketi, uygulama mağazasındaki uygulamaların açtığı {n} türü “Birlikte aç” listesinde gösterir; bunları yalnızca derlenirken bildirebilir. Bir dosyaya çift tıklayınca sunucularından birinde o uygulama varsa açılır, yoksa bu söylenir.'],
+        'ow.apps_sub_none':     ['This copy tells the system nothing - a run from source or the portable .exe registers no file types. A file opened with it still opens on the server whose app opens its kind.',
+                                 'Bu kopya sisteme hiçbir şey bildirmez: kaynaktan çalıştırma ya da taşınabilir .exe dosya türü kaydetmez. Onunla açılan bir dosya yine de türünü açan uygulamanın olduğu sunucuda açılır.'],
+        'ow.apps_none':         ['No app on your servers opens a kind of file yet. An administrator adds apps from the app store.',
+                                 'Sunucularındaki hiçbir uygulama henüz bir dosya türü açmıyor. Uygulamaları yönetici uygulama mağazasından ekler.'],
+        'ow.apps_on':           ['{app} on {server}', '{server} üzerinde {app}'],
+        'ow.apps_office_ds':    ['Office documents also open with the Document Server on {servers}.', 'Ofis belgeleri {servers} üzerindeki Document Server ile de açılır.'],
+        'ow.apps_unasked':      ['{servers} did not answer; what it said last is kept.', '{servers} yanıt vermedi; en son söyledikleri tutuluyor.'],
+        'ow.apps_read_at':      ['Last asked {when}', 'Son sorulma: {when}'],
+        'ow.apps_reading':      ['Asking your servers…', 'Sunucularına soruluyor…'],
+        'ow.apps_show':         ['Show the kinds', 'Türleri göster'],
+        'ow.apps_hide':         ['Hide the kinds', 'Türleri gizle'],
+        'ow.apps_refresh':      ['Refresh', 'Yenile'],
+        'ow.apps_choices':      ['When more than one of your servers opens a kind, filex asks where to open it. It remembers {n} of your answers.',
+                                 'Bir türü birden fazla sunucun açıyorsa filex nerede açılacağını sorar. Cevaplarından {n} tanesini hatırlıyor.'],
+        'ow.apps_forget':       ['Forget my answers', 'Cevaplarımı unut'],
         'ow.registered':        ['filex is listed under "Open with" for these files.',
                                  'filex bu dosyalar için “Birlikte aç” listesinde görünür.'],
         'ow.dev':               ['Only the installed app is registered with the system - a run from source is not.',
@@ -1135,7 +1133,11 @@
         'sync.held_sub':        ["filex is holding them back instead of uploading them: this folder's first sync would have sent a great many items into a server folder that already has content - which is what an old copy of the folder looks like. Everything else keeps syncing.",
                                  'filex bunları yüklemek yerine bekletiyor: bu klasörün ilk eşitlemesi, zaten içeriği olan bir sunucu klasörüne çok sayıda öğe gönderecekti - bu, klasörün eski bir kopyasına benziyor. Geri kalan her şey eşitlenmeye devam ediyor.'],
         'sync.held_upload':     ['Upload them', 'Sunucuya yükle'],
-        'sync.held_discard':    ['Move to local trash', 'Yerel çöpe taşı'],
+        'sync.held_discard':    ['Delete from this computer', 'Bu bilgisayardan sil'],
+        'sync.renamed_title':   ['Named differently on this computer', 'Bu bilgisayarda başka adla'],
+        'sync.renamed_sub':     ["This computer cannot use these server names, so the files are kept here under another name. They sync as usual: a change here goes to the server's name.",
+                                 'Bu bilgisayar bu sunucu adlarını kullanamıyor; dosyalar burada başka bir adla tutuluyor. Her zamanki gibi eşitlenirler: burada yapılan bir değişiklik sunucudaki ada gider.'],
+        'sync.renamed_more':    ['and {n} more', 've {n} öğe daha'],
         'sync.pending':         ['waiting for its first check', 'ilk denetimini bekliyor'],
         'sync.moving':          ['moving to the new filex folder…', 'yeni filex klasörüne taşınıyor…'],
         'set.sync_root_moving': ['Moving…', 'Taşınıyor…'],
@@ -1146,8 +1148,6 @@
         'sync.no_stream':       ['the sync engine could not start (exit {code}) - it may be older than this app',
                                  'eşitleme motoru başlatılamadı (çıkış {code}) - bu uygulamadan eski olabilir'],
         'sync.restarting':      ['- starting it again shortly', '- birazdan yeniden başlatılıyor'],
-        'sync.trash_kept':      ['Kept for 30 days:', '30 gün saklanıyor:'],
-        'sync.trash_empty':     ['Nothing has been removed by sync.', 'Eşitleme hiçbir şey silmedi.'],
 
         'pick.title':           ['Choose a folder on the server', 'Sunucuda bir klasör seç'],
         'pick.storages':        ['Storages on this server', 'Bu sunucudaki depolar'],
@@ -1293,12 +1293,34 @@
       }
 
       /** Per-machine open gesture: 'single' or 'double' (default). Touch is
-       *  never governed by this — a tap always opens. Settings toggles it and
-       *  remounts the explorer. */
+       *  never governed by this — a tap always opens. Set in User settings →
+       *  Preferences → This device (task #258). */
       function openTriggerPref() {
         try {
           return localStorage.getItem('filex.openTrigger') === 'single' ? 'single' : 'double';
         } catch { return 'double'; }
+      }
+
+      /** The open gesture picked in User settings. ⚠ The explorer is NOT
+       *  remounted, as App settings used to do: the dialog is open INSIDE it.
+       *  The new gesture goes in through its config, which it watches (the
+       *  same reassignment applyLang makes for the language). */
+      function setOpenTrigger(v) {
+        try { localStorage.setItem('filex.openTrigger', v === 'single' ? 'single' : 'double'); } catch {}
+        for (const el of document.querySelectorAll('filex-explorer')) {
+          if (el.config) el.config = { ...el.config, openTrigger: openTriggerPref() };
+        }
+      }
+
+      /** The language picked in User settings (#191: the account's). The main
+       *  process writes it to the account and answers with the language this
+       *  window and the tray now speak; the dialog follows through the
+       *  explorer's config (applyLang). */
+      async function pickLanguage(code) {
+        state = await window.filexApp.setSettings({ locale: code });
+        if (applyLang(state.effectiveLocale)) relabelStatic();
+        render();
+        if ($('#settings').classList.contains('open')) renderSettings();
       }
 
       async function loadBrand(account) {
@@ -1507,6 +1529,10 @@
           pathPersist: 'none',
           trashVisible: true,
           theme: 'auto',
+          // Task #258: light/dark, palette and density are the ACCOUNT's, as
+          // on the web - the explorer keeps them in this surface's document
+          // (GET/PUT /api/me/prefs?surface=desktop) with its own credential.
+          accountPrefs: { surface: 'desktop' },
           // Host-owned open: every file opens in its OWN window (openDoc below),
           // not the in-page overlay. One "open" path, one instance per document.
           openInHost: true,
@@ -1515,8 +1541,9 @@
           // row is drawn is the explorer's rule, the web app's too (core
           // lib/appStoreRow): a person, and the server shows them the screen.
           appStorePage: true,
-          // Mouse open gesture — a per-machine setting (Settings → click). Touch
-          // is untouched: a tap always opens. Default: double-click opens.
+          // Mouse open gesture — this computer's (User settings → Preferences →
+          // This device). Touch is untouched: a tap always opens. Default:
+          // double-click opens.
           openTrigger: openTriggerPref(),
           // One language for the whole window. The component defaults to
           // Turkish, so without this an English desktop showed English chrome
@@ -1567,16 +1594,31 @@
             },
           },
           // ⚠ The avatar holds the person's INTERFACE settings; this window's
-          // own ⚙ holds the APP's (owner, 2026-09-27). So: "User settings" is
-          // the explorer's own row and opens the web app's settings dialog IN
-          // this window (settings: true); "Admin panel ↗" stays for an
-          // administrator; the explorer's shortcut and tour rows fold in from
-          // the "⋯". There is NO Sign out here — signing an account out of the
-          // app is done in Settings → Accounts, beside the other accounts —
-          // so this block gives no tail. Language, one click or two, sync and
-          // the other accounts stay in Settings as well.
+          // own ⚙ (App settings) holds the APP's (owner, 2026-09-27). So:
+          // "User settings" is the explorer's own row and opens the web app's
+          // settings dialog IN this window; "Admin panel ↗" stays for an
+          // administrator; the tour row folds in from the "⋯". There is NO
+          // Sign out here — signing an account out of the app is done in App
+          // settings → Accounts, beside the other accounts — so this block
+          // gives no tail.
+          //
+          // Task #258: the language, one click or two and this computer's
+          // notifications are rows of that dialog now (Preferences and
+          // Notifications), given here as hooks because only this window can
+          // carry them out - the tray menu, the sync engine and the native
+          // toasts are the main process's. App settings keeps what is this
+          // computer's alone.
           account: {
-            settings: true,
+            settings: {
+              language: { pick: (code) => { void pickLanguage(code); } },
+              openTrigger: { get: openTriggerPref, set: setOpenTrigger },
+              deviceNotifications: {
+                enabled: () => state.notifications !== false,
+                setEnabled: async (on) => {
+                  state = await window.filexApp.setSettings({ notifications: !!on });
+                },
+              },
+            },
             actions: (person) =>
               person && person.role === 'admin'
                 ? [{ key: 'admin', label: T('set.admin'), icon: 'admin' }]
@@ -1827,10 +1869,10 @@
       // switch here would be a second answer to a question the product has
       // already answered once, which is the thing this whole pass is removing.
       //
-      // Language is the exception and it is not a copy: the TRAY MENU is a
-      // native menu built in the main process, and nothing in the file list can
-      // tell it what language to speak. One control, in the one place that can
-      // reach all three surfaces (this window, the tray, the explorer).
+      // Task #258: the language, one click or two and the notifications moved
+      // out too, into User settings (the dialog the avatar opens). The tray
+      // still speaks the language picked there: the dialog's hook (pickLanguage)
+      // goes through the main process, which rebuilds the tray menu.
       /** A bandwidth limit: the presets the main process offers, KiB/s. A
        *  stored value that is not one of them is named rather than hidden. */
       function limitRow(id, current, label, sub) {
@@ -1851,10 +1893,6 @@
 
       function settingsHtml() {
         const active = state.accounts.find((a) => a.id === state.activeId);
-        // The language is written to the account (#191): an account whose
-        // token the server no longer takes cannot write it (main.ts refuses
-        // settings:set for it), so it is offered like no account at all.
-        const signedIn = !!active && !active.signedOut;
 
         /** A yes/no row: the label, what it means, and a switch that shows the
          *  state instead of a button whose text is the state. */
@@ -1932,6 +1970,11 @@
           // How changes made on THIS computer reach the engine — only said
           // when they cannot be watched and wait for the 30-second check.
           const localNote = syncing && h.local ? (h.local.message || '') : '';
+          // Server items kept here under another name (the engine's
+          // pass.name.synced_as, task #238): information, not an error -
+          // shown whatever the line above says, the first few by name.
+          const renamed = Array.isArray(h.renamed) ? h.renamed : [];
+          const RENAMED_SHOWN = 8;
           return `
           <div class="card" data-pair="${esc(f.id)}"><div class="between">
             <div style="min-width:0">
@@ -1946,7 +1989,13 @@
               <button data-openlocal="${esc(f.localPath)}">${esc(T('set.open_folder'))}</button>
               <button class="danger" data-rmsync="${f.id}">${esc(T('set.stop_sync'))}</button>
             </div>
-          </div>${f.held > 0 ? `
+          </div>${renamed.length ? `
+            <div class="hold info" data-renamed role="status">
+              <div class="label">${esc(T('sync.renamed_title'))}</div>
+              <div class="muted">${esc(T('sync.renamed_sub'))}</div>
+              ${renamed.slice(0, RENAMED_SHOWN).map((r) => `<div class="muted" style="overflow-wrap:anywhere" data-renamed-row title="${esc(r.name)}">${esc(r.message || r.name)}</div>`).join('')}
+              ${renamed.length > RENAMED_SHOWN ? `<div class="muted">${esc(T('sync.renamed_more', { n: String(renamed.length - RENAMED_SHOWN) }))}</div>` : ''}
+            </div>` : ''}${f.held > 0 ? `
             <div class="hold" role="status">
               <div class="label">${esc(f.held === 1 ? T('sync.held_one') : T('sync.held_many', { n: String(f.held) }))}</div>
               <div class="muted">${esc(T('sync.held_sub'))}</div>
@@ -1981,7 +2030,7 @@
           <p class="muted">${esc(T('set.add_hint'))}</p>
 
           <h2>${esc(T('set.connections'))}</h2>
-          <!-- ⚠ ONE button, and since v0.43.0 it is the "How to connect" one:
+          <!-- ⚠ ONE button, and since v0.43.0 it opens "Connections":
                the shared panel lost its Storages tab, so "Manage storages" no
                longer described anything it does. Storages are created and
                edited in the admin panel - the per-account "Admin panel ↗" link
@@ -2032,38 +2081,11 @@
           ${pairs}
           <div class="row" style="margin-top:6px">
             <button class="primary" id="add-sync" ${active ? '' : 'disabled'}>${esc(T('set.add_sync'))}</button>
-            <button id="sync-trash">${esc(T('set.trash'))}</button>
           </div>
           <p class="muted" style="margin-top:10px">${esc(T('set.sync_note'))}</p>
 
           <h2>${esc(T('set.this_app'))}</h2>
-          <div class="card"><div class="between">
-            <div><div class="label">${esc(T('set.language'))}</div>
-              <div class="muted">${esc(T(signedIn ? 'set.language_sub' : 'set.language_signed_out'))}</div></div>
-            <div class="segmented">${
-              // The names stay in their own language — a Turkish speaker looking
-              // for Turkish scans for "Türkçe", not for "Turkish".
-              // ⚠ #191: no "System" choice - the app's language IS the
-              // account's, and a pick is written to the account (main.ts
-              // settings:set). The lit one is the language the window draws.
-              [['en', 'English'], ['tr', 'Türkçe']]
-                .map(([code, label]) => `<button data-locale="${code}"${
-                  state.effectiveLocale === code ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"'
-                }${signedIn ? '' : ' disabled'}>${esc(label)}</button>`).join('')
-            }</div>
-          </div></div>
-          <div class="card"><div class="between">
-            <div><div class="label">${esc(T('set.open_trigger'))}</div>
-              <div class="muted">${esc(T('set.open_trigger_sub'))}</div></div>
-            <div class="segmented">${
-              [['double', T('set.open_double')], ['single', T('set.open_single')]]
-                .map(([v, label]) => `<button data-opentrigger="${v}"${
-                  openTriggerPref() === v ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"'
-                }>${esc(label)}</button>`).join('')
-            }</div>
-          </div></div>
           ${toggle('bg', state.runInBackground, T('set.background'), T('set.background_sub'))}
-          ${toggle('notifs', state.notifications !== false, T('set.notifications'), T('set.notifications_sub'))}
           ${state.launchAtLoginInOsSettings ? `
           <div class="card"><div class="between">
             <div><div class="label">${esc(T('set.autostart'))}</div>
@@ -2104,7 +2126,7 @@
       let owJson = '';
 
       // ── "Mount as a drive" (WebDAV) ────────────────────────────────
-      // The one-click counterpart of the "How to connect" guide: attach the
+      // The one-click counterpart of the "Connections" guide: attach the
       // active account's server as an OS drive. The token never touches this
       // page — driveMount tells the main process which account, and it hands
       // the credential to the OS mounter on stdin (src/drive.ts).
@@ -2187,6 +2209,7 @@
               esc(T('ow.types', { types: (ow.extensions || []).map((e) => '.' + e).join('  ') }))}</div>
             <div class="muted">${esc(T(ow.registered ? 'ow.registered' : 'ow.dev'))}</div>
           </div>
+          ${appKindsCard(ow.apps, store)}
           <div class="card"><div class="between">
             <div style="min-width:0">
               <div class="muted">${esc(T(hint, { store }))}</div>
@@ -2196,6 +2219,61 @@
           </div></div>
           ${live ? `<div class="card">
             <div class="label">${esc(T('ow.open_now'))}</div>${live}</div>` : ''}`;
+      }
+
+      // ── the kinds the apps on the servers open (src/app-kinds.ts) ──
+      //
+      // Not a list this window keeps: the main process asks every signed-in
+      // server which kinds its apps open and tells the system (src/os-assoc.ts).
+      // The card says how many, which app on which server opens each, and asks
+      // again on Refresh.
+      let owAppsOpen = false;
+      let owAppsBusy = false;
+
+      function applyOpenWith(s) {
+        if (!s) return;
+        owJson = JSON.stringify(s);
+        owState = s;
+      }
+
+      function appKindsCard(a, store) {
+        if (!a) return '';
+        const label = (m) => (m && (m[LANG] || m.en || Object.values(m)[0])) || '';
+        const rows = a.rows || [];
+        const busy = owAppsBusy || a.reading;
+        const platform = state.updateChannel ? (STORE_NAMES[state.updateChannel] || store)
+          : (owState && owState.platform === 'darwin' ? 'macOS' : '');
+        const sub = a.route === 'build' ? T('ow.apps_sub_build', { platform, n: String(a.packageKinds || 0) })
+          : a.route === 'none' ? T('ow.apps_sub_none') : T('ow.apps_sub_dynamic');
+        let when = '';
+        try { when = a.readAt ? new Date(a.readAt).toLocaleString(LANG === 'tr' ? 'tr-TR' : 'en-GB') : ''; } catch {}
+        const list = owAppsOpen && rows.length ? `
+            <div id="ow-apps-list" style="margin-top:8px">${rows.map((r) => `
+              <div class="muted" style="overflow-wrap:anywhere"><code>.${esc(r.ext)}</code> - ${esc(r.openers
+                .map((o) => T('ow.apps_on', { app: label(o.label) || o.plugin, server: o.server })).join(', '))}</div>`).join('')}
+            </div>` : '';
+        return `
+          <div class="card" id="ow-apps">
+            <div class="between">
+              <div style="min-width:0">
+                <div class="label">${esc(T('ow.apps_count', { n: String(rows.length) }))}</div>
+                <div class="muted">${esc(sub)}</div>
+                ${rows.length ? '' : `<div class="muted">${esc(T('ow.apps_none'))}</div>`}
+                ${(a.documentServers || []).length ? `<div class="muted">${esc(T('ow.apps_office_ds', { servers: a.documentServers.join(', ') }))}</div>` : ''}
+                ${(a.unasked || []).length ? `<div class="err">${esc(T('ow.apps_unasked', { servers: a.unasked.join(', ') }))}</div>` : ''}
+                ${a.error ? `<div class="err">${esc(a.error)}</div>` : ''}
+                <div class="muted">${esc(busy ? T('ow.apps_reading') : when ? T('ow.apps_read_at', { when }) : '')}</div>
+              </div>
+              <div class="row">
+                ${rows.length ? `<button id="ow-apps-toggle" aria-expanded="${owAppsOpen ? 'true' : 'false'}" aria-controls="ow-apps-list">${esc(T(owAppsOpen ? 'ow.apps_hide' : 'ow.apps_show'))}</button>` : ''}
+                <button id="ow-apps-refresh"${busy ? ' disabled' : ''}>${esc(T('ow.apps_refresh'))}</button>
+              </div>
+            </div>${list}
+            ${a.choices ? `<div class="between" style="margin-top:8px">
+              <div class="muted">${esc(T('ow.apps_choices', { n: String(a.choices) }))}</div>
+              <button id="ow-apps-forget">${esc(T('ow.apps_forget'))}</button>
+            </div>` : ''}
+          </div>`;
       }
 
       /**
@@ -2342,13 +2420,8 @@
             renderSettings();
           }
         });
-        $('#sync-trash', el).addEventListener('click', () => void openTrash());
         $('#bg', el).addEventListener('click', async () => {
           state = await window.filexApp.setSettings({ runInBackground: !state.runInBackground });
-          renderSettings();
-        });
-        $('#notifs', el).addEventListener('click', async () => {
-          state = await window.filexApp.setSettings({ notifications: state.notifications === false });
           renderSettings();
         });
         // Held items: the engine's own confirm / discard; the main process
@@ -2378,24 +2451,6 @@
         }));
         el.querySelectorAll('[data-sync-window]').forEach((b) => b.addEventListener('click', async () => {
           state = await window.filexApp.setSettings({ syncWindow: b.dataset.syncWindow || '' });
-          renderSettings();
-        }));
-        el.querySelectorAll('[data-locale]').forEach((b) => b.addEventListener('click', async () => {
-          state = await window.filexApp.setSettings({ locale: b.dataset.locale });
-          // Written to the account by the main process; taking its answer
-          // keeps this window and the tray menu in the same language.
-          applyLang(state.effectiveLocale);
-          relabelStatic();
-          render();
-          renderSettings();
-        }));
-        // Open gesture (single/double click) — a per-machine preference. Store
-        // it and remount the explorer so the new config.openTrigger takes hold.
-        el.querySelectorAll('[data-opentrigger]').forEach((b) => b.addEventListener('click', () => {
-          try { localStorage.setItem('filex.openTrigger', b.dataset.opentrigger); } catch {}
-          mountedFor = null;
-          const active = state.accounts.find((a) => a.id === state.activeId);
-          if (active) void mountExplorer(active);
           renderSettings();
         }));
         const portableShow = $('#portable-show', el);
@@ -2431,6 +2486,25 @@
             alert(r.ok ? T('ow.default_done') : T('ow.default_failed', { err: r.detail || '' }));
           }
           refreshOpenWith();
+        });
+        const owAppsToggle = $('#ow-apps-toggle', el);
+        if (owAppsToggle) owAppsToggle.addEventListener('click', () => {
+          owAppsOpen = !owAppsOpen;
+          renderSettings();
+        });
+        const owAppsRefresh = $('#ow-apps-refresh', el);
+        if (owAppsRefresh) owAppsRefresh.addEventListener('click', async () => {
+          if (owAppsBusy || !window.filexApp.openWithRefresh) return;
+          owAppsBusy = true;
+          renderSettings();
+          try { applyOpenWith(await window.filexApp.openWithRefresh()); } catch {}
+          owAppsBusy = false;
+          renderSettings();
+        });
+        const owAppsForget = $('#ow-apps-forget', el);
+        if (owAppsForget) owAppsForget.addEventListener('click', async () => {
+          try { applyOpenWith(await window.filexApp.openWithForgetChoices()); } catch {}
+          renderSettings();
         });
         refreshOpenWith();
         refreshDrive();
@@ -2534,48 +2608,16 @@
         } catch (e) { alert(String(e.message || e)); }
       });
 
-      // ── what sync removed from THIS computer ──────────────────
-      // A surface, not an alert(). The native box is the one thing in this
-      // window the product's palette cannot reach, it blocks the renderer
-      // while it is up, and it was printing a date-stamped list as plain text
-      // in a proportional system font.
-      async function openTrash() {
-        const dlg = $('#trash');
-        const list = $('#tr-list');
-        dlg.classList.add('open');
-        list.innerHTML = `<li class="muted">${esc(T('pick.loading'))}</li>`;
-        try {
-          const items = await window.filexApp.syncTrash();
-          list.innerHTML = '';
-          if (!items.length) {
-            list.innerHTML = `<li class="muted">${esc(T('sync.trash_empty'))}</li>`;
-            return;
-          }
-          for (const i of items.slice(0, 200)) {
-            const li = document.createElement('li');
-            const name = document.createElement('code');
-            name.textContent = i.rel;
-            const when = document.createElement('span');
-            when.className = 'muted';
-            when.textContent = new Date(i.deleted).toLocaleDateString();
-            li.append(name, when);
-            list.appendChild(li);
-          }
-        } catch (e) {
-          list.innerHTML = `<li class="err">${esc(e.message || e)}</li>`;
-        }
-      }
-      $('#tr-close').addEventListener('click', () => $('#trash').classList.remove('open'));
-      // Both dialogs close on the backdrop and on Escape, like every other
+      // The picker closes on the backdrop and on Escape, like every other
       // dialog in the product.
-      for (const id of ['#picker', '#trash']) {
+      for (const id of ['#picker']) {
         $(id).addEventListener('mousedown', (e) => {
           if (e.target === $(id)) $(id).classList.remove('open');
         });
       }
       window.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
-        for (const id of ['#picker', '#trash']) {
+        for (const id of ['#picker']) {
           if ($(id).classList.contains('open')) { $(id).classList.remove('open'); return; }
         }
       });
@@ -2611,9 +2653,7 @@
         $('#pk-title').textContent = T('pick.title');
         $('#pk-up').textContent = T('pick.up');
         $('#pk-use').textContent = T('pick.use');
-        $('#tr-title').textContent = T('set.trash');
-        $('#tr-sub').textContent = T('set.trash_sub');
-        for (const id of ['#pk-close', '#tr-close']) {
+        for (const id of ['#pk-close']) {
           const b = $(id);
           b.innerHTML = ICON_X;
           b.title = T('pick.close');

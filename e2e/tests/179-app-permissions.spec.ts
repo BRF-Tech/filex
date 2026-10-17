@@ -26,7 +26,7 @@
  * own session.
  */
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { apiLogin, dismissInstallBanner, loginAs } from '../helpers/auth';
+import { ADMIN_EMAIL, ADMIN_PASSWORD, apiLogin, dismissInstallBanner } from '../helpers/auth';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage } from '../helpers/seed';
 import { guardFixture, installThroughWizard } from '../helpers/appPlugin';
 import { echoFixture } from '../helpers/echoFixture';
@@ -58,31 +58,48 @@ async function removeEcho() {
   }
 }
 
-async function signInAsPerson(page: Page) {
+/**
+ * Signed in through the page's own cookie jar, WITHOUT a page (task #260).
+ *
+ * ⚠⚠ Not through the sign-in form. The form lands on the account's start
+ * page, and the next step left that page for the explorer while it was still
+ * asking the server for things (the bell's count, the start page's lists):
+ * WebKit drops its network process on such a navigation now and then (filex
+ * lesson #1541), and the explorer then said "The server could not be
+ * reached" over an empty listing and never asked for it - the 0.56.3 GitHub
+ * gate's webkit red on "taken from the role", 15 s on a row that never came.
+ * The page under test is the first page of the tab instead.
+ */
+async function signIn(page: Page, email: string, password: string) {
   await dismissInstallBanner(page);
   await page.addInitScript(() => localStorage.setItem('filex.tourDone', '1'));
-  await page.goto('/admin/login');
-  await page.getByLabel(/e-?mail|kullanıcı adı/i).fill(PERSON);
-  await page.getByLabel(/password|parola|şifre/i).fill(PERSON_PW);
-  await page
-    .getByRole('button', { name: 'Sign in', exact: true })
-    .or(page.getByRole('button', { name: 'Oturum aç', exact: true }))
-    .first()
-    .click();
-  await page.waitForURL(/\/drive\//, { timeout: 15_000 });
+  const res = await page.request.post('/api/auth/login', { data: { email, password } });
+  expect(res.ok(), `sign-in as ${email}: ${res.status()}`).toBeTruthy();
 }
+
+const signInAsPerson = (page: Page) => signIn(page, PERSON, PERSON_PW);
+const signInAsAdmin = (page: Page) => signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
 /** The labels of the right-click menu on the contract, from the person's session. */
 async function personMenu(page: Page): Promise<string[]> {
+  // The app rows come from /api/files/plugins/actions, asked once when the
+  // explorer starts: wait for that ANSWER (filex lesson #1508), not for a
+  // quiet network, which a page with a socket and a poll may never have.
+  const actions = page
+    .waitForResponse((r) => r.url().includes('/api/files/plugins/actions') && r.request().method() === 'GET', {
+      timeout: 15_000,
+    })
+    .catch(() => null);
   await page.goto(`/drive/explore#${encodeURIComponent(STORAGE)}/${FOLDER}`);
   const row = page.locator('[data-fe-path]').filter({ hasText: FILE }).first();
   await expect(row).toBeVisible({ timeout: 15_000 });
-  // The app rows come from /api/files/plugins/actions; let it answer.
-  await page.waitForLoadState('networkidle');
+  expect((await actions)?.ok(), 'the app rows were never asked for').toBe(true);
   await row.click({ button: 'right' });
   const menu = page.locator('.fe-ctx').last();
   await expect(menu).toBeVisible();
-  await page.waitForLoadState('networkidle');
+  // The app's own row that requires nothing is in every menu of this
+  // journey: once it is drawn, so is everything the app gives this person.
+  await expect(menu.locator('.fe-ctx__item:visible .fe-ctx__label').filter({ hasText: OTHER }).first()).toBeVisible();
   const labels = (await menu.locator('.fe-ctx__item:visible .fe-ctx__label').allTextContents()).map((s) => s.trim());
   await page.keyboard.press('Escape');
   return labels;
@@ -152,7 +169,7 @@ test.describe('app permissions: per role and per person', () => {
   });
 
   test("the User role lists the app's permission under Apps; Deny is saved as the role's decision", async ({ page }) => {
-    await loginAs(page);
+    await signInAsAdmin(page);
     await installThroughWizard(page, ECHO);
 
     const editor = await openUserRole(page);
@@ -189,7 +206,7 @@ test.describe('app permissions: per role and per person', () => {
   });
 
   test("Allow on the role gives it back: in the person's menu, and the run is queued", async ({ page, browser }) => {
-    await loginAs(page);
+    await signInAsAdmin(page);
     const editor = await openUserRole(page);
     const row = editor.getByTestId(`perm-row-${KEY}`);
     await expect(row.getByTestId(`perm-${KEY}-deny`)).toHaveAttribute('aria-checked', 'true');
@@ -212,7 +229,7 @@ test.describe('app permissions: per role and per person', () => {
   });
 
   test("a person's own exception beats the role, and their page says where each answer comes from", async ({ page, browser }) => {
-    await loginAs(page);
+    await signInAsAdmin(page);
     await page.goto(`/admin/users/${personId}`);
     const card = page.getByTestId('user-permissions-card');
     await expect(card).toBeVisible();

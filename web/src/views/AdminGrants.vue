@@ -7,6 +7,7 @@ import { useI18n } from 'vue-i18n';
 import { Trash2, ShieldCheck } from 'lucide-vue-next';
 
 import { AdminGrantsApi, type AdminGrant } from '@/api/grants';
+import { grantPlace, isWholeStorage } from '@/lib/grantPlace';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import Badge from '@/components/ui/Badge.vue';
@@ -46,6 +47,7 @@ const filtered = computed(() => {
           (g.user_name ?? '').toLowerCase().includes(term) ||
           (g.group_name ?? '').toLowerCase().includes(term) ||
           g.path.toLowerCase().includes(term) ||
+          (isWholeStorage(g) && t('grants.wholeStorage').toLowerCase().includes(term)) ||
           g.storage_name.toLowerCase().includes(term) ||
           g.level.includes(term),
       );
@@ -74,7 +76,8 @@ const columns = computed<DataColumn<AdminGrant>[]>(() => [
     label: t('grants.path'),
     sortable: true,
     width: 240,
-    sortValue: (g) => g.path_prefix || '/',
+    // The whole storage first, then its folders.
+    sortValue: (g) => (isWholeStorage(g) ? '' : g.path_prefix),
   },
   {
     id: 'level',
@@ -92,7 +95,7 @@ function levelTone(l: string): 'rose' | 'amber' | 'zinc' {
 }
 
 async function revoke(g: AdminGrant) {
-  if (!confirm(t('grants.revokeConfirm', { email: userOf(g), path: g.path }))) return;
+  if (!confirm(t('grants.revokeConfirm', { email: userOf(g), path: grantPlace(g, t) }))) return;
   try {
     await AdminGrantsApi.remove(g.id, g.kind);
     grants.value = grants.value.filter((x) => !(x.id === g.id && x.kind === g.kind));
@@ -146,10 +149,15 @@ function onRowAction(key: string, row: AdminGrant) {
         </div>
       </template>
 
+      <!-- #117 — a grant on the storage root is the whole storage: said in
+           words, never as "/" -->
       <template #cell-path="{ row }">
-        <span class="tbl-mono">
-          {{ (row as AdminGrant).path_prefix || '/'
-          }}<span v-if="(row as AdminGrant).is_dir && (row as AdminGrant).path_prefix">/…</span>
+        <div v-if="isWholeStorage(row as AdminGrant)">
+          <Badge tone="brand" size="xs" data-testid="grant-whole-storage">{{ t('grants.wholeStorage') }}</Badge>
+        </div>
+        <span v-else class="tbl-mono">
+          {{ (row as AdminGrant).path_prefix
+          }}<span v-if="(row as AdminGrant).is_dir">/…</span>
         </span>
       </template>
 

@@ -596,6 +596,10 @@ func (s *Service) ListAs(ctx context.Context, archivePath, logicalName, password
 // as the last word of `Attributes` for ZIP and 7z entries made on unix.
 var unixModePattern = regexp.MustCompile(`^[-dlcbps?][-rwxsStT]{9}$`)
 
+// sltField is one `Key = value` line of `7z l -slt`: a capitalised key of
+// letters, digits and spaces ("Path", "Packed Size", "User ID").
+var sltField = regexp.MustCompile(`^([A-Z][A-Za-z0-9 ]*[A-Za-z0-9]) = (.*)$`)
+
 // unixMode finds the member's unix mode, or "" when 7-Zip shows none.
 func unixMode(fields map[string]string) string {
 	if m := strings.TrimSpace(fields["Mode"]); unixModePattern.MatchString(m) {
@@ -621,8 +625,11 @@ func parseTechnicalList(out, archivePath string) []Entry {
 	var entries []Entry
 	cur := map[string]string{}
 	flush := func() {
-		name := strings.TrimSpace(cur["Path"])
-		if name == "" || filepath.Clean(name) == filepath.Clean(archivePath) {
+		// ⚠ The name as 7-Zip printed it: a member called ` notes.txt ` is
+		// not `notes.txt`, and trimming it listed a name that selecting then
+		// extracted nothing for (task #238).
+		name := cur["Path"]
+		if strings.TrimSpace(name) == "" || filepath.Clean(name) == filepath.Clean(archivePath) {
 			cur = map[string]string{}
 			return
 		}
@@ -649,18 +656,34 @@ func parseTechnicalList(out, archivePath string) []Entry {
 		})
 		cur = map[string]string{}
 	}
-	sc := bufio.NewScanner(strings.NewReader(out))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			if len(cur) > 0 {
-				flush()
-			}
+	// ⚠ A member name may hold a line break (task #238: `line` LF
+	// `break.txt` is a legal name on Linux, and an archive carries it as it
+	// is). So a block does not end at a blank line: it ends where the next
+	// `Path = ` begins, and a line that is not `Key = value` continues the
+	// value before it, blank lines included. A field the name seems to carry
+	// is overwritten by the real one 7-Zip prints after the Path.
+	var lastKey string
+	blanks := 0
+	for _, raw := range strings.Split(out, "\n") {
+		// Only the line end is cut (a CR on a Windows host): the value after
+		// ` = ` keeps its spaces, which can be a name's own.
+		line := strings.TrimSuffix(raw, "\r")
+		if strings.TrimSpace(line) == "" {
+			blanks++
 			continue
 		}
-		if i := strings.Index(line, " = "); i > 0 {
-			cur[line[:i]] = line[i+3:]
+		if m := sltField.FindStringSubmatch(line); m != nil {
+			if m[1] == "Path" && len(cur) > 0 {
+				flush()
+			}
+			cur[m[1]] = m[2]
+			lastKey, blanks = m[1], 0
+			continue
 		}
+		if lastKey != "" {
+			cur[lastKey] += strings.Repeat("\n", blanks+1) + line
+		}
+		blanks = 0
 	}
 	if len(cur) > 0 {
 		flush()
@@ -839,7 +862,9 @@ func (s *Service) extractSevenZip(ctx context.Context, archivePath, kind, destDi
 	if err != nil {
 		return err
 	}
-	args := []string{"x", "-t" + kind, "-y", "-aoa", "-bd", "-sccUTF-8", "-o" + destDir, "--", archivePath}
+	// -spd: a member named on the command line is a NAME, not a wildcard -
+	// `a*b.txt` and `why?.txt` selected their look-alikes too (task #238).
+	args := []string{"x", "-t" + kind, "-y", "-aoa", "-bd", "-sccUTF-8", "-spd", "-o" + destDir, "--", archivePath}
 	args = append(args, members...)
 	cctx, cancel := s.timeoutContext(ctx)
 	defer cancel()

@@ -59,6 +59,7 @@ func (e *Engine) RunDirs(ctx context.Context, dirs []string) (Result, error) {
 	defer done()
 	started := e.now()
 	var res Result
+	e.loadNames()
 	led := e.newLedger(base)
 
 	var subtrees []string // folders already reconciled recursively this call
@@ -99,6 +100,14 @@ func (e *Engine) RunDirs(ctx context.Context, dirs []string) (Result, error) {
 // subtree root when it went recursive, so the caller can skip folders under it.
 func (e *Engine) passFolder(ctx context.Context, led *ledger, dir string, res *Result) (*string, error) {
 	for {
+		// A folder this computer cannot name, holds only under a twin's
+		// spelling, or that is (or lies in) an item synced under another
+		// name, is reconciled from its parent: one listing could not tell
+		// the two sides' names apart (localSpelled, nameMap.covers).
+		if dir != "" && (!localSpelled(e.Pair.Local, dir, e.goos()) || e.names.covers(dir)) {
+			dir = parentDir(dir)
+			continue
+		}
 		local, lerr := ListLocalDir(e.Pair.Local, dir)
 		if lerr != nil && !isMissingDir(lerr) {
 			return nil, lerr
@@ -121,8 +130,13 @@ func (e *Engine) passFolder(ctx context.Context, led *ledger, dir string, res *R
 			continue
 		}
 		base := led.flatRows(dir)
+		var named []NameReport
+		local, remote, base, named = e.mapNames(local, remote, base, false)
 		actions := Plan(local, remote, base, Options{Now: e.now()})
 		if !touchesFolders(actions) {
+			var refused []NameReport
+			actions, refused = e.serverRefused(actions)
+			res.Names = append(append(res.Names, named...), refused...)
 			actions, holding, err := e.holdPass(actions, base, local, remote, false, false, res)
 			if err != nil {
 				return nil, err
@@ -155,7 +169,12 @@ func (e *Engine) passSubtree(ctx context.Context, led *ledger, dir string, res *
 	}
 	local, remote = prefixed(local, dir), prefixed(remote, dir)
 	base := led.subtreeRows(dir)
+	var named []NameReport
+	local, remote, base, named = e.mapNames(local, remote, base, false)
+	res.Names = append(res.Names, named...)
 	actions := Plan(local, remote, base, Options{Now: e.now()})
+	actions, named = e.serverRefused(actions)
+	res.Names = append(res.Names, named...)
 	actions, holding, err := e.holdPass(actions, base, local, remote, false, false, res)
 	if err != nil {
 		return err

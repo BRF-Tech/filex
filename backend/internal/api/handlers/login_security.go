@@ -81,8 +81,10 @@ type LoginSecurity struct {
 	// Guard is the running limiter; its settings cache is dropped after a
 	// write so the next attempt sees the new numbers.
 	Guard *loginguard.Guard
-	// EnvTrustedProxies is FILEX_TRUSTED_PROXIES, shown as the source of the
-	// trusted-proxy list when the setting is empty.
+	// EnvTrustedProxies is the configuration's trusted-proxy list
+	// (FILEX_TRUSTED_PROXIES over config.yaml trusted_proxies): the seed of
+	// the setting (loginguard proxyseed.go), its fallback while it is empty,
+	// and what the page compares the saved list with.
 	EnvTrustedProxies string
 	// DemoMode marks a public playground, where these pages are readable by
 	// whoever read the published credentials: the visitors' addresses (the
@@ -113,6 +115,15 @@ type loginSecuritySettings struct {
 	// `auto`, `loopback`, `private`, `link-local`, `none`). Empty = unset; see
 	// trusted_proxies_effective for what is in force.
 	TrustedProxies []string `json:"trusted_proxies"`
+}
+
+// trustedConfiguredView is the configuration's trusted-proxy list, the seed
+// of the saved one.
+type trustedConfiguredView struct {
+	// Source: "FILEX_TRUSTED_PROXIES" or "config.yaml trusted_proxies".
+	Source  string   `json:"source"`
+	Entries []string `json:"entries"`
+	Differs bool     `json:"differs"`
 }
 
 // trustedAutoView is what `auto` resolves to (clientip.AutoResolution) and
@@ -148,10 +159,17 @@ type loginSecurityResponse struct {
 	// its own addresses and networks - never trusted inside them:
 	// trusted_proxies_auto.excluded_gateways and excluded_self, when `auto`
 	// is in use.
-	// TrustedProxiesSource says where it came from: "setting", "env" or
-	// "auto" (neither is set: the default).
+	// TrustedProxiesSource says where it came from: "seeded" (the saved list
+	// is the configuration's - written at a first start, since 0.57),
+	// "setting" (saved on this page), "env" (nothing saved: the
+	// configuration's list, until the next start seeds it) or "auto"
+	// (neither is set: the default).
 	TrustedProxiesEffective []string `json:"trusted_proxies_effective"`
 	TrustedProxiesSource    string   `json:"trusted_proxies_source"`
+	// TrustedProxiesConfigured is the configuration's list and where it is
+	// set; nil when the configuration names none. Differs: the saved list
+	// overrules it (`filex settings reseed login.trusted_proxies` applies it).
+	TrustedProxiesConfigured *trustedConfiguredView `json:"trusted_proxies_configured"`
 	// TrustedDefaults says, one switch each, which words the list in force
 	// takes (auto and the three classes); TrustedAddresses is the rest of it -
 	// the addresses and networks written out.
@@ -218,10 +236,21 @@ func (h *LoginSecurity) view(r *http.Request) loginSecurityResponse {
 		resp.Limits[key] = loginSecurityLimit{Min: s.Min, Max: s.Max, Default: s.Default}
 	}
 	effective, source := clientip.DefaultSet(), "auto"
+	configured := strings.TrimSpace(h.EnvTrustedProxies)
 	if set, _ := clientip.ParseList(rawProxy); set != nil {
 		effective, source = set, "setting"
-	} else if envSet, _ := clientip.ParseList(h.EnvTrustedProxies); envSet != nil {
+		if configured != "" && loginguard.SameProxyList(rawProxy, configured) {
+			source = "seeded"
+		}
+	} else if envSet, _ := clientip.ParseList(configured); envSet != nil {
 		effective, source = envSet, "env"
+	}
+	if configured != "" {
+		resp.TrustedProxiesConfigured = &trustedConfiguredView{
+			Source:  loginguard.ProxyConfigSource(),
+			Entries: splitList(configured),
+			Differs: source == "setting",
+		}
 	}
 	resp.TrustedProxiesEffective, resp.TrustedProxiesSource = effective.Effective(), source
 	resp.TrustedDefaults, resp.TrustedAddresses = effective.Classes(), effective.Addresses()

@@ -347,6 +347,38 @@ describe('Sign-in security — trusted proxies', () => {
     expect(said).not.toBe(source);
   });
 
+  // FILEX_TRUSTED_PROXIES seeds the saved list since 0.57 (task #258): the
+  // page says the list came from it, and names it when the saved one wins.
+  it('says the saved list is the variable’s first value, in both languages', async () => {
+    const configured = { source: 'FILEX_TRUSTED_PROXIES', entries: ['auto', '172.18.0.1'], differs: false };
+    state = makeState({ trusted_proxies_source: 'seeded', trusted_proxies_configured: configured });
+    let w = await mountPage();
+    expect(w.get('[data-testid="login-proxies-source"]').text()).toBe('First value from FILEX_TRUSTED_PROXIES');
+    expect(w.find('[data-testid="login-proxies-configured"]').exists(), 'the two agree: nothing to say').toBe(false);
+
+    w = await mountPage('tr');
+    expect(w.get('[data-testid="login-proxies-source"]').text()).toBe('İlk değeri FILEX_TRUSTED_PROXIES verdi');
+  });
+
+  it('names the variable’s list, and the command that applies it, when the saved list overrules it', async () => {
+    state = makeState({
+      trusted_proxies_source: 'setting',
+      trusted_proxies_configured: { source: 'FILEX_TRUSTED_PROXIES', entries: ['auto', '172.18.0.1'], differs: true },
+    });
+    const w = await mountPage();
+    const note = w.get('[data-testid="login-proxies-configured"]').text();
+    expect(note).toContain('FILEX_TRUSTED_PROXIES');
+    expect(note).toContain('auto, 172.18.0.1');
+    expect(note).toContain('filex settings reseed login.trusted_proxies');
+    expect(w.get('[data-testid="login-proxies-source"]').text()).toBe(en.loginSecurity.proxies.source.setting);
+  });
+
+  it('says nothing about a configured list when there is none', async () => {
+    state = makeState({ trusted_proxies_source: 'setting', trusted_proxies_configured: null });
+    const w = await mountPage();
+    expect(w.find('[data-testid="login-proxies-configured"]').exists()).toBe(false);
+  });
+
   it('saves the typed list as the trusted_proxies setting, after the switches', async () => {
     const w = await mountPage();
     await w.get('[data-testid="login-proxies"] input').setValue('172.16.0.0/12');

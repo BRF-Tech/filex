@@ -61,6 +61,7 @@ func main() {
 	root.AddCommand(
 		serveCmd(),
 		migrateCmd(),
+		settingsCmd(),
 		adminCmd(),
 		storageCmd(),
 		thumbCmd(),
@@ -73,6 +74,7 @@ func main() {
 		encryptCmd(),
 		vaultCmd(),
 		pluginValidatorCmd(),
+		officeEngineCmd(),
 	)
 
 	if err := root.Execute(); err != nil {

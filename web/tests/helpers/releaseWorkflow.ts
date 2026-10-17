@@ -23,6 +23,13 @@ export const bash = findBash();
 
 export type Row = Record<string, string>;
 
+/**
+ * The Snap Store upload every Linux row of a release makes (#265): the same
+ * revision to stable, candidate, beta and edge at once, so the preview
+ * channels never lag a release (packaging/ci/release-snap-channels.patch).
+ */
+export const SNAP_UPLOAD = /snapcraft upload --release=stable,candidate,beta,edge "\$snap"/;
+
 /** release.yml without comment-only lines, LF. */
 export const code = () =>
   fs
@@ -88,6 +95,21 @@ export function stepsOf(block: string) {
     });
 }
 
+/** A step's `run: |` script, dedented, as bash runs it. */
+export function scriptOf(stepText: string): string {
+  const lines = stepText.split('\n');
+  const at = lines.findIndex((l) => /^\s+run: \|\s*$/.test(l));
+  expect(at, 'the step has a run: | block').toBeGreaterThanOrEqual(0);
+  const own = lines[at].indexOf('run:');
+  const body: string[] = [];
+  for (const l of lines.slice(at + 1)) {
+    if (l.trim() && l.search(/\S/) <= own) break;
+    body.push(l);
+  }
+  const ind = Math.min(...body.filter((l) => l.trim()).map((l) => l.search(/\S/)));
+  return body.map((l) => l.slice(ind)).join('\n');
+}
+
 /** One step of a job, by name. */
 export function stepNamed(block: string, name: string) {
   const s = stepsOf(block).find((x) => x.name === name);
@@ -123,6 +145,19 @@ export function holds(cond: string, env: Record<string, string>, matrix: Row): b
 
 /** Whatever makes something public from the desktop job. */
 export const PUBLISHES = /gh release upload|snapcraft upload|msstore-submit|microsoft-store-apppublisher|wingetcreate|winget-cla\.sh|winget-supersede\.sh|git push/;
+
+/**
+ * The steps a windows row that submits to winget publishes with, in order
+ * (task #68: while winget does not have the desktop app and its first pull
+ * request waits for a moderator, "Does the desktop app wait for a winget
+ * moderator?" - which only asks - sets WINGET_DESKTOP_SKIP and all three are
+ * skipped; a test's env never sets it).
+ */
+export const WINGET_PUBLISHING = [
+  'Submit to winget',
+  'Sign the CLA on the winget pull request',
+  'Close the superseded winget pull requests',
+];
 
 /**
  * What marks a step of the desktop job that BUILDS something: a tag run that
@@ -300,6 +335,12 @@ export interface VerifyAnswers {
    * 404).
    */
   release?: 'yes' | 'error';
+  /**
+   * #252, a server patch: what the jobs of run 1 answer for the part verify
+   * waits for ("Go vet + build"), as "<status> <conclusion>" - `completed
+   * success`, `completed failure`, `in_progress ` - or nothing (no such part).
+   */
+  part?: string;
 }
 
 /** The stand-in for circleci-green.mjs that `verify` below runs instead of asking CircleCI. */
@@ -344,7 +385,7 @@ export function verify(env: Record<string, string>, answers: VerifyAnswers = {})
         'printf \'%s|WANT=%s|SHA=%s\\n\' "$*" "${WANT:-}" "${SHA:-}" >> "$FAKE_GH_LOG"',
         'case "$*" in',
         '  *"/commits/"*) [ -n "$FAKE_COMMIT_FAILS" ] && exit 1; echo "$FAKE_TAG_SHA" ;;',
-        '  *"/actions/runs/"*"/jobs"*) [ -n "$FAKE_FULL" ] && echo "All tests (full)" ;;',
+        '  *"/actions/runs/"*"/jobs"*) if [ -n "$FAKE_PART" ]; then echo "$FAKE_PART"; elif [ -n "$FAKE_FULL" ]; then echo "All tests (full)"; fi ;;',
         '  *"/actions/runs/"*"/artifacts"*) [ -n "$FAKE_ARTIFACTS" ] && printf \'%s\\n\' "$FAKE_ARTIFACTS" ;;',
         '  *"workflows/ci.yml/runs"*) [ -n "$FAKE_CI" ] && echo 1 ;;',
         '  *"workflows/release.yml/runs"*) [ -n "$FAKE_DRY" ] && echo 2 ;;',
@@ -383,6 +424,7 @@ export function verify(env: Record<string, string>, answers: VerifyAnswers = {})
         FAKE_CI: answers.ci ? '1' : '',
         FAKE_DRY: answers.dry ? '1' : '',
         FAKE_FULL: (answers.full ?? answers.ci) ? '1' : '',
+        FAKE_PART: answers.part ?? '',
         FAKE_ARTIFACTS: (answers.artifacts ?? []).join('\n'),
         FAKE_COMMIT_FAILS: answers.commitFails ? '1' : '',
         FAKE_RELEASE: answers.release ?? '',

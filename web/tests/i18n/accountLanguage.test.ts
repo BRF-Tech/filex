@@ -33,7 +33,11 @@ function stubServer(): Call[] {
 
 async function freshI18n() {
   vi.resetModules();
-  return import('@/i18n');
+  const mod = await import('@/i18n');
+  // The web app wires the account document at boot (src/main.ts); since
+  // 0.57 an unwired page sends nothing (core lib/prefs, prefsEmbed.test.ts).
+  (await import('@brftech/filex-core')).configurePrefs({ surface: 'web' });
+  return mod;
 }
 
 function lastPut(calls: Call[]): { prefs?: { locale?: string } } {

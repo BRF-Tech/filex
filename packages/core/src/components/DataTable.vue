@@ -65,7 +65,8 @@ import {
 import { setTableSort, tableColumnBacking, tableSort } from '../lib/tablePrefs';
 import { useTableEnv } from '../lib/tableEnv';
 import { syncCutTitle } from '../lib/cutTitle';
-import { clampAlongInline, dirOfElement, inlineKeyStep, inlineSign, inlineStartX } from '../lib/direction';
+import { containBidi } from '../lib/nameRule';
+import { clampAlongInline, dirOfElement, inlineKeyStep, inlineSign, inlineStartX, scrollEdges } from '../lib/direction';
 import ItemCheck from './ItemCheck.vue';
 import RowActions from './RowActions.vue';
 import type { ContextAction } from './ContextMenu.vue';
@@ -333,17 +334,18 @@ const moreEnd = ref(false);
 function measureEnd(el: HTMLElement | null) {
   if (!el) return;
   /* RTL: the same distance-from-the-start reading as `onListScroll`. */
-  const on = el.scrollWidth - el.clientWidth - Math.abs(el.scrollLeft) > 1;
+  const on = scrollEdges(el).end;
   if (on !== moreEnd.value) moreEnd.value = on;
 }
 
 function onListScroll(ev: Event) {
   const el = ev.currentTarget as HTMLElement | null;
-  /* ⚠⚠ RTL: `scrollLeft` is 0 at the start edge and goes NEGATIVE as a
-     right-to-left table scrolls toward its end (the CSSOM rule every current
-     engine follows). `> 0` was never true there, so the frozen Name and ⋮
-     never drew their edges. Distance from the start, either way. */
-  const on = Math.abs(el?.scrollLeft ?? 0) > 0;
+  if (!el) return;
+  /* ⚠⚠ RTL: `scrollLeft` goes NEGATIVE as a right-to-left table scrolls
+     toward its end; `> 0` was never true there, so the frozen Name and ⋮
+     never drew their edges. lib/direction `scrollEdges` reads the distance
+     from the start, either way. */
+  const on = scrollEdges(el).start;
   if (on !== scrolledX.value) scrolledX.value = on;
   measureEnd(el);
 }
@@ -446,17 +448,32 @@ const StackValue: FunctionalComponent<{ on: boolean }> = (p, { slots }) =>
   p.on ? h('div', { class: 'fe-list__stack-value' }, slots.default?.()) : slots.default?.();
 StackValue.props = ['on'];
 
-/** Is this cell one of a stacked row's facts ("label value" after the lead)? A
- *  column whose header draws no label (the explorer's star) is a control, not
- *  a fact: it stays on the first line, beside the actions. */
+/**
+ * A column whose header draws no label (the explorer's star) is a CONTROL, not
+ * a fact: stacked, it stays on the first line beside the actions; and where it
+ * has nothing to control it draws NOTHING.
+ *
+ * ⚠⚠ Not "-". The cell's fallback is the "no value" dash of a fact, and Vue
+ * renders a slot's fallback whenever the slot's own content is only comments:
+ * the explorer's star cell is `<span v-if="…a file…">`, so on every FOLDER row
+ * it rendered a comment and the table drew "-" in its place. The star column
+ * is invisible until its row is hovered or focused, so the dash appeared
+ * beside the ⋮ the moment the pointer reached a folder (measured on the demo,
+ * 1280px, 0.56.3) and on a phone's focused row (task #249, the vault shots).
+ */
+function isControl(id: string): boolean {
+  return colById.value.get(id)?.headerLabel === false;
+}
+
+/** Is this cell one of a stacked row's facts ("label value" after the lead)? */
 function stackFact(id: string): boolean {
-  return stacked.value && colById.value.get(id)?.headerLabel !== false;
+  return stacked.value && !isControl(id);
 }
 
 /** The last fact of a stacked row: the one with no " · " after it. */
 const stackLast = computed<string | null>(() => {
   if (!stacked.value) return null;
-  const facts = visibleCols.value.filter((id) => colById.value.get(id)?.headerLabel !== false);
+  const facts = visibleCols.value.filter((id) => !isControl(id));
   return facts.length ? facts[facts.length - 1] : null;
 });
 
@@ -600,6 +617,25 @@ function isSortable(id: string): boolean {
   return colById.value.get(id)?.sortable === true;
 }
 
+/**
+ * STACKED, THE HEADER SAYS WHAT IT IS (task #264).
+ *
+ * Without columns the header is a row of sort buttons, and at 340px it read
+ * "Name ↑ Type Owner Modified Size" over rows whose facts read "Type Folder ·
+ * Owner System" - the same words, the same grey, one line above them: the
+ * owner's "neither a header nor a row". It is drawn as a band of its own
+ * (base.css), and it leads with "Sort by" while any button in it can sort:
+ * the stylesheet draws the words from this attribute, with empty alternative
+ * text, so a screen reader still hears the buttons by their own names.
+ * Closed (a ranked search, a paged list) the buttons cannot sort, so it does
+ * not say it.
+ */
+const stackSortLabel = computed<string | undefined>(() =>
+  stacked.value && !closedWhy.value && [store.value.lead, ...visibleCols.value].some(isSortable)
+    ? t('sort.by')
+    : undefined,
+);
+
 function toggleSort(id: string) {
   /* ⚠⚠ The `disabled` attribute is the AFFORDANCE, not the rule: a click
    * dispatched in script still runs this listener. Measured on the explorer
@@ -723,7 +759,11 @@ function cellText(row: any, id: string): string {
   const c = colById.value.get(id);
   const v = c?.format ? c.format(row) : row?.[id];
   if (v === null || v === undefined || v === '') return '-';
-  return String(v);
+  // A cell is drawn, never read back: a file name with a RIGHT-TO-LEFT
+  // OVERRIDE in it (an admin's Trash, Shares, Versions, Files) cannot turn
+  // its cell around and hide its extension (lib/nameRule containBidi, task
+  // #238). What filex wrote itself - a closed isolate, a mark - stays.
+  return containBidi(String(v));
 }
 
 function cellTitle(row: any, id: string): string | undefined {
@@ -1241,6 +1281,7 @@ defineExpose({ store, layout, pinLead, stacked });
         class="fe-list__head"
         role="row"
         :class="{ 'is-dragging-col': !!dragCol }"
+        :data-sort-label="stackSortLabel"
         :style="tableStyle"
         @contextmenu="openColMenu"
         @click.capture="onHeadClickCapture"
@@ -1299,7 +1340,7 @@ defineExpose({ store, layout, pinLead, stacked });
           role="columnheader"
           :style="colStyle(id)"
           :aria-sort="ariaSort(id)"
-          :aria-label="colById.get(id)?.headerLabel === false ? label(id) : undefined"
+          :aria-label="isControl(id) ? label(id) : undefined"
           :data-col="id"
           @pointerdown="onHeadPointerDown(id, $event)"
           @keydown="onHeadKey(id, $event)"
@@ -1319,7 +1360,7 @@ defineExpose({ store, layout, pinLead, stacked });
             <span class="fe-list__sort-label">{{ label(id) }}</span>
             <span v-if="sortArrow(id)" class="fe-list__sort-arrow" aria-hidden="true">{{ sortArrow(id) }}</span>
           </button>
-          <span v-else-if="colById.get(id)?.headerLabel !== false" class="fe-list__head-label" :title="label(id)">{{ label(id) }}</span>
+          <span v-else-if="!isControl(id)" class="fe-list__head-label" :title="label(id)">{{ label(id) }}</span>
           <span
             v-if="isResizable(id) && !stacked"
             class="fe-list__resize"
@@ -1415,8 +1456,10 @@ defineExpose({ store, layout, pinLead, stacked });
               :title="$slots[`cell-${id}`] ? undefined : cellTitle(row, id)"
             >
               <StackValue :on="stackFact(id)">
+                <!-- A control column (`isControl`) has no "no value" dash: a
+                     slot of its that draws nothing leaves the cell empty. -->
                 <slot :name="`cell-${id}`" :row="row" :value="cellValue(row, id)">
-                  <span class="fe-list__cell-text"><bdi>{{ cellText(row, id) }}</bdi></span>
+                  <span v-if="!isControl(id)" class="fe-list__cell-text"><bdi>{{ cellText(row, id) }}</bdi></span>
                 </slot>
               </StackValue>
             </div>

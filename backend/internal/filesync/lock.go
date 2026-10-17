@@ -13,12 +13,12 @@ import (
 
 // ── one engine per pair on this computer: the pair lock ─────────────────
 //
-// Everything a pair remembers — its baseline, its hold, its local trash — is
+// Everything a pair remembers — its baseline, its hold — is
 // a file under the store, and the engine reads it at the start of a pass and
 // writes it at the end. Two engines on the same pair at once each plan from
 // the baseline the other is about to overwrite: one's uploads look like
-// "changed on the server" to the other, one's local trash looks like "deleted
-// here", and the checkpoint of the slower one puts back rows the faster one
+// "changed on the server" to the other, one's local deletions look like
+// "deleted here", and the checkpoint of the slower one puts back rows the faster one
 // had settled. Nothing fails; files are uploaded twice, conflict copies
 // appear, and a delete can travel to the side that did not ask for it.
 //

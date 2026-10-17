@@ -35,7 +35,7 @@ func TestCapabilities_NewdocWithheld(t *testing.T) {
 
 	t.Run("anonymous, English: the two services, no admin line", func(t *testing.T) {
 		w := withheldOf(t, &http.Client{}, "en")
-		require.Equal(t, "Office documents need a document server (ONLYOFFICE), which is not set up here.", w["onlyoffice"])
+		require.Equal(t, "Office documents need an office engine, the Office editor app or ONLYOFFICE, and neither is set up here.", w["onlyoffice"])
 		require.Equal(t, "Diagrams need draw.io, which is not set up here.", w["drawio"])
 		_, hasAdmin := w["admin"]
 		require.False(t, hasAdmin, "only a caller who can set a service up is told where")
@@ -43,13 +43,13 @@ func TestCapabilities_NewdocWithheld(t *testing.T) {
 
 	t.Run("in the reader's language", func(t *testing.T) {
 		w := withheldOf(t, &http.Client{}, "tr-TR,tr;q=0.9")
-		require.Equal(t, "Ofis belgeleri için bir belge sunucusu (ONLYOFFICE) gerekir; burada kurulu değil.", w["onlyoffice"])
+		require.Equal(t, "Ofis belgeleri için bir ofis motoru (Ofis düzenleyici uygulaması ya da ONLYOFFICE) gerekir; burada ikisi de kurulu değil.", w["onlyoffice"])
 	})
 
 	t.Run("an administrator is told where to set them up", func(t *testing.T) {
 		email, pw := testutil.SeedAdmin(t, store)
 		testutil.LoginAs(t, srv, client, email, pw)
 		w := withheldOf(t, client, "en")
-		require.Equal(t, "Set them up in the admin panel under External services.", w["admin"])
+		require.Equal(t, "Set them up in the admin panel under Apps or External services.", w["admin"])
 	})
 }

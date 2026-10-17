@@ -11,6 +11,7 @@ package protoperm
 import (
 	"context"
 	"errors"
+	"path"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
@@ -18,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
+	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/writegate"
 )
@@ -28,6 +30,61 @@ import (
 // bytes over a protocol IS a download: there is no preview to leave open.
 func CanRead(set *acl.Set, rel string) bool {
 	return set != nil && set.Effective(rel) >= acl.LevelViewer && set.AllowsAt(rel, perm.FilesDownload)
+}
+
+// DownloadLifted reports whether putting the bytes at src (on srcSet's
+// storage) at dst (on dstSet's storage, the same caller's set) would make them
+// downloadable where they are not: CanRead refuses src and allows dst.
+//
+// A copy, a move, a rename, an extraction or a derived file that lands its
+// bytes somewhere else is refused when this says yes, on every door - so a
+// role's part that says no to files.download on some paths or some names is
+// not undone by putting the file at another path or under another name. A
+// copy or a move that stays where download is refused, and one by an account
+// whose files.download is the same on every path, is untouched.
+func DownloadLifted(srcSet *acl.Set, src string, dstSet *acl.Set, dst string) bool {
+	return !CanRead(srcSet, src) && CanRead(dstSet, dst)
+}
+
+// TreeDownloadLifted is DownloadLifted for a whole item: src itself and, when
+// src is a folder on drv (the source's driver), every file below it, each at
+// its own place below dst. at is the source path that would be lifted - src,
+// or the first file below it - for the refusal to name.
+//
+// It walks the folder only when the caller's files.download can answer
+// differently from path to path (a role's part limited to some storages,
+// folders or names, perm.Result.VariesByFolder): otherwise every path answers
+// alike, the level a copy or a move already asked is at least viewer at both
+// ends, and nothing can be lifted. A folder that cannot be walked is an error,
+// which the door answers as its own failure.
+func TreeDownloadLifted(ctx context.Context, drv storage.Driver, srcSet *acl.Set, src string, dstSet *acl.Set, dst string) (at string, lifted bool, err error) {
+	if DownloadLifted(srcSet, src, dstSet, dst) {
+		return src, true, nil
+	}
+	if (!downloadVaries(srcSet) && !downloadVaries(dstSet)) || drv == nil {
+		return "", false, nil
+	}
+	st, err := drv.Stat(ctx, src)
+	if err != nil || st.Kind != storage.KindDirectory {
+		return "", false, nil
+	}
+	files, err := sharezip.CollectFiles(ctx, drv, src)
+	if err != nil {
+		return "", false, err
+	}
+	for _, f := range files {
+		from := path.Join(src, f.Rel)
+		if DownloadLifted(srcSet, from, dstSet, path.Join(dst, f.Rel)) {
+			return from, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// downloadVaries reports whether set's files.download can differ by path.
+func downloadVaries(set *acl.Set) bool {
+	p := set.Perms()
+	return p != nil && p.VariesByFolder().Has(perm.FilesDownload)
 }
 
 // CanDo is the door for every change: the storage exists and is writable, no

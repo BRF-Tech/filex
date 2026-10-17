@@ -37,9 +37,12 @@ import {
   parseTestList,
   shardMinutes,
   shotsOnly,
+  trackShare,
   trackWeight,
+  weightOf,
 } from '../../../scripts/chain/plan.mjs';
-import { KIND, hostJobEnv, jobImages, jobWarnings, parseArgs, parseEnvFile } from '../../../scripts/chain/run.mjs';
+import { KIND, e2eRecordOf, hostJobEnv, jobImages, jobWarnings, parseArgs, parseEnvFile } from '../../../scripts/chain/run.mjs';
+import { recordSettings } from '../../../e2e/helpers/record';
 import { ioWaits, pickJobs, poolBudget, poolCeiling, readyJobs, simulate } from '../../../scripts/chain/schedule.mjs';
 import { findBash } from '../../../scripts/release/engine.mjs';
 
@@ -55,9 +58,19 @@ type Job = { name: string; weight: number; prio: number; needs: string[]; kind: 
 const job = (name: string, weight: number, prio = 1, needs: string[] = []): Job => ({ name, weight, prio, needs, kind: 'race' });
 const heavy = (name: string, weight: number, prio = 1): Job => ({ ...job(name, weight, prio), io: 'heavy' });
 
-// ioMax: CHAIN_IO_HEAVY_MAX, 1 on the build host (#194).
-function budgetOf(plan: ReturnType<typeof buildPlan>, memGb = 8, poolMax = 3, ioMax = 1) {
-  return { memGb, trackGb: trackWeight(plan.track), dbGb: plan.pool.some((j: { db: boolean }) => j.db) ? WEIGHTS.db : 0, poolMax, ioMax };
+// memGb: what the build host gives a run, 9.75-10.25 GiB above the reserve
+// on the nights of 0.56 (CHAIN_MEM_GB 10). ioMax: CHAIN_IO_HEAVY_MAX, 1 on the
+// build host (#194). trackShares: the round's share while each line runs, as
+// run.mjs budgetOf gives it.
+function budgetOf(plan: ReturnType<typeof buildPlan>, memGb = 10, poolMax = 3, ioMax = 1) {
+  return {
+    memGb,
+    trackGb: trackWeight(plan.track),
+    trackShares: plan.track.map((_: unknown, i: number) => trackShare(plan.track, i)),
+    dbGb: plan.pool.some((j: { db: boolean }) => j.db) ? WEIGHTS.db : 0,
+    poolMax,
+    ioMax,
+  };
 }
 
 describe('the default lists', () => {
@@ -454,23 +467,56 @@ describe('the scheduler', () => {
 });
 
 describe('the weights (#194)', () => {
-  // The most each kind's container held in the four 0.53 full runs of
-  // 2026-10-06/07 and on the night of 2026-10-07 (cAdvisor working set, GiB).
-  // db: MySQL 0.77 + PostgreSQL 0.14 + Redis and Samba 0.04.
+  // The most each job's cgroup held on the nights of 2026-10-10, -12 and -13
+  // (0.56; result.json `load.mem_gb`, sampled every 5 s, GiB). The sidecars
+  // are not sampled: the Document Server and the databases are 0.53's
+  // cAdvisor numbers (MySQL 0.77 + PostgreSQL 0.14 + Redis and Samba 0.04).
+  // ⚠ Until 0.57 every Playwright line was budgeted at 4.25 and the Chromium
+  // line held 6.62-6.85 (7.15 on its own, 2026-10-15): its /tmp is a tmpfs
+  // since 0.55, and its one worker kept what recording every test left it.
+  // Chromium is the line measured on its own recording nothing (2026-10-15,
+  // 4.15 GiB), what the chain runs now (CHAIN_E2E_RECORD=retry); the other
+  // lines are the nights' numbers, recorded, until a night measures them
+  // without (plan.mjs WEIGHTS says more).
   const MEASURED: Record<string, number> = {
-    build: 4.72, web: 3.03, docs: 0.31, 'shards-check': 0.95, go: 0.76, race: 1.22, 'race-shard': 0.86,
-    cypress: 1.39, e2e: 4.04, ds: 0.72, db: 0.95,
+    build: 4.84, web: 3.05, docs: 1.39, e2etsc: 0.41, 'shards-check': 1.07, migrate: 0.02,
+    'go-db': 0.63, 'go-handlers-1-2': 1.04, 'go-handlers-3-4': 0.91, 'go-handlers-5-6': 0.49, 'go-handlers-7-8': 0.42,
+    'go-io-rest': 1.22, 'go-wasmplugin-1-2': 0.38, 'go-wasmplugin-3': 0.43,
+    'race-build-handlers': 1.11, 'race-build-wasmplugin': 0.33, 'race-db-io': 1.67, 'race-rest': 1.35, 'race-auth': 0.74,
+    'race-handlers-1': 0.7, 'race-handlers-2': 0.15, 'race-handlers-3': 0.58, 'race-handlers-4': 0.52, 'race-handlers-5': 0.94,
+    'race-handlers-6': 0.65, 'race-handlers-7': 0.63, 'race-handlers-8': 0.67,
+    'race-wasmplugin-1': 0.59, 'race-wasmplugin-2': 0.53, 'race-wasmplugin-3': 0.95,
+    'e2e-cypress': 1.7, 'e2e-chromium': 4.15, 'e2e-firefox': 5.64, 'e2e-webkit': 5.31, 'e2e-nods': 1.6, 'e2e-nopub': 1.74, 'e2e-s3': 0.71,
+    'ds-go': 1.01, 's3-live': 0.29, shots: 2.52,
   };
+  const SIDECARS: Record<string, number> = { ds: 0.72, db: 0.95 };
+  const nightly = buildPlan({ profile: 'nightly', lists, src: REPO });
 
-  it('budget every kind for at least what it was measured to hold', () => {
-    // ⚠ Until 0.53 the web job was budgeted at 1 GiB and held 2.0-3.03.
-    for (const [kind, gb] of Object.entries(MEASURED)) expect(WEIGHTS[kind as keyof typeof WEIGHTS], kind).toBeGreaterThanOrEqual(gb);
-    expect(JOB_WEIGHTS['go-io-rest' as keyof typeof JOB_WEIGHTS]).toBeGreaterThanOrEqual(1.22);
+  it('budget every job of a full and a nightly run for at least what it was measured to hold', () => {
+    const jobs = [...nightly.pool, ...nightly.track];
+    for (const [name, gb] of Object.entries(MEASURED)) {
+      const j = jobs.find((x: Job) => x.name === name);
+      expect(j, `${name} is no job of the nightly plan: rename it in MEASURED`).toBeTruthy();
+      expect(j.weight, name).toBeGreaterThanOrEqual(gb);
+      expect(j.weight, name).toBe(weightOf(name, j.weightKind ?? (j.kind === 'local' || j.kind === 'nopub' || j.kind === 's3' ? 'e2e' : j.kind)));
+    }
+    for (const [kind, gb] of Object.entries(SIDECARS)) expect(WEIGHTS[kind as keyof typeof WEIGHTS], kind).toBeGreaterThanOrEqual(gb);
+    // Every job of the nightly plan has been measured but realenv (an engine's 4 until a night does).
+    expect(jobs.map((j: Job) => j.name).filter((n: string) => !(n in MEASURED))).toEqual(['realenv']);
   });
 
-  it('give a job its own weight where it has one, and a renamed shard cannot silently drop it', () => {
+  it('budget a Playwright line the plan does not name for the heaviest engine', () => {
+    // A targeted run's line, or a part of a split one: it may run the whole suite on Chromium.
+    const [part] = parseE2eList('chromium-2 local chromium 1 --shard 2/4');
+    expect(weightOf(`e2e-${part.name}`, 'e2e')).toBe(WEIGHTS.e2e);
+    expect(WEIGHTS.e2e).toBeGreaterThanOrEqual(Math.max(MEASURED['e2e-chromium'], MEASURED['e2e-firefox'], MEASURED['e2e-webkit']));
+    const targeted = buildPlan({ profile: 'targeted', lists, env: { CHAIN_E2E_GREP: '01-smoke', CHAIN_E2E_BROWSERS: 'chromium' } });
+    expect(targeted.track.find((t: Job) => t.name === 'e2e-targeted').weight).toBe(WEIGHTS.e2e);
+  });
+
+  it('give a job its own weight where it has one, and a renamed shard or line cannot silently drop it', () => {
     for (const [name, gb] of Object.entries(JOB_WEIGHTS)) {
-      const j = full.pool.find((x: Job) => x.name === name);
+      const j = [...full.pool, ...full.track].find((x: Job) => x.name === name);
       expect(j, `${name} is no job of the full plan: rename it in JOB_WEIGHTS`).toBeTruthy();
       expect(j.weight, name).toBe(gb);
     }
@@ -479,24 +525,84 @@ describe('the weights (#194)', () => {
   });
 });
 
+describe("the browser round's share (#194)", () => {
+  // ⚠ The round held its heaviest line's share from its first line to its
+  // last - Firefox's 6.5 GiB with the Document Server, through the light lines
+  // at its end too. The share is now the heaviest line STILL TO RUN.
+  const shares = full.track.map((_: unknown, i: number) => trackShare(full.track, i));
+
+  it("is the heaviest line still to run, plus the Document Server while a line still to run needs it", () => {
+    expect(names(full.track)).toEqual(['e2e-cypress', 'e2e-chromium', 'e2e-firefox', 'e2e-webkit', 'e2e-nods', 'e2e-nopub', 'e2e-s3']);
+    const ds = WEIGHTS.ds;
+    const w = (n: string) => full.track.find((t: Job) => t.name === n).weight;
+    expect(shares).toEqual([
+      w('e2e-firefox') + ds,
+      w('e2e-firefox') + ds,
+      w('e2e-firefox') + ds,
+      w('e2e-webkit') + ds,
+      Math.max(w('e2e-nods'), w('e2e-nopub'), w('e2e-s3')),
+      Math.max(w('e2e-nopub'), w('e2e-s3')),
+      w('e2e-s3'),
+    ]);
+    expect(trackShare(full.track, 0)).toBe(trackWeight(full.track));
+    expect(trackShare([], 0)).toBe(0);
+  });
+
+  it('only shrinks as the round goes, and always covers the line running: the round never waits for memory the pool took', () => {
+    for (const plan of [full, buildPlan({ profile: 'nightly', lists, src: REPO })]) {
+      plan.track.forEach((t: Job & { ds: boolean }, i: number) => {
+        const share = trackShare(plan.track, i);
+        expect(share, t.name).toBeGreaterThanOrEqual(t.weight + (t.ds ? WEIGHTS.ds : 0));
+        if (i > 0) expect(share, t.name).toBeLessThanOrEqual(trackShare(plan.track, i - 1));
+      });
+    }
+  });
+
+  it('gives the pool back what a line that ended held: never a longer run, and the web gates start sooner', () => {
+    for (const plan of [full, buildPlan({ profile: 'nightly', lists, src: REPO })]) {
+      const sim = simulate(plan, { ...budgetOf(plan), minutes: expectedMinutes });
+      // The round's opening share for the whole round instead.
+      const fixed = simulate(plan, { ...budgetOf(plan), trackShares: [], minutes: expectedMinutes });
+      expect(sim.wall, plan.profile).toBeLessThanOrEqual(fixed.wall);
+      const web = (s: typeof sim) => s.timeline.find((e: { name: string }) => e.name === 'web').start;
+      expect(web(sim), plan.profile).toBeLessThan(web(fixed));
+    }
+  });
+
+  it('is what run.mjs gives the pool while each line runs', () => {
+    const runMjs = fs.readFileSync(path.join(CHAIN, 'run.mjs'), 'utf8');
+    expect(runMjs).toMatch(/const trackShares = plan\.track\.map\(\(_, i\) => trackShare\(plan\.track, i\)\);/);
+    expect(runMjs).toMatch(/const later = track\.slice\(i \+ 1\);\n\s*this\.trackAt = i;/);
+    expect(runMjs).toMatch(/const trackGb = this\.budget\.trackShares\[this\.trackAt\] \?\? this\.budget\.trackGb;/);
+  });
+});
+
 describe('a full run, replayed with the minutes the build host measured', () => {
   const b = budgetOf(full);
   const sim = simulate(full, { ...b, minutes: expectedMinutes });
   const at = (name: string) => sim.timeline.find((e: { name: string }) => e.name === name);
 
-  it('never holds more than the 8 GiB budget, and runs at most three pool jobs at once, and the one heavy writer', () => {
-    expect(sim.peakGb).toBeLessThanOrEqual(8 + 1e-9);
+  it('never holds more than the 10 GiB budget, and runs at most three pool jobs at once, and the one heavy writer', () => {
+    expect(sim.peakGb).toBeLessThanOrEqual(10 + 1e-9);
     // The heavy writer runs in its own lane, in the place the round's heavy line held (#194).
     expect(sim.maxRunning).toBeLessThanOrEqual(3 + 1);
     expect(sim.maxHeavy).toBe(1);
   });
 
-  it('runs -race next to Chromium: two or three race jobs while it runs', () => {
+  it('runs the Go shards and -race next to Chromium, and -race next to the engines after it', () => {
+    // ⚠ #194: the round holds Firefox's 6.5 GiB (with the Document Server)
+    // until Firefox is done, the databases 1: the pool has 2.5 of 10 beside
+    // Chromium and Firefox, 2.75 beside WebKit.
     const c = at('e2e-chromium');
-    const overlapping = sim.timeline.filter(
-      (e: { name: string; start: number; end: number }) => e.name.startsWith('race-') && !e.name.startsWith('race-build') && e.start < c.end && e.end > c.start,
-    );
-    expect(overlapping.length).toBeGreaterThanOrEqual(2);
+    const beside = sim.timeline.filter((e: { name: string; start: number; end: number }) => e.lane === 'pool' && e.start < c.end && e.end > c.start);
+    expect(beside.filter((e: { name: string }) => e.name.startsWith('go-')).length).toBeGreaterThanOrEqual(3);
+    for (const line of ['e2e-chromium', 'e2e-firefox', 'e2e-webkit']) {
+      const l = at(line);
+      const race = sim.timeline.filter(
+        (e: { name: string; start: number; end: number }) => e.name.startsWith('race-') && !e.name.startsWith('race-build') && e.start < l.end && e.end > l.start,
+      );
+      expect(race.length, line).toBeGreaterThanOrEqual(2);
+    }
   });
 
   it('ends within three hours (0.51 took 4 h 42 min)', () => {
@@ -512,30 +618,37 @@ describe('a full run, replayed with the minutes the build host measured', () => 
     expect(s.wall).toBeLessThanOrEqual(180);
   });
 
-  it('starts the web gates once the databases or the round have let go, not beside the round and the databases (#194)', () => {
-    const lastDb = Math.max(...sim.timeline.filter((e: { name: string }) => full.pool.find((j: Job & { db: boolean }) => j.name === e.name)?.db).map((e: { end: number }) => e.end));
-    const roundEnd = Math.max(...full.track.map((t: Job) => at(t.name).end));
-    // go-io-rest, a Go job beside the databases, writes heavily: it waits for
-    // the round's heavy lines, and the databases stay up until it ends.
-    expect(at('web').start >= lastDb || at('web').start >= roundEnd, `web at ${at('web').start}, databases until ${lastDb}, round until ${roundEnd}`).toBe(true);
+  it("starts the web gates where they fit: beside the round's light lines and the databases, never beside an engine (#194)", () => {
+    // ⚠ The web gates (3.25 GiB) beside the round and the databases started
+    // the run over its budget until #194, the opening minute in which the
+    // build host stalled. With the round's share shrinking (trackShare) they
+    // fit once the engines are done: 3.25 + 1.75 + 1 of 10.
+    const engines = ['e2e-chromium', 'e2e-firefox', 'e2e-webkit'].map((n) => at(n));
+    for (const e of engines) expect(at('web').start >= e.end || at('web').end <= e.start, `web beside ${e.name}`).toBe(true);
+    expect(at('web').start).toBeGreaterThanOrEqual(at('e2e-webkit').end);
   });
 });
 
 describe('a run on a host with less to give (#194)', () => {
   it('runs every job however small the budget: a job heavier than the pool has waits for the round, never for good', () => {
-    for (const memGb of [7.25, 6.75, 6, 4, 2]) {
+    for (const memGb of [9, 8, 7.25, 6.75, 6, 4, 2]) {
       const s = simulate(full, { ...budgetOf(full, memGb), minutes: expectedMinutes });
       const ran = new Set(s.timeline.map((e: { name: string }) => e.name));
       expect([...full.pool, ...full.track].filter((j: Job) => !ran.has(j.name)).map((j: Job) => j.name), `budget ${memGb}`).toEqual([]);
-      // Below the round's and the databases' shares nothing but those two is held.
-      if (memGb >= trackWeight(full.track) + WEIGHTS.db) expect(s.peakGb, `budget ${memGb}`).toBeLessThanOrEqual(memGb + 1e-9);
+      // The budget, or - below the round's and the databases' shares - nothing but those two.
+      expect(s.peakGb, `budget ${memGb}`).toBeLessThanOrEqual(Math.max(memGb, trackWeight(full.track) + WEIGHTS.db) + 1e-9);
     }
   });
 
-  it('is slower, never redder: on the 6.75 GiB the build host leaves beside its Android emulator a full run ends within four hours', () => {
-    const s = simulate(full, { ...budgetOf(full, 6.75), minutes: expectedMinutes });
-    expect(s.peakGb).toBeLessThanOrEqual(6.75 + 1e-9);
-    expect(s.wall).toBeLessThanOrEqual(240);
+  it('is slower, never redder: on the 7.25 GiB the build host leaves while its Android emulator runs, a full run ends within four hours', () => {
+    // 2026-10-15, a chain started without its pause hook: MemAvailable 8.4 GiB
+    // at the start, the emulator holding 2.6. Nothing runs beside Chromium,
+    // and the pool waits for the round's share to shrink.
+    for (const memGb of [7.25, 6.75]) {
+      const s = simulate(full, { ...budgetOf(full, memGb), minutes: expectedMinutes });
+      expect(s.peakGb, `${memGb}`).toBeLessThanOrEqual(trackWeight(full.track) + WEIGHTS.db + 1e-9);
+      expect(s.wall, `${memGb}`).toBeLessThanOrEqual(240);
+    }
   });
 });
 
@@ -615,7 +728,7 @@ describe('the disk: one heavy writer at a time (#194)', () => {
   for (const profile of ['full', 'nightly'] as const) {
     it(`never runs two heavy writers at once in a ${profile} run, the round's lines included`, () => {
       const plan = profile === 'full' ? full : buildPlan({ profile, lists, src: REPO });
-      for (const memGb of [8, 6.75]) {
+      for (const memGb of [10, 7.25]) {
         const s = simulate(plan, { ...budgetOf(plan, memGb), minutes: expectedMinutes });
         expect(s.maxHeavy, `${profile} ${memGb}`).toBe(1);
         const heavyRuns = s.timeline.filter((e: { name: string }) => [...plan.pool, ...plan.track].find((j: Job) => j.name === e.name)?.io === 'heavy');
@@ -628,8 +741,8 @@ describe('the disk: one heavy writer at a time (#194)', () => {
     });
   }
 
-  it('ran them together before: Chromium beside race-db-io and race-rest, the minutes the disk stalled', () => {
-    const s = simulate(full, { ...budgetOf(full, 8, 3, 0), minutes: expectedMinutes });
+  it('runs them together without the rule: an engine beside race-db-io and race-rest, the minutes the disk stalled', () => {
+    const s = simulate(full, { ...budgetOf(full, 10, 3, 0), minutes: expectedMinutes });
     expect(s.maxHeavy).toBeGreaterThanOrEqual(3);
   });
 });
@@ -666,8 +779,36 @@ describe('what run.mjs does with the host (#194)', () => {
     expect(e2eSh).toContain('cp -a "e2e/test-results/$LABEL" "$OUT/test-results"');
     expect(e2eSh).toMatch(/e2e\/test-results\/\*\) cp -a "\$e" "\$OUT\/test-results\/" ;;/);
     const pw = fs.readFileSync(path.join(REPO, 'e2e', 'playwright.config.ts'), 'utf8');
-    expect(pw).toMatch(/trace: 'retain-on-failure'/);
-    expect(pw).toMatch(/video: 'retain-on-failure'/);
+    expect(pw).toMatch(/trace: RECORD\.trace,/);
+    expect(pw).toMatch(/video: RECORD\.video,/);
+  });
+
+  it('records a test only when it fails, on its second attempt, and keeps the line red (#194)', () => {
+    // ⚠ The build host on 2026-10-15, the whole suite on Chromium: recording
+    // every test, the line's one Playwright worker grew to 3.4 GiB and the
+    // line held 7.15; recording nothing, 4.15 (the worker 1.2 at its end).
+    expect(e2eRecordOf(undefined)).toBe('retry');
+    expect(e2eRecordOf('')).toBe('retry');
+    expect(e2eRecordOf('failures')).toBe('failures');
+    expect(() => e2eRecordOf('all')).toThrow(/CHAIN_E2E_RECORD/);
+    expect(runMjs).toMatch(/e2eRecord: e2eRecordOf\(env\.CHAIN_E2E_RECORD\),/);
+    expect(runMjs).toMatch(/\.\.\.\(k\.results \? \{ E2E_RECORD: c\.e2eRecord \} : \{\}\),/);
+
+    // retry: nothing on a first attempt; a failed test once more, recorded;
+    // a test that passes only then is flaky, and a flaky test fails the run.
+    expect(recordSettings('retry')).toEqual({
+      mode: 'retry', retries: 1, failOnFlakyTests: true, trace: 'on-first-retry', video: 'on-first-retry',
+    });
+    // failures (a person's run, GitHub's): every test recorded, a failure's
+    // first attempt on record (task #81), as before.
+    expect(recordSettings(undefined)).toEqual({
+      mode: 'failures', retries: 0, failOnFlakyTests: false, trace: 'retain-on-failure', video: 'retain-on-failure',
+    });
+    expect(recordSettings('', { ci: true }).retries).toBe(1);
+    expect(() => recordSettings('everything')).toThrow(/E2E_RECORD/);
+    const pw = fs.readFileSync(path.join(REPO, 'e2e', 'playwright.config.ts'), 'utf8');
+    expect(pw).toMatch(/const RECORD = recordSettings\(process\.env\.E2E_RECORD, \{ ci: !!process\.env\.CI \}\);/);
+    expect(pw).toMatch(/retries: RECORD\.retries,\n\s*failOnFlakyTests: RECORD\.failOnFlakyTests,/);
   });
 
   it("gives a Playwright line a tmpfs /tmp of its own size: the browser's profile, the server's data directory, Chromium's shared memory", () => {
@@ -730,7 +871,7 @@ describe('what run.mjs does with the host (#194)', () => {
     expect(runMjs).toMatch(/this\.trackIo = job\.io === 'heavy';\n[^\n]*await this\.cool\(job\);\n\s*await this\.trackMemory\(job\);\n\s*await this\.trackDisk\(job\);\n\s*await this\.startJob\(job, 'e2e'\);\n\s*this\.trackIo = false;/);
     expect(runMjs).toMatch(/const ioHeld = this\.trackIo \? 1 : 0;/);
     expect(runMjs).toMatch(/io_wait_secs: Math\.round\(h\.ioWaitMs \/ 1000\)/);
-    expect(runMjs).toMatch(/return \{ memGb, trackGb, dbGb, poolMax: cfg\.poolMax, ioMax: cfg\.ioHeavyMax \};/);
+    expect(runMjs).toMatch(/return \{ memGb, trackGb, trackShares, dbGb, poolMax: cfg\.poolMax, ioMax: cfg\.ioHeavyMax \};/);
   });
 
   it('waits for a cool disk at most CHAIN_TEMP_WAIT_TOTAL_MIN in a whole run', () => {
@@ -749,7 +890,7 @@ describe('a nightly run, replayed with the same minutes', () => {
 
   it('holds the browser round to the same share as the full run: the extras weigh no more than an engine', () => {
     expect(trackWeight(nightly.track)).toBe(trackWeight(full.track));
-    expect(sim.peakGb).toBeLessThanOrEqual(8 + 1e-9);
+    expect(sim.peakGb).toBeLessThanOrEqual(10 + 1e-9);
   });
 
   it('runs ds-go and shots while the Document Server is still up, and s3-live and realenv after every browser line', () => {

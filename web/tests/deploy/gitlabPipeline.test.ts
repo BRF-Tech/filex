@@ -573,4 +573,139 @@ describe('the private pipeline', () => {
       expect(fs.readdirSync(runs).sort()).toEqual(['full-20261001-000000Z-abcdef12', 'gl-3-4', 'gl-5-6', 'latest-full.json']);
     });
   });
+  // ── the embargo watch (task #182) ─────────────────────────────────────────
+  //
+  // On 2026-10-10 an embargoed branch was pushed with `-o ci.skip`: the forge
+  // recorded a "skipped" pipeline, ran nothing and said nothing, and the
+  // branch reached main that afternoon without the chain. The watch on the
+  // build host starts the chain on such a tip; the merge queue refuses one
+  // (trainMergeQueue.test.ts). Both decide through scripts/lib/embargo.mjs.
+
+  describe.skipIf(!present)('embargo-watch.mjs, the skipped chain started again', () => {
+    const WATCH = path.join(RUNNER, 'embargo-watch.mjs');
+    const load = async () =>
+      (await import(pathToFileURL(WATCH).href)) as {
+        branchesToStart: (
+          b: unknown[],
+          p: (b: { sha: string }) => Promise<unknown[]>,
+          o?: { now?: number; days?: number },
+        ) => Promise<Array<{ name: string }>>;
+        watch: (o: { env: Record<string, string>; dryRun?: boolean; fetchImpl: typeof fetch; log?: (l: string) => void }) => Promise<number>;
+      };
+    const NOW = Date.parse('2026-10-15T12:00:00Z');
+    const fresh = NOW - 3_600_000;
+
+    it('starts a tip that only ever had a skipped pipeline, or none; leaves red, running, green and old tips alone', async () => {
+      const m = await load();
+      const pipes: Record<string, unknown[]> = {
+        a: [{ status: 'skipped' }],
+        b: [],
+        c: [{ status: 'failed' }, { status: 'skipped' }],
+        d: [{ status: 'running' }],
+        e: [{ status: 'success' }],
+        f: [{ status: 'skipped' }],
+      };
+      const branches = [
+        { name: 'sec/a', sha: 'a', at: fresh },
+        { name: 'sec/b', sha: 'b', at: fresh },
+        { name: 'sec/c', sha: 'c', at: fresh },
+        { name: 'sec/d', sha: 'd', at: fresh },
+        { name: 'sec/e', sha: 'e', at: fresh },
+        { name: 'sec/f', sha: 'f', at: NOW - 30 * 86_400_000 },
+      ];
+      const todo = await m.branchesToStart(branches, async (b) => pipes[b.sha], { now: NOW, days: 7 });
+      expect(todo.map((b) => b.name)).toEqual(['sec/a', 'sec/b']);
+    });
+
+    function fakeForge(pipelines: unknown[]) {
+      const calls: Array<{ method: string; url: string; body?: string; token?: string }> = [];
+      const fetchImpl = (async (url: string, init?: { method?: string; body?: string; headers?: Record<string, string> }) => {
+        const method = init?.method ?? 'GET';
+        calls.push({ method, url: String(url), body: init?.body, token: init?.headers?.['PRIVATE-TOKEN'] });
+        const json = (v: unknown) => ({ ok: true, status: 200, json: async () => v });
+        if (String(url).includes('/repository/branches')) {
+          return json([
+            { name: 'sec/hole', commit: { id: 'f2cb5832aaaa', committed_date: new Date().toISOString() } },
+            { name: 'feat/not-an-embargo', commit: { id: 'bbbb', committed_date: new Date().toISOString() } },
+          ]);
+        }
+        if (method === 'GET' && String(url).includes('/pipelines?')) return json(pipelines);
+        if (method === 'POST' && String(url).includes('/pipeline?')) return json({ id: 4242 });
+        return { ok: false, status: 404, json: async () => ({}) };
+      }) as unknown as typeof fetch;
+      return { calls, fetchImpl };
+    }
+
+    function settings() {
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-embargo-'));
+      const token = path.join(d, 'token');
+      fs.writeFileSync(token, 'test-token-value\n');
+      return { EMBARGO_API: 'https://forge.example.com/api/v4/projects/7', EMBARGO_TOKEN_FILE: token };
+    }
+
+    it('starts the whole chain on the skipped tip, through the API, with the token in a header', async () => {
+      const m = await load();
+      const f = fakeForge([{ status: 'skipped' }]);
+      const lines: string[] = [];
+      expect(await m.watch({ env: settings(), fetchImpl: f.fetchImpl, log: (l) => lines.push(l) })).toBe(0);
+      const post = f.calls.filter((c) => c.method === 'POST');
+      expect(post).toHaveLength(1);
+      expect(post[0].url).toBe('https://forge.example.com/api/v4/projects/7/pipeline?ref=sec%2Fhole');
+      expect(JSON.parse(post[0].body ?? '{}')).toEqual({ variables: [{ key: 'CHAIN_PROFILE', value: 'full' }] });
+      for (const c of f.calls) expect(c.token).toBe('test-token-value');
+      for (const c of f.calls) expect(c.url).not.toContain('test-token-value');
+      expect(lines.join('\n')).not.toContain('test-token-value');
+      // A branch that is no embargo is not even asked about.
+      expect(f.calls.some((c) => c.url.includes('bbbb'))).toBe(false);
+    });
+
+    it('does nothing to a tip whose chain ran, and only says so on a dry run', async () => {
+      const m = await load();
+      const ran = fakeForge([{ status: 'failed' }]);
+      expect(await m.watch({ env: settings(), fetchImpl: ran.fetchImpl, log: () => {} })).toBe(0);
+      expect(ran.calls.some((c) => c.method === 'POST')).toBe(false);
+      const dry = fakeForge([{ status: 'skipped' }]);
+      const lines: string[] = [];
+      expect(await m.watch({ env: settings(), dryRun: true, fetchImpl: dry.fetchImpl, log: (l) => lines.push(l) })).toBe(0);
+      expect(dry.calls.some((c) => c.method === 'POST')).toBe(false);
+      expect(lines.join('\n')).toContain('would start the chain on sec/hole');
+    });
+
+    it('watches nothing without its settings, and says so', async () => {
+      const m = await load();
+      const f = fakeForge([]);
+      const lines: string[] = [];
+      expect(await m.watch({ env: {}, fetchImpl: f.fetchImpl, log: (l) => lines.push(l) })).toBe(2);
+      expect(f.calls).toEqual([]);
+      expect(lines.join('\n')).toContain('EMBARGO_API');
+    });
+
+    it('runs every ten minutes as a oneshot from the installed copy, and its settings hold no token', () => {
+      const unit = runnerFile('filex-embargo-watch.service');
+      expect(unit).toMatch(/^Type=oneshot$/m);
+      expect(/^ExecStart=(.*)$/m.exec(unit)?.[1]).toContain('/etc/gitlab-runner-filex/watch/gitlab-runner/embargo-watch.mjs');
+      expect(unit).toMatch(/^EnvironmentFile=\/etc\/filex-chain\/embargo-watch\.env$/m);
+      expect(runnerFile('filex-embargo-watch.timer')).toMatch(/^OnUnitActiveSec=10min$/m);
+      const env = parseEnvFile(runnerFile('embargo-watch.env'));
+      expect(env.EMBARGO_TOKEN_FILE).toMatch(/^\/etc\/filex-chain\//);
+      for (const f of fs.readdirSync(RUNNER)) expect(runnerFile(f), f).not.toMatch(/glpat-[A-Za-z0-9_-]{10,}/);
+    });
+
+    it('install.sh keeps the watch token off every command line too', () => {
+      const lines = runnerFile('install.sh')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => !l.startsWith('#') && /\bWTOKEN\b/.test(l));
+      const allowed = [
+        /^WTOKEN=""$/,
+        /^IFS= read -r WTOKEN( < "\$WATCH_TOKEN_FILE")? \|\| \[ -n "\$WTOKEN" \] \|\| die "[^"$]*"$/,
+        /^WTOKEN="\$\{WTOKEN%\$'\\r'\}"$/,
+        /^\[\[ "\$WTOKEN" =~ \^glpat-\S+ \]\] \|\| die "[^"$]*"$/,
+        /^printf '%s\\n' "\$WTOKEN" > "\$WATCH_TOKEN\.new" \|\| die "[^"]*"$/,
+        /^unset WTOKEN$/,
+      ];
+      expect(lines.length).toBeGreaterThan(4);
+      expect(lines.filter((l) => !allowed.some((re) => re.test(l)))).toEqual([]);
+    });
+  });
 });

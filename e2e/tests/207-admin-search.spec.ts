@@ -15,7 +15,7 @@
  * holds in whichever language an earlier spec left the account.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { ADMIN_EMAIL, loginAs } from '../helpers/auth';
+import { ADMIN_EMAIL, openSignedIn } from '../helpers/auth';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -25,8 +25,10 @@ async function settled(page: Page) {
 }
 
 async function openPanel(page: Page) {
-  await loginAs(page);
-  await page.goto('/admin/dashboard');
+  // Signed in through the API with the dashboard as the tab's first page
+  // (helpers/auth openSignedIn): the form's start page left mid-load was the
+  // WebKit "internal error" on this goto (task #182).
+  await openSignedIn(page, '/admin/dashboard');
   await expect(page.getByTestId('account-menu')).toBeVisible({ timeout: 20_000 });
   await settled(page);
 }

@@ -21,7 +21,13 @@
 //     as an older one did) lands beside the document as Rapor.docx, the next
 //     save of the session goes to the same file, and the copies go with the
 //     session; a .csv opens too, saved as CSV over itself, saved as a
-//     spreadsheet beside it.
+//     spreadsheet beside it;
+//   • the kinds of file the apps on the server open (src/app-kinds.ts): the
+//     suite installs a small app of its own (openwith-probe, the example
+//     office app's interface) that opens the office documents and `.fxprobe`;
+//     a `.fxprobe` opens in it (`app=openwith-probe/editor`), a kind no app
+//     opens is refused before anything is uploaded, Settings counts the
+//     kinds, and once the app is removed `.fxprobe` is refused too.
 //
 // ⚠ OnlyOffice itself is NOT in the loop, and cannot honestly be: the document
 // server is a separate ~2 GB service that has to reach the filex instance over
@@ -33,9 +39,10 @@
 // ⚠ No Playwright MCP and no OS input anywhere. This drives Electron through
 // playwright-core directly, so a run never touches the operator's mouse.
 //
-// Prerequisites: a filex instance to sign in to.
+// Prerequisites: a filex instance to sign in to, and the app SDK built
+// (packages/app-ui/dist - `pnpm run build:packages`) for the probe app.
 //   FILEX_SERVER=http://127.0.0.1:8899 FILEX_EMAIL=admin@local FILEX_PASSWORD=admin \
-//     node desktop/scripts/openwith-e2e.mjs
+//     node --experimental-strip-types desktop/scripts/openwith-e2e.mjs
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -44,6 +51,10 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 import { DESKTOP, REPO, EMAIL, PASSWORD, SERVER, arrived, check, finish, launchApp, signIn, sleep } from './lib/harness.mjs';
+import { packInterfaceApp } from '../../e2e/shots/board-app/pack.mjs';
+// ⚠ TypeScript, imported: run with --experimental-strip-types (package.json
+// e2e:openwith), so the office list is the app's own, not a copy.
+import { OFFICE_EXTENSIONS } from '../src/openwith.ts';
 
 const require = createRequire(import.meta.url);
 const ELECTRON_BIN = require('electron'); // the package's main export IS the exe path
@@ -103,6 +114,72 @@ async function serverSideSave(basename, bytes) {
   form.append('file[]', new Blob([bytes]), basename);
   const res = await api('/api/files/manager?action=upload', { method: 'POST', body: form });
   if (!res.ok) throw new Error(`server-side save failed: ${res.status} ${await res.text()}`);
+}
+
+// ── the probe app: what the server's apps open (src/app-kinds.ts) ──
+const PROBE = 'openwith-probe';
+const PROBE_KINDS = [...OFFICE_EXTENSIONS, 'fxprobe'];
+
+/**
+ * Installs an interface-only app named openwith-probe whose viewer opens the
+ * office documents and `.fxprobe` - the example office app's own interface
+ * (e2e/shots/office-app), with a manifest of this suite's: a server without
+ * a Document Server then opens every document this suite double-clicks, and
+ * `.fxprobe` is a kind only an app opens. The install is the wizard's: a dry
+ * run, then the review's permissions granted.
+ */
+async function installProbeApp() {
+  await removeProbeApp();
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-ow-probe-'));
+  const { zip, manifest } = packInterfaceApp(path.join(REPO, 'e2e', 'shots', 'office-app'), work);
+  const reasons = {
+    'files:read': { en: 'To open the document you choose.', tr: 'Seçtiğiniz belgeyi açmak için.' },
+    'files:write': { en: 'To save the document.', tr: 'Belgeyi kaydetmek için.' },
+    ui: { en: 'The document is drawn by the app\'s own page.', tr: 'Belgeyi uygulamanın kendi sayfası çizer.' },
+  };
+  for (const k of PROBE_KINDS) reasons[`ui-viewer:.${k}`] = { en: `So that .${k} files open in it.`, tr: `.${k} dosyaları onda açılsın diye.` };
+  const probe = {
+    ...manifest,
+    name: PROBE,
+    label: { en: 'Open-with probe', tr: 'Birlikte aç sınaması' },
+    description: { en: 'The desktop "Open with filex" suite\'s app.', tr: 'Masaüstü "filex ile aç" sınamasının uygulaması.' },
+    permissions: ['files:read', 'files:write'],
+    permission_reasons: reasons,
+    views: [{ ...manifest.views[0], id: 'editor', applies: { ext: PROBE_KINDS } }],
+  };
+  delete probe.encrypted_folders;
+  delete probe.co_edit;
+  delete probe.new_documents;
+  const form = (grant) => {
+    const fd = new FormData();
+    fd.append('grant', JSON.stringify({ permissions: grant }));
+    fd.append('manifest', new Blob([Buffer.from(JSON.stringify(probe))]), 'filex-app.json');
+    fd.append('ui', new Blob([zip]), 'ui.zip');
+    return fd;
+  };
+  const dry = await api('/api/admin/app-plugins?dry_run=1', { method: 'POST', body: form([]) });
+  if (!dry.ok) throw new Error(`the probe app's review: ${dry.status} ${(await dry.text()).slice(0, 400)}`);
+  const rows = ((await dry.json()).permissions ?? []).map((r) => r.id);
+  const res = await api('/api/admin/app-plugins', { method: 'POST', body: form(rows) });
+  if (!res.ok) throw new Error(`install the probe app: ${res.status} ${(await res.text()).slice(0, 400)}`);
+  return rows;
+}
+
+async function removeProbeApp() {
+  const list = await api('/api/admin/app-plugins');
+  if (!list.ok) return;
+  for (const p of (await list.json()).plugins ?? []) {
+    if (p.name === PROBE) await api(`/api/admin/app-plugins/${p.id}`, { method: 'DELETE' });
+  }
+}
+
+/** The app's log (userData/logs, src/log.ts): what a refusal says when no dialog may be drawn. */
+function appLog(profile) {
+  try {
+    return fs.readFileSync(path.join(profile, 'logs', 'filex-desktop.log'), 'utf8');
+  } catch {
+    return '';
+  }
 }
 
 async function waitUntil(label, fn, timeoutMs = 30_000, stepMs = 400) {
@@ -170,6 +247,11 @@ async function main() {
     const text = await made.text();
     if (!/exists/i.test(text)) throw new Error(`could not seed a storage: ${made.status} ${text}`);
   }
+
+  // ── an app that opens the documents (src/app-kinds.ts) ────────────
+  const granted = await installProbeApp();
+  check('the probe app is installed and opens its kinds', PROBE_KINDS.every((k) => granted.includes(`ui-viewer:.${k}`)),
+    granted.join(', '));
 
   // ── the app ────────────────────────────────────────────────────────
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-ow-home-'));
@@ -437,6 +519,43 @@ async function main() {
     await waitUntil('the .csv session to be cleaned up', async () => (await listScratch()).length === 0, 40_000, 500)
       .catch(() => {});
 
+    // ── 3d. kinds only an app opens (src/app-kinds.ts) ──────────────
+    // A server opens what its apps open: .fxprobe is the probe app's alone.
+    const probeDoc = path.join(oldDir, 'Deneme.fxprobe');
+    fs.writeFileSync(probeDoc, Buffer.from('FXPROBE-1'));
+    const probePromise = app.waitForEvent('window', { timeout: 30_000 }).catch(() => null);
+    await openViaSecondInstance(profile, home, probeDoc);
+    const probeWin = await probePromise;
+    const probeEditor = probeWin ? await arrived(probeWin, /\/files\/edit/) : null;
+    const probeUrl = probeEditor ? new URL(probeEditor.url()) : null;
+    check('a kind only an app opens opens with filex, in that app',
+      probeUrl?.searchParams.get('app') === `${PROBE}/editor`, probeUrl ? decodeURIComponent(probeUrl.search) : '(no window)');
+    const probeCopy = await waitUntil('the .fxprobe working copy', async () =>
+      (await listScratch()).find((f) => /^[0-9a-f]{12}-Deneme\.fxprobe$/.test(f.basename)) ?? null, 30_000, 400).catch(() => null);
+    check('it gets a working copy like any document', Boolean(probeCopy), (await listScratch()).map((f) => f.basename).join(', '));
+    if (probeCopy) {
+      const PROBE_2 = Buffer.from('FXPROBE-2-SAVED');
+      await serverSideSave(probeCopy.basename, PROBE_2);
+      const back = await waitUntil('the .fxprobe save to come home', async () =>
+        fs.readFileSync(probeDoc).equals(PROBE_2), 30_000, 300).catch(() => false);
+      check('and the app\'s save is written back over it', back === true);
+    }
+    if (probeEditor) await probeEditor.close();
+    await waitUntil('the .fxprobe session to be cleaned up', async () => (await listScratch()).length === 0, 40_000, 500)
+      .catch(() => {});
+
+    // A kind no app on the server opens: said, and nothing uploaded.
+    const nobodyDoc = path.join(oldDir, 'Kimse.fxnobody');
+    fs.writeFileSync(nobodyDoc, Buffer.from('NOBODY'));
+    const strayPromise = app.waitForEvent('window', { timeout: 6_000 }).catch(() => null);
+    await openViaSecondInstance(profile, home, nobodyDoc);
+    const stray = await strayPromise;
+    check('a kind no server opens opens no window', stray === null, stray ? stray.url() : '');
+    check('and puts nothing on the server', (await listScratch()).length === 0, (await listScratch()).map((f) => f.basename).join(', '));
+    const said = await waitUntil('the refusal in the log', async () =>
+      /None of your filex servers opens \.fxnobody files/.test(appLog(profile)), 10_000, 300).catch(() => false);
+    check('and says that none of your servers opens it', said === true);
+
     // ── 4. what Settings tells the user ──────────────────────────────
     // ⚠ Read off the rendered panel, not off the IPC answer. A card that is
     // computed correctly and never drawn is a feature nobody can find, and this
@@ -449,6 +568,10 @@ async function main() {
       ow.extensions.join(' '));
     check('a run from source says it is NOT registered with the system',
       ow.registered === false, String(ow.registered));
+    const rowOf = (ext) => (ow.apps?.rows ?? []).find((r) => r.ext === ext);
+    check('Settings knows the kinds the server\'s apps open, .fxprobe among them',
+      Boolean(rowOf('fxprobe')?.openers?.some((o) => o.plugin === PROBE)), JSON.stringify(ow.apps?.rows?.map((r) => r.ext)));
+    check('a test run tells the system nothing (route "none")', ow.apps?.route === 'none', String(ow.apps?.route));
     const expectedRoute = process.platform === 'win32' ? 'settings'
       : process.platform === 'linux' ? 'xdg' : 'manual';
     check('the "make it the default" route matches what this OS actually allows',
@@ -466,6 +589,8 @@ async function main() {
       const text = await win.evaluate(() => document.querySelector('#settings')?.innerText ?? '');
       return /open documents with filex/i.test(text) ? text : null;
     }, 10_000, 300);
+    check('Settings counts the kinds from the servers\' apps',
+      /kinds filex opens: \d+, from the apps on your servers/i.test(panel), panel.replace(/\s+/g, ' ').slice(0, 300));
     check('Settings draws the card, with the type list and the honest default-app wording',
       /\.docx/i.test(panel) && /choose the default app yourself|make filex the default|finder/i.test(panel),
       panel.split(/open documents with filex/i)[1]?.replace(/\s+/g, ' ').slice(0, 200));
@@ -504,8 +629,18 @@ async function main() {
       check('and no scratch copy was made for it', (await listScratch()).length === 0);
       await twinWin.close();
     }
+
+    // ── 6. the app removed: its kinds go with it ─────────────────────
+    await removeProbeApp();
+    const refreshed = await win.evaluate(() => window.filexApp.openWithRefresh());
+    check('once the app is removed, Settings no longer lists .fxprobe',
+      !(refreshed.apps?.rows ?? []).some((r) => r.ext === 'fxprobe'), JSON.stringify(refreshed.apps?.rows?.map((r) => r.ext)));
+    const gonePromise = app.waitForEvent('window', { timeout: 6_000 }).catch(() => null);
+    await openViaSecondInstance(profile, home, probeDoc);
+    check('and a .fxprobe is refused', (await gonePromise) === null);
   } finally {
     await app.close().catch(() => {});
+    await removeProbeApp().catch(() => {});
   }
 }
 

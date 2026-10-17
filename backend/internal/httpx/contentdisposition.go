@@ -5,6 +5,8 @@ package httpx
 import (
 	"fmt"
 	"strings"
+
+	"github.com/brf-tech/filex/backend/internal/leafname"
 )
 
 // ContentDisposition builds a `Content-Disposition` value that is safe for
@@ -39,18 +41,37 @@ func ContentDisposition(disposition, name string) string {
 	if name == "" {
 		name = "file"
 	}
-	// Path separators never belong in a filename parameter — a client that
-	// honours them writes outside the folder the user chose.
-	name = strings.NewReplacer("/", "_", `\`, "_", "\r", "_", "\n", "_").Replace(name)
+	name = strings.Map(savedRune, name)
 
 	ascii := asciiFallback(name)
 	out := disposition + `; filename="` + ascii + `"`
-	if ascii != name {
-		// Only add the extended form when it says something the fallback
-		// cannot: an ASCII name needs no second copy of itself.
+	// Only add the extended form when it says something the fallback cannot:
+	// an ASCII name needs no second copy of itself - unless it holds a `%`.
+	// Chromium percent-decodes a plain `filename` ("%-escaped UTF-8", its
+	// last-resort guess), so `100%20off.txt` was saved as `100 off.txt` and
+	// `a%2Fb.txt` as `a_b.txt`; `filename*` is read as it is (task #238).
+	if ascii != name || strings.Contains(name, "%") {
 		out += "; filename*=UTF-8''" + rfc5987Escape(name)
 	}
 	return out
+}
+
+// savedRune is what one rune of a name becomes in the name a client saves:
+// itself, or `_` for the three kinds that must never reach the client's disk.
+func savedRune(r rune) rune {
+	if r == '/' || r == '\\' {
+		// Path separators never belong in a filename parameter - a client
+		// that honours them writes outside the folder the user chose.
+		return '_'
+	}
+	// A line break splits the header and no control character is part of a
+	// name anybody saves; a bidi control in a SAVED name is the oldest way to
+	// hide an extension (`invoice` + U+202E + `fdp.exe` shown as
+	// `invoiceexe.pdf`). Chromium and Firefox replace them when they save a
+	// download; a strict client (curl -OJ, wget, the desktop app's drag-out)
+	// writes them as they come. The same rule a ZIP member's name follows
+	// (leafname.SavedRune, task #238).
+	return leafname.SavedRune(r)
 }
 
 // asciiFallback keeps what a plain `filename=` may contain: printable ASCII,

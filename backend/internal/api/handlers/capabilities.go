@@ -86,6 +86,10 @@ type Capabilities struct {
 	// `share_link_max_days` (linkCeilingDays). Nil = the install's ceiling
 	// alone, which is what every test that builds this handler by hand gets.
 	ACL *acl.Resolver
+	// Assistant answers `assistant` (task #269): the AI assistant's state
+	// for the caller and whether the explorer draws its button. Nil = the
+	// field is absent, and no client draws one.
+	Assistant *Assistant
 }
 
 // NewCapabilities constructs a Capabilities handler.
@@ -276,6 +280,14 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	merged["caller_kind"] = callerKind
 	merged["caller_admin"] = h.callerCanConfigure(r)
+	merged["caller_platform"] = h.callerInPlatform(r)
+	// The AI assistant: `state` (on, off, not_configured), `permitted` (the
+	// caller holds ai.assistant) and `button` - on, set up, not hidden by the
+	// administrator, and permitted. A signed-in person's only; the explorer
+	// draws the button from this and from nothing else.
+	if h.Assistant != nil && auth.UserFrom(r.Context()) != nil {
+		merged["assistant"] = h.Assistant.Capability(r.Context())
+	}
 	if len(h.Queued) > 0 {
 		merged["queued"] = h.Queued
 	}
@@ -408,17 +420,29 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 // It names nothing and grants nothing: it only decides which of two honest
 // sentences the menu shows.
 func (h *Capabilities) callerCanConfigure(r *http.Request) bool {
+	return auth.CallerMayAdminister(r.Context()) && h.callerInPlatform(r)
+}
+
+// callerInPlatform reports whether this caller stands in the PLATFORM's
+// scope: always on a single-tenant install, and on a multi-tenant one only
+// for the supertenant's people. It is `requireSupertenant`'s question asked
+// ahead of time, without the role - the admin menu offers a page about the
+// instance (Protection, Plugins, the Queue...) to whoever passes it and the
+// page's own rule, and leaves it out for a tenant's administrator, whom every
+// call of that page would answer 403 (task #258).
+//
+// Like callerCanConfigure it names nothing and grants nothing.
+func (h *Capabilities) callerInPlatform(r *http.Request) bool {
+	if !h.MultiTenant || h.Store == nil {
+		return true
+	}
 	ctx := r.Context()
-	if !auth.CallerMayAdminister(ctx) {
+	u := auth.UserFrom(ctx)
+	if u == nil {
 		return false
 	}
-	if h.MultiTenant && h.Store != nil {
-		s := auth.ScopeForUser(ctx, h.Store, auth.UserFrom(ctx))
-		if s == nil || !s.IsSupertenant {
-			return false
-		}
-	}
-	return true
+	s := auth.ScopeForUser(ctx, h.Store, u)
+	return s != nil && s.IsSupertenant
 }
 
 // e2ePolicy is the `e2e_policy` answer for the caller; ok=false leaves the

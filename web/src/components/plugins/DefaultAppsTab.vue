@@ -18,13 +18,26 @@
  * A change invalidates the explorer's cached actions list: it carries the
  * open rules (`open_rules`), so an explorer on this page opens the next file
  * by the new order.
+ *
+ * Above the kinds, the office engine (filex 0.57, OfficeEngineSection): who
+ * converts office documents and draws their thumbnails - an app's engine or
+ * the Document Server - and how each stands.
  */
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { FileCog, RefreshCcw } from 'lucide-vue-next';
 import { DataTable, invalidatePluginActions, type ContextAction, type DataColumn } from '@brftech/filex-core';
 
-import { FileTypesApi, type FileTypeCap, type FileTypeChange, type FileTypeKind } from '@/api/fileTypes';
+import {
+  FileTypesApi,
+  OFFICE_ENGINE,
+  type EngineRow,
+  type FileTypeCap,
+  type FileTypeChange,
+  type FileTypeKind,
+  type FileTypeRule,
+  type FileTypesAnswer,
+} from '@/api/fileTypes';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 import { handlerLabel } from '@/lib/fileTypes';
@@ -33,6 +46,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Button from '@/components/ui/Button.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import FileTypeEditor from './FileTypeEditor.vue';
+import OfficeEngineSection from './OfficeEngineSection.vue';
 
 const props = withDefaults(defineProps<{
   /** The tab is the one on screen: its list is read again each time it is
@@ -44,6 +58,7 @@ const { t, locale } = useI18n();
 const toast = useToastStore();
 
 const kinds = ref<FileTypeKind[]>([]);
+const engines = ref<EngineRow[]>([]);
 const enabled = ref(true);
 const editable = ref(false);
 const loading = ref(false);
@@ -67,8 +82,9 @@ async function load() {
   }
 }
 
-function apply(ans: { kinds: FileTypeKind[]; enabled: boolean; editable: boolean }) {
+function apply(ans: FileTypesAnswer) {
   kinds.value = ans.kinds;
+  engines.value = ans.engines ?? [];
   enabled.value = ans.enabled;
   editable.value = ans.editable;
   if (editing.value) editing.value = ans.kinds.find((k) => k.ext === editing.value?.ext) ?? null;
@@ -81,6 +97,9 @@ watch(
   },
   { immediate: true },
 );
+
+/** The office engine's row (filex 0.57); none with apps off. */
+const officeEngine = computed(() => engines.value.find((e) => e.engine === OFFICE_ENGINE) ?? null);
 
 /** A capability's handlers that are on, as one line: "1. draw.io · 2. filex". */
 function onLine(c: FileTypeCap): string {
@@ -126,34 +145,48 @@ function onRowAction(key: string, row: FileTypeKind) {
   } else if (key === 'reset') void reset(row.ext);
 }
 
-async function save(change: FileTypeChange) {
-  const ext = editing.value?.ext;
-  if (!ext) return;
+/**
+ * One change sent: the busy flag, the answer applied (the whole list again),
+ * its toast. True when it was stored.
+ */
+async function send(call: () => Promise<FileTypesAnswer>, done: string): Promise<boolean> {
   busy.value = true;
   try {
-    apply(await FileTypesApi.put(ext, change));
-    invalidatePluginActions();
-    toast.success(t('defaultApps.saved', { ext }));
-    editorOpen.value = false;
+    apply(await call());
+    toast.success(done);
+    return true;
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.actionFailed')));
+    return false;
   } finally {
     busy.value = false;
   }
 }
 
+/** A kind's rules changed: the explorer reads the new order, the editor closes. */
+function kindChanged(ok: boolean) {
+  if (!ok) return;
+  invalidatePluginActions();
+  editorOpen.value = false;
+}
+
+async function save(change: FileTypeChange) {
+  const ext = editing.value?.ext;
+  if (!ext) return;
+  kindChanged(await send(() => FileTypesApi.put(ext, change), t('defaultApps.saved', { ext })));
+}
+
 async function reset(ext: string) {
-  busy.value = true;
-  try {
-    apply(await FileTypesApi.reset(ext));
-    invalidatePluginActions();
-    toast.success(t('defaultApps.resetDone', { ext }));
-    editorOpen.value = false;
-  } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.actionFailed')));
-  } finally {
-    busy.value = false;
-  }
+  kindChanged(await send(() => FileTypesApi.reset(ext), t('defaultApps.resetDone', { ext })));
+}
+
+/** The office engine's back ends in a new order (the one chosen first). */
+async function chooseEngine(rule: FileTypeRule) {
+  await send(() => FileTypesApi.putEngine(OFFICE_ENGINE, rule), t('defaultApps.engine.saved'));
+}
+
+async function resetEngine() {
+  await send(() => FileTypesApi.resetEngine(OFFICE_ENGINE), t('defaultApps.engine.resetDone'));
 }
 </script>
 
@@ -195,6 +228,15 @@ async function reset(ext: string) {
       >
         {{ t('defaultApps.readonly') }}
       </p>
+
+      <OfficeEngineSection
+        v-if="enabled && officeEngine"
+        :row="officeEngine"
+        :editable="editable"
+        :busy="busy"
+        @choose="chooseEngine"
+        @reset="resetEngine"
+      />
 
       <DataTable
         table-id="admin.plugins.defaults"

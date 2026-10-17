@@ -1,4 +1,4 @@
-// Storage connections, in the desktop app.
+// Connections, in the desktop app (App settings → Connections).
 //
 // The point of this script is that the desktop app does NOT have its own
 // connections screen. It mounts `<filex-connections>` from the same npm
@@ -27,7 +27,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { SHOTS, SERVER, api, check, finish, launchApp, signIn, skipTour, sleep } from './lib/harness.mjs';
+import { SHOTS, SERVER, api, check, finish, launchApp, setAccountLanguage, signIn, skipTour, sleep } from './lib/harness.mjs';
 
 const STORAGE = process.env.CONN_STORAGE_NAME ?? 'desktop-conn-e2e';
 // A path the SERVER can see — not this machine's view of it.
@@ -79,7 +79,7 @@ await win.evaluate(() => {
 await sleep(500);
 
 const settingsText = await win.evaluate(() => document.querySelector('#settings')?.innerText ?? '');
-check('Settings offers storage connections', /Storage connections/.test(settingsText),
+check('App settings offers the connections', /Connections/.test(settingsText),
   settingsText.split('\n').find((l) => /connection/i.test(l)) ?? 'not found');
 check('…and it no longer says the server settings live elsewhere',
   !/live in its admin panel/.test(settingsText));
@@ -139,7 +139,7 @@ check('…and the OS clipboard really holds the address', clip.includes('/dav/')
 // screen stayed English. Read the TEXT.
 await win.evaluate(() => document.querySelector('[data-testid="connections-close"]')?.click());
 await sleep(400);
-await win.evaluate(() => document.querySelector('#settings [data-locale="tr"]')?.click());
+await setAccountLanguage(win, 'tr');
 await sleep(1200);
 await win.evaluate(() => document.querySelector('#conn-open')?.click());
 await sleep(1200);
@@ -147,12 +147,12 @@ await sleep(1200);
 const trText = await win.evaluate(
   () => document.querySelector('filex-connections')?.innerText ?? '');
 check('the connections panel itself is in Turkish, not just its locale property',
-  /Depo bağlantıları/.test(trText) && /Protokol/.test(trText),
+  /Bağlantılar/.test(trText) && /Protokol/.test(trText),
   trText.split('\n').filter(Boolean).slice(0, 3).join(' · ') || 'empty');
 // ⚠ Case-sensitive above, on purpose. The desktop shell styles `h2` with
 // text-transform: uppercase for its own headings and that reaches into this
 // component (shadowRoot: false, deliberately) — it rendered
-// "DEPO BAĞLANTILARI" here while the web app rendered "Depo bağlantıları",
+// "BAĞLANTILAR" here while the web app rendered "Bağlantılar",
 // until the package started stating its own heading type. A
 // case-insensitive check would have let that straight through.
 
@@ -169,7 +169,7 @@ await shot(win, 'desktop-connections-tr');
 // back to English so the profile is not left mid-experiment
 await win.evaluate(() => document.querySelector('[data-testid="connections-close"]')?.click());
 await sleep(300);
-await win.evaluate(() => document.querySelector('#settings [data-locale="en"]')?.click());
+await setAccountLanguage(win, 'en');
 await sleep(600);
 
 await dropStorage();

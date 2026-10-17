@@ -7,6 +7,804 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-10-17
+
+### Added
+
+- **A picture from another server in a file's preview waits for you.** A
+  Markdown file, a notebook's cells and HTML outputs and an app's release
+  notes on the update review loaded every picture they named, so opening a
+  shared file told the server a picture was on that the file was opened, and
+  from which IP address. Such a picture is now a placeholder with its alt
+  text and its server's name; clicking it asks in filex's own dialog, which
+  names the server: *Load image* loads that one, *Load all remote images in
+  this file* the others too until the file is closed. A `srcset` or
+  `<picture>` source from elsewhere is dropped. The new **User settings →
+  Preferences → Load remote images in previews** (off by default, kept on the
+  account) loads them without asking. A loaded picture goes with no referrer.
+  Thumbnails, folder previews and the file cards never load one, whatever the
+  setting says. The same in the web interface, the desktop app and every
+  embed ([FEATURES.md](docs/FEATURES.md#viewers-editors-search-and-thumbnails)).
+- **A Mermaid diagram and an EPUB book ask no other server either.** A
+  diagram's image node (`@{ img: ... }`), a picture in an HTML label and a
+  `themeCSS` url() were fetched while Mermaid laid the diagram out, and an
+  EPUB chapter loaded every picture, style sheet and font it named from
+  elsewhere. A diagram is now laid out in a frame of its own that fetches
+  nothing (Mermaid's `sandbox` level; `themeCSS` and `dompurifyConfig` can no
+  longer be set from a diagram), and its pictures from elsewhere are
+  placeholders like a Markdown file's. An EPUB chapter is drawn in a frame
+  that loads only the book's own files and sends no referrer; the reader says
+  when pictures were held, and *Load all remote images in this file* or the
+  setting draws it again with its pictures and style sheets (a url() in the
+  chapter's own styles and a font from elsewhere never load).
+- **Give a whole storage to people and groups.** A storage's page in the admin
+  panel has an **Access** section: pick a person or a group and a level, and
+  they reach every file and folder of the storage, however deep, on every
+  surface at once - the web interface, the desktop app, WebDAV, SFTP, FTPS,
+  NFS, the S3-compatible API and an AI agent. The level is changed in the row,
+  **Revoke all access** takes back the storage-wide assignments and leaves
+  every folder grant as it is, and where a folder grant and the storage's both
+  apply the higher one counts (nothing narrows access). With per-item access
+  control off the section says why nobody can be given the storage yet and
+  turns it on in place, asking first who keeps access. The explorer offers the
+  same on a storage row to whoever may manage it - an administrator, or a
+  person given the storage as owner (the storage list now says each caller's
+  level at every root, `storage_info[].perm`): **Access…** opens the access
+  dialog on the storage, with people and groups only - no link and no file
+  request. An assignment is an ordinary grant on the storage's root
+  (`POST /api/files/permissions {"path": "<storage>://"}`), so no table and no
+  route were added. **Folder access** and a group's page name such a grant
+  "Whole storage" instead of "/"
+  ([RBAC.md](docs/RBAC.md#a-whole-storage-for-people-and-groups)). Requested by
+  @gguglietti ([GitHub #117](https://github.com/BRF-Tech/filex/issues/117)).
+- **Nightly builds of the desktop app, every night: on
+  [filex.sh/nightly](https://filex.sh/nightly/) and the Snap Store's `edge`
+  channel.** Every night the nightly test run passes on a change, the desktop
+  app of that night is built for Windows (x64, arm64), macOS and Linux
+  (AppImage, `.deb`, `.rpm`; x64 and arm64) and goes to filex.sh/nightly, with
+  the night, the commit and the checksums, and as a snap to `edge` on x64 and
+  arm64: `sudo snap install filex-app --edge`. The last nights are kept on
+  ghcr.io (`ghcr.io/brf-tech/filex-desktop-nightly`). Its version names the
+  night and the commit (`0.57.0-nightly.20261014+2ca25999`). A nightly is not
+  supported and not signed; try it on a copy of your data
+  ([INSTALLATION.md](docs/INSTALLATION.md#nightly-builds)).
+
+- **What a nightly image is, read off the image.** `ghcr.io/brf-tech/filex:nightly`
+  now carries labels for the public commit it was built on
+  (`sh.filex.nightly.public-base`) and its night's test result
+  (`sh.filex.nightly.tests`) beside its commit, and a new
+  [Nightly builds](docs/INSTALLATION.md#nightly-builds) section says how to
+  try one, how to read which commit it is, and why it is not for the data you
+  keep.
+- **Search settings in the admin panel.** Whether filex reads the text inside
+  files, the largest file it reads, how much memory indexing may take and
+  whether an outdated index is repaired at startup are now settings an
+  administrator changes on **Admin → Settings → General** (the Search index
+  page links there; and through
+  `GET`/`PATCH /api/admin/search/settings` and the admin MCP tools
+  `admin_search_settings_get` / `_update`), instead of variables that need a
+  restart. The first three apply at once. `FILEX_SEARCH_CONTENT`,
+  `FILEX_SEARCH_CONTENT_MAX`, `FILEX_SEARCH_MEMORY_PERCENT` and
+  `FILEX_SEARCH_AUTO_REBUILD` (and their `config.yaml` keys) give these
+  settings their first value and are ignored after that, so an upgrading
+  install keeps what it had set
+  ([SEARCH.md](docs/SEARCH.md#configuration)). Follows up
+  [GitHub #115](https://github.com/BRF-Tech/filex/issues/115) (task #261).
+- **An AI assistant in the explorer.** The disabled "coming soon" button is
+  gone; in its place, once an administrator sets it up on **Admin → Settings
+  → AI assistant**, is an assistant that finds, reads, summarises, tidies up
+  and moves files - against **Anthropic** (Claude), **OpenAI** or any
+  OpenAI-compatible server (OpenRouter, vLLM, LM Studio), or a local
+  **Ollama** that keeps everything on your network. It works through filex's
+  own MCP tools, called inside the server **as the person who asks** - their
+  folder access, the `files.download` rule, their tenant and their root, no
+  key minted for it. Its panel streams the reply, shows every step a tool
+  took and takes the selection as context. A change that can be undone
+  (move, rename, copy, write, delete to the trash) happens at once with an
+  **Undo**; one that cannot (a public or upload link, an access change, a
+  delete with no trash) waits on an **approval card**. Encrypted folders,
+  `.fxe` files and the vault never reach a model - refused before the tool
+  runs and taken out of every listing - and every file content sent is in the
+  audit log (`assistant.content_sent`: who, which file, which provider and
+  model). **The assistant comes off; its new permission comes on for
+  everyone.** `ai.assistant` says who gets the button: every preset holds
+  it, and the first start of this version gives it to every saved role,
+  custom ones included - once, so a role an administrator takes it away from
+  keeps it away ([PERMISSIONS.md](docs/PERMISSIONS.md#things-to-know)).
+  *Hide the button* closes the assistant for everybody and keeps the
+  settings. The API key is
+  sealed with `FILEX_SECRET_KEY` and never shown again; tool steps, reply
+  length, a token budget per request, a timeout and a per-person rate are
+  limits on the same page. Conversations are kept per person on the server
+  for a set number of days (30 by default) and can be deleted from **User
+  settings → AI assistant**. The settings are also `GET`/`PATCH
+  /api/admin/assistant` and the admin MCP tools `admin_ai_assistant_get` /
+  `_update` / `_test` ([AI-ASSISTANT.md](docs/AI-ASSISTANT.md)) (task #269).
+- **An app that edits a CSV is told how the file is written, and may say how
+  its save is.** `file.read` of a `.csv` answers `text_dialect`
+  (`{delimiter, bom, crlf, encoding}`, read by the server from the file; text
+  is decoded in the file's own encoding), and `file.save` takes
+  `csv: {delimiter, encoding, bom, eol}`, which the server checks against the
+  bytes. Apps written before it keep working: the server reads the bytes
+  either way
+  ([APP-PLUGINS-API.md → CSV files: how they are written](docs/APP-PLUGINS-API.md#csv-files-how-they-are-written)).
+- **Office conversions and office thumbnails without a Document Server.** The
+  Office editor app brings an office engine - ONLYOFFICE's converter and page
+  layout, compiled to WebAssembly - and filex runs it on the server: the
+  conversions apps ask for (`engines:office`: the Convert app, MCP's
+  `file_convert`) and the thumbnails of office documents, the work a Document
+  Server did. Apps need no change. filex runs the engine in a process of its
+  own (`filex office-engine`, with no network and none of filex's
+  environment), never inside its own binary; the engine comes with the app's
+  release as `engine.zip`, pinned by its manifest's new `engines.office` block
+  (derived permission `office-engine`); the install wizard's **Upload files**
+  takes it in a field of its own beside the interface bundle, and says which
+  file a manifest names is not chosen before it uploads anything. It is compiled once in the background
+  after the app is installed or updated, or filex is - 3.5 to 5 minutes, then
+  about a second from the cache in `<data dir>/office-engine/` - and is
+  *being prepared* meanwhile: a connected Document Server takes the work, and
+  without one a conversion fails as `office_preparing` and thumbnails wait.
+  When both are there, **Admin → Plugins → Default apps → Office engine**
+  chooses (the app's engine first by default) and shows how each stands
+  (`GET /api/admin/file-types` → `engines`, `PUT`/`DELETE
+  /api/admin/file-types/engines/office`). The thumbnail drawer stays
+  ONLYOFFICE whichever back end draws, so existing pictures stay valid.
+  `FILEX_OFFICE_ENGINE_MAX_MB` (default 2048, 512 to 4096) caps the memory of
+  each of its modules; a process holding about twice that is ended on Linux
+  and Windows. Documents with SVG, EMF or WMF pictures, HTML to Markdown and
+  text in legacy code pages convert as a Document Server converts them; a
+  picture or style sheet a document links from another server is left out,
+  as a Document Server without a network leaves it, and nothing is fetched
+  ([ONLYOFFICE.md → The office engine without a Document Server](docs/ONLYOFFICE.md#the-office-engine-without-a-document-server),
+  [APP-PLUGINS-API.md → An app's office engine](docs/APP-PLUGINS-API.md#an-apps-office-engine-enginesoffice-057)).
+  The app kit's test host gains `PrepareOfficeEngine()`
+  ([PLUGIN-KIT.md → The office engine](docs/PLUGIN-KIT.md#the-office-engine)).
+- **Desktop: "Open with filex" takes every kind of file an app on your
+  servers opens.** A server with an app that opens PSD files opens a `.psd`
+  double-clicked on your own disk, in that app, with the same working copy and
+  write-back as an office document. The desktop asks every server it is signed
+  in to which kinds its apps open (their `viewer` views, Default apps'
+  switches and order included) at start, on an account change, every half
+  hour, when its window comes to the front and before a double-click; a
+  server that cannot be asked keeps what it said last. The installed Windows
+  app adds those kinds to "Open with" under the user's own hive (ProgId
+  `filex.AppDocument`) and takes them back when no server opens them, the
+  uninstaller removing them all; the `.deb`, `.rpm` and AppImage write a
+  hidden desktop entry and, for an extension the system has no type for, a
+  type of filex's own at a lower weight than a system one, removed with the
+  package. macOS, the Microsoft Store package and the snap, which cannot add a
+  type while they run, declare every kind the app store's apps open, at build
+  time, from the store's signed catalog (`desktop/build/app-kinds.json`,
+  `pnpm --dir desktop app-kinds:refresh`; the release audit checks it). Where
+  more than one server opens a kind the desktop asks which, and can remember
+  it; where none does it says so, and nothing is uploaded. filex never makes
+  itself the default for a kind. *App settings → Open documents with filex* shows
+  *Kinds filex opens: N, from the apps on your servers*, the list, and
+  **Refresh**
+  ([DESKTOP.md → Which kinds open with filex, and where](docs/DESKTOP.md#which-kinds-open-with-filex-and-where)).
+- **Desktop: "Open with filex" takes a large file, up to the server's own
+  limit.** The working copy goes up the way the explorer sends a large file -
+  from 8 MiB in parts, over the staged upload, the server checking its hash -
+  and the saved version comes back in ranged parts; a dropped connection costs
+  one part (the server says where to go on from), and a file saved again while
+  it comes back is taken whole. The 256 MB ceiling of the app's own is gone:
+  the limit is the server's `max_upload_size`.
+- **Desktop: "Open with filex" moves a large file without holding it in
+  memory.** The working copy goes up read from the document one part at a
+  time, and a save comes back streamed into a file in the app's data folder
+  (`openwith-spool`), hashed as it arrives and checked again as it replaces the
+  document; memory stays at a few parts whatever the size of the file. A
+  document saved again while it goes up is not committed half old and half
+  new: that upload is dropped and the document sent again
+  ([DESKTOP.md → What happens to the file](docs/DESKTOP.md#what-happens-to-the-file)).
+- **Desktop: "Open with filex" opens a kind in the app you chose for it.**
+  Where a server has more than one app for a kind, the account's own
+  **Always open with** choice - the one the browser follows - comes before
+  the administrator's Default apps order, as it does in the browser; an app
+  switched off for the kind is still not taken. On Linux an extension the
+  system gives several media types (`.otf`: a font and an OpenDocument
+  formula template) is registered for the ones the app says it opens.
+- **An app saves a legacy document beside it, as a Document Server's save
+  is.** The Office editor opens a `.doc`, `.xls` or `.ppt` and writes OOXML;
+  it says so (`file.save` `beside: 'docx'`), and filex writes the save
+  beside the file, which is left as it was, under a name filex chooses
+  (`rapor.docx`, `rapor (2).docx` when that is taken) and for a person who
+  may create files in that folder; the answer says where it went
+  (`{saved, name, beside}`), the person is told in the bell, the audit log
+  writes `file.app_saved_beside`, and later saves of the same opening go to
+  that file - in an editing session for every member (the session records
+  it: migration 00133). One writer for both editors: the Document Server's
+  callback now calls the same code (`internal/officesave`)
+  ([APP-PLUGINS-API.md → Saving beside the file, conflict copies](docs/APP-PLUGINS-API.md#saving-beside-the-file-conflict-copies)).
+- **A document changed while an app had it open gets a conflict copy, as
+  with a Document Server.** An app that asks for it (`file.save`
+  `conflict: 'copy'`) has a save of a file somebody else changed after it
+  was read written as `<name>.filex-conflict-<UTC time>.<ext>` beside it,
+  named in the answer, the other change kept; editing together, the
+  session's own record decides. Every read of an app's file names the
+  version handed over (`X-Filex-Version`), which the explorer sends back with
+  such a save. An app that does not ask (every app built for 0.56) gets the
+  0.56 answer, unchanged.
+- **The editor language fixed for everybody reaches the Office editor app
+  too.** The administrator's *Editor language* (External services →
+  ONLYOFFICE, `FILEX_ONLYOFFICE_LANG`) is handed to an app's interface as
+  `session.editor_lang`, read even with no Document Server configured
+  ([ONLYOFFICE.md → The editor's language](docs/ONLYOFFICE.md#the-editors-language)).
+- **Dictionaries for the office editor's other languages.** The languages
+  the app's release offers are listed on its page, *Admin → Plugins → Apps →
+  the app → Dictionaries*, and **Install** downloads one, every file checked
+  against the release's sha256 (the manifest's `ui.extras.dictionaries.catalog`,
+  a `filex-extras/1` catalog; `GET …/extras-catalog/{kind}`, `POST
+  …/extras-catalog/{kind}/{item}`). Any other Hunspell dictionary (`.aff`,
+  `.dic`, `hyph_<lang>.dic`) can be uploaded there. The section shows only
+  for an app whose manifest names the kind (`ui.extras`): draw.io has none.
+  The editor checks that language from then on. The files are the app's, kept outside its
+  signed package: an upgrade keeps them, removing the app removes them. The
+  app's interface reads them under its own package address
+  (`extra/dictionaries/<lang>/<file>.txt`) with the `ui:package-fetch` grant
+  it already has; the install review's sentence for that grant now says so.
+  `GET /api/admin/app-plugins/{id}/extras`, `PUT` / `DELETE
+  …/extras/<path>`; a change needs a signed-in administrator and is audited
+  (`app_plugin.extra_add`, `app_plugin.extra_remove`)
+  ([APP-PLUGINS.md → Dictionaries for the office editor](docs/APP-PLUGINS.md#dictionaries-for-the-office-editor)).
+- **A CSV in Greek (Windows-1253) or Baltic (Windows-1257) is recognised.**
+  The code page of a `.csv` is judged from its letters, now also by how well
+  they read as one language's alphabet, so a Lithuanian, Latvian or Greek
+  file opens with its own letters and is saved back in its page; Western,
+  Turkish, Central European and Cyrillic files are judged as before.
+- **Desktop: "Open with filex" edits in the Office editor app when the
+  server has no Document Server.** A Word, Excel, PowerPoint, OpenDocument,
+  RTF or CSV file double-clicked on your own disk opens in the app's editor
+  (`/files/edit?…&app=office-editor/editor`) whenever no ONLYOFFICE Document
+  Server answers and the app opens that type - also where a person or an
+  administrator once picked filex's own viewer, which cannot edit an office
+  document without a Document Server. With a Document Server the window opens
+  what it opened before, and an app an administrator switched off for a type
+  stays off. An edited `.doc`, `.xls` or `.ppt` comes home beside the document
+  as `rapor.docx` (`rapor (2).docx` when taken), the window's later saves over
+  that same file, as with a Document Server: the app's saves into the
+  desktop's working copy are taken as the Document Server's are
+  ([DESKTOP.md → Opening documents from your computer](docs/DESKTOP.md#opening-documents-from-your-computer)).
+- **An office document opens in the Office editor app, in the browser as on
+  the desktop, when there is no Document Server.** An earlier pick of
+  filex's own viewer for .docx and the rest - a person's "Always open with",
+  a Default apps rule, an "Open with" link - only said a Document Server is
+  missing; where an app opens the kind it is no longer chosen (it stays in
+  *Open with*). With a Document Server every pick holds as before.
+
+### Changed
+
+- **Folder sync no longer keeps a local trash; a deletion is restored from the
+  server's trash.** A file deleted on the server used to be moved out of the
+  sync folder into a hidden folder in your profile (`~/.filex/sync/trash`) -
+  copied and then removed when the sync folder was on another drive - which is
+  the very pattern antivirus ransomware detection looks for: Bitdefender
+  stopped the desktop app's `filex.exe` in the middle of a sync and
+  quarantined the files it was handling. It was also a second copy of a file
+  the server's trash already keeps. A file deleted on the server is now
+  deleted here, and restored from the server's Trash like any other deletion;
+  a folder deleted on the server keeps anything in it that sync never carried,
+  and says so. What an older version put in `~/.filex/sync/trash` is still
+  swept after its 30 days
+  ([SYNC.md](docs/SYNC.md#deletions-are-restored-from-the-servers-trash), task
+  #259).
+
+- **"Delete from this computer" deletes only what the server still has.** A
+  folder's first sync holds the files that are here and not on the server;
+  `filex sync discard` (*Delete from this computer* in the desktop app) used to
+  delete every one of them. It now deletes a held file only when the server
+  holds an identical copy of it - the same bytes, in your trash there or
+  elsewhere in the folder's storage - so nothing is lost. Every other held file
+  stays where it is and keeps waiting, and you are told why for each one: the
+  server has no copy, the file changed after it was held, or the server could
+  not be asked. `discard` now asks the server (it needs the folder's account
+  signed in) and takes `--json` and `--lang`; the server compares a file with
+  its trash through the new `POST /api/files/manager/trash/same`, which answers
+  only about entries of your own trash listing
+  ([SYNC.md](docs/SYNC.md#a-first-run-that-would-re-upload-a-stale-copy-asks-first),
+  task #259).
+- **Every `filex.exe` says what it is.** The Windows CLI in the release's zip
+  and the one inside the desktop app (`resources\bin\filex.exe`) now carry a
+  version resource: its Properties name the company (BRF Tech), the product
+  (filex), what it is, its file name and its version, as security products
+  and Windows itself read them. The packages on GitHub stay unsigned; the
+  Microsoft Store's copy is the signed one.
+- **A fix only the server carries ships on its own, sooner.** A patch release
+  whose changes reach nothing but the server now goes out about half an hour
+  after the fix is ready instead of two hours: the server image, the server
+  archives and the update manifest, and nothing it did not change - no new
+  desktop packages, CLI packages or npm packages of the same code. Its entry
+  in the update manifest asks installs to take it only when asked until the
+  full test suite has passed on it as well (usually within the hour), and it
+  is not marked GitHub's latest release, so every download link keeps
+  pointing at the last release that has every file
+  ([UPDATES.md](docs/UPDATES.md#what-automatic-actually-checks)).
+- **The admin menu has a Settings panel.** Every page that changes how the
+  instance behaves now sits under one fourth entry, **Settings**, in three
+  columns: *General* (the page that was called Settings, now *General*;
+  Branding, Appearance, Multi-tenant mode, My tenant), *Security & data*
+  (Identity providers, Sign-in security, Encryption, Protection) and *File
+  processing & integrations* (Archives, Plugins, External services, Webhooks,
+  Notifications, API / MCP). The bar reads **Files & storage**, **People**,
+  **Settings**, **Maintenance & records**; *People & security* and *System*
+  are gone. No address moved: `/admin/settings`, `/admin/protection` and every
+  bookmark open the same page
+  ([ADMIN-PANEL.md](docs/ADMIN-PANEL.md#the-menu)).
+
+- **A tenant's administrator is not offered the pages about the instance.**
+  On a multi-tenant install the menu used to list Protection, Plugins, the
+  Queue and eleven more pages to a tenant's administrator, and every one of
+  them answered with refusals. They are now left out for them, page by page
+  as the server decides (`403 supertenant_only` on read and write), and
+  Notifications shows them their tenant's summary defaults without the
+  instance's history. A new capability, `caller_platform`, says whether the
+  reader stands in the platform's scope
+  ([ADMIN-PANEL.md](docs/ADMIN-PANEL.md#who-sees-which-page)).
+
+- **Each admin setting has one home.** The default folder view moved from
+  Settings to **Settings → Appearance**, beside the default theme. The
+  thumbnail settings (folder previews, the SVG and Office limits) are on
+  **Settings → General** alone; *Tools → Thumbnail repair* links there
+  (*Change the limits →*) instead of drawing a second copy. The panel's search
+  finds the thumbnail settings, the logo, the accent color, the sign-in
+  button's label, the footer, the summary defaults, the push key, the archive
+  formats and limits, the store screen and the install requests by their own
+  names, and scrolls to the card on a long page
+  ([ADMIN-PANEL.md](docs/ADMIN-PANEL.md#search)).
+
+- **The instance has one name.** The old Settings page's *Site name*
+  (`site_name`) and Branding's *Display name* (`branding.name`) were two
+  names for one instance, and only the share and file-request emails read the
+  first: an instance branded "Acme Cloud" on every page could still mail
+  "shared with you via filex". The emails now read the Display name - a
+  tenant's own on a tenant's host - and *Site name* is gone.
+  `FILEX_SITE_NAME` now seeds the Display name.
+  **Upgrading:** nothing to do. At the first start an old `site_name` is
+  copied into the Display name when that is empty (when both are set, the
+  Display name stays, as every page already shows it) and the old row is
+  removed; a tenant's own branding is not touched
+  ([CONFIGURATION.md](docs/CONFIGURATION.md#zero-touch-seeding)).
+
+- **User settings say where each setting is saved.** *Preferences* is in two
+  parts, **Account** (language, time zone, the look, the default folder view,
+  the vault's idle time, default apps, storage used - the same wherever you
+  sign in) and **This device** (the start page, one click or two, the
+  keyboard shortcuts, the desktop and web app installs); *Notifications*
+  likewise, **My account** (the bell and what it tells) and **This device**
+  (browser, push and desktop notifications, drawn only where the device has
+  one). The **keyboard shortcuts** are a row of Preferences → This device:
+  *Edit…* opens their editor over the dialog, and Escape closes the editor
+  first. The avatar menu no longer repeats the shortcuts where the dialog is
+  one row away; an explorer embedded without the dialog keeps them in its
+  "⋯" menu ([NOTIFICATIONS.md](docs/NOTIFICATIONS.md#per-user-settings)).
+
+- **Desktop: one settings dialog, and App settings for the computer.** The
+  language, one click or two and the desktop notifications moved from the
+  app's ⚙ screen into *User settings* (the avatar), the same dialog the web
+  app has; the language still reaches the tray menu and the sync engine, and
+  one click or two applies without reloading the file list. The ⚙ screen is
+  now **App settings** and keeps what is this computer's alone: accounts,
+  connections and the drive, synced folders, running in the background,
+  starting at sign-in, the portable copy, opening documents with filex and
+  updates (the tray item reads *App settings…*). The desktop's light / dark,
+  palette and density are now kept **on your account**, as the web app's are
+  (its own *desktop* document), so the app on another computer opens the
+  same way ([DESKTOP.md](docs/DESKTOP.md#notifications-and-your-account)).
+  For embedders: `ExplorerConfig.account.settings` also takes an object of
+  host rows (`language`, `openTrigger`, `deviceNotifications`;
+  `ExplorerAccountSettings`), and `ExplorerConfig.accountPrefs: { surface }`
+  keeps the look on the account; `settings: true` works as before
+  ([INTEGRATION.md](docs/INTEGRATION.md#4f-the-notification-bell-and-the-account-menu-host-hooks)).
+- **The search index is several times smaller.** It kept every field four
+  ways - stored, with term vectors, copied into a catch-all field and again as
+  sort values - where filex reads back only names, paths and the extracted
+  text; an install with 21,000 documents had an 8 GB index. Searches find
+  exactly what they found before. An existing index is rebuilt once, in the
+  background, after the upgrade (search keeps answering from the old one until
+  the new one is ready) ([SEARCH.md](docs/SEARCH.md#upgrading-an-existing-index),
+  task #261).
+
+- **The server's defaults are settings on the admin panel.** Variables that
+  could only be changed in the environment and needed a restart are now
+  settings, each on the page it belongs to: the default language, how often
+  storages are scanned, how long an unfinished upload is kept, the file
+  cache's size and the thumbnail cache's upkeep (**Settings → General**),
+  keeping a version before an overwrite (**Protection**), the apps' size
+  limits, how long an install request waits and co-editing's limits
+  (**Plugins → Apps**), the notifications switch (**Notifications**) and the
+  default webhook's language (**Webhooks**). Each row names the variable that
+  gave its first value, its bounds, and - for the ones read at start - says
+  when a change is waiting for the next start. `FILEX_DEFAULT_LOCALE`,
+  `FILEX_SYNC_INTERVAL`, `FILEX_UPLOAD_STAGING_TTL`, `FILEX_CACHE_MAX_BYTES`,
+  `FILEX_THUMBS_SWEEP_INTERVAL`, `FILEX_VERSIONS_ON_OVERWRITE`,
+  `FILEX_APP_PLUGIN_MAX_*_MB`, `FILEX_PLUGIN_REQUEST_TTL_DAYS`,
+  `FILEX_COEDIT_MAX_MEMBERS`, `FILEX_COEDIT_UNSAVED_DAYS`,
+  `FILEX_NOTIFY_ENABLED` and `FILEX_WEBHOOK_LANG` (and their `config.yaml`
+  keys) are **no longer read at every start: they seed** the settings - the
+  first start writes their value, and from then on the stored value wins;
+  change it on the panel, or apply a changed variable with
+  `filex settings reseed <key>`
+  ([CONFIGURATION.md](docs/CONFIGURATION.md#variables-that-seed-a-stored-setting)).
+  The search settings joined them on Settings → General.
+
+- **`FILEX_TRUSTED_PROXIES` seeds the trusted-proxy list.** Until now the
+  variable was read at every start, under an empty list on **Sign-in
+  security**. Now it is written into that list on the first start where the
+  list holds nothing - exactly as typed, so `auto` stays `auto` and
+  `auto, <the proxy's address>` stays that - and the saved list wins from
+  then on. The page says *First value from FILEX_TRUSTED_PROXIES* while the
+  two are the same, and names the variable's list beside the saved one when
+  they are not; `filex settings reseed login.trusted_proxies` applies a
+  changed variable, and a running server takes it within a minute. With no
+  variable set, `reseed` leaves the saved list alone rather than dropping it
+  to `auto` ([CONFIGURATION.md](docs/CONFIGURATION.md#trusted-proxies)).
+
+- **One rule for every variable that gives a setting its value: it seeds, it
+  does not override.** The external services were the exception: a service
+  `FILEX_ONLYOFFICE_URL` (or `_JWT`, `_CALLBACK_URL`, `_LANG`, or
+  `FILEX_DRAWIO_URL`) named was written back at every start, so an edit on
+  *External services* lasted until the next restart. Now the stored row
+  stands, like every other setting's. `filex settings reseed` is the explicit
+  way to write the environment's value over a stored one (`<key>`, `--all`,
+  `--external`) ([CONFIGURATION.md](docs/CONFIGURATION.md#writing-the-environment-again-filex-settings-reseed)).
+
+  **Upgrading:** an install keeps exactly what it runs with today - the
+  values the environment gave are stored on the first start (the server
+  defaults above, `FILEX_TRUSTED_PROXIES`, the external services). What
+  changes is the next edit: **the environment is no longer read at every
+  start, so changing one of these variables in compose and restarting no
+  longer changes the setting.** Change it on the admin panel, or run
+  `filex settings reseed <key>` (`--external` for ONLYOFFICE / draw.io,
+  `login.trusted_proxies` for the trusted proxies) and restart. A start whose
+  variable says something other than the stored value logs it once
+  (`FILEX_X is set but the stored value wins; run filex settings reseed
+  <key> to apply it`). A deployment that switches
+  `FILEX_VERSIONS_ON_OVERWRITE` or `FILEX_NOTIFY_ENABLED` off and on from the
+  environment, or that moves its proxy and edits `FILEX_TRUSTED_PROXIES`,
+  does the same.
+
+- **One name per place.** The user settings dialog is *User settings*
+  everywhere (its section list too); the connections panel, the desktop
+  app's heading and the explorer's navigation row that opens the guides are
+  *Connections*, as in the admin menu (they said *Storage connections* and
+  *How to connect*; the desktop button reads *Open Connections*), and the
+  navigation's Connections section has no heading of the same word over that
+  row any more - a rule separates it; the
+  Notifications page is titled *Notifications*, as its menu row (it said
+  *Notifications admin*); the General page is titled *General*. Two unused components (a language
+  switcher and a dark-mode toggle the shell stopped drawing in 0.41) are gone.
+- **The default install no longer runs an ONLYOFFICE Document Server.** Office
+  documents are edited by the Office editor app, in the browser, with no
+  server of its own: install it from the app store (Admin → Plugins → Apps);
+  filex does not install it by itself
+  ([ONLYOFFICE.md → Office editing](docs/ONLYOFFICE.md)). A Document Server
+  stays supported and optional - the Office editor app's office engine now
+  draws office thumbnails and runs the apps' office conversions without one
+  (above) - behind the `onlyoffice` compose profile
+  in `docker-compose.yml` and `deploy/compose/docker-compose.full.yml`, its
+  image pinned to `onlyoffice/documentserver:9.4.0.1` instead of `latest`
+  (`ONLYOFFICE_IMAGE` picks another). The full stack's `.env.example` leaves
+  `onlyoffice` out of `COMPOSE_PROFILES`, Helm's `values-full.yaml` no longer
+  wires one, and the Umbrel, CasaOS, Runtipi, Portainer and Unraid listings
+  run none and point to the app.
+
+  **Upgrading with a Document Server from filex's compose:** keep `onlyoffice`
+  in `COMPOSE_PROFILES` in your `.env` (full stack), or keep passing
+  `--profile onlyoffice` (quick start); `FILEX_ONLYOFFICE_*`,
+  `ONLYOFFICE_JWT_SECRET` and `ONLYOFFICE_DOMAIN` stay as they are. The image
+  moves from `latest` to 9.4.0.1: to stay on a Docs 10 you already run, set
+  `ONLYOFFICE_IMAGE=onlyoffice/documentserver:<version>` (CSV saves work with
+  both, below). ⚠ Do not run `up -d --remove-orphans` with the profile left
+  out: it removes the Document Server container (its `onlyoffice-data` volume
+  stays). With Helm and `values-full.yaml`, set `onlyoffice.enabled=true`,
+  `onlyoffice.url` and `onlyoffice.jwtSecret` in your own values.
+- **"Office documents cannot be converted" now names the Office editor app
+  first.** A job that finds no office engine says that office documents are
+  converted by the Office editor app's engine or by an ONLYOFFICE Document
+  Server, and an administrator is told to install the app under Apps (or to
+  connect a Document Server under External services); the job's code stays
+  `office_unconfigured`.
+
+### Removed
+
+- `filex sync trash` and the desktop app's *Removed by sync* list, with the
+  local trash they read. The `--json` event `pass.trashed` is now
+  `pass.removed` (task #259).
+
+### Fixed
+
+- **An app installed on a busy server is no longer refused as "the build and
+  the manifest do not belong together".** Every module that did not end its
+  load running was answered `describe_mismatch`, and `describe` - filex's own
+  check at install and every load - had the call budget a screen gets (15 s
+  unless the app asks for more), counting the module's start-up. On an
+  overloaded machine a module still starting ran out of it and the install was
+  refused with that sentence, about files that were fine. `describe` now gets
+  at least a minute, a start cut short by a budget is a timeout rather than a
+  crash, and the refusal says what happened: `describe_mismatch` only for a
+  module that answered as another program, `load_timeout` (503, try again)
+  for one that ran out of time, `load_failed` for one that did not compile,
+  start or answer. The server's log names the plugin and the reason
+  ([APP-PLUGINS.md → Troubleshooting](docs/APP-PLUGINS.md#troubleshooting)).
+- **Leaving a page while it is still asking who is signed in no longer signs
+  the browser out.** Safari and Firefox still run the code of a page that is
+  being left, and the panel took the question it had in flight
+  (`GET /api/auth/me`, dropped by the browser) for "nobody is signed in": it
+  cleared this browser's session hint and the person's look, so the next page
+  opened in the instance's colours instead of the person's palette, and the
+  other open tabs, told of the same sign-out, dropped it too. A server that
+  could not answer did the same: a `502` from a proxy while filex restarted,
+  any `5xx` or a `429` was taken for "nobody", and a page whose first question
+  met it sent a live session to the sign-in page. Only the server saying so -
+  `401`, or `403` for an account that may not have a session - signs the
+  browser out now. A question that gets no answer (the page being left, a
+  cancelled request, a lost connection, a timeout, a `5xx` or `429`) changes
+  nothing, and one the server could not answer is asked again twice, a moment
+  apart (a `429`'s `Retry-After` is waited for, up to 3 seconds).
+- **A complete language pack no longer shows as partly translated.** The
+  coverage of a pack for a language with fewer plural forms than English
+  (Chinese, Japanese) counted English's singular forms the language never
+  uses, so a finished Chinese pack showed 97%. Coverage now leaves out the
+  plural forms the language's CLDR rules never select. Contributed by
+  @chengjie ([GitHub #120](https://github.com/BRF-Tech/filex/pull/120)).
+- **An embedded explorer no longer writes preferences to the page it sits
+  in.** A host that never wires the account document (`configurePrefs`) got
+  every preference write - the version of an app a person has seen, a theme,
+  an app's `state.set`, an "Open with" choice - sent as `PUT /api/me/prefs`
+  or `/api/me/open-with` to its OWN origin, a 404 on every app opening
+  behind a host proxy. Pointing it at the explorer's `apiBase` would have been
+  worse: behind one shared proxy token every person of that product is one
+  filex account, and a PUT of a document the page never read replaces the
+  whole record. Unwired, the explorer now keeps preferences on the page and in
+  this browser's mirror and sends nothing; the web app, which wires it at
+  boot, is unchanged.
+- **An invitation's link is asked like every other link.** For an address with
+  no account, the access dialog's invitation makes a public link; it asked only
+  the `share.links` permission, not the rule every other link door asks, so it
+  could link into an end-to-end encrypted folder, and on a storage root only a
+  missing catalogue row kept it from linking the whole storage. It now asks the
+  same rule (edit rights, never filex's own folders, never an encrypted folder)
+  and refuses a storage root with `400 root_link`. The agent's share door
+  answers a storage root with `400` instead of a `500` that read as "retry".
+- **The end of the filter row on a phone is a ⋮, not a broken box.** The
+  listing's "⋮" was pinned over a chip row that scrolls sideways, and on a
+  narrow screen it came to rest on top of the last chip it could reach: the
+  chip's edge and the stem of its first letter on one side of it, its caret
+  on the other, read as an empty box with a stray divider in it. The chips,
+  the name box and the sort now scroll in a track of their own that fades out
+  where more of it is waiting, and the ⋮ stands after it with nothing under it
+  (task #264).
+
+- **The list's header on a phone reads as a header.** Where the list cannot be
+  a table and puts each row's values under its name, its header - the row of
+  sort buttons - ran on one line in the same grey as the values below it,
+  neither a header nor a row. It is now a band that starts with "Sort by",
+  each key a button and the active one filled; a column that cannot sort is
+  no longer a plain word between them. Every table in the product does the
+  same (task #264).
+
+- **No stray "-" beside the ⋮ of a folder.** Hovering a folder row in the
+  list, or focusing one on a phone, showed a "-" where a file shows its star:
+  the star column has nothing to draw on a folder, and the table filled the
+  gap with the dash it uses for an empty value. A column that is a control
+  now draws nothing when it has nothing to control, and the ⋮ no longer
+  carries a square of its own colour on a highlighted row (task #249).
+- **No "The server could not be reached" for a request the page itself let
+  go.** Safari and other WebKit browsers fail every request still in flight
+  the moment a page is left, with the same bare error a dead network gives,
+  and filex took that for a lost connection: opening a folder from a start
+  page that was still loading could show the strip over an explorer that
+  never asked for its listing. A request the page cancelled, or one dropped
+  while the page is being left, no longer says the server is unreachable;
+  a timeout still does (task #260).
+
+- **A request the client gave up on is logged as 499, not 500.** A handler
+  that failed only because the browser had gone (a page left, a tab closed)
+  answered and logged a server error, which sent people looking for a fault
+  in the server; it is now `status=499`, nginx's "client closed request"
+  ([CONFIGURATION.md](docs/CONFIGURATION.md#logging)) (task #260).
+- **The build host's test chain budgets a browser line for what it holds.**
+  Every Playwright line was budgeted at 4.25 GiB while the Chromium line held
+  6.6-7.2 GiB, Firefox 5.6 and WebKit 5.3 (their `/tmp` is memory, and the one
+  worker that runs a line's specs kept what recording every test left it); the
+  runs stayed calm only because the whole budget was 2 GiB short of what the
+  host gave. The chain now records a test only when it fails, on its second
+  attempt, and the line stays red (`E2E_RECORD=retry`): the Chromium line
+  holds 4.15 GiB and ends four minutes sooner. The weights are the measured
+  ones again, the budget is what the host gives (`CHAIN_MEM_GB` 10), and the
+  browser round holds only what its heaviest line still to run needs. Two web
+  test files' 30-second timeouts for a stalled host are gone: they take
+  0.6-0.8 s a night now (task #194; [CONTRIBUTING.md](docs/CONTRIBUTING.md)).
+- **The Snap Store's `candidate`, `beta` and `edge` channels follow the
+  releases again.** Every release went to `stable` alone, so the three preview
+  channels still served 0.52.0 (x64 only, nothing for arm64) four minor
+  releases later. Each release now goes to all four channels, for x64 and
+  arm64 alike, and the release checks `stable`, `candidate` and `beta` after it
+  ([DESKTOP.md](docs/DESKTOP.md#the-snap-stores-channels)).
+
+- **The desktop app's winget package keeps its place in the review queue.**
+  `BRFTech.filex-app` is not on winget yet, and every release opened a new
+  first submission and closed the one before it, so the moderators' queue
+  started again each time: fourteen passed validation and none was approved.
+  Until winget accepts the package, a release leaves it alone - no new pull
+  request, nothing moved, signed or closed - and says it waits for a
+  moderator; once accepted, every release submits a new version, as the CLI's
+  package `BRFTech.filex` already does.
+- **A tenant's administrator can no longer send a test mail through the
+  instance's mail server.** `POST /api/admin/settings/smtp-test` had no
+  platform check, unlike the `smtp.*` settings it tests.
+- **A CSV saved from ONLYOFFICE Docs 10 keeps its columns.** filex read every
+  save of a `.csv` as comma-separated, which Docs 9.4 writes; Docs 10 keeps
+  the file's own delimiter, so a semicolon file came back as one column and
+  every row was written as one quoted field (`"elma;42;""a; b"";7;…"`), its
+  leading zeros and dates lost too. How a save is written - its delimiter,
+  byte order mark, line ends and encoding - is now read from its bytes, never
+  assumed: the delimiter is the one under which the save reads as the file's
+  table. The same rules write a save from the Office editor app, editing
+  together included, and a save whose bytes are not what the app declared is
+  refused with nothing written
+  ([ONLYOFFICE.md → CSV files](docs/ONLYOFFICE.md#csv-files)).
+
+- **A CSV in a legacy code page or in UTF-16 stays in it.** A Windows-1254 (or
+  -1250, -1251, -1252) or UTF-16 file was written back as UTF-8 with a byte
+  order mark after an edit, and its unchanged cells took the editor's values.
+  filex now recognises the file's encoding from its bytes, writes the save
+  back in it with every untouched record byte for byte, and refuses a save
+  holding a character that encoding cannot hold (the people who edited it
+  are told; save a copy in UTF-8 instead) rather than write it as `?`.
+
+- **Desktop: a document changed outside filex while the Office editor app has
+  it open is asked about, not held.** The editor page told the desktop it
+  takes outside changes even under an app's interface, which takes none: the
+  change went unanswered and every later save waited for an answer that never
+  came. Under an app the desktop now asks in its own dialog (Keep the outside
+  version / Write mine / Keep both), and "Keep the outside version" opens it
+  in the same app.
+- **Desktop: closing a document window with unsaved changes says what is
+  lost.** An app's interface holding changes it had not saved got the draft's
+  question ("What was typed stays in Drafts") - untrue for any document but a
+  draft. It now asks *Close without saving?*, and the draft keeps its own
+  words.
+- **One rule for a new name, at every door.** The explorer, the API, file
+  requests, agents, WebDAV, S3, SFTP, FTPS and NFS now refuse the same names
+  and nothing else: an empty name or one of only spaces, a `/` or `\`, a NUL
+  or any other control character (a tab, a line break), and a name of only
+  dots and spaces with at least one dot (`.`, `..`, `...`, `. .`): on a
+  Windows host each of those names the folder it is in or its parent once
+  the trailing dots and spaces are trimmed. Before, each door had its own
+  idea: a new
+  folder called `..` answered 200, a file uploaded as `...` (or created over
+  WebDAV or SFTP) could then not be opened, renamed or deleted, the protocols
+  accepted a backslash (an SFTP server on Windows even made a folder of it),
+  one refused name in a multi-file upload left the files before it written,
+  and a file request answered "storage unavailable". A file that already
+  carries such a name on the disk stays readable, writable, renamable and
+  deletable; only a new name is asked. The refusal says why
+  (`400 NAME_NOT_ALLOWED`, S3 `InvalidArgument`, FTPS `553`)
+  ([FILE-NAMES.md](docs/FILE-NAMES.md#the-names-filex-refuses)).
+
+- **A name too long for the storage is "name too long", not a server error.**
+  A name over the 255 bytes a local disk holds in one name (about 85 Chinese
+  characters) answered 500 in the explorer, 503 on a file request, 405 over
+  WebDAV and 500 over S3, and S3's message and FTPS's reply printed the
+  server's own path. Every surface now answers it as the client's mistake
+  (`400 NAME_TOO_LONG`, S3 `KeyTooLongError`, FTPS `553`, NFS
+  `NFS3ERR_NAMETOOLONG`, "file name too long" on a `filex mount` drive), with
+  no server path, and a large upload is refused before its bytes are sent.
+
+- **A right-to-left override can no longer hide a file's extension.** A file
+  named `invoice` + U+202E + `fdp.exe` (an `.exe`) was drawn as
+  `invoiceexe.pdf` in the explorer, the tab title, the public share pages,
+  notifications and mail, and turned the rest of a message around it. Every
+  surface that shows a name now draws a bidi control as `�`, so the true
+  extension stays at the end, and a download, a drag-out and a ZIP (downloaded
+  or created) write `_` in its place. The stored name is unchanged.
+
+- **Spaces at the ends of a name are part of it.** Opening or downloading
+  ` notes.txt` or `report.txt ` served the file without the space, or nothing;
+  a token or an agent confined to a folder reached the twin without the
+  space. Renaming a file without changing its name no longer trims it, and a
+  dropped folder whose name ends in a space keeps its files.
+
+- **Browser uploads and downloads keep the exact name.** A file whose name
+  holds `"` was stored with `%22` in its place when uploaded from the browser
+  (the explorer and file-request pages), and a download of `100%20off.txt` was
+  saved by Chromium as `100 off.txt`.
+
+- **S3 behaves like S3 with names.** Listings asked with `encoding-type=url`
+  (the AWS CLI, boto3 and rclone ask for it) now encode the keys, so
+  `C++ notes+draft.txt` and `100%20off.txt` are no longer read back as other
+  names. On a dedicated S3 host a key or a bucket whose name starts with `s3`
+  keeps it (`s3cmd.conf` was stored as `cmd.conf`). A copy onto another
+  spelling of its source (`./a.txt`) no longer empties the file. A `DELETE`
+  removes at most the one object it names: `DELETE folder/` (or `folder`, or
+  the same key in a bulk delete) moved the whole folder and its files to the
+  trash; now an empty folder's marker removes the folder and a folder that
+  still holds files is left as it is (`204`, as on S3). A key over 1024 bytes
+  is refused like AWS refuses it, and a finished multipart upload's
+  `Location` is a valid URL.
+
+- **WebDAV `COPY` or `MOVE` onto another spelling of the same file** answers
+  `403` instead of emptying or trashing it.
+
+- **Removing a folder that is not empty over SFTP, FTPS or NFS is refused.**
+  `RMDIR`/`RMD` (and FTP's `SITE RMDIR`) of a folder that still held files
+  moved the whole folder to the trash; it now answers "directory not empty"
+  and moves nothing. An empty folder is removed as before. A file-removal
+  command (SFTP `REMOVE`, FTP `DELE`) on a folder, empty or not, answers "is a
+  directory" instead of trashing it.
+
+- **Archives keep every name.** ZIP downloads no longer drop a member whose
+  name starts with two dots (`..notes`) or with a digit and a colon
+  (`1:1 notes.txt`), and extraction no longer refuses such an archive. A ZIP
+  made by Windows without the UTF-8 flag shows its names (read in the code
+  page of the account's language: 857 for Turkish, 437 by default) instead of
+  replacement characters. 7-Zip extraction reads `*`, `?` and line breaks in a
+  member's name literally, and a member too long for the disk no longer fails
+  the whole extraction. An extraction lists every member it left out and why
+  (`skipped`), and a queued one ends partial instead of failed. Two members
+  of an archive being created whose names become one once their control
+  characters are written as `_` are both kept (`a_b.txt`, `a_b (2).txt`). An
+  archive download's own long non-ASCII name stays valid.
+
+- **Shared folders open every file.** A file with a backslash in its name, on
+  a Linux storage, opened from a shared folder as "not found".
+
+- **NFS and SFTP listings.** A name over 255 bytes is left out of an NFS
+  listing instead of failing the whole folder, and an SFTP rename that only
+  changes letter case works on a storage that ignores case.
+
+- **Folder sync brings down a file your computer cannot name as it is, and
+  never changes the server because of a name.** A server item Windows cannot
+  hold (`report.`, `CON`, `a:b.txt`), one over 255 bytes, or the second of two
+  names that are one name on Windows or macOS (`Rapor.docx` beside
+  `rapor.docx`) was downloaded under another name and then deleted or renamed
+  on the server on the next pass, or downloaded again on every pass. It now
+  arrives under a safe name (`report_`, `_CON`, `a_b.txt`,
+  `rapor (2).docx`), the folder says so, and a change made here goes back to
+  the server's original name. When the safe name is taken here by another
+  file, the item is not downloaded and the folder says why. A file here that
+  differs from a server file only in letter case is compared with it on the
+  first pairing instead of being uploaded as a second file, a file whose name
+  the server does not accept is reported instead of failing on every pass, a
+  conflict on a very long name no longer hangs the sync, and `THUMBS.DB` is
+  skipped in any letter case
+  ([SYNC.md](docs/SYNC.md#names-your-computer-cannot-hold)).
+
+- **Dragging files out of the desktop app writes names the computer can
+  hold**: a forbidden character, a control, a bidi control or a trailing dot
+  becomes `_`, a Windows device name gets a `_` in front, two names that are
+  one name there are kept apart with ` (2)`, and a file is never handed over
+  with the bytes of its twin.
+
+- **Search finds a name by what you see.** A name holding an invisible
+  character (a zero-width space, a soft hyphen) is found by its visible
+  spelling (`zerowidth`); the search index is rebuilt once, in the background,
+  after the upgrade - the same one rebuild that makes it smaller
+  ([SEARCH.md](docs/SEARCH.md#upgrading-an-existing-index)).
+  The command palette finds names typed on a Mac and works in a Turkish
+  browser, a notification opens a folder whose name holds `%`, `#` or `?`, and
+  a file whose name only looks like a trash entry keeps its full name.
+
+### Security
+
+- WebDAV applies every permission and app lock to the file a request
+  reaches, however the request spells its path.
+- An S3 key confined to a folder can no longer reach outside it through a
+  path segment; a key with an empty, `.` or `..` segment is refused.
+- Blocked file types are also blocked when the name ends in a dot or a space
+  or carries an NTFS stream suffix (`setup.exe.`, `setup.exe::$DATA`).
+- The folder an NFS export shares can no longer be removed or renamed
+  through the mount's root, and a name holding `/`, `.` or `..` is refused
+  over NFS.
+- An FTPS listing leaves out a file whose name holds a line break instead of
+  printing it as lines of the protocol.
+- `files.download` is asked of each file on its own path on every door:
+  inside an archived or linked folder, for a download link or a link an app
+  opens, and for a copy, move, rename, extraction or app result that puts a
+  file somewhere else
+  ([RBAC.md](docs/RBAC.md#every-file-in-a-folder-answers-the-download-rule)).
+
 ## [0.56.3] - 2026-10-13
 
 ### Fixed

@@ -31,6 +31,7 @@ import { hasLocale, normalizeLocaleCode } from '../../lib/uiLocales';
 import { localPref, setLocalPref } from '../../lib/prefs';
 import { detectLocale } from '../../locales/resolve';
 import { labelOf } from '../../lib/pluginLabel';
+import { visibleName } from '../../lib/nameRule';
 import { publicLayoutFor } from '../../lib/publicLayout';
 import PublicShell from './PublicShell.vue';
 import PublicShareBody from './PublicShareBody.vue';
@@ -189,11 +190,13 @@ const title = computed(() => {
   const app = shareInfo.value?.app;
   const fromSurface = labelOf(share?.conv.current.value?.title, locale.value);
   if (app) return fromSurface || labelOf(app.title, locale.value) || '';
-  return shareInfo.value?.node?.name || requestInfo.value?.folder || '';
+  // A file's or a folder's name is SHOWN (heading, tab title): a bidi control
+  // in it cannot hide the true extension (lib/nameRule, task #238).
+  return visibleName(shareInfo.value?.node?.name || requestInfo.value?.folder || '');
 });
 
 const subject = computed(() => {
-  const s = link.info.value?.subject ?? '';
+  const s = visibleName(link.info.value?.subject ?? '');
   // Not twice: a file share's subject defaults to the file's own name on the
   // server, and printing it again under the heading is noise.
   return s && s !== title.value ? s : '';

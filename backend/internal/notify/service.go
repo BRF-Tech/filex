@@ -1099,6 +1099,15 @@ func (s *service) SetWebhook(url, token string) {
 	s.mu.Unlock()
 }
 
+// SetWebhookLang is the language the default webhook is told in ("" = the
+// instance's): a setting since 0.57 (Admin → Settings → Webhooks), applied to
+// the next delivery (internal/instancesettings SetLive).
+func (s *service) SetWebhookLang(lang string) {
+	s.mu.Lock()
+	s.webhookLang = strings.TrimSpace(lang)
+	s.mu.Unlock()
+}
+
 func (s *service) WebhookConfig() (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

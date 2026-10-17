@@ -23,6 +23,7 @@ import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { E2E_NAME_VIEW } from '../composables/useE2eNames';
 import { hasInternalDrag } from '../lib/dragOut';
 import { virtualSegmentLabel } from '../lib/listing';
+import { visibleName } from '../lib/nameRule';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { actionIconSvg } from '../lib/actionIcons';
@@ -127,7 +128,7 @@ const crumbs = computed<Crumb[]>(() => {
          properly. One resolver, and a sentinel added to `lib/listing` reaches
          both branches on the day it lands. */
       out.push({
-        label: virtualSegmentLabel(part, t) || e2eLabel(`${adapterPrefix}${acc}`) || part,
+        label: virtualSegmentLabel(part, t) || visibleName(e2eLabel(`${adapterPrefix}${acc}`) || part),
         adapterPath: `${adapterPrefix}${acc}`,
       });
     }
@@ -163,7 +164,9 @@ const crumbs = computed<Crumb[]>(() => {
     // which is a filename the user never typed and cannot navigate to.
     // etiket:t1 — via the shared resolver, which also knows the tag view's
     // `.tag~<name>` segment; the raw map only covers the fixed-label views.
-    const label = virtualSegmentLabel(part, t) || e2eLabel(`${adapterPrefix}${acc}`) || part;
+    // ⚠ A folder's own name through `visibleName` (lib/nameRule): a bidi
+    // control in it is drawn as U+FFFD instead of rearranging the crumb.
+    const label = virtualSegmentLabel(part, t) || visibleName(e2eLabel(`${adapterPrefix}${acc}`) || part);
     out.push({ label, adapterPath: `${adapterPrefix}${acc}` });
   }
   return out;

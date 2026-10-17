@@ -32,7 +32,6 @@ import (
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/dbsetting"
-	"github.com/brf-tech/filex/backend/internal/drafts"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/enginebin"
@@ -42,6 +41,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/ftpsrv"
 	"github.com/brf-tech/filex/backend/internal/identity"
 	"github.com/brf-tech/filex/backend/internal/identitystore"
+	"github.com/brf-tech/filex/backend/internal/instancesettings"
 	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/metrics"
@@ -49,6 +49,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/netguard"
 	"github.com/brf-tech/filex/backend/internal/nfssrv"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/officeengine"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/perm"
@@ -77,7 +78,6 @@ import (
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/update"
-	"github.com/brf-tech/filex/backend/internal/usage"
 	"github.com/brf-tech/filex/backend/internal/version"
 	"github.com/brf-tech/filex/backend/internal/versioning"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
@@ -146,6 +146,10 @@ type Server struct {
 	// appPlugins is the in-process wasm registry; closed at shutdown so the
 	// compiled modules and the call spool go with the process.
 	appPlugins *wasmplugin.Registry
+	// officeRunner runs the office engine an app brings, in processes of its
+	// own (internal/officeengine); closed at shutdown so they end with filex.
+	// Nil when apps are off.
+	officeRunner *officeengine.Runner
 	// protocolAuth is the shared credential resolver every non-HTTP protocol
 	// authenticates through. Held here for the revalidation sweep, which is what
 	// makes revoking a credential reach a session that is already open.
@@ -223,6 +227,11 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// cfg.MultiTenant (the environment's sign-in drivers below): everything
 	// after this line is handed the one answer.
 	tenancy.Resolve(ctx, store, &cfg)
+	// The settings that lived in the environment alone until 0.57 (task
+	// #258, internal/instancesettings): the configuration seeds a row on a
+	// start that has none, and the row's value is written into cfg here,
+	// before the first consumer below is built from it.
+	instancesettings.Boot(ctx, store, &cfg)
 	// Off on an install that has tenants is maintenance mode: only the
 	// platform's own tenant signs in, and a tenant's open session or API key
 	// stops working too (auth.MaintenanceLockout, mounted by the router).
@@ -262,7 +271,8 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// allows, so a key it never saw reads "not allowed". perm.UpgradeCatalogue
 	// gives every saved role, and every person's own exceptions, the added
 	// keys they held through an older one (files.encrypt through
-	// files.create) — once, and records the catalogue.
+	// files.create), gives every saved role the keys added for everyone
+	// (ai.assistant) — once, and records the catalogue.
 	// ⚠ A failure does not stop the start: it changes nothing, and the next
 	// start does the whole of it again.
 	if rep, err := perm.UpgradeCatalogue(ctx, store); err != nil {
@@ -333,13 +343,22 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// after that is the memory's (internal/loginguard). A table that cannot be
 	// read leaves the defaults and an empty memory; the counters are read again
 	// at the next sweep.
+	// FILEX_TRUSTED_PROXIES (or config.yaml trusted_proxies) is a seed since
+	// 0.57 (task #258): written into `login.trusted_proxies` on a start where
+	// the row holds nothing, the row wins from then on, and a start whose
+	// configuration says something else logs it once (loginguard
+	// proxyseed.go). Before Load, so the memory starts with the seeded list.
+	if _, err := loginguard.SeedTrustedProxies(ctx, store, cfg.TrustedProxies); err != nil {
+		slog.Warn("loginguard: could not seed the trusted proxies; the configuration's list applies this start", slog.Any("err", err))
+	}
 	loginGuard := loginguard.New(store)
 	if err := loginGuard.Load(ctx); err != nil {
 		slog.Warn("loginguard: started without the table's settings or counters", slog.Any("err", err))
 	}
 	// Which address a request came from. Forwarded headers are believed only
 	// from a trusted proxy: `login.trusted_proxies` (the admin page, held in
-	// the limiter's memory) wins over FILEX_TRUSTED_PROXIES, and with neither
+	// the limiter's memory; seeded above) wins over the configuration's list,
+	// and with neither
 	// it is `auto` - loopback, plus the container networks filex is attached
 	// to minus their gateways (internal/clientip, auto.go). Set before
 	// anything serves, because the sign-in throttle counts by it; `auto` is
@@ -459,6 +478,13 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	}
 
 	// Search index.
+	//
+	// The search behaviours an admin edits (content extraction, its size cap,
+	// the memory budget, the automatic repair) are settings-table rows since
+	// 0.57 (task #261): their variables and config.yaml keys seed them on a
+	// boot where no row exists yet, and the rows win from then on
+	// (internal/search settings.go). Seeded before anything below reads them.
+	search.SeedSettings(ctx, store, cfg.Search)
 	var idx *search.Index
 	if cfg.Search.Enabled {
 		idx, err = search.Open(cfg.Search.IndexPath)
@@ -779,17 +805,39 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	}
 	ooSvc.DefaultLocale = cfg.DefaultLocale
 
-	// Office thumbnails are the document server's (thumb/office.go): the
-	// pipeline asks it through the adapter, and the Default apps chain names
-	// it first for the office kinds while OnlyOffice is configured. Both read
-	// the configuration in force (cached for a second by extResolver), so
-	// configuring OnlyOffice in the admin page starts drawing without a
-	// restart, and the pictures LibreOffice drew before 0.50 go stale then.
-	pipeline.AttachOffice(&officeThumbs{svc: ooSvc})
+	// The office engine's back ends (office_backends.go): the engine an app
+	// brings (the Office editor's, run by internal/officeengine in processes
+	// of its own, compiled in the background after an install) and the
+	// Document Server, if one is connected. Which one works, when both are
+	// there, is the administrator's (Default apps → the engine).
+	var officeRunner appEngine
+	var officeApps func() []wasmplugin.OfficeEnginePackage
+	if appPlugins != nil {
+		runner := officeengine.New(officeengine.Options{
+			CacheDir:    officeEngineCacheDir(cfg.DataDir),
+			MaxMB:       func() int { return cfg.OfficeEngineMaxMB },
+			Slots:       func() int { return pipeline.OfficeLimits().Slots },
+			IdleTimeout: officeEngineIdle,
+			Log:         slog.Default(),
+		})
+		srvObj.officeRunner = runner
+		officeRunner = runner
+		officeApps = appPlugins.OfficeEngines
+	}
+	office := newOfficeBackends(ooSvc, officeRunner, assocSvc, officeApps, version.String())
+	// Office thumbnails are drawn by the same back ends (thumb/office.go): the
+	// pipeline asks them through the adapter, and the Default apps chain
+	// names the drawer ("onlyoffice", whichever back end runs) first for the
+	// office kinds while one runs. Both read the configuration in force, so
+	// configuring OnlyOffice in the admin page, or an app's engine becoming
+	// ready, starts drawing without a restart.
+	pipeline.AttachOffice(office)
 	if assocSvc != nil {
 		assocSvc.SetOnlyOfficeThumb(func(name, mime string) bool {
-			return thumb.OnlyOfficeDraws(name, mime) && ooSvc.EnabledCtx(context.Background())
+			return thumb.OnlyOfficeDraws(name, mime) && office.Ready(context.Background())
 		})
+		// The Document Server as a back end of the office engine.
+		assocSvc.SetOnlyOfficeEngine(func() bool { return ooSvc.EnabledCtx(context.Background()) })
 		// filex 0.51: a .csv opens in ONLYOFFICE's spreadsheet while it is
 		// configured (Default apps: first, filex's table second), read from
 		// the same configuration in force as the thumbnails above.
@@ -797,7 +845,6 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			return ooSvc.EnabledCtx(context.Background())
 		})
 	}
-	logOfficeThumbs(ctx, ooSvc)
 	logOfficeEditorOrigin(ctx, ooSvc, cfg.ExternalServices.OnlyOffice.FrameOrigin, cfg.AppUIOrigin)
 
 	// The replica rule engine, made before the resolver: every replication
@@ -836,8 +883,13 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// in the admin UI turns office conversions on without a restart, and no
 	// LibreOffice is looked for (0.50).
 	if appPlugins != nil {
-		appPlugins.SetOffice(officeEngine{svc: ooSvc})
+		appPlugins.SetOffice(office)
+		// And the apps' engines: the registry tells the back ends what runs
+		// now, and lets them go of an app's files before an upgrade moves
+		// them (this call reads what is installed, and prepares it).
+		appPlugins.SetEngineHost(office)
 	}
+	logOfficeThumbs(ctx, office)
 
 	// Async ops queue — DB-backed, restart-safe.
 	opsSvc := ops.NewForDialect(sqlDB, cfg.DB.Driver, resolver)
@@ -942,12 +994,22 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// Content extraction ("Bul"): register the async content_index job and
 	// hook the search index so every metadata (re)index of an eligible file
 	// enqueues extraction — this covers the upload/write handlers AND the
-	// sync worker upserts, since both feed Index.IndexNode. Kill-switch:
-	// FILEX_SEARCH_CONTENT=0. Best-effort by design — the write path never
-	// blocks on (or fails because of) extraction.
-	if idx != nil && srvObj.qpool != nil && cfg.Search.Content {
-		contentIdx := queue.NewContentIndexer(store, resolver, idx, cfg.Search.ContentMaxBytes)
+	// sync worker upserts, since both feed Index.IndexNode. Best-effort by
+	// design — the write path never blocks on (or fails because of)
+	// extraction.
+	//
+	// ⚠ Wired whether or not content search is switched on: the switch
+	// (search.content, the Search page; FILEX_SEARCH_CONTENT seeds it) and the
+	// size cap (search.content_max_mb) are read per file, so turning it on
+	// takes effect without a restart. Wiring only when it was on at boot made
+	// the switch a restart-only setting.
+	if idx != nil && srvObj.qpool != nil {
+		contentIdx := queue.NewContentIndexer(store, resolver, idx, queue.DefaultContentMaxBytes)
 		contentIdx.AttachBody(bgBody)
+		contentIdx.AttachSettings(
+			func() int64 { return search.ContentMaxBytes(context.Background(), store) },
+			func() bool { return search.ContentSetting.Resolve(context.Background(), store) },
+		)
 		// Its own pool, so the texts the index writes together can be more
 		// than the shared pool's few workers; extraction itself stays at
 		// that many at once (queue.ContentIndexWorkers, issue #115).
@@ -973,15 +1035,18 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// extraction as part of the rebuild. Wiring it any earlier would
 	// silently skip that.
 	//
-	// FILEX_SEARCH_AUTO_REBUILD=0 turns it off; the index then keeps
-	// reporting needs_rebuild and an operator can POST
-	// /api/admin/search/rebuild?content=1 when it suits them.
+	// The setting search.auto_rebuild (FILEX_SEARCH_AUTO_REBUILD seeds it)
+	// turns it off; the index then keeps reporting needs_rebuild and an
+	// operator can POST /api/admin/search/rebuild?content=1 when it suits
+	// them. Read here, once: it decides what this start does.
 	if idx != nil {
-		setSearchMemoryBudget(idx, cfg.Search.MemoryPercent)
-		idx.AutoRebuildIfStale(store, cfg.Search.AutoRebuild)
+		idx.ApplyMemoryPercent(search.MemoryPercentSetting.Resolve(ctx, store))
+		idx.AutoRebuildIfStale(store, search.AutoRebuildSetting.Resolve(ctx, store))
 	}
 
-	// Notifications subsystem.
+	// Notifications subsystem. ⚠ `notify.enabled` is a setting since 0.57
+	// (Admin → Settings → Notifications): it decides whether the service is
+	// built at all, so it applies at the next start.
 	if cfg.Notify.Enabled {
 		srvObj.notify = notify.New(store, notify.Config{
 			WebhookURL:   cfg.Notify.WebhookURL,
@@ -1010,6 +1075,15 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		// switched on that can no longer start is left out of the running set;
 		// the administrators are told once per reason. A failure at boot (the
 		// providers are built before this exists) is raised by this call.
+		// The default webhook's language applies to the next delivery: the
+		// one instance setting that is live (internal/instancesettings).
+		if wl, ok := srvObj.notify.(interface{ SetWebhookLang(string) }); ok {
+			instancesettings.SetLive("notify.webhook_lang", func(_ context.Context, v any) {
+				if lang, ok := v.(string); ok {
+					wl.SetWebhookLang(lang)
+				}
+			})
+		}
 		authLive.SetProviderAlarm(func(name, reason string) {
 			// The facts only: the server says the alarm from them, in each
 			// reader's language, on the bell, a push and an email alike
@@ -1047,16 +1121,16 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	var avEnqueueAfterSave func(ctx context.Context, n *model.Node)
 	// Database-backed settings seeded from the environment on first boot only.
 	// The env var is inert once a row exists (see package dbsetting).
+	// ONE list (reseed.go dbSeeders), the one `filex settings reseed` writes
+	// over on request. The antivirus family has one rule more (an address
+	// with no mode seeds daemon mode), and search's its config.yaml keys
+	// (seeded above, before the index opens): their own SeedSettings run it.
 	antivirus.SeedSettings(ctx, store)
-	usage.SeedSettings(ctx, store)
-	drafts.SeedSettings(ctx, store)
-	// The SVG thumbnail limits (thumb/svglimits.go), editable in Settings and
-	// in Admin → Tools → Thumbnail repair.
-	dbsetting.SeedAll(ctx, store, thumb.SVGMaxMBSetting, thumb.SVGTimeoutSetting, thumb.FolderPreviewsSetting,
-		thumb.OfficeMaxMBSetting, thumb.OfficeSlotsSetting)
-	// Whether an app granted files:e2e-plaintext may edit a file of an
-	// encrypted folder (wasmplugin/e2eplain.go, filex 0.56).
-	dbsetting.SeedAll(ctx, store, wasmplugin.E2EPlaintextSetting)
+	dbsetting.SeedAll(ctx, store, dbSeeders()...)
+	// After the seeds, once per start: a variable set to something its
+	// stored row overrules is named in the log, with the command that
+	// applies it (dbsetting drift.go).
+	dbsetting.WarnDrift(ctx, store, dbSeeders()...)
 	// ⚠⚠ This resolution is what the process RUNS with until it restarts.
 	// enabled / mode / clamd address are read once, here, because the lines
 	// below are the wiring itself: registering the queue handler and handing
@@ -1262,6 +1336,10 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	zipCache := sharezip.New(zipDir)
 	zipCache.WarmMaxBytes = cfg.Cache.ShareZipWarmMaxBytes
 	zipCache.MaxAge = cfg.Cache.ShareZipMaxAge
+	// The warmed archive holds what a visitor's download of the link would:
+	// each member answers the link's creator's download rule
+	// (handlers.LinkMembers), asked through a resolver over the same store.
+	linkACL := acl.New(store)
 	srvObj.zipWarmer = sharezip.NewWarmer(
 		zipCache,
 		func(ctx context.Context) ([]sharezip.DirShare, error) {
@@ -1293,7 +1371,10 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 					if node == nil || node.Type != model.NodeTypeDirectory {
 						continue
 					}
-					out = append(out, sharezip.DirShare{StorageID: node.StorageID, Path: node.Path, NodeID: node.ID})
+					out = append(out, sharezip.DirShare{
+						StorageID: node.StorageID, Path: node.Path, NodeID: node.ID,
+						Keep: handlers.LinkMembers(ctx, linkACL, store, sm.Share, node.StorageID),
+					})
 				}
 				if len(rows) < page || int64(offset+len(rows)) >= total {
 					complete = true
@@ -1413,6 +1494,8 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		AppPluginsDisabledReason: appPluginsReason,
 		AppStore:                 appStore,
 		Assoc:                    assocSvc,
+		OfficeEngineStates:       office.States,
+		OfficeEnginesChanged:     office.EnginesChanged,
 		Embed:                    embedFS,
 		LocalAuth:                localDrv,
 		OIDCAuth:                 oidcDrv,
@@ -1520,6 +1603,9 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// expire after seven days — this labels them hourly (the rule refuses a
 	// late approval whatever its row still says).
 	deps.E2ERequests.StartSweeper(ctx)
+	// The AI assistant's conversations are kept for the retention the
+	// administrator set (Admin -> Settings -> AI assistant): swept hourly.
+	deps.Assistant.StartRetention(ctx)
 	// Filled BY BuildRouter when nil — same reason the protocol listeners below
 	// are built after it.
 	srvObj.protocolAuth = deps.ProtocolAuth
@@ -1689,23 +1775,37 @@ func migrateShareZipDir(legacy, dst string) {
 		slog.String("dir", legacy))
 }
 
-// seedExternalDefaults reconciles the `external_services` table with env/YAML.
+// seedExternalDefaults writes what the environment / config.yaml says about
+// the external services (FILEX_ONLYOFFICE_URL / _JWT / _CALLBACK_URL / _LANG,
+// FILEX_DRAWIO_URL) into the `external_services` table under the ONE rule
+// every setting a variable gives a first value to follows since 0.57 (task
+// #258, package dbsetting): a SEED, never an override.
 //
-// Two rules, and the second one is the reason this is not just a seeder:
+//   - A service with no address stored yet (no row, or a row nothing was
+//     configured in) takes the environment's address, secret, callback
+//     address and editor language, switched on when an address is given.
+//   - A service with an address stored is the admin page's: the environment
+//     is not written over it, and a value that differs is said once in the
+//     log, naming the way to write it anyway (`filex settings reseed
+//     --external`).
+//   - An option the environment pins alone (the callback address, the
+//     editor's language) is written onto a row that has none of its own, and
+//     nothing else on the row is touched.
 //
-//   - a service env/YAML says nothing about is created once, disabled, and then
-//     belongs entirely to the admin UI. Its row is the runtime truth and an
-//     operator's edit applies live;
-//   - a service env/YAML DOES configure is re-asserted on every boot. Compose
-//     is declarative: an operator who edits FILEX_ONLYOFFICE_URL and restarts
-//     expects the new URL, and a seed-if-missing would have silently kept the
-//     old one from first boot forever — the same class of "saved value the
-//     process ignores" that issue #17 was about, just pointing the other way.
-//
-// A UI edit to an env-pinned service therefore applies immediately and is
-// reverted at the next restart; GET/PATCH /api/admin/external return
-// `env_managed` so the operator is told that rather than finding out later.
+// ⚠ Until 0.57 a service the environment named was RE-ASSERTED at every start
+// ("compose is declarative"): an edit on External services lasted until the
+// next restart. The owner's decision of 2026-10-15 retired that pattern for
+// the seed: what an administrator saves on the page stays saved. The upgrade
+// note is in the CHANGELOG (0.57) and docs/CONFIGURATION.md.
 func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config) {
+	applyExternalFromConfig(ctx, store, cfg, false)
+}
+
+// applyExternalFromConfig is seedExternalDefaults with force: true writes the
+// configuration over a stored row as well - `filex settings reseed
+// --external`, the explicit way back to what the environment says (the old
+// re-assertion, on request). It answers the services it wrote.
+func applyExternalFromConfig(ctx context.Context, store db.Store, cfg config.Config, force bool) []string {
 	type defRow struct {
 		name     string
 		url      string
@@ -1722,20 +1822,21 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 	if strings.TrimSpace(os.Getenv("FILEX_CONVERT_URL")) != "" {
 		slog.Warn("FILEX_CONVERT_URL is no longer used: the iframe converter was removed; install the Convert app (Admin → Plugins → Apps) - docs/APP-PLUGINS.md")
 	}
+	var wrote []string
 	for _, d := range defaults {
 		cur, _ := store.GetExternalService(ctx, d.name)
 		if cur != nil && d.url == "" && d.callback == "" {
-			// Not pinned by the environment: the row is the operator's.
+			// Nothing in the environment: the row is the operator's.
 			continue
 		}
-		// ⚠ Only the callback address pinned (FILEX_ONLYOFFICE_CALLBACK_URL
+		// ⚠ Only the callback address given (FILEX_ONLYOFFICE_CALLBACK_URL
 		// without FILEX_ONLYOFFICE_URL): the service is the admin page's, and
-		// the environment writes that one option and nothing else. Run through
-		// the re-assertion below it switched a service configured on the admin
-		// page off and wiped its address at every boot (`enabled = d.url != ""`,
-		// found while adding FILEX_ONLYOFFICE_LANG, #214).
+		// the environment writes that one option and nothing else - onto a row
+		// that has none of its own, or on request (#214: run through the
+		// address branch below it switched the service off and wiped its URL).
 		if cur != nil && d.url == "" {
-			if external.CallbackURLFromOptions(cur.OptionsJSON) == strings.TrimRight(strings.TrimSpace(d.callback), "/") {
+			stored := external.CallbackURLFromOptions(cur.OptionsJSON)
+			if stored == strings.TrimRight(strings.TrimSpace(d.callback), "/") || (stored != "" && !force) {
 				continue
 			}
 			merged, err := external.WithCallbackURL(cur.OptionsJSON, d.callback)
@@ -1746,16 +1847,26 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 			}
 			if err := writeRowOptions(ctx, store, cur, merged); err != nil {
 				slog.Warn("seed external_services callback URL", slog.String("name", d.name), slog.String("err", err.Error()))
+				continue
 			}
+			wrote = append(wrote, d.name)
 			continue
 		}
-		// ⚠ Switched on is part of the match. A row the administrator switched
-		// off on External services kept its URL, so it "matched" and stayed off
-		// across restarts - unseen while the OnlyOffice service fell back to the
-		// boot values, real once it stopped (0.50). Env pins the service on.
-		if cur != nil && cur.Enabled == (d.url != "") && cur.URL == d.url && (d.secret == "" || cur.SecretEnc == d.secret) &&
-			(d.callback == "" || external.CallbackURLFromOptions(cur.OptionsJSON) == d.callback) {
-			continue // already matches the environment; nothing to say
+		matches := cur != nil && cur.Enabled == (d.url != "") && cur.URL == d.url && (d.secret == "" || cur.SecretEnc == d.secret) &&
+			(d.callback == "" || external.CallbackURLFromOptions(cur.OptionsJSON) == d.callback)
+		if matches {
+			continue // already what the environment says; nothing to write or say
+		}
+		// The seed rule: a service with an address of its own is the admin
+		// page's. Said once, so an operator who edited compose finds out why
+		// nothing changed.
+		if cur != nil && strings.TrimSpace(cur.URL) != "" && !force {
+			slog.Info("external service: the environment differs from the stored row; the stored row stands (filex settings reseed --external writes the environment's)",
+				slog.String("name", d.name),
+				slog.Bool("stored_enabled", cur.Enabled),
+				slog.String("stored_url", cur.URL),
+				slog.String("env_url", d.url))
+			continue
 		}
 		options := "{}"
 		secret := d.secret
@@ -1764,11 +1875,6 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 			if secret == "" {
 				secret = cur.SecretEnc
 			}
-			slog.Info("external service is pinned by the environment; re-asserting it over the stored row",
-				slog.String("name", d.name),
-				slog.Bool("stored_enabled", cur.Enabled),
-				slog.String("stored_url", cur.URL),
-				slog.String("env_url", d.url))
 		}
 		if d.callback != "" {
 			merged, err := external.WithCallbackURL(options, d.callback)
@@ -1786,52 +1892,66 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 		}
 		if err := store.UpsertExternalService(ctx, d.name, enabled, d.url, secret, options, time.Time{}, state); err != nil {
 			slog.Warn("seed external_services row", slog.String("name", d.name), slog.String("err", err.Error()))
+			continue
+		}
+		if d.url != "" || d.callback != "" {
+			wrote = append(wrote, d.name)
 		}
 	}
-	seedOnlyOfficeEditorLang(ctx, store, cfg.ExternalServices.OnlyOffice.EditorLang)
+	if seedOnlyOfficeEditorLang(ctx, store, cfg.ExternalServices.OnlyOffice.EditorLang, force) {
+		wrote = append(wrote, external.EnvPinEditorLang)
+	}
+	return wrote
 }
 
 // seedOnlyOfficeEditorLang writes FILEX_ONLYOFFICE_LANG onto the ONLYOFFICE
-// row, under the same rule as the URL above: a value the environment gives is
-// re-asserted at every boot (an edit on External services lasts until the
-// next start), no value leaves the setting to the admin page.
+// row under the seed rule: onto a row that has no editor language of its own
+// (or, with force, over the one it has). No value leaves the setting to the
+// admin page. It answers whether it wrote.
 //
 // ⚠ Only the language. The row's switch, address and secret are not the
 // variable's to touch: an install that configures ONLYOFFICE on the admin page
-// and pins only the language keeps the rest exactly as the page left it
-// (writeRowOptions, as for a callback address pinned alone).
+// and gives only the language keeps the rest exactly as the page left it
+// (writeRowOptions, as for a callback address given alone).
 //
 // A value ONLYOFFICE does not offer is said once, at boot, and not written:
 // "the setting does not work" is how a typo would otherwise look.
-func seedOnlyOfficeEditorLang(ctx context.Context, store db.Store, raw string) {
+func seedOnlyOfficeEditorLang(ctx context.Context, store db.Store, raw string, force bool) bool {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return
+		return false
 	}
 	want, ok := onlyoffice.NormalizeEditorLang(raw)
 	if !ok {
 		slog.Warn("FILEX_ONLYOFFICE_LANG is not a language the ONLYOFFICE editor offers; the setting on External services stands - docs/ONLYOFFICE.md#the-editors-language",
 			slog.String("value", raw))
-		return
+		return false
 	}
 	cur, err := store.GetExternalService(ctx, external.OnlyOffice)
 	if err != nil || cur == nil {
-		// The loop above creates the row; without it there is nothing to pin.
+		// The loop above creates the row; without it there is nothing to write on.
 		slog.Warn("seed onlyoffice editor language: no ONLYOFFICE row", slog.String("value", raw))
-		return
+		return false
 	}
-	if stored, ok := onlyoffice.NormalizeEditorLang(external.EditorLangFromOptions(cur.OptionsJSON)); ok && stored == want {
-		return
+	storedRaw := external.EditorLangFromOptions(cur.OptionsJSON)
+	if stored, ok := onlyoffice.NormalizeEditorLang(storedRaw); ok && stored == want {
+		return false
+	}
+	if strings.TrimSpace(storedRaw) != "" && !force {
+		// The page chose a language: it stands (the seed rule).
+		return false
 	}
 	options, err := external.WithEditorLang(cur.OptionsJSON, want)
 	if err != nil {
 		slog.Warn("external service options are not an object; the editor language was not applied",
 			slog.String("name", external.OnlyOffice), slog.String("err", err.Error()))
-		return
+		return false
 	}
 	if err := writeRowOptions(ctx, store, cur, options); err != nil {
 		slog.Warn("seed onlyoffice editor language", slog.String("err", err.Error()))
+		return false
 	}
+	return true
 }
 
 // writeRowOptions writes a row's options and nothing else: its switch,
@@ -2064,6 +2184,9 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		if s.appPlugins != nil {
 			s.appPlugins.Close(context.Background())
+		}
+		if s.officeRunner != nil {
+			s.officeRunner.Close()
 		}
 		s.worker.Stop()
 		if s.ops != nil {
@@ -2523,19 +2646,28 @@ func logThumbCapabilities(c thumb.Capabilities, heic enginebin.HEICStatus) {
 // logOfficeThumbs names the engine office thumbnails come from: the
 // OnlyOffice document server, and whether it is configured. Without it an
 // office document shows its type icon, and the Thumbnail repair tab lists it
-// as "OnlyOffice is not configured" (no_tool:office); this line is where an
-// operator who wonders why reads it first. LibreOffice is not asked: it left
-// the image in 0.50.
-func logOfficeThumbs(ctx context.Context, oo *onlyoffice.Service) {
-	if oo.EnabledCtx(ctx) {
-		u := oo.LiveTarget(ctx).DocumentServerURL
+// as "no office engine" (no_tool:office); this line is where an operator who
+// wonders why reads it first. LibreOffice is not asked: it left the image in
+// 0.50.
+func logOfficeThumbs(ctx context.Context, office *officeBackends) {
+	if office.dsReady(ctx) {
+		u := office.ds.LiveTarget(ctx).DocumentServerURL
 		slog.Info("thumbs: office documents are drawn by OnlyOffice",
 			slog.String("engine", "onlyoffice"), slog.String("document_server", u))
+	}
+	if office.runner != nil {
+		if st := office.runner.Status(); st.State != officeengine.StateAbsent {
+			slog.Info("thumbs: office documents are drawn by an app's office engine",
+				slog.String("app", st.App), slog.String("version", st.Version), slog.String("state", string(st.State)))
+			return
+		}
+	}
+	if office.dsReady(ctx) {
 		return
 	}
-	slog.Warn("thumbs: office documents get no thumbnail: OnlyOffice is not configured",
-		slog.String("engine", "onlyoffice"),
-		slog.String("configure", "Settings -> External services -> OnlyOffice (or FILEX_ONLYOFFICE_URL and FILEX_ONLYOFFICE_JWT)"))
+	slog.Warn("thumbs: office documents get no thumbnail: no office engine runs here",
+		slog.String("engine", "office"),
+		slog.String("configure", "install the Office editor app (Apps), or connect ONLYOFFICE under Settings -> External services (FILEX_ONLYOFFICE_URL and FILEX_ONLYOFFICE_JWT)"))
 }
 
 // logOfficeEditorOrigin says where the editor's api.js runs (task #92): in a

@@ -57,9 +57,8 @@ contextBridge.exposeInMainWorld('filexApp', {
     ipcRenderer.invoke('remote:browse', accountId, remotePath),
   addSync: (remotePath: string) => ipcRenderer.invoke('sync:add', remotePath),
   removeSync: (id: string) => ipcRenderer.invoke('sync:remove', id),
-  syncTrash: () => ipcRenderer.invoke('sync:trash'),
-  /** Items the engine holds for a decision: send them, or move them to this
-   *  computer's sync trash (the main process asks first). */
+  /** Items the engine holds for a decision: send them, or delete them from
+   *  this computer (the main process asks first). */
   syncHoldUpload: (pairId: string) => ipcRenderer.invoke('sync:holdUpload', pairId),
   syncHoldDiscard: (pairId: string) => ipcRenderer.invoke('sync:holdDiscard', pairId),
   openLocal: (p: string) => ipcRenderer.invoke('shell:openPath', p),
@@ -125,6 +124,11 @@ contextBridge.exposeInMainWorld('filexApp', {
   // here can take a file type over on its own.
   openWith: () => ipcRenderer.invoke('openwith:state'),
   openWithSetDefault: () => ipcRenderer.invoke('openwith:setDefault'),
+  // The kinds the apps on the person's servers open (src/app-kinds.ts): ask
+  // the servers again now, and forget which server opens a kind when more
+  // than one does. Both answer the same state as openWith.
+  openWithRefresh: () => ipcRenderer.invoke('openwith:refresh'),
+  openWithForgetChoices: () => ipcRenderer.invoke('openwith:forgetChoices'),
 
   // "Mount as a drive" (WebDAV) — attach this account's server (or one storage)
   // as an OS drive, and detach it. The token never crosses this bridge: the main

@@ -116,7 +116,9 @@ func (s *Server) serveChannel(sess *session, ch ssh.Channel, reqs <-chan *ssh.Re
 	}()
 
 	handlers := s.handlers(sess)
-	srv := sftp.NewRequestServer(ch, handlers, sftp.WithRSAllocator())
+	// escapePaths: every request path reaches the handlers as the client sent
+	// it, whatever the host's own separator (rawpath.go).
+	srv := sftp.NewRequestServer(escapePaths(ch), handlers, sftp.WithRSAllocator())
 	defer srv.Close()
 
 	status := uint32(0)

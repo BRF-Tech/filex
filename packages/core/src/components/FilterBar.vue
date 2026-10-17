@@ -66,9 +66,9 @@
  * compiles to `.cls[data-v-HASH]` and the hash does not match in the
  * web-component build, so the rules silently stop applying in every embed.
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue';
 import { useLocale } from '../composables/useLocale';
-import { clampAlongInline, inlineStartX } from '../lib/direction';
+import { clampAlongInline, inlineStartX, scrollEdges } from '../lib/direction';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import type { FileNode } from '../types/FileNode';
 import type { DriveFilters, ModifiedFilter, SizeFilter, TypeFilter } from '../lib/fileFilters';
@@ -488,159 +488,223 @@ onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onDocPointer, true);
   document.removeEventListener('keydown', onKey, true);
 });
+
+/* === task #264 — the track's edges =====================================
+ * Which side(s) of the scrolling track have more of it waiting: the fade is
+ * drawn there and only there (base.css `.fe-filterbar__track.is-more-*`). A
+ * fade drawn while nothing is hidden would fade the sort control at the end
+ * of a row that fits.
+ *
+ * Read again when the track is scrolled, when it or anything in it changes
+ * size (a chip that now says "Last 7 days", a locale with longer words, the
+ * pane resized), and after every render of this row (the Clear button and the
+ * count come and go). lib/direction `scrollEdges` is the same reading the
+ * table's frozen cells use, RTL included. */
+const trackEl = ref<HTMLElement | null>(null);
+const edges = ref({ start: false, end: false });
+function measureTrack(): void {
+  const el = trackEl.value;
+  if (!el) return;
+  const e = scrollEdges(el);
+  if (e.start !== edges.value.start || e.end !== edges.value.end) edges.value = e;
+}
+let trackRo: ResizeObserver | null = null;
+function observeTrack(): void {
+  const el = trackEl.value;
+  if (!el || !trackRo) return;
+  trackRo.observe(el);
+  /* The chips' own wrapper is `display: contents` (no box to observe), so
+     each chip is watched by itself. Observing a box twice is a no-op. */
+  for (const child of Array.from(el.querySelectorAll(':scope > *, .fe-filterbar__chip'))) trackRo.observe(child);
+}
+watch(
+  trackEl,
+  (el) => {
+    trackRo?.disconnect();
+    trackRo = null;
+    if (!el) return;
+    if (typeof ResizeObserver !== 'undefined') {
+      trackRo = new ResizeObserver(() => measureTrack());
+      observeTrack();
+    }
+    measureTrack();
+  },
+  { flush: 'post' },
+);
+onUpdated(() => {
+  observeTrack();
+  measureTrack();
+});
+onBeforeUnmount(() => {
+  trackRo?.disconnect();
+  trackRo = null;
+});
 </script>
 
 <template>
   <div class="fe-filterbar" :data-mode="full ? 'full' : 'find'" data-testid="filterbar">
-    <!-- `display: contents` — the chips stay flex items of the row while the
-         group role covers exactly the four that ARE filters. The sort control
-         at the far end is not one of them and must not be announced as one. -->
-    <div v-if="full" class="fe-filterbar__chips" role="group" :aria-label="t('filter.aria')">
-      <button
-        v-for="g in GROUPS"
-        :key="g"
-        :ref="(el) => setAnchorEl(g, el)"
-        type="button"
-        class="fe-filterbar__chip"
-        :class="{ 'is-set': chosen(g) !== 'any', 'is-open': openPop === g }"
-        :aria-expanded="openPop === g"
-        aria-haspopup="listbox"
-        :data-testid="`filter-${g}`"
-        @click="toggle(g)"
-      >
-        <span class="fe-filterbar__label">{{ chipLabel(g) }}</span>
-        <svg
-          class="fe-ficon fe-filterbar__caret"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <path d="M7 10l5 5 5-5" />
-        </svg>
-      </button>
-    </div>
-
-    <!-- gorunum:v1 — the name box. Same height as the chips beside it; it is
-         one more way to narrow THIS folder, not a second search. -->
-    <div class="fe-filterbar__find">
-      <svg
-        class="fe-ficon fe-filterbar__find-glass"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.9"
-        stroke-linecap="round"
-        aria-hidden="true"
-        focusable="false"
-      >
-        <circle cx="11" cy="11" r="6.5" />
-        <path d="M16 16l4.5 4.5" />
-      </svg>
-      <input
-        type="search"
-        class="fe-filterbar__find-input"
-        :placeholder="findLabel"
-        :aria-label="findLabel"
-        :value="localName"
-        data-testid="filter-find"
-        @input="onNameInput"
-        @keydown.esc.stop.prevent="clearName"
-      />
-    </div>
-
-    <button
-      v-if="full && activeCount > 0"
-      type="button"
-      class="fe-filterbar__clear"
-      data-testid="filter-clear"
-      @click="clearAll"
+    <!-- task #264 — everything but the "⋮" is in the TRACK, and the track is
+         what scrolls sideways on a phone. The ⋮ used to be pinned (sticky)
+         over a row that scrolled, and came to rest on top of a chip; outside
+         the scroller nothing slides under it. `is-more-*` fade the track's
+         edge(s) where more of it is waiting (base.css). -->
+    <div
+      ref="trackEl"
+      class="fe-filterbar__track"
+      :class="{ 'is-more-start': edges.start, 'is-more-end': edges.end }"
+      data-testid="filterbar-track"
+      @scroll.passive="measureTrack"
     >
-      {{ t('filter.clear') }}
-    </button>
+      <!-- `display: contents` — the chips stay flex items of the track while the
+           group role covers exactly the four that ARE filters. The sort control
+           at the far end is not one of them and must not be announced as one. -->
+      <div v-if="full" class="fe-filterbar__chips" role="group" :aria-label="t('filter.aria')">
+        <button
+          v-for="g in GROUPS"
+          :key="g"
+          :ref="(el) => setAnchorEl(g, el)"
+          type="button"
+          class="fe-filterbar__chip"
+          :class="{ 'is-set': chosen(g) !== 'any', 'is-open': openPop === g }"
+          :aria-expanded="openPop === g"
+          aria-haspopup="listbox"
+          :data-testid="`filter-${g}`"
+          @click="toggle(g)"
+        >
+          <span class="fe-filterbar__label">{{ chipLabel(g) }}</span>
+          <svg
+            class="fe-ficon fe-filterbar__caret"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path d="M7 10l5 5 5-5" />
+          </svg>
+        </button>
+      </div>
 
-    <span
-      v-if="full && activeCount > 0 && typeof shown === 'number' && typeof total === 'number'"
-      class="fe-filterbar__count"
-      role="status"
-      data-testid="filter-count"
-      >{{ t('filter.count', { shown: String(shown), total: String(total) }) }}</span
-    >
-
-    <!-- surucu:d1-sort — pushed to the trailing edge of the row.
-         ⚠ `full` only: a drive list and Home's three card blocks are not a
-         sorted listing this row owns, so a button naming a sort key would be
-         naming one nothing on screen obeys — the same lie the ranked-search
-         case above is built to avoid. -->
-    <div v-if="full" class="fe-filterbar__sort">
-      <button
-        :ref="(el) => setAnchorEl('sort', el)"
-        type="button"
-        class="fe-filterbar__sortdir"
-        :class="{ 'is-ranked': ranked }"
-        :disabled="ranked"
-        :title="ranked ? sortDirLabel : undefined"
-        data-testid="sort-dir"
-        @click="flipSortDir()"
-      >
-        <span>{{ sortKeyLabel }}</span>
-        <!-- The accessible name becomes "Modified, Descending". The arrow
-             carries the same fact for everyone who can see it, so it is not
-             repeated as a title. Ranked: "Relevance, <why it is closed>" —
-             the reason reaches a screen reader through the same channel it
-             reaches a mouse, rather than living only in a tooltip. -->
-        <span class="fe-sr-only">, {{ sortDirLabel }}</span>
+      <!-- gorunum:v1 — the name box. Same height as the chips beside it; it is
+           one more way to narrow THIS folder, not a second search. -->
+      <div class="fe-filterbar__find">
         <svg
-          v-if="!ranked"
-          class="fe-ficon fe-filterbar__sortarrow"
+          class="fe-ficon fe-filterbar__find-glass"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          stroke-width="2"
+          stroke-width="1.9"
           stroke-linecap="round"
-          stroke-linejoin="round"
           aria-hidden="true"
           focusable="false"
         >
-          <template v-if="sortAscending">
-            <path d="M12 19V5" />
-            <path d="M5 12l7-7 7 7" />
-          </template>
-          <template v-else>
-            <path d="M12 5v14" />
-            <path d="M19 12l-7 7-7-7" />
-          </template>
+          <circle cx="11" cy="11" r="6.5" />
+          <path d="M16 16l4.5 4.5" />
         </svg>
-      </button>
+        <input
+          type="search"
+          class="fe-filterbar__find-input"
+          :placeholder="findLabel"
+          :aria-label="findLabel"
+          :value="localName"
+          data-testid="filter-find"
+          @input="onNameInput"
+          @keydown.esc.stop.prevent="clearName"
+        />
+      </div>
+
       <button
+        v-if="full && activeCount > 0"
         type="button"
-        class="fe-filterbar__sortpick"
-        :aria-label="ranked ? sortDirLabel : t('sort.by')"
-        :title="ranked ? sortDirLabel : t('sort.by')"
-        :disabled="ranked"
-        aria-haspopup="menu"
-        :aria-expanded="openPop === 'sort'"
-        data-testid="sort-menu"
-        @click="openSortMenu()"
+        class="fe-filterbar__clear"
+        data-testid="filter-clear"
+        @click="clearAll"
       >
-        <svg
-          class="fe-ficon fe-filterbar__caret"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <path d="M7 10l5 5 5-5" />
-        </svg>
+        {{ t('filter.clear') }}
       </button>
+
+      <span
+        v-if="full && activeCount > 0 && typeof shown === 'number' && typeof total === 'number'"
+        class="fe-filterbar__count"
+        role="status"
+        data-testid="filter-count"
+        >{{ t('filter.count', { shown: String(shown), total: String(total) }) }}</span
+      >
+
+      <!-- surucu:d1-sort — pushed to the trailing edge of the row.
+           ⚠ `full` only: a drive list and Home's three card blocks are not a
+           sorted listing this row owns, so a button naming a sort key would be
+           naming one nothing on screen obeys — the same lie the ranked-search
+           case above is built to avoid. -->
+      <div v-if="full" class="fe-filterbar__sort">
+        <button
+          :ref="(el) => setAnchorEl('sort', el)"
+          type="button"
+          class="fe-filterbar__sortdir"
+          :class="{ 'is-ranked': ranked }"
+          :disabled="ranked"
+          :title="ranked ? sortDirLabel : undefined"
+          data-testid="sort-dir"
+          @click="flipSortDir()"
+        >
+          <span>{{ sortKeyLabel }}</span>
+          <!-- The accessible name becomes "Modified, Descending". The arrow
+               carries the same fact for everyone who can see it, so it is not
+               repeated as a title. Ranked: "Relevance, <why it is closed>" —
+               the reason reaches a screen reader through the same channel it
+               reaches a mouse, rather than living only in a tooltip. -->
+          <span class="fe-sr-only">, {{ sortDirLabel }}</span>
+          <svg
+            v-if="!ranked"
+            class="fe-ficon fe-filterbar__sortarrow"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <template v-if="sortAscending">
+              <path d="M12 19V5" />
+              <path d="M5 12l7-7 7 7" />
+            </template>
+            <template v-else>
+              <path d="M12 5v14" />
+              <path d="M19 12l-7 7-7-7" />
+            </template>
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="fe-filterbar__sortpick"
+          :aria-label="ranked ? sortDirLabel : t('sort.by')"
+          :title="ranked ? sortDirLabel : t('sort.by')"
+          :disabled="ranked"
+          aria-haspopup="menu"
+          :aria-expanded="openPop === 'sort'"
+          data-testid="sort-menu"
+          @click="openSortMenu()"
+        >
+          <svg
+            class="fe-ficon fe-filterbar__caret"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path d="M7 10l5 5 5-5" />
+          </svg>
+        </button>
+      </div>
     </div>
 
     <!-- surucu:d1-actions — the listing's own menu, at the very end of the row.

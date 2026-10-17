@@ -54,6 +54,16 @@ test.describe('tema:v1 — a custom theme, composed and worn', () => {
      engine alone on a fresh server green). Put back as found. */
   let prefsBefore: Record<string, unknown> = {};
 
+  /* ⚠ SERIAL, because it is: every case after the first wears the theme the
+     first one composes, and nothing else creates it. Left parallel-in-name,
+     one red tore the worker down, afterAll deleted the theme, and every later
+     case - and the red one's own retry - measured a theme that no longer
+     existed: the 0.57 second full chain read as five reds on WebKit
+     (112, 131, 226, 284, 318), and it was one (DELETE e2e-acme 200 right
+     after 112's first attempt, 404 after every later one). Serial, a red
+     stops the walk and the retry walks it again from the compose. */
+  test.describe.configure({ mode: 'serial' });
+
   test.beforeAll(async ({ playwright, baseURL, request }) => {
     const api = await newAuthedRequest(playwright, baseURL ?? '');
     prefsBefore = await readWebPrefs(api);
@@ -127,6 +137,152 @@ test.describe('tema:v1 — a custom theme, composed and worn', () => {
     await page.goto('/admin/users');
     await expect.poll(() => token(page, '--fe-primary')).toBe(BRAND);
   });
+
+  /* ⚠⚠ The case above, with the timing it lost on: the 0.57 second full chain
+     (WebKit) left /admin/explore 180 ms after it loaded, while Explore.vue's
+     own `GET /api/auth/me` was still on its way back. WebKit and Firefox run
+     a page's error handlers while the next page loads; the dropped request
+     was taken for "signed out", and the page that was being left cleared
+     `filex.session` and the person's palette from this browser's storage.
+     /admin/users then booted as a signed-out window and, the account holding
+     no palette, never got the person's back: stock blue, the whole time.
+     (Chromium does not run them, which is why only WebKit was red.)
+
+     Here the question is HELD until the page is left, so the race is lost
+     every time: once after the page has learned who is signed in (the
+     chain's case), once before it has learned anything (a cold load left
+     early). The account is given no palette, as it had none in the chain:
+     the person's choice is the one this browser remembers. */
+  for (const variant of [
+    { name: 'after the page has learned who is signed in', answerFirst: true },
+    { name: 'before it has learned anything', answerFirst: false },
+  ]) {
+    test(`a page left while it asks who is signed in does not sign the browser out - ${variant.name}`, async ({
+      page,
+    }) => {
+      await dismissInstallBanner(page);
+      await loginAs(page);
+      const doc = await readWebPrefs(page.request);
+      delete doc.palette;
+      const put = await page.request.put(WEB_PREFS_URL, { data: { prefs: doc } });
+      expect(put.ok(), `prefs PUT failed: ${put.status()}`).toBe(true);
+
+      await page.addInitScript((id) => {
+        localStorage.setItem('filex.palette', id);
+        (window as unknown as { __bootSession: string | null }).__bootSession =
+          localStorage.getItem('filex.session');
+      }, THEME_ID);
+
+      let holding = true;
+      let answered = !variant.answerFirst;
+      const held: Array<() => void> = [];
+      await page.route('**/api/auth/me', async (route) => {
+        if (!holding) return route.continue();
+        if (!answered) {
+          answered = true;
+          return route.continue();
+        }
+        await new Promise<void>((resolve) => held.push(resolve));
+        await route.continue().catch(() => undefined);
+      });
+      page.on('request', (r) => {
+        if (r.isNavigationRequest() && new URL(r.url()).pathname.endsWith('/admin/users')) holding = false;
+      });
+
+      // ⚠ Not to `load`: with the very first question held (the cold case),
+      // WebKit's goto never reached `load` in 15 s (measured; Firefox did).
+      await page.goto('/admin/explore', { waitUntil: 'domcontentloaded' });
+      await expect.poll(() => token(page, '--fe-primary')).toBe(BRAND);
+      await expect.poll(() => held.length, 'a question is on its way when the page is left').toBeGreaterThan(0);
+
+      await page.goto('/admin/users');
+      for (const release of held.splice(0)) release();
+
+      await expect.poll(() => token(page, '--fe-primary'), 'the next page wears the person\'s palette').toBe(BRAND);
+      expect(
+        await page.evaluate(() => (window as unknown as { __bootSession: string | null }).__bootSession),
+        'the page that was left must not have signed this browser out',
+      ).toBe('1');
+      await page.unroute('**/api/auth/me');
+    });
+  }
+
+  /* ⚠⚠ And a server that was reached but could not answer: a proxy's 502
+     while filex restarts. Only 401 and 403 mean "nobody" (stores/auth
+     meFailure); a 502 used to null the user like a 401, and the page forgot
+     the session hint and the person's palette on the spot (warm: the page
+     already knew who was signed in) or sent a live session to the sign-in
+     page (cold). Warm: one 502, on a question asked once an answer is in.
+     Cold: the server answers the first TWO questions with a 502, the way a
+     restart answers every question for a moment - the panel asks more than
+     once as it boots (the router guard, App.vue), and with one 502 which
+     question got it, and which answer landed first, decided the run (green on
+     Chromium and Firefox, red on WebKit, before the fix). Then the real answer:
+     the page stays where it is, wears the person's palette, and never
+     removes `filex.session`. */
+  for (const variant of [
+    { name: 'its first questions, on a cold load', path: '/admin/users', ready: 'account-menu', fail: 2, failAfterAnswer: false },
+    {
+      name: 'a later question, once the page knows who is signed in',
+      path: '/admin/explore',
+      ready: '',
+      fail: 1,
+      failAfterAnswer: true,
+    },
+  ]) {
+    test(`a 502 from the server, asked who is signed in, signs nobody out - ${variant.name}`, async ({ page }) => {
+      await dismissInstallBanner(page);
+      await loginAs(page);
+      const doc = await readWebPrefs(page.request);
+      delete doc.palette;
+      const put = await page.request.put(WEB_PREFS_URL, { data: { prefs: doc } });
+      expect(put.ok(), `prefs PUT failed: ${put.status()}`).toBe(true);
+
+      await page.addInitScript((id) => {
+        localStorage.setItem('filex.palette', id);
+        const w = window as unknown as { __removed: string[] };
+        w.__removed = [];
+        const removeItem = Storage.prototype.removeItem;
+        Storage.prototype.removeItem = function (key: string) {
+          w.__removed.push(key);
+          return removeItem.call(this, key);
+        };
+      }, THEME_ID);
+
+      let answered = false;
+      let failed = 0;
+      let answeredAfter = 0;
+      await page.route('**/api/auth/me', async (route) => {
+        if (failed < variant.fail && (!variant.failAfterAnswer || answered)) {
+          failed++;
+          return route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body>502 Bad Gateway</body></html>' });
+        }
+        const res = await route.fetch();
+        await route.fulfill({ response: res });
+        answered = true;
+        if (failed === variant.fail) answeredAfter++;
+      });
+
+      await page.goto(variant.path);
+      await expect.poll(() => failed, 'the 502s were served').toBe(variant.fail);
+      await expect(page).toHaveURL(new RegExp(`${variant.path}$`));
+      // Signed-in content: the panel's account menu, or the explorer's storage.
+      const signedIn = variant.ready ? page.getByTestId(variant.ready) : page.getByText(STORAGE).first();
+      await expect(signedIn).toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => token(page, '--fe-primary'), 'the person\'s palette is still on').toBe(BRAND);
+      // A moment for anything the answers set off, then the evidence.
+      await page.waitForTimeout(1000);
+      expect(await token(page, '--fe-primary')).toBe(BRAND);
+      expect(await page.evaluate(() => localStorage.getItem('filex.session'))).toBe('1');
+      expect(
+        await page.evaluate(() => (window as unknown as { __removed: string[] }).__removed),
+        'nothing forgot the session',
+      ).not.toContain('filex.session');
+      // ⚠ And the panel asked again (stores/auth askWho), and got its answer.
+      await expect.poll(() => answeredAfter, 'asked again after the 502').toBeGreaterThan(0);
+      await page.unroute('**/api/auth/me');
+    });
+  }
 
   test('made the instance default, it reaches a page with no account at all', async ({
     page,

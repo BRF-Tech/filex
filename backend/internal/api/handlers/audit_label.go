@@ -176,6 +176,7 @@ var auditWireResource = map[string][]string{
 	"webhook_config":      {"webhook-config"},
 	"smtp_test":           {"smtp-test"},
 	"file_types":          {"file-types"},
+	"instance_settings":   {"instance-settings"},
 }
 
 // auditResourceOptions is every resource the catalogue names, labelled in

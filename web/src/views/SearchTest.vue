@@ -17,6 +17,7 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import StatCard from '@/components/ui/StatCard.vue';
 import Badge from '@/components/ui/Badge.vue';
+import { RouterLink } from 'vue-router';
 import { DataTable, type DataColumn } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
@@ -238,6 +239,17 @@ const columns = computed<DataColumn<SearchHitEx>[]>(() => [
       <Badge tone="amber" dot>{{ t('common.running') }}</Badge>
     </p>
     <p class="text-xs text-zinc-500">{{ t('search.rebuildHint') }}</p>
+
+    <!-- The search settings (task #261) live on Admin → Settings → General
+         (task #258: one home per setting, as the thumbnail limits); this
+         page, where the index is inspected and rebuilt, links there. -->
+    <p class="card card-body flex flex-wrap items-center justify-between gap-2 text-sm" data-testid="search-settings-link">
+      <span class="text-zinc-500 dark:text-zinc-400">{{ t('search.settings.elsewhere') }}</span>
+      <RouterLink
+        :to="{ name: 'settings', hash: '#search-settings' }"
+        class="font-medium text-brand-600 hover:underline dark:text-brand-400"
+      >{{ t('search.settings.change') }}</RouterLink>
+    </p>
 
     <form class="flex gap-2 items-start" @submit.prevent="runSearch">
       <Input

@@ -13,8 +13,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 
-	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/archivecli"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -104,8 +104,16 @@ func (a *Archive) extractExternal(ctx context.Context, req archiveRequest, drv s
 		return nil, err
 	}
 	defer os.RemoveAll(root)
-	if err := a.Engine.ExtractAs(ctx, archivePath, req.Path, root, req.Password, req.Members); err != nil {
-		return nil, err
+	// A member whose name this server's own disk cannot hold is left out of
+	// the extraction and listed, instead of failing the whole job (task #238):
+	// 7-Zip is handed the other members by name.
+	members, long := externalMembers(entries, req.Members, runtime.GOOS == "windows")
+	if len(long) == 0 || len(members) > 0 {
+		for _, batch := range memberBatches(members, memberBatchBytes) {
+			if err := a.Engine.ExtractAs(ctx, archivePath, req.Path, root, req.Password, batch); err != nil {
+				return nil, err
+			}
+		}
 	}
 	type extracted struct {
 		rel  string
@@ -147,6 +155,9 @@ func (a *Archive) extractExternal(ctx context.Context, req archiveRequest, drv s
 	// the write gate, the join check, the snapshot, the catalogue.
 	land := a.newLanding(ctx, req, drv, writer, progress)
 	land.parents = true
+	for _, name := range long {
+		land.skips.add(name, skipNameTooLong)
+	}
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return land.result(), err
@@ -289,7 +300,7 @@ func (a *Archive) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var members []archiveMember
-	sets := map[int64]*acl.Set{}
+	rule := newMemberRule(a.ACL, a.Store)
 	for _, raw := range req.Sources {
 		storageID, rel, err := a.resolveStorage(r.Context(), 0, raw)
 		if err != nil {
@@ -306,16 +317,9 @@ func (a *Archive) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		// Packing a file takes its bytes, as archive/download does:
 		// files.download on every selected item (≥viewer), and never one of
-		// filex's own names. The rule the AI zip asks too (pack_source_rule.go).
-		if err := packSourceRefusal(r.Context(), a.ACL, a.Store, storageID, rel); err != nil {
-			var pr *packRefusal
-			if !errors.As(err, &pr) {
-				answerGate(w, r, err)
-				return
-			}
-			if !pr.v.WritePerm(w, r) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + raw})
-			}
+		// filex's own names. The rule the AI zip asks too (pack_source_rule.go);
+		// every file inside a selected folder answers it too (expandDir).
+		if refusePackSource(w, r, a.ACL, a.Store, storageID, rel, raw) {
 			return
 		}
 		if refuseUnavailableID(w, r, a.Store, storageID, rel) {
@@ -332,12 +336,7 @@ func (a *Archive) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if st.Kind == storage.KindDirectory {
-			set, ok := sets[storageID]
-			if !ok {
-				set = a.aclSetFor(r.Context(), storageID)
-				sets[storageID] = set
-			}
-			found, err := a.expandDir(r.Context(), drv, storageID, rel, set)
+			found, err := a.expandDir(r.Context(), drv, storageID, rel, rule)
 			if err != nil {
 				writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 				return
@@ -359,6 +358,9 @@ func (a *Archive) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "selection exceeds configured archive limits", "max_entries": policy.MaxEntries, "max_bytes": policy.MaxExpandedBytes})
 		return
 	}
+	// Two sources of the SAME name are refused, as they always were; two
+	// names that become one only once saved (a control character) are
+	// numbered when the archive is built (memberNamer in createArchive).
 	seen := map[string]bool{}
 	for _, member := range members {
 		name, err := sanitizeZipPath(member.Name)
@@ -431,8 +433,23 @@ func (a *Archive) createArchive(ctx context.Context, req archiveCreateRequest, f
 	for _, member := range members {
 		stageTotal += member.Size + 1
 	}
+	// The members were decided when the archive was asked for; the job can
+	// run minutes later, behind other operations, and a rule can change in
+	// between. Each member is asked again (memberRule) as the account that
+	// asked, and one it refuses now is left out - before it is named, so it
+	// takes no name from a member that is packed.
+	rule := newMemberRule(a.ACL, a.Store)
+	kept := 0
+	namer := newMemberNamer()
 	for _, member := range members {
-		name, err := sanitizeZipPath(member.Name)
+		if !rule.allows(ctx, member.StorageID, member.Path) {
+			staged += member.Size + 1
+			continue
+		}
+		kept++
+		// Staged under the name the archive will carry (memberNamer): the
+		// staging folder is what the built-in ZIP writer and 7-Zip both read.
+		name, _, err := namer.name(member.Name)
 		if err != nil {
 			return nil, fmt.Errorf("unsafe archive member name %q: %w", member.Name, err)
 		}
@@ -468,6 +485,9 @@ func (a *Archive) createArchive(ctx context.Context, req archiveCreateRequest, f
 		}
 		staged += member.Size + 1
 		bar.span(0, archiveStagedAt, staged, stageTotal)
+	}
+	if kept == 0 {
+		return nil, errors.New("selection contains no readable files")
 	}
 	output := filepath.Join(root, "output."+format)
 	if format == "zip" && req.Password == "" {

@@ -19,6 +19,26 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import nodePath from 'node:path';
 
+// ⚠ The page's own rules, not copies (the arrangement of unreadBadge in
+// main.ts): whether a Document Server counts as there, and whether an app's
+// interface opens a kind. `.ts` on purpose - the desktop tests run in plain
+// node, whose resolver does not turn `.js` into `.ts` (tsconfig.json).
+import { isExternalUsable, type ExternalServiceStatus } from '../../packages/core/src/types/FileNode.ts';
+import { appliesMatches } from '../../packages/core/src/lib/pluginApplies.ts';
+import { e2eMimeForExt } from '../../packages/core/src/lib/e2emime.ts';
+import { serverUrl } from './server-url.ts';
+import {
+  contentHead,
+  contentIncludes,
+  contentSha256,
+  contentSize,
+  hashInto,
+  isSpooled,
+  readFullAt,
+  writeContent,
+  type Content,
+} from './spool.ts';
+
 /**
  * The types filex takes over — office documents ONLY, deliberately.
  *
@@ -202,7 +222,14 @@ export interface SyncTwin {
 export function resolveSyncTwin(
   localPath: string,
   pairs: readonly SyncPairView[],
-  opts: { platform?: NodeJS.Platform } = {},
+  opts: {
+    platform?: NodeJS.Platform;
+    /** The server's pair-relative path for a path here, when the sync engine
+     *  keeps the item under another name (local-name.ts serverRelFor over the
+     *  engine's names/<pair-id>.json): `rapor_2024.txt` here is the server's
+     *  `rapor:2024.txt`, and the editor must open THAT. */
+    serverRel?: (pairId: string, rel: string) => string;
+  } = {},
 ): SyncTwin | null {
   const platform = opts.platform ?? process.platform;
   const target = localPathForm(localPath, platform);
@@ -230,7 +257,8 @@ export function resolveSyncTwin(
     // The rest comes from the ORIGINAL parts, case preserved: the comparison
     // is case-insensitive on Windows, the wire path is not.
     const segs = target.parts.slice(depth);
-    best = { pairId: p.id, remote: joinRemote(p.remote, segs) };
+    const serverSegs = opts.serverRel ? opts.serverRel(p.id, segs.join('/')).split('/') : segs;
+    best = { pairId: p.id, remote: joinRemote(p.remote, serverSegs) };
     bestDepth = depth;
   }
   return best;
@@ -336,6 +364,325 @@ export function scratchRemoteDir(storage: string): string {
   return storage + '://' + SCRATCH_DIR_NAME;
 }
 
+// ─────────────────────────── which editor the window opens ───────────────────────────
+//
+// The window shows the server's own editor page (`/files/edit`), and that page
+// picks what opens the document the way the explorer does (packages/core
+// lib/appViewer pickOpenHandler): the address's `app=` choice, else the
+// person's "always open with", else the administrator's order. With a
+// Document Server that is what it always was. Without one, filex's own viewer
+// cannot edit an office document at all - it only says the document server is
+// missing - and a choice of it made while there was one (the person's, or an
+// administrator's order) would open a document nobody can edit, in a window
+// whose whole point is editing. So the window names the office editor app's
+// interface (`app=office-editor/<view>`) whenever no Document Server answers
+// and that app opens the document's kind. The page still holds the choice to
+// the server's rules: a handler an administrator switched off for the kind is
+// never taken (pickOpenHandler), and the page then opens what it opened before.
+
+/** The office editor app (its manifest's `name`): the editor a filex without a Document Server edits office documents in. */
+export const OFFICE_EDITOR_APP = 'office-editor';
+
+/**
+ * A Document Server is configured AND answering, by the server's capabilities
+ * (GET /api/files/capabilities) - the very test the editor page makes before
+ * it opens one (web/src/views/Editor.vue: `external.onlyoffice` usable and an
+ * `onlyoffice_url`), so the window and the page never disagree about it.
+ */
+export function documentServerUsable(caps: unknown): boolean {
+  const c = (caps ?? {}) as { onlyoffice_url?: unknown; external?: { onlyoffice?: ExternalServiceStatus } };
+  return !!isExternalUsable(c.external?.onlyoffice) && typeof c.onlyoffice_url === 'string' && c.onlyoffice_url !== '';
+}
+
+/**
+ * The `app=` the window asks for `fileName`: `office-editor/<view>` when no
+ * Document Server answers (`caps`, the capabilities) and the office editor
+ * app's interface opens the kind (`actions`, GET /api/files/plugins/actions -
+ * the list of views the page reads, matched by the explorer's own rule,
+ * lib/pluginApplies). null - a Document Server is there, or the app is not -
+ * leaves the page to choose as before.
+ *
+ * The office editor's case of the one rule below (serverOpener): which app a
+ * server opens a file in.
+ */
+export function officeEditorChoice(caps: unknown, actions: unknown, fileName: string): string | null {
+  const o = serverOpener(serverAppsFrom(caps, actions), fileName);
+  return o?.via === 'app' && o.plugin === OFFICE_EDITOR_APP ? o.app : null;
+}
+
+// ─────────────────────────── what a server opens ───────────────────────────
+//
+// The kinds of file "Open with filex" takes are not one list (the owner,
+// 2026-10-16: "someone installs a PSD editor, and a .psd opens with filex").
+// Beside the office documents the desktop keeps on purpose (OFFICE_EXTENSIONS,
+// which a Document Server edits), a server opens every kind an app installed
+// on it opens in its own interface - a `viewer` view with a `ui`, what the
+// administrator granted as `ui-viewer:.<ext>` - in the order and with the
+// switches of its Default apps (`open_rules`, backend internal/assoc). Read
+// from the same two answers the editor page reads; app-kinds.ts gathers them
+// over every server this computer is signed in to.
+
+/** One app interface on a server that opens files in place of filex's preview. */
+export interface AppOpener {
+  plugin: string;
+  view: string;
+  /** The view's label, by language (as the server sent it). */
+  label: Record<string, string>;
+  /** The extensions it opens, lower case, no dot - what an OS can be told. */
+  ext: string[];
+  /** The media types it opens (`image/svg+xml`, or a family like `image/*`). */
+  mime: string[];
+  /** The kinds an administrator switched it off for (Default apps). */
+  off: string[];
+}
+
+/** What one server opens: through its Document Server, and in its apps. */
+export interface ServerApps {
+  /** An ONLYOFFICE Document Server answers (documentServerUsable). */
+  documentServer: boolean;
+  /** In the server's order: by app name, then each app's own order. */
+  apps: AppOpener[];
+  /** The administrator's order per kind (Default apps): handler ids first. */
+  order: Record<string, string[]>;
+  /**
+   * The largest file the server takes, in bytes (capabilities
+   * `upload_limit_mb`); 0 when it says none. A working copy over it is
+   * refused before a byte is sent (openwith-io.ts sendWorkingCopy).
+   */
+  uploadLimit: number;
+  /**
+   * The person's own "always open this kind with this app", by kind - the
+   * ACCOUNT's choices (GET /api/me/open-with; core lib/openWith reads the
+   * same record), which the browser and this app share: ahead of the
+   * administrator's order wherever that app opens the file and is on.
+   */
+  choices: Record<string, string>;
+}
+
+/** A kind a choice is kept for (core lib/openWith validKind, backend assoc.ValidExt). */
+const CHOICE_KIND_RE = /^[a-z0-9][a-z0-9_+-]{0,31}$/;
+/** A handler a choice names (core lib/openWith validHandler). */
+const CHOICE_HANDLER_RE = /^(?:builtin|onlyoffice|app:[a-z0-9][a-z0-9_-]{0,31}\/[a-z0-9][a-z0-9_.-]{0,63})$/;
+
+/** The account's choices out of GET /api/me/open-with (`{choices: {ext: handler}}`), the malformed left out. */
+export function openWithChoicesFrom(answer: unknown): Record<string, string> {
+  const c = (answer as { choices?: unknown } | null)?.choices;
+  const out: Record<string, string> = {};
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return out;
+  for (const [k, id] of Object.entries(c as Record<string, unknown>).slice(0, 512)) {
+    if (typeof id === 'string' && CHOICE_KIND_RE.test(k) && CHOICE_HANDLER_RE.test(id)) out[k] = id;
+  }
+  return out;
+}
+
+/** The server's upload limit in bytes (capabilities `upload_limit_mb`), 0 for none. */
+export function uploadLimitOf(caps: unknown): number {
+  const mb = (caps as { upload_limit_mb?: unknown } | null)?.upload_limit_mb;
+  return typeof mb === 'number' && Number.isFinite(mb) && mb > 0 ? Math.floor(mb) * 1024 * 1024 : 0;
+}
+
+/** An app's or a view's name, as the window's `app=` may carry it. */
+const OPENER_NAME_RE = /^[A-Za-z0-9_.-]{1,64}$/;
+/**
+ * An extension and a media type as a `viewer` view may name them - the
+ * server's own grammar (backend wasmplugin/uimanifest.go viewerExtRe,
+ * viewerMimeRe). The server checked them when the app was installed; this is
+ * the desktop not taking a server's word for what it hands the OS.
+ */
+export const KIND_RE = /^[a-z0-9][a-z0-9_+-]{0,31}(?:\.[a-z0-9][a-z0-9_+-]{0,31}){0,2}$/;
+export const MEDIA_TYPE_RE = /^[a-z0-9][a-z0-9.+-]{0,63}\/(?:[a-z0-9][a-z0-9.+-]{0,127}|\*)$/;
+
+/** The handler id Default apps names an app's interface by (lib/appViewer openHandlerId). */
+export function openerHandlerId(a: Pick<AppOpener, 'plugin' | 'view'>): string {
+  return 'app:' + a.plugin + '/' + a.view;
+}
+
+function stringsOf(v: unknown, test: RegExp, max: number): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const s of v) {
+    const t = typeof s === 'string' ? s.trim().toLowerCase() : '';
+    if (t && test.test(t) && !out.includes(t)) out.push(t);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+function labelOf(v: unknown): Record<string, string> {
+  if (typeof v === 'string') return { en: v };
+  const out: Record<string, string> = {};
+  if (v && typeof v === 'object') {
+    for (const [k, s] of Object.entries(v as Record<string, unknown>)) {
+      if (typeof s === 'string' && /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(k)) out[k] = s.slice(0, 120);
+    }
+  }
+  return out;
+}
+
+/**
+ * What a server opens, from its capabilities (`caps`) and its apps' views
+ * (`actions`, GET /api/files/plugins/actions): the Document Server, and every
+ * `viewer` view that is an app's interface, with the kinds an administrator
+ * switched it off for. A view the explorer would not take is left out - no
+ * interface, a name that is not one, a rule that is not one, a rule about an
+ * app's own marks (`state`, which no file on this computer carries) or one
+ * that wants more than one file - never thrown on. `openWith`: the person's
+ * choices (GET /api/me/open-with), when the server said them.
+ */
+export function serverAppsFrom(caps: unknown, actions: unknown, openWith?: unknown): ServerApps {
+  const out: ServerApps = {
+    documentServer: documentServerUsable(caps),
+    apps: [],
+    order: {},
+    uploadLimit: uploadLimitOf(caps),
+    choices: openWithChoicesFrom(openWith),
+  };
+  const a = (actions ?? {}) as { views?: unknown; open_rules?: unknown };
+  const views = Array.isArray(a.views) ? a.views : [];
+  const rules = (a.open_rules && typeof a.open_rules === 'object' ? a.open_rules : {}) as Record<string, unknown>;
+  const ruleOf = (kind: string): { order: string[]; off: string[] } => {
+    const r = (rules[kind] ?? {}) as { order?: unknown; off?: unknown };
+    const ids = (v: unknown) => (Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string').slice(0, 64) : []);
+    return { order: ids(r.order), off: ids(r.off) };
+  };
+  for (const raw of views.slice(0, 512)) {
+    const v = raw as {
+      plugin?: unknown; id?: unknown; placement?: unknown; ui?: unknown; label?: unknown;
+      applies?: { kind?: unknown; ext?: unknown; mime?: unknown; state?: unknown; min?: unknown };
+    } | null;
+    if (!v || v.placement !== 'viewer' || !v.ui) continue;
+    if (typeof v.plugin !== 'string' || !OPENER_NAME_RE.test(v.plugin)) continue;
+    if (typeof v.id !== 'string' || !OPENER_NAME_RE.test(v.id)) continue;
+    const ap = v.applies ?? {};
+    if ((ap.ext !== undefined && !Array.isArray(ap.ext)) || (ap.mime !== undefined && !Array.isArray(ap.mime))) continue;
+    if (ap.kind !== undefined && ap.kind !== 'file') continue;
+    if (Array.isArray(ap.state) && ap.state.length) continue;
+    if (typeof ap.min === 'number' && ap.min > 1) continue;
+    const opener: AppOpener = {
+      plugin: v.plugin,
+      view: v.id,
+      label: labelOf(v.label),
+      ext: stringsOf(ap.ext, KIND_RE, 256),
+      mime: stringsOf(ap.mime, MEDIA_TYPE_RE, 64),
+      off: [],
+    };
+    if (!opener.ext.length && !opener.mime.length) continue;
+    const id = openerHandlerId(opener);
+    for (const kind of Object.keys(rules).slice(0, 1024)) {
+      if (KIND_RE.test(kind) && ruleOf(kind).off.includes(id)) opener.off.push(kind);
+    }
+    out.apps.push(opener);
+  }
+  for (const kind of new Set(out.apps.flatMap((o) => o.ext))) {
+    const order = ruleOf(kind).order;
+    if (order.length) out.order[kind] = order;
+  }
+  return out;
+}
+
+/** The media type a kind's rule is matched with: the office table's, else
+ *  the one core hands a decrypted file of that kind (lib/e2emime). */
+function mediaTypeOfKind(ext: string): string {
+  if (OFFICE_MIME_TYPES[ext]) return OFFICE_MIME_TYPES[ext];
+  const m = e2eMimeForExt(ext);
+  return m === 'application/octet-stream' ? '' : m;
+}
+
+/**
+ * The app interfaces of a server that open `fileName`: matched by the
+ * explorer's own rule (lib/pluginApplies), the ones an administrator switched
+ * off for its kind left out, in the administrator's order for the kind and
+ * the server's order after it (backend assoc.Apply).
+ */
+export function appsOpening(s: ServerApps, fileName: string): AppOpener[] {
+  const ext = extensionOf(fileName);
+  const item = { kind: 'file', ext, mime: mediaTypeOfKind(ext) };
+  const on = s.apps.filter((a) => !a.off.includes(ext) && appliesMatches({ kind: 'file', ext: a.ext, mime: a.mime }, [item]));
+  const order = s.order[ext] ?? [];
+  const rank = (a: AppOpener) => {
+    const i = order.indexOf(openerHandlerId(a));
+    return i < 0 ? order.length : i;
+  };
+  return on.map((a, i) => ({ a, i })).sort((x, y) => rank(x.a) - rank(y.a) || x.i - y.i).map((x) => x.a);
+}
+
+/** How a server opens one file. */
+export interface ServerOpener {
+  /** The window's `app=` (documentRouteUrl): `plugin/view`, or null for the page's own choice. */
+  app: string | null;
+  /** Through the Document Server (the page then picks, as before), or in one app. */
+  via: 'document-server' | 'app';
+  plugin?: string;
+  view?: string;
+  label?: Record<string, string>;
+}
+
+/**
+ * Whether, and how, a server opens `fileName`; null when it does not.
+ *
+ *   - an office document (OFFICE_EXTENSIONS) on a server whose Document
+ *     Server answers: the page's own choice, as the window always opened it;
+ *   - otherwise the app the person chose for the kind ("always open with",
+ *     the account's choice the browser makes too - ServerApps.choices) while
+ *     it opens the file and is on; else the first app interface that opens it
+ *     (appsOpening) - for an office document the office editor app ahead of
+ *     the rest, which is what the window opened before there were others
+ *     (officeEditorChoice). A choice of filex's own viewer is not followed
+ *     here: it cannot edit, and editing is the window's point.
+ *
+ * ⚠ The app is NAMED (`app=`) rather than left to the page: the window's
+ * whole point is editing, and a choice of filex's own viewer made in the
+ * explorer would open the kind in a viewer that cannot.
+ */
+export function serverOpener(s: ServerApps, fileName: string): ServerOpener | null {
+  const ext = extensionOf(fileName);
+  if (s.documentServer && OFFICE_SET.has(ext)) return { app: null, via: 'document-server' };
+  const apps = appsOpening(s, fileName);
+  if (!apps.length) return null;
+  const chosen = s.choices?.[ext];
+  const pick =
+    (chosen ? apps.find((a) => openerHandlerId(a) === chosen) : undefined) ??
+    (OFFICE_SET.has(ext) ? apps.find((a) => a.plugin === OFFICE_EDITOR_APP) : undefined) ??
+    apps[0]!;
+  return { app: pick.plugin + '/' + pick.view, via: 'app', plugin: pick.plugin, view: pick.view, label: pick.label };
+}
+
+/**
+ * The editor page's address for a document on the server, in edit mode, with
+ * the window's `app=` choice when it has one (officeEditorChoice).
+ */
+export function documentRouteUrl(server: string, remote: string, app?: string | null): string {
+  const url = serverUrl(server, '/files/edit');
+  url.searchParams.set('path', remote);
+  url.searchParams.set('type', extensionOf(remote));
+  url.searchParams.set('mode', 'edit');
+  if (app) url.searchParams.set('app', app);
+  return url.toString();
+}
+
+/** A person's drafts area on a storage (backend syspath.Drafts): `.filex-drafts/<user>/<key>/<name>`. */
+export const DRAFTS_DIR_NAME = '.filex-drafts';
+
+/**
+ * The question a document window asks when its page holds edits and is about
+ * to go (Electron's `will-prevent-unload`: the page's `beforeunload`, which
+ * the explorer's viewer raises for a draft with edits and for an app's
+ * interface with unsaved changes). Electron draws no question of its own, so
+ * the window's words have to be true for the page in it: a draft keeps what
+ * was typed in Drafts, any other document - the office editor app's, above
+ * all, in an "Open with filex" window - loses what was not saved yet. Read
+ * from the page's address (`path=`), which follows a draft once it is saved.
+ */
+export function leaveQuestionFor(pageUrl: string): 'draft' | 'unsaved' {
+  try {
+    const p = new URL(pageUrl).searchParams.get('path') ?? '';
+    const rel = p.includes('://') ? p.slice(p.indexOf('://') + 3) : p;
+    return rel.split('/').filter(Boolean)[0] === DRAFTS_DIR_NAME ? 'draft' : 'unsaved';
+  } catch {
+    return 'unsaved';
+  }
+}
+
 // ─────────────────────────── change detection ───────────────────────────
 
 /** What a listing says about one remote file. All three fields are optional
@@ -407,8 +754,10 @@ export function sha256Hex(bytes: Buffer | Uint8Array): string {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
-function versionFrom(st: { size: number; mtimeMs: number }, bytes: Buffer | Uint8Array, at: number): LocalVersion {
-  return { size: st.size, mtimeMs: st.mtimeMs, sha256: sha256Hex(bytes), at };
+/** The version of what filex wrote: its size and hash are the content's,
+ *  never a re-read (a re-read may already be somebody else's next write). */
+function versionFrom(st: { mtimeMs: number }, c: Content, at: number): LocalVersion {
+  return { size: contentSize(c), mtimeMs: st.mtimeMs, sha256: contentSha256(c), at };
 }
 
 function isGone(err: unknown): boolean {
@@ -417,14 +766,14 @@ function isGone(err: unknown): boolean {
 }
 
 /**
- * The file's bytes and its version, read through ONE handle: the stat and the
- * bytes are of the same file even when somebody renames another one over the
- * name in between. null when there is no regular file there.
+ * The file's version, read through ONE handle: the stat and the bytes are of
+ * the same file even when somebody renames another one over the name in
+ * between. null when there is no regular file there.
+ *
+ * ⚠ Hashed through one fixed buffer (spool.ts hashInto), never read whole: a
+ * document of several GB costs a read of it, not that much memory.
  */
-export async function readLocalVersion(
-  p: string,
-  opts: { now?: number } = {},
-): Promise<{ version: LocalVersion; bytes: Buffer } | null> {
+export async function hashLocalVersion(p: string, opts: { now?: number } = {}): Promise<LocalVersion | null> {
   const fh = await fs.promises.open(p, 'r').catch((err: unknown) => {
     if (isGone(err)) return null;
     throw err;
@@ -433,8 +782,9 @@ export async function readLocalVersion(
   try {
     const st = await fh.stat();
     if (!st.isFile()) return null;
-    const bytes = await fh.readFile();
-    return { version: versionFrom({ size: bytes.length, mtimeMs: st.mtimeMs }, bytes, opts.now ?? Date.now()), bytes };
+    const h = crypto.createHash('sha256');
+    const size = await hashInto(fh, h);
+    return { size, mtimeMs: st.mtimeMs, sha256: h.digest('hex'), at: opts.now ?? Date.now() };
   } finally {
     await fh.close().catch(() => undefined);
   }
@@ -445,8 +795,10 @@ export type LocalDrift =
   /** The same content. `version` may carry a newer timestamp (a touch) and is
    *  the baseline to keep from here on. */
   | { kind: 'same'; version: LocalVersion }
-  /** Different bytes: somebody else wrote it. */
-  | { kind: 'changed'; version: LocalVersion; bytes: Buffer }
+  /** Different bytes: somebody else wrote it. The bytes stay in the file:
+   *  whoever acts on the change reads them from there, held to `version`
+   *  (DocumentReader). */
+  | { kind: 'changed'; version: LocalVersion }
   /** No regular file at that path any more (deleted, moved, replaced by a folder). */
   | { kind: 'gone' };
 
@@ -475,10 +827,121 @@ export async function localDrift(
   if (!racy && st.size === baseline.size && st.mtimeMs === baseline.mtimeMs) {
     return { kind: 'same', version: baseline };
   }
-  const read = await readLocalVersion(p, opts);
-  if (!read) return { kind: 'gone' };
-  if (read.version.sha256 === baseline.sha256) return { kind: 'same', version: read.version };
-  return { kind: 'changed', version: read.version, bytes: read.bytes };
+  const version = await hashLocalVersion(p, opts);
+  if (!version) return { kind: 'gone' };
+  if (version.sha256 === baseline.sha256) return { kind: 'same', version };
+  return { kind: 'changed', version };
+}
+
+/**
+ * The document changed while filex was sending it (DocumentReader): what
+ * went up is not one version of it, so it was not kept - the staging is
+ * released, nothing is committed. Sent again once it holds still.
+ */
+export class SourceChangedError extends Error {
+  readonly path: string;
+  constructor(p: string, why: string) {
+    super(p + ' changed while filex was sending it (' + why + ') - nothing of it was kept on the server');
+    this.name = 'SourceChangedError';
+    this.path = p;
+  }
+}
+
+/**
+ * The person's document, read a part at a time for its trip to the server
+ * (transfer.ts UploadSource), and held to ONE version of it: `expected`, what
+ * filex hashed (hashLocalVersion) and declares to the server as the sha256 it
+ * checks at the commit.
+ *
+ * ⚠ The person may go on saving while it goes up. Every part is read after a
+ * look at the file through the same handle - another size or another
+ * modification time and it is SourceChangedError - and hashed as it is read:
+ * a part asked for again (a dropped connection) must be the bytes it was the
+ * first time, and before the commit (`verify`) the whole must hash to
+ * `expected`. A save that keeps the size and the timestamp (a two-second
+ * file system) is caught there, and by the server's own check of the
+ * declared sha256 after it. Mixed bytes are never committed.
+ *
+ * Memory is one part (the caller's `end - start`), whatever the file's size.
+ */
+export class DocumentReader {
+  // Plain fields, not constructor parameter properties (see SessionStore).
+  readonly size: number;
+  private readonly path: string;
+  private readonly fh: fs.promises.FileHandle;
+  private readonly expected: LocalVersion;
+  private readonly running = crypto.createHash('sha256');
+  /** How far the running hash has read, in order. */
+  private hashedTo = 0;
+  /** Each part read in order, by where it starts: its end and its digest. */
+  private readonly parts = new Map<number, { end: number; digest: string }>();
+  private digest: string | null = null;
+
+  constructor(p: string, fh: fs.promises.FileHandle, expected: LocalVersion) {
+    this.path = p;
+    this.fh = fh;
+    this.expected = expected;
+    this.size = expected.size;
+  }
+
+  /** The file is still `expected` by its size and timestamp. */
+  private async same(): Promise<void> {
+    const st = await this.fh.stat();
+    if (!st.isFile() || st.size !== this.expected.size) {
+      throw new SourceChangedError(this.path, 'its size is ' + st.size + ', not ' + this.expected.size);
+    }
+    if (st.mtimeMs !== this.expected.mtimeMs) throw new SourceChangedError(this.path, 'it was saved again');
+  }
+
+  async read(start: number, end: number): Promise<Uint8Array> {
+    if (!(start >= 0 && end >= start && end <= this.size)) throw new RangeError(`no bytes ${start}-${end} in ${this.size}`);
+    await this.same();
+    const buf = Buffer.allocUnsafe(end - start);
+    if ((await readFullAt(this.fh, buf, start)) !== buf.length) throw new SourceChangedError(this.path, 'it got shorter');
+    // Bytes the server already held (it said so at begin) are hashed, not sent.
+    if (start > this.hashedTo) {
+      if ((await hashInto(this.fh, this.running, this.hashedTo, start)) !== start - this.hashedTo) {
+        throw new SourceChangedError(this.path, 'it got shorter');
+      }
+      this.hashedTo = start;
+    }
+    if (this.digest !== null) throw new Error('the document was already verified whole');
+    const digest = crypto.createHash('sha256').update(buf).digest('hex');
+    if (start === this.hashedTo) {
+      this.running.update(buf);
+      this.parts.set(start, { end, digest });
+      this.hashedTo = end;
+    } else {
+      // A part asked for again: the bytes it was the first time, or nothing.
+      const first = this.parts.get(start);
+      if (!first || first.end !== end) throw new SourceChangedError(this.path, 'a part was asked for off its grid');
+      if (first.digest !== digest) throw new SourceChangedError(this.path, 'a part asked for again is not what was sent');
+    }
+    return buf;
+  }
+
+  /** Every byte is up: the whole hashes to `expected`, and the file is still it. */
+  async verify(): Promise<void> {
+    if (this.hashedTo < this.size) {
+      if ((await hashInto(this.fh, this.running, this.hashedTo, this.size)) !== this.size - this.hashedTo) {
+        throw new SourceChangedError(this.path, 'it got shorter');
+      }
+      this.hashedTo = this.size;
+    }
+    await this.same();
+    this.digest ??= this.running.digest('hex');
+    if (this.digest !== this.expected.sha256) throw new SourceChangedError(this.path, 'it is not the version filex read');
+  }
+
+  async close(): Promise<void> {
+    await this.fh.close().catch(() => undefined);
+  }
+}
+
+/** The document at `p`, opened to be sent as `expected` (DocumentReader). */
+export async function openDocument(p: string, expected: LocalVersion): Promise<DocumentReader> {
+  const fh = await fs.promises.open(p, 'r');
+  return new DocumentReader(p, fh, expected);
 }
 
 /**
@@ -521,14 +984,14 @@ function besidePath(target: string, tag: string): string {
  */
 export async function writeConflictCopy(
   target: string,
-  bytes: Buffer | Uint8Array,
+  bytes: Content,
   opts: { now?: Date } = {},
 ): Promise<string> {
   const stamp = stampOf(opts.now ?? new Date());
   for (let n = 1; n < 100; n++) {
     const p = conflictPathFor(target, stamp, n);
     try {
-      await fs.promises.writeFile(p, bytes, { flag: 'wx' });
+      await writeContent(p, bytes, { exclusive: true });
       return p;
     } catch (err) {
       if ((err as NodeJS.ErrnoException)?.code === 'EEXIST') continue;
@@ -599,7 +1062,7 @@ function stampOf(now: Date): string {
  */
 export async function writeBackAtomic(
   target: string,
-  bytes: Buffer | Uint8Array,
+  bytes: Content,
   opts: { fallbackDir?: string; now?: Date; expect?: LocalVersion | null } = {},
 ): Promise<LocalVersion> {
   const dir = nodePath.dirname(target);
@@ -623,7 +1086,11 @@ export async function writeBackAtomic(
     '.' + nodePath.basename(target) + '.filex-openwith-' + crypto.randomBytes(4).toString('hex'),
   );
   try {
-    await fs.promises.writeFile(tmp, bytes);
+    // Exclusive, and on the disk (fsync) before the rename: a power cut after
+    // it leaves the old document or the new one, never an empty file. A
+    // spooled save is copied through one buffer and its sha256 checked
+    // (spool.ts writeContent).
+    await writeContent(tmp, bytes, { exclusive: true });
     // Keep the document's permissions. A fresh temp file is created with the
     // process umask, so without this a group-readable document quietly became
     // owner-only the first time it was edited through filex.
@@ -687,7 +1154,7 @@ export async function writeBackAtomic(
   // already be somebody else's next write, which would then pass for ours.
   const at = Date.now();
   const st = await fs.promises.stat(target).catch(() => null);
-  return versionFrom({ size: bytes.length, mtimeMs: st?.mtimeMs ?? -1 }, bytes, at);
+  return versionFrom({ mtimeMs: st?.mtimeMs ?? -1 }, bytes, at);
 }
 
 // ─────────────────────────── watching the local document ───────────────────────────
@@ -697,8 +1164,9 @@ export interface LocalDocMonitorOptions {
   path: string;
   /** The version filex read when it opened it. */
   baseline: LocalVersion;
-  /** A version filex did not write appeared — once per version. */
-  onChange: (version: LocalVersion, bytes: Buffer) => void;
+  /** A version filex did not write appeared — once per version. Its bytes
+   *  are in the file (read them held to `version`: DocumentReader). */
+  onChange: (version: LocalVersion) => void;
   /** Quiet time after the last folder event before looking. */
   debounceMs?: number;
   platform?: NodeJS.Platform;
@@ -884,7 +1352,7 @@ export class LocalDocMonitor {
     if (drift.version.sha256 === this.reported) return drift;
     this.reported = drift.version.sha256;
     try {
-      this.onChange(drift.version, drift.bytes);
+      this.onChange(drift.version);
     } catch (err) {
       this.onError?.(err);
     }
@@ -912,13 +1380,13 @@ export class LocalDocMonitor {
 
 /** Last resort: get the bytes onto disk somewhere and report where. */
 async function stash(
-  bytes: Buffer | Uint8Array,
+  bytes: Content,
   preferred: string,
   fallbackDir: string | undefined,
   stamp: string,
 ): Promise<string | null> {
   try {
-    await fs.promises.writeFile(preferred, bytes);
+    await writeContent(preferred, bytes);
     return preferred;
   } catch {
     /* the original's directory is not usable — try the app's own */
@@ -927,7 +1395,7 @@ async function stash(
   try {
     await fs.promises.mkdir(fallbackDir, { recursive: true });
     const p = nodePath.join(fallbackDir, stamp + '-' + nodePath.basename(preferred));
-    await fs.promises.writeFile(p, bytes);
+    await writeContent(p, bytes);
     return p;
   } catch {
     return null;
@@ -955,7 +1423,7 @@ async function stash(
 
 /**
  * The formats a save may come back in beside the working copy: the ones the
- * server's callback keeps (callback_format.go besideTypes). Held to that list
+ * server keeps beside a file (backend officesave BesideFormats). Held to that list
  * by the shared drift file (backend/internal/api/handlers/testdata/
  * rule-mirrors.json, web/tests/lib/serverRuleVectors.test.ts - #211).
  */
@@ -1100,21 +1568,51 @@ function odfTypeOf(b: Uint8Array): string | null {
  * the server already).
  */
 export function savedFormatOf(localPath: string, bytes: Uint8Array): string | null {
+  const v = formatByHead(localPath, bytes);
+  if ('format' in v) return v.format;
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).includes(CONTENT_TYPES) ? v.ifOoxml : null;
+}
+
+/** The OOXML package's part list: the name that makes a zip OOXML. */
+const CONTENT_TYPES = Buffer.from('[Content_Types].xml', 'latin1');
+
+/**
+ * As much of a file as the head rules read: a zip's first local header (30
+ * bytes), its name and extra field (each at most 0xffff) and 96 bytes of the
+ * ODF media type after them.
+ */
+const HEAD_BYTES = 30 + 0xffff + 0xffff + 96;
+
+/**
+ * savedFormatOf's rules on the head of a file: the answer, or - for a zip
+ * that is not ODF - the answer when `[Content_Types].xml` is in it (it is
+ * OOXML) and null when it is not. ONE rule for bytes in hand and for a
+ * spooled save (savedFormatOfContent).
+ */
+function formatByHead(localPath: string, head: Uint8Array): { format: string | null } | { ifOoxml: string | null } {
   const ext = extensionOf(localPath);
   const family = FAMILY[ext];
-  if (!family) return null;
-  if (startsWithBytes(bytes, ZIP_MAGIC)) {
-    const odf = odfTypeOf(bytes);
-    if (odf) return odf === ext ? null : odf;
-    if (!Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).includes('[Content_Types].xml', 0, 'latin1')) {
-      return null;
-    }
-    return ext === OOXML_OF[family] ? null : OOXML_OF[family];
+  if (!family) return { format: null };
+  if (startsWithBytes(head, ZIP_MAGIC)) {
+    const odf = odfTypeOf(head);
+    if (odf) return { format: odf === ext ? null : odf };
+    return { ifOoxml: ext === OOXML_OF[family] ? null : OOXML_OF[family] };
   }
-  if (startsWithBytes(bytes, OLE_MAGIC)) {
-    return ext === BINARY_OF[family] ? null : BINARY_OF[family];
+  if (startsWithBytes(head, OLE_MAGIC)) {
+    return { format: ext === BINARY_OF[family] ? null : BINARY_OF[family] };
   }
-  return null;
+  return { format: null };
+}
+
+/**
+ * savedFormatOf for a save wherever it is: in hand, or spooled - read from
+ * its file, the head and then (a zip only) one fixed buffer at a time.
+ */
+export async function savedFormatOfContent(localPath: string, c: Content): Promise<string | null> {
+  if (!isSpooled(c)) return savedFormatOf(localPath, c);
+  const v = formatByHead(localPath, await contentHead(c, HEAD_BYTES));
+  if ('format' in v) return v.format;
+  return (await contentIncludes(c, CONTENT_TYPES)) ? v.ifOoxml : null;
 }
 
 /** `rapor.doc` + `docx` → `rapor.docx`, in the same folder. */
@@ -1149,9 +1647,10 @@ export interface BesideTarget {
  */
 export type BesideOutcome = 'created' | 'updated' | 'conflict';
 
-async function writtenVersion(p: string, bytes: Buffer | Uint8Array): Promise<LocalVersion> {
+/** The version of a file filex just wrote `bytes` to (versionFrom's rule). */
+export async function writtenVersion(p: string, bytes: Content): Promise<LocalVersion> {
   const st = await fs.promises.stat(p).catch(() => null);
-  return versionFrom({ size: bytes.length, mtimeMs: st?.mtimeMs ?? -1 }, bytes, Date.now());
+  return versionFrom({ mtimeMs: st?.mtimeMs ?? -1 }, bytes, Date.now());
 }
 
 /**
@@ -1175,7 +1674,7 @@ async function writtenVersion(p: string, bytes: Buffer | Uint8Array): Promise<Lo
 export async function writeBesideSave(
   localPath: string,
   ext: string,
-  bytes: Buffer | Uint8Array,
+  bytes: Content,
   target: BesideTarget | null,
   opts: { fallbackDir?: string; now?: Date } = {},
 ): Promise<{ target: BesideTarget; outcome: BesideOutcome }> {
@@ -1212,7 +1711,7 @@ export async function writeBesideSave(
     const p = numberedPathFor(want, n);
     try {
       // Exclusive: an existing file of that name is never replaced.
-      await fs.promises.writeFile(p, bytes, { flag: 'wx' });
+      await writeContent(p, bytes, { exclusive: true });
     } catch (err) {
       if ((err as NodeJS.ErrnoException)?.code === 'EEXIST') continue;
       const stamp = stampOf(opts.now ?? new Date());
@@ -1376,7 +1875,7 @@ export function orphanScratchEntries(
 
 /**
  * The documents being opened right now: between the double-click and the
- * editor window, while the working copy goes up (up to 256 MB).
+ * editor window, while the working copy goes up (in parts, up to the server's limit).
  *
  * ⚠ "Is it already open?" only knew documents whose editor was up, so a second
  * double-click in that time opened a second session of the same document: two

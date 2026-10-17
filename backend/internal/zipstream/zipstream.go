@@ -37,6 +37,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/brf-tech/filex/backend/internal/leafname"
 )
 
 // Member is one entry to be written into the archive.
@@ -179,7 +181,7 @@ func Write(ctx context.Context, out io.Writer, members []Member, opt Options) ([
 			note(Skip{Name: m.Name, Err: err})
 			continue
 		}
-		name = dedupe(used, name)
+		name = Dedupe(used, name)
 
 		if m.Open == nil {
 			note(Skip{Name: name, Err: errNoOpener})
@@ -225,7 +227,7 @@ func Write(ctx context.Context, out io.Writer, members []Member, opt Options) ([
 	}
 
 	if opt.Manifest != "" && len(skips) > 0 {
-		if err := writeManifest(zw, dedupe(used, opt.Manifest), skips); err != nil {
+		if err := writeManifest(zw, Dedupe(used, opt.Manifest), skips); err != nil {
 			_ = zw.Close()
 			return skips, err
 		}
@@ -257,13 +259,20 @@ func writeManifest(zw *zip.Writer, name string, skips []Skip) error {
 // (sanitizeZipPath). Both exist because the danger runs both ways: an archive
 // we UNPACK can try to escape its destination, and an archive we BUILD from
 // paths the caller supplied can carry an escape to whoever unpacks it next.
+//
+// The member is a copy saved OUTSIDE filex, so a bidi control or a control
+// character in the name becomes `_` (leafname.SavedRune, the rule a
+// download's file name follows): unpacked, `invoice` + U+202E + `fdp.exe`
+// would show as `invoiceexe.pdf` in the person's file manager (task #238).
 func EntryName(raw string) (string, error) {
 	clean := strings.ReplaceAll(raw, `\`, "/")
 	clean = strings.TrimLeft(clean, "/")
 	if clean == "" {
 		return "", errEmptyName
 	}
-	if len(clean) >= 2 && clean[1] == ':' {
+	// A drive letter is a LETTER and a colon (`C:x`); `1:1 notes.txt` and a
+	// macOS `10:30 report` are names (task #238).
+	if len(clean) >= 2 && clean[1] == ':' && (clean[0]|0x20) >= 'a' && (clean[0]|0x20) <= 'z' {
 		return "", fmt.Errorf("zipstream: absolute path %q", raw)
 	}
 	for _, part := range strings.Split(clean, "/") {
@@ -272,20 +281,29 @@ func EntryName(raw string) (string, error) {
 		}
 	}
 	clean = strings.TrimLeft(path.Clean("/"+clean), "/")
-	if clean == "" || clean == "." || strings.HasPrefix(clean, "..") {
+	// `..` itself or a `../` start - not any name that BEGINS with two dots:
+	// `..notes` and `...` are names, and were dropped from the archive (task
+	// #238).
+	if clean == "" || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
 		return "", fmt.Errorf("zipstream: rejected %q", raw)
 	}
-	return clean, nil
+	return strings.Map(leafname.SavedRune, clean), nil
 }
 
-// dedupe makes name unique within one archive by inserting " (2)", " (3)", …
-// before the extension.
+// Dedupe makes name unique within one archive by inserting " (2)", " (3)", …
+// before the extension, and records it in used.
 //
 // Not cosmetic: a selection can legitimately contain two files with the same
 // basename from two different folders (or two different storages), and a ZIP
 // with two identical member names is a file most tools unpack by overwriting
 // the first with the second. The user asked for both.
-func dedupe(used map[string]bool, name string) string {
+//
+// ⚠ The ONE numbering for a member of an archive filex writes: the selection
+// download and the share ZIP (Write), and archive create, archive add and the
+// agent's zip (handlers.memberNamer) - two names that become one once
+// leafname.SavedRune has run (`a` TAB `b.txt` and `a_b.txt`) are numbered,
+// not refused (task #238).
+func Dedupe(used map[string]bool, name string) string {
 	if !used[name] {
 		used[name] = true
 		return name

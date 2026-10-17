@@ -34,7 +34,9 @@ func TestSeedFromEnv_SeedsSettingsAndStorage(t *testing.T) {
 	seedFromEnv(ctx, store, cfg)
 
 	get := func(k string) string { v, _ := store.GetSetting(ctx, k); return v }
-	assert.Equal(t, "Acme Files", get("site_name"))
+	// FILEX_SITE_NAME seeds the Display name since 0.57 (task #258).
+	assert.Equal(t, "Acme Files", get("branding.name"))
+	assert.Equal(t, "", get("site_name"))
 	assert.Equal(t, "30", get("trash.retention_days"))
 	assert.Equal(t, "smtp.example.com", get(mailer.KeyHost))
 	assert.Equal(t, "587", get(mailer.KeyPort))
@@ -54,7 +56,7 @@ func TestSeedFromEnv_OnlyIfAbsent(t *testing.T) {
 	_, store := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	require.NoError(t, store.UpsertSetting(ctx, "site_name", "Operator Name"))
+	require.NoError(t, store.UpsertSetting(ctx, "branding.name", "Operator Name"))
 	_, err := store.CreateStorage(ctx, &model.Storage{
 		Name: "Existing", Driver: "local", MountPath: "/",
 		ConfigJSON: json.RawMessage(`{"path":"/op/path"}`),
@@ -68,7 +70,7 @@ func TestSeedFromEnv_OnlyIfAbsent(t *testing.T) {
 
 	seedFromEnv(ctx, store, cfg)
 
-	v, _ := store.GetSetting(ctx, "site_name")
+	v, _ := store.GetSetting(ctx, "branding.name")
 	assert.Equal(t, "Operator Name", v, "existing setting must not be clobbered")
 
 	sts, _ := store.ListStorages(ctx)

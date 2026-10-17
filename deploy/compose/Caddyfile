@@ -1,9 +1,10 @@
 # Caddy config for the full filex stack. HTTPS is obtained + renewed
 # automatically for real public domains (ports 80/443 must be reachable).
 #
-# Add-on vhosts (OnlyOffice / Drawio) below default to a harmless
-# *.localhost self-signed host when you don't run that add-on. Leave the block
-# or delete it — an unused *.localhost vhost costs nothing and requests no cert.
+# Add-on vhosts (Drawio, and the optional ONLYOFFICE Document Server) below
+# default to a harmless *.localhost self-signed host when you don't run that
+# add-on. Leave the block or delete it - an unused *.localhost vhost costs
+# nothing and requests no cert.
 
 {$FILEX_DOMAIN} {
 	encode zstd gzip
@@ -21,9 +22,12 @@
 	}
 }
 
-# OnlyOffice Document Server (onlyoffice profile). The browser loads its iframe
-# from here and filex calls it server-to-server, so it needs a real HTTPS host.
-# Delete this block if you don't run OnlyOffice.
+# ONLYOFFICE Document Server - OPTIONAL (onlyoffice profile, not on by
+# default; the Office editor app edits office documents without it). The
+# browser loads its iframe from here and filex calls it server-to-server, so
+# with the profile on it needs a real HTTPS host in ONLYOFFICE_DOMAIN. Without
+# the profile this block answers only onlyoffice.localhost and does nothing;
+# delete it if you like.
 #
 # /filex-frame/* goes to filex: the page the editor's api.js runs in, on the
 # document server's own origin instead of in filex's pages

@@ -362,6 +362,13 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 		}
 	}
 
+	// Or by the office engine an app brings (filex 0.57, server/
+	// office_backends.go): the app runtime's `office` engine is available
+	// exactly when one of the two back ends runs.
+	if caps.AppPlugins.Engines["office"] {
+		caps.Thumbs.Office = true
+	}
+
 	// Per-storage capability probe — opt-in via AttachStorageResolver.
 	s.mu.RLock()
 	resolver := s.storageResolver

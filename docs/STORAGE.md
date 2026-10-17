@@ -154,6 +154,14 @@ It is on the storage's page in the admin UI, under **Stable address**, and in
 rename. The name stays the address people type; the uid is the address a
 machine should be given.
 
+**Access** - the section under the form - gives the whole storage to people
+and groups, at a level each, and takes it back without touching folder
+grants. It needs **Per-item access control (RBAC)** on; while it is off the
+section says so and turns it on in place, asking first who keeps access
+([RBAC.md → A whole storage](RBAC.md#a-whole-storage-for-people-and-groups)).
+
+![A storage's Access section with per-item access control off: why nobody can be given the storage yet, and Turn on per-item access](https://filex.sh/shots/storageaccess/storage-access-off-1440.6c15ea9d2f56.png)
+
 ### Ordering storages
 
 The explorer's navigation panel (and Home's storage cards) list the storages in
@@ -175,9 +183,9 @@ one order, decided in three layers - the most personal wins:
 3. **Creation order**, when neither has been set - what every install showed
    before this existed.
 
-![A storage row's order menu in the navigation panel](https://filex.sh/shots/sidenav/storage-order-menu-1440.6aeee0490716.png)
+![A storage row's order menu in the navigation panel](https://filex.sh/shots/sidenav/storage-order-menu-1440.cb8c28254ec6.png)
 
-![The admin Storages table while a row is dragged by its handle: the row in hand is faded, the line shows where it lands](https://filex.sh/shots/sidenav/admin-storages-order-1440.18320ebce8d8.png)
+![The admin Storages table while a row is dragged by its handle: the row in hand is faded, the line shows where it lands](https://filex.sh/shots/sidenav/admin-storages-order-1440.926684c0dced.png)
 
 A storage the person's own order does not name - one added after they
 arranged theirs, or one they could not see then - keeps the position the
@@ -1526,7 +1534,8 @@ worse":
   their bytes are already on filex's local disk.
 
 **Disk.** The cache directory (`<data_dir>/cache`) has a **global** ceiling,
-`FILEX_CACHE_MAX_BYTES`, default 20 GiB, enforced with LRU eviction and counting
+`FILEX_CACHE_MAX_BYTES`, default 20 GiB (since 0.57 the [seed](CONFIGURATION.md#variables-that-seed-a-stored-setting)
+of *File cache size* on **Admin → Settings → General**), enforced with LRU eviction and counting
 copies that are still being fetched. It is never unlimited. An entry a request
 is currently reading is never evicted; when nothing can be freed, the new file
 is simply not prepared and streams from the backend as before.

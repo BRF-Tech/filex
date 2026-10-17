@@ -4,9 +4,11 @@
 #   proxies.sh INSTANCE...
 #
 # For every running instance: the gateway of each network its container is
-# on, measured now, must be in FILEX_TRUSTED_PROXIES as the compose file will
-# give it to the next container (`docker compose config`, so a value from
-# .env counts).
+# on, measured now, must be in the trusted-proxy list it goes by - the one
+# saved in its settings when it holds one (FILEX_TRUSTED_PROXIES only seeds
+# it since 0.57; common.sh proxies_in_force), else FILEX_TRUSTED_PROXIES as
+# the compose file will give it to the next container (`docker compose
+# config`, so a value from .env counts).
 #
 # ⚠ Why this is a step (0.50, 2026-10-03): the reverse proxy reaches filex
 # through the published port, so every visitor arrives from the Docker
@@ -30,16 +32,20 @@ for spec in "$@"; do
   fi
   gws=$(gateways_of "$cid")
   value=$(compose_env "$I_DIR" "$I_SVC" FILEX_TRUSTED_PROXIES)
-  if [ -z "$value" ]; then
+  proxies_in_force "$(db_path)" "$value"
+  if [ -z "$P_LIST" ]; then
     log "$I_NAME: FILEX_TRUSTED_PROXIES is not set in $I_COMPOSE - write: FILEX_TRUSTED_PROXIES: \"auto, ${gws%% *}\""
     bad=1
     continue
   fi
   # shellcheck disable=SC2086
-  if missing=$(trusted_covers "$value" $gws); then
-    log "$I_NAME: gateway ${gws% } is trusted (FILEX_TRUSTED_PROXIES \"$value\")"
+  if missing=$(trusted_covers "$P_LIST" $gws); then
+    log "$I_NAME: gateway ${gws% } is trusted ($P_SOURCE \"$P_LIST\")"
+  elif [ "$P_SOURCE" = FILEX_TRUSTED_PROXIES ]; then
+    log "$I_NAME: gateway $missing is NOT in FILEX_TRUSTED_PROXIES \"$P_LIST\" - add it in $I_COMPOSE (and in the repository copy of that file)"
+    bad=1
   else
-    log "$I_NAME: gateway $missing is NOT in FILEX_TRUSTED_PROXIES \"$value\" - add it in $I_COMPOSE (and in the repository copy of that file)"
+    log "$I_NAME: gateway $missing is NOT in $P_SOURCE \"$P_LIST\" - FILEX_TRUSTED_PROXIES only seeds that list: add the gateway on Admin > Settings > Sign-in security, or add it in $I_COMPOSE and run: docker compose exec $I_SVC filex settings reseed login.trusted_proxies"
     bad=1
   fi
 done

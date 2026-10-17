@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/cliclient"
 )
@@ -39,7 +40,19 @@ const (
 	ErrNoSpace
 	// ErrTooBig — the file is larger than the write spool allows.
 	ErrTooBig
+	// ErrBadName — the server refused the request as malformed: above all a
+	// name no filex door may create (a backslash, `...`; internal/leafname).
+	// EINVAL, which a file manager shows as "invalid argument", rather than
+	// the "input/output error" that reads as a broken disk.
+	ErrBadName
+	// ErrNameTooLong — the storage could not hold a name that long
+	// (ENAMETOOLONG, the errno a local disk gives for the same name).
+	ErrNameTooLong
 )
+
+// nameTooLongCode is the code the server's refusal carries for a name the
+// storage could not hold (storage.IsNameTooLong, task #238).
+const nameTooLongCode = "name_too_long"
 
 // Classify turns an error from the filex client into an ErrKind.
 func Classify(err error) ErrKind {
@@ -65,7 +78,12 @@ func Classify(err error) ErrKind {
 	// room", and both look identical from here otherwise.
 	var apiErr *cliclient.APIError
 	if errors.As(err, &apiErr) {
+		if strings.EqualFold(apiErr.Code, nameTooLongCode) {
+			return ErrNameTooLong
+		}
 		switch apiErr.Status {
+		case 400:
+			return ErrBadName
 		case 401, 403:
 			return ErrDenied
 		case 404:
@@ -74,6 +92,8 @@ func Classify(err error) ErrKind {
 			return ErrExists
 		case 413, 507:
 			return ErrNoSpace
+		case 414:
+			return ErrNameTooLong
 		}
 	}
 	return ErrIO

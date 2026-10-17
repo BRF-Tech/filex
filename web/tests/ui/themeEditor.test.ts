@@ -72,6 +72,12 @@ vi.mock('@/stores/settings', () => ({
 
 vi.mock('@/lib/instanceThemes', () => ({ applyInstanceThemes: vi.fn() }));
 
+// The default folder view card (#258) shares the page and is not what this
+// file tests. ⚠ It is a <form> at its root, and happy-dom 15 answers a form's
+// nextSibling wrongly: the page's next re-draw (a save, a delete) then patches
+// against a null anchor ("reading 'type'", "reading 'nextSibling'").
+vi.mock('@/components/settings/FolderViewCard.vue', () => ({ default: { template: '<div data-testid="settings-folder-view" />' } }));
+
 import Appearance from '@/views/Appearance.vue';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 

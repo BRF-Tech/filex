@@ -22,12 +22,14 @@ import (
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/listorder"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/rowgate"
 	"github.com/brf-tech/filex/backend/internal/search"
@@ -166,6 +168,15 @@ func (a *aiOps) can(ctx context.Context, s *model.Storage, rel string, p perm.Pe
 		return denied(errAIForbidden, "access denied: your account lacks the %s permission", p)
 	}
 	return errAIForbidden
+}
+
+// newLeafErr is the one name rule (leafname, task #238) for a write that
+// CREATES rel; a write over a file that is there keeps the name it has.
+func newLeafErr(need perm.Perm, rel string) error {
+	if need != perm.FilesCreate {
+		return nil
+	}
+	return leafname.Check(path.Base(rel))
 }
 
 // writeNeed is the permission a write to rel needs: files.modify when a file
@@ -323,7 +334,10 @@ func (a *aiOps) resolveStorage(ctx context.Context, p string) (*model.Storage, s
 		// root — not the storage root. Fully-qualified adapter://… paths are
 		// validated as-is. (Empty path → the root itself.)
 		if !strings.Contains(p, "://") {
-			rel := strings.Trim(strings.TrimSpace(p), "/")
+			// ⚠ Slashes only, never spaces: `report.txt ` and ` notes.txt`
+			// are names of their own, and trimming them addressed the twin
+			// without the space (task #238).
+			rel := strings.Trim(p, "/")
 			base := root.Adapter + "://" + root.Rel
 			if root.Rel == "" {
 				base = root.Adapter + "://"
@@ -696,6 +710,9 @@ func (a *aiOps) WriteStream(ctx context.Context, p string, src io.Reader, size i
 	if err := a.can(ctx, s, rel, need); err != nil {
 		return nil, err
 	}
+	if err := newLeafErr(need, rel); err != nil {
+		return nil, err
+	}
 	// A new key file or `.fxe` is a new encryption (e2e_policy_gate.go): one
 	// question for every surface this funnel serves — /api/ai/upload, the MCP
 	// file_write tool, /api/sharex/upload and /u/{ticket}. Whether the write
@@ -998,6 +1015,13 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (out *aiEntry, err er
 	if relSrc == "" || relDst == "" {
 		return nil, errors.New("src and dst required")
 	}
+	// A rename gives a new name: the one name rule (leafname, task #238). A
+	// move that keeps the name keeps whatever name it has.
+	if path.Base(relDst) != path.Base(relSrc) {
+		if err := leafname.Check(path.Base(relDst)); err != nil {
+			return nil, err
+		}
+	}
 	if sSrc.ReadOnly {
 		return nil, storage.ErrReadOnly
 	}
@@ -1030,6 +1054,16 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (out *aiEntry, err er
 		if err := a.can(ctx, sDst, aiParent(relDst), p); err != nil {
 			return nil, err
 		}
+	}
+	// What the caller may not download where it is does not move, or get a
+	// new name, to where they could (downloadLift: the rule the explorer's
+	// move, rename and copy ask). A folder is asked file by file.
+	_, noLift, lerr := downloadLift(ctx, a.acl, a.store, a.resolver, sSrc.ID, relSrc, sDst.ID, relDst)
+	if lerr != nil {
+		return nil, lerr
+	}
+	if !noLift {
+		return nil, liftDenied(sSrc, relSrc, sDst, relDst)
 	}
 	/* wiring:e2 — the AI/MCP surface obeys the same encryption boundary as
 	 * the web UI. `dst` here is a full path (move is also rename), so the
@@ -1345,6 +1379,9 @@ func (a *aiOps) Mkdir(ctx context.Context, p string) (*aiEntry, error) {
 	if err := a.can(ctx, s, aiParent(rel), perm.FilesCreate); err != nil {
 		return nil, err
 	}
+	if err := leafname.Check(path.Base(rel)); err != nil {
+		return nil, err
+	}
 	drv, err := a.resolver(s.ID)
 	if err != nil {
 		return nil, err
@@ -1486,7 +1523,10 @@ func (a *aiOps) CreateShare(ctx context.Context, p string, pin bool, expiresInDa
 		return nil, err
 	}
 	if rel == "" {
-		return nil, errors.New("share target path required (cannot share a storage root)")
+		// A call to fix, not to retry: a plain error here fell through to
+		// mapDriverErr's 500. A whole storage goes to people and groups by a
+		// grant (#117), never to a link (public_link_rule.go errRootLink).
+		return nil, badInput("share target path required (cannot share a storage root)")
 	}
 	node, err := a.store.GetNodeByPath(ctx, s.ID, pathkey.Hash(s.ID, rel))
 	if err != nil || node == nil {
@@ -1499,7 +1539,9 @@ func (a *aiOps) CreateShare(ctx context.Context, p string, pin bool, expiresInDa
 	if err := publicLinkRefusal(ctx, a.acl, a.store, s.ID, node.Path, perm.ShareLinks); err != nil {
 		var lr *linkRefusal
 		if errors.As(err, &lr) && lr.v.ByPerm() {
-			return nil, denied(errAIForbidden, "access denied: your account lacks the %s permission", perm.ShareLinks)
+			// The permission that refused: share.links, or files.download
+			// on the item a download link would hand out.
+			return nil, denied(errAIForbidden, "access denied: your account lacks the %s permission", lr.v.p)
 		}
 		if errors.Is(err, errLinkNeedsEdit) {
 			return nil, denied(errAIForbidden, "access denied: a public link to %s needs edit permission on it", joinAdapterPath(s.Name, rel))
@@ -1672,10 +1714,13 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 	defer tmp.Close()
 
 	zw := zip.NewWriter(tmp)
-	seen := map[string]bool{}
+	namer := newMemberNamer()
+	// Every file packed from inside a source folder answers the rule a
+	// download of that file answers (memberRule), not only the folder.
+	rule := newMemberRule(a.acl, a.store)
 	for _, relSrc := range srcRels {
 		// Every source is on sDest's storage (checked above).
-		if aerr := a.zipAdd(ctx, zw, drvDest, sDest.ID, relSrc, path.Base(relSrc), seen); aerr != nil {
+		if aerr := a.zipAdd(ctx, zw, drvDest, sDest.ID, relSrc, path.Base(relSrc), namer, rule); aerr != nil {
 			_ = zw.Close()
 			return nil, aerr
 		}
@@ -1724,9 +1769,12 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 // zipAdd writes rel (a file or directory) into zw under the zip-internal path
 // `base`. Directories recurse via the driver's List. `base` is composed from
 // already-cleaned basenames, so it is zip-slip-safe by construction; the file
-// branch still routes through sanitizeZipPath as defense in depth. `seen`
-// dedups member names (first writer wins) so colliding sources don't error.
-func (a *aiOps) zipAdd(ctx context.Context, zw *zip.Writer, drv storage.Driver, storageID int64, rel, base string, seen map[string]bool) error {
+// branch still routes through sanitizeZipPath (memberNamer) as defense in
+// depth. `namer` names the members: the same name twice keeps the first, so
+// colliding sources don't error. A file rule refuses (memberRule: files.download on that file) is left out,
+// as the explorer's folder archive leaves it out - before it is named, so it
+// takes no name from a file that is packed.
+func (a *aiOps) zipAdd(ctx context.Context, zw *zip.Writer, drv storage.Driver, storageID int64, rel, base string, namer *memberNamer, rule *memberRule) error {
 	st, err := drv.Stat(ctx, rel)
 	if err != nil {
 		return err
@@ -1739,7 +1787,7 @@ func (a *aiOps) zipAdd(ctx context.Context, zw *zip.Writer, drv storage.Driver, 
 		if len(objs) == 0 {
 			// Preserve the empty directory as a zip dir entry.
 			if marker := strings.Trim(base, "/"); marker != "" {
-				_, _ = zw.Create(marker + "/")
+				_, _ = zw.Create(strings.Map(leafname.SavedRune, marker) + "/")
 			}
 			return nil
 		}
@@ -1755,17 +1803,22 @@ func (a *aiOps) zipAdd(ctx context.Context, zw *zip.Writer, drv storage.Driver, 
 			if childRel == "" {
 				childRel = path.Join(rel, o.Name)
 			}
-			if aerr := a.zipAdd(ctx, zw, drv, storageID, childRel, path.Join(base, o.Name), seen); aerr != nil {
+			if aerr := a.zipAdd(ctx, zw, drv, storageID, childRel, path.Join(base, o.Name), namer, rule); aerr != nil {
 				return aerr
 			}
 		}
 		return nil
 	}
-	safe, err := sanitizeZipPath(base)
+	if !rule.allows(ctx, storageID, rel) {
+		return nil
+	}
+	// The same name twice keeps the first, as it always did; two names that
+	// become one once saved are numbered (memberNamer).
+	safe, dup, err := namer.name(base)
 	if err != nil {
 		return err
 	}
-	if seen[safe] {
+	if dup {
 		return nil
 	}
 	src, err := a.body.Resolve(ctx, drv, storageID, rel, nil)
@@ -1784,7 +1837,6 @@ func (a *aiOps) zipAdd(ctx context.Context, zw *zip.Writer, drv storage.Driver, 
 	if _, err := io.Copy(fw, rc); err != nil {
 		return err
 	}
-	seen[safe] = true
 	return nil
 }
 
@@ -1796,58 +1848,60 @@ func (a *aiOps) zipAdd(ctx context.Context, zw *zip.Writer, drv storage.Driver, 
 // turned away, as distinct from a member skipped for a permanent reason
 // (zip-slip, kind conflict). When every member was refused and nothing landed,
 // the error is errAISnapshotRefused.
-func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error) {
+func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, memberSkips, error) {
 	// Declared before the first early return so every one of them can name it;
 	// it stays 0 until the member loop below actually runs.
 	refused := 0
+	// skips: the members left out for their names (archive_skips.go).
+	var skips memberSkips
 	sSrc, relSrc, err := a.resolveStorage(ctx, src)
 	if err != nil {
-		return 0, refused, err
+		return 0, refused, skips, err
 	}
 	if relSrc == "" {
-		return 0, refused, errors.New("src path required")
+		return 0, refused, skips, errors.New("src path required")
 	}
 	sDst, relDst, err := a.resolveStorage(ctx, destDir)
 	if err != nil {
-		return 0, refused, err
+		return 0, refused, skips, err
 	}
 	if sSrc.ID != sDst.ID {
-		return 0, refused, errors.New("unzip dest must be on the same storage as src")
+		return 0, refused, skips, errors.New("unzip dest must be on the same storage as src")
 	}
 	if sDst.ReadOnly {
-		return 0, refused, storage.ErrReadOnly
+		return 0, refused, skips, storage.ErrReadOnly
 	}
 	if err := a.can(ctx, sDst, relDst, perm.FilesCreate); err != nil {
-		return 0, refused, err
+		return 0, refused, skips, err
 	}
 	// An archive that is ciphertext cannot be opened here (no key): the rule
 	// file_read asks. Where the members land is judged below, member by
 	// member, before any of them is written.
 	if err := a.encryptedRefusal(ctx, sSrc, relSrc); err != nil {
-		return 0, refused, err
+		return 0, refused, skips, err
 	}
 	drv, err := a.resolver(sSrc.ID)
 	if err != nil {
-		return 0, refused, err
+		return 0, refused, skips, err
 	}
 	wr, ok := drv.(storage.Writer)
 	if !ok {
-		return 0, refused, storage.ErrUnsupported
+		return 0, refused, skips, storage.ErrUnsupported
 	}
 
 	// archive/zip needs a ReaderAt+Seeker — materialize to a tmp file first.
 	srcBody, err := a.body.Resolve(ctx, drv, sSrc.ID, relSrc, nil)
 	if err != nil {
-		return 0, refused, err
+		return 0, refused, skips, err
 	}
 	rc, err := srcBody.Open(ctx)
 	if err != nil {
-		return 0, refused, err
+		return 0, refused, skips, err
 	}
 	tmp, err := os.CreateTemp("", "filex-ai-unzip-*.zip")
 	if err != nil {
 		_ = rc.Close()
-		return 0, refused, err
+		return 0, refused, skips, err
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
@@ -1855,16 +1909,18 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error
 	_ = rc.Close()
 	_ = tmp.Close()
 	if cerr != nil {
-		return 0, refused, cerr
+		return 0, refused, skips, cerr
 	}
 
 	zr, err := zip.OpenReader(tmpName)
 	if err != nil {
-		return 0, refused, fmt.Errorf("not a zip: %w", err)
+		return 0, refused, skips, fmt.Errorf("not a zip: %w", err)
 	}
 	defer zr.Close()
 
 	dest := strings.Trim(relDst, "/")
+	// A member name in a DOS code page is read decoded (zip_names.go).
+	names := zipNamesFor(ctx)
 	// The members land as plaintext: into an encrypted folder only with
 	// allow_plaintext (plaintextRefusal, the rule file_write asks). Judged
 	// per member, because one can land in an encrypted folder that sits
@@ -1874,23 +1930,39 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error
 	if !plaintextConsented(ctx) {
 		roots := newE2eRoots(a.store)
 		for _, f := range zr.File {
-			safeRel, serr := sanitizeZipPath(f.Name)
+			safeRel, serr := sanitizeZipPath(names.name(f))
 			if serr != nil {
 				continue
 			}
 			target := strings.Trim(path.Join(dest, safeRel), "/")
 			if root := roots.of(ctx, sDst.ID, sDst.Name, target); root != "" {
-				return 0, refused, a.plaintextRefusal(ctx, sDst, aiParent(target))
+				return 0, refused, skips, a.plaintextRefusal(ctx, sDst, aiParent(target))
 			}
 		}
+	}
+	// An archive the caller may not download stays that way in its members:
+	// one landing where download is allowed would hand out its contents
+	// (protoperm.DownloadLifted, the rule a copy and a move ask). Judged
+	// before anything is written, so a refusal leaves nothing half-extracted.
+	if err := a.unzipLiftRefusal(ctx, sSrc, relSrc, sDst, dest, zr.File, names); err != nil {
+		return 0, refused, skips, err
 	}
 	mkdirer, _ := drv.(storage.Mkdirer)
 	locks := a.lockView(ctx, sDst)
 	count := 0
 	for _, f := range zr.File {
-		safeRel, serr := sanitizeZipPath(f.Name)
+		member := names.name(f)
+		safeRel, serr := sanitizeZipPath(member)
 		if serr != nil {
-			slog.Warn("ai unzip: skipped zip-slip entry", slog.String("name", f.Name), slog.String("err", serr.Error()))
+			slog.Warn("ai unzip: skipped zip-slip entry", slog.String("name", member), slog.String("err", serr.Error()))
+			skips.add(member, skipUnsafePath)
+			continue
+		}
+		// The one name rule every door asks (leafname, task #238), as the
+		// explorer's extraction asks it (landing.target).
+		if lerr := leafname.CheckPath(safeRel); lerr != nil {
+			slog.Warn("ai unzip: skipped a member for its name", slog.String("why", lerr.Error()))
+			skips.add(member, skipNameNotAllowed)
 			continue
 		}
 		target := strings.Trim(path.Join(dest, safeRel), "/")
@@ -1914,7 +1986,7 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error
 			slog.Warn("ai unzip: target escapes dest after join", slog.String("target", target))
 			continue
 		}
-		if strings.HasSuffix(f.Name, "/") {
+		if strings.HasSuffix(member, "/") {
 			if mkdirer != nil {
 				if kerr := storage.EnsureDirTarget(ctx, drv, target); kerr != nil {
 					slog.Warn("ai unzip: skipped folder colliding with a file",
@@ -1964,6 +2036,9 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error
 		werr := wr.Write(ctx, target, frc, int64(f.UncompressedSize64))
 		_ = frc.Close()
 		if werr != nil {
+			if reason := reasonOfWrite(werr); reason != "" {
+				skips.add(member, reason)
+			}
 			slog.Warn("ai unzip: write", slog.String("target", target), slog.String("err", werr.Error()))
 			continue
 		}
@@ -1973,9 +2048,47 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error
 	if count == 0 && refused > 0 {
 		// Fail-closed at the batch level, mirroring every single-write guard
 		// site: nothing landed, and it was refused rather than absent.
-		return 0, refused, errAISnapshotRefused
+		return 0, refused, skips, errAISnapshotRefused
 	}
-	return count, refused, nil
+	return count, refused, skips, nil
+}
+
+// unzipLiftRefusal is the download rule for an extraction (Unzip): the
+// archive at src is the source of every member, and each member lands at its
+// own path under dest on the same storage - under the name the extraction
+// gives it (names: a code-page name decoded, zip_names.go). nil when the
+// caller may download the archive, or when no member would land where they
+// may download.
+func (a *aiOps) unzipLiftRefusal(ctx context.Context, sSrc *model.Storage, src string, sDst *model.Storage, dest string, files []*zip.File, names zipNames) error {
+	if a.acl == nil {
+		return nil
+	}
+	set, err := callerSetOn(ctx, a.acl, a.store, sSrc.ID)
+	if err != nil {
+		return err
+	}
+	if protoperm.CanRead(set, src) {
+		return nil
+	}
+	for _, f := range files {
+		safeRel, serr := sanitizeZipPath(names.name(f))
+		if serr != nil {
+			continue
+		}
+		target := strings.Trim(path.Join(dest, safeRel), "/")
+		if protoperm.DownloadLifted(set, src, set, target) {
+			return liftDenied(sSrc, src, sDst, target)
+		}
+	}
+	return nil
+}
+
+// liftDenied is the agent surface's refusal when the download rule says no
+// (downloadLift): it names the permission and both ends, as the explorer's
+// refusal names the permission and the rule.
+func liftDenied(sSrc *model.Storage, src string, sDst *model.Storage, dst string) error {
+	return denied(errAIForbidden, "access denied: your account lacks the %s permission on %s, and this would put it where it has it (%s)",
+		perm.FilesDownload, joinAdapterPath(sSrc.Name, src), joinAdapterPath(sDst.Name, dst))
 }
 
 // ───── catalogue helpers ─────

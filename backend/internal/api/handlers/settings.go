@@ -78,6 +78,13 @@ func appearanceSettingKey(key string) bool { return key == DefaultThemeSettingKe
 //
 //	POST /api/admin/settings/smtp-test  { "to": "you@example.com" }  (to optional)
 func (h *Settings) SMTPTest(w http.ResponseWriter, r *http.Request) {
+	// The instance's mail server, used to send a message to any address: the
+	// platform's to test, never a tenant administrator's (they may not change
+	// the smtp.* keys either - allowSettingWrite). Found while checking each
+	// admin page's calls for the menu, task #258.
+	if !requireSupertenant(w, r, "smtp test") {
+		return
+	}
 	if h.Mailer == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "mailer not configured"})
 		return

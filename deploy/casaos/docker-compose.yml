@@ -7,7 +7,7 @@
 name: filex
 services:
   filex:
-    image: ghcr.io/brf-tech/filex:v0.56.3
+    image: ghcr.io/brf-tech/filex:v0.57.0
     container_name: filex
     network_mode: bridge
     restart: unless-stopped
@@ -73,11 +73,11 @@ x-casaos:
       `filex mount` attaches it as a drive. Browsing opens on Home - your
       storages, what you opened last, what you starred - and + New
       makes a folder or a document: Markdown, text, CSV or code straight
-      away, and Word, Excel, PowerPoint or OpenDocument once you connect
-      an ONLYOFFICE server or install the office editor app, which edits
-      them in the browser with no document server. The
-      ONLYOFFICE templates are real documents compiled into the binary, so
-      no LibreOffice is installed anywhere. A multi-file
+      away, and Word, Excel or PowerPoint once you install the office
+      editor app, which edits them in the browser with no document server
+      (an ONLYOFFICE Document Server stays optional, and adds OpenDocument
+      templates). The templates are real documents compiled into the
+      binary, so no LibreOffice is installed anywhere. A multi-file
       selection downloads as one streamed ZIP. Public share links with PIN
       and expiry, file-drop upload links, resumable uploads, full-text
       search, thumbnails of the file itself (a PDF's first page, a video's
@@ -111,9 +111,9 @@ x-casaos:
   # Published screenshots: e2e/shots/manifest.json names the current file of
   # each, and `node scripts/shots-site.mjs relink` keeps these three on it.
   screenshot_link:
-    - https://filex.sh/shots/explorer-grid-light.de398671d43b.png
-    - https://filex.sh/shots/admin-dashboard.d94a065baab6.png
-    - https://filex.sh/shots/share-modal.d6f6572228ea.png
+    - https://filex.sh/shots/explorer-grid-light.475b0b61faab.png
+    - https://filex.sh/shots/admin-dashboard.233358b87c3e.png
+    - https://filex.sh/shots/share-modal.87cb16a1a6f0.png
   tips:
     before_install:
       en_US: >-
@@ -127,7 +127,7 @@ x-casaos:
   port_map: "5212"
   scheme: http
   store_app_id: filex
-  version: "0.56.3"
+  version: "0.57.0"
   website: https://filex.sh
   repo: https://github.com/BRF-Tech/filex
   support: https://github.com/BRF-Tech/filex/issues

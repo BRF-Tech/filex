@@ -37,13 +37,15 @@ package handlers
 //	  ← {"url":"/z/<ticket>", "name":"Belgeler.zip", "files":12, …}
 //	GET  /z/<ticket>                                  ← navigation, streams
 //
-// The mint is where all the authority lives. Every path is resolved, checked
-// against the caller's tenancy and their ≥viewer grant, and every folder is
-// WALKED SERVER-SIDE with that same grant applied to each descendant. What the
-// ticket carries is the finished member list — the client's list is an opening
-// request, never the answer. The redeem needs no credential because it is not a
-// credential for filex: it is unguessable, it lives for minutes, it is consumed
-// on use, and the only thing it can do is produce that one archive.
+// The mint is where the selection is decided. Every path is resolved, checked
+// against the caller's tenancy and files.download, and every folder is WALKED
+// SERVER-SIDE with the same files.download decision asked of each file in it
+// (memberRule). What the ticket carries is the finished member list — the
+// client's list is an opening request, never the answer. The redeem needs no
+// credential because it is not a credential for filex: it is unguessable, it
+// lives for minutes, it is consumed on use, and the only thing it can do is
+// produce that one archive. It still asks the rule again, as the minting
+// account, of every member it streams: a rule can change in those minutes.
 
 import (
 	"context"
@@ -59,10 +61,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/httpx"
@@ -114,10 +116,11 @@ type archiveTicket struct {
 	Name    string
 	Members []archiveMember
 	Bytes   int64
-	// Owner is who minted it. Kept for the audit line, not consulted at
-	// redeem: the authorization decision was made at mint and is baked into
-	// Members.
+	// Owner is who minted it, and TokenID the API token it was minted with
+	// (0 for a session). The redeem acts as them again (ticketOwner) and asks
+	// memberRule of every member before its bytes go out.
 	Owner     *model.User
+	TokenID   int64
 	ExpiresAt time.Time
 	claimedAt time.Time
 	// File, when set, makes this a ONE-FILE link (`"mode":"file"`): the
@@ -284,11 +287,10 @@ func (a *Archive) DownloadTicket(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var members []archiveMember
 	var total int64
-	// One ACL set per storage, loaded once. A selection is usually one
-	// storage; a folder walk asks CanSee for every descendant, and doing that
-	// against a freshly loaded set per node would turn a listing walk into a
-	// query storm.
-	sets := map[int64]*acl.Set{}
+	// One rule for every member, loading the caller's set once per storage:
+	// a folder walk asks it of every file, and a freshly loaded set per file
+	// would turn a listing walk into a query storm.
+	rule := newMemberRule(a.ACL, a.Store)
 
 	for _, raw := range req.Paths {
 		storageID, rel, err := a.resolveStorage(ctx, 0, raw)
@@ -322,11 +324,6 @@ func (a *Archive) DownloadTicket(w http.ResponseWriter, r *http.Request) {
 		if refuseUnavailableID(w, r, a.Store, storageID, rel) {
 			return
 		}
-		set, ok := sets[storageID]
-		if !ok {
-			set = a.aclSetFor(ctx, storageID)
-			sets[storageID] = set
-		}
 		drv, err := a.StorageResolver(storageID)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad storage"})
@@ -343,7 +340,7 @@ func (a *Archive) DownloadTicket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if st.Kind == storage.KindDirectory {
-			found, err := a.expandDir(ctx, drv, storageID, rel, set)
+			found, err := a.expandDir(ctx, drv, storageID, rel, rule)
 			if err != nil {
 				writeJSON(w, http.StatusBadGateway, map[string]string{"error": "could not list " + raw + ": " + err.Error()})
 				return
@@ -374,11 +371,16 @@ func (a *Archive) DownloadTicket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := ArchiveName(req.Paths, req.Name)
+	var tokenID int64
+	if t := auth.TokenFrom(ctx); t != nil {
+		tokenID = t.ID
+	}
 	tok, err := a.Tickets.mint(&archiveTicket{
 		Name:      name,
 		Members:   members,
 		Bytes:     total,
 		Owner:     auth.UserFrom(ctx),
+		TokenID:   tokenID,
 		ExpiresAt: time.Now().Add(archiveTicketTTL),
 	})
 	if err != nil {
@@ -397,32 +399,17 @@ func (a *Archive) DownloadTicket(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// aclSetFor loads the caller's grants for one storage, or nil when RBAC is not
-// wired at all (dev/tests), which every consumer reads as "no filtering".
-func (a *Archive) aclSetFor(ctx context.Context, storageID int64) *acl.Set {
-	if a.ACL == nil {
-		return nil
-	}
-	st, err := a.Store.GetStorage(ctx, storageID)
-	if err != nil || st == nil {
-		return nil
-	}
-	set, err := a.ACL.LoadSet(ctx, auth.UserFrom(ctx), st)
-	if err != nil {
-		return nil
-	}
-	return set
-}
-
 // expandDir walks a selected folder and returns every file under it the caller
-// may read, named relative to the folder's PARENT so the archive unpacks as
-// `<folder>/…` rather than dumping the contents at the top level.
+// may download, named relative to the folder's PARENT so the archive unpacks
+// as `<folder>/…` rather than dumping the contents at the top level.
 //
-// ⚠ The per-descendant CanSee is the whole point of doing this server-side. A
-// folder the caller can see may contain a subtree they were never granted; a
-// client-side expansion would have asked for those paths by name and an
-// endpoint that trusted the list would have served them.
-func (a *Archive) expandDir(ctx context.Context, drv storage.Driver, storageID int64, rel string, set *acl.Set) ([]archiveMember, error) {
+// ⚠ The per-file rule is the whole point of doing this server-side. A folder
+// the caller may download can hold a file a role keeps from them, or a
+// subtree they were never granted; a client-side expansion would have asked
+// for those paths by name and an endpoint that trusted the list would have
+// served them. memberRule asks each file what a download of that one file
+// asks - not only "may they see it".
+func (a *Archive) expandDir(ctx context.Context, drv storage.Driver, storageID int64, rel string, rule *memberRule) ([]archiveMember, error) {
 	files, err := sharezip.CollectFiles(ctx, drv, rel)
 	if err != nil {
 		return nil, err
@@ -433,7 +420,7 @@ func (a *Archive) expandDir(ctx context.Context, drv storage.Driver, storageID i
 	}
 	out := make([]archiveMember, 0, len(files))
 	for _, f := range files {
-		if set != nil && set.Effective(acl.CleanRel(f.Path)) < acl.LevelViewer {
+		if !rule.allows(ctx, storageID, f.Path) {
 			continue
 		}
 		name := f.Rel
@@ -472,6 +459,15 @@ func (a *Archive) DownloadArchive(w http.ResponseWriter, r *http.Request) {
 		a.redeemFileLink(w, r, tok, t)
 		return
 	}
+	// The members were decided at the mint, as their owner; the redeem asks
+	// again as the same owner, of every member, before its bytes go out
+	// (memberRule). An owner who may no longer sign in, or a token that is
+	// gone, ends the link as it ends a one-file link.
+	r, ok := a.redeemAsOwner(w, r, tok, t)
+	if !ok {
+		return
+	}
+	rule := newMemberRule(a.ACL, a.Store)
 
 	// ⚠ No Content-Length, and there must never be one. The size of a
 	// deflated archive is not known until its last member is written; the
@@ -493,6 +489,11 @@ func (a *Archive) DownloadArchive(w http.ResponseWriter, r *http.Request) {
 			Size:  m.Size,
 			Mtime: m.Mtime,
 			Open: func(c context.Context) (io.ReadCloser, error) {
+				// Refused now: left out, and named in the archive's
+				// incomplete note - a name its owner could see at the mint.
+				if !rule.allows(c, m.StorageID, m.Path) {
+					return nil, errMemberRefused
+				}
 				drv, err := a.StorageResolver(m.StorageID)
 				if err != nil {
 					return nil, err
@@ -528,6 +529,30 @@ func (a *Archive) DownloadArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Tickets.consume(tok)
+}
+
+// errMemberRefused is a ticket member the rule refuses at the redeem: the
+// owner's files.download on it was taken away after the mint.
+var errMemberRefused = errors.New("not downloadable for this account any more")
+
+// redeemAsOwner is r as the archive ticket's owner (ticketOwner + asOwner), or
+// false with the refusal written and the ticket consumed. Unwired (no ACL: a
+// handler built by hand in a test) it is r itself, as nothing is enforced.
+func (a *Archive) redeemAsOwner(w http.ResponseWriter, r *http.Request, tok string, t *archiveTicket) (*http.Request, bool) {
+	if a.ACL == nil {
+		return r, true
+	}
+	var ownerID int64
+	if t.Owner != nil {
+		ownerID = t.Owner.ID
+	}
+	owner, token, reason := a.ticketOwner(r.Context(), ownerID, t.TokenID)
+	if reason != "" {
+		a.Tickets.consume(tok)
+		http.Error(w, "this download link is no longer valid", http.StatusForbidden)
+		return nil, false
+	}
+	return a.asOwner(r, owner, token), true
 }
 
 // flusher returns a "push what you have to the client" func for w, or nil when
@@ -615,7 +640,14 @@ func sanitizeArchiveName(s string) string {
 	}, s)
 	s = strings.Trim(strings.TrimSpace(s), ".")
 	if len(s) > 120 {
-		s = strings.TrimSpace(s[:120])
+		// At a rune boundary: `s[:120]` cut a two-byte letter in half, and
+		// the archive was offered as `a____.zip` (filename* ended in a
+		// dangling %C5, task #238).
+		cut := 120
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = strings.TrimSpace(s[:cut])
 	}
 	return s
 }

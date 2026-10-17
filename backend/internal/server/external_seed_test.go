@@ -13,15 +13,13 @@ import (
 	"github.com/brf-tech/filex/backend/internal/testutil/dbtest"
 )
 
-// The environment pins a service ON at every boot. An administrator who
-// switched an env-configured OnlyOffice off on External services keeps it off
-// until filex restarts, and the restart writes the environment back - the
-// switch included. Before 0.50 the row kept its URL, "matched" the
-// environment and stayed off across restarts; nobody saw it, because the
-// OnlyOffice service fell back to its boot-time values and ran anyway. Now
-// that switched off is off everywhere (onlyoffice.Service.settings), the boot
-// has to switch it back on, as External services and the PATCH answer say.
-func TestSeedExternalDefaults_TheEnvironmentSwitchesAPinnedServiceBackOn(t *testing.T) {
+// Task #258 (the owner's decision of 2026-10-15): the environment SEEDS an
+// external service, like every other setting a variable gives a first value
+// to. An administrator who switched an env-configured ONLYOFFICE off on
+// External services keeps it off across restarts; until 0.57 the next start
+// wrote the environment back, switch included. `filex settings reseed
+// --external` (force) is the explicit way back.
+func TestSeedExternalDefaults_TheAdministratorsSwitchStandsAcrossRestarts(t *testing.T) {
 	ctx := context.Background()
 	_, store := dbtest.NewTestDB(t)
 	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", false, "http://ds", "pinned-secret", "{}", time.Time{}, "disabled"))
@@ -35,30 +33,67 @@ func TestSeedExternalDefaults_TheEnvironmentSwitchesAPinnedServiceBackOn(t *test
 	oo, err := store.GetExternalService(ctx, "onlyoffice")
 	require.NoError(t, err)
 	require.NotNil(t, oo)
-	assert.True(t, oo.Enabled, "pinned by the environment: on again after the boot")
+	assert.False(t, oo.Enabled, "switched off on the page: it stays off")
 	assert.Equal(t, "http://ds", oo.URL)
-	assert.Equal(t, "pinned-secret", oo.SecretEnc)
 
-	// Not pinned (no draw.io address in the environment): the row is the
-	// administrator's, switched off it stays.
+	// An edited address stands too.
+	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", true, "http://ds-moved", "pinned-secret", "{}", time.Time{}, "ok"))
+	seedExternalDefaults(ctx, store, cfg)
+	oo, err = store.GetExternalService(ctx, "onlyoffice")
+	require.NoError(t, err)
+	assert.Equal(t, "http://ds-moved", oo.URL)
+
+	// On request, the environment again - the switch included.
+	wrote := applyExternalFromConfig(ctx, store, cfg, true)
+	assert.Equal(t, []string{"onlyoffice"}, wrote)
+	oo, err = store.GetExternalService(ctx, "onlyoffice")
+	require.NoError(t, err)
+	assert.True(t, oo.Enabled)
+	assert.Equal(t, "http://ds", oo.URL)
+
+	// draw.io, which the environment does not name: the administrator's.
 	dio, err := store.GetExternalService(ctx, "drawio")
 	require.NoError(t, err)
 	require.NotNil(t, dio)
-	assert.False(t, dio.Enabled, "not pinned: the administrator's switch stands")
+	assert.False(t, dio.Enabled)
 	assert.Equal(t, "http://drawio", dio.URL)
 }
 
-// FILEX_ONLYOFFICE_LANG (GitHub Discussion #93) pins the editor's language
-// the way FILEX_ONLYOFFICE_URL pins the address: written onto the row at every
-// boot, the way ONLYOFFICE's list writes it. It touches nothing else on the
-// row: an install that configured ONLYOFFICE on the admin page and pins only
-// the language keeps its switch, address, secret and callback address.
-// Red on the old code: the variable did not exist.
-func TestSeedExternalDefaults_TheEnvironmentPinsTheEditorLanguageAndNothingElse(t *testing.T) {
+// A service nothing was configured in yet - no row, or a row with no address
+// (what a first start without the variable leaves) - takes the environment's
+// values: adding FILEX_ONLYOFFICE_URL to an install that never set ONLYOFFICE
+// up works on the next start.
+func TestSeedExternalDefaults_AnUnconfiguredServiceTakesTheEnvironment(t *testing.T) {
+	ctx := context.Background()
+	_, store := dbtest.NewTestDB(t)
+	seedExternalDefaults(ctx, store, config.Config{})
+	oo, err := store.GetExternalService(ctx, "onlyoffice")
+	require.NoError(t, err)
+	require.NotNil(t, oo)
+	require.Empty(t, oo.URL)
+
+	var cfg config.Config
+	cfg.ExternalServices.OnlyOffice.URL = "http://ds"
+	cfg.ExternalServices.OnlyOffice.JWTSecret = "s3cret"
+	seedExternalDefaults(ctx, store, cfg)
+	oo, err = store.GetExternalService(ctx, "onlyoffice")
+	require.NoError(t, err)
+	assert.True(t, oo.Enabled)
+	assert.Equal(t, "http://ds", oo.URL)
+	assert.Equal(t, "s3cret", oo.SecretEnc)
+}
+
+// FILEX_ONLYOFFICE_LANG (GitHub Discussion #93) gives the editor's language a
+// first value: written onto a row that has no language of its own, the way
+// ONLYOFFICE's list writes it, and - since 0.57 (task #258) - never over the
+// one the admin page chose. It touches nothing else on the row: an install
+// that configured ONLYOFFICE on the admin page and gives only the language
+// keeps its switch, address, secret and callback address.
+func TestSeedExternalDefaults_TheEnvironmentSeedsTheEditorLanguageAndNothingElse(t *testing.T) {
 	ctx := context.Background()
 	_, store := dbtest.NewTestDB(t)
 	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", true, "https://docs.ui", "ui-secret",
-		`{"callback_url":"http://filex:5212","editor_lang":"fr"}`, time.Time{}, "ok"))
+		`{"callback_url":"http://filex:5212"}`, time.Time{}, "ok"))
 
 	var cfg config.Config
 	cfg.ExternalServices.OnlyOffice.EditorLang = "de-DE"
@@ -73,13 +108,21 @@ func TestSeedExternalDefaults_TheEnvironmentPinsTheEditorLanguageAndNothingElse(
 	assert.Equal(t, "ui-secret", oo.SecretEnc)
 	assert.Equal(t, "http://filex:5212", external.CallbackURLFromOptions(oo.OptionsJSON))
 
-	// An edit on External services lasts until the next boot.
+	// An edit on External services stands across restarts.
 	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", true, "https://docs.ui", "ui-secret",
 		`{"callback_url":"http://filex:5212","editor_lang":"es"}`, time.Time{}, "ok"))
 	seedExternalDefaults(ctx, store, cfg)
 	oo, err = store.GetExternalService(ctx, "onlyoffice")
 	require.NoError(t, err)
-	assert.Equal(t, "de", external.EditorLangFromOptions(oo.OptionsJSON), "re-asserted at boot")
+	assert.Equal(t, "es", external.EditorLangFromOptions(oo.OptionsJSON), "the page's language stands")
+
+	// On request, the environment's.
+	assert.True(t, seedOnlyOfficeEditorLang(ctx, store, cfg.ExternalServices.OnlyOffice.EditorLang, true))
+	oo, err = store.GetExternalService(ctx, "onlyoffice")
+	require.NoError(t, err)
+	assert.Equal(t, "de", external.EditorLangFromOptions(oo.OptionsJSON))
+	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", true, "https://docs.ui", "ui-secret",
+		`{"callback_url":"http://filex:5212","editor_lang":"es"}`, time.Time{}, "ok"))
 
 	// No variable: the setting is the admin page's, left as it is.
 	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", true, "https://docs.ui", "ui-secret",
@@ -96,9 +139,9 @@ func TestSeedExternalDefaults_TheEnvironmentPinsTheEditorLanguageAndNothingElse(
 	require.NoError(t, err)
 	assert.Equal(t, "es", external.EditorLangFromOptions(oo.OptionsJSON))
 
-	// "auto" pins automatic: the key goes.
+	// "auto", on request, is automatic: the key goes.
 	cfg.ExternalServices.OnlyOffice.EditorLang = "auto"
-	seedExternalDefaults(ctx, store, cfg)
+	applyExternalFromConfig(ctx, store, cfg, true)
 	oo, err = store.GetExternalService(ctx, "onlyoffice")
 	require.NoError(t, err)
 	assert.Empty(t, external.EditorLangFromOptions(oo.OptionsJSON))

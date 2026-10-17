@@ -1,8 +1,9 @@
 // The admin panel's menu, as data (lib/adminNav, GitHub #82, 0.51.0).
 //
-// The owner's grouping (2026-10-03): the dashboard as a plain link, then
-// Files & storage / People & security / System, each a panel of sections.
-// What is pinned here:
+// The owner's grouping (2026-10-15, task #258, renewing the three entries of
+// 2026-10-03): the dashboard as a plain link, then Files & storage / People /
+// Settings / Maintenance & records, each a panel of sections. What is pinned
+// here:
 //   1. every admin page the router has (bar sub-pages and redirects) is in
 //      the menu EXACTLY once - a page added to the router without a place in
 //      the menu fails here instead of being unreachable from the panel;
@@ -11,7 +12,8 @@
 //   4. who sees what is the router guard's own rule, per page: an
 //      administrator everything, a delegated administrator (admin.* without
 //      the role) the pages naming a permission they hold, plus Files;
-//      Tenants / My tenant on a multi-tenant install only; the apps' rows;
+//      Tenants / My tenant on a multi-tenant install only; the pages about
+//      the instance never to a tenant's administrator; the apps' rows;
 //   5. what is marked as the page being looked at.
 import { describe, expect, it, vi } from 'vitest';
 import type { RouteRecordRaw } from 'vue-router';
@@ -92,6 +94,7 @@ describe('every admin page has one place in the menu', () => {
       encryption: '/encryption',
       protection: '/protection',
       'api-mcp': '/api-mcp',
+      'ai-assistant': '/ai-assistant',
       plugins: '/plugins',
       external: '/external',
       webhooks: '/webhooks',
@@ -111,7 +114,12 @@ describe('every admin page has one place in the menu', () => {
 });
 
 describe('the owner’s grouping', () => {
-  it('three entries, their sections, and the pages in each', () => {
+  // The owner, 2026-10-15 (task #258): a fourth entry, Settings, holds every
+  // page that changes how the instance behaves, in three columns - General /
+  // Security & data / File processing & integrations. It renews the menu of
+  // 2026-10-03, whose "People & security" and "System" mixed settings with
+  // the things the instance has.
+  it('four entries, their sections, and the pages in each', () => {
     const shape = ADMIN_NAV.map((e) => [e.id, e.sections.map((s) => [s.id, s.pages.map((p) => p.route)])]);
     expect(shape).toEqual([
       [
@@ -122,22 +130,33 @@ describe('the owner’s grouping', () => {
           ['storage', ['storages', 'connections', 'sync', 'replica', 'usage']],
         ],
       ],
+      ['people', [['people', ['users', 'groups', 'roles', 'grants', 'tenants']]]],
       [
-        'people',
+        'settings',
         [
-          ['people', ['users', 'groups', 'roles', 'grants', 'tenants', 'tenant-self']],
-          ['security', ['auth-providers', 'login-security', 'encryption', 'protection', 'api-mcp']],
+          ['general', ['settings', 'branding', 'appearance', 'tenancy', 'tenant-self']],
+          ['security', ['auth-providers', 'login-security', 'encryption', 'protection']],
+          ['integrations', ['archives', 'plugins', 'external', 'webhooks', 'notifications', 'api-mcp', 'ai-assistant']],
         ],
       ],
-      [
-        'system',
-        [
-          ['integrations', ['plugins', 'external', 'webhooks', 'notifications']],
-          ['customize', ['settings', 'tenancy', 'branding', 'appearance', 'archives']],
-          ['maintenance', ['queue', 'tools', 'audit', 'updates', 'about']],
-        ],
-      ],
+      ['maintenance', [['maintenance', ['queue', 'tools', 'audit', 'updates', 'about']]]],
     ]);
+  });
+
+  // Settings comes BEFORE Maintenance & records, not last - the order the
+  // owner approved: Dashboard | Files & storage | People | Settings |
+  // Maintenance & records.
+  it('the entries read Files & storage, People, Settings, Maintenance & records', () => {
+    const top = (en as { nav: { top: Record<string, string> } }).nav.top;
+    expect(ADMIN_NAV.map((e) => top[e.label.split('.').pop()!])).toEqual([
+      'Files & storage',
+      'People',
+      'Settings',
+      'Maintenance & records',
+    ]);
+    // The Settings page is the General column's "General": a page called
+    // Settings under a menu called Settings would name nothing.
+    expect(adminNavPages().find((p) => p.route === 'settings')!.label).toBe('nav.general');
   });
 
   it('every label, heading and short line is in the catalogue', () => {
@@ -154,7 +173,10 @@ describe('the owner’s grouping', () => {
   it('a sub-page is placed by its parent; the dashboard and the public pages by nothing', () => {
     expect(adminNavSectionOf('users')?.section.id).toBe('people');
     expect(adminNavSectionOf('protection')?.section.id).toBe('security');
+    expect(adminNavSectionOf('protection')?.entry.id).toBe('settings');
     expect(adminNavSectionOf('audit')?.section.id).toBe('maintenance');
+    expect(adminNavSectionOf('tenant-self')?.section.id).toBe('general');
+    expect(adminNavSectionOf('api-mcp')?.section.id).toBe('integrations');
     expect(adminNavSectionOf('dashboard')).toBeNull();
     expect(adminNavSectionOf('login')).toBeNull();
   });
@@ -198,22 +220,30 @@ function drawn(entries: MegaMenuEntry[]): Record<string, string[]> {
   );
 }
 
+/** The pages about the instance (`only: 'platform'`, task #258). */
+const PLATFORM_PAGES = [
+  'search', 'replica', 'usage', 'queue', 'updates', 'settings', 'appearance', 'tenancy',
+  'auth-providers', 'login-security', 'protection', 'archives', 'plugins', 'external', 'webhooks',
+  // The AI assistant (task #269): the instance's provider and key.
+  'ai-assistant',
+];
+
 describe('who sees what - the router guard’s rule, per page', () => {
-  it('an administrator: the dashboard and every page but the multi-tenant two and the switch', () => {
-    const d = drawn(buildAdminNav(ctx()));
-    expect(Object.keys(d)).toEqual(['dashboard', 'files', 'people', 'system']);
+  it('an administrator of a single-tenant install: the dashboard and every page but the two tenant pages', () => {
+    const d = drawn(buildAdminNav(ctx({ platform: true })));
+    expect(Object.keys(d)).toEqual(['dashboard', 'files', 'people', 'settings', 'maintenance']);
     const all = Object.values(d).flat();
     expect(all).toContain('encryption');
+    expect(all).toContain('tenancy');
     expect(all).not.toContain('tenants');
     expect(all).not.toContain('tenant-self');
-    expect(all).not.toContain('tenancy');
-    expect(all).toHaveLength(1 + 37 - 3 + 0); // dashboard link + 37 pages - the two tenant pages - the switch
+    expect(all).toHaveLength(1 + 38 - 2); // dashboard link + 38 pages (the AI assistant's since #269) - the two tenant pages
   });
 
-  it('Multi-tenant mode to whoever may configure the instance (#167), under System', () => {
+  it('Multi-tenant mode to whoever may configure the instance (#167), under Settings → General', () => {
     const d = drawn(buildAdminNav(ctx({ platform: true })));
-    expect(d.system).toContain('tenancy');
-    expect(adminNavSectionOf('tenancy')?.section.id).toBe('customize');
+    expect(d.settings).toContain('tenancy');
+    expect(adminNavSectionOf('tenancy')?.section.id).toBe('general');
     // A delegated administrator is not offered it: the route names no admin.* permission.
     const theirs = Object.values(drawn(buildAdminNav(ctx({ isAdmin: false, perms: ['admin.users'], platform: true })))).flat();
     expect(theirs).not.toContain('tenancy');
@@ -225,23 +255,49 @@ describe('who sees what - the router guard’s rule, per page', () => {
   });
 
   it('a delegated administrator holding admin.monitor: the dashboard, Sync, Usage and the Queue', () => {
-    const d = drawn(buildAdminNav(ctx({ isAdmin: false, perms: ['admin.monitor'] })));
-    expect(d).toEqual({ dashboard: ['(link)'], files: ['explore', 'sync', 'usage'], system: ['queue'] });
+    const d = drawn(buildAdminNav(ctx({ isAdmin: false, perms: ['admin.monitor'], platform: true })));
+    expect(d).toEqual({ dashboard: ['(link)'], files: ['explore', 'sync', 'usage'], maintenance: ['queue'] });
   });
 
-  it('a delegated administrator holding admin.audit: the Audit log alone under System', () => {
-    const d = drawn(buildAdminNav(ctx({ isAdmin: false, perms: ['admin.audit'] })));
-    expect(d.system).toEqual(['audit']);
+  it('a delegated administrator holding admin.audit: the Audit log alone under Maintenance & records', () => {
+    const d = drawn(buildAdminNav(ctx({ isAdmin: false, perms: ['admin.audit'], platform: true })));
+    expect(d.maintenance).toEqual(['audit']);
     expect(d.people).toBeUndefined();
+    expect(d.settings).toBeUndefined();
   });
 
   it('Tenants to the platform operator, My tenant to a tenant’s administrator, never both', () => {
-    const op = Object.values(drawn(buildAdminNav(ctx({ tenants: true })))).flat();
+    const op = Object.values(drawn(buildAdminNav(ctx({ tenants: true, platform: true })))).flat();
     expect(op).toContain('tenants');
     expect(op).not.toContain('tenant-self');
-    const own = Object.values(drawn(buildAdminNav(ctx({ tenantSelf: true })))).flat();
+    const own = Object.values(drawn(buildAdminNav(ctx({ tenantSelf: true, platform: false })))).flat();
     expect(own).toContain('tenant-self');
     expect(own).not.toContain('tenants');
+  });
+
+  // Task #258: a tenant's administrator is not offered a page about the
+  // instance - each one's API answers them 403 on read and on write
+  // (backend handlers/admin_menu_platform_pages_test.go holds the server to
+  // the same list). The summary defaults on Notifications are their
+  // tenant's, so that page stays.
+  it('the pages a tenant’s administrator is not offered', () => {
+    expect(adminNavPages().filter((p) => p.only === 'platform').map((p) => p.route).sort()).toEqual([...PLATFORM_PAGES].sort());
+    const d = drawn(buildAdminNav(ctx({ tenantSelf: true, platform: false })));
+    const theirs = Object.values(d).flat();
+    for (const page of PLATFORM_PAGES) expect(theirs, page).not.toContain(page);
+    expect(d).toEqual({
+      dashboard: ['(link)'],
+      files: ['explore', 'admin-files', 'shares', 'trash', 'tagged', 'duplicates', 'storages', 'connections', 'sync'],
+      people: ['users', 'groups', 'roles', 'grants'],
+      settings: ['branding', 'tenant-self', 'encryption', 'notifications', 'api-mcp'],
+      maintenance: ['tools', 'audit', 'about'],
+    });
+    expect(Object.keys(d)).toEqual(['dashboard', 'files', 'people', 'settings', 'maintenance']);
+  });
+
+  it('the platform’s own administrator of a multi-tenant install is offered them all', () => {
+    const theirs = Object.values(drawn(buildAdminNav(ctx({ tenants: true, platform: true })))).flat();
+    for (const page of PLATFORM_PAGES) expect(theirs, page).toContain(page);
   });
 
   it('an installed app’s screen is a row of the Apps section, by its icon NAME, for an administrator', () => {

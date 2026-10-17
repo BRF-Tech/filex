@@ -14,6 +14,7 @@ import (
 	billy "github.com/go-git/go-billy/v5"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -52,10 +53,21 @@ func (f *fs) OpenFile(name string, flag int, _ os.FileMode) (billy.File, error) 
 	write := flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_APPEND) != 0
 
 	if write {
-		if !f.canDo(t, f.writeNeed(t)) {
+		if !t.changeable() {
+			// The export's own root is a folder, never a file to write.
+			return nil, os.ErrPermission
+		}
+		need := f.writeNeed(t)
+		if !f.canDo(t, need) {
 			// A write that cannot happen must say so — unlike a read, where
 			// "no such file" is the answer that keeps the tree from leaking.
 			return nil, os.ErrPermission
+		}
+		// A new file's name, asked at the CREATE (internal/leafname).
+		if need == perm.FilesCreate {
+			if err := refuseName(t.Rel); err != nil {
+				return nil, err
+			}
 		}
 	} else if !f.canRead(t) {
 		return nil, os.ErrNotExist

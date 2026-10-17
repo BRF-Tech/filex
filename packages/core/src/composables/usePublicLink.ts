@@ -572,6 +572,12 @@ export function usePublicRequest(token: string, opts: PublicLinkOptions) {
       };
       const form = new FormData();
       for (const f of files) form.append('file', f, f.name);
+      // The names again, one plain field per file in the same order (task
+      // #238): a browser escapes `"` and line breaks in a multipart FILENAME
+      // (`%22`, `%0A`) and the server cannot undo it, so `say "hi".txt`
+      // arrived as `say %22hi%22.txt`. The explorer's upload does the same
+      // (useFileApi uploadMultipart).
+      for (const f of files) form.append('name[]', f.name);
       if (name) form.append('uploader_name', name);
       xhr.send(form);
     });

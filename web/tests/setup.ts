@@ -27,7 +27,7 @@ import { teardownDom } from './helpers/teardown';
   takeServerRules(v);
 }
 
-// matchMedia stub — required by DarkModeToggle / theme.ts on cold boot.
+// matchMedia stub — required by theme.ts on cold boot.
 if (!('matchMedia' in window)) {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,

@@ -83,6 +83,9 @@
       "name": "Server"
     },
     {
+      "name": "Assistant"
+    },
+    {
       "name": "Agents (/api/ai)"
     }
   ],
@@ -5473,6 +5476,104 @@
         "x-filex-token-verb": "read"
       }
     },
+    "/api/files/manager/trash/same": {
+      "post": {
+        "operationId": "sameInTrash",
+        "summary": "Whether trash entries hold exactly the bytes of a sha256",
+        "description": "For the sync's Delete from this computer, which deletes a held file only when the server still has a copy: a trashed file has no download, so the client sends the sha256 of its own file and the ids of the trash entries of that size, and the server compares. It answers about the entries the caller's own trash listing shows (the rule `GET /api/files/manager/trash` filters by): any other id answers `same: false`, exactly like an entry with other bytes, and nothing of an entry comes back, not even its hash. One request reads at most 2 GiB of the trash; an entry past that answers `checked: false` (not known).",
+        "tags": [
+          "Trash"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "items"
+                ],
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "sha256"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "integer",
+                          "format": "int64",
+                          "description": "A trash entry's id, from the trash listing."
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$",
+                          "description": "The sha256 of the caller's own file, in 64 lower-case hex digits."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One answer per entry asked about. `checked: false`: its bytes were not read, `same` is not known (a client keeps its file).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer",
+                            "format": "int64"
+                          },
+                          "same": {
+                            "type": "boolean"
+                          },
+                          "checked": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`trash_same_items`: no items, more than 50, or a value that is not a sha256.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/TRASH-VERSIONING.md#trash-endpoints"
+        },
+        "x-filex-token-verb": "read"
+      }
+    },
     "/api/files/manager/view-prefs": {
       "get": {
         "operationId": "getViewPrefs",
@@ -8832,6 +8933,444 @@
           "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#post-apifilesversionssnapshot"
         },
         "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/assistant": {
+      "get": {
+        "operationId": "assistantMe",
+        "summary": "The AI assistant as it stands for this person",
+        "tags": [
+          "Assistant"
+        ],
+        "responses": {
+          "200": {
+            "description": "Its state for the caller (`on`, `off` - hidden reads as off - or `not_configured`), whether their role allows it, whether the explorer draws the button, how many days conversations are kept, their choice, and - on - the provider and model that read what they write.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "on",
+                        "off",
+                        "not_configured"
+                      ]
+                    },
+                    "permitted": {
+                      "type": "boolean"
+                    },
+                    "button": {
+                      "type": "boolean"
+                    },
+                    "retention_days": {
+                      "type": "integer"
+                    },
+                    "prefs": {
+                      "type": "object",
+                      "properties": {
+                        "confirm_all": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "anthropic",
+                        "openai",
+                        "ollama"
+                      ]
+                    },
+                    "model": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read",
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/AI-ASSISTANT.md#api"
+        }
+      }
+    },
+    "/api/files/assistant/prefs": {
+      "put": {
+        "operationId": "assistantSetPrefs",
+        "summary": "Change the person's assistant choice",
+        "description": "`confirm_all`: every change waits for the person's approval, not only the ones that cannot be undone. The person's own, like their preferences.",
+        "tags": [
+          "Assistant"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirm_all": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The choice as stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "confirm_all": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read",
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/AI-ASSISTANT.md#api"
+        }
+      }
+    },
+    "/api/files/assistant/conversations": {
+      "get": {
+        "operationId": "assistantListConversations",
+        "summary": "The person's conversations, the latest first",
+        "description": "A person only: a session or the person's own API key, never an app's (`403`). Off, hidden or not set up answers `404 assistant_off` / `assistant_not_configured`; without the `ai.assistant` permission `403 permission_denied`.",
+        "tags": [
+          "Assistant"
+        ],
+        "responses": {
+          "200": {
+            "description": "At most 100.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "conversations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "created_ms": {
+                            "type": "integer"
+                          },
+                          "updated_ms": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read",
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/AI-ASSISTANT.md#api"
+        }
+      },
+      "delete": {
+        "operationId": "assistantDeleteConversations",
+        "summary": "Delete every conversation of the person",
+        "description": "Works whether the assistant is on or not.",
+        "tags": [
+          "Assistant"
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read",
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/AI-ASSISTANT.md#api"
+        }
+      }
+    },
+    "/api/files/assistant/conversations/{id}": {
+      "get": {
+        "operationId": "assistantGetConversation",
+        "summary": "One conversation, as the panel draws it",
+        "description": "A person only: a session or the person's own API key, never an app's (`403`). Off, hidden or not set up answers `404 assistant_off` / `assistant_not_configured`; without the `ai.assistant` permission `403 permission_denied`.",
+        "tags": [
+          "Assistant"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Its items (the person's messages, the replies, every step a tool took), the step waiting for approval if there is one, the provider and the model.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read",
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/AI-ASSISTANT.md#api"
+        }
+      },
+      "delete": {
+        "operationId": "assistantDeleteConversation",
+        "summary": "Delete one conversation of the person",
+        "description": "`404 assistant_not_found` when it is not theirs. Works whether the assistant is on or not.",
+        "tags": [
+          "Assistant"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read",
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/AI-ASSISTANT.md#api"
+        }
+      }
+    },
+    "/api/files/assistant/chat": {
+      "post": {
+        "operationId": "assistantChat",
+        "summary": "Ask the assistant",
+        "description": "A person only: a session or the person's own API key, never an app's (`403`). Off, hidden or not set up answers `404 assistant_off` / `assistant_not_configured`; without the `ai.assistant` permission `403 permission_denied`. The tools run as the person, each asking its own verb and permission; a change that cannot be undone waits for `decide`.",
+        "tags": [
+          "Assistant"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "conversation_id": {
+                    "type": "integer",
+                    "description": "Absent: a new conversation."
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "paths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The selection, as context: the paths, not the contents."
+                  }
+                },
+                "required": [
+                  "message"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-sent events: `conversation` `{id, title}`, `text` `{delta}`, `step` and `approval` (a step, already said in the person's language), `done` `{reason, conversation}`, `error` `{error, message, detail}`.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read",
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/AI-ASSISTANT.md#api"
+        }
+      }
+    },
+    "/api/files/assistant/conversations/{id}/decide": {
+      "post": {
+        "operationId": "assistantDecide",
+        "summary": "Approve or decline the step that waits",
+        "description": "A person only: a session or the person's own API key, never an app's (`403`). Off, hidden or not set up answers `404 assistant_off` / `assistant_not_configured`; without the `ai.assistant` permission `403 permission_denied`. `409 assistant_nothing_waiting` when no step waits.",
+        "tags": [
+          "Assistant"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "approve": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "approve"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-sent events: `conversation` `{id, title}`, `text` `{delta}`, `step` and `approval` (a step, already said in the person's language), `done` `{reason, conversation}`, `error` `{error, message, detail}`.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read",
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/AI-ASSISTANT.md#api"
+        }
+      }
+    },
+    "/api/files/assistant/conversations/{id}/undo": {
+      "post": {
+        "operationId": "assistantUndo",
+        "summary": "Undo a change the assistant made",
+        "description": "A person only: a session or the person's own API key, never an app's (`403`). Off, hidden or not set up answers `404 assistant_off` / `assistant_not_configured`; without the `ai.assistant` permission `403 permission_denied`. Put back through the trash or the version history, as the person. `409 assistant_no_undo` for a step that cannot be undone.",
+        "tags": [
+          "Assistant"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "step_id": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "step_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The step, now undone, and the conversation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "conversation": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read",
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/AI-ASSISTANT.md#api"
+        }
       }
     },
     "/api/files/ws-ticket": {

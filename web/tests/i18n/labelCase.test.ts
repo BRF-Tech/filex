@@ -74,11 +74,19 @@ const NAMES = new Set([
   'Alex', 'Smith', 'Ahmet', 'Yılmaz',
 ]);
 
+/** Names of more than one word, matched whole so that neither word becomes a
+ *  name everywhere ("Server" alone is no name): a product, a page quoted by
+ *  its title. */
+const NAME_PHRASES = [
+  /\bDocument Server\b/g, // "ONLYOFFICE Document Server" (defaultApps.engine.documentServer)
+  /\bExternal services\b/g, // the page, by its title (defaultApps.engine.kindServer)
+];
+
 function titleCased(value: string, tag: string): string[] | null {
   const v = value.trim();
   if (v.length > 40 || /[.:!?]$/.test(v)) return null;
   // A quoted label and anything after an arrow are another screen's words.
-  const text = v
+  const text = NAME_PHRASES.reduce((acc, re) => acc.replace(re, ' '), v)
     .replace(/[“"«][^”"»]*[”"»]/g, ' ')
     .replace(/→.*$/, ' ')
     .replace(/\{[^}]*\}/g, ' ');
@@ -118,5 +126,7 @@ describe('a label is in sentence case', () => {
     expect(titleCased('Delete Permanently', 'en-US')).toEqual(['Permanently']);
     expect(titleCased('Move to Trash', 'en-US')).toBeNull();
     expect(titleCased('Use path-style URLs (Hetzner, MinIO)', 'en-US')).toBeNull();
+    expect(titleCased('ONLYOFFICE Document Server', 'en-US')).toBeNull();
+    expect(titleCased('Add Server', 'en-US'), 'a word of a name is not a name by itself').toEqual(['Server']);
   });
 });

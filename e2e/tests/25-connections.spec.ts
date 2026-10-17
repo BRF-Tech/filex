@@ -251,7 +251,7 @@ test.describe('storage connections', () => {
     await loginAs(page);
     await page.goto('/admin/connections');
     await dismissInstallBanner(page);
-    await expect(page.getByTestId('connections-panel')).toContainText('Storage connections');
+    await expect(page.getByTestId('connections-panel')).toContainText('Connections');
 
     // ⚠ Assert the TEXT, never the component's locale property. A
     // property-level check passed 10/10 in v0.19.0 while the screen was
@@ -264,7 +264,7 @@ test.describe('storage connections', () => {
     await switchLanguage(page, 'tr');
 
     const panel = page.getByTestId('connections-panel');
-    await expect(panel).toContainText('Depo bağlantıları');
+    await expect(panel).toContainText('Bağlantılar');
     // ⚠ The tab strip used to be measured here (Depolar / Nasıl bağlanılır).
     // It went with the storage half; the protocol picker is what the panel
     // opens on now, and its label is the one that has to be Turkish.
@@ -557,6 +557,8 @@ test.describe('storage connections', () => {
     // straight after the URL settles races that, where the old page-bar button
     // was in the page's own chrome and was there immediately.
     await expect(page.getByTestId('sidenav')).toBeVisible({ timeout: 25_000 });
+    // One name (task #258): the row is "Connections", like the panel it opens.
+    await expect(page.getByTestId('sidenav-connect')).toHaveAttribute('aria-label', 'Connections');
     await page.getByTestId('sidenav-connect').click();
     const panel = page.getByTestId('connections-panel');
     await expect(panel).toBeVisible();

@@ -191,10 +191,11 @@ func TestAHoldNeverRewritesPairsJSON(t *testing.T) {
 	}
 }
 
-// Discard trashes held files. One that the engine has since recorded as in
-// step on BOTH sides — an identical copy turned up on the server and was
-// adopted — is not stale any more: trashing it here made the next pass carry
-// the deletion to the server.
+// Discard deletes held files the server has a copy of. One that the engine
+// has since recorded as in step on BOTH sides - an identical copy turned up
+// on the server and was adopted - is not stale any more: deleting it here made
+// the next pass carry the deletion to the server. The server having a copy
+// (it does: the adopted twin) changes nothing about that.
 func TestDiscardLeavesAFileTheBaselineKnowsAlone(t *testing.T) {
 	r := staleMirror(t, MassUploadThreshold+5)
 	r.registerPair()
@@ -220,11 +221,15 @@ func TestDiscardLeavesAFileTheBaselineKnowsAlone(t *testing.T) {
 		t.Fatal("setup: the twin was not adopted")
 	}
 
-	if _, _, err := r.engine.Store.DiscardHeld(r.pair(), r.clock); err != nil {
+	res, err := r.engine.Store.DiscardHeld(context.Background(), r.pair(), trashHolding(body))
+	if err != nil {
 		t.Fatal(err)
 	}
 	if !r.localExists("copies/c000.txt") {
-		t.Fatal("discard trashed a file the baseline records as in step")
+		t.Fatal("discard deleted a file the baseline records as in step")
+	}
+	if got := reasonOf(res, "copies/c000.txt"); got != KeptSynced {
+		t.Fatalf("reason = %q, want %q", got, KeptSynced)
 	}
 	r.runStored()
 	if _, ok := r.srv.files["copies/c000.txt"]; !ok {

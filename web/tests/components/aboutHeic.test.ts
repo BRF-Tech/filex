@@ -82,11 +82,12 @@ describe('About: office documents', () => {
     return mount(About, { global: { plugins: [i18n] } });
   }
 
-  it('OnlyOffice configured: found, and no hint', () => {
+  it('an office engine runs (an app engine or ONLYOFFICE): found, and no hint', () => {
     const w = mountOffice(true);
     const row = w.find('[data-testid="about-tool-Office"]');
     expect(row.text()).toBe('Found');
-    expect(row.element.parentElement?.textContent).toContain('Office documents (ONLYOFFICE)');
+    expect(row.element.parentElement?.textContent).toContain('Office documents');
+    expect(row.element.parentElement?.textContent, 'the row names no one engine (0.57: the app draws them too)').not.toContain('ONLYOFFICE');
     expect(w.find('[data-testid="about-office-hint"]').exists()).toBe(false);
     expect(w.find('[data-testid="about-tool-LibreOffice"]').exists(), 'LibreOffice draws nothing now').toBe(false);
   });
@@ -96,12 +97,14 @@ describe('About: office documents', () => {
       const w = mountOffice(office);
       expect(w.find('[data-testid="about-tool-Office"]').text()).toBe('Not found');
       expect(w.find('[data-testid="about-office-hint"]').text()).toContain('Settings → External services');
+      // 0.57: the Office editor app's engine draws them too (server/office_backends.go).
+      expect(w.find('[data-testid="about-office-hint"]').text()).toContain('Office editor app');
     }
   });
 
   it('in Turkish', () => {
     const w = mountOffice(false, 'tr');
-    expect(w.find('[data-testid="about-tool-Office"]').element.parentElement?.textContent).toContain('Ofis belgeleri (ONLYOFFICE)');
+    expect(w.find('[data-testid="about-tool-Office"]').element.parentElement?.textContent).toContain('Ofis belgeleri');
     expect(w.find('[data-testid="about-office-hint"]').text()).toContain('Dış servisler');
   });
 });

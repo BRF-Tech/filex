@@ -155,21 +155,25 @@ var permRouteTable = map[string]permRoute{
 	"POST /api/notifications/push/test":                 exemptBecause(whyOwnState),
 
 	// ── the explorer ──
-	"POST /api/files/manager":              inHandler("per action: newfolder/newfile/upload files.create (files.modify to replace), rename files.rename, move files.move, delete files.delete"),
-	"PUT /api/files/upload/{id}":           exemptBecause(whyAuthorised),
-	"POST /api/files/upload/{id}/commit":   exemptBecause(whyAuthorised),
-	"DELETE /api/files/upload/{id}":        exemptBecause(whyWithdraw),
-	"POST /api/files/upload/begin":         inHandler("files.create, or files.modify when the target exists"),
-	"POST /api/files/save-text":            inHandler("files.modify, or files.create for a new file"),
-	"POST /api/files/onlyoffice/config":    inHandler("files.modify for edit mode; without it the document opens read-only"),
-	"POST /api/files/onlyoffice/callback":  exemptBecause(whyDocServer),
-	"POST /api/files/onlyoffice/session":   inHandler("files.modify for an answer (mine / theirs); asking whether the session is current needs view"),
-	"POST /api/files/copy":                 inHandler("files.create at the destination"),
-	"POST /api/files/move":                 inHandler("files.move at the source and the destination"),
-	"POST /api/files/delete":               inHandler("files.delete"),
-	"POST /api/files/ops":                  inHandler("per kind: move files.move, delete files.delete, copy files.create at the destination"),
-	"POST /api/files/ops/{id}/cancel":      exemptBecause(whyWithdraw),
-	"POST /api/files/manager/restore":      inHandler("files.create where the file came from"),
+	"POST /api/files/manager":             inHandler("per action: newfolder/newfile/upload files.create (files.modify to replace), rename files.rename, move files.move, delete files.delete"),
+	"PUT /api/files/upload/{id}":          exemptBecause(whyAuthorised),
+	"POST /api/files/upload/{id}/commit":  exemptBecause(whyAuthorised),
+	"DELETE /api/files/upload/{id}":       exemptBecause(whyWithdraw),
+	"POST /api/files/upload/begin":        inHandler("files.create, or files.modify when the target exists"),
+	"POST /api/files/save-text":           inHandler("files.modify, or files.create for a new file"),
+	"POST /api/files/onlyoffice/config":   inHandler("files.modify for edit mode; without it the document opens read-only"),
+	"POST /api/files/onlyoffice/callback": exemptBecause(whyDocServer),
+	"POST /api/files/onlyoffice/session":  inHandler("files.modify for an answer (mine / theirs); asking whether the session is current needs view"),
+	"POST /api/files/copy":                inHandler("files.create at the destination"),
+	"POST /api/files/move":                inHandler("files.move at the source and the destination"),
+	"POST /api/files/delete":              inHandler("files.delete"),
+	"POST /api/files/ops":                 inHandler("per kind: move files.move, delete files.delete, copy files.create at the destination"),
+	"POST /api/files/ops/{id}/cancel":     exemptBecause(whyWithdraw),
+	"POST /api/files/manager/restore":     inHandler("files.create where the file came from"),
+	// #259: whether entries of the caller's own trash listing hold the bytes
+	// of a sha256 - a read sent as POST for its body, judged by the listing's
+	// own rule (trashListKeep); nothing changes, nothing of an entry returns.
+	"POST /api/files/manager/trash/same":   exemptBecause(whyRead),
 	"POST /api/files/manager/tags/":        gated(perm.FilesTag),
 	"POST /api/files/manager/star/":        exemptBecause(whyOwnState),
 	"POST /api/files/manager/recent/":      exemptBecause(whyOwnState),
@@ -232,6 +236,17 @@ var permRouteTable = map[string]permRoute{
 	"POST /api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/ticket":     gated(perm.PluginsRun),
 	"POST /api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/leave":      gated(perm.PluginsRun),
 	"PUT /api/files/plugins/ui/{plugin}/{view}/coedit/{sid}/blob/{name}": gated(perm.PluginsRun),
+
+	// ── the AI assistant (handlers/assistant.go, task #269) ──
+	// ai.assistant is asked inside, after the assistant is found on (off
+	// answers 404 first), and every tool it runs asks that tool's own
+	// permission as the person.
+	"POST /api/files/assistant/chat":                      inHandler("ai.assistant; each tool the model calls asks its own permission, as the person"),
+	"POST /api/files/assistant/conversations/{id}/decide": inHandler("ai.assistant; the approved tool asks its own permission, as the person"),
+	"POST /api/files/assistant/conversations/{id}/undo":   inHandler("ai.assistant; the tool that puts it back asks its own permission, as the person"),
+	"PUT /api/files/assistant/prefs":                      exemptBecause(whyOwnState),
+	"DELETE /api/files/assistant/conversations":           exemptBecause("deletes the caller's own assistant conversations - nobody else's - and must stay possible after ai.assistant is taken away"),
+	"DELETE /api/files/assistant/conversations/{id}":      exemptBecause("deletes one of the caller's own assistant conversations - nobody else's - and must stay possible after ai.assistant is taken away"),
 }
 
 // walkStateChanging returns every non-GET route under the covered prefixes,

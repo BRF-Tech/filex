@@ -111,6 +111,18 @@ export interface AppPluginManifest {
   wasm?: { url?: string; sha256?: string };
   /** The kinds of file the app draws thumbnails of (filex 0.50). */
   thumbnails?: { applies: PluginApplies };
+  /** The app's own interface; only what the admin panel reads of it. */
+  ui?: AppPluginManifestUI;
+}
+
+/**
+ * The `ui` block as far as the admin panel reads it (filex 0.57): the kinds
+ * of file an administrator may add to the app (`extras`, backend
+ * wasmplugin/extras_catalog.go), each with the catalog its release offers.
+ */
+export interface AppPluginManifestUI {
+  package_fetch?: boolean;
+  extras?: Record<string, { catalog?: { url?: string; sha256?: string } }>;
 }
 
 export type AppPluginState = 'running' | 'disabled' | 'refused' | 'failed' | 'unlicensed' | string;
@@ -547,6 +559,59 @@ export interface AppThumbLimitsAnswer {
   mime: string[];
 }
 
+/**
+ * One file an administrator added to an app (`GET …/{id}/extras`,
+ * backend wasmplugin/extras.go): served to its interface under its package
+ * address, `extra/<path>`.
+ */
+export interface AppExtraFile {
+  /** Under extra/: `dictionaries/pl_PL/pl_PL.dic.txt`. */
+  path: string;
+  /** The kind (`dictionaries`). */
+  kind: string;
+  size: number;
+  modified: string;
+  /** Said by the write that stored it, not by the list. */
+  sha256?: string;
+}
+
+/** An app's added files, its ceilings, and whether its interface reads them. */
+export interface AppExtrasAnswer {
+  files: AppExtraFile[];
+  bytes: number;
+  max_file_bytes: number;
+  max_bytes: number;
+  /** The kinds the app names in its manifest (`ui.extras`), filex 0.57. */
+  kinds: string[];
+  /** Those its release offers a catalog of (one-click install), filex 0.57. */
+  catalogs?: string[];
+  /** The app was granted `ui:package-fetch` and names a kind: its interface can read them. */
+  read: boolean;
+}
+
+/** One item of the catalog an app's release offers (`GET …/{id}/extras-catalog/{kind}`): a dictionary's language. */
+export interface AppExtraCatalogItem {
+  id: string;
+  label?: string;
+  license?: string;
+  /** Its files together, as the catalog says them. */
+  size: number;
+  files: number;
+  /** Every file of it is among the added files; `partial`: some are. */
+  installed: boolean;
+  partial?: boolean;
+}
+
+export interface AppExtraCatalogAnswer {
+  kind: string;
+  items: AppExtraCatalogItem[];
+}
+
+/** An added file's place in the address: each segment encoded, the slashes kept. */
+function extraAddress(id: number, path: string): string {
+  return `${BASE}/${id}/extras/${path.split('/').map(encodeURIComponent).join('/')}`;
+}
+
 /** An install's answer: the app, and the File types choices that could not be
  *  written (the app is installed either way). */
 export type AppPluginInstalled = AppPlugin & { association_errors?: string[] };
@@ -594,7 +659,10 @@ export type AppPluginInstallSource =
   | { kind: 'github'; repo: string; ref?: string }
   // ⚠ `wasm` / `url` absent = a language pack, which has no module (the
   // server decides from the manifest and refuses the wrong combination).
-  | { kind: 'upload'; wasm?: File | null; manifest: File; signature?: string; ui?: File | null }
+  // `ui` is the interface bundle (ui.zip) a `ui` block needs, `engine` the
+  // office engine (engine.zip) an `engines.office` block needs: an upload
+  // carries both itself, as the parts `ui` and `engine`.
+  | { kind: 'upload'; wasm?: File | null; manifest: File; signature?: string; ui?: File | null; engine?: File | null }
   | { kind: 'url'; url?: string; manifest_url: string; sha256?: string };
 
 /** Error codes the install endpoints answer with (400/409). */
@@ -606,7 +674,9 @@ export type AppPluginErrorCode =
   | 'signature_required'
   | 'signature_invalid'
   | 'name_taken'
-  | 'describe_mismatch';
+  | 'describe_mismatch'
+  | 'load_failed'
+  | 'load_timeout';
 
 /** A refused install, as the wizard needs it to say what happened. */
 export interface AppPluginInstallRefusal {
@@ -691,6 +761,7 @@ function installPayload(
     if (source.wasm) form.append('wasm', source.wasm);
     form.append('manifest', source.manifest);
     if (source.ui) form.append('ui', source.ui);
+    if (source.engine) form.append('engine', source.engine);
     if (source.signature) form.append('signature', source.signature);
     form.append('grant', JSON.stringify({ permissions }));
     if (associations.length) form.append('associations', JSON.stringify(associations));
@@ -730,6 +801,20 @@ const BASE = '/admin/app-plugins';
  * the client does; this is the half that lets the person see the answer.)
  */
 export const INSTALL_TIMEOUT_MS = 180_000;
+
+/**
+ * A dry run's request config. ⚠ An UPLOAD's review carries the files
+ * themselves, so it waits as long as an install: the Office editor 0.4.0 is
+ * a 126 MB ui.zip and a 14 MB engine.zip, and under the client's 30 s
+ * default a link slower than about 40 Mbit/s cut the review off mid-upload
+ * ("timeout of 30000ms exceeded"). A review from a source compiles and
+ * sends nothing and keeps the default.
+ */
+function dryRunConfig(body: FormData | Record<string, unknown>) {
+  return body instanceof FormData
+    ? { params: { dry_run: 1 }, timeout: INSTALL_TIMEOUT_MS }
+    : { params: { dry_run: 1 } };
+}
 
 /** The list answer, defaults filled — for the list and for "Check now". */
 function listOf(data: Partial<AppPluginList>): AppPluginList {
@@ -790,7 +875,7 @@ export const AppPluginsApi = {
   /** `?dry_run=1`: the manifest, the permission review and the wasm hash — nothing installed. */
   async dryRun(source: AppPluginInstallSource): Promise<AppPluginDryRun> {
     const { body } = installPayload(source, []);
-    const { data } = await api.post<AppPluginDryRun>(BASE, body, { params: { dry_run: 1 } });
+    const { data } = await api.post<AppPluginDryRun>(BASE, body, dryRunConfig(body));
     return data;
   },
 
@@ -881,7 +966,7 @@ export const AppPluginsApi = {
   /** Dry-run of an upgrade: the new manifest and its permission review. */
   async upgradeDryRun(id: number, source: AppPluginInstallSource): Promise<AppPluginDryRun> {
     const { body } = installPayload(source, []);
-    const { data } = await api.post<AppPluginDryRun>(`${BASE}/${id}/upgrade`, body, { params: { dry_run: 1 } });
+    const { data } = await api.post<AppPluginDryRun>(`${BASE}/${id}/upgrade`, body, dryRunConfig(body));
     return data;
   },
 
@@ -937,5 +1022,45 @@ export const AppPluginsApi = {
   async putThumbLimits(id: number, limits: AppThumbLimits): Promise<AppThumbLimitsAnswer> {
     const { data } = await api.put<AppThumbLimitsAnswer>(`${BASE}/${id}/thumbnails`, limits);
     return data;
+  },
+
+  /** The files an administrator added to an app (its extra dictionaries). */
+  async extras(id: number): Promise<AppExtrasAnswer> {
+    const { data } = await api.get<AppExtrasAnswer>(`${BASE}/${id}/extras`);
+    return { ...data, files: data.files ?? [] };
+  },
+
+  /** Add or replace one, the file's bytes as they are. 400 `extra_path`,
+   *  409 `extras_unused`, 413 `too_large`, 422 `extra_not_text`, 507
+   *  `extras_full`; an API key gets 403 `session_required`. */
+  async putExtra(id: number, path: string, file: Blob): Promise<AppExtraFile> {
+    const { data } = await api.put<AppExtraFile>(extraAddress(id, path), file, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+      timeout: INSTALL_TIMEOUT_MS,
+    });
+    return data;
+  },
+
+  /** Remove one; 404 when it is not there. */
+  async deleteExtra(id: number, path: string): Promise<void> {
+    await api.delete(extraAddress(id, path));
+  },
+
+  /** What the app's release offers of a kind (filex 0.57). 404
+   *  `extras_no_catalog`, 409 `extras_unused`, 502 `extras_catalog`. */
+  async extraCatalog(id: number, kind: string): Promise<AppExtraCatalogAnswer> {
+    const { data } = await api.get<AppExtraCatalogAnswer>(`${BASE}/${id}/extras-catalog/${encodeURIComponent(kind)}`);
+    return { ...data, items: data.items ?? [] };
+  },
+
+  /** Download one item of it - every file checked against the catalog - and
+   *  add it. 502 `extras_catalog` when a file is not the catalog's. */
+  async installExtraItem(id: number, kind: string, item: string): Promise<AppExtraFile[]> {
+    const { data } = await api.post<{ files: AppExtraFile[] }>(
+      `${BASE}/${id}/extras-catalog/${encodeURIComponent(kind)}/${encodeURIComponent(item)}`,
+      undefined,
+      { timeout: INSTALL_TIMEOUT_MS },
+    );
+    return data.files ?? [];
   },
 };

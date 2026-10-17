@@ -1,4 +1,4 @@
-// 16-explorer-connections — "How to connect" and "API keys", reached from the
+// 16-explorer-connections — "Connections" and "API keys", reached from the
 // explorer's navigation panel (v0.30.0, gezinti:g1).
 //
 // Both surfaces already existed in @brftech/filex-core and neither was
@@ -28,7 +28,7 @@ describe('connections + API keys from the navigation panel', () => {
     cy.get('[data-testid="sidenav-apikeys"]').should('be.visible');
   });
 
-  it('"How to connect" opens the shared connections panel — and nothing else', () => {
+  it('"Connections" opens the shared connections panel — and nothing else', () => {
     cy.get('[data-testid="sidenav-connect"]').click();
     cy.get('[data-testid="explorer-overlay"]').should('be.visible');
     cy.get('[data-testid="connections-panel"]').should('be.visible');

@@ -35,6 +35,19 @@ function tmp(): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const sha = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
+
+/**
+ * A report, read off the file: the monitor names the version, and the bytes
+ * stay in the document (whoever acts on it reads them from there, held to
+ * that version). `text` is what the file holds when it is reported; `same`
+ * whether the reported version is that.
+ */
+function reportOf(file: string, version: ow.LocalVersion) {
+  const text = fs.readFileSync(file, 'utf8');
+  return { text, version, same: sha(text) === version.sha256 };
+}
+
 /** Resolves with the first report, or rejects after `ms`. */
 function nextReport(reports: Array<{ text: string }>, ms: number, from = 0): Promise<{ text: string }> {
   const until = Date.now() + ms;
@@ -51,12 +64,12 @@ function nextReport(reports: Array<{ text: string }>, ms: number, from = 0): Pro
 async function watching(dir: string, name: string, content: string) {
   const file = path.join(dir, name);
   fs.writeFileSync(file, content);
-  const reports: Array<{ text: string; version: ow.LocalVersion }> = [];
+  const reports: Array<{ text: string; version: ow.LocalVersion; same: boolean }> = [];
   const monitor = new api.LocalDocMonitor({
     path: file,
     baseline: versionOf(file),
     debounceMs: 150,
-    onChange: (version: ow.LocalVersion, bytes: Buffer) => reports.push({ text: bytes.toString('utf8'), version }),
+    onChange: (version: ow.LocalVersion) => reports.push(reportOf(file, version)),
   });
   monitor.start();
   return { file, monitor, reports };
@@ -72,6 +85,7 @@ test('watch: an agent that writes a temp file and RENAMES it over the document i
     writeByRename(file, 'WHAT-THE-AGENT-WROTE');
     const got = await nextReport(reports, 5000);
     assert.equal(got.text, 'WHAT-THE-AGENT-WROTE');
+    assert.equal(reports[0]!.version.sha256, sha('WHAT-THE-AGENT-WROTE'), 'the version reported is the one the agent wrote');
   } finally {
     monitor.stop();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -86,6 +100,7 @@ test('watch: an editor that writes the document IN PLACE is noticed too', async 
     fs.writeFileSync(file, 'WRITTEN-IN-PLACE');
     const got = await nextReport(reports, 5000);
     assert.equal(got.text, 'WRITTEN-IN-PLACE');
+    assert.ok(reports[0]!.same, 'the version reported is the one written in place');
   } finally {
     monitor.stop();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -109,6 +124,7 @@ test("watch: filex's OWN write-back is never reported as a change from outside",
     writeByRename(file, 'AGENT-AFTER-FILEX');
     const got = await nextReport(reports, 5000);
     assert.equal(got.text, 'AGENT-AFTER-FILEX');
+    assert.ok(reports[0]!.same);
   } finally {
     monitor.stop();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -133,6 +149,7 @@ test('watch: one outside version is reported ONCE, however many events and looks
     writeByRename(file, 'V2');
     const second = await nextReport(reports, 5000, 1);
     assert.equal(second.text, 'V2');
+    assert.deepEqual(reports.map((r) => r.version.sha256), [sha('V1'), sha('V2')]);
   } finally {
     monitor.stop();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -149,7 +166,7 @@ test("watch: the poll's look finds a change even where the folder watch heard no
   const monitor = new api.LocalDocMonitor({
     path: file,
     baseline: versionOf(file),
-    onChange: (_v: ow.LocalVersion, bytes: Buffer) => reports.push(bytes.toString('utf8')),
+    onChange: (v: ow.LocalVersion) => reports.push(v.sha256 === sha(fs.readFileSync(file, 'utf8')) ? fs.readFileSync(file, 'utf8') : '?'),
   });
   try {
     // Never started: no watcher, only the look.
@@ -225,12 +242,13 @@ test('version: what filex records for a file is its size, its timestamp and the 
   const file = path.join(dir, 'a.docx');
   fs.writeFileSync(file, 'HELLO');
   try {
-    const got = await api.readLocalVersion(file);
+    const got = await api.hashLocalVersion(file);
     assert.ok(got, 'nothing was read');
-    assert.equal(got.version.size, 5);
-    assert.equal(got.version.sha256, crypto.createHash('sha256').update('HELLO').digest('hex'));
-    assert.equal(got.bytes.toString('utf8'), 'HELLO');
-    assert.equal(await api.readLocalVersion(path.join(dir, 'missing.docx')), null);
+    assert.equal(got.size, 5);
+    assert.equal(got.sha256, crypto.createHash('sha256').update('HELLO').digest('hex'));
+    assert.equal(got.mtimeMs, fs.statSync(file).mtimeMs);
+    assert.equal(await api.hashLocalVersion(path.join(dir, 'missing.docx')), null);
+    assert.equal(await api.hashLocalVersion(dir), null, 'a folder is no document');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

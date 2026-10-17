@@ -59,9 +59,12 @@ export function useAdminNav(opts: { trashFull?: { readonly value: boolean } } = 
       // administrator runs My tenant (docs/TENANT-ADMIN.md). Off, neither.
       tenants: tenancy.operator.value,
       tenantSelf: tenancy.tenantAdmin.value,
-      // The Multi-tenant mode switch: whoever may configure the instance, on
-      // every install (it is where the mode is turned on).
-      platform: caps.data.caller_admin === true,
+      // The pages about the instance (Protection, Plugins, the Queue, the
+      // Multi-tenant mode switch...): whoever stands in the platform's scope -
+      // everybody on a single-tenant install, never a tenant's administrator,
+      // whom their API answers 403 (task #258). A server from before the
+      // field answered only caller_admin.
+      platform: caps.data.caller_platform ?? caps.data.caller_admin === true,
       // An administrator's alone, as the old sidebar had it: an app's screen
       // is the role's page (the route names no admin.* permission).
       apps: auth.isAdmin ? apps.value : [],

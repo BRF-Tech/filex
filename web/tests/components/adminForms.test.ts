@@ -77,6 +77,11 @@ vi.mock('@/api/storages', () => ({
   StoragesApi: { list: vi.fn(async () => []) },
 }));
 
+// The server's defaults card (components/settings/InstanceSettingsCard, #258)
+// shares the page: it reads its group as it mounts and draws a <form> of its
+// own. It is not what this file tests.
+vi.mock('@/components/settings/InstanceSettingsCard.vue', () => ({ default: { template: '<div />' } }));
+
 // The Webhooks page's global-webhook card reads its config as it mounts.
 vi.mock('@/api/notifications', () => ({
   NotificationsApi: {

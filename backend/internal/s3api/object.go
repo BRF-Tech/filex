@@ -63,12 +63,12 @@ func (h *Handler) getObject(w http.ResponseWriter, r *http.Request, p *protocola
 
 	src, err := h.cfg.Body.Resolve(ctx, drv, st.ID, key, nil)
 	if err != nil {
-		h.objectError(w, r, bodyWanted, statusForStorageErr(err), codeForStorageErr(err), "the specified key does not exist")
+		h.storageFailed(w, r, bodyWanted, err)
 		return
 	}
 	stat, err := src.Stat(ctx)
 	if err != nil {
-		h.objectError(w, r, bodyWanted, statusForStorageErr(err), codeForStorageErr(err), "the specified key does not exist")
+		h.storageFailed(w, r, bodyWanted, err)
 		return
 	}
 	if stat.Kind == storage.KindDirectory {
@@ -114,7 +114,7 @@ func (h *Handler) getObject(w http.ResponseWriter, r *http.Request, p *protocola
 	if rng != nil && src.CanRange() {
 		body, rerr := src.ReadRange(ctx, rng.off, rng.length)
 		if rerr != nil {
-			h.objectError(w, r, true, statusForStorageErr(rerr), codeForStorageErr(rerr), rerr.Error())
+			h.storageFailed(w, r, true, rerr)
 			return
 		}
 		defer body.Close()
@@ -127,7 +127,7 @@ func (h *Handler) getObject(w http.ResponseWriter, r *http.Request, p *protocola
 
 	body, err := src.Open(ctx)
 	if err != nil {
-		h.objectError(w, r, true, statusForStorageErr(err), codeForStorageErr(err), err.Error())
+		h.storageFailed(w, r, true, err)
 		return
 	}
 	defer body.Close()
@@ -340,18 +340,4 @@ func precondCode(status int) string {
 		return "NotModified"
 	}
 	return "PreconditionFailed"
-}
-
-func statusForStorageErr(err error) int {
-	if errors.Is(err, storage.ErrNotFound) {
-		return http.StatusNotFound
-	}
-	return http.StatusInternalServerError
-}
-
-func codeForStorageErr(err error) string {
-	if errors.Is(err, storage.ErrNotFound) {
-		return "NoSuchKey"
-	}
-	return "InternalError"
 }

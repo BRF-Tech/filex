@@ -42,6 +42,10 @@
  *     same as an administrator editing it.
  *   • Thumbnails (0.50): only for an app that draws them - the kinds, and
  *     its limits (AppPluginThumbLimits).
+ *   • Dictionaries (0.57): only for an app that names them in its manifest
+ *     (`ui.extras.dictionaries`) and reads its own package - the
+ *     dictionaries an administrator adds or installs from the app's release
+ *     (AppPluginDictionaries). An app that names none (draw.io) has none.
  *   • The log polls `?after=<next>` every 2 s while the drawer is open.
  */
 import { computed, ref, watch } from 'vue';
@@ -75,6 +79,8 @@ import ChipInput from '@/components/ui/ChipInput.vue';
 import Modal from '@/components/ui/Modal.vue';
 import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
 import AppPluginThumbLimits from './AppPluginThumbLimits.vue';
+import AppPluginDictionaries from './AppPluginDictionaries.vue';
+import { declaresExtra } from '@/lib/appDictionaries';
 
 const props = defineProps<{
   plugin: AppPlugin | null;
@@ -259,6 +265,11 @@ const grantedRows = computed(() => {
     };
   });
 });
+
+/** Its interface reads its own package (`ui:package-fetch`) and its manifest
+ *  names dictionaries (`ui.extras`): the only kind of app they are added to. */
+const readsPackage = computed(() => grantedRows.value.some((r) => r.id === 'ui:package-fetch'));
+const takesDictionaries = computed(() => readsPackage.value && declaresExtra(detail.value?.manifest, 'dictionaries'));
 
 const uiLocale = computed<'en' | 'tr'>(() => (locale.value === 'tr' ? 'tr' : 'en'));
 
@@ -651,6 +662,11 @@ function onLockAction(key: string, row: AppPluginLock) {
 
         <!-- Thumbnails (0.50): an app that draws them, its limits. -->
         <AppPluginThumbLimits v-if="detail.manifest.thumbnails" :plugin-id="detail.id" />
+
+        <!-- Dictionaries (0.57): what an administrator adds for an app whose
+             interface reads its own package - the office editor's languages
+             beyond the ones it brings. -->
+        <AppPluginDictionaries v-if="takesDictionaries" :plugin-id="detail.id" />
 
         <!-- Action overrides -->
         <section class="space-y-3">

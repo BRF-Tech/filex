@@ -33,6 +33,7 @@ import { pluralCategory } from '../lib/plural';
 // which reads `lib/uiLocales` — the cycle uiLocales avoids the same way).
 import { en as EN } from '../locales/en';
 import { foreignText, isolateLtrRuns, isolateValue, localeDir } from '../lib/direction';
+import { containBidi, visibleName } from '../lib/nameRule';
 import { EXPLORER_CLOCK, activeTimeZoneFor, deviceTimeZone } from '../lib/timezone';
 
 /* ── the tag ──────────────────────────────────────────────────────────── */
@@ -446,6 +447,28 @@ export function pickMessage(
   return entry(EN, enForm) ?? entry(EN, key) ?? key;
 }
 
+/**
+ * A row of the trash, whose stored name may carry the trash's
+ * `<Ymd-His>-<rand>__` prefix: soft-deleted (`trashed`), built by the trash
+ * view (`extra_metadata.deleted_at`, lib/filePreview isTrashRow), or listed
+ * inside a `.trash` folder.
+ */
+function inTrash(node: { path?: string; trashed?: boolean; extra_metadata?: unknown }): boolean {
+  if (node.trashed) return true;
+  const meta = node.extra_metadata;
+  if (meta && typeof meta === 'object' && 'deleted_at' in meta) return true;
+  return typeof node.path === 'string' && /(^|[/:])\.trash\//.test(node.path);
+}
+
+/** What nodeDisplayName and nodeName read off a row. */
+type NamedNode = {
+  basename: string;
+  fxe_name?: string;
+  path?: string;
+  trashed?: boolean;
+  extra_metadata?: unknown;
+};
+
 /** `{name}` placeholders, replaced verbatim. */
 function interpolate(raw: string, vars: Record<string, string | number>): string {
   return Object.entries(vars).reduce(
@@ -472,9 +495,16 @@ function render(
   rtl: boolean,
 ): string {
   const raw = pickMessage(table, key, vars);
-  if (!rtl) return interpolate(raw, vars);
+  // A value cannot rearrange the sentence it is put in (task #238): a file
+  // named `invoice` + RIGHT-TO-LEFT OVERRIDE + `fdp.exe` turned the rest of
+  // "Renamed {name} to {to}" around in EVERY language, isolation or not.
+  // `containBidi` keeps what filex and Intl put there themselves (balanced
+  // isolates, marks), so a size `t()` already rendered in Arabic survives.
+  const contained: Record<string, string | number> = {};
+  for (const [k, v] of Object.entries(vars)) contained[k] = typeof v === 'string' ? containBidi(v) : v;
+  if (!rtl) return interpolate(raw, contained);
   const isolated: Record<string, string | number> = {};
-  for (const [k, v] of Object.entries(vars)) isolated[k] = typeof v === 'string' ? isolateValue(v) : v;
+  for (const [k, v] of Object.entries(contained)) isolated[k] = typeof v === 'string' ? isolateValue(v) : v;
   return isolateLtrRuns(interpolate(raw, isolated));
 }
 
@@ -577,14 +607,34 @@ export function useLocale(
    *   - `.trash` directory → "Çöp Kutusu" / "Trash"
    *   - Trash entries are stored as `<Ymd-His>-<rand>__<original>` so
    *     listings inside .trash/ would otherwise show timestamps. Strip
-   *     that prefix so the user sees the original basename.
+   *     that prefix so the user sees the original basename — on a TRASH row
+   *     only (task #238): a file somebody named
+   *     `20261015-120000-x__invoice.pdf` is called that, and was shown as
+   *     `invoice.pdf` in every folder.
+   *   - ⚠ Shown through `visibleName` (lib/nameRule): a bidi control in the
+   *     name is drawn as U+FFFD, so `invoice<RLO>fdp.exe` keeps its true
+   *     extension in view instead of reading `invoiceexe.pdf`. Display only —
+   *     `basename` stays the stored name for every path and request.
    */
-  function nodeDisplayName(node: { basename: string; fxe_name?: string }): string {
+  function nodeDisplayName(node: NamedNode): string {
+    if (node.basename === '.trash') return t('node.trash');
+    return visibleName(nodeName(node));
+  }
+
+  /**
+   * The name nodeDisplayName draws, as DATA: what "Copy name" puts on the
+   * clipboard. The same overrides (the encrypted file's real name, the trash
+   * prefix taken off), and every character as it is - a bidi control
+   * included, because the person asked for the name, not for its picture.
+   */
+  function nodeName(node: NamedNode): string {
     if (node.basename === '.trash') return t('node.trash');
     /* wiring:e2 fxe — a single encrypted file opened in this tab. */
     if (typeof node.fxe_name === 'string' && node.fxe_name) return node.fxe_name;
-    const m = node.basename.match(/^\d{8}-\d{6}-[A-Za-z0-9]+__(.+)$/);
-    if (m) return m[1];
+    if (inTrash(node)) {
+      const m = node.basename.match(/^\d{8}-\d{6}-[A-Za-z0-9]+__(.+)$/);
+      if (m) return m[1];
+    }
     return node.basename;
   }
 
@@ -683,6 +733,7 @@ export function useLocale(
      */
     toDate,
     nodeDisplayName,
+    nodeName,
     /**
      * ⚠ RTL — which way this surface's language is written (`lib/direction`,
      * the server's one list). Bind it as `dir` on anything Teleported out of

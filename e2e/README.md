@@ -30,6 +30,7 @@ Drop `--build` once you have a binary in `bin/`, or point at one with
 | `--port <n>` | fixed port instead of a free one |
 | `--grep <pattern>` | passed through to Playwright |
 | `--grep-invert <pattern>` | passed through to Playwright: leaves the matching tests out |
+| `E2E_REPEAT_EACH=<n>` (environment) | runs every selected test `n` times (Playwright's `repeatEach`) - how a spec that was red now and then is shown green every time: `E2E_BROWSERS=webkit E2E_REPEAT_EACH=10 node e2e/run.mjs local --grep 179-app-permissions` |
 | `--shard <i/N>` | runs part `i` of `N` (Playwright's own `--shard`, applied after `--grep` and the engines, so the parts add up to the whole run), on a server, port and data dir of its own, with Playwright's output in `test-results/shard-i-of-N` and the server log in `.artifacts/shard-i-of-N` - N parts can run side by side on one machine. `node scripts/test-shards.mjs e2e-check --shards N` proves the parts add up; [CONTRIBUTING.md → Shards](../docs/CONTRIBUTING.md#shards) has the rest |
 | `--base-path <p>` | serves filex under a sub-path (`FILEX_BASE_PATH`, e.g. `/filex`) behind `lib/subpath-proxy.mjs`, which passes the full path like a real proxy, redirects the specs' own root-relative requests into the base, and **fails the run** when the app asks for anything outside it. `164-sub-path.spec.ts` asserts where each journey lands; at the root it asserts the root addresses. On Git Bash set `MSYS_NO_PATHCONV=1`, or `/filex` arrives as a Windows path |
 | `--no-public-url` | starts filex without `FILEX_PUBLIC_URL`, so it reads its own address from each request (`Host`, `X-Forwarded-Proto`) - the case `202-store-install.spec.ts` holds a store link's `filex_origin` to on an install with no public URL. Ignored with `--base-path` |
@@ -279,6 +280,9 @@ What tells you which it was:
   started, and says when the error came from the host's network stack.
 - The trace of the failing attempt is kept (`trace: 'retain-on-failure'`):
   its network tab shows whether the request was made, pending or refused.
+  (Not on the build host's chain, which records a test only on its second
+  attempt, `E2E_RECORD=retry` - `e2e/helpers/record.ts`; there the retry's
+  trace is the one kept. Run the spec on its own to see the first.)
 - `run.mjs` starts the server at `FILEX_LOG_LEVEL=debug`, so
   `e2e/.artifacts/server.log` has a `msg="http start"` line, with the socket
   (`peer`), for every request that ARRIVED: arrived and unanswered is the

@@ -726,10 +726,11 @@ on every use behind a one-second cache that the admin `PATCH` invalidates. It
 used to be a snapshot of env/YAML taken once at boot, which is how an operator
 could configure OnlyOffice in the admin UI, watch **Test** answer 200, and
 still get `503 onlyoffice not configured` from the editor forever (GitHub #17).
-Env and `config.yaml` are declarative configuration *for* that row: a service
-they name is re-asserted onto it at every boot and reported `env_managed: true`,
-so an admin-UI edit to one of those applies immediately and is reverted at the
-next start.
+Env and `config.yaml` SEED that row (0.57, the one seed rule of every setting
+a variable gives a first value to): a service they name takes their values
+while nothing is configured in it, is reported `env_managed: true`, and an
+admin-UI edit to it applies immediately and stands across restarts;
+`filex settings reseed --external` writes the environment's values again.
 
 ```
 admin PATCH /api/admin/external/onlyoffice ──┐

@@ -30,7 +30,8 @@ func (h *Manager) vfChanges(w http.ResponseWriter, r *http.Request, s *model.Sto
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "action not implemented: changes"})
 		return
 	}
-	rel = strings.Trim(strings.TrimSpace(rel), "/")
+	// Slashes only: a folder named ` x` is not `x` (task #238).
+	rel = strings.Trim(rel, "/")
 	if pathHasDotDot(rel) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
 		return

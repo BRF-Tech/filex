@@ -46,6 +46,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
@@ -380,6 +381,11 @@ func (h *PublicAPI) describe(r *http.Request, sh *model.Share, unlocked bool) Pu
 			if p, live := h.Apps.Registry.ByID(sh.PluginID); live {
 				if info := h.Apps.Registry.PageInfo(sh, p, unlocked); info != nil {
 					app.Plugin, app.Title, app.Files = info.Plugin, info.Title, info.Files
+				}
+				// Copies its creator may no longer download are not listed
+				// (appLinkCopiesServed, serveExposed refuses them too).
+				if len(app.Files) > 0 && !appLinkCopiesServed(r.Context(), h.ACL, h.Store, sh) {
+					app.Files = []wire.FileRef{}
 				}
 				if state, _ := p.State(); state != wasmplugin.StateRunning {
 					out.Revoked = true
@@ -743,6 +749,15 @@ func (h *PublicAPI) enqueueAsCreator(w http.ResponseWriter, r *http.Request, sh 
 		h.jobRefused(w, http.StatusForbidden, "no_access")
 		return
 	}
+	// A result that lands as a new file beside the anchor carries what the
+	// anchor holds: as the creator, what authorise asks (downloadLift at the
+	// result's folder, resultFolder).
+	if outStorage, outDir, ok := resultFolder(mode, nil, storageID, rel); ok {
+		if _, kept, lerr := downloadLift(auth.WithUser(r.Context(), creator), h.Apps.ACL, h.Store, nil, storageID, rel, outStorage, outDir); lerr != nil || !kept {
+			h.jobRefused(w, http.StatusForbidden, "no_access")
+			return
+		}
+	}
 	// The encrypted-folder boundary, drawn where authorise draws it: filex
 	// holds no key for an end-to-end encrypted folder, so a plugin reading one
 	// is handed ciphertext and produces nonsense. The obstacle is on the
@@ -945,6 +960,9 @@ func (h *PublicAPI) Entries(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 		return
 	}
+	// A file the link's creator may not download is not listed: the link
+	// would not serve it (LinkMembers, the no-JS page's filter too).
+	keep := LinkMembers(r.Context(), h.ACL, h.Store, sh, node.StorageID)
 	out := make([]PublicEntry, 0, len(objs))
 	for _, o := range objs {
 		if browseSkip(o.Name) {
@@ -953,6 +971,9 @@ func (h *PublicAPI) Entries(w http.ResponseWriter, r *http.Request) {
 		child := o.Name
 		if rel != "" {
 			child = rel + "/" + o.Name
+		}
+		if o.Kind != storage.KindDirectory && !linkMemberServed(keep, joinShareRel(node.Path, child)) {
+			continue
 		}
 		e := PublicEntry{Name: o.Name, Path: child, IsDir: o.Kind == storage.KindDirectory}
 		if !e.IsDir {
@@ -973,6 +994,12 @@ func (h *PublicAPI) Entries(w http.ResponseWriter, r *http.Request) {
 // links straight at this route.
 func (h *PublicAPI) serveExposed(w http.ResponseWriter, r *http.Request, sh *model.Share, ref string) {
 	if !strings.HasPrefix(ref, "pub:") {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	}
+	// The copies answer the page document's download rule, as its creator
+	// (appLinkCopiesServed): withheld, they read as not there.
+	if !appLinkCopiesServed(r.Context(), h.ACL, h.Store, sh) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 		return
 	}

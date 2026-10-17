@@ -416,6 +416,12 @@ export const SCREENSHOTS = [
     depicts: ['packages/core/src/components/MegaMenu.vue', 'web/src/lib/adminNav.ts', 'web/src/components/TopNav.vue'],
   },
   {
+    // The Settings panel (0.57, #258) open over Admin → Settings → General:
+    // General, Security & data, File processing & integrations.
+    name: 'megamenu/settings-panel-1440.png',
+    depicts: ['packages/core/src/components/MegaMenu.vue', 'web/src/lib/adminNav.ts', 'web/src/components/TopNav.vue', 'web/src/views/Settings.vue'],
+  },
+  {
     // Admin → Encryption: the policy card and the requests waiting.
     name: 'encryption/admin-encryption-1440.png',
     depicts: ['web/src/views/Encryption.vue', 'web/src/components/encryption/EncryptionPolicyCard.vue', 'web/src/components/encryption/EncryptionRequestsPanel.vue'],
@@ -428,12 +434,12 @@ export const SCREENSHOTS = [
   {
     // A semicolon CSV in ONLYOFFICE's spreadsheet, a look first.
     name: 'csvoffice/csv-view-1440.png',
-    depicts: ['packages/core/src/modals/PreviewModal.vue', 'backend/internal/onlyoffice/csv.go'],
+    depicts: ['packages/core/src/modals/PreviewModal.vue', 'backend/internal/onlyoffice/csv_options.go'],
   },
   {
     // The editor tab with the note on what a save as CSV keeps.
     name: 'csvoffice/csv-edit-1440.png',
-    depicts: ['packages/core/src/modals/PreviewModal.vue', 'backend/internal/onlyoffice/csv.go'],
+    depicts: ['packages/core/src/modals/PreviewModal.vue', 'backend/internal/onlyoffice/csv_options.go'],
   },
   // ── v0.52.0: installing from a store, a paid app's license (e2e/shots/store.mjs) ──
   {

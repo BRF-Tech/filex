@@ -557,8 +557,11 @@ func (r *Relay) reusable(s *model.CoEditSession, req OpenRequest, now int64) (bo
 		return idle, nil
 	}
 	clean := s.ChangesHead <= s.SavedThrough
+	// The file as the session holds it: its base, or its last save over it.
+	// A session whose saves go elsewhere (SavedTo: beside it in another
+	// format, a conflict copy) never wrote the file: it is still the base.
 	current := s.BaseSig
-	if s.SavedSig != "" {
+	if s.SavedSig != "" && s.SavedTo == "" {
 		current = s.SavedSig
 	}
 	switch {
@@ -567,6 +570,11 @@ func (r *Relay) reusable(s *model.CoEditSession, req OpenRequest, now int64) (bo
 			return true, nil
 		}
 		return false, ErrBuild
+	case s.SavedTo != "" && idle && clean:
+		// Its edits are all in the file beside: with nobody in it, the file
+		// opens as it is, in a new session - as a Document Server's next
+		// opening after a save beside the document.
+		return true, nil
 	case s.KeyMode != req.KeyMode || current != req.FileSig:
 		if idle && clean {
 			return true, nil
@@ -939,6 +947,15 @@ func (r *Relay) Lease(ctx context.Context, sid, client string, op LeaseOp, chang
 // it, and the file's signature after the write - the server's own reading of
 // the file, never the member's word. Saves only move forward.
 func (r *Relay) Saved(ctx context.Context, sid, client string, through uint64, sig string) (uint64, error) {
+	return r.SavedTo(ctx, sid, client, through, sig, "")
+}
+
+// SavedTo is Saved for a save written to another file than the session's
+// own: `to`, beside it in another format or a conflict copy (filex 0.57).
+// From then on the session's saves go there (CoEditSession.SavedTo), and
+// sig is that file's. "" is the session's own file; a session that saved
+// elsewhere once never goes back to it.
+func (r *Relay) SavedTo(ctx context.Context, sid, client string, through uint64, sig, to string) (uint64, error) {
 	if sig == "" {
 		return 0, ErrBadRequest
 	}
@@ -963,6 +980,9 @@ func (r *Relay) Saved(ctx context.Context, sid, client string, through uint64, s
 		s.Head = next
 		s.SavedThrough = int64(through)
 		s.SavedSig = sig
+		if to != "" {
+			s.SavedTo = to
+		}
 		s.ActiveMs = now
 		seq = uint64(next)
 		return true, nil

@@ -132,6 +132,29 @@ How the limits hold while an archive is unpacked depends on who reads it:
 - Every member lands through the same gate as any other write: ACL, app locks
   (a document under signature is not replaced), filex's own folders
   (`.versions`, `.thumbs`, …) refused, overwrite snapshots and the catalogue.
+- A member whose name no door accepts ([File names](FILE-NAMES.md#the-names-filex-refuses):
+  a backslash, a NUL or another control character, a name of only dots), one
+  that is too long for the destination storage, and one whose path would
+  leave the destination are skipped, not written under another name, and the
+  rest of the archive lands. The result lists each one with its reason
+  (`skipped: [{name, reason}]`, `name_not_allowed`, `name_too_long` or
+  `unsafe_path`; at most 100, the rest counted in `skipped_more`), and a
+  queued extraction that left members out ends `partial`, naming them. A
+  member name starting with two dots (`..notes`) or a digit and a colon
+  (`1:1 notes.txt`) is a name, not a traversal or a drive. 7-Zip is asked for
+  members by their literal names: `*`, `?` and a line break in a name are not
+  special.
+- A ZIP member's name written without the UTF-8 flag is read in the DOS code
+  page of the account's language (857 for Turkish; 437, the ZIP standard's,
+  when nothing else fits), so an archive made by Windows' Compressed folders
+  lists `Bütçe.xlsx`, not replacement characters
+  ([File names](FILE-NAMES.md#what-each-surface-does)). The archive does not say
+  which code page wrote it, so the account's language is a guess
+  ([known limits](FILE-NAMES.md#known-limits)).
+- An archive filex writes (a download of several files, an archive created in
+  the explorer) writes a bidi control or a control character in a member's
+  name as `_`; two members whose names become one that way are both kept, the
+  second as `name (2).ext`.
 - Provider commands inherit request cancellation and have a configurable hard
   timeout.
 

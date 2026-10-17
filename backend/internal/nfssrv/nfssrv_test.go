@@ -437,38 +437,8 @@ func TestReadWriteRoundTrip(t *testing.T) {
 	}
 }
 
-func TestTurkishFilenamesSurvive(t *testing.T) {
-	hz := newHarness(t)
-	u := hz.user(t, "nfs@example.com")
-	st := hz.storage(t, "main")
-	target := hz.mustMount(t, hz.export(t, u, protocolauth.IssueExportRequest{Storage: "main"}))
-
-	const name = "/gölge dosya şğüöç.txt"
-	wr, err := target.OpenFile(name, 0o644)
-	if err != nil {
-		t.Fatalf("openfile: %v", err)
-	}
-	wr.Write([]byte("türkçe"))
-	if err := wr.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(hz.rootOf(t, st), "gölge dosya şğüöç.txt")); err != nil {
-		t.Fatalf("not on disk under its own name: %v", err)
-	}
-	entries, err := target.ReadDirPlus("/")
-	if err != nil {
-		t.Fatalf("readdir: %v", err)
-	}
-	found := false
-	for _, n := range entryNames(entries) {
-		if n == "gölge dosya şğüöç.txt" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("the Turkish name is not in the listing: %v", entryNames(entries))
-	}
-}
+// The Turkish-name round trip that stood here is TestHostileNamesSurvive
+// (hostile_names_test.go), which walks the shared hostile names (task #238).
 
 func TestMkdirRenameAndDeleteToTheTrash(t *testing.T) {
 	hz := newHarness(t)

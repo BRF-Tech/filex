@@ -62,11 +62,11 @@ export function decidePortableDataDir(
   if (!exeDir || !exeDir.trim()) return { portable: false };
   const dataDir = path.join(exeDir, PORTABLE_DATA_DIRNAME);
   if (!canWrite(dataDir)) return { portable: true, dataDir: null, exeDir };
-  // ⚠ The sync engine keeps its OWN state — pairs, per-pair baselines, and the
-  // local trash that holds real copies of files it deleted — and it keeps it in
-  // `~/.filex/sync`, not under userData. On a portable copy that is somebody
-  // else's home directory, and the trash makes it a privacy leak rather than
-  // just untidiness. FILEX_SYNC_DIR moves it inside our folder; the CLI honours
+  // ⚠ The sync engine keeps its OWN state — pairs and per-pair baselines (and,
+  // from an older filex, a local trash holding real copies of deleted files) —
+  // and it keeps it in `~/.filex/sync`, not under userData. On a portable copy
+  // that is somebody else's home directory, and a list of another person's
+  // folders and files there is a privacy leak rather than just untidiness. FILEX_SYNC_DIR moves it inside our folder; the CLI honours
   // it (backend/internal/filesync/store.go).
   return { portable: true, dataDir, syncDir: path.join(dataDir, 'sync') };
 }

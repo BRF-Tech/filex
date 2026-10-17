@@ -12,16 +12,29 @@
 // says in one message what went red and which commits did it, and builds an
 // image only from a green change.
 
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { parseEnvFile } from '../../../scripts/chain/env.mjs';
 import {
+  PAGE_MARKERS,
+  classifyDesktopFile,
   composeReport,
   decideBuild,
+  decideDesktop,
+  desktopManifest,
+  followLines,
+  followTrouble,
+  followVerdict,
+  platformOfRow,
+  renderNightlyPage,
   decideRun,
   decideS3Live,
+  desktopDirsToPrune,
+  desktopVersion,
   expectedRunMin,
   extrasFor,
   imagesToPrune,
@@ -30,6 +43,7 @@ import {
   localDate,
   nextS3LiveState,
   nightRecord,
+  nightlyLabels,
   nightlyRunId,
   nightlySettings,
   nightlyTags,
@@ -43,10 +57,16 @@ import {
   S3_LIVE_PATHS,
   s3LiveFile,
   s3Touched,
+  snapEdgeLine,
+  snapEdgeState,
+  snapUploadVerdict,
   startWindow,
 } from '../../../scripts/chain/nightly-lib.mjs';
+import { rowsOf } from '../../../scripts/chain/nightly-desktop-manifest.mjs';
 import { parseNightlyArgs } from '../../../scripts/chain/nightly.mjs';
+import { edgeSummary } from '../../../scripts/chain/nightly-snap-edge.mjs';
 import { notifyBody, parseReportArgs } from '../../../scripts/chain/report.mjs';
+import { findBash } from '../../../scripts/release/engine.mjs';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
 const CHAIN = path.join(REPO, 'scripts', 'chain');
@@ -310,12 +330,388 @@ describe('the nightly build', () => {
   });
 
   it('builds from the public form of the commit, never from the private tree, and publishes nothing itself', () => {
+    // The export both nightly builds share (#266: the image and the desktop side).
+    const exp = read('nightly-export.sh');
+    expect(exp).toMatch(/bash "\$src\/scripts\/export-public\.sh" "\$dir"/);
+    expect(exp).toMatch(/if \[ "\$head" != "\$sha" \]; then/);
     const sh = read('nightly-build.sh');
-    expect(sh).toMatch(/bash "\$NB_SRC\/scripts\/export-public\.sh" "\$NB_PUBLIC_DIR"/);
+    expect(sh).toMatch(/\. "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)\/nightly-export\.sh"/);
+    expect(sh).toMatch(/nightly_public_export "\$NB_SRC" "\$NB_SHA" "\$NB_PUBLIC_DIR" "\$NB_PUBLIC_REMOTE"/);
     expect(sh).toMatch(/docker build [^\n]*-f "\$NB_PUBLIC_DIR\/\$DOCKERFILE"/);
     expect(sh).toMatch(/-t "\$NB_IMAGE:\$NB_TAG" "\$NB_PUBLIC_DIR"/);
     expect(sh).not.toMatch(/docker push/);
-    expect(sh).not.toMatch(/rm -rf/);
+    for (const s of [sh, exp]) expect(s).not.toMatch(/rm -rf/);
+  });
+
+  it('says from outside which commit it is and whether its night was green (#266)', () => {
+    const sh = read('nightly-build.sh');
+    expect(sh).toMatch(/--label "org\.opencontainers\.image\.revision=\$NB_SHA"/);
+    expect(sh).toMatch(/--label "sh\.filex\.nightly\.public-base=\$base"/);
+    expect(sh).toMatch(/base=\$\(git -C "\$NB_PUBLIC_DIR" rev-parse origin\/main\)/);
+    expect(sh).toMatch(/done < "\$NB_LABELS_FILE"/);
+    const labels = nightlyLabels({ counts: { passed: 40, failed: 0, skipped: 2, total: 42 }, runId: 'nightly-20261013-230005Z-2ca25999' });
+    expect(labels).toEqual({
+      'org.opencontainers.image.source': 'https://github.com/BRF-Tech/filex',
+      'org.opencontainers.image.description': expect.stringMatching(/^filex nightly build: .*Not a release and not supported/),
+      'sh.filex.nightly.tests': 'green: 40 passed, 2 skipped of 42 jobs (nightly-20261013-230005Z-2ca25999)',
+    });
+    expect(nightlyLabels({})['sh.filex.nightly.tests']).toBeUndefined();
+    // The labels go to the build one a line: no value may break a line.
+    for (const v of Object.values(labels)) expect(v).not.toMatch(/[\r\n]/);
+  });
+});
+
+describe('the desktop side of a nightly build (#266)', () => {
+  const now = ms('2026-10-18T01:00:00Z');
+
+  it('packs the amd64 snap and pushes the source for GitHub every night that made a build, and nothing on a night without one', () => {
+    expect(decideDesktop({ built: true, snapMode: 'edge', desktopMode: 'github' })).toEqual({
+      targets: ['snap', 'source'],
+      why: "the amd64 snap for edge and the source of the desktop packages GitHub's runners make",
+    });
+    expect(decideDesktop({ built: true, snapMode: 'off', desktopMode: 'github' }).targets).toEqual(['source']);
+    expect(decideDesktop({ built: true, snapMode: 'edge', desktopMode: 'off' }).targets).toEqual(['snap']);
+    expect(decideDesktop({ built: false, snapMode: 'edge', desktopMode: 'github' })).toEqual({ targets: [], why: 'no nightly build tonight' });
+    expect(decideDesktop({ built: true })).toEqual({ targets: [], why: 'no desktop target asked for' });
+  });
+
+  it('gives every package one version, cut to what the Snap Store takes', () => {
+    expect(desktopVersion('0.57.0-nightly.20261014+2ca25999')).toBe('0.57.0-nightly.20261014+2ca25999');
+    expect(desktopVersion('0.57.0-nightly.20261014+2ca25999').length).toBe(32);
+    expect(desktopVersion('0.100.0-nightly.20261014+2ca25999')).toBe('0.100.0-nightly.20261014+2ca2599');
+    expect(desktopVersion('10.100.0-nightly.20261014+2ca25999')).toBe('10.100.0-n.20261014+2ca2599');
+    expect(() => desktopVersion('100.1000.10000-nightly.20261014+2ca25999')).toThrow(/snap version/);
+  });
+
+  it("reads snapcraft's answer: released, held for a review, or failed", () => {
+    expect(snapUploadVerdict(0, "Revision 31 created for 'filex-app' and released to 'edge'")).toEqual({ state: 'released', revision: 31 });
+    expect(snapUploadVerdict(2, 'Revision 32 created for filex-app.\nThe revision is waiting for manual review.')).toEqual({ state: 'review', revision: 32 });
+    expect(snapUploadVerdict(1, 'error: upload failed\nStore API error 502')).toEqual({ state: 'failed', why: 'error: upload failed / Store API error 502' });
+    expect(snapUploadVerdict(1, '').why).toBe('exit 1');
+  });
+
+  it('knows from the public channel map whether edge serves the last nightly snap, per architecture', () => {
+    const version = '0.57.0-nightly.20261014+2ca25999';
+    const last = { version, revision: 32, at: '2026-10-14T03:00:00Z' };
+    const entry = (v: string, revision: number, architecture = 'amd64') => ({ channel: { name: 'edge', architecture }, version: v, revision });
+    expect(snapEdgeState([entry(version, 32)], last, { nowMs: now })).toEqual({ state: 'live', version, revision: 32 });
+    expect(snapEdgeState([entry('0.56.3', 29), entry(version, 33, 'arm64')], last, { nowMs: now })).toEqual({
+      state: 'held',
+      arch: 'amd64',
+      version,
+      revision: 32,
+      edge: '0.56.3 (revision 29)',
+      since: last.at,
+      days: 3,
+    });
+    expect(snapEdgeState([entry('0.56.3', 29), entry(version, 33, 'arm64')], last, { arch: 'arm64', nowMs: now })?.state).toBe('live');
+    expect(snapEdgeState([], last, { nowMs: now })?.edge).toBe('no revision');
+    expect(snapEdgeState([entry(version, 32)], null, { nowMs: now })).toBeNull();
+  });
+
+  it('keeps its last runs and never the one the last snap is in', () => {
+    const names = ['20261004-aaaaaaaa', '20261011-bbbbbbbb', '20261012-cccccccc', '20261013-dddddddd', '20261014-eeeeeeee', 'notes', 'site'];
+    expect(desktopDirsToPrune(names, 2)).toEqual(['20261012-cccccccc', '20261011-bbbbbbbb', '20261004-aaaaaaaa']);
+    expect(desktopDirsToPrune(names, 2, ['20261011-bbbbbbbb'])).toEqual(['20261012-cccccccc', '20261004-aaaaaaaa']);
+  });
+
+  it('takes the source from the public form before anything is built in it, and packs only the amd64 snap here', () => {
+    const sh = read('nightly-desktop.sh');
+    expect(sh).toMatch(/nightly_public_export "\$ND_SRC" "\$ND_SHA" "\$ND_PUBLIC_DIR" "\$ND_PUBLIC_REMOTE"/);
+    // The source archive: the public tree, no .git, before the container writes into it.
+    const tar = sh.indexOf('tar --exclude=./.git -C "$ND_PUBLIC_DIR" -czf "$ND_OUT/files/filex-nightly-src.tar.gz" .');
+    expect(tar).toBeGreaterThan(sh.indexOf('nightly_public_export "$ND_SRC"'));
+    expect(tar).toBeLessThan(sh.indexOf('docker run --rm --name'));
+    // A night with the source alone starts no container.
+    expect(sh).toMatch(/container_targets=\$\(printf '%s' ",\$ND_TARGETS," \| sed 's\/,source,\/,\/g; s\/\^,\/\/; s\/,\$\/\/'\)/);
+    expect(sh).toMatch(/if \[ -z "\$container_targets" \]; then/);
+    // The packages in electron-builder's container, from the public tree; the snap packed on the host (LXD).
+    expect(sh).toMatch(/-v "\$ND_PUBLIC_DIR:\/w\/src"/);
+    expect(sh).toMatch(/"\$ND_IMAGE" bash \/w\/chain\/nightly-desktop-job\.sh/);
+    expect(sh).toMatch(/electron-builder --linux snap --x64 --publish never --prepackaged release\/linux-unpacked/);
+    for (const s of [sh, read('nightly-desktop-job.sh')]) {
+      expect(s).not.toMatch(/snapcraft upload|gh release|docker push|git push|oras push/);
+      expect(s).not.toMatch(/rm -rf/);
+      expect(s).not.toMatch(/--publish (?!never)/);
+    }
+  });
+
+  it('makes every package of a night with one script, on the build host and on GitHub, unsigned', () => {
+    const job = read('nightly-desktop-job.sh');
+    expect(job).toMatch(/^SRC="\$\{ND_JOB_SRC:-\/w\/src\}"$/m);
+    expect(job).toMatch(/^OUT="\$\{ND_JOB_OUT:-\/w\/out\}"$/m);
+    expect(job).toMatch(/^export CSC_IDENTITY_AUTO_DISCOVERY=false$/m);
+    // Each package's CLI for its own platform and CPU, as release.yml's rows.
+    for (const [platform, arch] of [['linux', 'x64'], ['linux', 'arm64'], ['win32', 'x64'], ['win32', 'arm64']]) {
+      expect(job).toContain(`node scripts/fetch-cli.mjs --platform ${platform} --arch ${arch}`);
+    }
+    expect(job).toContain('node scripts/fetch-cli.mjs --platform darwin');
+    for (const t of ['linux-x64', 'linux-arm64', 'windows', 'mac', 'snap', 'snap-arm64']) expect(job).toMatch(new RegExp(`^ {4}${t}\\)$`, 'm'));
+    expect(job).toMatch(/electron-builder --linux dir --arm64 --publish never/);
+    expect(job).toMatch(/npm version "\$ND_VERSION" --no-git-tag-version --allow-same-version/);
+  });
+
+  it('uploads the amd64 snap through the script GitHub uploads the arm64 one with: edge only, the credential never printed', () => {
+    const mjs = read('nightly.mjs');
+    expect(mjs).toMatch(/path\.join\(cfg\.src, 'scripts', 'chain', 'nightly-snap-edge\.mjs'\), file, result\]/);
+    expect(mjs).toMatch(/env: childEnv\(\{ SNAPCRAFT_STORE_CREDENTIALS: creds, SNAPCRAFT: cfg\.snap\.snapcraft \}\)/);
+    expect(mjs).toMatch(/\.split\(creds\)\.join\('<credential>'\)/);
+    const edge = read('nightly-snap-edge.mjs');
+    expect(edge).toMatch(/\['upload', '--release=edge', file\]/);
+    expect(edge).not.toMatch(/--release=(?!edge)/);
+    expect(edge).toMatch(/\.split\(creds\)\.join\('<credential>'\)/);
+  });
+
+  it('pushes the source to ghcr signed in as the image is, with the commit, the version and the night it needs', () => {
+    const mjs = read('nightly.mjs');
+    expect(mjs).toMatch(/const ref = `\$\{cfg\.desktop\.srcRepo\}:nightly`;/);
+    for (const k of ['org.opencontainers.image.revision', 'org.opencontainers.image.version', 'sh.filex.nightly.desktop-version', 'sh.filex.nightly.date']) expect(mjs).toContain(`'${k}'`);
+    expect(mjs).toMatch(/return withRegistry\(cfg, ref\.split\('\/'\)\[0\], \(config\) => \{/);
+    // The image push signs in the same way: one place for the credential.
+    expect(mjs).toMatch(/withRegistry\(cfg, pushRepo\.split\('\/'\)\[0\], \(config\) => \{/);
+    expect(mjs.match(/'login', registry, '-u', registryUser, '--password-stdin'/g)?.length).toBe(1);
+  });
+
+  it('keeps a small record of it for the next mornings', () => {
+    const rec = nightRecord({
+      night: '2026-10-18',
+      decision: 'ran',
+      desktop: { decision: 'built', version: 'v', targets: { snap: 'built', source: 'built' }, dir: '/d', snap: { state: 'review', revision: 3 }, source: { ref: 'r:nightly', digest: 'sha256:x' }, log: '/d/desktop.log' },
+      snapEdge: { state: 'held', version: 'v0', revision: 2, since: '2026-10-17T01:00:00Z', edge: '0.56.3 (revision 29)', days: 1 },
+    });
+    expect(rec.desktop).toEqual({ decision: 'built', version: 'v', targets: { snap: 'built', source: 'built' }, dir: '/d', snap: { state: 'review', revision: 3 }, source: { ref: 'r:nightly', digest: 'sha256:x' } });
+    expect(rec.snapEdge).toEqual({ version: 'v0', revision: 2, since: '2026-10-17T01:00:00Z' });
+    expect(nightRecord({ night: 'n', decision: 'skipped', desktop: { decision: 'skipped', why: 'x' } }).desktop).toBeUndefined();
+  });
+});
+
+describe("GitHub's desktop packages of a night and filex.sh/nightly (#266)", () => {
+  const now = ms('2026-10-18T05:00:00Z');
+  const version = '0.57.0-nightly.20261018+cccccccc';
+  const source = { revision: 'c'.repeat(40), version, at: '2026-10-18T02:40:00Z' };
+
+  it('knows what each package is from its name, and leaves out what is none', () => {
+    expect(classifyDesktopFile('filex-desktop-x64.exe')).toEqual({ platform: 'windows', arch: 'x64', kind: 'installer' });
+    expect(classifyDesktopFile('filex-desktop-portable-arm64.exe')).toEqual({ platform: 'windows', arch: 'arm64', kind: 'portable' });
+    expect(classifyDesktopFile('filex-desktop-arm64.dmg')).toEqual({ platform: 'macos', arch: 'arm64', kind: 'dmg' });
+    expect(classifyDesktopFile('filex-desktop-x86_64.AppImage')).toEqual({ platform: 'linux', arch: 'x64', kind: 'AppImage' });
+    expect(classifyDesktopFile('filex-desktop-amd64.deb')).toEqual({ platform: 'linux', arch: 'x64', kind: 'deb' });
+    expect(classifyDesktopFile('filex-desktop-aarch64.rpm')).toEqual({ platform: 'linux', arch: 'arm64', kind: 'rpm' });
+    for (const n of ['filex-desktop-x64.exe.blockmap', 'latest.yml', 'filex-desktop-arm64.snap', 'filex-desktop-portable-x64.dmg', 'filex-desktop-ppc64.deb', 'filex-nightly-src.tar.gz']) {
+      expect(classifyDesktopFile(n), n).toBeNull();
+    }
+    expect(platformOfRow('mac')).toBe('macos');
+    expect(platformOfRow('linux-arm64')).toBe('linux');
+    expect(platformOfRow('snap-arm64')).toBeNull();
+  });
+
+  it("writes the night's manifest: the packages in the page's order, every expected row, the arm64 snap", () => {
+    const m = desktopManifest({
+      files: [
+        { name: 'filex-desktop-amd64.deb', size: 3, sha256: 'd' },
+        { name: 'filex-desktop-arm64.exe', size: 2, sha256: 'b' },
+        { name: 'filex-desktop-x64.exe', size: 1, sha256: 'a' },
+        { name: 'notes.txt', size: 1, sha256: 'z' },
+      ],
+      version,
+      revision: source.revision,
+      date: '2026-10-18',
+      rows: rowsOf(['windows built\n', 'linux-x64 built\nsnap-arm64 failed\n'], ['windows', 'linux-x64', 'mac', 'snap-arm64']),
+      snap: { arm64: { state: 'skipped', why: 'skipped: no Snap Store credential' } },
+    });
+    expect(m.files.map((f) => f.name)).toEqual(['filex-desktop-x64.exe', 'filex-desktop-arm64.exe', 'filex-desktop-amd64.deb']);
+    expect(m.rows).toEqual({ windows: 'built', 'linux-x64': 'built', mac: 'failed', 'snap-arm64': 'failed' });
+    expect(m).toMatchObject({ schema: 1, version, date: '2026-10-18', snap: { arm64: { state: 'skipped' } } });
+  });
+
+  const template = path.join(REPO, 'site', 'nightly.src.html');
+  it.runIf(fs.existsSync(template))("makes the page from the site's own template: every platform, what was not built, the warning, nothing unescaped", () => {
+    const tpl = fs.readFileSync(template, 'utf8');
+    for (const m of PAGE_MARKERS) expect(tpl).toContain(`<!--nightly:${m}-->`);
+    const manifest = desktopManifest({
+      files: [
+        { name: 'filex-desktop-x64.exe', size: 104857600, sha256: 'a' },
+        { name: 'filex-desktop-x86_64.AppImage', size: 2097152, sha256: 'b' },
+      ],
+      version: '0.57.0-nightly.1+<b>',
+      revision: source.revision,
+      date: '2026-10-18',
+      run: 'https://github.com/BRF-Tech/filex/actions/runs/1',
+      rows: { windows: 'built', 'linux-x64': 'built', 'linux-arm64': 'failed', mac: 'failed' },
+    });
+    const page = renderNightlyPage({ template: tpl, manifest });
+    expect(page).not.toMatch(/<!--nightly:/);
+    expect(page).toContain('0.57.0-nightly.1+&lt;b&gt;');
+    expect(page).toContain('<a href="./filex-desktop-x64.exe">Installer (.exe)</a> <span class="meta">x64 · 100 MB</span>');
+    expect(page).toContain('<a href="./filex-desktop-x86_64.AppImage">AppImage</a> <span class="meta">x64 · 2.0 MB</span>');
+    expect(page).toMatch(/<h2>macOS<\/h2>\n<p class="meta">Not built this night\.<\/p>/);
+    expect(page).toContain('<p class="meta">Not built this night: linux-arm64.</p>');
+    expect(page).toContain('<a href="./SHA256SUMS">SHA256SUMS</a>');
+    expect(page).toContain('Not supported.');
+    expect(page).toContain(source.revision.slice(0, 8));
+    expect(() => renderNightlyPage({ template: tpl.replace('<!--nightly:downloads-->', ''), manifest })).toThrow(/nightly:downloads/);
+  });
+
+  it('follows the last source: built, building, failed, or not taken within three hours', () => {
+    const at = (r: string) => ({ revision: r });
+    const rev = source.revision;
+    expect(followVerdict({ source: null, nowMs: now })).toBeNull();
+    expect(followVerdict({ source, built: at(rev), nowMs: now })).toMatchObject({ state: 'built', version });
+    expect(followVerdict({ source, built: at('old'), attempted: at(rev), run: { status: 'in_progress', url: 'u' }, nowMs: now })).toMatchObject({ state: 'building', url: 'u' });
+    expect(followVerdict({ source, attempted: at(rev), run: { status: 'completed', conclusion: 'failure', url: 'u' }, nowMs: now })).toMatchObject({ state: 'failed', conclusion: 'failure' });
+    expect(followVerdict({ source, attempted: at(rev), run: { status: 'completed', conclusion: 'success', url: 'u' }, nowMs: now }).why).toMatch(/published no packages/);
+    expect(followVerdict({ source, attempted: at('old'), nowMs: ms('2026-10-18T03:30:00Z') })).toMatchObject({ state: 'waiting' });
+    expect(followVerdict({ source, attempted: at('old'), nowMs: ms('2026-10-18T06:00:00Z') })).toMatchObject({ state: 'not-started', hours: 3 });
+  });
+
+  it('says it in the morning report - a warning when GitHub failed, a row is missing, the page or the arm64 snap did not go out; never red', () => {
+    const built = { state: 'built', version, platforms: ['windows', 'macos', 'linux'], rows: { windows: 'built', mac: 'built' }, site: { state: 'published', detail: `filex.sh/nightly: ${version}` }, snapArm64: { state: 'released', revision: 40 } };
+    expect(followLines(built)).toEqual([
+      `desktop packages ${version}: built on GitHub's runners (windows, macos, linux)`,
+      `  filex.sh/nightly: filex.sh/nightly: ${version}`,
+      `  snap ${version} on edge (arm64): revision 40`,
+    ]);
+    expect(followTrouble(built)).toBe(false);
+    const skipped = { ...built, snapArm64: { state: 'skipped', why: 'skipped: no Snap Store credential (SNAPCRAFT_STORE_CREDENTIALS is not set)' } };
+    expect(followLines(skipped)).toContain('  snap arm64: skipped: no Snap Store credential (SNAPCRAFT_STORE_CREDENTIALS is not set)');
+    expect(followTrouble(skipped)).toBe(false);
+    for (const f of [
+      { ...built, rows: { windows: 'built', mac: 'failed' } },
+      { ...built, site: { state: 'failed', detail: 'exit 1' } },
+      { ...built, snapArm64: { state: 'review', revision: 41 } },
+      { ...built, edgeArm64: { state: 'held', arch: 'arm64', version, edge: '0.56.3 (revision 28)', days: 2 } },
+      { state: 'failed', version, conclusion: 'failure', url: 'u' },
+      { state: 'not-started', version, hours: 5 },
+    ]) {
+      expect(followTrouble(f), JSON.stringify(f)).toBe(true);
+    }
+    expect(followLines({ ...built, edgeArm64: { state: 'held', arch: 'arm64', version, edge: '0.56.3 (revision 28)', days: 2 } }).join('\n')).toMatch(/WARNING snap: edge \(arm64\) serves 0\.56\.3/);
+    expect(followLines({ state: 'kept' })).toEqual([]);
+    expect(followLines({ ...built, site: { state: 'kept', detail: 'NIGHTLY_SITE_CMD is not set; the page is in /d/site' } })).toContain('  filex.sh/nightly NOT updated: NIGHTLY_SITE_CMD is not set; the page is in /d/site');
+  });
+
+  it('runs the follow-up before the report is composed, and publishes a page once per revision', () => {
+    const report = read('report.mjs');
+    expect(report.indexOf('followDesktop(cfg, { dry: !!args.dryRun })')).toBeGreaterThan(0);
+    expect(report.indexOf('followDesktop(cfg, { dry: !!args.dryRun })')).toBeLessThan(report.indexOf('composeReport({'));
+    const mjs = read('nightly.mjs');
+    expect(mjs).toMatch(/if \(state\.last_site\?\.revision === source\.revision\) \{/);
+    expect(mjs).toMatch(/NIGHTLY_SITE_REF: digest \? `\$\{cfg\.desktop\.repo\}@\$\{digest\}` : `\$\{cfg\.desktop\.repo\}:nightly`/);
+    expect(mjs).toMatch(/fs\.readFileSync\(path\.join\(cfg\.src, 'site', 'nightly\.src\.html'\), 'utf8'\)/);
+  });
+});
+
+describe('the nightly snap to edge from a runner (#266)', () => {
+  const run = (env: Record<string, string>) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'snap-edge-'));
+    try {
+      const r = spawnSync(process.execPath, [path.join(CHAIN, 'nightly-snap-edge.mjs'), path.join(dir, 'filex-desktop-arm64.snap'), path.join(dir, 'out.json')], {
+        encoding: 'utf8',
+        env: { ...process.env, SNAPCRAFT_STORE_CREDENTIALS: '', ...env },
+      });
+      const out = fs.existsSync(path.join(dir, 'out.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'out.json'), 'utf8')) : null;
+      return { code: r.status, stdout: r.stdout, out };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('says "skipped: no Snap Store credential" without one, and stays green', () => {
+    const r = run({});
+    expect(r.code).toBe(0);
+    expect(r.stdout.split('\n')[0]).toBe('skipped: no Snap Store credential (SNAPCRAFT_STORE_CREDENTIALS is not set)');
+    expect(r.stdout).toMatch(/::notice title=Snap Store::skipped: no Snap Store credential/);
+    expect(r.out).toEqual({ state: 'skipped', why: 'skipped: no Snap Store credential (SNAPCRAFT_STORE_CREDENTIALS is not set)' });
+  });
+
+  it('is red when there is no snap to upload, and says what it would have said for each outcome', () => {
+    const r = run({ SNAPCRAFT_STORE_CREDENTIALS: 'a credential' });
+    expect(r.code).toBe(1);
+    expect(r.out).toMatchObject({ state: 'failed' });
+    expect(r.stdout).not.toContain('a credential');
+    expect(edgeSummary({ state: 'review', revision: 41 }, 's.snap').annotation).toMatch(/^::warning title=Snap Store: review::/);
+    expect(edgeSummary({ state: 'released', revision: 40 }, 's.snap')).toEqual({ line: 's.snap is on edge (revision 40)', annotation: '' });
+    expect(edgeSummary({ state: 'failed', why: 'x' }, 's.snap').annotation).toMatch(/^::error /);
+  });
+});
+
+describe('filex.sh/nightly on the site host (#266)', () => {
+  it('sends its half on stdin, never as an inline script, and only to an absolute site directory', () => {
+    const sh = read('nightly-site.sh');
+    expect(sh).toMatch(/cat "\$REMOTE"\n\} \| ssh -o BatchMode=yes "\$SSH_DEST" bash -s$/m);
+    expect(sh).toMatch(/case "\$SITE" in \/\?\*\) ;; \*\) echo "--path must be an absolute directory, not \/" >&2; exit 2 ;; esac/);
+    for (const v of ['SITE', 'REF', 'ORAS', 'PAGE_B64', 'JSON_B64']) expect(sh).toMatch(new RegExp(`printf '${v}=%q\\\\n'`));
+    const install = read('install-nightly.sh');
+    expect(install).toMatch(/for f in nightly\.mjs nightly-lib\.mjs report\.mjs env\.mjs nightly-site\.sh nightly-site-remote\.sh; do/);
+  });
+
+  it('is never deleted by a deploy of the site', () => {
+    const sync = fs.readFileSync(path.join(REPO, 'scripts', 'sync-site.sh'), 'utf8');
+    expect(sync).toMatch(/--exclude=\/nightly --exclude=\/\.nightly\//);
+    expect(sync).toMatch(/grep -qi 'deleting\.\*\\\(desktop\\\|updates\\\|shots\\\|nightly\\\)'/);
+  });
+
+  const bash = findBash();
+  it.runIf(!!bash && process.platform === 'linux')('pulls, checks, puts the page beside the packages and swaps the link in one rename; a package that does not match changes nothing', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nightly-site-'));
+    const fwd = (p: string) => p.split(path.sep).join('/');
+    try {
+      const site = path.join(tmp, 'site');
+      const bin = path.join(tmp, 'bin');
+      fs.mkdirSync(site);
+      fs.mkdirSync(bin);
+      fs.writeFileSync(path.join(tmp, 'mode'), 'good');
+      // A fake `docker run ... -v <dir>:/w ... pull <ref>`: the artifact's files.
+      fs.writeFileSync(
+        path.join(bin, 'docker'),
+        [
+          '#!/usr/bin/env bash',
+          `tmp="${fwd(tmp)}"`,
+          'dir=""; prev=""',
+          'for a in "$@"; do if [ "$prev" = "-v" ]; then dir="${a%%:/w}"; fi; prev="$a"; done',
+          'printf x > "$dir/filex-desktop-x64.exe"',
+          'printf \'{"version":"v"}\' > "$dir/nightly.json"',
+          'if [ "$(cat "$tmp/mode")" = good ]; then (cd "$dir" && sha256sum filex-desktop-x64.exe > SHA256SUMS); else echo "0000000000000000000000000000000000000000000000000000000000000000  filex-desktop-x64.exe" > "$dir/SHA256SUMS"; fi',
+          '',
+        ].join('\n'),
+      );
+      fs.chmodSync(path.join(bin, 'docker'), 0o755);
+      const b64 = (s: string) => Buffer.from(s).toString('base64');
+      const go = () =>
+        spawnSync(bash!, [fwd(path.join(CHAIN, 'nightly-site-remote.sh'))], {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+            SITE: fwd(site),
+            REF: 'ghcr.io/acme/filex-desktop-nightly@sha256:1',
+            ORAS: 'oras:pinned',
+            PAGE_B64: b64('<p>page</p>'),
+            JSON_B64: b64('{\n  "schema": 1,\n  "version": "0.57.0-nightly.20261018+cccccccc",\n  "date": "2026-10-18"\n}\n'),
+          },
+        });
+      const ok = go();
+      expect(ok.status, ok.stderr).toBe(0);
+      expect(ok.stdout).toMatch(/filex\.sh\/nightly: 0\.57\.0-nightly\.20261018\+cccccccc \(20261018\), 1 package\(s\)/);
+      expect(fs.readlinkSync(path.join(site, 'nightly'))).toBe('.nightly/20261018');
+      expect(fs.readFileSync(path.join(site, 'nightly', 'index.html'), 'utf8')).toBe('<p>page</p>');
+      expect(JSON.parse(fs.readFileSync(path.join(site, 'nightly', 'nightly.json'), 'utf8')).date).toBe('2026-10-18');
+      // A package that does not match its checksum: nothing published, the night before stays.
+      fs.writeFileSync(path.join(tmp, 'mode'), 'bad');
+      const bad = go();
+      expect(bad.status).toBe(1);
+      expect(bad.stderr).toMatch(/does not match its SHA256SUMS: nothing published/);
+      expect(fs.readlinkSync(path.join(site, 'nightly'))).toBe('.nightly/20261018');
+      // A `nightly` that is no link is never replaced.
+      fs.unlinkSync(path.join(site, 'nightly'));
+      fs.mkdirSync(path.join(site, 'nightly'));
+      fs.writeFileSync(path.join(tmp, 'mode'), 'good');
+      const dir = go();
+      expect(dir.status).toBe(2);
+      expect(dir.stderr).toMatch(/is not a link: move it away first/);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 
@@ -473,6 +869,74 @@ describe('the morning report', () => {
     expect(pushed.message).toContain(`nightly build: filex-nightly:cccccccc (0.53.0-nightly.20261007+cccccccc), published as ${refs.join(', ')}`);
   });
 
+  it('names the desktop side (#266): the snap on edge, the source for GitHub, and what GitHub made of the last one', () => {
+    const version = '0.53.0-nightly.20261007+cccccccc';
+    const desktop = {
+      decision: 'built',
+      version,
+      dir: '/n/desktop/20261007-cccccccc',
+      targets: { snap: 'built', source: 'built' },
+      snap: { state: 'released', revision: 31, name: 'filex-app' },
+      source: { ref: 'ghcr.io/brf-tech/filex-nightly-src:nightly', digest: 'sha256:1' },
+    };
+    const ok = composeReport({ tonight: tonight({ desktop }), result: result(), history, commits, nowMs: now, tz });
+    expect(ok.severity).toBe('success');
+    expect(ok.title).toBe(`filex nightly 2026-10-07: green (${C.slice(0, 8)}, 2h15m00s)`);
+    expect(ok.message).toContain(`desktop ${version}: snap built, source built`);
+    expect(ok.message).toContain("  the source for GitHub's desktop packages: ghcr.io/brf-tech/filex-nightly-src:nightly");
+    expect(ok.message).toContain(`  snap ${version} on edge (amd64): revision 31`);
+    // A source that did not go out: a warning, never red.
+    const noSource = composeReport({ tonight: tonight({ desktop: { ...desktop, source: { error: 'oras push failed: unauthorized' } } }), result: result(), history, commits, nowMs: now, tz });
+    expect(noSource.severity).toBe('warning');
+    expect(noSource.message).toContain("WARNING the source for GitHub's desktop packages was NOT pushed: oras push failed: unauthorized");
+    // What GitHub made of the last source: said on a quiet night too.
+    const follow = { state: 'failed', version, conclusion: 'failure', url: 'https://github.com/BRF-Tech/filex/actions/runs/1' };
+    const red = composeReport({ tonight: tonight({ desktop }), result: result(), history, commits, nowMs: now, tz, follow });
+    expect(red.severity).toBe('warning');
+    expect(red.message).toContain(`WARNING desktop packages ${version}: GitHub's build FAILED (failure) - https://github.com/BRF-Tech/filex/actions/runs/1`);
+    const quiet = composeReport({ tonight: tonight({ decision: 'skipped', why: 'main has not moved', run_id: undefined }), history: [...history, ran({ night: '2026-10-06', sha: C })], nowMs: now, tz, follow: { state: 'building', version, url: 'u' } });
+    expect(quiet.message).toContain(`desktop packages ${version}: still being built on GitHub (u); the next report publishes them`);
+    expect(quiet.severity).toBe('info');
+  });
+
+  it('turns a snap the Store holds, a failed upload or a failed package into a warning - never red - and says so every morning until edge serves it', () => {
+    const version = '0.53.0-nightly.20261007+cccccccc';
+    const base = { decision: 'built', version, dir: '/n/d', files: 1, targets: { snap: 'built' } };
+    const held = composeReport({ tonight: tonight({ desktop: { ...base, snap: { state: 'review', revision: 32 } } }), result: result(), history, commits, nowMs: now, tz });
+    expect(held.severity).toBe('warning');
+    expect(held.title).toBe(`filex nightly 2026-10-07: green, the desktop packages or the snap with a warning (${C.slice(0, 8)}, 2h15m00s)`);
+    expect(held.message).toContain("WARNING snap: revision 32 uploaded and HELD for the Snap Store's review");
+    const failed = composeReport({ tonight: tonight({ desktop: { ...base, snap: { state: 'failed', why: 'NIGHTLY_SNAP_CREDENTIALS_FILE is not set: the snap was packed and not uploaded' } } }), result: result(), history, commits, nowMs: now, tz });
+    expect(failed.severity).toBe('warning');
+    expect(failed.message).toContain('WARNING snap upload to edge FAILED: NIGHTLY_SNAP_CREDENTIALS_FILE is not set');
+    const partial = composeReport({
+      tonight: tonight({ desktop: { ...base, decision: 'partial', why: 'nightly-desktop.sh exited 1: windows failed', log: '/n/d/desktop.log', targets: { snap: 'built', windows: 'failed' }, snap: { state: 'released' } } }),
+      result: result(),
+      history,
+      commits,
+      nowMs: now,
+      tz,
+    });
+    expect(partial.severity).toBe('warning');
+    expect(partial.message).toContain('snap built, windows failed');
+    // A red night stays red.
+    const red = result({ ok: false, counts: { passed: 2, failed: 1, skipped: 0, total: 3 } });
+    expect(composeReport({ tonight: tonight({ desktop: { ...base, snap: { state: 'review' } } }), result: red, history, commits, nowMs: now, tz }).severity).toBe('danger');
+    // The next morning, a quiet one: edge still does not serve it.
+    const edge = { state: 'held', version, revision: 32, edge: '0.52.0 (revision 14)', since: '2026-10-06T23:40:00Z', days: 1 };
+    const quiet = composeReport({
+      tonight: tonight({ decision: 'skipped', why: 'main has not moved', run_id: undefined, snapEdge: edge }),
+      history: [...history, ran({ night: '2026-10-06', sha: C })],
+      nowMs: now,
+      tz,
+    });
+    expect(quiet.severity).toBe('warning');
+    expect(quiet.message).toContain(`WARNING snap: edge (amd64) serves 0.52.0 (revision 14), not the nightly ${version} uploaded 1 day(s) ago (revision 32): the Snap Store still holds it`);
+    // Served, or never asked: nothing to say.
+    expect(snapEdgeLine({ state: 'live', version })).toBeNull();
+    expect(snapEdgeLine(undefined)).toBeNull();
+  });
+
   it('says s3-live was skipped on an unchanged night, and warns - without turning red - when the S3 code changed and nobody could test it', () => {
     const unchanged = composeReport({
       tonight: tonight({ s3live: { status: 'unchanged', since: B, why: `S3 driver unchanged since ${B.slice(0, 8)}` } }),
@@ -595,6 +1059,32 @@ describe('the settings', () => {
     expect(cfg.build.publish).toBe('auto');
     expect(cfg.build.pushRepo).toBe('ghcr.io/brf-tech/filex');
     expect(nightlySettings(base).build.publish).toBe('manual');
+  });
+
+  it("feed the Snap Store edge and GitHub's desktop packages every green change on the build host; nothing of the kind in the code (#266)", () => {
+    const cfg = nightlySettings(parseEnvFile(read('nightly.env.example')));
+    expect(cfg.snap).toMatchObject({ mode: 'edge', name: 'filex-app', snapcraft: 'snapcraft' });
+    expect(cfg.desktop).toMatchObject({
+      mode: 'github',
+      srcRepo: 'ghcr.io/brf-tech/filex-nightly-src',
+      repo: 'ghcr.io/brf-tech/filex-desktop-nightly',
+      workflowRepo: 'BRF-Tech/filex',
+      workflow: 'nightly-desktop.yml',
+      oras: 'ghcr.io/oras-project/oras:v1.2.2',
+      siteCmd: '',
+      image: 'electronuserland/builder:22-wine-05.26',
+      keep: 4,
+    });
+    // A checkout with no Snap Store credential and no registry would warn every green night.
+    expect(nightlySettings(base).snap.mode).toBe('off');
+    expect(nightlySettings(base).desktop.mode).toBe('off');
+    expect(nightlySettings(base).desktop.out).toBe(path.resolve('/var/lib/filex-nightly/desktop'));
+    expect(() => nightlySettings({ ...base, NIGHTLY_SNAP: 'nightly' })).toThrow(/NIGHTLY_SNAP/);
+    // Weekly is gone (the owner, 2026-10-15: every night).
+    expect(() => nightlySettings({ ...base, NIGHTLY_DESKTOP: 'weekly' })).toThrow(/NIGHTLY_DESKTOP/);
+    // The credential is a file, never a value in the settings.
+    expect(read('nightly.env.example')).toMatch(/^# NIGHTLY_SNAP_CREDENTIALS_FILE=\/\S+$/m);
+    expect(read('nightly.env.example')).not.toMatch(/^NIGHTLY_SNAP_CREDENTIALS=/m);
   });
 
   it('sign a publish in with the user and the token together, or with neither - never one of them', () => {

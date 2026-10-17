@@ -8,12 +8,14 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/pkg/sftp"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
@@ -74,9 +76,11 @@ type target struct {
 
 func (t target) isRoot() bool { return t.Storage == nil }
 
-// split turns an SFTP path into a storage name and a relative path.
+// split turns an SFTP path into a storage name and a relative path. The path
+// is the client's own first (rawPath): every request path arrives escaped, so
+// the library's host-dependent Clean cannot have split a name at a backslash.
 func split(p string) (string, string) {
-	rest := strings.Trim(path.Clean("/"+p), "/")
+	rest := strings.Trim(path.Clean("/"+rawPath(p)), "/")
 	if rest == "" || rest == "." {
 		return "", ""
 	}
@@ -251,6 +255,7 @@ func (f *fs) Lstat(r *sftp.Request) (sftp.ListerAt, error) { return f.stat(r.Fil
 // O(1) and never touch a backend. A relative answer gives clients `work/work/f`
 // and a `cd ..` that never terminates.
 func (f *fs) RealPath(p string) (string, error) {
+	p = rawPath(p)
 	if p == "" || p == "." {
 		return "/", nil
 	}
@@ -355,8 +360,10 @@ func (f *fs) Filecmd(r *sftp.Request) error {
 		return f.rename(r, true)
 	case "Mkdir":
 		return f.mkdir(r)
-	case "Rmdir", "Remove":
-		return f.remove(r)
+	case "Rmdir":
+		return f.rmdir(r)
+	case "Remove":
+		return f.remove(r, false)
 	case "Link", "Symlink":
 		// ⚠ Refused rather than faked. `Symlink`'s Filepath is the ONE path the
 		// library does not clean, so a link is also the one place a traversal
@@ -425,6 +432,9 @@ func (f *fs) mkdir(r *sftp.Request) error {
 	if !f.canDo(t, perm.FilesCreate) {
 		return sftp.ErrSSHFxPermissionDenied
 	}
+	if err := refuseName(t.Rel); err != nil {
+		return err
+	}
 	drv, err := f.driverFor(t)
 	if err != nil {
 		return err
@@ -468,6 +478,13 @@ func (f *fs) rename(r *sftp.Request, overwrite bool) error {
 	if overwrite && f.writeNeed(dst) == perm.FilesModify && !f.canDo(dst, perm.FilesModify) {
 		return sftp.ErrSSHFxPermissionDenied
 	}
+	// A NEW name is asked of the one rule (internal/leafname); moving an item
+	// into another folder under the name it already has gives it nothing new.
+	if path.Base(dst.Rel) != path.Base(src.Rel) {
+		if err := refuseName(dst.Rel); err != nil {
+			return err
+		}
+	}
 	if src.Storage.ID != dst.Storage.ID {
 		// Across storages this is a copy plus a delete, which is an async
 		// operation in filex — refusing is honest; pretending it is a rename
@@ -482,11 +499,30 @@ func (f *fs) rename(r *sftp.Request, overwrite bool) error {
 	if !ok {
 		return sftp.ErrSSHFxOpUnsupported
 	}
+	// A rename puts the source's bytes at the destination path: not where
+	// they would become downloadable while they are not where they are
+	// (protoperm.TreeDownloadLifted - a folder by every file below it).
+	_, lifted, lerr := protoperm.TreeDownloadLifted(f.ctx, drv, src.Set, src.Rel, dst.Set, dst.Rel)
+	if lerr != nil {
+		return mapStorageErr(lerr)
+	}
+	if lifted {
+		return sftp.ErrSSHFxPermissionDenied
+	}
 	var checks []protocolsync.Check
 	if !overwrite {
-		if _, serr := drv.Stat(f.ctx, dst.Rel); serr == nil {
-			// v3 RENAME semantics: refuse an existing destination.
-			return os.ErrExist
+		// v3 RENAME semantics: refuse an existing destination.
+		//
+		// ⚠ storage.StillFree, not a bare Stat of the destination: on a
+		// storage that ignores case (a Windows or macOS disk), renaming
+		// `Rapor.docx` to `rapor.docx` finds the source itself at the new
+		// name, and a bare Stat refused the one rename that only changes the
+		// case - the one WinSCP sends as a plain v3 RENAME (task #238).
+		if serr := storage.StillFree(f.ctx, drv, dst.Rel, src.Rel); serr != nil {
+			if errors.Is(serr, os.ErrExist) {
+				return os.ErrExist
+			}
+			return mapStorageErr(serr)
 		}
 		// Asked again once the row gate is held: a rename that waited for
 		// it refuses a file that landed on the name meanwhile (sec055).
@@ -517,12 +553,11 @@ func (f *fs) rename(r *sftp.Request, overwrite bool) error {
 	return nil
 }
 
-// remove serves both Remove and Rmdir.
-//
-// ⚠ To the TRASH, like every other surface. A delete over a protocol is still
-// a delete by the owner, and "it was gone forever because I used WinSCP" is not
-// a rule anyone can hold in their head.
-func (f *fs) remove(r *sftp.Request) error {
+// rmdir is RMDIR: an EMPTY folder, then remove. A folder with something in it
+// answers "directory not empty" (SSH_FX_FAILURE with that message; SFTP v3
+// has no code of its own for it) and a file "not a directory", and nothing
+// goes to the trash (protocolsync.CheckRmdir).
+func (f *fs) rmdir(r *sftp.Request) error {
 	t, err := f.resolve(r.Filepath)
 	if err != nil {
 		return err
@@ -536,6 +571,46 @@ func (f *fs) remove(r *sftp.Request) error {
 	drv, err := f.driverFor(t)
 	if err != nil {
 		return err
+	}
+	switch err := protocolsync.CheckRmdir(f.ctx, drv, t.Rel); {
+	case errors.Is(err, syscall.ENOTEMPTY), errors.Is(err, syscall.ENOTDIR):
+		return err
+	case err != nil:
+		return mapStorageErr(err)
+	}
+	return f.remove(r, true)
+}
+
+// remove serves Remove (a file: folder false), and Rmdir once rmdir found the
+// folder empty (folder true). REMOVE on a folder, empty or not, answers "is a
+// directory" and removes nothing: a folder goes only by RMDIR
+// (protocolsync.CheckRemoveFile).
+//
+// ⚠ To the TRASH, like every other surface. A delete over a protocol is still
+// a delete by the owner, and "it was gone forever because I used WinSCP" is not
+// a rule anyone can hold in their head.
+func (f *fs) remove(r *sftp.Request, folder bool) error {
+	t, err := f.resolve(r.Filepath)
+	if err != nil {
+		return err
+	}
+	if t.isRoot() || t.Rel == "" {
+		return sftp.ErrSSHFxPermissionDenied
+	}
+	if !f.canDo(t, perm.FilesDelete) {
+		return sftp.ErrSSHFxPermissionDenied
+	}
+	drv, err := f.driverFor(t)
+	if err != nil {
+		return err
+	}
+	if !folder {
+		switch err := protocolsync.CheckRemoveFile(f.ctx, drv, t.Rel); {
+		case errors.Is(err, syscall.EISDIR):
+			return err
+		case err != nil:
+			return mapStorageErr(err)
+		}
 	}
 	// The bytes and the rows under the storage's row gate (Syncer.Discard,
 	// Purge; issue #201): a storage scan never judges the catalogue between
@@ -583,9 +658,35 @@ func mapStorageErr(err error) error {
 		return sftp.ErrSSHFxOpUnsupported
 	case errors.Is(err, io.EOF):
 		return io.EOF
+	case storage.IsNameTooLong(err):
+		return nameError{msg: "name too long"}
+	case errors.Is(err, leafname.ErrRefused):
+		return nameError{msg: err.Error()}
 	default:
 		return sftp.ErrSSHFxFailure
 	}
+}
+
+// nameError is a name this server refused (internal/leafname) or one the
+// storage could not hold: SSH_FX_FAILURE, with the reason as the status
+// message every client shows ("a name cannot contain / or \", "name too
+// long"). ⚠ Never the driver's own text, which carries the server's path
+// (`open /srv/<storage root>/…: file name too long`).
+type nameError struct{ msg string }
+
+func (e nameError) Error() string { return e.msg }
+
+// refuseName asks the one rule (internal/leafname) of the name rel would give
+// an entry, before anything is written: the list's refused names - a
+// backslash, a NUL, a control character, `..`, `...` - are refused on every
+// door, so a file never exists on one surface that the next cannot open
+// (task #238). A file that already has such a name is not asked: it stays
+// readable, writable and removable.
+func refuseName(rel string) error {
+	if err := leafname.Check(path.Base(rel)); err != nil {
+		return nameError{msg: err.Error()}
+	}
+	return nil
 }
 
 // principalOf is a small accessor used by the file handles.

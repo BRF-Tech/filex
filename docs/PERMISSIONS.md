@@ -67,13 +67,13 @@ which the Users page shows beside each permission and every refusal names.
 
 ## The permissions
 
-29 in five groups. Keys are stored by name, never by position.
+30 in five groups. Keys are stored by name, never by position.
 
 ### Files (path-checked - also need the folder level)
 
 | Key | Allows |
 |---|---|
-| `files.download` | Download, zip download, reading over WebDAV / SFTP / FTPS / S3 / NFS, desktop sync. **Previews stay open** - a browser that renders a file has its bytes; this governs the explicit save. |
+| `files.download` | Download, zip download, reading over WebDAV / SFTP / FTPS / S3 / NFS, desktop sync, the document editor's Download as. Asked of every file inside a folder that is archived or linked, and a copy, move, rename, extraction or app result never takes a file to where it could be downloaded from where it could not ([RBAC.md](RBAC.md#every-file-in-a-folder-answers-the-download-rule)). **Previews stay open** - a browser that renders a file has its bytes; this governs the explicit save. |
 | `files.create` | Upload a new file, new folder or file, copy into a folder, extract an archive, restore from trash |
 | `files.modify` | Overwrite, edit (text editor, ONLYOFFICE), save, restore a version, add to an archive |
 | `files.rename` | A new name in the **same** folder |
@@ -95,6 +95,7 @@ A write decides create vs modify **per file**: replacing a file that is there is
 | `share.users` | Sharing with another account or a group (the per-item permissions panel, invites) |
 | `comments.write` | Posting comments. An API key also needs its own `comments:rw` ([RBAC.md](RBAC.md#permissions-with-a-level-comments)) |
 | `ai.use` | The agent REST + MCP API at `/api/ai` |
+| `ai.assistant` | The AI assistant in the explorer - its button and its routes ([AI-ASSISTANT.md](AI-ASSISTANT.md#who-may-use-it)). What it does is held to the person's own permissions, tool by tool; it is not `ai.use` and needs no API key. Every preset holds it, and every role has it from the version that adds it ([below](#things-to-know)) |
 | `plugins.run` | Running app actions and app view events. An app may put some of its actions behind a permission of its own as well ([App permissions](#app-permissions)) |
 
 ### Access outside the web app (checked at login)
@@ -141,8 +142,8 @@ a tenant's administrator sees them read-only and gives their people a
 | Full admin | Everything |
 | Standard user | Everything outside the admin area - what a `user` could do before permissions existed. **The User role until it is edited.** |
 | Read-only | Standard minus file changes and sharing - what a `viewer` could do before. **The Viewer role until it is edited.** |
-| Upload-only | `files.create`, `files.encrypt` and `account.edit` - a drop-box account |
-| Guest | `files.download` only |
+| Upload-only | `files.create`, `files.encrypt`, `account.edit` and `ai.assistant` - a drop-box account |
+| Guest | `files.download` and `ai.assistant` |
 
 A preset on a person's page pins every permission of that one account to the
 preset (as exceptions); *Clear exceptions* goes back to inheriting.
@@ -164,7 +165,7 @@ tenant is given only to that tenant's accounts; one held outside its tenant
 by no role, so picking a custom role for one makes them stop being an
 administrator (never the last one) - one save, one server call.
 
-![A custom role's editor: its name in Turkish, its permissions, and the folder where it differs](https://filex.sh/shots/roles/role-editor-1440.1cbf21192719.png)
+![A custom role's editor: its name in Turkish, its permissions, and the folder where it differs](https://filex.sh/shots/roles/role-editor-1440.3524f24e0347.png)
 
 A role has:
 
@@ -334,7 +335,7 @@ An installed app can declare permissions of its own - the actions an
 organisation would want to limit, and nothing else. A signing app puts
 *Request signatures* behind one, while signing what somebody sent you needs
 none. They appear here under the app's name and are decided the same way as
-the 29, per role and per person; the app's manifest declares them
+the 30, per role and per person; the app's manifest declares them
 (`user_permissions`, [PLUGIN-KIT.md](PLUGIN-KIT.md#user-permissions-what-an-administrator-hands-out)).
 
 - **The key** is `app.<app>.<id>` - `app.sign.request`. It is stored by name
@@ -367,7 +368,7 @@ the 29, per role and per person; the app's manifest declares them
   built-in role its people are on, then the app's default. A person's page
   has the same rows among their exceptions, beside the answer and where it
   comes from; *Default* there is what their role alone gives them. A preset
-  and *Clear exceptions* change the 29 only and leave the person's app
+  and *Clear exceptions* change the 30 only and leave the person's app
   exceptions as they are - the Apps group's own *Reset to defaults* clears
   those. A delegated administrator sees a person's app rows read-only.
 - **Through the API.** `GET /api/admin/roles/catalogue` lists the installed
@@ -382,20 +383,26 @@ the 29, per role and per person; the app's manifest declares them
   /api/admin/users/{id}/exceptions`) carries `effective.apps`: for each app
   permission `{key, allowed, source, inherited: {allowed, source}}` -
   `inherited` is the answer without the person's own exception. The whole
-  `overrides` map is replaced on `PUT`, so a client that writes the 29 must
+  `overrides` map is replaced on `PUT`, so a client that writes the 30 must
   send the `app.*` keys it read back with them, or they are cleared.
 
-![A person's page: their role, and their own exception to an app permission beside the answer and where it comes from](https://filex.sh/shots/apppermissions/person-exceptions.7e1f829939f4.png)
+![A person's page: their role, and their own exception to an app permission beside the answer and where it comes from](https://filex.sh/shots/apppermissions/person-exceptions.6d132fcacdb0.png)
 
 ## Public links follow their creator
 
 A public link hands an item to people without an account, so making one needs
 edit rights on the item **and** `share.links` (a file request:
 `share.upload_links`) - on every door alike: the Share dialog, the agent API
-and the MCP `file_share` tool.
+and the MCP `file_share` tool. A download link also needs `files.download` on
+the item, and a folder link serves, lists and packs only the files inside it
+that its creator may download. A link an app opens hands over only what the
+person its job runs for may download, and the copies an app's page hands over
+are withheld once its creator may no longer download the page's document; the
+page itself stays ([APP-PLUGINS-API.md](APP-PLUGINS-API.md#an-apps-public-page-is-a-share-v3)).
 
 It keeps needing them. A link answers only while the person who made it
-**still** holds that permission, at the editor level, on the item: take
+**still** holds that permission, at the editor level, on the item (and, for a
+download link, `files.download` there): take
 `share.links` away from them - by a role, an exception, a folder part of a
 custom role, by taking their editor grant on the folder, or by taking them out
 of the group whose grant or role gave it - and every link
@@ -427,11 +434,17 @@ The server enforces everything; the web app only hides what would be refused.
 |---|---|---|
 | Web app / REST | session or API key (`access.api` / `access.desktop` for keys) | per route and per file - `perm_route_table_test.go` fails the build on any state-changing route that is not classified |
 | Agent API `/api/ai` | `ai.use` (+ the key's `access.api`) | the same file permissions |
+| AI assistant `/api/files/assistant` | `ai.assistant` (a person: a session or their own key, never an app's) | the same file permissions, each tool as that person |
 | WebDAV | `access.webdav`, every request | GET = download; PUT = create/modify; MKCOL = create; DELETE = delete (+purge without trash); MOVE = rename and/or move; COPY = create at the destination. PROPFIND stays on the grant |
 | SFTP | `access.sftp` | read = download; write = create/modify; mkdir = create; rename = rename and/or move (+modify when it replaces); remove = delete (+purge without trash) |
 | FTPS | `access.ftp` | RETR = download; STOR = create/modify; MKD = create; RNFR/RNTO = rename and/or move; DELE = delete |
 | S3 | `access.s3` | GET = download (HEAD stays open); PUT, multipart, copy destination = create/modify; DELETE = delete |
 | NFS | `access.nfs` at mount | as SFTP |
+
+On every door, a copy, move or rename (COPY, MOVE, rename, RNFR/RNTO, S3's
+copy) that would take a file from where `files.download` is refused to where
+it is allowed is refused as a download would be
+([RBAC.md](RBAC.md#every-file-in-a-folder-answers-the-download-rule)).
 
 Taking a protocol's permission away ends access at the next login. Inside an
 open session, file permissions follow the same short reload the grants have.
@@ -446,7 +459,7 @@ An **API key** is held to its own verbs on each of these doors as well -
 |---|---|---|
 | `GET /api/auth/me` | anyone signed in | now also `permissions` (account-wide), `permissions_in_folders` (allowed only in some folders), `permissions_by_folder` (whose answer differs from folder to folder), `permission_settings`, `two_factor_required` - what the explorer reads to hide what would be refused |
 | `GET /api/auth/me/permissions` | anyone signed in | effective permissions with sources, limits, role ids, path-limited role ids |
-| `GET /api/admin/roles/catalogue` | `admin.users` | the 29 permissions, the presets, and `apps`: every installed app's own permissions (`key`, `app`, `app_label`, `id`, `label`, `description`, `default`, and `default_for` - what `default` comes to on each built-in role when nobody has decided: `{"viewer":false,"user":true,"admin":true}`) |
+| `GET /api/admin/roles/catalogue` | `admin.users` | the 30 permissions, the presets, and `apps`: every installed app's own permissions (`key`, `app`, `app_label`, `id`, `label`, `description`, `default`, and `default_for` - what `default` comes to on each built-in role when nobody has decided: `{"viewer":false,"user":true,"admin":true}`) |
 | `GET /api/admin/roles/exceptions` | `admin.users` | user id → exceptions |
 | `GET` / `PUT /api/admin/users/{id}/exceptions` | `admin.users` | exceptions + effective (with `effective.apps`, [App permissions](#app-permissions)) / `{"overrides":{"files.delete":"deny","app.sign.request":"deny"}}` - `{}` clears. The whole map is replaced. Allowing an `admin.*` permission needs a session; changing an `app.*` key needs an administrator |
 | `GET` / `PUT /api/admin/users/{id}/roles` | `admin.users` | a person's one role, set in one call: `{"role_id":3}` (a custom role - also sets the level underneath), `{"role_id":null}`, or `{"role":"viewer"}` (a built-in role; ends their own custom one - a group's role still applies, [GROUPS.md](GROUPS.md#api)). An administrator given a custom role stops being one - never the last administrator (`409`) |
@@ -603,6 +616,18 @@ answers for all of them alike: `403 {"error":"e2e_not_allowed","reason":"permiss
   replaces its list the same way. Upgrading again does not give `files.encrypt`
   back to those, nor where an administrator took it away in between: it was
   merged once, at the first upgrade, and nothing stored tells the two apart.
+- **`ai.assistant` (0.57) comes on for everyone.** It is carved out of
+  nothing, and it is given to everybody: every preset holds it (Guest and
+  Upload-only too), and the first start of 0.57 adds it to every saved
+  role - the User and Viewer roles once edited, every custom role whatever
+  else it allows, switched off or not, of every tenant. A person's own
+  exceptions are not touched: without one for the key, a person follows
+  their role. Once, like `files.encrypt`: an administrator who takes it
+  away on Admin → Roles has taken it away, and no later start gives it back.
+  The permission alone sends nothing anywhere - the assistant itself is
+  off until an administrator sets it up and turns it on
+  ([AI-ASSISTANT.md](AI-ASSISTANT.md)), and what it does is held to the
+  person's own permissions, so a guest's assistant can only read.
 - **A role that may have lost a permission** is pointed out, from 0.52.0
   on. Admin → Roles shows, above the table, the built-in User role
   when it allows `files.create` but not `files.encrypt`, and every custom role
@@ -623,7 +648,7 @@ answers for all of them alike: `403 {"error":"e2e_not_allowed","reason":"permiss
   held `files.encrypt`, and "may add files, may not encrypt" is a role made on
   purpose.
 
-  ![Admin → Roles pointing out the User role and a custom role that may have lost Encrypt](https://filex.sh/shots/roles/roles-gaps-1280.bf4cbd7277e2.png)
+  ![Admin → Roles pointing out the User role and a custom role that may have lost Encrypt](https://filex.sh/shots/roles/roles-gaps-1280.5b3074ba1795.png)
 - **A permission a later version stored is kept.** A role or a person's
   exceptions saved by a newer filex may hold a key this version does not know.
   The pages cannot show it, so they cannot have taken it away: every save - a

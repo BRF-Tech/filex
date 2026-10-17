@@ -24,8 +24,47 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { SERVER, STORAGE, api, check, failures, finish, launchApp, signIn, skipTour, sleep } from './lib/harness.mjs';
+import { CREATABLE_NAMES, utf8Bytes } from '../../e2e/helpers/hostile-names.mjs';
 
 const RUN = `dragout-${Date.now()}`;
+
+/**
+ * Uploads one file under EXACTLY `name`.
+ *
+ * ⚠ Not through FormData: a browser's (and undici's) multipart encoder writes
+ * `"` as `%22` and a line break as `%0A` in the filename, and the server keeps
+ * what it is sent - `say "hi".txt` would be seeded as `say %22hi%22.txt`. The
+ * name travels as RFC 5987 `filename*` instead, which carries every character.
+ */
+async function uploadNamed(token, dir, name, body) {
+  const boundary = `----filex-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const star = encodeURIComponent(name).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  const payload = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="path"\r\n\r\n${dir}/\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file[]"; filename*=UTF-8''${star}\r\n`),
+    Buffer.from('Content-Type: text/plain\r\n\r\n'),
+    Buffer.from(body),
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  return api('/api/files/manager?action=upload', {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+    body: payload,
+  }, token);
+}
+
+/** A name Windows can hold (no forbidden or control character, no trailing
+ *  dot or space, no device name) with no bidi control in it. Written apart
+ *  from desktop/src/local-name.ts on purpose: this checks it. */
+function windowsHolds(name) {
+  for (const ch of name) {
+    const cp = ch.codePointAt(0);
+    if (cp < 0x20 || cp === 0x7f || '\\/:*?"<>|'.includes(ch)) return false;
+    if (cp === 0x061c || cp === 0x200e || cp === 0x200f || (cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069)) return false;
+  }
+  const stem = (name.includes('.') ? name.slice(0, name.indexOf('.')) : name).replace(/ +$/, '').toUpperCase();
+  return !/[. ]$/.test(name) && !/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem);
+}
 const REMOTE = `${STORAGE}://${RUN}`;
 const SUB = `${REMOTE}/klasor`;
 const BODY = `dragged out at ${new Date().toISOString()}`;
@@ -134,6 +173,56 @@ async function main() {
       ps.some((p) => fs.statSync(p).isDirectory()),
     ps.join(' | '),
   );
+
+  // ── 4b. the hostile names (task #238) ───────────────────────────
+  // The ONE list every surface of filex is tested with
+  // (backend/internal/testutil/hostilenames/names.json): every name the
+  // server takes is dragged out in one folder. Each must arrive with its OWN
+  // bytes - under its own name where the drag-out rule
+  // (desktop/src/local-name.ts) leaves it alone, under its safe name
+  // otherwise - and every name that lands is one Windows holds, with no bidi
+  // control in it. Two names that are one name on this computer (`Rapor.docx`
+  // and `rapor.docx`) used to land on each other: one arrived, with either
+  // twin's bytes.
+  const HOSTILE = `${REMOTE}/hostile`;
+  {
+    const mk = await api('/api/files/manager?action=newfolder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: REMOTE, name: 'hostile' }),
+    }, token);
+    if (!mk.ok) throw new Error(`seeding ${HOSTILE} failed (${mk.status})`);
+  }
+  const seeded = [];
+  for (const n of CREATABLE_NAMES) {
+    // Over 255 bytes a local-disk storage refuses the name (and says so).
+    if (utf8Bytes(n.name) > 255) continue;
+    const up = await uploadNamed(token, HOSTILE, n.name, `body of ${n.id}`);
+    check(`the server takes the hostile name ${n.id}`, up.ok, String(up.status));
+    if (up.ok) seeded.push(n);
+  }
+  res = await prepare([{ path: HOSTILE, basename: 'hostile', type: 'dir' }]);
+  check('a folder of hostile names prepares', res?.ready === true, JSON.stringify(res));
+  const ph = res?.paths?.[0] ?? '';
+  const arrived = ph && fs.existsSync(ph) ? fs.readdirSync(ph) : [];
+  check(
+    'every hostile name arrived as an entry of its own',
+    arrived.length === seeded.length,
+    `${arrived.length} of ${seeded.length}`,
+  );
+  const byBody = new Map(arrived.map((f) => [fs.readFileSync(path.join(ph, f), 'utf8'), f]));
+  for (const n of seeded) {
+    const got = byBody.get(`body of ${n.id}`);
+    const asIs = !n.windowsInvalid && !n.tags.includes('bidi-control') && !n.twin && utf8Bytes(n.name) <= 245;
+    check(
+      `${n.id}: its own bytes arrived${asIs ? ', under its own name' : ''}`,
+      got !== undefined && (!asIs || got === n.name),
+      JSON.stringify(got ?? null),
+    );
+    if (got !== undefined) {
+      check(`${n.id}: it landed under a name Windows holds, with no bidi control`, windowsHolds(got), JSON.stringify(got));
+    }
+  }
 
   // ── 5. an empty selection starts nothing ────────────────────────
   // The old contract refused everything unprepared; since the placeholder

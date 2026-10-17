@@ -22,8 +22,8 @@ SSO/LDAP, multiinquilino, carpetas cifradas, componente web integrable, aplicaci
 <sub>Esta es una traducción del [README en inglés](README.md); donde los dos difieran, prevalece el texto en inglés. Se tradujo de forma automática y está pendiente de la revisión de un hablante nativo - se agradecen las correcciones. Los documentos a los que enlaza están en inglés.</sub>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.e032d7456831.png">
-  <img src="https://filex.sh/shots/explorer-grid-light.de398671d43b.png" alt="explorador de filex - cuadrícula de miniaturas" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.ff7a02b49f27.png">
+  <img src="https://filex.sh/shots/explorer-grid-light.475b0b61faab.png" alt="explorador de filex - cuadrícula de miniaturas" width="900">
 </picture>
 
 </div>
@@ -195,7 +195,7 @@ en [docs/FEATURES.md](docs/FEATURES.md).
 
 Todas las funciones del explorador, en detalle: [docs/FEATURES.md → The explorer](docs/FEATURES.md#the-explorer).
 
-<p align="center"><img src="https://filex.sh/shots/driveshell/driveshell-hero-1440.16ace59f07c3.png" alt="La interfaz base de filex" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/driveshell/driveshell-hero-1440.6410104e072c.png" alt="La interfaz base de filex" width="860"></p>
 
 <details>
 <summary><b>Capturas de pantalla del explorador</b> - la interfaz base, la búsqueda, la navegación, las etiquetas, la papelera, la campana, los temas, los enlaces simbólicos, CSV en ONLYOFFICE</summary>
@@ -204,14 +204,14 @@ Todas las funciones del explorador, en detalle: [docs/FEATURES.md → The explor
 <tr>
 <td width="50%" valign="top">
 
-![La interfaz base de filex](https://filex.sh/shots/driveshell/driveshell-hero-1440.16ace59f07c3.png)
+![La interfaz base de filex](https://filex.sh/shots/driveshell/driveshell-hero-1440.6410104e072c.png)
 
 <sub>La interfaz base - adonde llega todo el mundo</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Búsqueda en una carpeta](https://filex.sh/shots/driveshell/driveshell-search-1440.c0f3ceda0ec4.png)
+![Búsqueda en una carpeta](https://filex.sh/shots/driveshell/driveshell-search-1440.2536c373425f.png)
 
 <sub>Buscar en esta carpeta; `⌘K` / `Ctrl K` pasa la consulta a la paleta</sub>
 
@@ -220,14 +220,14 @@ Todas las funciones del explorador, en detalle: [docs/FEATURES.md → The explor
 <tr>
 <td width="50%" valign="top">
 
-![Panel de navegación](https://filex.sh/shots/sidenav/sidenav-expanded-1440.461d5aaaff2a.png)
+![Panel de navegación](https://filex.sh/shots/sidenav/sidenav-expanded-1440.e96ea7e98388.png)
 
 <sub>Panel de navegación - Inicio, Compartido conmigo, Mis enlaces, Recientes, Destacados, Papelera y los almacenamientos a los que puede acceder</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Contraído a una barra](https://filex.sh/shots/sidenav/sidenav-rail-1440.843a2158380d.png)
+![Contraído a una barra](https://filex.sh/shots/sidenav/sidenav-rail-1440.9269e026d29a.png)
 
 <sub>Contraído a la barra de iconos</sub>
 
@@ -236,14 +236,14 @@ Todas las funciones del explorador, en detalle: [docs/FEATURES.md → The explor
 <tr>
 <td width="50%" valign="top">
 
-![Etiquetas personales y de equipo](https://filex.sh/shots/tags/tags-kinds-1440.64e4d6a5ccbc.png)
+![Etiquetas personales y de equipo](https://filex.sh/shots/tags/tags-kinds-1440.a4504c43e5cb.png)
 
 <sub>Etiquetas - las suyas, o las de su equipo; una etiqueta abre todos los archivos que la llevan, de todas las carpetas en las que están</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![La vista de la papelera](https://filex.sh/shots/sidenav/view-trash-1440.ab3cfb3b01cf.png)
+![La vista de la papelera](https://filex.sh/shots/sidenav/view-trash-1440.40f8904b147f.png)
 
 <sub>Papelera - qué se eliminó, de dónde vino y cuánto falta para que desaparezca</sub>
 
@@ -252,14 +252,14 @@ Todas las funciones del explorador, en detalle: [docs/FEATURES.md → The explor
 <tr>
 <td width="50%" valign="top">
 
-![La campana con su insignia de notificaciones sin leer, abierta](https://filex.sh/shots/signing/bell-badge-1440.61396b9ab714.png)
+![La campana con su insignia de notificaciones sin leer, abierta](https://filex.sh/shots/signing/bell-badge-1440.e9232b261511.png)
 
 <sub>La campana - con el número de notificaciones sin leer encima, y cada fila lleva adonde dice</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![La lista completa de notificaciones encima del explorador](https://filex.sh/shots/signing/notifications-list-1440.3176161f2110.png)
+![La lista completa de notificaciones encima del explorador](https://filex.sh/shots/signing/notifications-list-1440.669ce56b62d7.png)
 
 <sub>Todas sus notificaciones, dentro del explorador - para todos, no solo para los administradores</sub>
 
@@ -268,14 +268,14 @@ Todas las funciones del explorador, en detalle: [docs/FEATURES.md → The explor
 <tr>
 <td width="50%" valign="top">
 
-![El editor de temas](https://filex.sh/shots/appearance/theme-editor-1440.5b28006557f8.png)
+![El editor de temas](https://filex.sh/shots/appearance/theme-editor-1440.867a94807e72.png)
 
 <sub>Apariencia - cree un tema con sus propios colores, con vista previa mientras escribe</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![El explorador con el tema del operador](https://filex.sh/shots/appearance/themed-explorer-1440.dbe464fc39c7.png)
+![El explorador con el tema del operador](https://filex.sh/shots/appearance/themed-explorer-1440.abc278616daa.png)
 
 <sub>Establecido como predeterminado, es lo que lleva el explorador de todos…</sub>
 
@@ -284,14 +284,14 @@ Todas las funciones del explorador, en detalle: [docs/FEATURES.md → The explor
 <tr>
 <td width="50%" valign="top">
 
-![La página de inicio de sesión con el tema del operador](https://filex.sh/shots/appearance/themed-signin-1440.98801a84bea2.png)
+![La página de inicio de sesión con el tema del operador](https://filex.sh/shots/appearance/themed-signin-1440.b891c6431444.png)
 
 <sub>…y la página de inicio de sesión, antes de que nadie haya iniciado sesión</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Un enlace simbólico que sale del almacenamiento, con insignia](https://filex.sh/shots/symlinks/symlink-badge-1440.0d128385d287.png)
+![Un enlace simbólico que sale del almacenamiento, con insignia](https://filex.sh/shots/symlinks/symlink-badge-1440.82a105d4239e.png)
 
 <sub>Un enlace simbólico que filex no seguirá lo dice - en el listado, y con palabras en sus detalles</sub>
 
@@ -336,7 +336,7 @@ Todas las funciones del explorador, en detalle: [docs/FEATURES.md → The explor
 
 Todas las funciones de almacenamiento y protocolos, en detalle: [docs/FEATURES.md → Storage and protocols](docs/FEATURES.md#storage-and-protocols).
 
-<p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.8bfbe35780f4.png" alt="Cómo conectarse" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png" alt="Cómo conectarse" width="860"></p>
 
 <details>
 <summary><b>Capturas de pantalla de almacenamiento y protocolos</b> - las guías de conexión, las claves de API y un complemento de almacenamiento</summary>
@@ -345,14 +345,14 @@ Todas las funciones de almacenamiento y protocolos, en detalle: [docs/FEATURES.m
 <tr>
 <td width="50%" valign="top">
 
-![Cómo conectarse](https://filex.sh/shots/sidenav/connect-1440.8bfbe35780f4.png)
+![Cómo conectarse](https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png)
 
 <sub>Cómo conectarse - las guías, generadas a partir de *su* despliegue</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Claves de API](https://filex.sh/shots/sidenav/apikeys-minted-1440.cfc100f30069.png)
+![Claves de API](https://filex.sh/shots/sidenav/apikeys-minted-1440.3464cb59b2f8.png)
 
 <sub>Claves de API - cree las suyas, en el explorador o en una integración (la sesión o el token de una persona; una integración servida a través de un proxy con un único token compartido de tipo *app* no recibe esta entrada)</sub>
 
@@ -361,14 +361,14 @@ Todas las funciones de almacenamiento y protocolos, en detalle: [docs/FEATURES.m
 <tr>
 <td width="50%" valign="top">
 
-![Guía de conexión](https://filex.sh/shots/connections-guide.98a4f82ecd9d.png)
+![Guía de conexión](https://filex.sh/shots/connections-guide.3999cf32c3d9.png)
 
 <sub>Acceder a filex desde cualquier cosa - S3, SFTP, FTPS, NFS, WebDAV. Cada comando se genera a partir de *su* despliegue</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Complementos](https://filex.sh/shots/admin-plugins.c25fa69cfc7c.png)
+![Complementos](https://filex.sh/shots/admin-plugins.6bd96bf65745.png)
 
 <sub>Un almacenamiento que filex no incluye - instalado como complemento en **Complementos → Complementos de almacenamiento** y que describe su propio formulario de configuración</sub>
 
@@ -407,7 +407,7 @@ Todas las funciones de uso compartido y protección, en detalle: [docs/FEATURES.
 <tr>
 <td width="50%" valign="top">
 
-![Cuadro de diálogo Compartir](https://filex.sh/shots/share-modal.d6f6572228ea.png)
+![Cuadro de diálogo Compartir](https://filex.sh/shots/share-modal.87cb16a1a6f0.png)
 
 <sub>Uso compartido - PIN, caducidad, límite de descargas, `curl` de una línea</sub>
 
@@ -439,14 +439,14 @@ Todas las funciones de uso compartido y protección, en detalle: [docs/FEATURES.
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Enlaces compartidos, con el menú Acciones de una fila abierto](https://filex.sh/shots/signing/admin-table-actions-1440.330fcc5fda73.png)
+![Admin → Enlaces compartidos, con el menú Acciones de una fila abierto](https://filex.sh/shots/signing/admin-table-actions-1440.0fffdc146eb1.png)
 
 <sub>Cada tabla de administración - un único menú **Acciones** fijado por fila, el mismo menú que abre el ⋮ del explorador</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Admin → Cifrado: la política de aprobación y tres solicitudes en espera](https://filex.sh/shots/encryption/admin-encryption-1440.b74163acb93c.png)
+![Admin → Cifrado: la política de aprobación y tres solicitudes en espera](https://filex.sh/shots/encryption/admin-encryption-1440.35606d99b816.png)
 
 <sub>Quién puede cifrar - desactivado, solo administradores, todas las personas cuyo rol lo permita, o tras la aprobación de un administrador; las solicitudes en espera, con quién las hizo y por qué ([quién puede cifrar](docs/E2E-ENCRYPTION.md#who-may-encrypt))</sub>
 
@@ -484,7 +484,7 @@ Todas las funciones de uso compartido y protección, en detalle: [docs/FEATURES.
 
 Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → People and access](docs/FEATURES.md#people-and-access).
 
-<p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png" alt="Admin → Roles: los roles integrados y dos personalizados" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png" alt="Admin → Roles: los roles integrados y dos personalizados" width="860"></p>
 
 <details>
 <summary><b>Capturas de pantalla de personas y acceso</b> - roles, grupos, seguridad del inicio de sesión, una cuenta bloqueada, el panel de administración y su menú</summary>
@@ -493,14 +493,14 @@ Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → Peop
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Roles: los roles integrados y dos personalizados](https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png)
+![Admin → Roles: los roles integrados y dos personalizados](https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png)
 
 <sub>Roles - Administrador, Usuario, Lector y sus propios roles: quién tiene cada uno, qué permite, dónde difiere según la carpeta, sus límites ([docs/PERMISSIONS.md](docs/PERMISSIONS.md))</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Admin → Grupos](https://filex.sh/shots/groups/groups-list-1440.73224b70e40b.png)
+![Admin → Grupos](https://filex.sh/shots/groups/groups-list-1440.22ff57b029f5.png)
 
 <sub>Grupos - conjuntos de personas con nombre, con acceso a carpetas y un rol; miembros agregados a mano o sincronizados con los grupos que trae un inicio de sesión ([docs/GROUPS.md](docs/GROUPS.md))</sub>
 
@@ -516,7 +516,7 @@ Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → Peop
 </td>
 <td width="50%" valign="top">
 
-![Admin → Seguridad de acceso](https://filex.sh/shots/loginsecurity/login-security-1440.077cec3f1b0a.png)
+![Admin → Seguridad de acceso](https://filex.sh/shots/loginsecurity/login-security-1440.70f2a2a76257.png)
 
 <sub>Seguridad del inicio de sesión - el límite de intentos y las direcciones permitidas, que nunca se cuentan; los proxies de confianza, los bloqueos y el registro de inicios de sesión siguen en la misma página ([límites de intentos de inicio de sesión](docs/CONFIGURATION.md#sign-in-attempt-limits))</sub>
 
@@ -525,14 +525,14 @@ Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → Peop
 <tr>
 <td width="50%" valign="top">
 
-![El formulario de inicio de sesión de una cuenta bloqueada](https://filex.sh/shots/loginsecurity/login-locked-1440.3f4c6d3233f3.png)
+![El formulario de inicio de sesión de una cuenta bloqueada](https://filex.sh/shots/loginsecurity/login-locked-1440.42e1fe6f1937.png)
 
 <sub>…y lo que dice el formulario de inicio de sesión de una cuenta bloqueada, con el tiempo restante del bloqueo en su botón</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Panel principal de administración](https://filex.sh/shots/admin-dashboard.d94a065baab6.png)
+![Panel principal de administración](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
 
 <sub>Panel de administración</sub>
 
@@ -541,16 +541,16 @@ Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → Peop
 <tr>
 <td width="50%" valign="top">
 
-![Página de inicio de la demo](https://filex.sh/shots/demo-landing.bb2b8d97d4ff.png)
+![Página de inicio de la demo](https://filex.sh/shots/demo-landing.64f23c6f8cb3.png)
 
 <sub>Página de inicio de la demo</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![El panel Personas y seguridad del menú de administración, abierto encima de Admin → Usuarios](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png)
+![El panel Ajustes del menú de administración, abierto encima de Admin → Ajustes → General](https://filex.sh/shots/megamenu/settings-panel-1440.23a710915f9c.png)
 
-<sub>El menú de administración - todas las páginas en tres paneles, **Archivos y almacenamiento**, **Personas y seguridad** y **Sistema**, con una línea breve debajo de cada una; un teléfono recibe las mismas páginas en un panel deslizante ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
+<sub>El menú de administración - todas las páginas en cuatro paneles, **Archivos y almacenamiento**, **Personas**, **Ajustes** (General, Seguridad y datos, Procesamiento de archivos e integraciones) y **Mantenimiento y registros**, con una línea breve debajo de cada una; un teléfono recibe las mismas páginas en un panel deslizante ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
 
 </td>
 </tr>
@@ -593,8 +593,9 @@ sudo snap install filex-app                 # the same snap as the badge above
 
 La versión de la Store (*filex File Manager*) es la única copia para Windows con firma de
 código - Microsoft la firma - y la Store la mantiene actualizada. El paquete de winget de
-la aplicación de escritorio (`BRFTech.filex-app`) se envía con cada versión y está a la
-espera de su primera revisión por parte de los moderadores de winget, así que
+la aplicación de escritorio (`BRFTech.filex-app`) está a la espera de su primera revisión
+por parte de los moderadores de winget - hasta que lo acepten, una versión deja el envío
+como está - así que
 `winget install BRFTech.filex-app` todavía no lo encuentra.
 El instalador, el `.exe` portátil, el AppImage, el `.deb`, el `.rpm` y el `.dmg` se
 adjuntan a la [última versión](https://github.com/BRF-Tech/filex/releases/latest) -
@@ -645,7 +646,7 @@ El componente web ocupa dos líneas:
 <filex-explorer api-base="http://localhost:5212" sidenav connections ui-profile="simple"></filex-explorer>
 ```
 
-<p align="center"><img src="https://filex.sh/shots/sidenav/embed-webcomponent-1440.c8c25d893d24.png" alt="Componente web integrado" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/sidenav/embed-webcomponent-1440.b802d5b6ab56.png" alt="Componente web integrado" width="860"></p>
 
 <details>
 <summary><b>Vue 3 y React</b> - los otros dos envoltorios, y dónde están los detalles</summary>
@@ -683,14 +684,14 @@ servidor en la misma versión ([docs/API.md](docs/API.md)).
 <tr>
 <td width="50%" valign="top">
 
-![Compartido conmigo](https://filex.sh/shots/sidenav/view-shared-1440.475ec2d8b49f.png)
+![Compartido conmigo](https://filex.sh/shots/sidenav/view-shared-1440.faf6f6668c20.png)
 
 <sub>Compartido conmigo - carpetas a las que otras personas le dieron acceso, sin instrucciones de montaje</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Componente web integrado](https://filex.sh/shots/sidenav/embed-webcomponent-1440.c8c25d893d24.png)
+![Componente web integrado](https://filex.sh/shots/sidenav/embed-webcomponent-1440.b802d5b6ab56.png)
 
 <sub>Integrado en la página de otro producto</sub>
 
@@ -775,7 +776,7 @@ la genera filex, y el enlace que recibe el socio es un enlace compartido corrien
 <tr>
 <td width="50%" valign="top">
 
-![El documento bloqueado, con su panel Firmas abierto](https://filex.sh/shots/signing/sign-status-1440.9f93226381ed.png)
+![El documento bloqueado, con su panel Firmas abierto](https://filex.sh/shots/signing/sign-status-1440.54c60e832ced.png)
 
 <sub>Mientras está en curso - el documento congelado para todos y, en sus detalles, quién ha firmado</sub>
 
@@ -791,7 +792,7 @@ la genera filex, y el enlace que recibe el socio es un enlace compartido corrien
 <tr>
 <td width="50%" valign="top">
 
-![El detalle de una aplicación instalada](https://filex.sh/shots/apps/apps-detail-1440.4e27b40c5ce7.png)
+![El detalle de una aplicación instalada](https://filex.sh/shots/apps/apps-detail-1440.b7f6ec845458.png)
 
 <sub>Una aplicación instalada - de dónde vino, su huella digital y cada permiso que tiene, en lenguaje claro (su configuración y sus acciones vienen después, más abajo en la página)</sub>
 
@@ -807,7 +808,7 @@ la genera filex, y el enlace que recibe el socio es un enlace compartido corrien
 <tr>
 <td width="50%" valign="top">
 
-![La revisión de instalación de una aplicación con interfaz propia](https://filex.sh/shots/apps/app-interface-review-1440.51df0aa460ad.png)
+![La revisión de instalación de una aplicación con interfaz propia](https://filex.sh/shots/apps/app-interface-review-1440.877a89c82359.png)
 
 <sub>Una aplicación que trae su propia interfaz - la revisión muestra la huella digital del paquete, cada dirección fuera de él (una en vivo es un permiso, en amarillo) y lo que un navegador no puede prometer</sub>
 
@@ -846,7 +847,7 @@ la genera filex, y el enlace que recibe el socio es un enlace compartido corrien
 </td>
 <td width="50%" valign="top">
 
-![Complementos → Aplicaciones predeterminadas](https://filex.sh/shots/defaultapps/default-apps-1440.27d3c64fe457.png)
+![Complementos → Aplicaciones predeterminadas](https://filex.sh/shots/defaultapps/default-apps-1440.0dd62b519f8f.png)
 
 <sub>Aplicaciones predeterminadas - cada tipo de archivo gestionado por algo además de filex: quién lo abre y quién genera su miniatura, en el orden que usted establezca ([Aplicaciones predeterminadas](docs/APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail))</sub>
 
@@ -855,14 +856,14 @@ la genera filex, y el enlace que recibe el socio es un enlace compartido corrien
 <tr>
 <td width="50%" valign="top">
 
-![Carpetas mostradas con sus archivos más recientes](https://filex.sh/shots/thumbnails/folders-grid-1440.2b408fb54f7e.png)
+![Carpetas mostradas con sus archivos más recientes](https://filex.sh/shots/thumbnails/folders-grid-1440.dd7653d6edca.png)
 
 <sub>Vistas previas de carpetas - cada carpeta mostrada con los tres últimos archivos que entraron en ella; los SVG los genera el motor integrado de filex ([docs/thumbnails.md](docs/thumbnails.md#folder-previews))</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![La revisión de instalación abierta desde el enlace de una tienda](https://filex.sh/shots/store/store-review-1440.d93b2b571d93.png)
+![La revisión de instalación abierta desde el enlace de una tienda](https://filex.sh/shots/store/store-review-1440.36cf3bbc2a50.png)
 
 <sub>Instalar desde una tienda - la misma revisión, marcada **De la tienda**, con la clave de licencia de la aplicación de pago mostrada por sus primeros caracteres ([Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 
@@ -871,14 +872,14 @@ la genera filex, y el enlace que recibe el socio es un enlace compartido corrien
 <tr>
 <td width="50%" valign="top">
 
-![El primer enlace de una tienda: ¿confiar en ella?](https://filex.sh/shots/store/store-trust-1440.94bebecac9fe.png)
+![El primer enlace de una tienda: ¿confiar en ella?](https://filex.sh/shots/store/store-trust-1440.8fb07862db1a.png)
 
 <sub>El primer enlace de una tienda - su dirección y las huellas digitales de sus claves, para compararlas antes de confiar en ella ([Tiendas de confianza](docs/APP-PLUGINS.md#trusted-stores))</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Una aplicación de pago retenida, con la franja en una página de administración](https://filex.sh/shots/store/store-license-held-1440.2dd9518d7e87.png)
+![Una aplicación de pago retenida, con la franja en una página de administración](https://filex.sh/shots/store/store-license-held-1440.6fd145640e0f.png)
 
 <sub>Una licencia que la tienda revocó - la aplicación retenida, *Sin licencia*, sin quitar nada, y una franja en cada página de administración ([Aplicaciones de pago](docs/APP-PLUGINS.md#paid-apps))</sub>
 
@@ -1015,7 +1016,7 @@ Empiece por [Instalación](docs/INSTALLATION.md), [Configuración](docs/CONFIGUR
 | **Uso compartido** | Enlaces públicos con PIN, caducidad y límite de descargas, solicitudes de archivos e invitaciones para compartir por correo electrónico ([Uso compartido](docs/SHARING.md)) |
 | **Protección** | Papelera e historial de versiones, análisis opcional con ClamAV, carpetas cifradas de extremo a extremo, replicación a un segundo almacenamiento (con una copia inicial de lo que ya hay) y un registro de auditoría ([Papelera y versiones](docs/TRASH-VERSIONING.md), [Protección](docs/PROTECTION.md), [Cifrado E2E](docs/E2E-ENCRYPTION.md), [Replicación](docs/REPLICATION.md), [Registro de auditoría](docs/BACKEND.md#admin-audit-log)) |
 | **Visores y editores** | Imágenes, video, audio, PDF, Markdown, código (Monaco), documentos de Office en la aplicación de editor ofimático o mediante ONLYOFFICE, diagramas de draw.io, diagramas de Mermaid dibujados y editados como texto, modelos 3D, y archivos comprimidos en ZIP, 7z y TAR ([ONLYOFFICE](docs/ONLYOFFICE.md), [Archivos comprimidos](docs/ARCHIVES.md)) |
-| **Búsqueda y miniaturas** | Búsqueda de texto completo integrada que respeta los permisos, y miniaturas para imágenes, video, PDF, carpetas y, con ONLYOFFICE conectado, documentos de Office ([Búsqueda](docs/SEARCH.md), [Miniaturas](docs/thumbnails.md)) |
+| **Búsqueda y miniaturas** | Búsqueda de texto completo integrada que respeta los permisos, y miniaturas para imágenes, video, PDF, carpetas y documentos de Office - las de Office las dibuja en el servidor el motor de la app de editor de Office o un ONLYOFFICE conectado ([Búsqueda](docs/SEARCH.md), [Miniaturas](docs/thumbnails.md)) |
 | **Tiempo real** | Presencia y actualizaciones de archivos en vivo por WebSocket, y la edición conjunta de un archivo en una aplicación, a través del relé de filex ([Tiempo real](docs/REALTIME.md), [Edición conjunta](docs/APP-PLUGINS-API.md#editing-together-coedit-056)) |
 | **Clientes** | Una aplicación de escritorio con sincronización de carpetas, una aplicación web que un teléfono instala con el nombre y el logotipo de su instancia, una CLI, integraciones de Vue / React / componente web, una API REST y un servidor MCP ([Escritorio](docs/DESKTOP.md), [Sincronización](docs/SYNC.md), [CLI](docs/CLI.md), [Integración](docs/INTEGRATION.md), [MCP](docs/MCP.md)) |
 | **Aplicaciones e idiomas** | Aplicaciones en un entorno aislado (Firma electrónica, Convertir, Office editor, filextext, draw.io) que imprimen a través de filex, editan un archivo entre varias personas a través de su relé y abren el archivo de una carpeta cifrada solo cuando usted lo permite, descifrado en su navegador; paquetes de idioma y un diseño de derecha a izquierda ([Aplicaciones](docs/APP-PLUGINS.md), [Editar en una aplicación](docs/E2E-ENCRYPTION.md#editing-in-an-app), [RTL](docs/RTL.md)) |

@@ -2,12 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.56.3"
+version: "0.57.0"
 releaseNotes: |-
-  filex v0.56.3 - 2026-10-13
-  • df and a mapped drive show the real disk, not 1 PB.
-  • Indexing a large existing tree no longer eats the server's memory.
-  • A plugin in a long data directory starts.
+  filex v0.57.0 - 2026-10-17
+  • A picture from another server in a file's preview waits for you.
+  • A Mermaid diagram and an EPUB book ask no other server either.
+  • Give a whole storage to people and groups.
+  • Nightly builds of the desktop app, every night: on filex.sh/nightly and the Snap Store's edge channel.
+  • What a nightly image is, read off the image.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-
@@ -27,10 +29,9 @@ description: >-
 
   Browsing opens on Home - your storages, what you opened last, what you
   starred. + New makes a folder or a document: Markdown, text, CSV or code
-  straight away, and Word, Excel, PowerPoint or OpenDocument once an
-  ONLYOFFICE server is connected. The templates are real documents compiled
-  into the binary, so nothing here needs LibreOffice installed; the office
-  editor app adds Word, Excel and PowerPoint rows of its own. Select a dozen
+  straight away, and Word, Excel or PowerPoint once you install the office
+  editor app, which needs no document server. Nothing here needs LibreOffice
+  installed. Select a dozen
   files and Download hands back one ZIP, streamed rather than assembled, so a
   large archive costs the server almost no memory. Every file records its
   owner, so the listing has an Owner column, the filter row an Owner entry,
@@ -50,10 +51,11 @@ description: >-
   (OIDC/LDAP), a desktop app with two-way folder sync, an embeddable web
   component, and an AI/MCP API for agents. An open folder keeps itself current
   over a WebSocket, so a file somebody else uploads appears without a refresh.
-  The office editor app edits Office documents in the browser with no
-  document server - in an encrypted folder too, your browser decrypting the
-  document for it. ONLYOFFICE and draw.io can be
-  connected for in-browser document and diagram editing, and so can a ClamAV
+  For Office documents, install the office editor app from filex's app
+  store: it edits them in the browser with no document server, alone or
+  together - in an encrypted folder too, your browser decrypting the
+  document for it. An ONLYOFFICE Document Server stays optional; draw.io can
+  be connected for diagram editing, and so can a ClamAV
   container: give filex its address and every
   file written is scanned, with infected ones quarantined into the trash.
 

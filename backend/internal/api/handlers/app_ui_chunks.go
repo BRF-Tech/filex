@@ -76,10 +76,10 @@ func sweepUIChunks(now time.Time) {
 
 func uiChunkTarget(r *http.Request) (string, bool) {
 	q := r.URL.Query()
-	if p := strings.TrimSpace(q.Get("path")); p != "" {
+	if p := keptPath(q.Get("path")); p != "" {
 		return "path:" + p, true
 	}
-	dir, name := strings.TrimSpace(q.Get("dir")), strings.TrimSpace(q.Get("name"))
+	dir, name := keptPath(q.Get("dir")), keptPath(q.Get("name"))
 	if dir != "" && name != "" {
 		return "new:" + dir + "\x00" + name, true
 	}

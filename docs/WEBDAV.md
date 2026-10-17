@@ -100,7 +100,7 @@ Notes:
 > available inside the app with your real host, your storage name and your
 > own username already substituted, plus a copy button per command:
 >
-> - the file explorer's navigation panel → **How to connect** - the same entry
+> - the file explorer's navigation panel → **Connections** - the same entry
 >   on every surface that draws the panel, for every signed-in user;
 > - admins also reach it from **Connections** in the admin menu (*Files & storage*).
 >

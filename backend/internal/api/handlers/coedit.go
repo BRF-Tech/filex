@@ -261,7 +261,7 @@ func (h *CoEdit) Join(w http.ResponseWriter, r *http.Request) {
 	if !readCoEditBody(w, r, 16<<10, &body) {
 		return
 	}
-	target := strings.TrimSpace(body.Path)
+	target := keptPath(body.Path)
 	if target == "" {
 		writeError(w, r, http.StatusBadRequest, "bad_path", nil)
 		return
@@ -698,8 +698,10 @@ func (h *CoEdit) audit(r *http.Request, p *wasmplugin.Installed, action string, 
 // `…/save?path=…&coedit=<sid>&client=&token=&through=<seq>`. The file's
 // signature after the write is the server's own reading; a request that is
 // not the member's, or a session of another file or app, records nothing.
-// The save itself stands either way (it is written already).
-func (h *AppPlugins) coeditSaved(r *http.Request, p *wasmplugin.Installed, drv storage.Driver, storageID int64, rel string) {
+// The save itself stands either way (it is written already). written is
+// where the save went: rel, or the file beside it the session's saves go to
+// from now on (app_ui_beside.go; coedit.Relay.SavedTo).
+func (h *AppPlugins) coeditSaved(r *http.Request, p *wasmplugin.Installed, drv storage.Driver, storageID int64, rel, written string) {
 	q := r.URL.Query()
 	sid := q.Get("coedit")
 	if h.CoEditRelay == nil || sid == "" {
@@ -722,19 +724,26 @@ func (h *AppPlugins) coeditSaved(r *http.Request, p *wasmplugin.Installed, drv s
 	if err != nil || s.App != p.Row.Name || s.StorageID != storageID || s.Path != rel {
 		return
 	}
-	obj, err := drv.Stat(ctx, rel)
+	obj, err := drv.Stat(ctx, written)
 	if err != nil {
 		return
 	}
-	if _, err := h.CoEditRelay.Saved(ctx, sid, m.Client, through, coeditSig(&obj)); err != nil {
+	to := ""
+	if written != rel {
+		to = written
+	}
+	if _, err := h.CoEditRelay.SavedTo(ctx, sid, m.Client, through, coeditSig(&obj), to); err != nil {
 		slog.Warn("coedit: a save was written but not recorded in its session",
 			slog.String("sid", sid), slog.String("client", m.Client), slog.String("err", err.Error()))
 		return
 	}
+	meta := map[string]any{"storage_id": storageID, "path": rel, "session": sid, "client": m.Client, "through": through}
+	if to != "" {
+		meta["saved_to"] = to
+	}
 	_ = h.Store.InsertAuditEntry(ctx, &model.AuditEntry{
 		UserID: &u.ID, Action: "app_plugin.coedit_saved", TargetType: "app_plugin", TargetID: p.Row.Name,
-		Metadata: map[string]any{"storage_id": storageID, "path": rel, "session": sid, "client": m.Client, "through": through},
-		IP:       clientIP(r),
+		Metadata: meta, IP: clientIP(r),
 	})
 }
 
@@ -742,36 +751,43 @@ func (h *AppPlugins) coeditSaved(r *http.Request, p *wasmplugin.Installed, drv s
 // A member's page cannot know the date another member's save gave the file,
 // so the session answers instead: the file must still be what the session
 // holds - the version it started from or its last save - or another version
-// was written outside it, and the save is refused (`changed`). inSession is
-// false when the save names no session of this file (or not the member's
-// own): the caller asks `expect` as before.
-func (h *AppPlugins) coeditSaveHolds(r *http.Request, p *wasmplugin.Installed, drv storage.Driver, storageID int64, rel string) (inSession, holds bool) {
+// was written outside it (`changed`: refused, or a conflict copy when the
+// app asked for one). inSession is false when the save names no session of
+// this file (or not the member's own): the caller asks `expect` as before.
+// savedTo is where the session's saves go when it is not rel (filex 0.57: a
+// save beside it in another format, a conflict copy), and holds is then
+// asked of that file.
+func (h *AppPlugins) coeditSaveHolds(r *http.Request, p *wasmplugin.Installed, drv storage.Driver, storageID int64, rel string) (inSession, holds bool, savedTo string) {
 	q := r.URL.Query()
 	sid := q.Get("coedit")
 	if h.CoEditRelay == nil || sid == "" {
-		return false, false
+		return false, false, ""
 	}
 	u := auth.UserFrom(r.Context())
 	if u == nil {
-		return false, false
+		return false, false, ""
 	}
 	ctx := r.Context()
 	if _, err := h.CoEditRelay.Authorise(ctx, sid, q.Get("client"), q.Get("token"), u.ID); err != nil {
-		return false, false
+		return false, false, ""
 	}
 	s, err := h.CoEditRelay.Session(ctx, sid)
 	if err != nil || s.App != p.Row.Name || s.StorageID != storageID || s.Path != rel {
-		return false, false
+		return false, false, ""
 	}
-	obj, err := drv.Stat(ctx, rel)
+	at := rel
+	if s.SavedTo != "" {
+		at = s.SavedTo
+	}
+	obj, err := drv.Stat(ctx, at)
 	if err != nil {
-		return true, false
+		return true, false, s.SavedTo
 	}
 	current := s.BaseSig
 	if s.SavedSig != "" {
 		current = s.SavedSig
 	}
-	return true, coeditSig(&obj) == current
+	return true, coeditSig(&obj) == current, s.SavedTo
 }
 
 // ---------------------------------------------------------------------------

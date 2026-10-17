@@ -37,6 +37,7 @@ vi.mock('@/api/storages', () => ({
 
 import Tools from '@/views/Tools.vue';
 import ThumbnailRepairTab from '@/components/tools/ThumbnailRepairTab.vue';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 import ThumbLimitsCard from '@/components/tools/ThumbLimitsCard.vue';
 import { pickOption } from '../helpers/choiceSelect';
 
@@ -64,7 +65,10 @@ function i18n(locale: 'en' | 'tr' = 'en') {
 async function router(at = '/tools') {
   const r = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/tools', name: 'tools', component: { template: '<div />' } }],
+    routes: [
+      { path: '/tools', name: 'tools', component: { template: '<div />' } },
+      { path: '/settings', name: 'settings', component: { template: '<div />' } },
+    ],
   });
   await r.push(at);
   await r.isReady();
@@ -187,8 +191,9 @@ describe('Thumbnail repair', () => {
       'Took longer than the SVG time limit (10 s)',
       'Could not be drawn',
       'ImageMagick with HEIC support is not installed',
-      // 0.50: office documents are OnlyOffice's, not a program's here.
-      'ONLYOFFICE is not configured (Settings → External services)',
+      // 0.50: office documents are OnlyOffice's, not a program's here; 0.57:
+      // the Office editor app's engine draws them too, so the reason names it.
+      "No office engine runs: install the Office editor app (Apps) or connect ONLYOFFICE (Settings → External services); an app's engine is prepared for a few minutes after it is installed",
       // A kind this client does not know yet still says what happened.
       'A program this kind of file needs is not installed',
       'Encrypted archive: its contents are not listed',
@@ -229,6 +234,30 @@ describe('Thumbnail repair', () => {
     w.unmount();
     w = await mountTab('tr');
     expect(w.find('[data-testid="thumb-problem-reason"]').text()).toBe("libheif'in HEVC çözücüsü kurulu değil (libheif-plugin-libde265)");
+  });
+});
+
+// Task #258: the thumbnail settings have ONE home, Admin → Settings → General.
+// The repair tab used to draw the same card; it now links to it.
+describe('the thumbnail settings, from the repair tab', () => {
+  it('links to the card on General instead of drawing a second copy', async () => {
+    const w = await mountTab();
+    expect(w.find('[data-testid="thumb-limits"]').exists()).toBe(false);
+    const link = w.get('[data-testid="thumb-limits-link"]');
+    expect(link.text()).toContain(en.tools.thumbs.limits.changeLimits);
+    expect(link.get('a').attributes('href')).toBe('/settings#thumb-limits');
+    expect(api.thumbSettings).not.toHaveBeenCalled();
+  });
+
+  it('says it in Turkish: "Sınırları değiştir →"', async () => {
+    const w = await mountTab('tr');
+    expect(w.get('[data-testid="thumb-limits-link"] a').text()).toBe('Sınırları değiştir →');
+  });
+
+  it('is not offered to a tenant’s administrator, who cannot open General', async () => {
+    useCapabilitiesStore().data = { caller_platform: false } as never;
+    const w = await mountTab();
+    expect(w.find('[data-testid="thumb-limits-link"]').exists()).toBe(false);
   });
 });
 

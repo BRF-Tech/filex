@@ -129,6 +129,12 @@ export interface PluginUIRef {
   /** The app has a module: `engine.call` and `job.submit` answer. */
   engine: boolean;
   version: string;
+  /**
+   * filex 0.57: the language the administrator fixed for document editors
+   * (#214); absent while each person's own language decides. The interface
+   * is told it as `session.editor_lang`.
+   */
+  editor_lang?: string;
 }
 
 /** One "offered once X is there" part of an action's rule. */

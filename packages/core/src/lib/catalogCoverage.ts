@@ -47,6 +47,8 @@ export interface StorageInfo {
   name: string;
   read_only?: boolean;
   coverage?: CatalogCoverage | null;
+  /** #117 — the caller's level at the storage's root (lib/storageRoot). */
+  perm?: string;
 }
 
 /** A coverage object worth telling anybody about, or null. */

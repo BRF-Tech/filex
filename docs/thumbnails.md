@@ -31,9 +31,12 @@ that filex **auto-detects on `PATH`** at startup. If the tool is missing, a
 file of that kind is recorded as *skipped* with the tool named, and **Admin →
 Tools → Thumbnail repair** lists it with the reason; install the tool, restart,
 and the next listing (or a *Fix* repair) draws it. **Office documents** are
-drawn by the **OnlyOffice document server** filex is configured with, and by
-nothing else (0.50, [Office through OnlyOffice](#office-through-onlyoffice)):
-without OnlyOffice they get no thumbnail, and the repair tab says so.
+drawn by ONLYOFFICE's converter, on the server: the office engine the Office
+editor app brings (0.4.0, filex 0.57), or an **OnlyOffice Document Server**
+filex is connected to ([Office through OnlyOffice](#office-through-onlyoffice)).
+The default install runs no Document Server, so office documents get their
+pictures once the app is installed and its engine prepared (a few minutes);
+with neither they get no thumbnail, and the repair tab says so.
 
 A file whose thumbnail will not come because of the file itself (it is
 damaged, encrypted or too large) keeps its type icon with a small marker in
@@ -76,7 +79,7 @@ in its own shape:
 | **Gallery** | The same folder large behind, and up to three prints fanned out in front of it from their foot. |
 | **List** | The row's small folder, with the newest file rising out of its mouth. |
 
-![The grid: each folder drawn with the files that came into it last](https://filex.sh/shots/thumbnails/folders-grid-1440.2b408fb54f7e.png)
+![The grid: each folder drawn with the files that came into it last](https://filex.sh/shots/thumbnails/folders-grid-1440.dd7653d6edca.png)
 
 **Which files.** The three files directly in the folder that came in last:
 for each file, the later of when it entered the catalogue and its own
@@ -105,7 +108,7 @@ Both are part of the explorer package, so the web app, the desktop app and
 every embed draw the same thing.
 
 **Turning them off.** *Folder previews* is a switch on the thumbnail settings
-card (**Settings**, and **Admin → Tools → Thumbnail repair**; setting
+card (**Admin → Settings → General**; setting
 `thumbs.folder_previews`, on by default, seeded once from
 `FILEX_THUMBS_FOLDER_PREVIEWS`). Off, listings send no folder files, the three
 views keep their classic folder icons (the grid its compact folder cards), and
@@ -360,8 +363,8 @@ An [app](APP-PLUGINS.md) may draw thumbnails: a `thumbnails` block in its
 manifest names the kinds it draws (extensions and media types) and its module
 answers a `thumbnail` export. filex itself is one more drawer, **built-in**,
 for the kinds it draws (images, SVG, video, audio, PDF, HEIC/AVIF, text, the
-archives it lists), and the **OnlyOffice** document server another, for office
-documents while OnlyOffice is configured
+archives it lists), and **ONLYOFFICE** another, for office documents while
+an office engine runs - the one an app brings, or a connected Document Server
 ([Office through OnlyOffice](#office-through-onlyoffice)). So every kind of
 file has an ordered list of
 **handlers** that can draw it, and the administrator decides that list
@@ -370,7 +373,7 @@ opens a file: [APP-PLUGINS.md → Default apps](APP-PLUGINS.md#default-apps-whic
 The person has no say here: a thumbnail is the same picture for everybody.
 
 **The chain.** For one file the handlers are OnlyOffice (for an office kind,
-while it is configured), the built-in one (when filex draws that kind) and
+while an office engine runs), the built-in one (when filex draws that kind) and
 every running app whose `thumbnails` rule matches the file (its extension, or
 its recorded type), in this default order: OnlyOffice first, then built-in,
 then the apps by name. An administrator's rule for the file's extension reorders
@@ -401,7 +404,7 @@ file changed, but when the answer would now come from somebody else:
 |---|---|
 | `ready` | any handler up to and including the one that drew it is now different: another one in front of it, it was switched off, removed, or upgraded (its version is part of what was recorded). A handler added **after** it changes nothing. |
 | `failed` / `skipped` | the chain is different in any way (a new handler may draw it), or an app's limit it hit was raised (`app_too_large`, `app_timeout`, like the SVG limits) |
-| drawn before 0.50 (no `attempts`) | as if the built-in drawer had drawn it: stale when the built-in drawer is no longer first for its kind. An office document's page (LibreOffice drew it) is therefore stale once OnlyOffice is configured, and kept while nobody here can draw office documents |
+| drawn before 0.50 (no `attempts`) | as if the built-in drawer had drawn it: stale when the built-in drawer is no longer first for its kind. An office document's page (LibreOffice drew it) is therefore stale once an office engine runs, and kept while nobody here can draw office documents |
 
 It is the same check as the rest of [Freshness](#freshness-one-signature-checked-where-the-catalogue-already-is):
 a listing compares what it holds, in memory, and a *Fix* repair renders the
@@ -444,16 +447,21 @@ so ciphertext is skipped before any handler is asked.
 
 ### Office through OnlyOffice
 
-Since 0.50 the thumbnail of an office document (Word, Excel, PowerPoint,
-OpenDocument, RTF, EPUB, Apple's Pages, Numbers and Keynote, Visio, OpenDocument
-drawings) is a picture of its first page made by the **OnlyOffice document
-server** filex is configured with ([ONLYOFFICE.md](ONLYOFFICE.md)), and by
-nothing else. filex ships no office suite: LibreOffice left the image, and with
-it the path that converted a document to PDF and rasterised its first page.
-Without OnlyOffice an office document gets no thumbnail and says why: `skipped`,
-`no_tool:office`, "ONLYOFFICE is not configured" on the repair tab, its type
-icon in the views. Configure OnlyOffice (no restart: the setting is read live)
-and the next listing draws it.
+The thumbnail of an office document (Word, Excel, PowerPoint, OpenDocument,
+RTF, EPUB, Apple's Pages, Numbers and Keynote, Visio, OpenDocument drawings) is
+a picture of its first page made by ONLYOFFICE's converter, through one of two
+**office engines**: the one the Office editor app brings (0.4.0), which filex
+runs on the server (*The Office editor app's engine*, below, and
+[ONLYOFFICE.md → The office engine without a Document Server](ONLYOFFICE.md#the-office-engine-without-a-document-server)),
+or an **OnlyOffice Document Server** filex is connected to
+([ONLYOFFICE.md](ONLYOFFICE.md#the-onlyoffice-document-server-optional)).
+filex ships no office suite of its own; the default install runs no Document
+Server, so office documents show their type icon until the app is installed
+and its engine prepared, or a Document Server is connected.
+With no office engine an office document gets no thumbnail and says why:
+`skipped`, `no_tool:office`, "No office engine runs" on the repair tab, its
+type icon in the views. Install the app or configure OnlyOffice (no restart:
+both are read live) and the next listing draws it.
 
 **What is sent.** For one document filex asks the document server's conversion
 service (`ConvertService.ashx`) for a PNG of the first page, at most 320 x 320
@@ -505,7 +513,7 @@ the file, new parameters or a retry is never answered from the cache.
 | -10 (its own size limit) | `skipped`, `oo_too_large:0`, marked *Too large* | when the file changes, or a repair asks |
 | over `thumbs.office_max_mb` (not sent) | `skipped`, `oo_too_large:<bytes>`, marked *Too large* | when the setting is raised past the file |
 | -4 refused by filex (the file is encrypted) | `skipped`, `e2e-encrypted content`, marked *Encrypted* | never for this content |
-| OnlyOffice not configured | `skipped`, `no_tool:office` | once it is configured |
+| no office engine runs (none installed or connected, or an app's still being prepared) | `skipped`, `no_tool:office` | once one runs |
 | anything else: -1, -2, -6, -8, a -4 that never reached filex, the network, an HTTP error, a timeout, a busy slot, a picture it could not fetch or read | `failed`, `oo_retry:<tries>:<what>`, no mark | after a back-off (below) |
 
 Not every damaged file is refused: the document server draws an empty, a
@@ -522,17 +530,38 @@ the same listings and storage syncs that keep every thumbnail fresh, so a file
 nobody looks at is not asked for.
 
 **The pictures LibreOffice drew** before 0.50 stay where they are while no
-OnlyOffice is configured: nobody here could draw a better one, and drawing
-again would only replace a picture with "ONLYOFFICE is not configured". Once
-OnlyOffice is configured the chain names it first for the office kinds, so
+office engine runs: nobody here could draw a better one, and drawing
+again would only replace a picture with "No office engine runs". Once
+an office engine runs the chain names ONLYOFFICE first for the office kinds, so
 those pictures are stale and are drawn again as they are listed, one document
 at a time (or all at once with a *Fix* repair).
 
 **Default apps.** OnlyOffice is a thumbnail handler of filex's own, named
 **ONLYOFFICE** on the Default apps screen and in the repair tab's chain and
-"Who drew the thumbnails": first for the office kinds while it is configured,
-then filex's built-in drawer (for a kind it also draws), then the apps. An
-administrator reorders it or switches it off per kind like any other handler.
+"Who drew the thumbnails": first for the office kinds while an office engine
+runs, then filex's built-in drawer (for a kind it also draws), then the apps.
+An administrator reorders it or switches it off per kind like any other
+handler.
+
+**The Office editor app's engine.** The same pictures are drawn without a
+Document Server by the office engine the Office editor app brings, which
+filex runs on the server
+([ONLYOFFICE.md → The office engine without a Document Server](ONLYOFFICE.md#the-office-engine-without-a-document-server)).
+It is the same drawer: the handler is still **ONLYOFFICE** (`onlyoffice`, the
+`generator` too), the job is the one a Document Server is given - the first
+page, 320 x 320 with its proportions kept, a spreadsheet laid out 120 mm wide
+with gridlines - and `thumbs.office_slots`, `thumbs.office_max_mb`, the 60
+seconds, the answers on the row and the retries are the same. So a picture a
+Document Server drew does **not** go stale when the app's engine takes over,
+nor the other way round; which of the two draws, when both are there, is
+**Default apps → Office engine**. The engine's failures are recorded with its
+own short names (`oo_corrupt:x2t-86`, `oo_corrupt:x2t-trap`,
+`oo_corrupt:layout-open`, `oo_too_large:0` for a document that reached its
+memory cap, `oo_retry:<tries>:crash`) and classed as the Document Server's
+codes are. While the app's engine is **being prepared** (a few minutes after
+it is installed or updated) and no Document Server is connected, office
+documents are skipped as `no_tool:office`, and drawn as they are listed once
+it is ready.
 
 **Several replicas.** The fetch address is signed with the JWT secret and
 checked by any replica (no state), so the document server may download from
@@ -578,8 +607,8 @@ Every generator writes a **JPEG** to the cache directory as
 |---|---|
 | `pending` | Dispatched, not finished yet (or left over from a crash). |
 | `ready` | A JPEG is cached and servable. |
-| `skipped` | Nothing to draw, by design: an end-to-end encrypted file, an SVG over the [SVG limits](#svg-limits), a kind whose program is missing (or an office document with no OnlyOffice configured), a kind whose handlers are all switched off, an app that could not draw it ([Thumbnails drawn by apps](#thumbnails-drawn-by-apps-one-chain-per-kind)), or an office document OnlyOffice will not draw: a password, a size limit. Not an error; the row records why. |
-| `failed` | A generator ran but errored (broken file, tool crash), or OnlyOffice could not read the document (`oo_corrupt`) or did not answer (`oo_retry`, asked again later: [Office through OnlyOffice](#office-through-onlyoffice)). Logged at WARN with the error stored on the row. |
+| `skipped` | Nothing to draw, by design: an end-to-end encrypted file, an SVG over the [SVG limits](#svg-limits), a kind whose program is missing (or an office document while no office engine runs), a kind whose handlers are all switched off, an app that could not draw it ([Thumbnails drawn by apps](#thumbnails-drawn-by-apps-one-chain-per-kind)), or an office document the office engine will not draw: a password, a size limit. Not an error; the row records why. |
+| `failed` | A generator ran but errored (broken file, tool crash), or the office engine could not read the document (`oo_corrupt`) or did not answer (`oo_retry`, asked again later: [Office through OnlyOffice](#office-through-onlyoffice)). Logged at WARN with the error stored on the row. |
 
 Every row also records the **source signature** of the content it was drawn
 from (`source_sig`: the backend etag, else size + modification time) and when
@@ -633,9 +662,9 @@ Cached JPEGs are released two ways, both described in
 | **Video** | `video/*` - mp4, webm, mov, mkv, avi, … | `ffmpeg` - the first frame that is **not black**, searched over the opening 10 s, scaled to 320 wide | `ffmpeg` |
 | **Audio** | `audio/*` - mp3, wav, ogg, flac, m4a, aac, opus | `ffmpeg` - a 320×120 waveform image (`showwavespic`) | `ffmpeg` |
 | **PDF** | `application/pdf` | Ghostscript renders page 1 at 96 dpi (falls back to poppler), then the page is scaled down to thumbnail size | `gs` **or** `pdftoppm` |
-| **Office** | doc, docx, docm, dot, dotx, dotm, odt, ott, rtf, epub, pages; xls, xlsx, xlsm, xlsb, xlt, xltx, xltm, ods, ots, numbers; ppt, pptx, pptm, pps, ppsx, ppsm, pot, potx, potm, odp, otp, key (a Keynote package only, never a key file); odg, vsdx | The **OnlyOffice document server**: a PNG of the first page, at most 320 px, a spreadsheet laid out as wide as its columns with gridlines ([Office through OnlyOffice](#office-through-onlyoffice)) | **none here**: OnlyOffice configured (*Settings → External services*) |
+| **Office** | doc, docx, docm, dot, dotx, dotm, odt, ott, rtf, epub, pages; xls, xlsx, xlsm, xlsb, xlt, xltx, xltm, ods, ots, numbers; ppt, pptx, pptm, pps, ppsx, ppsm, pot, potx, potm, odp, otp, key (a Keynote package only, never a key file); odg, vsdx | **ONLYOFFICE** - the office engine the Office editor app brings, or a connected document server: a PNG of the first page, at most 320 px, a spreadsheet laid out as wide as its columns with gridlines ([Office through OnlyOffice](#office-through-onlyoffice)) | **none here**: the Office editor app installed, or OnlyOffice configured (*Settings → External services*) |
 | **SVG** | `image/svg+xml` | Built-in: resvg compiled to WebAssembly, run in-process by wazero, under the [SVG limits](#svg-limits); `rsvg-convert` only when the built-in engine could not draw a file | **none** (`rsvg-convert` optional, as a fallback) |
-| **Text** | txt, md, markdown, text | Built-in Go: the first lines (at most 8 KiB read, 16 lines) on a light page in the embedded Go Mono, a Markdown heading bold without its `#` | **none** |
+| **Text** | txt, md, markdown, text | Built-in Go: the first lines (at most 8 KiB read, 16 lines) on a light page in the embedded Go Mono, a Markdown heading bold without its `#`; a picture the file names is a line of its text, never fetched | **none** |
 | **Archive** | zip, tar, tar.gz / tgz, tar.bz2 | Built-in Go: the top-level names (a folder bold, with its slash) under a strip with the kind and the number of entries. A ZIP's central directory only; a tar's headers in order, until the list is full. Nothing is unpacked, and every read is bounded (below) | **none** |
 | **Placeholder** | everything else - 3D models, code, raw docs, … | Built-in Go - a tinted card with the extension centred (colour hashed from the extension) | **none** |
 
@@ -660,6 +689,16 @@ Notes:
   `<image>` that names a path or a URL draws nothing, an XML entity from outside
   the file is refused, and each file gets a fresh engine instance with a memory
   ceiling. Text is drawn with the embedded Go fonts.
+- **No thumbnail loads a picture from another server**, whatever a person's
+  *Load remote images in previews* says: a Markdown file's thumbnail is its
+  text, an SVG's `<image>` that names a URL draws nothing, and the explorer's
+  cards and folder previews draw a file's first lines as text, never its
+  markup, a Mermaid diagram is the card of its kind, and the office engine
+  that draws an office document's or an EPUB's thumbnail has no network (a
+  linked picture in a `.docx` is not fetched and is left out of the
+  thumbnail: [ONLYOFFICE.md](ONLYOFFICE.md#how-it-runs)). A file's preview holds such a
+  picture until the person loads it
+  ([Features](FEATURES.md#viewers-editors-search-and-thumbnails)).
 - **Transparency shows a checkerboard.** A JPEG has no alpha channel, and the
   encoder alone turns a transparent pixel black (a logo on a black slab, 0.49).
   Every Go-drawn thumbnail (images, SVG, HEIC/AVIF, placeholder cards) is drawn
@@ -668,8 +707,9 @@ Notes:
   picture is transparent there, and its two mid greys keep a black logo and a
   white one legible on the light theme and the dark one alike. An opaque
   picture covers it entirely.
-- **Office** (0.50) is the OnlyOffice document server's: filex asks it for a
-  picture of the first page and nothing on this machine is involved. One
+- **Office** (0.50) is ONLYOFFICE's: a connected document server is asked for
+  a picture of the first page, or, since 0.57, the office engine the Office
+  editor app brings draws it on this machine, in a process of its own. One
   document at a time per process, 60 s each, at most 25 MB (both settings);
   a failure that may pass is asked again after a back-off, and a damaged, a
   protected or a too large document is marked so. Before 0.50 LibreOffice made
@@ -727,28 +767,30 @@ Notes:
 | Setting | Default | Where | Meaning |
 |---|---|---|---|
 | `FILEX_THUMBS_ENABLED` | `true` | env | Master switch. Accepts `1` or `true` (case-insensitive) as **on**; any other value is off. Off, listings and the sync draw nothing in the background. |
-| `thumbs.folder_previews` | `true` | **Settings** or **Admin → Tools → Thumbnail repair** (seed: `FILEX_THUMBS_FOLDER_PREVIEWS`) | Folder cards show up to three pictures from inside, and a resting pointer lists what a folder holds. Off: classic folder cards, no list. See [Folder previews](#folder-previews). |
-| `thumbs.svg_max_mb` | `5` | **Settings** or **Admin → Tools → Thumbnail repair** (seed: `FILEX_THUMBS_SVG_MAX_MB`) | The largest SVG drawn, in MB (1-64). See [SVG limits](#svg-limits). |
+| `thumbs.folder_previews` | `true` | **Admin → Settings → General** (seed: `FILEX_THUMBS_FOLDER_PREVIEWS`) | Folder cards show up to three pictures from inside, and a resting pointer lists what a folder holds. Off: classic folder cards, no list. See [Folder previews](#folder-previews). |
+| `thumbs.svg_max_mb` | `5` | **Admin → Settings → General** (seed: `FILEX_THUMBS_SVG_MAX_MB`) | The largest SVG drawn, in MB (1-64). See [SVG limits](#svg-limits). |
 | `thumbs.svg_timeout_seconds` | `10` | same (seed: `FILEX_THUMBS_SVG_TIMEOUT`) | The longest time one SVG may take to draw, in seconds (1-120). |
-| `thumbs.office_max_mb` | `25` | same (seed: `FILEX_THUMBS_OFFICE_MAX_MB`) | The largest office document sent to OnlyOffice for a thumbnail, in MB (1-100). Larger ones are marked *Too large*; raising it draws them. See [Office limits](#office-limits). |
-| `thumbs.office_slots` | `1` | same (seed: `FILEX_THUMBS_OFFICE_SLOTS`) | How many office documents one filex process has OnlyOffice draw at once (1-4). |
+| `thumbs.office_max_mb` | `25` | same (seed: `FILEX_THUMBS_OFFICE_MAX_MB`) | The largest office document given to the office engine for a thumbnail, in MB (1-100). Larger ones are marked *Too large*; raising it draws them. See [Office limits](#office-limits). |
+| `thumbs.office_slots` | `1` | same (seed: `FILEX_THUMBS_OFFICE_SLOTS`) | How many office documents one filex process has the office engine draw at once (1-4); with the Office editor app's engine, how many engine processes draw thumbnails. |
 | `FILEX_THUMB_BACKFILL_ON_BOOT` | *(unset)* | env | Set `once` (or `true` / `1`) to run one background backfill on startup. See [Repair](#repair-catching-up-existing-files). |
 | `thumbs.cache_dir` | `<data_dir>/thumbs` | **config.yaml only** | Directory the cached `<id>.jpg` files live in. No env override. |
 | `thumbs.formats` | `[image, video, pdf, office]` | **config.yaml only** | Read by nothing: it still loads, and changes nothing. Which kinds are drawn follows the tools installed ([Generators](#generators--required-tools)) and, for an app's kinds, **Default apps**. |
-| `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | env / `thumbs.sweep_interval` | How often the cache is reconciled against the node catalogue (and, once per boot, pages cached at full size before 0.41.0 are scaled down). `0` disables both. See [Reclaiming the cache](#reclaiming-the-cache). |
+| `thumbs.sweep` + `thumbs.sweep_interval_minutes` | on, `360` | **Admin → Settings → General** (seed: `FILEX_THUMBS_SWEEP_INTERVAL`, `0` seeds the switch off; applies at the next start) | How often the cache is reconciled against the node catalogue (and, once per boot, pages cached at full size before 0.41.0 are scaled down). Off disables both. See [Reclaiming the cache](#reclaiming-the-cache). |
 | `FILEX_THUMBS_URL_TTL` | `24h` | env / `thumbs.url_ttl` | How long a stamped `thumb_url` stays valid - see [Serving](#serving). Matches the endpoint's `Cache-Control: private, max-age=86400`. ⚠ `0` means *use the default*, **not** "never expires"; an unbounded stamp would be a permanent bearer capability for that preview. Shortening it never locks out the SPA, the desktop app or an embedded explorer - all three fetch with credentials and are authorized per request. |
 
 There is **no env var or config key for the external tools** - filex probes
 `PATH` at boot (`ffmpeg`, `gs`, `pdftoppm`, ImageMagick, and `rsvg-convert` as
 the SVG fallback) and enables each kind accordingly. In practice a kind renders
 when its MIME type matches **and** its tool is present (SVG needs no tool;
-office documents need OnlyOffice configured, read live, no restart);
+office documents need an office engine - the Office editor app's, or
+OnlyOffice configured - read live, no restart);
 `cache_dir` is the `thumbs.*` value read at runtime.
 
 ⚠ The folder switch, the two SVG limits and the two office settings are
 settings, not environment variables: the variables **seed** the setting on the
 first boot where it has no value, and are inert after that. Change them on the
-**Thumbnail settings** card (**Settings**, or the repair tab).
+**Thumbnail settings** card (**Admin → Settings → General**; the repair tab
+links there).
 
 ### SVG limits
 
@@ -776,14 +818,17 @@ at a time) after 10 seconds.
 
 ### Office limits
 
-An office document larger than `thumbs.office_max_mb` (25 MB) is not sent to
-OnlyOffice: it is `skipped` as `oo_too_large:<bytes>`, keeps its type icon
-with the *Too large* marker, and is listed on the repair tab. Raise the limit
-and the next listing (or a *Fix* repair) draws it. `thumbs.office_slots` (1)
-is how many documents one filex process has OnlyOffice draw at once: a
-Community Edition document server has one converter, shared with the editors,
-so more slots only make each document wait inside it. Each document has 60
-seconds. Like the SVG limits, both are the instance's.
+An office document larger than `thumbs.office_max_mb` (25 MB) is not given to
+the office engine: it is `skipped` as `oo_too_large:<bytes>`, keeps its type
+icon with the *Too large* marker, and is listed on the repair tab. Raise the
+limit and the next listing (or a *Fix* repair) draws it.
+`thumbs.office_slots` (1) is how many documents one filex process has the
+office engine draw at once: a Community Edition document server has one
+converter, shared with the editors, so more slots only make each document
+wait inside it; the Office editor app's engine runs one process per slot
+(each holding up to `FILEX_OFFICE_ENGINE_MAX_MB` per module), so a slot more
+costs memory. Each document has 60 seconds. Like the SVG limits, both are the
+instance's.
 
 ---
 
@@ -798,7 +843,7 @@ row there and then, so the space comes back when the user asks for it.
 ⚠ **Trashing a file does not.** A trashed file is restorable and keeps its
 thumbnail, so it is on screen the instant it comes back.
 
-**The sweeper.** Every `FILEX_THUMBS_SWEEP_INTERVAL` (and once at boot) filex
+**The sweeper.** Every *Tidy the thumbnail cache every* interval (**Admin → Settings → General**, 6 hours by default; and once at boot) filex
 walks the cache directory and deletes files whose node no longer exists. This is
 what repairs an install that has been accumulating orphans - from a removed
 storage, a sync tombstone, or simply from a version of filex that never cleaned
@@ -838,7 +883,7 @@ works. One line says what it did:
 thumb cache re-fit dir=/data/thumbs scanned=43467 refitted=14706 freed_bytes=1527318528 failed=0 skipped=0
 ```
 
-Set `FILEX_THUMBS_SWEEP_INTERVAL=0` to turn both off; nothing else in filex
+Switch *Tidy the thumbnail cache* off (**Admin → Settings → General**; `FILEX_THUMBS_SWEEP_INTERVAL=0` seeds it off on a new install) to turn both off; nothing else in filex
 removes or rewrites a cached thumbnail on a schedule.
 
 ---
@@ -865,10 +910,10 @@ libheif-libde265 → libheif's HEVC decoder, which a HEIC needs (libheif depends
 fonts (noto/liberation/dejavu)  → so PDF text isn't rendered as boxes
 ```
 
-Office documents need nothing in the image: the OnlyOffice document server
-draws them ([Office through OnlyOffice](#office-through-onlyoffice)), on the
-full image, on `:slim` and on the bare binary alike, once OnlyOffice is
-configured.
+Office documents need nothing in the image: the office engine the Office
+editor app brings, or an OnlyOffice document server, draws them
+([Office through OnlyOffice](#office-through-onlyoffice)), on the full image,
+on `:slim` and on the bare binary alike.
 
 The **`:slim`** image deliberately ships none of them (together they are most
 of the full image's size, and they are the reason two images exist). SVG thumbnails need none
@@ -947,12 +992,13 @@ curl https://files.example.com/api/files/capabilities | jq .thumbs
   "audio": true, "pdf": true, "office": true, "svg": true }
 ```
 
-(Every one of them is `true` on the stock full image with OnlyOffice
-configured. On `:slim` and the bare binary `image` and `svg` are `true` and the
-tools' kinds `false`: SVG is built in since 0.50. `office` is OnlyOffice being
-configured (a URL and a secret), on any image: office documents are drawn by
-it and nothing else since 0.50; it follows the configuration without a
-restart, within the capabilities cache. `heic` is not `imagemagick` again: it says that ImageMagick decoded a
+(Every one of them is `true` on the stock full image with an office engine.
+On `:slim` and the bare binary `image` and `svg` are `true` and the
+tools' kinds `false`: SVG is built in since 0.50. `office` is an office engine
+running, on any image: OnlyOffice configured (a URL and a secret), or, since
+0.57, an app's office engine available (`app_plugins.engines.office`) - the
+Office editor app's, once it is prepared; it follows the configuration
+without a restart, within the capabilities cache. `heic` is not `imagemagick` again: it says that ImageMagick decoded a
 sample HEIC when the server started, so `"imagemagick": true, "heic": false`
 is an ImageMagick whose libheif has no HEVC decoder - see
 [HEIC / AVIF photos have no thumbnail](#heic--avif-photos-have-no-thumbnail).
@@ -980,7 +1026,7 @@ SVG limit, after restoring the cache from elsewhere), use the repair.
 
 ### Admin → Tools → Thumbnail repair
 
-![Admin → Tools → Thumbnail repair after a Fix run: the counts, the thumbnail settings and the files without a thumbnail, with the reason](https://filex.sh/shots/thumbnails/thumbnail-repair-1440.c13a17556be7.png)
+![Admin → Tools → Thumbnail repair after a Fix run: the counts and the files without a thumbnail, with the reason](https://filex.sh/shots/thumbnails/thumbnail-repair-1440.20d89532c445.png)
 
 Pick **all storages**, one storage, or a file or folder inside a storage (the
 folder with everything in it), and a mode:
@@ -997,8 +1043,9 @@ per tenant at a time; a second press is told so and follows the first. A tenant
 administrator repairs the tenant's own storages only. Every repair is in the
 audit log as `thumbnail.repair`.
 
-Below it, the **Thumbnail settings** card (folder previews, SVG limits; the
-same card as in Settings), **Who drew the thumbnails** (0.50: the thumbnails
+Below it, a link to the **Thumbnail settings** (folder previews, SVG and
+Office limits), whose one home is **Admin → Settings → General** - *Change
+the limits →* (shown to whoever may open that page) - then **Who drew the thumbnails** (0.50: the thumbnails
 in your reach counted by who drew them - filex itself, each app with its
 version, and those from before 0.50) and **Files without a thumbnail**: the
 files whose thumbnail failed or was skipped, with the reason (too large, took
@@ -1014,10 +1061,9 @@ API: `POST /api/admin/tools/thumbnails/repair` `{path, mode}` (`path` is
 `mode` is `fix` or `rebuild`), `GET` the same path for the latest run,
 `GET /api/admin/tools/thumbnails/problems` (each row's `code`:
 `svg_too_large` / `svg_timeout` with `limit`, `no_tool` with `tool` = `video`,
-`audio`, `pdf`, `heif`, `heic_codec` or `office` (OnlyOffice is not
-configured), `archive_encrypted`, `archive_too_large`, `no_engine`,
+`audio`, `pdf`, `heif`, `heic_codec` or `office` (no office engine runs), `archive_encrypted`, `archive_too_large`, `no_engine`,
 `no_handler`, `app_failed` with `app`, `app_timeout` / `app_too_large` with
-`app` and `limit` (milliseconds / bytes), the OnlyOffice document server's
+`app` and `limit` (milliseconds / bytes), the office engine's
 `oo_corrupt` (`detail`: what failed), `oo_password`, `oo_too_large` (`limit`
 in bytes, 0 for the document server's own) and `oo_retry` (`tries`, `detail`),
 `fell_back` (a ready row: `generator` drew it after the first handler failed),
@@ -1116,24 +1162,28 @@ default; most operators prefer to trigger backfills explicitly.
   ```
   Office documents have a line of their own, naming the engine: INFO
   `thumbs: office documents are drawn by OnlyOffice engine=onlyoffice
-  document_server=…` when it is configured, otherwise a WARN `thumbs: office
-  documents get no thumbnail: OnlyOffice is not configured` with where to
-  configure it.
+  document_server=…` when a Document Server is configured, INFO `thumbs:
+  office documents are drawn by an app's office engine app=… version=…
+  state=…` when an app brings one (`state` is `preparing` for a few minutes
+  after it is installed), otherwise a WARN `thumbs: office documents get no
+  thumbnail: no office engine runs here` with what to install or configure.
   An ImageMagick that is installed and cannot decode the sample HEIC is named
   the same way: `unavailable=heic`, with `install` saying "heic needs libheif's
   HEVC decoder under imagemagick (libheif-plugin-libde265 on Debian/Ubuntu,
   libheif-libde265 on Alpine), then a restart" and quoting what ImageMagick
   said about the sample.
-- **Missing tool for video / audio / PDF / HEIC, or no OnlyOffice for an
+- **Missing tool for video / audio / PDF / HEIC, or no office engine for an
   office document** (0.50) → state **`skipped`** with the reason
   `no_tool:<kind>` (`video`, `audio`, `pdf`, `heif`, `heic_codec` for a HEIC
-  when ImageMagick is there and cannot decode HEVC, and `office` when
-  OnlyOffice is not configured), *not* `failed` and not a placeholder card. The
+  when ImageMagick is there and cannot decode HEVC, and `office` when no
+  office engine runs: no app brings one, or it is being prepared, and no
+  OnlyOffice is configured), *not* `failed` and not a placeholder card. The
   views show the type tile, and **Admin → Tools → Thumbnail repair → Files
   without a thumbnail** lists the file with what it needs ("FFmpeg is not
   installed", "ONLYOFFICE is not configured", "libheif's HEVC decoder is not
   installed (libheif-plugin-libde265)", …). Install the program and restart
-  (the probe runs at boot), or configure OnlyOffice (no restart): the next
+  (the probe runs at boot), or install the Office editor app or configure
+  OnlyOffice (no restart): the next
   listing that shows the file, or a *Fix* repair, draws it. (Before 0.50 these
   files got the extension's placeholder card as `ready`, which said nothing
   about why and was never drawn again once the tool arrived.)
@@ -1169,11 +1219,21 @@ storage is empty, run a **sync** first: the repair only walks nodes already in
 the catalogue, and says so for a storage that was never synced.
 
 ### Office documents have no thumbnail
-Office documents are drawn by OnlyOffice (0.50), so look there first:
+Office documents are drawn by ONLYOFFICE - the office engine the Office editor
+app brings, or a connected Document Server - so look there first:
 
-- **About** shows *Office documents (ONLYOFFICE)*: *Not found* means OnlyOffice
-  is not configured (*Settings → External services*). The repair tab says
-  "ONLYOFFICE is not configured".
+- **Admin → Plugins → Default apps → Office engine** says which back ends
+  there are and how each stands: none (install the Office editor app, or
+  connect OnlyOffice under *Settings → External services*), *Being prepared*
+  (the app's engine is compiled once after an install or an update - a few
+  minutes; the pictures come as the files are listed once it is *Ready*), or
+  *Failed* with the reason (tried again after 30 minutes and at every start).
+  The repair tab says no office engine runs.
+- An `x2t-…` or `layout-…` reason (*Damaged*): the app's engine could not read
+  or draw the document. SVG, EMF and WMF pictures are drawn as a Document
+  Server draws them, so this is a document the engine cannot read at all; a
+  Document Server put first under **Office engine** is the other back end to
+  try ([ONLYOFFICE.md → Where it differs from a Document Server](ONLYOFFICE.md#where-it-differs-from-a-document-server)).
 - *ONLYOFFICE did not answer (ds-4)*: the document server could not download
   the document from filex. That is the editor's third leg, the address the
   document server reaches filex at; **Test now** on the OnlyOffice card checks

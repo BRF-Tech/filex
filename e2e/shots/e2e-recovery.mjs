@@ -170,6 +170,34 @@ async function openFolder(page, name) {
   if (!done()) throw new Error(`the folder ${name} did not open (the address is ${page.url()})`);
 }
 
+/**
+ * Waits for the listing behind the first two dialogs: `plain.txt` in the
+ * storage's root and the navigation panel's "Storage … used" line.
+ *
+ * ⚠ `plain.txt` is written BEFORE the storage is made (main, below): once a
+ * storage's first scan has run, its listing is read from the catalogue alone,
+ * and a file written on disk after that scan stays out of it until the next
+ * poll - 15 minutes, in 0.56 as in 0.57 (measured 2026-10-16). Written after
+ * the storage was made, the file raced that first scan; the v0.57.0 runs lost
+ * the race and shot both dialogs over an empty listing. The reloads below
+ * are for the usage line and a slow first scan, not for a catalogue that
+ * would catch up on its own.
+ */
+const plainRow = (page) =>
+  page.locator('.fe-list__row[data-fe-path], .fe-grid__card[data-fe-path]').filter({ hasText: 'plain.txt' }).first();
+const usageLine = (page) => page.locator('[data-testid="sidenav-quota"]').first();
+
+async function backdropReady(page) {
+  const row = plainRow(page);
+  for (let i = 0; i < 6; i++) {
+    if (await row.waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false)) break;
+    await page.reload({ waitUntil: 'load' });
+    await explorerReady(page);
+  }
+  await row.waitFor({ state: 'visible', timeout: 5000 });
+  await usageLine(page).waitFor({ state: 'visible', timeout: 20000 });
+}
+
 async function openNewFolder(page) {
   const plus = page.locator('[data-testid="sidenav-new"]');
   if (await plus.count()) {
@@ -317,6 +345,12 @@ async function main(expectedKid) {
 
   await api(token, 'PUT', '/api/auth/profile', { locale: 'en' });
 
+  // A plaintext file that lives OUTSIDE the encrypted folder — the move
+  // guard needs something to refuse. Written before the storage is made, so
+  // its first scan takes it in (backdropReady above says why).
+  fs.writeFileSync(path.join(STORAGE_ROOT, 'plain.txt'), 'not a secret\n');
+  pinTimes(STORAGE_ROOT);
+
   const existing = await api(token, 'GET', '/api/admin/storages');
   const already = (existing.json?.storages || existing.json || []).find?.(
     (s) => s.name === STORAGE,
@@ -330,12 +364,11 @@ async function main(expectedKid) {
       enabled: true,
     });
     if (made.status >= 400) throw new Error(`storage create failed: ${made.text}`);
+  } else {
+    // A storage kept from an earlier run (--base) has scanned long ago: ask
+    // it to look again so the file written above is in its listing.
+    await api(token, 'POST', `/api/admin/storages/${already.id}/sync`, {});
   }
-
-  // A plaintext file that lives OUTSIDE the encrypted folder — the move
-  // guard needs something to refuse.
-  fs.writeFileSync(path.join(STORAGE_ROOT, 'plain.txt'), 'not a secret\n');
-  pinTimes(STORAGE_ROOT);
 
   browser = await chromium.launch();
   const ctx = await browser.newContext({
@@ -380,6 +413,7 @@ async function main(expectedKid) {
 
   await page.goto(`${BASE}/admin/explore`, { waitUntil: 'load' });
   await explorerReady(page);
+  await backdropReady(page);
   await page.waitForTimeout(1500);
 
   // ── 1. create an encrypted folder ─────────────────────────────────
@@ -433,6 +467,9 @@ async function main(expectedKid) {
   );
   const escrowInKeyDialog = await page.locator('.fe-e2e-rk .fe-e2e-rk__escrow').isVisible();
   check('the key dialog repeats that the operator holds a key too', escrowInKeyDialog);
+  // The listing behind it again (no reload here: the key is shown once).
+  await plainRow(page).waitFor({ state: 'visible', timeout: 15000 });
+  await usageLine(page).waitFor({ state: 'visible', timeout: 15000 });
   await shot(page, 'recovery-key-shown-once.png');
 
   // The dialog must not be dismissable until acknowledged — the key cannot

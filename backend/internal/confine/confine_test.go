@@ -30,6 +30,10 @@ func TestRoot_Enforce(t *testing.T) {
 		{"main://projeler/acme/../other", "", true},              // traversal → blocked
 		{"other://projeler/acme", "", true},                      // wrong storage → blocked
 		{"main://baba", "", true},                                // outside prefix → blocked
+		// A space at either end is part of the name (task #238): kept, so
+		// a confined caller reaches `report.txt `, never its twin.
+		{"main://projeler/acme/report.txt ", "main://projeler/acme/report.txt ", false},
+		{"main://projeler/acme/ notes.txt", "main://projeler/acme/ notes.txt", false},
 	}
 	for _, c := range cases {
 		got, err := root.enforce(c.in)

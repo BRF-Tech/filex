@@ -93,7 +93,7 @@ property.
 | `theme`        | string | `theme`    | `light \| dark \| auto` (default `auto`) - the **host's** mode, used while the viewer has not pinned one of their own |
 | `trash-visible`| bool   | `trashVisible` | show the Trash entry |
 | `sidenav`      | bool   | `sideNav`  | the navigation panel. Absent leaves the core default (on) alone |
-| `connections`  | bool   | `connections` | the panel's "How to connect" + "API keys" entries |
+| `connections`  | bool   | `connections` | the panel's "Connections" + "API keys" entries |
 | `ui-profile`   | string | `uiProfile` | `standard \| simple`. Resolved by the core's own rule, so an unrecognised value becomes `standard` and says so once in the console |
 
 Boolean attributes follow the DOM convention: present (or `="true"`) is true,
@@ -516,7 +516,7 @@ export interface ExplorerConfig {
    *  `rootPath`, where a confined embed has no storage list to show. */
   sideNav?: boolean;
 
-  /** The panel's "How to connect" + "API keys" entries. Default on, except
+  /** The panel's "Connections" + "API keys" entries. Default on, except
    *  under `uiProfile: 'simple'`. Never gated on role. On a multi-tenant
    *  server the guides read the top-level `realm` of `GET /api/auth/me`: a
    *  host that proxies that route must pass it through, or a tenant account's
@@ -525,7 +525,7 @@ export interface ExplorerConfig {
 
   /** Is a PERSON behind this explorer, or an integration? 'app' suppresses the
    *  surfaces that belong to ONE identity - API keys, Recent, Starred, Shared
-   *  with me - and keeps Upload, the storages, Trash and "How to connect".
+   *  with me - and keeps Upload, the storages, Trash and "Connections".
    *  Omit it and the explorer asks the server (GET /api/files/capabilities →
    *  `caller_kind`), which is authoritative because only the server knows a
    *  token's kind; set it when the host already knows, to spare the flash of a
@@ -549,8 +549,8 @@ export interface ExplorerConfig {
   /** How a mouse opens an item. `'double'` (default) - a single click selects
    *  and a double click opens (Enter opens the selection); `'single'` - the
    *  first click opens. Touch is unaffected: a tap always opens, the checkbox
-   *  always selects. A per-viewer preference (the desktop app exposes it as
-   *  Settings → Open files with). */
+   *  always selects. A per-viewer preference (the web and desktop apps expose it
+   *  as User settings → Preferences → This device → Open files with). */
   openTrigger?: 'single' | 'double';
 
   /** Hand the OPEN of a file to the host: opening a file emits `file-opened`
@@ -770,8 +770,9 @@ export interface Capabilities {
   ffmpeg?: boolean;
   ghostscript?: boolean;
   /* No `libreoffice` since 0.50: filex runs no LibreOffice; office
-     thumbnails and conversions are the connected ONLYOFFICE's
-     (`thumbs.office`, `external.onlyoffice`). */
+     thumbnails and conversions are the office engine's - the one the
+     Office editor app brings, or a connected ONLYOFFICE Document Server
+     (`thumbs.office` is true while either runs; `external.onlyoffice`). */
   /** Folder previews are on (0.50; setting `thumbs.folder_previews`, on by
    *  default): folder rows carry `preview` and the explorer shows what a
    *  folder holds on a resting pointer. Absent (an older server): on. */

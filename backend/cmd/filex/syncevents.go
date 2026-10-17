@@ -32,7 +32,7 @@ import (
 //	{"event":"pass","pair":"pair-1","code":"pass.done","params":{…},"message":"…"}
 //
 //   - event   what kind of report it is (hello, progress, hold, pass, error,
-//     note, lock, local, live, window, fatal);
+//     note, lock, local, live, window, fatal; `sync discard`'s discard);
 //   - pair    the pair it is about, when it is about one;
 //   - code    the exact report, stable across releases (syncEventCodes);
 //   - params  its figures and facts, typed (numbers are numbers);
@@ -62,13 +62,18 @@ var syncEventCodes = []string{
 	"progress.transfer", "progress.transfer_bytes", "progress.transfer_eta", "progress.settling",
 	"hold",
 	"pass.in_step", "pass.done", "pass.done_failed", "pass.failed", "pass.action_failed",
-	"pass.raced", "pass.skipped", "pass.trashed",
+	"pass.raced", "pass.skipped", "pass.removed",
+	"pass.name.synced_as", "pass.name.taken", "pass.name.server_refuses", "pass.name.image",
 	"lock.busy", "lock.acquired", "lock.failed",
 	"local.watched", "local.too_large", "local.unavailable",
 	"live.connected", "live.polling", "live.offline", "live.off",
 	"window.waiting", "window.closed", "window.outside",
 	"window.any", "window.ok", "window.bad", "window.empty",
 	"signed_out", "pairs_busy", "no_pairs", "pairs_unreadable", "fatal",
+	// `filex sync discard --json` (task #259): one line per held file it
+	// deleted or left, then the summary.
+	"discard.deleted", "discard.kept_no_copy", "discard.kept_changed", "discard.kept_unchecked",
+	"discard.kept_failed", "discard.kept_synced", "discard.done", "discard.not_holding",
 }
 
 // syncEvent is one line of the stream.
@@ -249,6 +254,9 @@ func (r *syncReporter) result(p filesync.Pair, res filesync.Result) {
 		"removed_here": res.DeletedLocal, "removed_server": res.DeletedRemot,
 		"conflicts": res.Conflicts, "identical": res.Identical, "held": res.Held,
 		"failed": failed, "duration_ms": res.Duration.Milliseconds(),
+		// A full pass's name reports are the whole list (the app replaces
+		// what it shows); a targeted pass's cover only its folders.
+		"full": res.Full,
 	}
 	if res.Planned == 0 && failed == 0 && res.Held == 0 {
 		r.emit(false, "", syncEvent{Event: "pass", Pair: p.ID, Code: "pass.in_step", Params: params})
@@ -266,6 +274,20 @@ func (r *syncReporter) result(p filesync.Pair, res filesync.Result) {
 		r.emit(true, "", syncEvent{Event: "error", Pair: p.ID, Code: "pass.action_failed",
 			Params: map[string]any{"error": e}, vars: srvtext.Vars{"error": e}})
 	}
+	// Names a pass could not use as they are (task #238). An item synced
+	// here under another name is a note: it IS synced. One not downloaded
+	// because its name is taken here, or not uploaded because the server
+	// refuses its name, is an "error", so the app keeps it under the folder
+	// until a pass without it - though nothing failed and nothing was
+	// touched. One code per reason, each said whole in the reader's language.
+	for _, nr := range res.Names {
+		ev := syncEvent{Event: "error", Pair: p.ID, Code: "pass.name." + nr.Reason,
+			Params: nameParams(nr), vars: srvtext.Vars{"name": nr.Rel, "local": nr.Other, "other": nr.Other}}
+		if nr.Reason == filesync.ReasonSyncedAs {
+			ev.Event = "note"
+		}
+		r.emit(true, "", ev)
+	}
 	for _, rc := range res.Raced {
 		r.emit(false, "", syncEvent{Event: "note", Pair: p.ID, Code: "pass.raced",
 			Params: map[string]any{"detail": rc}, vars: srvtext.Vars{"name": rc}})
@@ -276,9 +298,70 @@ func (r *syncReporter) result(p filesync.Pair, res filesync.Result) {
 			vars: srvtext.Vars{"name": res.Skipped[0]}})
 	}
 	if n := res.DeletedLocal; n > 0 {
-		r.emit(false, "", syncEvent{Event: "note", Pair: p.ID, Code: "pass.trashed",
+		r.emit(false, "", syncEvent{Event: "note", Pair: p.ID, Code: "pass.removed",
 			Params: map[string]any{"count": n}, count: &n})
 	}
+}
+
+// discardNotHolding: `sync discard` on a pair that holds nothing.
+func (r *syncReporter) discardNotHolding(pairID string) {
+	r.emit(false, pairID+" is not holding anything.", syncEvent{Event: "discard", Pair: pairID, Code: "discard.not_holding",
+		vars: srvtext.Vars{"pair": pairID}})
+}
+
+// discardKeptWords is the plain line's reason for a held file left in place.
+var discardKeptWords = map[string]string{
+	filesync.KeptNoCopy:    "the server has no identical copy of it",
+	filesync.KeptChanged:   "it changed after it was held",
+	filesync.KeptUnchecked: "the server could not be asked whether it has a copy",
+	filesync.KeptFailed:    "it could not be deleted",
+	filesync.KeptSynced:    "it is in step with the server now",
+}
+
+// discardResult is what `sync discard` did: every held file it deleted (and
+// where the server's copy is) and every one it left (and why), then the sum.
+// The plain lines name the files left in place, the ones a person has to
+// look at; the stream names every file.
+func (r *syncReporter) discardResult(pairID string, res filesync.DiscardResult) {
+	for _, it := range res.Deleted {
+		r.emit(false, "", syncEvent{Event: "discard", Pair: pairID, Code: "discard.deleted",
+			Params: map[string]any{"path": it.Rel, "where": it.Where},
+			vars:   srvtext.Vars{"path": it.Rel, "where": it.Where}})
+	}
+	for _, it := range res.Kept {
+		plain := fmt.Sprintf("  %s - %s", it.Rel, discardKeptWords[it.Reason])
+		params := map[string]any{"path": it.Rel, "reason": it.Reason}
+		if it.Err != "" {
+			plain += ": " + it.Err
+			params["error"] = it.Err
+		}
+		r.emit(false, plain, syncEvent{Event: "discard", Pair: pairID, Code: "discard.kept_" + it.Reason,
+			Params: params, vars: srvtext.Vars{"path": it.Rel, "error": it.Err}})
+	}
+	deleted, kept := len(res.Deleted), len(res.Kept)
+	plain := fmt.Sprintf("%s: deleted %d held file(s) from this computer - the server holds an identical copy of each", pairID, deleted)
+	if res.StillHeld > 0 {
+		plain += fmt.Sprintf("; %d item(s) stay here and are still held (above: why)", res.StillHeld)
+	}
+	r.emit(false, plain+".", syncEvent{Event: "discard", Pair: pairID, Code: "discard.done",
+		Params: map[string]any{"deleted": deleted, "kept": kept, "still_held": res.StillHeld}, count: &deleted,
+		vars: srvtext.Vars{"kept": r.n(kept), "held": r.n(res.StillHeld)}})
+}
+
+// nameParams are a name report's facts: the item, why, and the name it has
+// here (synced_as, taken) or the server item it stands for (image).
+func nameParams(nr filesync.NameReport) map[string]any {
+	params := map[string]any{"name": nr.Rel, "reason": nr.Reason}
+	switch nr.Reason {
+	case filesync.ReasonSyncedAs, filesync.ReasonTaken:
+		params["local"] = nr.Other
+	case filesync.ReasonImage:
+		params["other"] = nr.Other
+	}
+	if nr.Why != "" {
+		params["why"] = nr.Why
+	}
+	return params
 }
 
 // passFailed is a pass that could not run.

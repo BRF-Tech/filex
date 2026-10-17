@@ -23,12 +23,18 @@
 //                                          alone, on the tagged commits (when the ci
 //                                          stage is held red by a store that is not
 //                                          ours to hurry). Confirms nothing.
-//   --profile minor|patch|full             which gates run where (task #172):
+//   --profile minor|patch|full|server      which gates run where (task #172):
 //                                          minor (default) the fast gates here, the
 //                                          heavy suites on GitHub or here during the
 //                                          gate stage; patch (X.Y.Z+1 only) builds
 //                                          always, the rest only for what changed;
-//                                          full every gate here, as up to 0.52
+//                                          full every gate here, as up to 0.52;
+//                                          server (#252) a patch only the server
+//                                          carries: its own gates, the server's
+//                                          surface alone, GitHub's full matrix
+//                                          behind it (chosen by itself when the
+//                                          changes allow; --profile patch to keep
+//                                          the whole patch)
 //   --no-cache                             run every gate, even one that passed on
 //                                          exactly these inputs before
 //   --chain <result.json>                  a green scripts/chain run on this tree
@@ -95,6 +101,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { GATE_SOURCES, PROFILES, deferredSpecs, deferredWork, newestTag, selectGates, versionProblems } from './release/checks.mjs';
 import { Gates, banner, bold, dim, findBash, gitOut, green, loadState, lsRemote, red, revParse, saveState, slash, stateFile, takeLock, yellow } from './release/engine.mjs';
 import { ACKS, RUNNERS, STAGES, closeDeferred, forgetRemotes } from './release/stages.mjs';
+import { affectedSurfaces, releaseSurfaces, serverPatch } from './release/surfaces.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -150,8 +157,8 @@ const shape = versionProblems(version, null);
 if (shape.length) usage(shape.join('\n'));
 // A patch profile tests only what changed since the last release: X.Y.Z+1
 // alone. Preflight checks the step against the last tag as well.
-if (opts.profile === 'patch' && Number(version.split('.')[2]) === 0) {
-  usage(`--profile patch: ${version} is no patch number (X.Y.Z with Z above 0) — a minor or a major takes the minor profile, or full`);
+if ((opts.profile === 'patch' || opts.profile === 'server') && Number(version.split('.')[2]) === 0) {
+  usage(`--profile ${opts.profile}: ${version} is no patch number (X.Y.Z with Z above 0) — a minor or a major takes the minor profile, or full`);
 }
 if (opts.chain && !fs.existsSync(opts.chain)) usage(`--chain ${opts.chain}: no such file (the result.json of a scripts/chain run)`);
 if (opts.until && !STAGES.some((s) => s.id === opts.until)) usage(`--until ${opts.until}: stages are ${STAGES.map((s) => s.id).join(', ')}`);
@@ -208,7 +215,7 @@ if (opts.plan) {
   // A patch's choice depends on what changed since the newest release tag.
   let changed = null;
   let since = null;
-  if (profile === 'patch') {
+  if (profile === 'patch' || profile === 'server') {
     try {
       since = newestTag(gitOut(REPO, 'tag', '--list', 'v*').split('\n').map((t) => t.trim()).filter(Boolean));
       if (since) changed = gitOut(REPO, 'diff', '--name-only', '--no-renames', since, 'HEAD').split('\n').filter(Boolean);
@@ -298,10 +305,30 @@ if (state.complete) {
 }
 // The profile a run started with holds for its resumes unless one names
 // another (a patch found to be more than a patch: --resume --profile minor).
-const profile = opts.profile ?? state.profile ?? 'minor';
+// #252: a fresh patch whose changes reach the server alone takes the server
+// lane by itself (scripts/release/surfaces.mjs serverPatch) - said, and
+// `--profile patch` keeps the whole patch.
+let chosen = null;
+if (!opts.profile && !state.profile && !opts.dry && Number(version.split('.')[2]) > 0) {
+  try {
+    const since = newestTag(gitOut(REPO, 'tag', '--list', 'v*').split('\n').map((t) => t.trim()).filter(Boolean));
+    if (since) {
+      const files = gitOut(REPO, 'diff', '--name-only', '--no-renames', since, 'HEAD').split('\n').filter(Boolean);
+      const lane = serverPatch(affectedSurfaces(files));
+      if (lane.ok) chosen = { profile: 'server', why: `${lane.why} since ${since} (--profile patch releases every surface instead)` };
+    }
+  } catch {
+    chosen = null;
+  }
+}
+const profile = opts.profile ?? state.profile ?? chosen?.profile ?? 'minor';
 const profileChanged = !!(state.profile && opts.profile && opts.profile !== state.profile);
 const profileWas = state.profile;
 state.profile = profile;
+// #252: a server patch publishes the server's surface (and the docs) alone;
+// every other profile, every surface. Fixed once the tags are out: the tag
+// run read them from the tags.
+if (state.stages?.push?.status !== 'done') state.surfaces = profile === 'server' ? ['server', 'docs'] : undefined;
 // Where the gate stage reads the export commit's suites (#181). Kept like the
 // profile: a resume after `--gate circleci` reads CircleCI again unless it
 // names GitHub (Actions is back). The stage records which one passed it.
@@ -364,6 +391,8 @@ const R = {
       logsDir,
       profile,
       changed: R.changed,
+      // #252: what this release publishes (the record's, every surface when it names none).
+      surfaces: releaseSurfaces(state),
     };
   },
 };
@@ -379,6 +408,7 @@ try {
 console.log(`  repo    ${slash(REPO)}  (${branchName} @ ${revParse(REPO, 'HEAD')?.slice(0, 10)})`);
 console.log(`  export  ${slash(exp)}`);
 console.log(`  profile ${profile}${profileChanged ? ` ${yellow(`(was ${profileWas}: changed by --profile)`)}` : ''}${opts.noCache ? ' · every gate runs (--no-cache)' : ''}${opts.chain ? ` · chain ${slash(opts.chain)}` : ''}`);
+if (chosen && profile === chosen.profile) console.log(`  ${yellow('server')}  a server patch: ${chosen.why}`);
 if (gateSource !== 'github' || gateChanged) {
   console.log(`  gate    ${gateSource === 'circleci' ? yellow('circleci') : gateSource}${gateChanged ? ` ${yellow('(changed by --gate)')}` : ''}${gateSource === 'circleci' ? dim(' - CircleCI stands in for GitHub Actions: no dry run of the release') : ''}`);
 }

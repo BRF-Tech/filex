@@ -7,6 +7,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 )
 
 // ── The person behind a call, asked again where the call reaches further ─
@@ -26,15 +27,8 @@ import (
 // ⚠ A call with no person (the hourly wake-up's job, actor id 0) is answered
 // by its caller, never here: there is no ACL to ask. See keepsStateOn.
 func (r *Registry) actorHoldsEditor(ctx context.Context, actor *model.User, storageID int64, rel string, pluginID int64) bool {
-	if actor == nil || actor.ID <= 0 || r.opts.Store == nil {
-		return false
-	}
-	st, err := r.opts.Store.GetStorage(ctx, storageID)
-	if err != nil || st == nil {
-		return false
-	}
-	set, err := acl.New(r.opts.Store).LoadSet(ctx, actor, st)
-	if err != nil || set == nil {
+	set := r.actorSet(ctx, actor, storageID)
+	if set == nil {
 		return false
 	}
 	rel = strings.Trim(rel, "/")
@@ -45,6 +39,35 @@ func (r *Registry) actorHoldsEditor(ctx context.Context, actor *model.User, stor
 		return set.EffectiveIgnoringLocks(rel) >= acl.LevelEditor
 	}
 	return false
+}
+
+// actorMayDownload answers whether the person a call runs for may download
+// rel: the question every download door asks (protoperm.CanRead - the level
+// and files.download there, a role's part for some folders or names
+// included). A public link that hands over a file - the document itself, or
+// copies the app exposes - asks it of every input when it is opened
+// (hfShareCreate); the link's door asks it again at every visit (handlers
+// linkCreatorAllows, appLinkCopiesServed).
+func (r *Registry) actorMayDownload(ctx context.Context, actor *model.User, storageID int64, rel string) bool {
+	set := r.actorSet(ctx, actor, storageID)
+	return set != nil && protoperm.CanRead(set, strings.Trim(rel, "/"))
+}
+
+// actorSet loads the person's ACL set on one storage, or nil (no person, no
+// store, a lookup that failed: every question asked of it says no).
+func (r *Registry) actorSet(ctx context.Context, actor *model.User, storageID int64) *acl.Set {
+	if actor == nil || actor.ID <= 0 || r.opts.Store == nil {
+		return nil
+	}
+	st, err := r.opts.Store.GetStorage(ctx, storageID)
+	if err != nil || st == nil {
+		return nil
+	}
+	set, err := acl.New(r.opts.Store).LoadSet(ctx, actor, st)
+	if err != nil {
+		return nil
+	}
+	return set
 }
 
 // mayFreeze answers whether this call may lock rel (hfFileLock).

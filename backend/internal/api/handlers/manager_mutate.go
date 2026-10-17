@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
@@ -199,8 +200,12 @@ func (h *Manager) vfNewFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.Name = strings.TrimSpace(body.Name)
-	if body.Name == "" || strings.ContainsAny(body.Name, "/\\") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad folder name"})
+	// The name rule every door asks (leafname, task #238). It was "not empty,
+	// no slash" here alone: `.` and `..` made the folder itself or its parent
+	// again (200, and a catalogue row named `..`), NUL reached the disk as a
+	// 500 and `...` made a folder no other request could open.
+	if err := leafname.Check(body.Name); err != nil {
+		writeNameRefusal(w, r, err)
 		return
 	}
 
@@ -238,7 +243,7 @@ func (h *Manager) vfNewFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := mk.Mkdir(r.Context(), fullRel); err != nil {
-		writeJSON(w, mapDriverErr(err), map[string]string{"error": "mkdir: " + err.Error()})
+		writeDriverErr(w, r, "mkdir", err)
 		return
 	}
 
@@ -296,11 +301,11 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 	}
 	body.Name = strings.TrimSpace(body.Name)
 	// "." and ".." are not names: joined onto the item's folder they point at
-	// the folder itself or at its parent. sanitizeUploadName is the one leaf
-	// guard every upload surface uses; a name must not be legal to rename to
-	// and illegal to upload.
-	if _, ok := sanitizeUploadName(body.Name); !ok || strings.ContainsAny(body.Name, "/\\") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad new name"})
+	// the folder itself or at its parent. leafname is the one leaf rule every
+	// door asks (sanitizeUploadName too); a name must not be legal to rename
+	// to and illegal to upload.
+	if err := leafname.Check(body.Name); err != nil {
+		writeNameRefusal(w, r, err)
 		return
 	}
 
@@ -340,6 +345,11 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 	if !h.require(w, r, current, path.Join(path.Dir(srcRel), body.Name), perm.FilesRename, "insufficient permission") {
 		return
 	}
+	// …and the new name must not make downloadable what is not where it is:
+	// a role's rule on a path or a name is about the bytes (downloadLift).
+	if refuseDownloadLift(w, r, h.ACL, h.Store, h.StorageResolver, current.ID, srcRel, current.ID, path.Join(path.Dir(srcRel), body.Name)) {
+		return
+	}
 
 	drv, err := h.StorageResolver(current.ID)
 	if err != nil {
@@ -364,6 +374,13 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 	// than given a "-copy" name the way a move is: the person typed this name,
 	// and the client's undo assumes the item landed exactly there.
 	taken, terr := destinationTaken(r.Context(), h.Store, drv, current.ID, srcRel, dstRel)
+	// A name longer than the storage holds answers its Stat with "name too
+	// long" (a local disk's ENAMETOOLONG): the client's name to change, not an
+	// inconclusive check to retry (task #238).
+	if storage.IsNameTooLong(terr) {
+		writeNameRefusal(w, r, terr)
+		return
+	}
 	if terr != nil {
 		slog.Warn("rename refused: existence check inconclusive",
 			slog.Int64("storage", current.ID),
@@ -452,7 +469,7 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 			slog.String("from", srcRel),
 			slog.String("to", dstRel),
 			slog.String("err", err.Error()))
-		writeJSON(w, mapDriverErr(err), map[string]string{"error": "rename: " + clientErrText(err)})
+		writeDriverErr(w, r, "rename", err)
 		return
 	}
 	h.vfIndex(w, r, current, parentRel, storageNames, false)
@@ -526,6 +543,19 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := e2e.GuardTransfer(r.Context(), lk, current.ID, rels, current.ID, destRel); err != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	// The download rule, over the whole batch before anything moves: an item
+	// the caller may not download where it is does not move to where they
+	// could (downloadLift). A path, or a move, the loop below refuses is left
+	// to it, so its refusal stays the one it gives.
+	for _, it := range body.Items {
+		_, srcRel := splitAdapterPath(it.Path)
+		if srcRel == "" || pathHasDotDot(srcRel) || !aclCanID(r.Context(), h.ACL, h.Store, current.ID, srcRel, perm.FilesMove).ok {
+			continue
+		}
+		if refuseDownloadLift(w, r, h.ACL, h.Store, h.StorageResolver, current.ID, srcRel, current.ID, path.Join(destRel, path.Base(srcRel))) {
 			return
 		}
 	}
@@ -890,6 +920,23 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no files in upload"})
 		return
 	}
+	// Every name of the batch, through the one name rule, before anything
+	// else is asked or written (task #238): the check used to sit inside the
+	// write loop, so `a.txt` was written and `..` then answered 400 - a batch
+	// refused AND half-written. `name[]` is each file's name as the person
+	// gave it (upload_names.go).
+	names, nameErr := uploadNames(r.MultipartForm, files, func(name string) bool {
+		drv, err := h.StorageResolver(current.ID)
+		if err != nil {
+			return false
+		}
+		_, serr := drv.Stat(r.Context(), path.Join(destRel, name))
+		return serr == nil
+	})
+	if nameErr != nil {
+		writeNameRefusal(w, r, nameErr)
+		return
+	}
 	// Before a byte is written, over the whole batch: a file an app has
 	// locked is not overwritten (the folder grants editor, the LOCK is on the
 	// file — without this the "read-only until the signatures are in" promise
@@ -898,11 +945,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 	// upload into filex's own names that is let through; everything else —
 	// a file dropped into `.filex-trash/`, a document named `.keepdir` — would
 	// be written and never be seen again.
-	for _, fh := range files {
-		name, ok := sanitizeUploadName(fh.Filename)
-		if !ok {
-			continue
-		}
+	for _, name := range names {
 		target := writegate.Writes(path.Join(destRel, name)).As(syspath.PutWorkCopy)
 		// A vault's key file is rewritten here and nowhere else (a new
 		// password, a recovery reset, an escrow slot): the claim lets it past
@@ -968,12 +1011,8 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 	// and giving up here used to mean the file never entered the catalogue.
 	parentID, parentLookupErr := h.ensureDirChain(r.Context(), current.ID, destRel)
 
-	for _, fh := range files {
-		name, nameOK := sanitizeUploadName(fh.Filename)
-		if !nameOK {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad upload filename"})
-			return
-		}
+	for i, fh := range files {
+		name := names[i]
 		fullRel := path.Join(destRel, name)
 
 		src, err := fh.Open()
@@ -1081,7 +1120,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 				slog.String("name", name),
 				slog.Int64("size", fh.Size),
 				slog.String("reason", err.Error()))
-			writeJSON(w, mapDriverErr(err), map[string]string{"error": "write: " + err.Error()})
+			writeDriverErr(w, r, "write", err)
 			return
 		}
 		// The driver call, timed. Without this the write side of
@@ -1388,6 +1427,12 @@ func mapDriverErr(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
+	// A name the rule refuses, or one longer than the storage holds, is the
+	// client's to change (task #238): a 500 told a person with a 256-byte name
+	// that the server had broken.
+	if errors.Is(err, leafname.ErrRefused) || storage.IsNameTooLong(err) {
+		return http.StatusBadRequest
+	}
 	if errors.Is(err, storage.ErrNotFound) {
 		return http.StatusNotFound
 	}
@@ -1411,7 +1456,11 @@ func mapDriverErr(err error) int {
 	if errors.Is(err, storage.ErrKindConflict) {
 		return http.StatusConflict
 	}
-	msg := strings.ToLower(err.Error())
+	// ⚠ The error's own words, not err.Error(): a local driver's error text
+	// carries the PATH, so a file named "already there.txt" or "not found.md"
+	// picked the status by its name (task #238). clientErrText keeps the
+	// errno's text and drops the paths.
+	msg := strings.ToLower(clientErrText(err))
 	if strings.Contains(msg, "exists") || strings.Contains(msg, "already") {
 		return http.StatusConflict
 	}
@@ -1421,29 +1470,69 @@ func mapDriverErr(err error) int {
 	return http.StatusInternalServerError
 }
 
-// normalizeDBPath canonicalises a relative path to the form sync.poll
-// stores in the nodes table: leading slash, no trailing slash, no `.`.
 // sanitizeUploadName is the ONE filename guard every upload surface uses:
-// vfUpload (browser multipart), IngestFile (public file-drop) and the staged
-// upload path. Keeping it in one place is the point — three copies of a path
-// guard is three chances to fix a hole in two of them.
+// vfUpload (browser multipart), IngestFile (public file-drop), the staged
+// upload path, a new document, a rename. Keeping it in one place is the point
+// — three copies of a path guard is three chances to fix a hole in two of
+// them.
 //
-// It reduces the client's filename to a basename and refuses the values that
-// would escape the destination directory once path.Join'ed. ".." is refused
-// explicitly: path.Base("..") is ".." and joining it walks OUT of the target
-// folder — the earlier inline copies of this check did not cover it.
+// It reduces the client's filename to a basename and asks the name rule every
+// door of filex asks (internal/leafname, task #238): no empty name, no `/` or
+// `\`, no NUL, not `.` or `..` or only dots and spaces. ".." matters most:
+// path.Base("..") is ".." and joining it walks OUT of the target folder.
 func sanitizeUploadName(raw string) (string, bool) {
-	name := path.Base(raw)
-	switch name {
-	case "", ".", "..", "/":
-		return "", false
-	}
-	if strings.ContainsAny(name, "\\") {
-		return "", false
-	}
-	return name, true
+	name, err := checkUploadName(raw)
+	return name, err == nil
 }
 
+// checkUploadName is sanitizeUploadName with the refusal's reason (a
+// *leafname.Error), for a door that tells the client why.
+func checkUploadName(raw string) (string, error) {
+	if raw == "" {
+		return "", &leafname.Error{Name: raw, Reason: leafname.Empty}
+	}
+	name := path.Base(raw)
+	if err := leafname.Check(name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// writeNameRefusal answers a refused or too-long NAME as the client's mistake
+// and reports whether err was one: 400 `name_not_allowed` (code
+// NAME_NOT_ALLOWED, the leafname reason in `reason`) or 400 `name_too_long`
+// (code NAME_TOO_LONG, the storage's own limit, storage.IsNameTooLong). Never
+// a 500, and never the driver's text, which carries the server's disk path.
+func writeNameRefusal(w http.ResponseWriter, r *http.Request, err error) bool {
+	switch {
+	case errors.Is(err, leafname.ErrRefused):
+		writeError(w, r, http.StatusBadRequest, "name_not_allowed", nil,
+			"code", "NAME_NOT_ALLOWED", "reason", leafname.Reason(err))
+		return true
+	case storage.IsNameTooLong(err):
+		writeError(w, r, http.StatusBadRequest, "name_too_long", nil, "code", "NAME_TOO_LONG")
+		return true
+	}
+	return false
+}
+
+// writeDriverErr answers a storage error of a write: a refused or too-long
+// name as writeNameRefusal does, anything else with mapDriverErr's status
+// and the error's own words, `verb: <words>` (clientErrText - no server
+// path in them).
+func writeDriverErr(w http.ResponseWriter, r *http.Request, verb string, err error) {
+	if writeNameRefusal(w, r, err) {
+		return
+	}
+	msg := clientErrText(err)
+	if verb != "" {
+		msg = verb + ": " + msg
+	}
+	writeJSON(w, mapDriverErr(err), map[string]string{"error": msg})
+}
+
+// normalizeDBPath canonicalises a relative path to the form sync.poll
+// stores in the nodes table: leading slash, no trailing slash, no `.`.
 func normalizeDBPath(rel string) string {
 	rel = strings.Trim(rel, "/")
 	clean := path.Clean("/" + rel)
@@ -1458,9 +1547,9 @@ func normalizeDBPath(rel string) string {
 // EnsureDir first when writing into a freshly-created folder so the new file's
 // node links to the right parent.
 func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, filename string, src io.Reader, size int64) (*model.Node, error) {
-	name, ok := sanitizeUploadName(filename)
-	if !ok {
-		return nil, fmt.Errorf("bad filename: %q", filename)
+	name, err := checkUploadName(filename)
+	if err != nil {
+		return nil, err
 	}
 	drv, err := h.StorageResolver(st.ID)
 	if err != nil {

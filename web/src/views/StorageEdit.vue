@@ -33,6 +33,7 @@ import { syncStateLabel, syncTone } from '@/lib/syncTone';
 import StorageDriverFields from '@/components/StorageDriverFields.vue';
 import StorageSyncMode from '@/components/StorageSyncMode.vue';
 import StorageCatalogStatus from '@/components/StorageCatalogStatus.vue';
+import StorageAccess from '@/components/StorageAccess.vue';
 
 const { t, locale } = useI18n();
 const route = useRoute();
@@ -189,6 +190,16 @@ async function save() {
 
 // The runs table is read again when the scan starts and when it ends.
 const scan = useSyncNow({ onEnd: () => loadRuns() });
+
+/**
+ * #117 — the Access section turned per-item access control on (its own
+ * dialog, after choosing who keeps access). The form's switch follows: left
+ * at its old value, the next Save would have turned it off again.
+ */
+function onRbacEnabled(updated: StorageRef) {
+  rbacEnabled.value = true;
+  if (item.value) item.value = { ...item.value, rbac_enabled: updated.rbac_enabled ?? true };
+}
 
 async function syncNow() {
   await scan.press(id.value, name.value || storages.find(id.value)?.name || `#${id.value}`);
@@ -472,6 +483,15 @@ onMounted(load);
         </div>
       </div>
     </form>
+
+    <!-- #117 — the whole storage given to people and groups, right under the
+         form whose switch decides whether any of it applies. -->
+    <StorageAccess
+      :storage-id="id"
+      :storage-name="item.name"
+      :rbac-enabled="item.rbac_enabled ?? false"
+      @rbac-enabled="onRbacEnabled"
+    />
 
     <section
       v-if="item.catalogue"

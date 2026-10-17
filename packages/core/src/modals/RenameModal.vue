@@ -3,6 +3,7 @@ import { ref, watch } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { isInternalName } from '../lib/internalPaths';
+import { nameRefusal, trimName } from '../lib/nameRule';
 import Modal from './Modal.vue';
 
 const props = defineProps<{
@@ -56,11 +57,23 @@ function onInput() {
 
 function submit() {
   if (props.busy) return;
-  const clean = name.value.trim();
-  if (!clean) return;
-  if (/[\\/]/.test(clean) || clean === '.' || clean === '..') {
-    // Refused here with a word, not by doing nothing: a Save button that
-    // silently ignores the click reads as a broken dialog.
+  // Saved as it was opened: nothing to do (task #238). Compared BEFORE the
+  // trim - a file named ` notes.txt` opened and saved untouched was renamed
+  // to `notes.txt`, or refused as taken when that name existed.
+  if (name.value === props.currentName) {
+    emit('close');
+    return;
+  }
+  const clean = trimName(name.value);
+  // The server's rule (lib/nameRule, backend leafname), said here with a word,
+  // not by doing nothing: a Save button that silently ignores the click reads
+  // as a broken dialog - an emptied field included.
+  const refusal = nameRefusal(clean);
+  if (refusal === 'empty') {
+    shownError.value = t('modal.rename.empty');
+    return;
+  }
+  if (refusal) {
     shownError.value = t('modal.newfolder.invalid');
     return;
   }

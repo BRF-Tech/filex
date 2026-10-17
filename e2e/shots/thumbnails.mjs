@@ -34,7 +34,7 @@
 //
 // Environment: FILEX_BIN, SHOTS_OUT, SHOTS_KEEP (see apps.mjs).
 
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { chromium } from '@playwright/test';
 import { addLocalStorage, bootInstance, client, index, log, mustSay, newContext, shot, signIn, sleep } from './scene.mjs';
@@ -96,6 +96,13 @@ async function main() {
     writeFileSync(join(summer, 'harbour.png'), scene(480, 320, [90, 140, 200], [40, 80, 120], [0.5, 0.35]));
     writeFileSync(join(summer, 'sunset.png'), scene(480, 320, [240, 150, 110], [70, 50, 60], [0.45, 0.55]));
     writeFileSync(join(summer, 'itinerary.txt'), 'Day 1 - arrive\nDay 2 - boat\n');
+    // A folder is drawn with what came into it last, by modification time:
+    // five files written in one second come in any order, so the order is
+    // set - the itinerary first, the beach last, at the front of the card.
+    ['itinerary.txt', 'sunset.png', 'harbour.png', 'forest.png', 'beach.png'].forEach((name, i) => {
+      const t = new Date(Date.UTC(2026, 7, 20, 10, i));
+      utimesSync(join(summer, name), t, t);
+    });
     const logos = dir('Logos');
     copyFileSync(join(REPO, 'e2e', 'fixtures', 'file-types', 'logo.svg'), join(logos, 'filex.svg'));
     writeFileSync(join(logos, 'harbour-club.svg'), svgBadge('Harbour Club', '#0f766e'));
@@ -227,7 +234,8 @@ async function main() {
     await page2.getByTestId('thumb-repair-result').waitFor({ timeout: 20_000 });
     await page2.getByTestId('thumb-problem-reason').first().waitFor({ timeout: 20_000 });
     await mustSay(page2.locator('main'), 'the repair tab', [
-      'Thumbnail repair', 'Last repair', 'Drawn', 'Thumbnail settings', 'Folder previews', 'SVG limits',
+      // 0.57 (#258): the limits live on Settings → General; the tab links there.
+      'Thumbnail repair', 'Last repair', 'Drawn', 'Folder previews', 'Change the limits',
       'Files without a thumbnail', 'coast.svg', 'Larger than the SVG size limit (1 MB)',
       ...(heicDrawn ? [] : ['IMG_0142.heic', 'ImageMagick with HEIC support is not installed']),
     ]);

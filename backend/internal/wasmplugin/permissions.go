@@ -328,6 +328,8 @@ func (p Permission) Label(lang string) string {
 		return permText(lang, "schedule", nil)
 	case p == PermFilesCoEdit:
 		return permText(lang, "files_co_edit", nil)
+	case p == PermOfficeEngine:
+		return permText(lang, "office_engine", nil)
 	case p == PermUI:
 		return permText(lang, "ui", nil)
 	case p == PermUIEval:
@@ -360,10 +362,25 @@ func (p Permission) Label(lang string) string {
 		// The engine by its product name ("ImageMagick"), not its permission
 		// id: this sentence is what the install review and the app's page
 		// print for a person to read.
-		e := enginebin.DisplayName(strings.TrimPrefix(s, permPrefixEngines))
+		e := EngineLabel(lang, strings.TrimPrefix(s, permPrefixEngines))
 		return permText(lang, "engines", srvtext.Vars{"engine": e})
 	}
 	return s
+}
+
+// EngineLabel is an engine as a label names it: the product's own spelling
+// (enginebin.DisplayName), except the office engine. Since 0.57 that is the
+// Office editor app's engine OR a connected ONLYOFFICE Document Server, so
+// "ONLYOFFICE" beside the other engines (Admin → Apps, the install review's
+// permission line) named one of the two as if it were the only one. It is
+// "Office engine", in the reader's language. Where the words say what to
+// CONNECT (a missing engine's `name` in the review and the menu), the
+// product name stays.
+func EngineLabel(lang, id string) string {
+	if enginebin.Canonical(id) == enginebin.Office {
+		return srvtext.Text(lang, "server.perm.engine_name_office", nil)
+	}
+	return enginebin.DisplayName(id)
 }
 
 // permText is one `server.perm.<key>` sentence in lang.

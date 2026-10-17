@@ -249,6 +249,10 @@ func DoorAction(action string, aiDoor bool) string {
 const (
 	ViaAPI = "api"
 	ViaMCP = "mcp"
+	// ViaAssistant: a tool the explorer's AI assistant ran for the person
+	// who asked it (task #269) - their session or their own key, never a
+	// key of the assistant's.
+	ViaAssistant = "assistant"
 )
 
 // StampTokenDoor adds to meta (allocating it when needed) which token acted -
@@ -379,6 +383,17 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 		return "file_association.reset", "file_type", ""
 	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/app-plugins/") && strings.HasSuffix(p, "/thumbnails"):
 		return "app_plugin.thumbnail_limits", "app_plugin", id
+	// A file an administrator adds to an app or takes away (handlers/
+	// app_plugins_extras.go sets the path, and an added file's size and
+	// sha256). Before the generic fallback, which would call a removed
+	// dictionary an `app-plugins.delete`.
+	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/app-plugins/") && strings.Contains(p, "/extras/"):
+		return "app_plugin.extra_add", "app_plugin", id
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/app-plugins/") && strings.Contains(p, "/extras/"):
+		return "app_plugin.extra_remove", "app_plugin", id
+	// A catalog item installed with one click (0.57): files added, the same verb.
+	case method == http.MethodPost && strings.HasPrefix(p, "/api/admin/app-plugins/") && strings.Contains(p, "/extras-catalog/"):
+		return "app_plugin.extra_add", "app_plugin", id
 
 	// ── users ──
 	case method == http.MethodPost && (p == "/api/admin/users/" || p == "/api/admin/users"):

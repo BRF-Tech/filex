@@ -22,8 +22,8 @@ SSO/LDAP, çok kiracılılık, şifreli klasörler, gömülebilir web bileşeni,
 <sub>Bu sayfa, [İngilizce README](README.md) dosyasının çevirisidir; ikisi arasında fark olduğunda İngilizce metin geçerlidir. Bağlantı verdiği belgeler İngilizcedir.</sub>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.e032d7456831.png">
-  <img src="https://filex.sh/shots/explorer-grid-light.de398671d43b.png" alt="filex gezgini - küçük resim ızgarası" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.ff7a02b49f27.png">
+  <img src="https://filex.sh/shots/explorer-grid-light.475b0b61faab.png" alt="filex gezgini - küçük resim ızgarası" width="900">
 </picture>
 
 </div>
@@ -194,7 +194,7 @@ onu anlatan kılavuzla birlikte tam hâli [docs/FEATURES.md](docs/FEATURES.md) b
 
 Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](docs/FEATURES.md#the-explorer).
 
-<p align="center"><img src="https://filex.sh/shots/driveshell/driveshell-hero-1440.16ace59f07c3.png" alt="filex kabuğu" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/driveshell/driveshell-hero-1440.6410104e072c.png" alt="filex kabuğu" width="860"></p>
 
 <details>
 <summary><b>Gezginin ekran görüntüleri</b> - kabuk, arama, gezinti, etiketler, çöp kutusu, çan, temalar, sembolik bağlar, ONLYOFFICE'te CSV</summary>
@@ -203,14 +203,14 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 <tr>
 <td width="50%" valign="top">
 
-![filex kabuğu](https://filex.sh/shots/driveshell/driveshell-hero-1440.16ace59f07c3.png)
+![filex kabuğu](https://filex.sh/shots/driveshell/driveshell-hero-1440.6410104e072c.png)
 
 <sub>Kabuk - herkesin karşılaştığı düzen</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Bir klasörde arama](https://filex.sh/shots/driveshell/driveshell-search-1440.c0f3ceda0ec4.png)
+![Bir klasörde arama](https://filex.sh/shots/driveshell/driveshell-search-1440.2536c373425f.png)
 
 <sub>Bu klasörde arama; `⌘K` / `Ctrl K` sorguyu palete devreder</sub>
 
@@ -219,14 +219,14 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 <tr>
 <td width="50%" valign="top">
 
-![Gezinti paneli](https://filex.sh/shots/sidenav/sidenav-expanded-1440.461d5aaaff2a.png)
+![Gezinti paneli](https://filex.sh/shots/sidenav/sidenav-expanded-1440.e96ea7e98388.png)
 
 <sub>Gezinti paneli - Ana sayfa, Benimle paylaşılanlar, Paylaştıklarım, Son kullanılanlar, Yıldızlılar, Çöp kutusu ve erişebildiğiniz depolar</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Bir şeride daraltılmış](https://filex.sh/shots/sidenav/sidenav-rail-1440.843a2158380d.png)
+![Bir şeride daraltılmış](https://filex.sh/shots/sidenav/sidenav-rail-1440.9269e026d29a.png)
 
 <sub>Simge şeridine daraltılmış</sub>
 
@@ -235,14 +235,14 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 <tr>
 <td width="50%" valign="top">
 
-![Kişisel etiketler ve ekip etiketleri](https://filex.sh/shots/tags/tags-kinds-1440.64e4d6a5ccbc.png)
+![Kişisel etiketler ve ekip etiketleri](https://filex.sh/shots/tags/tags-kinds-1440.a4504c43e5cb.png)
 
 <sub>Etiketler - kendi etiketleriniz ya da ekibinizinkiler; bir etiket, onu taşıyan her dosyayı hangi klasörde durursa dursun açar</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Çöp kutusu görünümü](https://filex.sh/shots/sidenav/view-trash-1440.ab3cfb3b01cf.png)
+![Çöp kutusu görünümü](https://filex.sh/shots/sidenav/view-trash-1440.40f8904b147f.png)
 
 <sub>Çöp kutusu - neyin silindiği, nereden geldiği ve gitmesine ne kadar kaldığı</sub>
 
@@ -251,14 +251,14 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 <tr>
 <td width="50%" valign="top">
 
-![Okunmamış rozetini taşıyan çan, açık hâlde](https://filex.sh/shots/signing/bell-badge-1440.61396b9ab714.png)
+![Okunmamış rozetini taşıyan çan, açık hâlde](https://filex.sh/shots/signing/bell-badge-1440.e9232b261511.png)
 
 <sub>Çan - üzerinde okunmamışların sayısı, her satır yazdığı yere götürür</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Gezginin üzerinde bildirimlerin tam listesi](https://filex.sh/shots/signing/notifications-list-1440.3176161f2110.png)
+![Gezginin üzerinde bildirimlerin tam listesi](https://filex.sh/shots/signing/notifications-list-1440.669ce56b62d7.png)
 
 <sub>Tüm bildirimleriniz, gezginin içinde - yalnızca yöneticiler için değil, herkes için</sub>
 
@@ -267,14 +267,14 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 <tr>
 <td width="50%" valign="top">
 
-![Tema düzenleyicisi](https://filex.sh/shots/appearance/theme-editor-1440.5b28006557f8.png)
+![Tema düzenleyicisi](https://filex.sh/shots/appearance/theme-editor-1440.867a94807e72.png)
 
 <sub>Görünüm - kendi renklerinizle bir tema oluşturun, siz yazdıkça önizlenir</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![İşletmecinin temasını taşıyan gezgin](https://filex.sh/shots/appearance/themed-explorer-1440.dbe464fc39c7.png)
+![İşletmecinin temasını taşıyan gezgin](https://filex.sh/shots/appearance/themed-explorer-1440.abc278616daa.png)
 
 <sub>Varsayılan yapıldığında herkesin gezgini onu taşır…</sub>
 
@@ -283,14 +283,14 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 <tr>
 <td width="50%" valign="top">
 
-![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.98801a84bea2.png)
+![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.b891c6431444.png)
 
 <sub>…oturum açma sayfası da, henüz kimse oturum açmadan</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Deponun dışına çıkan bir sembolik bağ, rozetli](https://filex.sh/shots/symlinks/symlink-badge-1440.0d128385d287.png)
+![Deponun dışına çıkan bir sembolik bağ, rozetli](https://filex.sh/shots/symlinks/symlink-badge-1440.82a105d4239e.png)
 
 <sub>filex'in izlemeyeceği bir sembolik bağ bunu söyler - listede, ayrıntılarında da sözle</sub>
 
@@ -335,7 +335,7 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 
 Depolama ve protokollerin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → Storage and protocols](docs/FEATURES.md#storage-and-protocols).
 
-<p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.8bfbe35780f4.png" alt="Nasıl bağlanılır" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png" alt="Nasıl bağlanılır" width="860"></p>
 
 <details>
 <summary><b>Depolama ve protokollerin ekran görüntüleri</b> - bağlantı kılavuzları, API anahtarları ve bir depolama eklentisi</summary>
@@ -344,14 +344,14 @@ Depolama ve protokollerin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Nasıl bağlanılır](https://filex.sh/shots/sidenav/connect-1440.8bfbe35780f4.png)
+![Nasıl bağlanılır](https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png)
 
 <sub>Nasıl bağlanılır - kılavuzlar, *sizin* kurulumunuzdan üretilir</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.cfc100f30069.png)
+![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.3464cb59b2f8.png)
 
 <sub>API anahtarları - kendinizinkini oluşturun, gezginde ya da gömülü bir gezginde (bir kişinin oturumuyla ya da API anahtarıyla; tek bir ortak *uygulama* API anahtarıyla vekil sunucu üzerinden çalışan gömülü bir gezginde bu öğe yer almaz)</sub>
 
@@ -360,14 +360,14 @@ Depolama ve protokollerin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Bağlantı kılavuzu](https://filex.sh/shots/connections-guide.98a4f82ecd9d.png)
+![Bağlantı kılavuzu](https://filex.sh/shots/connections-guide.3999cf32c3d9.png)
 
 <sub>filex'e her şeyden erişmek - S3, SFTP, FTPS, NFS, WebDAV. Her komut *sizin* kurulumunuzdan üretilir</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Eklentiler](https://filex.sh/shots/admin-plugins.c25fa69cfc7c.png)
+![Eklentiler](https://filex.sh/shots/admin-plugins.6bd96bf65745.png)
 
 <sub>filex'le birlikte gelmeyen bir depo - **Eklentiler → Depolama eklentileri** sayfasında eklenti olarak kurulur, yapılandırma formunu kendisi tanımlar</sub>
 
@@ -407,7 +407,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.d6f6572228ea.png)
+![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.87cb16a1a6f0.png)
 
 <sub>Paylaşım - PIN, son kullanma tarihi, indirme limiti, tek satırlık `curl`</sub>
 
@@ -439,14 +439,14 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.330fcc5fda73.png)
+![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.0fffdc146eb1.png)
 
 <sub>Her yönetim tablosu - satır başına sabitlenmiş tek bir **Aksiyon** menüsü, gezgindeki ⋮ ile açılan menünün aynısı</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Yönetim → Şifreleme: onay politikası ve bekleyen üç istek](https://filex.sh/shots/encryption/admin-encryption-1440.b74163acb93c.png)
+![Yönetim → Şifreleme: onay politikası ve bekleyen üç istek](https://filex.sh/shots/encryption/admin-encryption-1440.35606d99b816.png)
 
 <sub>Kim şifreleyebilir - kapalı, yalnız yöneticiler, rolü izin veren herkes ya da yönetici onayıyla; bekleyen istekler, kimin neden istediğiyle birlikte ([kim şifreleyebilir](docs/E2E-ENCRYPTION.md#who-may-encrypt))</sub>
 
@@ -484,7 +484,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 
 Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md → People and access](docs/FEATURES.md#people-and-access).
 
-<p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png" alt="Yönetim → Roller: yerleşik roller ve iki özel rol" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png" alt="Yönetim → Roller: yerleşik roller ve iki özel rol" width="860"></p>
 
 <details>
 <summary><b>Kişiler ve erişimin ekran görüntüleri</b> - roller, gruplar, giriş güvenliği, kilitli bir hesap, yönetim paneli ve menüsü</summary>
@@ -493,14 +493,14 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <tr>
 <td width="50%" valign="top">
 
-![Yönetim → Roller: yerleşik roller ve iki özel rol](https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png)
+![Yönetim → Roller: yerleşik roller ve iki özel rol](https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png)
 
 <sub>Roller - Yönetici, Kullanıcı, İzleyici ve kendi rolleriniz: her birinin kimde olduğu, neye izin verdiği, klasöre göre nerede farklılaştığı, sınırları ([docs/PERMISSIONS.md](docs/PERMISSIONS.md))</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Yönetim → Gruplar](https://filex.sh/shots/groups/groups-list-1440.73224b70e40b.png)
+![Yönetim → Gruplar](https://filex.sh/shots/groups/groups-list-1440.22ff57b029f5.png)
 
 <sub>Gruplar - klasör erişimi ve bir rolü olan adlandırılmış kişi kümeleri; üyeler elle eklenir ya da oturum açmanın taşıdığı gruplarla eşitlenir ([docs/GROUPS.md](docs/GROUPS.md))</sub>
 
@@ -516,7 +516,7 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 </td>
 <td width="50%" valign="top">
 
-![Yönetim → Giriş güvenliği](https://filex.sh/shots/loginsecurity/login-security-1440.077cec3f1b0a.png)
+![Yönetim → Giriş güvenliği](https://filex.sh/shots/loginsecurity/login-security-1440.70f2a2a76257.png)
 
 <sub>Giriş güvenliği - giriş denemesi sınırı ve hiç sayılmayan izinli adresler; güvenilir vekil sunucular, kilitler ve oturum açma olayları aynı sayfada devam eder ([giriş denemesi sınırları](docs/CONFIGURATION.md#sign-in-attempt-limits))</sub>
 
@@ -525,14 +525,14 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <tr>
 <td width="50%" valign="top">
 
-![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.3f4c6d3233f3.png)
+![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.42e1fe6f1937.png)
 
 <sub>…ve kilitli bir hesabın oturum açma formunun söylediği; düğmesinde kilidin kalan süresi geri sayar</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Yönetim paneli](https://filex.sh/shots/admin-dashboard.d94a065baab6.png)
+![Yönetim paneli](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
 
 <sub>Yönetim paneli</sub>
 
@@ -541,16 +541,16 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <tr>
 <td width="50%" valign="top">
 
-![Demo açılış sayfası](https://filex.sh/shots/demo-landing.bb2b8d97d4ff.png)
+![Demo açılış sayfası](https://filex.sh/shots/demo-landing.64f23c6f8cb3.png)
 
 <sub>Demo açılış sayfası</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Yönetim menüsünün Kişiler ve güvenlik paneli, Yönetim → Kullanıcılar sayfasının üzerinde açık](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png)
+![Yönetim menüsünün Ayarlar paneli, Yönetim → Ayarlar → Genel sayfasının üzerinde açık](https://filex.sh/shots/megamenu/settings-panel-1440.23a710915f9c.png)
 
-<sub>Yönetim menüsü - bütün sayfalar üç panelde, **Dosyalar ve depolama**, **Kişiler ve güvenlik** ve **Sistem**, her sayfanın altında kısa bir satırla; telefonda aynı sayfalar bir çekmecede yer alır ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
+<sub>Yönetim menüsü - bütün sayfalar dört panelde, **Dosyalar ve depolama**, **Kişiler**, **Ayarlar** (Genel, Güvenlik ve veri, Dosya işleme ve entegrasyonlar) ve **Bakım ve kayıtlar**, her sayfanın altında kısa bir satırla; telefonda aynı sayfalar bir çekmecede yer alır ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
 
 </td>
 </tr>
@@ -592,8 +592,8 @@ sudo snap install filex-app                 # the same snap as the badge above
 
 Store derlemesi (*filex File Manager*), kod imzalı tek Windows kopyasıdır - onu Microsoft
 imzalar - ve Store onu güncel tutar. Masaüstü uygulamasının winget paketi
-(`BRFTech.filex-app`) her sürümle birlikte gönderiliyor ve winget moderatörlerinin ilk
-incelemesini bekliyor; bu yüzden `winget install BRFTech.filex-app` komutu onu henüz
+(`BRFTech.filex-app`) winget moderatörlerinin ilk incelemesini bekliyor - kabul edilene
+kadar sürümler başvuruya dokunmuyor; bu yüzden `winget install BRFTech.filex-app` komutu onu henüz
 bulamıyor. Kurulum programı, taşınabilir `.exe`, AppImage, `.deb`, `.rpm` ve `.dmg`
 [son sürüme](https://github.com/BRF-Tech/filex/releases/latest) eklidir - henüz kod imzalı
 değil; Windows kurulum programında bir SmartScreen uyarısı bekleyin. Ayrıntılar:
@@ -641,7 +641,7 @@ değil, arka uç uygular. Web bileşeni iki satırdır:
 <filex-explorer api-base="http://localhost:5212" sidenav connections ui-profile="simple"></filex-explorer>
 ```
 
-<p align="center"><img src="https://filex.sh/shots/sidenav/embed-webcomponent-1440.c8c25d893d24.png" alt="Gömülü web bileşeni" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/sidenav/embed-webcomponent-1440.b802d5b6ab56.png" alt="Gömülü web bileşeni" width="860"></p>
 
 <details>
 <summary><b>Vue 3 ve React</b> - öteki iki sarmalayıcı ve ayrıntıların nerede olduğu</summary>
@@ -680,14 +680,14 @@ aynı sürümde tutun ([docs/API.md](docs/API.md)).
 <tr>
 <td width="50%" valign="top">
 
-![Benimle paylaşılanlar](https://filex.sh/shots/sidenav/view-shared-1440.475ec2d8b49f.png)
+![Benimle paylaşılanlar](https://filex.sh/shots/sidenav/view-shared-1440.faf6f6668c20.png)
 
 <sub>Benimle paylaşılanlar - başkalarının size yetki verdiği klasörler, bağlama talimatı yok</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Gömülü web bileşeni](https://filex.sh/shots/sidenav/embed-webcomponent-1440.c8c25d893d24.png)
+![Gömülü web bileşeni](https://filex.sh/shots/sidenav/embed-webcomponent-1440.b802d5b6ab56.png)
 
 <sub>Başka bir ürünün sayfasına gömülü</sub>
 
@@ -772,7 +772,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 <tr>
 <td width="50%" valign="top">
 
-![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.9f93226381ed.png)
+![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.54c60e832ced.png)
 
 <sub>Belge imzadayken - herkes için dondurulmuş, kimin imzaladığı ayrıntılarında</sub>
 
@@ -788,7 +788,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 <tr>
 <td width="50%" valign="top">
 
-![Kurulu bir uygulamanın ayrıntıları](https://filex.sh/shots/apps/apps-detail-1440.4e27b40c5ce7.png)
+![Kurulu bir uygulamanın ayrıntıları](https://filex.sh/shots/apps/apps-detail-1440.b7f6ec845458.png)
 
 <sub>Kurulu bir uygulama - nereden geldiği, parmak izi ve sahip olduğu her izin, sade bir dille (ayarları ve işlemleri sayfanın daha aşağısında gelir)</sub>
 
@@ -804,7 +804,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 <tr>
 <td width="50%" valign="top">
 
-![Kendi arayüzü olan bir uygulamanın kurulum incelemesi](https://filex.sh/shots/apps/app-interface-review-1440.51df0aa460ad.png)
+![Kendi arayüzü olan bir uygulamanın kurulum incelemesi](https://filex.sh/shots/apps/app-interface-review-1440.877a89c82359.png)
 
 <sub>Kendi arayüzünü getiren bir uygulama - inceleme, paketin parmak izini, paketin dışındaki her adresi (canlı olanı bir izindir, sarı renkte) ve bir tarayıcının söz veremeyeceği şeyi gösterir</sub>
 
@@ -843,7 +843,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 </td>
 <td width="50%" valign="top">
 
-![Eklentiler → Varsayılan uygulamalar](https://filex.sh/shots/defaultapps/default-apps-1440.27d3c64fe457.png)
+![Eklentiler → Varsayılan uygulamalar](https://filex.sh/shots/defaultapps/default-apps-1440.0dd62b519f8f.png)
 
 <sub>Varsayılan uygulamalar - filex dışında bir şeyin işlediği her dosya türü: onu kimin açtığı ve küçük resmini kimin çizdiği, sizin belirlediğiniz sırayla ([Varsayılan uygulamalar](docs/APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail))</sub>
 
@@ -852,14 +852,14 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 <tr>
 <td width="50%" valign="top">
 
-![En yeni dosyalarıyla çizilmiş klasörler](https://filex.sh/shots/thumbnails/folders-grid-1440.2b408fb54f7e.png)
+![En yeni dosyalarıyla çizilmiş klasörler](https://filex.sh/shots/thumbnails/folders-grid-1440.dd7653d6edca.png)
 
 <sub>Klasör önizlemeleri - her klasör, içine en son gelen üç dosyayla çizilir; SVG'leri filex'in yerleşik motoru çizer ([docs/thumbnails.md](docs/thumbnails.md#folder-previews))</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Bir mağazanın bağlantısıyla açılan kurulum incelemesi](https://filex.sh/shots/store/store-review-1440.d93b2b571d93.png)
+![Bir mağazanın bağlantısıyla açılan kurulum incelemesi](https://filex.sh/shots/store/store-review-1440.36cf3bbc2a50.png)
 
 <sub>Mağazadan kurmak - aynı inceleme, *… mağazasından* diye işaretli; ücretli uygulamanın lisans anahtarı yalnızca ilk karakterleriyle görünür ([Mağazadan kurmak](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 
@@ -868,14 +868,14 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 <tr>
 <td width="50%" valign="top">
 
-![Bir mağazadan gelen ilk bağlantı: güvenilsin mi?](https://filex.sh/shots/store/store-trust-1440.94bebecac9fe.png)
+![Bir mağazadan gelen ilk bağlantı: güvenilsin mi?](https://filex.sh/shots/store/store-trust-1440.8fb07862db1a.png)
 
 <sub>Bir mağazadan gelen ilk bağlantı - adresi ve anahtarlarının parmak izleri, güvenmeden önce karşılaştırmanız için ([Güvenilen mağazalar](docs/APP-PLUGINS.md#trusted-stores))</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Bekletilen ücretli bir uygulama, bir yönetim sayfasındaki şerit](https://filex.sh/shots/store/store-license-held-1440.2dd9518d7e87.png)
+![Bekletilen ücretli bir uygulama, bir yönetim sayfasındaki şerit](https://filex.sh/shots/store/store-license-held-1440.6fd145640e0f.png)
 
 <sub>Mağazanın iptal ettiği bir lisans - uygulama bekletilir, *Lisanssız* görünür, hiçbir şey kaldırılmaz ve her yönetim sayfasında bir şerit onu adıyla anar ([Ücretli uygulamalar](docs/APP-PLUGINS.md#paid-apps))</sub>
 
@@ -1009,7 +1009,7 @@ ayırır.
 | **Paylaşım** | PIN'li, son kullanma tarihli ve indirme limitli herkese açık bağlantılar, dosya istekleri ve e-postayla paylaşım davetleri ([Paylaşım](docs/SHARING.md)) |
 | **Koruma** | Çöp kutusu ve sürüm geçmişi, isteğe bağlı ClamAV taraması, uçtan uca şifreli klasörler, ikinci bir depoya replikasyon (depoda zaten bulunanların ilk kopyasıyla birlikte) ve bir denetim kaydı ([Çöp kutusu ve sürümleme](docs/TRASH-VERSIONING.md), [Koruma](docs/PROTECTION.md), [Uçtan uca şifreleme](docs/E2E-ENCRYPTION.md), [Replikasyon](docs/REPLICATION.md), [Denetim kaydı](docs/BACKEND.md#admin-audit-log)) |
 | **Görüntüleyiciler ve düzenleyiciler** | Görseller, video, ses, PDF, Markdown, kod (Monaco), ofis düzenleyici uygulamasında ya da ONLYOFFICE üzerinden Office belgeleri, draw.io diyagramları, çizilen ve metin olarak düzenlenen Mermaid diyagramları, 3B modeller ve ZIP, 7z, TAR arşivleri ([ONLYOFFICE](docs/ONLYOFFICE.md), [Arşivler](docs/ARCHIVES.md)) |
-| **Arama ve küçük resimler** | İzinlere uyan gömülü tam metin arama; görseller, video, PDF, klasörler ve ONLYOFFICE bağlıyken Office belgeleri için küçük resimler ([Arama](docs/SEARCH.md), [Küçük resimler](docs/thumbnails.md)) |
+| **Arama ve küçük resimler** | İzinlere uyan gömülü tam metin arama; görseller, video, PDF, klasörler ve Office belgeleri için küçük resimler - Office belgelerinin küçük resmini sunucuda ofis düzenleyici uygulamasının motoru ya da bağlı bir ONLYOFFICE çizer ([Arama](docs/SEARCH.md), [Küçük resimler](docs/thumbnails.md)) |
 | **Gerçek zamanlı** | WebSocket üzerinden kimin açık olduğu ve canlı dosya güncellemeleri, bir de bir uygulamada filex üzerinden birlikte düzenleme ([Gerçek zamanlılık](docs/REALTIME.md), [Birlikte düzenleme](docs/APP-PLUGINS-API.md#editing-together-coedit-056)) |
 | **İstemciler** | Klasör eşitlemeli bir masaüstü uygulaması, telefonun kurulumunuzun adı ve logosuyla kurduğu bir web uygulaması, bir CLI, Vue / React / web bileşeni olarak gömme, bir REST API ve bir MCP sunucusu ([Masaüstü](docs/DESKTOP.md), [Eşitleme](docs/SYNC.md), [CLI](docs/CLI.md), [Entegrasyon](docs/INTEGRATION.md), [MCP](docs/MCP.md)) |
 | **Uygulamalar ve diller** | filex üzerinden yazdıran, bir dosyayı filex üzerinden birlikte düzenleyen ve şifreli bir klasördeki dosyayı yalnız siz izin verdiğinizde, tarayıcınızda çözülmüş olarak açan yalıtılmış uygulamalar (e-İmza, Dönüştür, Ofis düzenleyici, filextext, draw.io); dil paketleri ve sağdan sola yerleşim ([Uygulamalar](docs/APP-PLUGINS.md), [Bir uygulamada düzenleme](docs/E2E-ENCRYPTION.md#editing-in-an-app), [Sağdan sola diller](docs/RTL.md)) |

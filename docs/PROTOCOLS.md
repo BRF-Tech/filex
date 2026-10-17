@@ -19,7 +19,7 @@ be reached *as*:
 1. **Switch on what you need.** S3 and WebDAV are on already; SFTP, FTPS and NFS
    each take one variable ([Turning them on](#turning-them-on)). Set
    `FILEX_SECRET_KEY` before anybody mints an S3 access key.
-2. **Open How to connect** - the entry in the file explorer's navigation panel, on
+2. **Open Connections** - the entry in the file explorer's navigation panel, on
    every surface that draws it (the web app, the desktop app, any embed); admins
    also reach it from *Connections* in the admin menu (*Files & storage*). It
    builds every command from *this* deployment - its host, its port, your login -
@@ -36,10 +36,10 @@ password and without disturbing the others.
 
 | Protocol | What you present | Where it is minted |
 |---|---|---|
-| S3 | access key id + secret (SigV4) | How to connect → S3 |
-| SFTP | your login + an **API token** as the password, or a registered **SSH public key** | How to connect → SFTP |
-| FTPS | your login + an **API token** as the password | How to connect → FTPS |
-| NFSv3 | **the export path itself** - it carries 32 bytes of entropy | How to connect → NFS |
+| S3 | access key id + secret (SigV4) | Connections → S3 |
+| SFTP | your login + an **API token** as the password, or a registered **SSH public key** | Connections → SFTP |
+| FTPS | your login + an **API token** as the password | Connections → FTPS |
+| NFSv3 | **the export path itself** - it carries 32 bytes of entropy | Connections → NFS |
 | WebDAV | your login + an **API token** as the password | any token |
 | `filex mount` | `FILEX_URL` + an **API token** | any token |
 
@@ -62,7 +62,7 @@ Every credential in that table is a **person's** - mint them while signed in as
 yourself, or from a `user` API token. An *app* token (a host app's proxy, a bot)
 is refused by all four self-service credential surfaces (API tokens, S3 access
 keys, SSH keys, NFS exports); its explorer does not show the **API keys** entry,
-and "How to connect" keeps the guides but replaces the mint forms with a line
+and "Connections" keeps the guides but replaces the mint forms with a line
 saying this session cannot create credentials. See
 [MCP.md → Token kinds](MCP.md#token-kinds---user-vs-app).
 
@@ -140,7 +140,7 @@ one; when it carries none, the user name says it as **`realm/name`**:
   `<realm>/<name>`: `acme/alex`, `alex` on acme's address and the web form's
   `alex` in realm acme are one counter; beta's `alex` is another.
 
-*How to connect* prints your login already written this way: a tenant account's
+*Connections* prints your login already written this way: a tenant account's
 SFTP / FTPS login is `realm/username`, and its WebDAV user `realm/e-mail`.
 
 A **token carries its verbs** onto every protocol: signed in with a token as the
@@ -185,6 +185,18 @@ trash entry it could be restored from - before the rename or delete has written 
 A client that gives up while the verb waits for the gate changes nothing, and a MOVE
 or rename that waited refuses a file that landed on its name meanwhile instead of
 replacing it ([ARCHITECTURE.md → The row gate](ARCHITECTURE.md#the-row-gate)).
+
+A **new name** follows the same rule on every protocol as in the web UI: an
+empty name, a `/` or `\`, a NUL or other control character and a name of only
+dots are refused, everything else is kept byte for byte, and a name too long
+for the storage is answered "name too long" in the protocol's own words
+([File names](FILE-NAMES.md)). A file that already carries such a name is still
+read, overwritten and removed. **Removing a folder** (`RMDIR`, `RMD`, an S3
+`DELETE` of `folder/`) removes only an empty one: a folder that still holds
+files answers "directory not empty" (S3: `204`, and the folder stays, as on
+S3), and a file-removal command (SFTP `REMOVE`, FTP `DELE`) never removes a
+folder ("is a directory"). NFS says both in fewer words than the others
+([known limits](FILE-NAMES.md#known-limits)).
 
 ⚠⚠ **One thing is not shared: version history.** WebDAV and the S3 gateway take a
 pre-write snapshot; **SFTP, FTPS and NFS do not**, so an overwrite over those three

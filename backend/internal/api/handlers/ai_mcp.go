@@ -141,22 +141,7 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 	if auth.UserFrom(r.Context()) == nil {
 		return nil
 	}
-	ops := newAIOps(h.store, h.resolver, h.share, h.publicURL)
-	ops.attachSearchIndex(h.index)
-	ops.tenants = h.tenants
-	ops.acl = h.acl
-	ops.e2e = h.e2e
-	ops.thumbs = h.thumbs
-	ops.staged = h.staged
-	ops.body = h.body
-	ops.tickets = h.tickets
-	ops.doors = h.doors
-	srv := mcp.NewServer(&mcp.Implementation{
-		Name:    "filex",
-		Title:   "filex file manager",
-		Version: version.String(),
-	}, nil)
-	registerFilexTools(srv, ops, h.searchIndex())
+	srv, _ := h.fileServer()
 	// The file tools need the verbs their /api/ai twins need; a tool the token
 	// cannot use is not offered at all, like an admin_* tool to a non-admin.
 	withdrawUngrantedFileTools(srv, auth.TokenFrom(r.Context()))
@@ -171,6 +156,38 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 		registerAdminTools(srv, h.admin, principal)
 	}
 	return srv
+}
+
+// opsFor is the ops core every file tool of one server runs: the store, the
+// storages, the shares, and everything this handler was wired with.
+func (h *AIMCP) opsFor() *aiOps {
+	ops := newAIOps(h.store, h.resolver, h.share, h.publicURL)
+	ops.attachSearchIndex(h.index)
+	ops.tenants = h.tenants
+	ops.acl = h.acl
+	ops.e2e = h.e2e
+	ops.thumbs = h.thumbs
+	ops.staged = h.staged
+	ops.body = h.body
+	ops.tickets = h.tickets
+	ops.doors = h.doors
+	return ops
+}
+
+// fileServer is a server with every file tool on it (no admin tools), and
+// the ops core they run: what getServer serves an agent, and what the
+// explorer's assistant calls in process as the person who asked
+// (assistant_tools.go). Who the tools act for is the context of the
+// connection, never this server.
+func (h *AIMCP) fileServer() (*mcp.Server, *aiOps) {
+	ops := h.opsFor()
+	srv := mcp.NewServer(&mcp.Implementation{
+		Name:    "filex",
+		Title:   "filex file manager",
+		Version: version.String(),
+	}, nil)
+	registerFilexTools(srv, ops, h.searchIndex())
+	return srv, ops
 }
 
 // fileToolVerb is the token verb each file tool needs: the verb its REST twin
@@ -426,6 +443,11 @@ type mcpUnzipOut struct {
 	// system-caused) rather than skipped for a permanent reason such as a
 	// zip-slip entry or a kind conflict.
 	Refused int `json:"refused,omitempty"`
+	// Skipped: the members left out for their names, one by one (name and
+	// reason: unsafe_path, name_not_allowed, name_too_long), at most 100;
+	// SkippedMore counts the rest (task #238).
+	Skipped     []skippedMember `json:"skipped,omitempty"`
+	SkippedMore int             `json:"skipped_more,omitempty"`
 }
 
 // searchIndex digs the shared Bleve index out of the admin surface — AIMCP's
@@ -660,12 +682,12 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 		Description: "Extract a .zip already in storage into dest_dir ON THE SERVER (zip-slip protected; every entry stays within your confinement root). Returns the number of files written. " +
 			"Extracting into an end-to-end encrypted folder is refused with E2E_PLAINTEXT_REFUSED unless allow_plaintext is set.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpUnzipIn) (*mcp.CallToolResult, mcpUnzipOut, error) {
-		n, refused, err := ops.Unzip(withPlaintextConsent(ctx, in.AllowPlaintext), in.Src, in.DestDir)
+		n, refused, skips, err := ops.Unzip(withPlaintextConsent(ctx, in.AllowPlaintext), in.Src, in.DestDir)
 		if err != nil {
 			return toolErr[mcpUnzipOut](err)
 		}
 		mcpAuditWrite(ctx, ops.store, "file_unzip")
-		return nil, mcpUnzipOut{Extracted: n, Refused: refused}, nil
+		return nil, mcpUnzipOut{Extracted: n, Refused: refused, Skipped: skips.List, SkippedMore: skips.More}, nil
 	})
 
 	registerDoorTools(srv, ops)
@@ -753,9 +775,18 @@ func mcpAuditRow(ctx context.Context, store db.Store, tool, id string, detail *a
 		uid := u.ID
 		entry.UserID = &uid
 	}
-	entry.Metadata = detail.Into(map[string]interface{}{"via": auth.ViaMCP})
+	via := auth.ViaMCP
+	base := map[string]interface{}{}
+	// A tool the explorer's assistant ran for its person (assistant_tools.go)
+	// says so, and which provider and model asked for it.
+	if call := assistantCallFrom(ctx); call != nil {
+		via = auth.ViaAssistant
+		base["ai_provider"], base["ai_model"] = call.provider, call.model
+	}
+	base["via"] = via
+	entry.Metadata = detail.Into(base)
 	entry.TargetID, entry.Metadata = detail.ApplyTarget(entry.TargetID, entry.Metadata)
-	entry.Metadata = auth.StampTokenDoor(ctx, entry.Metadata, auth.ViaMCP)
+	entry.Metadata = auth.StampTokenDoor(ctx, entry.Metadata, via)
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := store.InsertAuditEntry(wctx, entry); err != nil {
@@ -856,7 +887,7 @@ func mcpSearch(ctx context.Context, ops *aiOps, idx *search.Index, p, query stri
 // agent to match on.
 func toolErr[T any](err error) (*mcp.CallToolResult, T, error) {
 	var zero T
-	text := err.Error()
+	text := aiErrText(err)
 	if code := aiErrCode(err); code != "" {
 		text = code + ": " + text
 	} else if code, params := apierr.CodeOf(err); code != "" {

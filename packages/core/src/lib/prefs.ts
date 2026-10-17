@@ -88,12 +88,19 @@ export interface UiPrefs {
    * made since on another surface.
    */
   openWith?: string;
+  /**
+   * 0.57 - "Load remote images in previews" (lib/remoteImages): `on`, or
+   * absent. Off, a picture from another server in a file's preview waits
+   * behind a placeholder until the person asks for it; on, previews draw it
+   * without asking. Not a look: no first-paint mirror.
+   */
+  remoteImages?: string;
 }
 
 export type PrefKey = keyof UiPrefs;
 
 /** The keys that paint the window — each has a first-paint mirror (below). */
-export type LookKey = Exclude<PrefKey, 'tour' | 'appState' | 'appStateE2e' | 'appsSeen' | 'openWith'>;
+export type LookKey = Exclude<PrefKey, 'tour' | 'appState' | 'appStateE2e' | 'appsSeen' | 'openWith' | 'remoteImages'>;
 
 /**
  * Every key the account document carries.
@@ -114,6 +121,7 @@ export const PREF_KEYS: readonly PrefKey[] = [
   'appStateE2e',
   'appsSeen',
   'openWith',
+  'remoteImages',
 ];
 
 /**
@@ -405,6 +413,15 @@ export function configurePrefs(next: PrefsConfig): void {
  * Did the host wire the account's document at all? An explorer embedded in
  * another product never calls `configurePrefs`, and for it there is no account
  * copy to wait for — only this browser's.
+ *
+ * ⚠ Nor one to WRITE to. Unconfigured, the address would be the host page's
+ * own origin (`appBase()`), not filex: an embed sent `PUT /api/me/prefs` to
+ * the product it sits in (portal.example.com, a 404 on every app opening, 0.57).
+ * Pointing it at the explorer's `apiBase` would be worse: behind a host proxy
+ * with one shared token every person of that product is one filex account,
+ * and an unread document PUT replaces the whole record. So without
+ * `configurePrefs` nothing is sent - `flush`, `accountFetch` and
+ * `hydratePrefs` keep to this page and this browser.
  */
 export function prefsConfigured(): boolean {
   return configured;
@@ -546,6 +563,12 @@ function sanitize(raw: unknown): UiPrefs {
  * last thing that should put an error in front of a person.
  */
 export async function hydratePrefs(): Promise<UiPrefs | null> {
+  // No account document wired (an embed): nothing to read, and the address
+  // would be the host page's own (`prefsConfigured`).
+  if (!configured) {
+    settle();
+    return null;
+  }
   const doFetch = cfg.fetchImpl ?? (typeof fetch === 'function' ? fetch : null);
   if (!doFetch) {
     settle();
@@ -624,6 +647,9 @@ async function flush(leaving = false): Promise<void> {
   const changed = pending;
   pending = {};
   if (!Object.keys(changed).length) return;
+  // An embed keeps its preferences on this page and in the mirror; the
+  // account copy is the configured host's (`prefsConfigured`).
+  if (!configured) return;
   // ⚠⚠ The WHOLE document, wrapped in `{prefs: …}`. `PUT /api/me/prefs`
   // REPLACES the stored document (handlers/userprefs.go: "Put replaces the
   // caller's document for one surface") — sending only what changed would
@@ -688,6 +714,7 @@ export function setAccountPref(key: PrefKey, value: string): void {
  * worth an exception.
  */
 export async function accountFetch(path: string, init: { method: string; body?: string }): Promise<Response | null> {
+  if (!configured) return null;
   const doFetch = cfg.fetchImpl ?? (typeof fetch === 'function' ? fetch : null);
   if (!doFetch) return null;
   try {

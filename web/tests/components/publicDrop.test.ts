@@ -16,6 +16,7 @@ import PublicLink from '@/views/public/PublicLink.vue';
 import { resetLocales } from '@brftech/filex-core';
 import { en } from '@brftech/filex-core/src/locales/en';
 import { fillPublic, isPublicStrings, publicStringsAnswer, publicTable } from '../helpers/publicStrings';
+import { hostileName } from '../../../e2e/helpers/hostile-names.mjs';
 
 /** The server's public sentences (server.public.*): what the page says. */
 const pub = publicTable('en');
@@ -25,7 +26,7 @@ function answer(status: number, body: unknown) {
 }
 
 const fetchMock = vi.fn();
-type Sent = { url: string; files: string[]; name: FormDataEntryValue | null };
+type Sent = { url: string; files: string[]; names: string[]; name: FormDataEntryValue | null };
 let sent: Sent[] = [];
 let reply: { status: number; body: unknown } = { status: 200, body: { ok: true } };
 
@@ -42,7 +43,12 @@ class FakeXHR {
   }
   setRequestHeader() {}
   send(form: FormData) {
-    sent.push({ url: this.url, files: form.getAll('file').map((f) => (f as File).name), name: form.get('uploader_name') });
+    sent.push({
+      url: this.url,
+      files: form.getAll('file').map((f) => (f as File).name),
+      names: form.getAll('name[]').map(String),
+      name: form.get('uploader_name'),
+    });
     this.status = reply.status;
     this.responseText = JSON.stringify(reply.body);
     this.onload?.();
@@ -209,5 +215,24 @@ describe('the server says this page (#210)', () => {
     dropInfo({ max_files: 5, max_file_size_mb: 5, allowed_ext: [], ask_name: true, name_max: 40 });
     const w = await openDrop();
     expect(w.get('[data-testid="public-request-name-input"]').attributes('maxlength')).toBe('40');
+  });
+});
+
+// Task #238: a browser escapes `"` and line breaks in a multipart FILENAME
+// (`%22`, `%0A`), and the server cannot undo it - a file really named
+// `100%22.txt` exists too. Each file's name travels again as a plain field.
+describe('the names of the files', () => {
+  it('travel as they are, one name[] per file, in the order of the files', async () => {
+    dropInfo({ max_files: 5, max_file_size_mb: 5, allowed_ext: [], ask_name: false });
+    const w = await openDrop();
+    const names = ['double-quote', 'percent-20', 'nfd-butce'].map((id) => hostileName(id).name);
+    await pick(
+      w,
+      names.map((n) => new File(['x'], n, { type: 'text/plain' })),
+    );
+    await flushPromises();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].names).toEqual(names);
+    expect(sent[0].files).toEqual(names);
   });
 });

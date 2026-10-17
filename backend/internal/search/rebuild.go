@@ -300,7 +300,9 @@ func (i *Index) rebuild(ctx context.Context, store NodeLister, opts RebuildOptio
 	if err := os.RemoveAll(pending); err != nil {
 		return fmt.Errorf("search: rebuild: clear %s: %w", pending, err)
 	}
-	created, err := bleve.New(pending, bleve.NewIndexMapping())
+	// The replacement gets THIS build's mapping (mapping.go): a rebuild is
+	// how an index created under an older one takes the new one on.
+	created, err := bleve.New(pending, indexMapping())
 	if err != nil {
 		return fmt.Errorf("search: rebuild: create replacement index: %w", err)
 	}

@@ -363,7 +363,7 @@ a tag cannot be used to learn that a file exists.
 opening one lists every file carrying it - from every folder and every storage
 the person can reach:
 
-![Personal and team tags, with a team tag opened](https://filex.sh/shots/tags/tags-kinds-1440.64e4d6a5ccbc.png)
+![Personal and team tags, with a team tag opened](https://filex.sh/shots/tags/tags-kinds-1440.a4504c43e5cb.png)
 
 Rules that follow from it:
 
@@ -592,16 +592,17 @@ working".
 | PDF | `pdf` | text layer via a pure-Go reader; **scanned/image-only PDFs yield no text** (that's OCR's job, a separate optional extractor) |
 | Office | `docx` `xlsx` `pptx` | native OOXML (zip+XML) walk - document body / shared strings / slide text |
 
-**Limits.** Source files larger than `FILEX_SEARCH_CONTENT_MAX` (default
-**5 MiB**) are skipped entirely; extracted text is always capped at
-**200 KiB** per file. Corrupt or unextractable files index as "no content" -
+**Limits.** Source files larger than the size limit (**Admin → Settings → General →
+Search settings**, default **5 MB**, 1-1024) are skipped entirely; extracted text is
+always capped at **200 KiB** per file. Corrupt or unextractable files index as "no content" -
 never as job failures.
 
 **Memory.** Extracted texts that are ready at the same time are written to the
-index together, in one batch. Indexing also has a memory budget:
-`FILEX_SEARCH_MEMORY_PERCENT` (default **25**, between **1** and **50**) percent
-of the memory filex was given - the container's limit when it has one, the
-machine's RAM otherwise - on top of what filex holds when it starts. Over it,
+index together, in one batch. Indexing also has a memory budget: the
+**Memory for indexing** share on **Admin → Settings → General** (the Search index page links there) (default **25**, between
+**1** and **50**) percent of the memory filex was given - the container's limit
+when it has one, the machine's RAM otherwise - on top of what filex held when
+the budget was first set. A new share applies the moment it is saved. Over it,
 extraction and a [rebuild](#post-apiadminsearchrebuild) wait until the index's
 background merges give the memory back; nothing is dropped and nothing is
 stopped. The startup log says what it read:
@@ -617,16 +618,29 @@ plain-text fragment around the content match with the matched terms wrapped in
 `«` `»` (never HTML). With `scope=all`, name hits rank first, so pre-v0.2
 clients see the ordering they always did.
 
-**Turning it off / tuning:**
+**Turning it off / tuning.** Since 0.57 these are settings an administrator
+changes on **Admin → Settings → General → Search settings** (or `PATCH /api/admin/search/settings`,
+[below](#get-and-patch-apiadminsearchsettings)): **Search inside files** (the
+switch), the **size limit** and **Memory for indexing**. The switch and the
+limit apply to the next file written, the memory share at once - no restart.
+Switched off, nothing new is read and a queued extraction does nothing when it
+comes up; text already in the index keeps matching. Switched back on, files
+are read as they change - a rebuild with `?content=1` catches up the rest.
+
+The variables and `config.yaml` keys below are now only the FIRST value of
+each setting: they are read on a boot where the setting has no stored value
+yet - for an upgrading install, its first start on 0.57, so a value you had
+set carries over - and **ignored after that**. Changing them later does
+nothing; change the setting instead.
 
 ```bash
-FILEX_SEARCH_CONTENT=0        # kill-switch: no extraction jobs are enqueued (default: on)
-FILEX_SEARCH_CONTENT_MAX=5242880  # per-file source-size cap in bytes (default 5 MiB)
-FILEX_SEARCH_MEMORY_PERCENT=25    # share of the given memory indexing may take (1-50, default 25)
+FILEX_SEARCH_CONTENT=0            # first value of "Search inside files" (default: on)
+FILEX_SEARCH_CONTENT_MAX=5242880  # first value of the size limit, in BYTES (stored in MB, rounded up)
+FILEX_SEARCH_MEMORY_PERCENT=25    # first value of "Memory for indexing" (1-50, default 25)
 ```
 
 ```yaml
-# config.yaml equivalent
+# config.yaml equivalent (used when the variable is not set)
 search:
   content: true
   content_max_bytes: 5242880
@@ -660,10 +674,18 @@ Search is **on by default**:
 | `FILEX_SEARCH_ENABLED` | env | `true` | Master switch. Accepts `1` / `true`. When off, no index is opened and search uses the LIKE fallback only. |
 | `search.enabled` | `config.yaml` | `true` | Same switch in YAML form. |
 | `search.index_path` | `config.yaml` **only** | `<data_dir>/search.bleve` | Where the Bleve directory lives. **No env override** - set it in the file if you want the index somewhere else (e.g. a faster disk). |
-| `FILEX_SEARCH_CONTENT` / `search.content` | env / yaml | `true` | [Content search](#content-search) kill-switch - `0` stops enqueueing extraction jobs (already-indexed content keeps matching). |
-| `FILEX_SEARCH_CONTENT_MAX` / `search.content_max_bytes` | env / yaml | `5242880` (5 MiB) | Source files above this size are never content-extracted. |
-| `FILEX_SEARCH_MEMORY_PERCENT` / `search.memory_percent` | env / yaml | `25` | Share, in percent (1-50), of the memory filex was given (container limit, else machine RAM) that indexing may take on top of what filex holds at startup. Over it, extraction and a rebuild wait. See [Content search](#content-search). |
-| `FILEX_SEARCH_AUTO_REBUILD` / `search.auto_rebuild` | env / yaml | `true` | Repair an index written by an older document schema, in the background, at startup. `0` leaves it alone - the index keeps reporting `needs_rebuild` and you rebuild when it suits you. See [Upgrading an existing index](#upgrading-an-existing-index). |
+| `search.content` | Admin → Settings → General; first value from `FILEX_SEARCH_CONTENT` / `search.content` | `true` | [Content search](#content-search) switch - off stops reading file text (already-indexed content keeps matching). Live. |
+| `search.content_max_mb` | Admin → Settings → General; first value from `FILEX_SEARCH_CONTENT_MAX` (bytes) / `search.content_max_bytes` | `5` (MB, 1-1024) | Source files above this size are never content-extracted. Live. |
+| `search.memory_percent` | Admin → Settings → General; first value from `FILEX_SEARCH_MEMORY_PERCENT` / `search.memory_percent` | `25` (1-50) | Share of the memory filex was given (container limit, else machine RAM) that indexing may take. Over it, extraction and a rebuild wait. Applied when saved. See [Content search](#content-search). |
+| `search.auto_rebuild` | Admin → Settings → General; first value from `FILEX_SEARCH_AUTO_REBUILD` / `search.auto_rebuild` | `true` | Repair an index written by an older document schema, in the background, at startup. Off leaves it alone - the index keeps reporting `needs_rebuild` and you rebuild when it suits you. Read at startup. See [Upgrading an existing index](#upgrading-an-existing-index). |
+
+⚠ The four rows above are **settings**, kept in the database: the variable or
+YAML key gives a setting its first value on a boot where it has none, and is
+ignored from then on (the rule every admin-editable setting follows -
+[CONFIGURATION.md](CONFIGURATION.md)). `FILEX_SEARCH_ENABLED` and
+`search.index_path` stay in the environment and the file: whether the index is
+opened at all, and where it lives, are decided before anything could read a
+setting.
 
 ```yaml
 # config.yaml
@@ -933,6 +955,44 @@ curl -X POST 'https://files.example.com/api/admin/search/rebuild?content=1' -b c
 |---|---|
 | **202 Accepted** | `{ "ok": true, "note": "rebuild started in background" }` - rebuild launched. |
 | **400 Bad Request** | `search index disabled` - the index isn't enabled, so there's nothing to rebuild. |
+
+### `GET` and `PATCH /api/admin/search/settings`
+
+The search settings (0.57) - what **Admin → Settings → General → Search settings** shows and
+saves. The platform operator's only in multi-tenant mode (one instance-wide
+index).
+
+```json
+{
+  "content": true,
+  "content_max_mb": 5, "content_max_mb_min": 1, "content_max_mb_max": 1024,
+  "memory_percent": 25, "memory_percent_min": 1, "memory_percent_max": 50,
+  "memory_budget_bytes": 1073741824,
+  "memory_given_bytes": 4294967296,
+  "memory_from": "cgroup v2 memory.max",
+  "memory_from_kind": "container",
+  "auto_rebuild": true,
+  "index_enabled": true
+}
+```
+
+- `memory_budget_bytes` / `memory_given_bytes` / `memory_from` - what the share
+  came to in the running server, of how much memory, read from where
+  (`memory_from_kind`: `container`, `host`, or empty when it could not be read
+  and indexing runs without a budget).
+- `index_enabled` - whether this server opened the index (`FILEX_SEARCH_ENABLED`,
+  read-only). The settings can be changed either way and apply once it is on.
+
+`PATCH` takes any of `content`, `content_max_mb`, `memory_percent`,
+`auto_rebuild` and answers the same shape. A number outside its bounds is
+**refused** (`400` with `field` and a `message` in the reader's language),
+never clamped; `content` and `content_max_mb` apply to the next file,
+`memory_percent` at once, `auto_rebuild` at the next start.
+
+```bash
+curl -X PATCH https://files.example.com/api/admin/search/settings -b cookies.txt \
+  -H 'Content-Type: application/json' -d '{"memory_percent": 15, "content_max_mb": 20}'
+```
 | **409 Conflict** | `rebuild already in progress` - one rebuild at a time, and that includes the automatic repair; wait for it to finish (`rebuilding` on the stats endpoint). |
 
 Internally the rebuild builds a **second index** in `<index_path>.rebuilding`,
@@ -957,8 +1017,9 @@ Writes that arrive during a rebuild (uploads, renames, deletes, content
 extraction) go into **both** indexes, so nothing that happened while it ran is
 lost - or resurrected - at the swap.
 
-Both actions are also exposed to admin tokens as the MCP tools
-`admin_search_stats` and `admin_search_rebuild`.
+These are also exposed to admin tokens as the MCP tools
+`admin_search_stats`, `admin_search_rebuild`, `admin_search_settings_get` and
+`admin_search_settings_update`.
 
 ---
 
@@ -970,7 +1031,17 @@ The forgiving name matching added two indexed fields, `name_norm` and
 normalised copies with [the four i's as one letter](#capital-letters-and-the-turkish-i):
 a schema-2 document holds a decomposed name's words in pieces, and `IŞIK` as a
 word no lower-case query reaches, so a schema-2 index is rebuilt the same way -
-automatically, in the background.
+automatically, in the background. Schema 4 (0.57) changes two things, and one
+rebuild after the upgrade carries both:
+
+- it keeps only what filex reads back: no `_all` field, term vectors on the
+  extracted text alone, no doc values. That alone changes no search's
+  results; the index is a fraction of its former size (an install with 21,000
+  documents had an 8 GB schema-3 index), and the rebuild is what shrinks it;
+- it reads a name the way it is seen: an invisible format character (a
+  zero-width space, a soft hyphen, a word joiner, a bidi control) no longer
+  splits a word, so `zero` + U+200B + `width.txt` is found by `zerowidth`
+  ([File names](FILE-NAMES.md)).
 
 **An upgrade needs no action, and search does not get worse.** The
 pre-existing sub-queries are still part of every query, precisely so that a
@@ -1027,6 +1098,10 @@ empty index, which is exactly why filex would not run one on its own.
   rebuild`) and the repair starts over. It is never swapped in.
 
 ### Turning it off
+
+Switch off **Repair an outdated index at startup** on **Admin → Settings → General →
+Search settings** (it applies at the next start). `FILEX_SEARCH_AUTO_REBUILD=0` gives
+the setting its first value on a new install, as it always meant:
 
 ```bash
 FILEX_SEARCH_AUTO_REBUILD=0
@@ -1111,10 +1186,11 @@ Indexing keeps to its budget (see **Memory** under
 `search: indexing memory budget` line in the startup log: `from` says whether
 filex saw the container's limit or only the machine's RAM. Without a container
 limit the budget is a share of the whole machine; set one, or lower
-`FILEX_SEARCH_MEMORY_PERCENT`. While indexing is held the log says
-`search: over the memory budget` - that is the budget working, and the backlog
-drains as the merges finish. `FILEX_SEARCH_CONTENT=0` stops content extraction
-altogether and leaves name search as it is.
+**Memory for indexing** on **Admin → Settings → General** (the Search index page links there) (it applies at once). While indexing
+is held the log says `search: over the memory budget` - that is the budget
+working, and the backlog drains as the merges finish. Switching off **Search
+inside files** stops content extraction altogether and leaves name search as
+it is.
 
 ### After a bulk import, lots of files are unsearchable
 Bulk imports that bypass filex's write path (rsync into a local mount, mass S3

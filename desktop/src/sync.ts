@@ -94,8 +94,8 @@ export function cliPath(): string | null {
  * The environment every engine invocation gets.
  *
  * ⚠ FILEX_SYNC_DIR is what keeps a PORTABLE copy portable. The engine's store
- * — the pairs, the per-pair baselines, and the local trash holding real copies
- * of files it deleted — defaults to `~/.filex/sync`, which on a borrowed
+ * — the pairs and the per-pair baselines (and, from an older filex, a local
+ * trash holding real copies of deleted files) — defaults to `~/.filex/sync`, which on a borrowed
  * machine is somebody else's home directory. There is one home for this app's
  * files and it is the folder next to the .exe. See src/portable.ts.
  */
@@ -150,24 +150,6 @@ export async function addPair(
   await run(args);
 }
 
-export interface TrashItem {
-  pair: string;
-  rel: string;
-  deleted: string;
-  size: number;
-}
-
-/** What sync removed from this machine and can still put back. */
-export async function listTrash(pairId?: string): Promise<TrashItem[]> {
-  try {
-    const args = ['sync', 'trash', '--json'];
-    if (pairId) args.push('--pair', pairId);
-    return JSON.parse(await run(args)) as TrashItem[];
-  } catch {
-    return [];
-  }
-}
-
 export async function removePair(id: string): Promise<void> {
   await run(['sync', 'remove', id]);
 }
@@ -216,10 +198,15 @@ export async function confirmHeld(id: string): Promise<string> {
   return (await run(['sync', 'confirm', id])).trim();
 }
 
-/** The items a pair holds move into its local sync trash (kept 30 days).
- *  Returns the engine's one-line answer. */
-export async function discardHeld(id: string): Promise<string> {
-  return (await run(['sync', 'discard', id])).trim();
+/** The held files the server still has an identical copy of (in the person's
+ *  trash, or elsewhere in the pair's storage) are DELETED from this computer;
+ *  every other held item stays, held, and the answer says why (task #259).
+ *  The engine asks the server, so it runs with the pair's account, and speaks
+ *  `lang`. Returns its event stream (sync-policy.ts discardOutcome reads it). */
+export async function discardHeld(id: string, acc: { serverUrl: string; token: string }, lang: string): Promise<string> {
+  const args = ['sync', 'discard', id, '--json'];
+  if (lang) args.push('--lang', lang);
+  return run(args, { FILEX_URL: acc.serverUrl, FILEX_TOKEN: acc.token });
 }
 
 export interface SupervisorHooks {

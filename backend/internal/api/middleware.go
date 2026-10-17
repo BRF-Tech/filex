@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -44,7 +45,7 @@ func LoggerAt(base string) func(http.Handler) http.Handler {
 func loggerFor(base string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		ww := &statusWriter{ResponseWriter: w, status: 200}
+		ww := &statusWriter{ResponseWriter: w, status: 200, req: r.Context()}
 		// ⚠ Read BEFORE the handler runs. confine.Middleware rewrites the
 		// query of this very request (it shares the url.URL), so afterwards
 		// it is not the query the caller sent.
@@ -173,11 +174,41 @@ func JSONOk(w http.ResponseWriter, body any) {
 type statusWriter struct {
 	http.ResponseWriter
 	status int
+	// req is the request's own context, taken before any middleware wraps
+	// it: net/http cancels it when the client is no longer waiting (it
+	// disconnected, or cancelled the request).
+	req context.Context
 }
 
+// StatusClientClosedRequest is the status an answer is given and logged with
+// when the client left before it was written: nginx's 499. Not an HTTP status
+// anybody receives - there is nobody left to receive it.
+const StatusClientClosedRequest = 499
+
+// WriteHeader records the status for the access log.
+//
+// ⚠ A 5xx written AFTER the client went away is a 499 (task #260). A handler
+// whose store read was cancelled because the browser dropped the request (a
+// page being left: WebKit cancels everything in flight) answered 500 with
+// "context canceled", and the log said the server had failed - the 0.56.3
+// gate's one 500, on the bell's unread count, read as a server fault while
+// the explorer next to it was the thing to look at. Every handler gets this
+// here, once, instead of each learning to tell a cancelled context apart.
+// A 4xx is left alone: it is an answer about the request, not about the
+// server, whatever became of the client.
 func (sw *statusWriter) WriteHeader(code int) {
+	if code >= 500 && sw.clientGone() {
+		code = StatusClientClosedRequest
+	}
 	sw.status = code
 	sw.ResponseWriter.WriteHeader(code)
+}
+
+// clientGone reports whether the client has stopped waiting. ⚠ Cancelled,
+// not past a deadline: a deadline is the server running out of time, which
+// is the server's failure and stays a 5xx.
+func (sw *statusWriter) clientGone() bool {
+	return sw.req != nil && errors.Is(sw.req.Err(), context.Canceled)
 }
 
 // Unwrap exposes the wrapped ResponseWriter so http.ResponseController /

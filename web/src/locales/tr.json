@@ -125,7 +125,6 @@
     "files": "Dosyalar",
     "storages": "Depolar",
     "users": "Kullanıcılar",
-    "settings": "Ayarlar",
     "external": "Dış servisler",
     "authProviders": "Kimlik sağlayıcılar",
     "apiMcp": "API / MCP",
@@ -168,19 +167,21 @@
     "myTenant": "Kiracım",
     "menu": "Menü",
     "adminMenu": "Yönetim menüsü",
+    "general": "Genel",
     "top": {
       "files": "Dosyalar ve depolama",
-      "people": "Kişiler ve güvenlik",
-      "system": "Sistem"
+      "people": "Kişiler",
+      "maintenance": "Bakım ve kayıtlar",
+      "settings": "Ayarlar"
     },
     "section": {
       "files": "Dosyalar",
       "storage": "Depolama",
       "people": "Kişiler ve erişim",
-      "security": "Güvenlik",
-      "integrations": "Eklentiler ve entegrasyonlar",
-      "customize": "Özelleştirme",
-      "maintenance": "Bakım ve kayıtlar"
+      "maintenance": "Bakım ve kayıtlar",
+      "general": "Genel",
+      "security": "Güvenlik ve veri",
+      "integrations": "Dosya işleme ve entegrasyonlar"
     },
     "hint": {
       "dashboard": "Sunucunun durumu bir bakışta",
@@ -213,15 +214,17 @@
       "webhooks": "Dosya olaylarını başka sistemlere gönderin",
       "notifications": "Bildirimler ve iletimi",
       "settings": "Sunucu geneli ayarlar ve e-posta",
-      "branding": "Herkese açık sayfalarda ve oturum açma ekranında ad ve logo",
+      "branding": "Herkese açık sayfalarda, oturum açma ekranında ve e-postalarda ad ve logo",
       "appearance": "Temalar ve varsayılan görünüm",
       "archives": "Arşiv oluşturma, açma ve sınırlar",
       "queue": "Arka plan işleri, ilerleme ve yeniden deneme",
       "tools": "Bilerek başlattığınız bakım işleri",
       "audit": "Yönetim panelinde yapılan her değişiklik",
       "updates": "Yeni sürümler ve güncelleme kuralı",
-      "about": "Sürüm ve derleme bilgisi"
-    }
+      "about": "Sürüm ve derleme bilgisi",
+      "aiAssistant": "Gezgindeki asistan: sağlayıcı, model, sınırlar"
+    },
+    "aiAssistant": "AI asistanı"
   },
   "login": {
     "title": "Oturum aç",
@@ -487,6 +490,35 @@
       "missingInStorage": "Depolamada yok",
       "sizeMismatch": "Boyut uyuşmazlığı",
       "hashMismatch": "Hash uyuşmazlığı"
+    },
+    "access": {
+      "title": "Erişim",
+      "hint": "Deponun tamamı verilen kişiler ve gruplar içindeki her dosya ve klasöre erişir: web arayüzünde, masaüstü uygulamasında ve her protokolde. İçindeki klasör yetkileri olduğu gibi kalır; ikisi birden geçerliyse yüksek olan sayılır, buradaki hiçbir ayar erişimi daraltmaz.",
+      "search": "Kişi ya da grup ekle…",
+      "noMatch": "Eşleşen kimse yok.",
+      "levelHelp": {
+        "viewer": "Depodaki her şeyi açar ve indirir.",
+        "editor": "Ayrıca ekler, değiştirir ve siler.",
+        "owner": "Ayrıca başka kimin erişeceğine karar verir."
+      },
+      "empty": "Deponun tamamı henüz kimseye verilmedi.",
+      "given": "Erişim verildi.",
+      "changed": "Seviye değişti.",
+      "revokeConfirm": "{who} için deponun tamamına erişim geri alınsın mı? Klasör yetkileri korunur.",
+      "revokeAll": "Tüm erişimi geri al",
+      "revokeAllConfirm": "{name} deposundaki tüm depo atamaları geri alınsın mı? İçindeki klasör yetkileri korunur.",
+      "revokedAll": "Depo erişimi geri alındı. Klasör yetkileri korundu.",
+      "someFailed": "Bunlar değiştirilemedi: {names}",
+      "groupOwnerConfirm": "{name} grubu deponun tamamında sahip yapılsın mı? Her üyesi başka kimin erişeceğine karar verebilecek.",
+      "folderGrants": "Tek tek klasörlere verilen yetkiler şurada listelenir:",
+      "rbacOff": "Bu depoda öğe bazlı erişim denetimi kapalı: herkes depoyu rolüne göre açar, bu yüzden burada henüz kimseye verilemez.",
+      "enable": "Öğe bazlı erişimi aç",
+      "enableWarning": "Açıldığında, deponun ya da içindeki bir klasörün kendisine verilmediği, yönetici olmayan hiç kimse bu depoyu göremez. Önce kimin erişmeye devam edeceğini seçin, sonra açın.",
+      "enableKeepers": "Açılınca deponun tamamı verilecekler",
+      "enableNobody": "Henüz kimse seçilmedi: bu depoyu yalnız yöneticiler görecek.",
+      "enableEarlier": "Kapatılmadan önce yapılan atamalar yeniden geçerli olur: {names}.",
+      "enableConfirm": "Aç",
+      "enabledOk": "Öğe bazlı erişim açık."
     }
   },
   "users": {
@@ -616,11 +648,115 @@
       "change": "Fotoğrafı değiştir"
     }
   },
+  "instanceSettings": {
+    "savedOk": "Ayarlar kaydedildi",
+    "restartNote": "Bunların bazıları filex başlarken okunur: birinde yapılan değişiklik bir sonraki başlatmada geçerli olur ve bekleyen bir değişiklik olduğunda satırı bunu söyler.",
+    "restartPending": "Bir sonraki başlatmada geçerli olur",
+    "fromEnv": "İlk değer {env} değişkeninden",
+    "bounds": "{min} ile {max} arası; varsayılan {default}.",
+    "unit": {
+      "minutes": "dakika",
+      "hours": "saat",
+      "days": "gün",
+      "MB": "MB",
+      "GB": "GB",
+      "people": "kişi"
+    },
+    "groups": {
+      "general": {
+        "title": "Sunucu varsayılanları",
+        "desc": "Kimsenin başka bir şey seçmediği yerde bu sunucunun davranışı: dili, depoların ne sıklıkla tarandığı, yarım kalan yüklemeler, dosya önbelleği ve küçük resim önbelleğinin bakımı."
+      },
+      "protection": {
+        "title": "Bir dosyanın üzerine yazılmadan önce",
+        "desc": "Bir yazma bir dosyanın yerine geçmeden önce filex'in eski içeriği sürüm olarak tutup tutmadığı."
+      },
+      "apps": {
+        "title": "Uygulamalar ve birlikte düzenleme",
+        "desc": "Bir uygulamanın işleyebileceği en büyük dosya ve paketler, bir kurulum isteğinin ne kadar beklediği ve bir dosyayı kaç kişinin birlikte düzenleyebileceği."
+      },
+      "notifications": {
+        "title": "Bu sunucudaki bildirimler",
+        "desc": "Sunucunun bildirimleri kaydedip iletip iletmediği."
+      },
+      "webhooks": {
+        "title": "Varsayılan webhook'un dili",
+        "desc": "Varsayılan webhook'a gönderilen iletilerin dili. Kendi hedefi olan bir webhook'un dili aşağıda ayrıca seçilir."
+      }
+    },
+    "items": {
+      "instance_default_locale": {
+        "label": "Varsayılan dil",
+        "hint": "Dil seçmemiş bir kişinin filex'i okuduğu dil ve sunucunun hesabı olmayan bir adrese yazdığı e-postaların dili.",
+        "none": "Tarayıcının dili"
+      },
+      "sync_default_interval_minutes": {
+        "label": "Depoları tarama sıklığı",
+        "hint": "Kendi aralığı olmayan bir deponun, filex dışında yapılan değişiklikler için ne sıklıkla kontrol edildiği."
+      },
+      "upload_staging_ttl_hours": {
+        "label": "Yarım kalan yüklemeyi tutma süresi",
+        "hint": "Duraklatılan ya da kesilen bir yükleme bu süre boyunca sürdürülebilir; sonra parçaları silinir."
+      },
+      "cache_max_gb": {
+        "label": "Dosya önbelleği boyutu",
+        "hint": "filex'in yavaş depolardaki dosyaların kopyaları için kullandığı disk alanı. Önce en eski kopyalar silinir."
+      },
+      "thumbs_sweep": {
+        "label": "Küçük resim önbelleğini düzenle",
+        "hint": "Artık var olmayan dosyaların küçük resimlerini düzenli olarak siler."
+      },
+      "thumbs_sweep_interval_minutes": {
+        "label": "Küçük resim önbelleğini düzenleme sıklığı",
+        "hint": "Düzenleme açıkken küçük resim önbelleğinin ne sıklıkla kontrol edildiği."
+      },
+      "versions_on_overwrite": {
+        "label": "Üzerine yazmadan önce sürüm tut",
+        "hint": "Bir yazma bir dosyanın yerine geçmeden önce eski içerik sürüm olarak tutulur. Kapalıyken üzerine yazma geri alınamaz; yalnızca kendi sürümlemesi yeten bir depo için kapatın."
+      },
+      "apps_max_input_mb": {
+        "label": "Bir uygulamanın okuyabileceği en büyük dosya",
+        "hint": "Daha büyük bir dosya uygulamaya verilmez."
+      },
+      "apps_max_output_mb": {
+        "label": "Bir uygulamanın yazabileceği en büyük dosya",
+        "hint": "Bundan büyük bir uygulama sonucu reddedilir."
+      },
+      "apps_max_wasm_mb": {
+        "label": "En büyük uygulama programı",
+        "hint": "Programı daha büyük olan bir uygulama kurulamaz."
+      },
+      "apps_max_ui_mb": {
+        "label": "En büyük uygulama arayüzü",
+        "hint": "Arayüz paketi daha büyük olan bir uygulama kurulamaz."
+      },
+      "apps_request_ttl_days": {
+        "label": "Kurulum isteğinin bekleme süresi",
+        "hint": "Bir uygulama isteğinin süresi dolmadan önce ne kadar açık kaldığı. Daha önce yapılmış bir istek kendi tarihini korur."
+      },
+      "coedit_max_members": {
+        "label": "Bir dosyayı birlikte düzenleyebilecek kişi sayısı",
+        "hint": "Bir düzenleme oturumundaki en fazla kişi sayısı."
+      },
+      "coedit_unsaved_days": {
+        "label": "Kaydedilmemiş ortak düzenlemeleri tutma süresi",
+        "hint": "Birlikte yapılıp kimsenin kaydetmediği değişiklikler bu süre boyunca tutulur, sonra silinir."
+      },
+      "notify_enabled": {
+        "label": "Bildirimler",
+        "hint": "Zil, e-postalar, anlık bildirimler ve webhook'lar. Kapalıyken sunucu hiçbir bildirim kaydetmez ve göndermez."
+      },
+      "notify_webhook_lang": {
+        "label": "Varsayılan webhook'un dili",
+        "hint": "Varsayılan webhook'a giden iletilerin yazıldığı dil.",
+        "none": "Sunucunun varsayılan dili"
+      }
+    }
+  },
   "settings": {
-    "title": "Ayarlar",
+    "title": "Genel",
     "subtitle": "Sunucu geneli yapılandırma",
-    "siteName": "Site adı",
-    "envOnlyNote": "Genel URL, senkron aralığı, log seviyesi ve varsayılan dil bu sayfadan değil ortam değişkenlerinden ayarlanır (FILEX_PUBLIC_URL, FILEX_SYNC_INTERVAL, FILEX_LOG_LEVEL, FILEX_DEFAULT_LOCALE) - bkz. docs/CONFIGURATION.md.",
+    "envOnlyNote": "Genel URL ve log seviyesi bu sayfadan değil ortam değişkenlerinden ayarlanır (FILEX_PUBLIC_URL, FILEX_LOG_LEVEL) - bkz. docs/CONFIGURATION.md.",
     "savedOk": "Ayarlar kaydedildi",
     "folderView": {
       "title": "Varsayılan klasör görünümü",
@@ -690,7 +826,7 @@
       "editorLang": "Editör dili",
       "editorLangAuto": "Otomatik - herkesin kendi filex dili",
       "editorLangHint": "Otomatik seçiliyken ONLYOFFICE editörü herkese filex'i kullandığı dilde açılır. Bir dil seçerseniz herkese o dilde açılır.",
-      "editorLangEnvHint": "{env} ile ayarlanmış. Buradaki değişiklik hemen uygulanır ve filex yeniden başlayana kadar sürer; açılışta ortamdaki değer geri yazılır."
+      "editorLangEnvHint": "İlk değeri {env} değişkeninden geldi. Buradaki değişiklik yeniden başlatmalardan sonra da geçerli kalır; filex settings reseed --external ortamdaki değeri yeniden yazar."
     },
     "states": {
       "healthy": "Sağlıklı",
@@ -703,8 +839,8 @@
     "testFail": "Sağlık kontrolü başarısız",
     "testWarn": "Erişilebilir, ama her şey yolunda değil: karta bakın",
     "testedUnsaved": "Bu sonuçlar formdaki, henüz kaydedilmemiş değerlere ait. Kullanmak için kaydedin.",
-    "envManaged": "Ortam değişkeniyle ayarlı",
-    "envManagedHint": "{env} ile ayarlanmış. Buradaki değişiklik, kapatmak da dahil, hemen uygulanır ve filex yeniden başlayana kadar sürer; açılışta ortamdaki değer geri yazılır. Kalıcı olarak kapatmak için {env} değişkenini (ya da yapılandırma dosyasındaki satırını) kaldırın.",
+    "envManaged": "İlk değeri ortam değişkeninden",
+    "envManagedHint": "Bu servisin ilk değeri {env} değişkeninden geldi. Buradaki değişiklik, kapatmak da dahil, yeniden başlatmalardan sonra da geçerli kalır. Ortamdaki değeri yeniden almak için filex settings reseed --external komutunu çalıştırıp filex'i yeniden başlatın.",
     "overall": {
       "disabled": "Pasif",
       "unconfigured": "Yapılandırılmamış",
@@ -987,7 +1123,9 @@
     "revokeConfirm": "{email} kullanıcısının {path} erişimi geri alınsın mı?",
     "revokedOk": "Yetki geri alındı",
     "empty": "Henüz yetki yok.",
-    "group": "Grup"
+    "group": "Grup",
+    "wholeStorage": "Tüm depo",
+    "wholeStorageOf": "{storage} (tüm depo)"
   },
   "apiMcp": {
     "title": "API / MCP",
@@ -1191,7 +1329,42 @@
     "scopeAll": "Tümü",
     "scopeName": "Ad",
     "scopeContent": "İçerik",
-    "inContent": "İçerikte"
+    "inContent": "İçerikte",
+    "settings": {
+      "title": "Ayarlar",
+      "desc": "İndeksin dosyalarınızı nasıl aldığı. Ortam değişkenlerinde değil, burada tutulur: FILEX_SEARCH_* değişkenleri yalnızca ilk değerlerini verdi.",
+      "savedOk": "Kaydedildi",
+      "savedNextStart": "Kaydedildi - bir sonraki açılışta geçerli olur",
+      "elsewhere": "İndeksin neyi okuduğu ve ne kadar bellek kullanabileceği Ayarlar → Genel sayfasında ayarlanır.",
+      "change": "Arama ayarlarını değiştir →",
+      "indexOff": "Bu sunucuda indeks kapalı (FILEX_SEARCH_ENABLED). Bu ayarlar saklanır ve indeks açıldığında uygulanır.",
+      "content": {
+        "label": "Dosyaların içinde ara",
+        "desc": "Belgelerin, PDF'lerin ve kodun metnini yazıldıkça indekse alır; arama yalnızca dosyanın adını değil, içinde yazanı da bulur. Kapalıyken yeni hiçbir şey okunmaz; indeksteki metin eşleşmeye devam eder. Yazılan bir sonraki dosyadan itibaren geçerli."
+      },
+      "contentMax": {
+        "title": "Metni okunan en büyük dosya",
+        "desc": "Daha büyük dosyalar yalnızca adlarıyla bulunur.",
+        "label": "Boyut sınırı (MB)",
+        "hint": "{min} ile {max} MB arası. Yazılan bir sonraki dosyadan itibaren geçerli."
+      },
+      "memory": {
+        "title": "İndeksleme belleği",
+        "desc": "filex'e ayrılan belleğin indekslemenin kullanabileceği payı. Bu pay aşılınca dosya okuma ve yeniden oluşturma, bellek geri gelene kadar bekler.",
+        "label": "Pay (%)",
+        "hint": "Yüzde {min} ile {max} arası. Hemen uygulanır.",
+        "inForce": "Şu an {given} belleğin {budget} kadarı ({from}).",
+        "unknown": "filex'e ayrılan bellek okunamadı, bu yüzden indeksleme sınırsız çalışıyor.",
+        "from": {
+          "container": "kapsayıcının sınırı",
+          "host": "makinenin belleği"
+        }
+      },
+      "autoRebuild": {
+        "label": "Eskimiş indeksi açılışta onar",
+        "desc": "İndeksin içeriğini değiştiren bir yükseltmeden sonra indeksi, aramalara cevap veren indeksin yanında arka planda yeniden oluşturur. Bir sonraki açılışta geçerli olur."
+      }
+    }
   },
   "adminSearch": {
     "alias": {
@@ -1223,7 +1396,8 @@
       "external": "ONLYOFFICE, draw.io, belge sunucusu, editörler",
       "webhooks": "HTTP geri çağrıları, olaylar",
       "notifications": "uyarılar, zil",
-      "settings": "e-posta, SMTP, site adı",
+      "general": "ayarlar, e-posta, SMTP",
+      "displayName": "site adı, sunucu adı, ürün adı",
       "branding": "logo, renkler, ad",
       "appearance": "tema, karanlık mod, özel CSS",
       "archives": "zip, 7z, tar, arşiv açma",
@@ -1233,6 +1407,7 @@
       "updates": "yükseltme, yeni sürüm",
       "about": "sürüm, derleme, lisans",
       "smtp": "e-posta sunucusu, giden posta",
+      "thumbnails": "SVG, önizlemeler, klasör önizlemeleri, Office küçük resimleri",
       "twoFactor": "2FA, TOTP, iki adımlı doğrulama",
       "allowlist": "IP adresleri",
       "stores": "uygulama mağazası, mağaza"
@@ -1270,8 +1445,8 @@
     "toolFound": "Bulundu",
     "toolMissing": "Bulunamadı",
     "heic": "HEIC fotoğrafları",
-    "office": "Ofis belgeleri (ONLYOFFICE)",
-    "officeHint": "Ofis belgelerinin küçük resimleri ONLYOFFICE'ten gelir. Ayarlar → Dış servisler altında yapılandırın; o zamana kadar tür simgeleriyle görünürler.",
+    "office": "Ofis belgeleri",
+    "officeHint": "Ofis belgelerinin küçük resimlerini bir ofis motoru çizer: Ofis düzenleyici uygulaması (Uygulamalar) ya da ONLYOFFICE (Ayarlar → Dış servisler). Biri çalışana kadar tür simgeleriyle görünürler.",
     "heicHint": "ImageMagick kurulu ama HEIC fotoğraflarını çözemiyor: libheif'in HEVC çözücüsü eksik. libheif-plugin-libde265 (Debian, Ubuntu) ya da libheif-libde265 (Alpine) paketini kurun, ardından filex'i yeniden başlatın.",
     "licenseIs": "Lisans: {license}"
   },
@@ -1388,7 +1563,7 @@
           "video": "FFmpeg kurulu değil",
           "audio": "FFmpeg kurulu değil",
           "pdf": "Ghostscript de poppler de kurulu değil",
-          "office": "ONLYOFFICE yapılandırılmamış (Ayarlar → Dış servisler)",
+          "office": "Çalışan bir ofis motoru yok: Ofis düzenleyici uygulamasını kurun (Uygulamalar) ya da ONLYOFFICE bağlayın (Ayarlar → Dış servisler); bir uygulamanın motoru kurulduktan sonra birkaç dakika hazırlanır",
           "heif": "HEIC destekli ImageMagick kurulu değil",
           "heic_codec": "libheif'in HEVC çözücüsü kurulu değil (libheif-plugin-libde265)",
           "other": "Bu tür dosyanın gerektirdiği program kurulu değil"
@@ -1410,6 +1585,8 @@
       "retry": "Yeniden dene",
       "limits": {
         "title": "Küçük resim ayarları",
+        "elsewhere": "Klasör önizlemeleri ile SVG ve Office sınırları Ayarlar → Genel sayfasında ayarlanır.",
+        "changeLimits": "Sınırları değiştir →",
         "desc": "Sınırlardan birini aşan SVG'nin küçük resmi çizilmez: simgesiyle görünür ve nedeniyle birlikte Araçlar → Küçük resim onarımı altında listelenir. Atladığı dosyaları çizmek için sınırı yükseltin.",
         "size": "En büyük SVG (MB)",
         "size_hint": "{min} ile {max} MB arası. Varsayılan 5.",
@@ -1419,8 +1596,8 @@
         "readonly": "Bu ayarlar sunucunun tamamı için geçerlidir; sunucunun yöneticisi değiştirebilir.",
         "saved": "Küçük resim ayarları kaydedildi.",
         "svg_title": "SVG sınırları",
-        "office_title": "Ofis belgeleri (ONLYOFFICE)",
-        "office_desc": "ONLYOFFICE, ofis belgesinin ilk sayfasını çizer. Düzenleyicilerle paylaştığı tek bir dönüştürücüyle çalışır, bu yüzden filex ona varsayılan olarak her seferinde tek belge gönderir. Boyut sınırını aşan belgenin küçük resmi çizilmez ve çok büyük diye işaretlenir.",
+        "office_title": "Ofis belgeleri",
+        "office_desc": "Ofis belgesinin ilk sayfasını ofis motoru çizer: Ofis düzenleyici uygulamasının motoru ya da bağlı bir ONLYOFFICE, Eklentiler → Varsayılan uygulamalar'da hangisi önce çalışıyorsa. filex ona varsayılan olarak her seferinde tek belge gönderir (ONLYOFFICE dönüştürücüsünü düzenleyicileriyle paylaşır). Boyut sınırını aşan belgenin küçük resmi çizilmez ve çok büyük diye işaretlenir.",
         "office_size": "En büyük ofis belgesi (MB)",
         "office_size_hint": "{min} ile {max} MB arası. Varsayılan 25.",
         "office_slots": "Aynı anda belge",
@@ -1481,7 +1658,7 @@
     "creds": "Demo hesabı: {email} · parola: {password}",
     "sandbox": "Ortak deneme alanı - her gece sıfırlanır; burada depolama, eklenti ve uygulamalar kapalıdır.",
     "adminHint": "Burada yönetim paneli her hesap için salt okunur - gösterdiklerini değiştirmek için kendi filex'inizi çalıştırın.",
-    "alsoIncluded": "Ayrıca: uygulamalar - izin incelemesinden geçerek kurulan WebAssembly eklentileri, e-İmza, Dönüştür, ofis düzenleyici, filextext ve draw.io ile birlikte · izin verdiğiniz bir uygulamayla bir dosyayı birlikte düzenleme ya da şifreli bir klasördeki dosyayı tarayıcınızda çözülmüş olarak açma · dil paketleri ve sağdan sola yerleşim · Görünüm ekranından kurum temaları · oluşturduğunuz bağlantılar, Paylaştıklarım'da · kişisel ve takım etiketleri · sembolik bağlantılı klasörler · klasör başına hatırlanan görünüm ve sıralama · roller, gruplar ve kişiye özel istisnalar, dosya ve klasör bazında erişim ve uygulamaların kendi izinleri · her kiracının kendi realm'iyle (oturum açma adıyla) çok kiracılık; kiracı kendi oturum açma sağlayıcılarını, alan adını ve sertifikasını kendisi yönetir · OIDC SSO, LDAP / Active Directory ve Windows ya da Linux hesabıyla oturum açma · IP izin listesiyle giriş denemesi sınırı · yerinde görüntüleyiciler ve düzenleyiciler, ofis düzenleyici uygulamasında ya da ONLYOFFICE ile Office belgeleri · SVG, HEIC, metin ve arşiv küçük resimleri, içine en son gelen dosyalarla çizilen klasörler · Varsayılan uygulamalar: bir dosya türünü hangi uygulamanın açacağı · + Yeni menüsünden belge oluşturma - Markdown, metin, CSV ve kod her yerde; Word, Excel, PowerPoint ve OpenDocument ise ONLYOFFICE bağlıyken ya da ofis düzenleyici uygulaması kuruluyken · tüm seçimi tek akışlı arşiv olarak indirme · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
+    "alsoIncluded": "Ayrıca: uygulamalar - izin incelemesinden geçerek kurulan WebAssembly eklentileri, e-İmza, Dönüştür, ofis düzenleyici, filextext ve draw.io ile birlikte · izin verdiğiniz bir uygulamayla bir dosyayı birlikte düzenleme ya da şifreli bir klasördeki dosyayı tarayıcınızda çözülmüş olarak açma · dil paketleri ve sağdan sola yerleşim · Görünüm ekranından kurum temaları · oluşturduğunuz bağlantılar, Paylaştıklarım'da · kişisel ve takım etiketleri · sembolik bağlantılı klasörler · klasör başına hatırlanan görünüm ve sıralama · roller, gruplar ve kişiye özel istisnalar, dosya ve klasör bazında erişim ve uygulamaların kendi izinleri · her kiracının kendi realm'iyle (oturum açma adıyla) çok kiracılık; kiracı kendi oturum açma sağlayıcılarını, alan adını ve sertifikasını kendisi yönetir · OIDC SSO, LDAP / Active Directory ve Windows ya da Linux hesabıyla oturum açma · IP izin listesiyle giriş denemesi sınırı · yerinde görüntüleyiciler ve düzenleyiciler, ofis düzenleyici uygulamasında ya da ONLYOFFICE ile Office belgeleri · ofis belgesi, SVG, HEIC, metin ve arşiv küçük resimleri, içine en son gelen dosyalarla çizilen klasörler · Varsayılan uygulamalar: bir dosya türünü hangi uygulamanın açacağı · + Yeni menüsünden belge oluşturma - Markdown, metin, CSV ve kod her yerde; Word, Excel, PowerPoint ve OpenDocument ise ONLYOFFICE bağlıyken ya da ofis düzenleyici uygulaması kuruluyken · tüm seçimi tek akışlı arşiv olarak indirme · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
     "features": {
       "storageTitle": "6 depolama sürücüsü, iki yönde",
       "storageBody": "Yerel diskleri, S3'ü, SFTP'yi, WebDAV'ı, FTP/FTPS'i ve SMB/NAS paylaşımlarını tek bir ağaçta yan yana bağlayın - sonra aynı ağaca S3, SFTP, FTPS, NFSv3 ya da WebDAV olarak geri erişin.",
@@ -1548,8 +1725,8 @@
     "openTarget": "Bildirimin konusunu aç",
     "prefs": {
       "title": "Bildirimleriniz",
-      "inApp": "Uygulama içi çan",
-      "inAppHint": "Kapatırsanız çanınız boşalır. Hiçbir kayıt silinmez - yönetici tüm olayları görmeye devam eder.",
+      "inApp": "Uygulama içi zil",
+      "inAppHint": "Kapatırsanız ziliniz boşalır. Hiçbir kayıt silinmez - yönetici tüm olayları görmeye devam eder.",
       "browser": "Tarayıcı bildirimleri",
       "browserHint": "Yeni bir şey geldiğinde sekmenin dışında bildirim göster. Bildirime tıklayınca konusu olan dosya, klasör ya da paylaşım açılır.",
       "enableBrowser": "Bildirimlere izin ver",
@@ -1564,8 +1741,8 @@
       "movedToSettings": "Kendi bildirim ayarlarınız - zil, tarayıcı bildirimleri, hangi olaylar - kullanıcı ayarlarınızda.",
       "openSettings": "Bildirim ayarlarımı aç"
     },
-    "adminTitle": "Bildirim yönetimi",
-    "bell": "Bildirim çanı",
+    "adminTitle": "Bildirimler",
+    "bell": "Bildirim zili",
     "empty": "Henüz bildirim yok",
     "viewAll": "Tüm bildirimleri gör",
     "manageAdmin": "Bildirim yönetimi",
@@ -2110,11 +2287,13 @@
       },
       "trustsNobody": "Hiçbir vekil sunucuya güvenilmiyor: isteğin geldiği adres her zaman istemcinin kendi adresidir, X-Forwarded-For hiç okunmaz.",
       "source": {
+        "seeded": "İlk değeri {source} verdi",
         "setting": "Burada ayarlandı",
         "env": "FILEX_TRUSTED_PROXIES ortam değişkeninden",
         "auto": "Otomatik: yerleşik varsayılan"
       },
-      "override": "Kaydettiğinizde bu liste burada saklanır ve FILEX_TRUSTED_PROXIES ortam değişkenini ezer. Değişkene, o da boşsa otomatik varsayılana dönmek için kayıtlı listeyi kaldırın.",
+      "configuredDiffers": "{source} başka bir liste veriyor ({list}); geçerli olan burada kayıtlı listedir. Yapılandırmadaki listeyi kullanmak için: {command}",
+      "override": "Kaydettiğinizde liste burada saklanır. FILEX_TRUSTED_PROXIES yalnızca ilk başlatmada ilk değeri verir: sonrasında burada kayıtlı liste geçerlidir, değişkende yapılan bir değişiklik filex settings reseed login.trusted_proxies ile uygulanır. Değişkene, o da boşsa otomatik varsayılana dönmek için kayıtlı listeyi kaldırın.",
       "reset": "Kayıtlı listeyi kaldır",
       "resetConfirm": "Güvenilir vekil sunucuların kayıtlı listesi kaldırılsın mı? Yeniden FILEX_TRUSTED_PROXIES ortam değişkeni ya da otomatik varsayılan geçerli olur.",
       "resetDone": "Kayıtlı liste kaldırıldı",
@@ -2252,7 +2431,7 @@
     "title": "Kurumsal kimlik",
     "subtitle": "Herkese açık paylaşım, yükleme ve PIN sayfaları ile oturum açma ekranında görünen kimlik",
     "name": "Görünen ad",
-    "nameHelp": "Herkese açık sayfalarda logonun yanında, oturum açma ekranında logonun altında görünür.",
+    "nameHelp": "Sunucunun adı: herkese açık sayfalarda logonun yanında, oturum açma ekranında logonun altında ve gönderdiği e-postalarda (\"... üzerinden sizinle paylaşıldı\").",
     "logo": "Logo",
     "logoHelp": "Bir görsel URL'si, siteye göreli bir yol ya da satır içi saklanan yüklenmiş dosya (en fazla 256 KB).",
     "logoUpload": "Dosya yükle",
@@ -2655,6 +2834,10 @@
       },
       "errRepo": "Repoyu sahip/ad biçiminde yazın.",
       "errFiles": "Manifesti (filex-app.json) seçin - uygulama bir dil paketi değilse modülü (.wasm) de.",
+      "errMissing": {
+        "ui": "Manifestte uygulamanın kendi arayüzü var (ui bloğu): Arayüz alanından ui.zip dosyasını seçin.",
+        "engine": "Manifest bir ofis motoru getiriyor (engines.office): Ofis motoru alanından engine.zip dosyasını seçin."
+      },
       "errUrl": "Manifest URL'sini girin - modülü olan bir uygulama için modül URL'sini ve 64 karakterlik SHA-256'yı da.",
       "languagePackNote": "Yalnızca filex'in kendisi için diller - modül yok, hiçbir şey çalışmaz.",
       "alreadyInstalled": "“{name}” burada zaten kurulu (sürüm {version}). İkinci kez kurulamaz; bunun yerine kurulu olanı aynı kaynaktan {next} sürümüne yükseltin.",
@@ -2667,8 +2850,9 @@
       "samePermissions": "Kurulu sürümle aynı izinleri istiyor.",
       "newPermission": "Yeni",
       "enginesMissing": "Bu sunucuda {engines} yok. Uygulama kurulur, ama bunlarla yaptığı işler bu motorlar kurulup filex yeniden başlatılana kadar çalışmaz.",
-      "officeMissing": "Ofis belgeleri {name} ile dönüştürülür ve bu sunucuya bağlı bir {name} yok. Uygulama kurulur; ofis belgeleriyle yaptığı işler, bir yönetici Dış servisler sayfasından {name} bağladığında çalışır. Yeniden başlatma gerekmez.",
+      "officeMissing": "Ofis belgelerini bir ofis motoru dönüştürür ve bu sunucuda çalışan yok. Uygulama kurulur; ofis belgeleriyle yaptığı işler, bir yönetici Ofis düzenleyici uygulamasını kurduğunda (Uygulamalar) ya da Dış servisler sayfasından {name} bağladığında çalışır. Yeniden başlatma gerekmez.",
       "ui": "Arayüz (ui.zip) - kendi arayüzü olan bir uygulama için",
+      "engine": "Ofis motoru (engine.zip) - Ofis düzenleyici gibi motor getiren bir uygulama için (engines.office)",
       "uiGroup": {
         "title": "Arayüz",
         "badge": "Kendi arayüzü var",
@@ -2821,6 +3005,49 @@
         "outOfRange": "{min} ile {max} arasında bir tam sayı (0 varsayılandır).",
         "saved": "Küçük resim sınırları kaydedildi.",
         "order": "Hangi türde önce bunun sorulacağı Eklentiler → Varsayılan uygulamalar'da belirlenir."
+      },
+      "dictionaries": {
+        "title": "Sözlükler",
+        "desc": "Bu uygulamanın kendisiyle gelmeyen diller için yazım denetimi ve heceleme. Arayüzü bunları kendi paket adresinden okur; bu adres oturum açmayı gerektirmez, bu yüzden yalnız herkese açık sözlükler ekleyin.",
+        "source": "Hunspell sözlükleri, ONLYOFFICE'in yayımladığı adlarıyla: her dil için bir klasör (pl_PL), içinde pl_PL.aff, pl_PL.dic ve varsa hyph_pl_PL.dic.",
+        "notRead": "Bu uygulamanın arayüzü kendisine eklenen dosyaları okumuyor (kendi paketini okuyamıyor), bu yüzden sözlük eklenemez.",
+        "empty": "Eklenmiş sözlük yok. Uygulamanın kendisiyle gelen diller sözlük eklenmeden denetlenir.",
+        "used": "Kullanılan: {used} / {max}",
+        "add": "Sözlük ekle",
+        "addTitle": "Sözlük ekle",
+        "column": {
+          "lang": "Dil",
+          "parts": "Dosyalar",
+          "size": "Boyut",
+          "modified": "Eklenme",
+          "status": "Durum"
+        },
+        "status": {
+          "installed": "Kurulu",
+          "partial": "Kısmen kurulu",
+          "available": "Kurulabilir"
+        },
+        "part": {
+          "aff": "yazım kuralları",
+          "dic": "sözcük listesi",
+          "hyph": "heceleme"
+        },
+        "lang": "Dil klasörü",
+        "langHint": "Sözlüğün klasör adı, örneğin pl_PL ya da sr_Latn_RS. Daha önce eklenmiş bir dil değiştirilir.",
+        "langInvalid": "Yalnız harf ve _, 2 ile 16 karakter arası.",
+        "aff": "Yazım kuralları (.aff)",
+        "dic": "Sözcük listesi (.dic)",
+        "hyph": "Heceleme (hyph_ .dic, varsa)",
+        "needBoth": "Bir .aff ve bir .dic dosyası seçin.",
+        "added": "{lang} eklendi.",
+        "remove": "Kaldır",
+        "confirmTitle": "Sözlük kaldırılsın mı?",
+        "confirmText": "{lang} artık bu uygulamada denetlenmeyecek. Dosyaları sunucudan kaldırılır.",
+        "sourceCatalog": "Bu uygulamanın sürümünün sunduğu diller listelenir: Kur, bir dilin dosyalarını indirir ve her birini sürümün sha256 değeriyle denetler. Başka bir Hunspell sözlüğü elle eklenebilir.",
+        "catalogUnread": "Bu uygulamanın sürümünün sunduğu diller listesi okunamadı: {why}. Sözlükler yine elle eklenebilir.",
+        "install": "Kur",
+        "installing": "Kuruluyor...",
+        "removed": "{lang} kaldırıldı."
       }
     },
     "kind": {
@@ -2884,7 +3111,31 @@
       "down": "Aşağı taşı"
     },
     "saved": ".{ext}: kaydedildi.",
-    "resetDone": ".{ext}: varsayılan sıraya dönüldü."
+    "resetDone": ".{ext}: varsayılan sıraya dönüldü.",
+    "engine": {
+      "title": "Ofis motoru",
+      "desc": "Uygulamaların istediği ofis dönüşümlerini (Convert, file_convert) ve ofis belgelerinin küçük resimlerini, bir uygulamanın getirdiği ve bu sunucuda çalışan ofis motoru ya da bir ONLYOFFICE Document Server yapar. İşi bu listede çalışan ilk motor üstlenir.",
+      "none": "Burada ofis belgelerini dönüştüren bir şey yok: Uygulamalar'dan Ofis düzenleyici uygulamasını kurun ya da Dış servisler'den bir ONLYOFFICE Document Server bağlayın.",
+      "documentServer": "ONLYOFFICE Document Server",
+      "kindApp": "Bu uygulamanın getirdiği ofis motoru",
+      "kindServer": "Dış servisler'den bağlı",
+      "switchedOff": "Kapalı",
+      "first": "İlk çalışan",
+      "firstHint": "İlki çalışmıyorsa (örneğin bir uygulamanın motoru hâlâ hazırlanıyorsa) işi sıradaki üstlenir.",
+      "reset": "Varsayılan sıraya dön",
+      "resetHint": "Varsayılan olarak önce uygulamanın motoru, ardından Document Server gelir.",
+      "saved": "Ofis motoru: kaydedildi.",
+      "resetDone": "Ofis motoru: varsayılan sıraya dönüldü.",
+      "preparingHint": "Kurulumdan ya da güncellemeden sonra bir kez derlenir; bu birkaç dakika sürer.",
+      "failedHint": "Hazırlanamadı: {error}. Yarım saat sonra ya da uygulama güncellendiğinde yeniden denenir.",
+      "state": {
+        "ready": "Hazır",
+        "preparing": "Hazırlanıyor",
+        "failed": "Başarısız",
+        "idle": "Çalışmıyor",
+        "off": "Bağlı değil"
+      }
+    }
   },
   "usage": {
     "title": "Kullanım ve maliyet",
@@ -2956,7 +3207,7 @@
     "saved": "Arşiv ayarları kaydedildi"
   },
   "userSettings": {
-    "title": "Ayarlar",
+    "title": "Kullanıcı ayarları",
     "open": "Kullanıcı ayarları",
     "saveChanges": "Değişiklikleri kaydet",
     "demoReadOnly": "Bu ortak bir demo hesabı; profili, parolası ve ikinci faktörü değiştirilemez.",
@@ -3055,11 +3306,7 @@
     },
     "heading": "Kullanıcı ayarları",
     "headingSub": "Profilinizi, tercihlerinizi ve güvenliğinizi yönetin.",
-    "adminBadge": "Yönetici",
-    "ai": {
-      "soon": "Yakında",
-      "body": "Bu sürümde kullanıcıya özel asistan ayarı yok. filex'in sunduğu AI özellikleri tüm kurulum için yönetici tarafından yapılandırılır; bu yüzden burada sizin açıp kapatacağınız bir şey henüz bulunmuyor."
-    }
+    "adminBadge": "Yönetici"
   },
   "appearance": {
     "title": "Görünüm",
@@ -3244,6 +3491,10 @@
         "use": {
           "label": "Yapay zekâ ajan API'si",
           "hint": "Yapay zekâ ajanlarının ve MCP istemcilerinin /api/ai üzerinden dosyalarla çalışması."
+        },
+        "assistant": {
+          "label": "AI asistanı",
+          "hint": "Gezgindeki asistanı kullanma: yönetici açtıktan sonra, kişinin kendi izinleriyle çalışır."
         }
       },
       "plugins": {
@@ -4057,5 +4308,49 @@
     },
     "requestStorage": "Bu eklentiyi iste",
     "storageEmpty": "Mağazada listelenen depolama eklentisi yok."
+  },
+  "assistantAdmin": {
+    "title": "AI asistanı",
+    "subtitle": "Gezgindeki asistan: hangi modelin, hangi anahtarla, hangi sınırlar içinde yanıt verdiği.",
+    "status": "Durum",
+    "state": {
+      "on": "Açık",
+      "off": "Kapalı",
+      "not_configured": "Kurulmadı"
+    },
+    "enabled": "Asistanı aç",
+    "enabledHint": "Varsayılan olarak kapalıdır. Açıkken kişilerin sordukları ve asistanın onlar için okuduğu dosyalar aşağıdaki sağlayıcıya gönderilir; okunan her dosya denetim kaydında yer alır. Şifreli klasörler ve kasa hiçbir zaman gönderilmez.",
+    "hideButton": "Düğmeyi gizle",
+    "hideButtonHint": "Gezginde kimse asistanın düğmesini görmez ve kimse kullanamaz; buradaki ayarlar korunur (aşağıdaki test çalışmaya devam eder).",
+    "whoMay": "Kimin kullanabileceğini her rolün AI asistanı izni belirler. Bir yönetici Roller sayfasından kaldırmadıkça her rol bu izne sahiptir.",
+    "whoMayLink": "Roller",
+    "provider": "Sağlayıcı",
+    "providerHelp": {
+      "anthropic": "Anthropic API'si üzerinden Claude. API anahtarı gerekir.",
+      "openai": "OpenAI ya da onun API'sini konuşan herhangi bir sunucu (OpenRouter, vLLM, LM Studio): adresini girin.",
+      "ollama": "Yerel bir Ollama sunucusu: hiçbir şey ağınızın dışına çıkmaz. Araç kullanabilen bir model seçin."
+    },
+    "baseUrl": "Adres",
+    "baseUrlHint": "Boş: sağlayıcının kendi adresi. OpenAI API'sini konuşan bir sunucu için /v1 ile biten adres.",
+    "apiKey": "API anahtarı",
+    "apiKeyStored": "Kayıtlı bir anahtar var - değiştirmek için yenisini yazın",
+    "apiKeyNeeded": "Bu sağlayıcı için gerekli. Şifreli saklanır ve bir daha gösterilmez.",
+    "apiKeyOptional": "Bu sağlayıcı için isteğe bağlı. Şifreli saklanır ve bir daha gösterilmez.",
+    "noSecretKey": "Bu sunucuda FILEX_SECRET_KEY yok, bu yüzden API anahtarı saklanamaz. Ollama ve anahtarsız kendi sunucunuz yine de çalışır.",
+    "clearKey": "Kayıtlı anahtarı kaldır",
+    "model": "Model",
+    "modelHint": "Modelin adı, sağlayıcının yazdığı gibi. Test, adresin sunduğu modelleri listeler.",
+    "test": "Bağlantıyı test et",
+    "limits": "Sınırlar ve saklama",
+    "maxToolRounds": "İstek başına araç adımı",
+    "maxToolRoundsHint": "Bir isteğin araç kullanıp modele kaç kez geri dönebileceği.",
+    "maxOutputTokens": "En uzun yanıt (token)",
+    "maxRequestTokens": "İstek başına bütçe (token)",
+    "maxRequestTokensHint": "Her adımın girdisi ve çıktısı birlikte; dolunca istek durur.",
+    "timeout": "Sağlayıcı zaman aşımı (saniye)",
+    "perMinute": "Kişi başına dakikada istek",
+    "retention": "Konuşmaları sakla (gün)",
+    "retentionHint": "Bir konuşmanın son kullanımından itibaren sayılır; sonra silinir. Herkes kendi konuşmalarını istediği an silebilir.",
+    "saved": "AI asistanı ayarları kaydedildi"
   }
 }

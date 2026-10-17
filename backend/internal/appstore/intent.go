@@ -601,6 +601,10 @@ func derivedPermission(id string) bool {
 		// 0.56: derived from the manifest's `co_edit` block
 		// (wasmplugin/permissions_coedit.go).
 		return true
+	case "office-engine":
+		// 0.57: derived from the manifest's `engines.office` block
+		// (wasmplugin/office_engine_app.go).
+		return true
 	}
 	for _, p := range []string{"ui:", "ui-net:", "ui-viewer:", "ui-new:", "thumbnail:"} {
 		if strings.HasPrefix(id, p) {

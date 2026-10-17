@@ -42,6 +42,7 @@ import {
   DIR,
   KEYS,
   REPO,
+  SNAP_UPLOAD,
   bash,
   code,
   desktopEnv,
@@ -150,7 +151,7 @@ describe('a run that adds the Linux arm64 snap to a release (only=snap-arm64)', 
     // The Store: the same step and channel as a full run.
     const store = stepNamed(desktop, 'Upload to the Snap Store');
     expect(store.text).toMatch(/\[ "\$LABEL" = linux-arm64 \] && snap=desktop\/release\/filex-desktop-arm64\.snap/);
-    expect(store.text).toMatch(/snapcraft upload --release=stable "\$snap"/);
+    expect(store.text).toMatch(SNAP_UPLOAD);
     expect(store.text).toContain('SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}');
 
     // A full release, and one of only=arm64, are what they were: the

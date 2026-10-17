@@ -33,7 +33,7 @@ describe('sign-in identifier', () => {
     const w = mount(Login, {
       global: {
         plugins: [i18n],
-        stubs: { LogoMark: true, LocaleSwitcher: true, DarkModeToggle: true, Input: true, Checkbox: true },
+        stubs: { LogoMark: true, Input: true, Checkbox: true },
       },
     });
     const box = w.find('input#email');

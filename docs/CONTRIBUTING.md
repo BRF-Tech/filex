@@ -449,23 +449,50 @@ were before #244, every word after the first became a file filter).
 
 **Memory decides what runs at once.** Every job is budgeted for the memory
 its container was measured to hold on the build host (`WEIGHTS` and
-`JOB_WEIGHTS` in `scripts/chain/plan.mjs`). The browser round holds its share
-for as long as it runs, the databases until the last Go or migration job
-ends, and the pool takes what is left, at most `CHAIN_POOL_MAX` jobs at once.
-A job that does not fit keeps its place: the lighter jobs behind it cannot
-take the memory it waits for. A job that cannot fit beside the round at all
-(the web gates, 3 GiB) waits for the round or the databases to let go
-instead of starting over the budget. A job also waits while the host's
-`MemAvailable` is under its weight plus `CHAIN_MEM_RESERVE_GB`.
+`JOB_WEIGHTS` in `scripts/chain/plan.mjs`, from `result.json`
+`load.mem_gb`: re-read them there when a job grows). The browser round holds
+the share of its heaviest line still to run, plus the Document Server's while
+a line still needs it: Firefox's 5.75 GiB until Firefox is done, then
+WebKit's, and 1.75 GiB for the light lines after them. The share
+only shrinks, so the round never waits for memory the pool took. The
+databases hold theirs until the last Go or migration job ends, and the pool
+takes what is left, at most `CHAIN_POOL_MAX` jobs at once. A job that does not
+fit keeps its place: the lighter jobs behind it cannot take the memory it
+waits for. A job that cannot fit beside the round at all (the web gates,
+3.25 GiB) waits for the round or the databases to let go instead of starting
+over the budget. A job also waits while the host's `MemAvailable` is under
+its weight plus `CHAIN_MEM_RESERVE_GB`.
 
-The budget is `CHAIN_MEM_GB`, or less when the host has less to give: a run
-takes `MemAvailable` at its start less `CHAIN_MEM_RESERVE_GB` when that is
+A Playwright line holds more than its browser: its `/tmp` is a tmpfs (below),
+so the server's data and the specs' storages are memory, and one worker runs
+every spec of the line. The Chromium line held 6.62-6.85 GiB on every night of
+0.56, and 7.15 GiB at its end when it ran on its own, while it was budgeted at
+4.25 - the nights stayed calm only because the budget, 8, was itself 2 GiB
+short of what the host gave. Most of it was the worker, which kept what
+recording every test left it: 1.5 GiB resident seven minutes in, 3.4 GiB
+fifteen minutes later. The same line recording nothing held 4.15 GiB (the
+worker 1.2 at its end) and ended in 23.5 minutes instead of 27.9.
+
+**What a browser line records.** So the chain records a test only when it
+fails: `CHAIN_E2E_RECORD=retry` (the default) runs its Playwright lines with
+`E2E_RECORD=retry` (`e2e/helpers/record.ts`): nothing is recorded on a test's
+first attempt, a test that fails runs once more with its trace and video
+recorded, and the line is red all the same - a test that passes only on its
+second attempt is flaky, and `failOnFlakyTests` makes that a failure. What it
+gives up is the recording of the FIRST failing attempt (the screenshot of it is
+still taken); `CHAIN_E2E_RECORD=failures` records every test again, for a run
+chasing a failure that does not come back on a retry, and needs the memory
+for it. A run on your machine and GitHub's keep recording every test
+(`E2E_RECORD` unset).
+
+The budget is `CHAIN_MEM_GB` (10), or less when the host has less to give: a
+run takes `MemAvailable` at its start less `CHAIN_MEM_RESERVE_GB` when that is
 smaller, and `chain.log` names the containers that are not the chain's and
 what they hold. Another workload on the host makes a run longer, not red.
 `web/tests/deploy/chainSchedule.test.ts` replays a full run with the measured
-minutes through the same scheduler and holds the budget, `-race` running next
-to Chromium, one heavy writer at a time, the three-hour bound, and that every
-job runs on a smaller budget.
+minutes through the same scheduler and holds the budget, the Go shards next
+to Chromium and `-race` next to Firefox and WebKit, one heavy writer at a
+time, the three-hour bound, and that every job runs on a smaller budget.
 
 **One heavy writer at a time.** The build host's disk (an NVMe without its
 own DRAM, nearly full) stops for seconds when two jobs that write a lot
@@ -590,7 +617,14 @@ request, no other branch, no tag):
   patch's release window (Release process, below); this is where it passes the
   full chain before that. A push option narrows a run
   (`git push -o ci.variable="CHAIN_PROFILE=targeted"`), and a newer push to the
-  same branch supersedes a run still going;
+  same branch supersedes a run still going. A push that skips the pipeline
+  (`-o ci.skip`) does not skip the chain: the build host notices a `sec/`
+  tip that no chain ever ran on and starts the whole chain on it within ten
+  minutes, and the release train's merge queue refuses a `sec/` branch whose
+  tip has no green chain - unless it is given the reason
+  (`--embargo-unchecked "<why>"`), which goes into the merge commit as an
+  `Embargo-Unchecked:` trailer (task #182: one embargoed branch reached
+  `main` without the chain, its push skipped);
 - **a run started by hand, or through the API, on `main` or a `sec/` branch**,
   with `CHAIN_PROFILE` (`full` or `targeted`) and the `targeted` variables
   (`CHAIN_GO_PKGS`, `CHAIN_E2E_GREP`, ...). This is the last-resort release
@@ -785,7 +819,80 @@ login; one of them alone is refused). A push that fails turns the morning
 report into a warning that names it, and `nightly.mjs publish` pushes that
 build again. `manual` - the code's default, for a checkout whose settings name
 no registry - only builds and tags, and leaves the push to `nightly.mjs
-publish`; `off` never pushes. There is no desktop channel for it.
+publish`; `off` never pushes.
+
+What a nightly is can be read off it from outside (#266): its version names
+the night and the commit (`0.57.0-nightly.20261014+2ca25999`), and so do its
+labels - the commit (`org.opencontainers.image.revision`), the public commit its
+tree was exported on (`sh.filex.nightly.public-base`, set by
+`nightly-build.sh` once it fetched), the night's test result
+(`sh.filex.nightly.tests`), the source and what the image is
+(`nightlyLabels` in `scripts/chain/nightly-lib.mjs`). How a user tries one:
+[INSTALLATION.md → Nightly builds](INSTALLATION.md#nightly-builds).
+
+**The desktop side of a nightly build** (#266). On a night that made a
+nightly build, `scripts/chain/nightly-desktop.sh` works from the same public
+form, in a public clone of its own (`NIGHTLY_DESKTOP_PUBLIC_DIR`;
+`scripts/chain/nightly-export.sh` is the export both share), every package
+carrying one version (`desktopVersion`: the nightly's, cut to the Snap
+Store's 32 characters when it would be longer):
+
+- **the amd64 snap, for the Snap Store's `edge` channel** (`NIGHTLY_SNAP=edge`),
+  every such night. electron-builder's own container (`NIGHTLY_DESKTOP_IMAGE`;
+  Go mounted from `CHAIN_GOROOT`) leaves the x64 app unpacked with its amd64
+  CLI (`scripts/chain/nightly-desktop-job.sh`, target `snap`), and
+  electron-builder on the host packs the snap from it with snapcraft in LXD - a
+  container has no LXD, and since 0.55 the snap is core24, built by snapcraft.
+  `nightly.mjs` uploads it with the credential in `NIGHTLY_SNAP_CREDENTIALS_FILE`
+  (the output of `snapcraft export-login`, 0600, in snapcraft's environment for
+  that one command, never logged) through `scripts/chain/nightly-snap-edge.mjs`
+  (`snapcraft upload --release=edge`), the script GitHub's arm64 runner uploads
+  the arm64 snap with. A revision the Store holds for its review (`review`) or
+  an upload that failed is a warning in the morning report, not a red night -
+  and the morning reports after it keep saying so, a quiet night's too, until
+  the public channel map shows `edge` serving that version (`snapEdgeState`,
+  `state.json` `last_snap`). A snap asked for and not uploaded (no credential)
+  is a warning as well, never a quiet skip;
+- **the source of every other desktop package** (`NIGHTLY_DESKTOP=github`):
+  the public tree as `filex-nightly-src.tar.gz`, taken before anything is
+  built in it and pushed to `NIGHTLY_DESKTOP_SRC_REPO`
+  (`ghcr.io/brf-tech/filex-nightly-src:nightly`, signed in as the image push
+  is), its annotations the commit, the version and the night.
+  `.github/workflows/nightly-desktop.yml` (packaging/ci/nightly-desktop.patch,
+  below) looks every hour: a revision it has neither built nor tried (the
+  `attempted` tag, so a source that fails is not tried every hour; `force`
+  by hand) is built on GitHub's runners by the same
+  `nightly-desktop-job.sh` - Windows x64 and arm64 (`windows-latest`), macOS
+  (`macos-15`), Linux x64 and arm64 (`ubuntu-latest`, `ubuntu-24.04-arm`:
+  AppImage, `.deb`, `.rpm`), unsigned - and the arm64 snap, packed with
+  snapcraft in LXD on the arm64 runner and uploaded to `edge` with the
+  repository's `SNAPCRAFT_STORE_CREDENTIALS` (without it: the line
+  `skipped: no Snap Store credential`, not a red run). The packages go to ghcr
+  as ONE OCI artifact, `filex-desktop-nightly:nightly-<date>` and `:nightly`,
+  with `nightly.json` (the night's manifest:
+  `scripts/chain/nightly-desktop-manifest.mjs`, `desktopManifest`) and
+  `SHA256SUMS`; the last `NIGHTLY_KEEP` (7) nights stay. A row that failed
+  turns the run red, and the night's manifest says which.
+
+**The morning's follow-up** (`report.mjs`, before it composes the report;
+`nightly.mjs follow` by hand). It asks the registry and GitHub where the last
+source stands (`followVerdict`: built, still building, failed, not taken
+within three hours). Built, it reads the night's `nightly.json` from the
+artifact, makes the page from `site/nightly.src.html` (`renderNightlyPage`:
+the night, the commit, a download per platform, the checksums, and that a
+nightly is not supported) and runs `NIGHTLY_SITE_CMD` once per revision -
+the repository's
+`scripts/chain/nightly-site.sh --ssh <site host> --path <site directory>`,
+which sends `nightly-site-remote.sh` to the site host on stdin: the site host pulls the packages from ghcr itself, checks them
+against `SHA256SUMS`, puts the page beside them in `.nightly/<date>/` and
+points `nightly` at that directory in one rename (`scripts/sync-site.sh`
+never deletes either). And it reads whether `edge` serves the arm64 snap the
+workflow uploaded. What is not as it should be is a warning in the report,
+never a red night.
+
+The desktop side waits for the build lock, keeps to the quiet windows
+(`NIGHTLY_DESKTOP_EXPECT_MIN`, 30) and never turns a green night red: what it
+could not do is a warning in the morning report.
 
 **What it leaves**, under its `CHAIN_ROOT`: the checkout (`src/`); the runs
 (`runs/`, the last `NIGHTLY_KEEP_RUNS` nights), where
@@ -793,7 +900,8 @@ publish`; `off` never pushes. There is no desktop channel for it.
 evidence (Release process, step 6) when it is green and `main` has not moved
 since the night; and `nightly/` - `tonight.json` (the night so far),
 `history.jsonl` (one line per night, what the report compares with) and
-`state.json` (the last nightly build, the last realenv night, and `s3_live`:
+`state.json` (the last nightly build, the last nightly snap, the last
+source pushed and the last page published, the last realenv night, and `s3_live`:
 the commit the S3 code is measured from).
 `web/tests/deploy/chainNightly.test.ts` holds the decisions above and the
 report's form.
@@ -845,7 +953,22 @@ the session cookie nor the token, the server answered 401 and the page was
 the sign-in page (the server had answered the same requests 200 a moment
 before). The 1440x900 and laptop runs of the same test before it passed.
 
-Left the list with the commit that removed their cause (task #199):
+Left the list with the commit that removed their cause (task #199, and
+task #260 for the first one):
+
+- `179-app-permissions`, "taken from the role: not in the person's menu, and
+  running it anyway is refused" (WebKit; red on both tries in 38398358691,
+  the 0.56.3 gate, green on the re-run). The spec signed the person in
+  through the form, which lands on the start page, and left that page for
+  the explorer while it was still asking for things - the navigation WebKit
+  drops its network process on (filex lesson #1541): the explorer showed
+  "The server could not be reached" over a listing it never asked for, and
+  the bell's count, cancelled under it, was logged as a 500. The spec now
+  signs in through the API with the explorer as the tab's first page and
+  waits for the app rows' answer, not for a quiet network; the product no
+  longer raises the strip for a request the page cancelled or the browser
+  dropped while the page was being left (core `lib/connection`), and the
+  server logs a request its client gave up on as 499, not 500.
 
 - `202-store-install`, "the session gone, a second link in that tab goes into
   no sign-in address" (Chromium; red in 37702037032, flaky in 37598598805
@@ -1086,10 +1209,17 @@ What every table gets, whoever draws it:
   still named by its column header - so selection, the right-click menu,
   the Actions control, the keyboard and a test that reads a cell keep
   working; the header keeps sorting and the column menu, and drops the
-  resize handles and header dragging, which mean nothing without columns. A
-  column with no header label (the explorer's star) stays on the first
-  line as a control. Nothing for a page to do: a `DataTable` stacks by
-  itself. Owner, 2026-10-11, after the e-Signature panel cut its signers'
+  resize handles and header dragging, which mean nothing without columns.
+  Stacked, the header is a band of its own that leads with "Sort by" (from
+  `data-sort-label`, CSS with empty alternative text) and draws each key as
+  a button, the active one filled; a column that cannot sort leaves the
+  band but keeps its header for a screen reader (0.57, task #264: it read
+  as a line of plain text over the rows' facts). A column with no header
+  label (the explorer's star) is a CONTROL: it stays on the first line,
+  and where it has nothing to control it draws nothing - never the facts'
+  "-" (0.57, task #249: Vue draws a slot's fallback when the slot renders
+  only a `v-if` comment, so every folder row carried a hidden dash beside
+  its ⋮). Nothing for a page to do: a `DataTable` stacks by itself. Owner, 2026-10-11, after the e-Signature panel cut its signers'
   State and When to "Invited ..." and "until S...": the one table lays its
   cells out under the lead in a narrow place, compact, every narrow table
   at once.
@@ -1543,8 +1673,8 @@ commands, link targets, image paths. And an interface label is written as the
 interface shows it in that language (the Turkish catalogue, a language pack's
 `translations/`), not as a translator would word it, so the page names what
 is on screen. A window that does not speak that language keeps its English
-label, glossed once: the desktop app's own windows (*Settings → Accounts*,
-*Settings → Open files with*) are English and Turkish only, whatever language
+label, glossed once: the desktop app's own windows (*App settings → Accounts*,
+*App settings → Synced folders*) are English and Turkish only, whatever language
 pack the explorer inside them wears. `scripts/check-links.mjs` and `scripts/check-doc-anchors.mjs`
 read every `README.*.md` at the root; the long-dash test reads every tracked
 markdown file, these included.
@@ -1846,7 +1976,7 @@ rots the moment the registry grows a type
   a new editing session because, measured on Docs 9.4, an editor opened on the
   session whose save was refused never finished loading.
 - Every cell rule below is pinned by the bytes a Docs 9.4.0 saved
-  (`backend/internal/onlyoffice/csv_keep_measured_test.go`).
+  (`backend/internal/officesave/csv_keep_measured_test.go`).
 
 #### ONLYOFFICE CSV cell values as measured
 
@@ -1899,7 +2029,7 @@ what a person types over it is theirs: in the English editor a typed
 it. That is also why German's `01.02.2026` and French's `01/02/2026` are no
 rule. A line end inside a quoted cell comes back as it was. Every rule is
 pinned by the bytes a Docs 9.4.0 saved
-(`backend/internal/onlyoffice/csv_keep_measured_test.go`).
+(`backend/internal/officesave/csv_keep_measured_test.go`).
 
 ⚠ What is still written as ONLYOFFICE writes it:
 
@@ -2781,6 +2911,7 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    | `minor` (the default) | the builds and vue-tsc, the embedded UI check, the unit suites in UTC, the desktop typecheck and unit suite, the Store copy, both images, the shop window instance | - (with `--gate circleci`: what CircleCI does not run) | every heavy suite, in `ci.yml`'s full matrix: the Go suite in shards and again under `-race`, the migrations on three engines and through the CLI, the unit suite on two clocks, Cypress, Playwright on three engines in parts and the Document Server specs with one, the store and S3 lines; and the dry run of the whole release |
    | `patch` (X.Y.Z+1 only) | the builds, the images, the desktop and the Store copy always; every other gate only when something it reads changed since the last tag; the Go suite on the changed packages and every package that imports one; the three engines when the schema changed | - | the same as a minor: every suite |
    | `full` | everything, as every release did up to 0.52 | - | the same |
+   | `server` (X.Y.Z+1 that reaches the server alone, chosen by itself) | the builds, both images, the embedded UI check, the shop window instance, and the changed Go packages with their importers under `-race`; nothing of the interface or the desktop app | - | ci.yml's build part before the tag; every other suite behind the release, read by `matrix-watch.mjs` before `auto_ok` is turned on ([A server patch](#a-server-patch)) |
 
    Since `ci.yml` became the full matrix (#173), a minor runs no heavy suite
    here: every one has its parts on GitHub, and the `gate` stage reads them
@@ -3101,6 +3232,17 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    `pnpm release X.Y.Z --resume --only deploy` runs the deploy checks alone,
    on the tagged commits, and confirms nothing.
 
+   A `published` gate may say it is such a thing (`held` in
+   `scripts/release/plan.mjs`): the Snap Store's, which reads the release's
+   revision back on `stable`, `candidate` and `beta` for amd64 and arm64
+   (#265). When it is red, the `ci` stage tells a person at once through the
+   maintainers' notifications (`scripts/lib/notify.mjs`, the train settings'
+   `FILEX_NOTIFY_*` and `FILEX_WAKE_*`) - which channel and architecture lag,
+   and the commands to look (`snapcraft status filex-app`) and to release a
+   revision by hand - instead of leaving it in a log nobody reads. When the
+   held gates are the only red ones, the stage's record says so (`held`), and
+   whoever drives the release next goes on to the deploy checks.
+
    > ⚠ The public halves of steps 7 and 8 happen in the checkout whose
    > `origin` is **GitHub** - that is what `release.yml` watches. Development
    > happens on GitLab; the public tree is produced by
@@ -3230,7 +3372,7 @@ of step 8, then these jobs):
   release, not as a failure. The `What was produced` step exists to make that
   readable in the log.
   ⚠ The **filex.sh/desktop/ feed is uploaded by hand**, and a portable copy's
-  *Settings → Updates* **Download** button points into it. Put
+  *App settings → Updates* **Download** button points into it. Put
   `filex-desktop-portable-x64.exe` there with the installer, or that button
   leads to a file that is not on the server.
 - `npm` (needs `verify`, nothing else) - publishes every package under
@@ -3323,6 +3465,63 @@ ones not yet published apply on top of one another in this order:
    font map is the build host's; `ci-docserver.sh` names the new step. It
    needs `scripts/ci/browser-prep.mjs` in the tree, so it lands with the
    export that brings it.
+8. `release-snap-channels.patch` (#265, 0.57): each Linux row's snap goes to
+   the Snap Store's `stable`, `candidate`, `beta` and `edge` in one upload
+   (`snapcraft upload --release=stable,candidate,beta,edge`), and the step's
+   summary and its manual-review warning name the four. Up to 0.56.3 a
+   release went to `stable` alone, and the three preview channels sat on
+   0.52.0, amd64 only. The release tool reads `stable`, `candidate` and `beta`
+   back at its `ci` stage, and a channel that lags is said to a person at once
+   (`held`, below) - not `edge`, which the nightly run moves on after a
+   release ([The Snap Store's channels](DESKTOP.md#the-snap-stores-channels)).
+9. `release-winget-first-package.patch` (#68, 0.57), on top of 8: until
+   winget has the desktop app (`manifests/b/BRFTech/filex-app` is not on
+   winget-pkgs' master), the release does not touch it while a first pull
+   request of ours for it is open (the owner's decision of 2026-10-16): the
+   windows row's new step "Does the desktop app wait for a winget
+   moderator?" (`.github/workflows/scripts/winget-pending.sh`, new) only asks,
+   says `skipped: BRFTech.filex-app waits for a moderator on #<number>` (a
+   notice and a line of the run's summary) and sets `WINGET_DESKTOP_SKIP`,
+   which skips the submission, the CLA step and the closing - no new pull
+   request, no update of the open one, no comment. When GitHub cannot be
+   asked it skips as well, and says why; with no first pull request open it
+   lets the release open one. `winget-supersede.sh` closes nothing of a
+   package winget does not have yet. Fourteen first submissions passed
+   validation and none was approved: each release opened a new one and
+   closed the one before, and the moderators' queue started again. The
+   release tool's winget read-back (ci stage) says the same in one line
+   instead of a red gate (`wingetWaits`). Once winget has the package, every
+   release submits a new version and closes the older one, as the CLI's
+   `BRFTech.filex` does.
+10. `release-aur-linux-only.patch` (#145, 0.57), on top of 9: the `aur` job
+    needs the Linux packages, not the whole desktop matrix. It runs once every
+    desktop row has ended, however each ended (`!cancelled()`), as long as
+    verify passed and the desktop job ran at all, and its first step after the
+    key asks the Release for `filex-desktop-amd64.deb` and
+    `filex-desktop-x86_64.AppImage`: both there, it goes on; either missing,
+    the Linux row did not publish, and the job is red. Up to 0.56 a Windows row
+    that failed skipped the AUR as well. Without `AUR_SSH_PRIVATE_KEY` (the
+    AUR's account registration was closed when `filex-app-bin` was to be
+    published, and the channel stays closed) the job prints
+    `skipped: no AUR key` and skips every other step - green, never red.
+11. `nightly-desktop.patch` (#266, 0.57), on top of 10: a new workflow,
+    `.github/workflows/nightly-desktop.yml` - every hour, the nightly source
+    the build host pushed (`filex-nightly-src:nightly`) built into every
+    desktop package and the arm64 snap when it is new, the packages pushed
+    to ghcr as `filex-desktop-nightly:nightly-<date>` and `:nightly`, the
+    arm64 snap uploaded to `edge` alone ([The nightly run](#the-nightly-run)).
+    It touches neither `release.yml` nor `ci.yml`, and publishes nothing a
+    release does.
+12. `release-surfaces.patch` (#252, 0.57), on top of 11: a tag whose message
+    says `surfaces: server` is a server patch ([A server patch](#a-server-patch)):
+    `plan` reads the line (`surfaces` output; anything but none, `all` or
+    `server` stops the run), `verify` publishes once ci.yml's `Go vet + build`
+    part of the push run is green - polled while it runs, at most 45 minutes,
+    and no dry run - with nothing to promote, `binaries` hands goreleaser
+    neither the Homebrew nor the winget secret and `FILEX_SURFACES` (no
+    "latest" release), and `npm` and `desktop` do not run. It needs
+    `.goreleaser.yml`'s `make_latest` in the tree, so it lands with the export
+    that brings it.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and
@@ -3572,6 +3771,194 @@ A workflow pushed ahead of its export goes red on GitHub (0.52.0).
 
 If something fails, fix forward - never delete a published tag.
 
+### A server patch
+
+A patch whose changes reach the server alone goes out on a lane of its own
+(#252): about half an hour from the code being done to the maintainers'
+instances running it, where a patch of every surface takes two hours - and
+nothing it does not change gets a new version. The owner's rule, 2026-10-12:
+if the CLI or the interface did not change, they are not updated.
+
+**Which patch it is.** `scripts/release/surfaces.mjs` places every changed file
+on the surfaces it reaches - the server (both images, the server archives and
+the update manifest, the instances, the Helm chart), the CLI's package
+managers, the interface (npm, the embeds), the desktop app (its packages,
+feeds and stores) and the documentation - or on none (a test, the release
+tooling, a note). A patch step (`X.Y.Z+1`) whose files reach the server, and
+at most the documentation, with no migration and every file placed, takes the
+`server` profile by itself; `pnpm release X.Y.Z` says so, and
+`--profile patch` keeps the whole patch instead. A file no rule places makes
+it a release of every surface: in doubt, everything is published. A backend
+package counts as the CLI's when the CLI's commands (`backend/cmd/filex`, every
+file but the server's own - `main.go`, `settings.go` and `office_engine.go`,
+`SERVER_COMMANDS`) reach it, directly or through another package - sync stands
+on `syspath` and `regfile` though no command names them, and plugin validation
+opens the storage and database layers (`CLI_PACKAGES`, 39 of the module's
+packages; `releaseSurfaces.test.ts` walks the imports and holds the list to
+them) - and `backend/pkg/**` and the module's `go.mod` too. The handlers,
+search, previews, office, sharing and the protocol servers are the server's
+alone: the CLI binary links them, but no command runs them.
+
+**What runs.**
+
+- **audit**: steps 1-3 go by the changed files - a patch step that changes
+  no file of the interface or the desktop app (a server patch always; a
+  `patch` profile too when nothing else changed) passes the README and the
+  screenshots with that reason, and the documentation check is the pages
+  that describe what changed. The README is read when it changed itself;
+  the CHANGELOG entry and the Releases-page summary are asked for as always
+  (`auditAsks` in `scripts/release/stages.mjs`).
+- **pretag**: the builds, both images and their smoke tests, the embedded UI
+  check, the shop window instance, and the Go packages the patch changed and
+  every package that imports them, **under `-race`** (`go-targeted.sh` with
+  `FILEX_GO_RACE=1`; it needs a C compiler, and says so). No unit suite of the
+  interface, no desktop typecheck, no Store copy: a server patch publishes
+  none of them (`serverSkip`), so nothing is deferred to a Windows machine
+  either.
+- **gate**: GitHub builds the export commit - ci.yml's `Go vet + build` part
+  of the push run, green (`serverGate`) - and no dry run is started.
+- **sign**: both tags carry the line `surfaces: server` (the stage prints the
+  commands with it, and refuses a server patch's tag without it, and any other
+  release's tag with it).
+- **the tag run** (`release-surfaces.patch`, below): `plan` reads the line from
+  the tag; `verify` waits for that same build part instead of the full matrix
+  and a dry run; `docker` builds both images in the run (there is nothing to
+  promote); `binaries` makes the Release with the server archives and the CLI
+  binaries, without the CLI's Homebrew cask and winget pull request, and does
+  not mark it GitHub's latest release (`make_latest` in `.goreleaser.yml`):
+  every `releases/latest/download` link names a desktop package or a CLI
+  binary, and they stay on the last release that has them. `desktop` and `npm`
+  do not run.
+- **ci and deploy**: the release tool reads back what a server patch
+  publishes and names the rest as not this release's (`surface` on each
+  published gate of `scripts/release/plan.mjs`).
+- **the ship**: backup, proxies, deploy, the manifest - with
+  `--no-auto vX.Y.Z`, so `auto_ok` is off - the Releases page, the Helm chart,
+  docs.filex.sh and the read-back; the desktop feed, its purge, npm and the
+  embeds are listed as not this release's and left as they are.
+
+**Behind it: the full matrix, then `auto_ok`.** The push of the public `main`
+still runs ci.yml's whole matrix on the commit; it no longer holds the patch.
+`node scripts/release/matrix-watch.mjs X.Y.Z` reads it part by part: green, it
+regenerates the manifest with `FILEX_MANIFEST_AUTO=vX.Y.Z`
+(`scripts/gen-update-manifest.py --auto`, which a publishing wrapper that
+passes its own options alone carries too), purges it from the CDN, reads it
+back and says so; red, it leaves `auto_ok` off and says which parts failed -
+installs that update by themselves do not take the patch, and a person
+decides (a new patch, or a re-run that passed and the watcher again). Its
+outcome is kept in the release's record (`matrix`). The autonomous release
+round starts it (`scripts/train/auto.mjs`).
+
+### The autonomous release round
+
+A release goes out from the release workspace on the build host, with nobody
+at the keyboard (#165): the code is written anywhere, and once the work for a
+release is on `main`, a timer cuts it. The audit stays a person's - the
+README, the screenshots, every page that describes the product - and the
+round releases exactly the commit it was done on.
+
+**Queue it.** On the commit a person audited, with its Releases-page summary
+in `docs-site/data/release-highlights.json` (step 10 above, written before,
+not after):
+
+```bash
+node scripts/train/auto.mjs request 0.57.0 --summary "one line: what this release is" \
+  [--commit <the audited commit; default: the private remote's main>] \
+  [--profile minor|patch|full|server] [--task <work task the signing is recorded on>]
+```
+
+It refuses a version that is not after the newest tag, a summary that says
+"Fixes #N" (on GitHub that closes the issue), and a commit without the
+release's summary. `auto.mjs status` shows the request and the last rounds,
+`auto.mjs cancel` drops it.
+
+**The round** (`auto.mjs run`, every half hour; nothing queued, nothing
+done): it fast-forwards both checkouts, wants them clean, on `main`, and the
+private one on the audited commit, with `FILEX_AUTO_MIN_FREE_GB` (30) free,
+then runs `pnpm release` and does what the tool leaves to a person:
+
+| The release tool waits at | The round |
+|---|---|
+| audit | confirms it (`--ack audit`) only on the commit the request names |
+| pretag, a check deferred to another machine | confirms the deferral (`--ack store-deferred`); the record keeps it owed |
+| export, withheld files | stops: only a person confirms that list |
+| land | commits the export (`vX.Y.Z - <summary>`) and pushes both mains |
+| gate, ci | asks again, `FILEX_AUTO_WAITS` (8) times at most |
+| sign | signs both tags (with `surfaces: server` for a server patch) under `FILEX_AUTO_SIGN_CMD`, which opens the signing key for that command alone |
+| push | pushes the two tags, one ref at a time |
+| deploy | runs the ship (`filex-ship.sh`), pushes its Releases-page commit, then `--ack deploy` - which the release tool takes only once its own read-back is green |
+
+The stages that build (up to the export) hold `CHAIN_LOCK`; from the land on
+it holds nothing, since it waits for GitHub. A server patch's round then runs
+`matrix-watch.mjs`: GitHub's full matrix behind it, and `auto_ok` on.
+
+**When it stops.** Red before the mains were pushed, the round rolls back -
+the stamp commit is dropped, the export's changes go to a stash in the public
+checkout, the release's record is kept beside under another name - and the
+number is not spent: fix `main`, audit, queue again. Red or waiting after
+that, nothing is undone (a pushed `main` and a tag are never moved): the
+notification says where it stopped, with the release tool's own words. A
+store that holds the read-back (a Snap Store review) is `held`: the round
+ships what is out and reads the stores again every round, quietly, until they
+pass. Every round that started is said to a person (`FILEX_NOTIFY_*`), and
+`auto.mjs report` at 07:00 sums up the rounds since the last report and what
+they left to a person: a deferred Store check, a held store, a matrix that is
+not green, the replies on the issues, the language packs.
+
+**Where it runs.** The release workspace (a container on the build host)
+holds both checkouts, the release train's settings
+(`~/.config/filex-train.env`, the keys in `scripts/train/train.env.example`),
+the narrow GitHub token wrapper and the signing command. The build host
+starts it: `scripts/train/install-auto.sh` installs
+`filex-release-auto.timer` (a round every half hour) and
+`filex-release-auto-report.timer` (07:00), which run
+`scripts/train/auto-host.mjs` - it `docker exec`s the round in the
+workspace, and when the workspace is not running it says so at once and
+once a day, instead of rounds that never happen.
+
+### The Store check without a Windows desktop
+
+The deferral above is a bridge (#248). Windows is needed for the Store copy's
+check - activating an MSIX - but not a person's Windows: what made GitHub's
+runner fail every activation check from 0.44.2 on is its account. `runneradmin`
+is the built-in Administrator renamed (RID 500): with no UAC and a full
+administrator token, and an MSIX app's Chromium does not start under it
+(actions/runner-images#9537). `store-e2e` says so itself now: every run prints
+the account, its SID, its token's integrity level and the UAC policy, and a
+failed activation reads the app's log where the Store copy writes it
+(`~/.filex/desktop/logs`, then the package's redirected userData) and ends on a
+verdict - the built-in Administrator, UAC off, or neither
+(`accountVerdict` in `desktop/scripts/lib/store-activation.mjs`).
+
+**Path A, tried first:** the same runner, another account.
+`packaging/store-e2e-lab/` is all of a separate, single-purpose public
+repository, so the trial changes nothing in this release:
+`run-store-e2e-as.ps1` turns Developer Mode on, makes a local administrator
+`e2e` with a random password (masked, kept nowhere), opens a Remote Desktop
+session for it from the runner to itself with FreeRDP (`127.0.0.2`: the client
+refuses `127.0.0.1`), and starts `store-e2e.mjs` in that session as `e2e`, not
+elevated (`schtasks /ru e2e /it`), with neither `CI` nor `GITHUB_ACTIONS` set -
+every check strict, none only a warning. `store-e2e.yml` checks a released tag
+of `BRF-Tech/filex` out and builds what the release tool's check builds (the
+UI, the Windows binary, the desktop app and its CLI) first. Set it up once and
+run it on a released tag, three to six times (about ten minutes each):
+
+```bash
+gh repo create BRF-Tech/store-e2e-lab --public --description "filex: the Store package's activation checks on a GitHub runner"
+# in a clone of it: packaging/store-e2e-lab/store-e2e.yml -> .github/workflows/store-e2e.yml,
+# packaging/store-e2e-lab/run-store-e2e-as.ps1 -> run-store-e2e-as.ps1; commit, push
+gh workflow run store-e2e.yml -R BRF-Tech/store-e2e-lab -f tag=v0.56.3
+```
+
+Green in every run - the Store copy's own checks printed PASS, the window
+checks too - and the release's Store job takes the same steps: `release.yml`'s
+`store` row runs `store-e2e` as a second account in its own session, the
+release tool reads that job at the gate stage (green and with no Store
+warning, as `storeJobProblems` reads the submission), and the pretag stops
+deferring the check off Windows. Red, or a session that never opens, and path
+B takes over: a Windows 11 virtual machine on the home server, signed in as an
+ordinary user with Developer Mode on, which the release tool reaches over ssh.
+
 ### When GitHub Actions is down
 
 On 2026-10-05 the 0.52.0 dry run could not get a runner, twice, and the
@@ -3739,8 +4126,8 @@ node scripts/release/package-local.mjs X.Y.Z --run --only images,desktop-windows
 
 ### The release train's tools
 
-Four commands in `scripts/train/` carry a release from the cut to the last
-read-back (#178, #179). They share one settings file - `~/.config/filex-train.env`,
+Five commands in `scripts/train/` carry a release from the cut to the last
+read-back (#178, #179, #165). They share one settings file - `~/.config/filex-train.env`,
 or the file `FILEX_TRAIN_ENV` or `--env` names, KEY=VALUE, the process
 environment winning - whose keys `scripts/train/train.env.example` lists with
 placeholders. No server name and no secret is in the repository: hosts, paths
@@ -3820,8 +4207,8 @@ where they can, each with its own log under `.git/filex-ship/vX.Y.Z/logs/`:
 |---|---|
 | `preflight` | the tag in this repository and in the public checkout, the tag on GitHub, the public checkout clean, the release's record here, the server answering |
 | `backup` | every instance into a new `pre-vX.Y.Z-<time>` directory on the server: its compose file, its settings (mode 600), the image it runs and a copy of its SQLite database made with SQLite's online backup, checked with `PRAGMA integrity_check`, with the newest migration it holds |
-| `proxies` | every instance's network gateway, measured now, is in `FILEX_TRUSTED_PROXIES` as the compose file gives it; a gap stops the ship before anything moves |
-| `deploy` | instance by instance, in the order the settings list them (the demo first: it is the canary): the image line, `docker compose up -d`, `/healthz`, the image it runs, its database at the newest migration the tag carries, its gateway trusted. A failed instance is rolled back - the compose file, and the database when migrations ran (the failed copy is kept beside it) - and the instances after it are not touched (`--on-fail hold` leaves it as it failed) |
+| `proxies` | every instance's network gateway, measured now, is in the trusted-proxy list it goes by - the one saved in its settings (`login.trusted_proxies`, which `FILEX_TRUSTED_PROXIES` only seeds since 0.57) when it holds one, else `FILEX_TRUSTED_PROXIES` as the compose file gives it; a gap stops the ship before anything moves, naming where to add the gateway |
+| `deploy` | instance by instance, in the order the settings list them (the demo first: it is the canary): the image line, `docker compose up -d`, `/healthz`, the image it runs, its database at the newest migration the tag carries, its gateway trusted (by the same list the `proxies` step reads). A failed instance is rolled back - the compose file, and the database when migrations ran (the failed copy is kept beside it) - and the instances after it are not touched (`--on-fail hold` leaves it as it failed) |
 | `manifest` | the update manifest servers and the CLI read (step 9) |
 | `desktop`, `purge` | the release's desktop packages and feeds from the GitHub Release onto the feed host, then every one of those files out of the CDN's cache: their names never change, and a stale package fails the sha512 its new feed promises (step 9) |
 | `releases` | the Releases page: the release's summary must be in `docs-site/data/release-highlights.json` and publishable, the page is regenerated and, when it changed, committed on `main` as `docs(releases): vX.Y.Z` (step 10; not pushed) |
@@ -3861,3 +4248,11 @@ to the agent waiting for it through an MCP server's `notify` tool
 the ship say so themselves when they end, and so does a run of the build
 host's chain (`scripts/chain/run.mjs`, `CHAIN_NOTIFY_*`), all through
 `scripts/lib/notify.mjs`.
+
+#### The autonomous round: `auto.mjs`
+
+`node scripts/train/auto.mjs request X.Y.Z --summary "..."` queues a release of
+the audited commit, and `auto.mjs run`, started by the build host's timer,
+cuts it with nobody at the keyboard - the person's steps of `pnpm release`
+included, a red stage before the land rolled back
+([The autonomous release round](#the-autonomous-release-round)).

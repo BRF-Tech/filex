@@ -12,6 +12,8 @@
 
 import type { RouteLocationNormalized } from 'vue-router';
 
+import { visibleName } from '@brftech/filex-core';
+
 import { brandName, loadBrandName, onBrandName } from '@/lib/brand';
 import { t } from '@/i18n';
 
@@ -35,7 +37,9 @@ export function applyDocumentTitle(to: RouteLocationNormalized): void {
   if (to.name === 'files.edit') {
     const raw = typeof to.query.path === 'string' ? to.query.path : '';
     const base = raw.split('/').filter(Boolean).pop() ?? '';
-    document.title = base || brandName();
+    // The name as it is SHOWN (task #238): a bidi control cannot hide the
+    // true extension in the tab.
+    document.title = visibleName(base) || brandName();
     loadBrandName();
     return;
   }

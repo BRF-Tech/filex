@@ -157,10 +157,17 @@ func (s StringSpec) Seed(ctx context.Context, st Store) error {
 // than letting callers Upsert directly is what stops a derived seed from
 // overwriting a row an admin has since edited.
 func (s StringSpec) SeedValue(ctx context.Context, st Store, raw string) error {
+	return s.SeedValueFrom(ctx, st, raw, "derived")
+}
+
+// SeedValueFrom is SeedValue with the log naming where raw came from
+// ("FILEX_TRUSTED_PROXIES", "config.yaml trusted_proxies") - for a value the
+// configuration holds rather than one derived from it.
+func (s StringSpec) SeedValueFrom(ctx context.Context, st Store, raw, source string) error {
 	if st == nil || strings.TrimSpace(raw) == "" {
 		return nil
 	}
-	return s.seed(ctx, st, raw, "derived")
+	return s.seed(ctx, st, raw, source)
 }
 
 func (s StringSpec) seed(ctx context.Context, st Store, raw, source string) error {

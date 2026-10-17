@@ -101,7 +101,8 @@ func TestRunDirsWidensToTheParentForAFolderMissingHere(t *testing.T) {
 }
 
 // A folder deleted in the browser: the targeted pass on its parent goes
-// recursive and trashes it here, exactly as a full pass would.
+// recursive and deletes it here, exactly as a full pass would. Deleted, not
+// moved: there is no local sync trash (task #259); the server's trash holds it.
 func TestRunDirsCarriesAFolderDelete(t *testing.T) {
 	r := deepRig(t)
 	delete(r.srv.files, "c/d/e/four.txt")
@@ -112,9 +113,8 @@ func TestRunDirsCarriesAFolderDelete(t *testing.T) {
 	if r.localExists("c/d") {
 		t.Fatalf("the deleted folder is still here: %+v", res)
 	}
-	items, _ := r.engine.Store.ListTrash("p1")
-	if len(items) == 0 {
-		t.Fatal("the local copy must be in the sync trash, not gone")
+	if _, err := os.Stat(filepath.Join(r.engine.Store.Dir, "trash")); !os.IsNotExist(err) {
+		t.Fatalf("a local trash was written: %v", err)
 	}
 }
 

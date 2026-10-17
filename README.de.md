@@ -22,8 +22,8 @@ SSO/LDAP, mandantenfähig, verschlüsselte Ordner, einbettbare Webkomponente, De
 <sub>Dies ist eine Übersetzung der [englischen README](README.md); wo die beiden voneinander abweichen, gilt der englische Text. Sie wurde maschinell übersetzt, eine Durchsicht durch Muttersprachler steht noch aus - Korrekturen sind willkommen. Die Dokumente, auf die sie verweist, sind auf Englisch.</sub>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.e032d7456831.png">
-  <img src="https://filex.sh/shots/explorer-grid-light.de398671d43b.png" alt="filex-Explorer - Raster mit Vorschaubildern" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.ff7a02b49f27.png">
+  <img src="https://filex.sh/shots/explorer-grid-light.475b0b61faab.png" alt="filex-Explorer - Raster mit Vorschaubildern" width="900">
 </picture>
 
 </div>
@@ -196,7 +196,7 @@ ihren Grenzen und der Anleitung, die sie beschreibt, steht in [docs/FEATURES.md]
 
 Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](docs/FEATURES.md#the-explorer).
 
-<p align="center"><img src="https://filex.sh/shots/driveshell/driveshell-hero-1440.16ace59f07c3.png" alt="Die filex-Shell" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/driveshell/driveshell-hero-1440.6410104e072c.png" alt="Die filex-Shell" width="860"></p>
 
 <details>
 <summary><b>Screenshots des Explorers</b> - die Shell, die Suche, die Navigation, Tags, der Papierkorb, die Glocke, Designs, Symlinks, CSV in ONLYOFFICE</summary>
@@ -205,14 +205,14 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 <tr>
 <td width="50%" valign="top">
 
-![Die filex-Shell](https://filex.sh/shots/driveshell/driveshell-hero-1440.16ace59f07c3.png)
+![Die filex-Shell](https://filex.sh/shots/driveshell/driveshell-hero-1440.6410104e072c.png)
 
 <sub>Die Shell - wo alle landen</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Einen Ordner durchsuchen](https://filex.sh/shots/driveshell/driveshell-search-1440.c0f3ceda0ec4.png)
+![Einen Ordner durchsuchen](https://filex.sh/shots/driveshell/driveshell-search-1440.2536c373425f.png)
 
 <sub>Diesen Ordner durchsuchen; `⌘K` / `Ctrl K` übergibt die Suchanfrage an die Befehlspalette</sub>
 
@@ -221,14 +221,14 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 <tr>
 <td width="50%" valign="top">
 
-![Navigationsbereich](https://filex.sh/shots/sidenav/sidenav-expanded-1440.461d5aaaff2a.png)
+![Navigationsbereich](https://filex.sh/shots/sidenav/sidenav-expanded-1440.e96ea7e98388.png)
 
 <sub>Navigationsbereich - Start, Mit mir geteilt, Meine Freigaben, Zuletzt verwendet, Favoriten, Papierkorb und die Speicher, die Sie erreichen können</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Zu einer Leiste eingeklappt](https://filex.sh/shots/sidenav/sidenav-rail-1440.843a2158380d.png)
+![Zu einer Leiste eingeklappt](https://filex.sh/shots/sidenav/sidenav-rail-1440.9269e026d29a.png)
 
 <sub>Zur Icon-Leiste eingeklappt</sub>
 
@@ -237,14 +237,14 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 <tr>
 <td width="50%" valign="top">
 
-![Persönliche Tags und Team-Tags](https://filex.sh/shots/tags/tags-kinds-1440.64e4d6a5ccbc.png)
+![Persönliche Tags und Team-Tags](https://filex.sh/shots/tags/tags-kinds-1440.a4504c43e5cb.png)
 
 <sub>Tags - Ihre eigenen oder die Ihres Teams; ein Tag öffnet alle Dateien, die es tragen, aus allen Ordnern, in denen sie liegen</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Die Ansicht „Papierkorb“](https://filex.sh/shots/sidenav/view-trash-1440.ab3cfb3b01cf.png)
+![Die Ansicht „Papierkorb“](https://filex.sh/shots/sidenav/view-trash-1440.40f8904b147f.png)
 
 <sub>Papierkorb - was gelöscht wurde, woher es kam und wie viel Zeit bleibt, bis es verschwindet</sub>
 
@@ -253,14 +253,14 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 <tr>
 <td width="50%" valign="top">
 
-![Die Glocke mit ihrem Badge für Ungelesenes, geöffnet](https://filex.sh/shots/signing/bell-badge-1440.61396b9ab714.png)
+![Die Glocke mit ihrem Badge für Ungelesenes, geöffnet](https://filex.sh/shots/signing/bell-badge-1440.e9232b261511.png)
 
 <sub>Die Glocke - darauf die Zahl der ungelesenen Benachrichtigungen, jede Zeile führt an den Ort, den sie nennt</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Die vollständige Liste der Benachrichtigungen über dem Explorer](https://filex.sh/shots/signing/notifications-list-1440.3176161f2110.png)
+![Die vollständige Liste der Benachrichtigungen über dem Explorer](https://filex.sh/shots/signing/notifications-list-1440.669ce56b62d7.png)
 
 <sub>Alle Ihre Benachrichtigungen, im Explorer - für alle, nicht nur für Administratoren</sub>
 
@@ -269,14 +269,14 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 <tr>
 <td width="50%" valign="top">
 
-![Der Design-Editor](https://filex.sh/shots/appearance/theme-editor-1440.5b28006557f8.png)
+![Der Design-Editor](https://filex.sh/shots/appearance/theme-editor-1440.867a94807e72.png)
 
 <sub>Darstellung - stellen Sie ein Design in Ihren eigenen Farben zusammen, mit Vorschau, während Sie tippen</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Der Explorer trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-explorer-1440.dbe464fc39c7.png)
+![Der Explorer trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-explorer-1440.abc278616daa.png)
 
 <sub>Ist es als Standard festgelegt, trägt es der Explorer bei allen…</sub>
 
@@ -285,14 +285,14 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 <tr>
 <td width="50%" valign="top">
 
-![Die Anmeldeseite trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-signin-1440.98801a84bea2.png)
+![Die Anmeldeseite trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-signin-1440.b891c6431444.png)
 
 <sub>…und die Anmeldeseite, bevor sich irgendjemand angemeldet hat</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Ein Symlink, der den Speicher verlässt, gekennzeichnet](https://filex.sh/shots/symlinks/symlink-badge-1440.0d128385d287.png)
+![Ein Symlink, der den Speicher verlässt, gekennzeichnet](https://filex.sh/shots/symlinks/symlink-badge-1440.82a105d4239e.png)
 
 <sub>Ein Symlink, dem filex nicht folgt, sagt das - in der Dateiliste und in Worten in seinen Details</sub>
 
@@ -338,7 +338,7 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 
 Alle Funktionen zu Speicher und Protokollen im Detail: [docs/FEATURES.md → Storage and protocols](docs/FEATURES.md#storage-and-protocols).
 
-<p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.8bfbe35780f4.png" alt="So verbinden Sie sich" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png" alt="So verbinden Sie sich" width="860"></p>
 
 <details>
 <summary><b>Screenshots zu Speicher und Protokollen</b> - die Verbindungsanleitungen, API-Schlüssel und ein Speicher-Plug-in</summary>
@@ -347,14 +347,14 @@ Alle Funktionen zu Speicher und Protokollen im Detail: [docs/FEATURES.md → Sto
 <tr>
 <td width="50%" valign="top">
 
-![So verbinden Sie sich](https://filex.sh/shots/sidenav/connect-1440.8bfbe35780f4.png)
+![So verbinden Sie sich](https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png)
 
 <sub>So verbinden Sie sich - die Anleitungen, aus *Ihrer* Installation erzeugt</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.cfc100f30069.png)
+![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.3464cb59b2f8.png)
 
 <sub>API-Schlüssel - erstellen Sie Ihre eigenen, im Explorer oder in einer Einbettung (Sitzung oder Schlüssel einer Person; eine Einbettung, die über einen Proxy mit einem gemeinsamen *App*-Schlüssel läuft, bekommt diesen Eintrag nicht)</sub>
 
@@ -363,14 +363,14 @@ Alle Funktionen zu Speicher und Protokollen im Detail: [docs/FEATURES.md → Sto
 <tr>
 <td width="50%" valign="top">
 
-![Verbindungsanleitung](https://filex.sh/shots/connections-guide.98a4f82ecd9d.png)
+![Verbindungsanleitung](https://filex.sh/shots/connections-guide.3999cf32c3d9.png)
 
 <sub>filex von allem aus erreichen - S3, SFTP, FTPS, NFS, WebDAV. Jeder Befehl wird aus *Ihrer* Installation erzeugt</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Plug-ins](https://filex.sh/shots/admin-plugins.c25fa69cfc7c.png)
+![Plug-ins](https://filex.sh/shots/admin-plugins.6bd96bf65745.png)
 
 <sub>Ein Speicher, den filex nicht mitliefert - unter **Plug-ins → Speicher-Plug-ins** als Plug-in installiert, das sein eigenes Konfigurationsformular beschreibt</sub>
 
@@ -410,7 +410,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.d6f6572228ea.png)
+![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.87cb16a1a6f0.png)
 
 <sub>Freigaben - PIN, Ablaufdatum, Download-Limit, `curl`-Einzeiler</sub>
 
@@ -442,14 +442,14 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.330fcc5fda73.png)
+![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.0fffdc146eb1.png)
 
 <sub>Jede Tabelle im Adminbereich - ein angeheftetes Menü **Aktionen** pro Zeile, dasselbe Menü, das sich über das ⋮ des Explorers öffnet</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Admin → Verschlüsselung: die Genehmigungsrichtlinie und drei wartende Anfragen](https://filex.sh/shots/encryption/admin-encryption-1440.b74163acb93c.png)
+![Admin → Verschlüsselung: die Genehmigungsrichtlinie und drei wartende Anfragen](https://filex.sh/shots/encryption/admin-encryption-1440.35606d99b816.png)
 
 <sub>Wer verschlüsseln darf - aus, nur Administratoren, alle, deren Rolle es erlaubt, oder nach Genehmigung durch einen Administrator; die wartenden Anfragen, jeweils mit der Angabe, wer gefragt hat und warum ([wer verschlüsseln darf](docs/E2E-ENCRYPTION.md#who-may-encrypt))</sub>
 
@@ -488,7 +488,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 
 Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People and access](docs/FEATURES.md#people-and-access).
 
-<p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png" alt="Admin → Rollen: die integrierten Rollen und zwei benutzerdefinierte" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png" alt="Admin → Rollen: die integrierten Rollen und zwei benutzerdefinierte" width="860"></p>
 
 <details>
 <summary><b>Screenshots zu Personen und Zugriff</b> - Rollen, Gruppen, Anmeldesicherheit, ein gesperrtes Konto, der Adminbereich und sein Menü</summary>
@@ -497,14 +497,14 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Rollen: die integrierten Rollen und zwei benutzerdefinierte](https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png)
+![Admin → Rollen: die integrierten Rollen und zwei benutzerdefinierte](https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png)
 
 <sub>Rollen - Administrator, Benutzer, Betrachter und eigene Rollen: wer sie jeweils hat, was sie erlauben, wo sie je nach Ordner abweichen, ihre Einschränkungen ([docs/PERMISSIONS.md](docs/PERMISSIONS.md))</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Admin → Gruppen](https://filex.sh/shots/groups/groups-list-1440.73224b70e40b.png)
+![Admin → Gruppen](https://filex.sh/shots/groups/groups-list-1440.22ff57b029f5.png)
 
 <sub>Gruppen - benannte Mengen von Personen mit Ordnerzugriff und einer Rolle; Mitglieder von Hand oder im Gleichschritt mit den Gruppen, die eine Anmeldung mitbringt ([docs/GROUPS.md](docs/GROUPS.md))</sub>
 
@@ -520,7 +520,7 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 </td>
 <td width="50%" valign="top">
 
-![Admin → Anmeldesicherheit](https://filex.sh/shots/loginsecurity/login-security-1440.077cec3f1b0a.png)
+![Admin → Anmeldesicherheit](https://filex.sh/shots/loginsecurity/login-security-1440.70f2a2a76257.png)
 
 <sub>Anmeldesicherheit - die Begrenzung der Anmeldeversuche und die erlaubten Adressen, die nie mitgezählt werden; vertrauenswürdige Proxys, die Sperren und das Anmeldeprotokoll folgen auf derselben Seite ([Begrenzung der Anmeldeversuche](docs/CONFIGURATION.md#sign-in-attempt-limits))</sub>
 
@@ -529,14 +529,14 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <tr>
 <td width="50%" valign="top">
 
-![Das Anmeldeformular bei einem gesperrten Konto](https://filex.sh/shots/loginsecurity/login-locked-1440.3f4c6d3233f3.png)
+![Das Anmeldeformular bei einem gesperrten Konto](https://filex.sh/shots/loginsecurity/login-locked-1440.42e1fe6f1937.png)
 
 <sub>…und was das Anmeldeformular eines gesperrten Kontos sagt, während es die Sperre auf seiner Schaltfläche herunterzählt</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Übersicht im Adminbereich](https://filex.sh/shots/admin-dashboard.d94a065baab6.png)
+![Übersicht im Adminbereich](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
 
 <sub>Adminbereich</sub>
 
@@ -545,16 +545,16 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <tr>
 <td width="50%" valign="top">
 
-![Startseite der Demo](https://filex.sh/shots/demo-landing.bb2b8d97d4ff.png)
+![Startseite der Demo](https://filex.sh/shots/demo-landing.64f23c6f8cb3.png)
 
 <sub>Startseite der Demo</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Der Bereich „Personen & Sicherheit“ des Adminmenüs, geöffnet über der Seite Admin → Benutzer](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png)
+![Der Bereich „Einstellungen“ des Adminmenüs, geöffnet über der Seite Admin → Einstellungen → Allgemein](https://filex.sh/shots/megamenu/settings-panel-1440.23a710915f9c.png)
 
-<sub>Das Adminmenü - alle Seiten in drei Bereichen, **Dateien & Speicher**, **Personen & Sicherheit** und **System**, mit einer kurzen Zeile unter jeder Seite; ein Smartphone bekommt dieselben Seiten in einer ausfahrbaren Leiste ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
+<sub>Das Adminmenü - alle Seiten in vier Bereichen, **Dateien & Speicher**, **Personen**, **Einstellungen** (Allgemein, Sicherheit & Daten, Dateiverarbeitung & Integrationen) und **Wartung & Protokolle**, mit einer kurzen Zeile unter jeder Seite; ein Smartphone bekommt dieselben Seiten in einer ausfahrbaren Leiste ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
 
 </td>
 </tr>
@@ -598,8 +598,8 @@ sudo snap install filex-app                 # the same snap as the badge above
 
 Der Store-Build (*filex File Manager*) ist die einzige Windows-Variante, die signiert ist -
 Microsoft signiert sie -, und der Store hält sie aktuell. Das winget-Paket der Desktop-App
-(`BRFTech.filex-app`) wird mit jedem Release eingereicht und wartet auf seine erste
-Prüfung durch die winget-Moderatoren, sodass `winget install BRFTech.filex-app` das Paket
+(`BRFTech.filex-app`) wartet auf seine erste Prüfung durch die winget-Moderatoren - bis
+es angenommen ist, lässt ein Release die Einreichung unverändert - sodass `winget install BRFTech.filex-app` das Paket
 noch nicht findet. Installer, portable `.exe`, AppImage, `.deb`, `.rpm` und `.dmg` sind dem
 [neuesten Release](https://github.com/BRF-Tech/filex/releases/latest) angehängt - noch
 nicht signiert, rechnen Sie also beim Windows-Installer mit einer SmartScreen-Meldung.
@@ -647,7 +647,7 @@ setzt das Backend durch, nicht das Widget. Die Webkomponente braucht zwei Zeilen
 <filex-explorer api-base="http://localhost:5212" sidenav connections ui-profile="simple"></filex-explorer>
 ```
 
-<p align="center"><img src="https://filex.sh/shots/sidenav/embed-webcomponent-1440.c8c25d893d24.png" alt="Eingebettete Webkomponente" width="860"></p>
+<p align="center"><img src="https://filex.sh/shots/sidenav/embed-webcomponent-1440.b802d5b6ab56.png" alt="Eingebettete Webkomponente" width="860"></p>
 
 <details>
 <summary><b>Vue 3 und React</b> - die beiden anderen Wrapper und wo die Details stehen</summary>
@@ -685,14 +685,14 @@ Pakete und Server auf derselben Version ([docs/API.md](docs/API.md)).
 <tr>
 <td width="50%" valign="top">
 
-![Mit mir geteilt](https://filex.sh/shots/sidenav/view-shared-1440.475ec2d8b49f.png)
+![Mit mir geteilt](https://filex.sh/shots/sidenav/view-shared-1440.faf6f6668c20.png)
 
 <sub>Mit mir geteilt - Ordner, für die Ihnen andere Zugriff erteilt haben, keine Anleitung zum Einbinden</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Eingebettete Webkomponente](https://filex.sh/shots/sidenav/embed-webcomponent-1440.c8c25d893d24.png)
+![Eingebettete Webkomponente](https://filex.sh/shots/sidenav/embed-webcomponent-1440.b802d5b6ab56.png)
 
 <sub>Eingebettet in die Seite eines anderen Produkts</sub>
 
@@ -778,7 +778,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 <tr>
 <td width="50%" valign="top">
 
-![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.9f93226381ed.png)
+![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.54c60e832ced.png)
 
 <sub>Solange es im Umlauf ist - das Dokument ist für alle eingefroren, in seinen Details steht, wer unterschrieben hat</sub>
 
@@ -794,7 +794,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 <tr>
 <td width="50%" valign="top">
 
-![Die Detailansicht einer installierten App](https://filex.sh/shots/apps/apps-detail-1440.4e27b40c5ce7.png)
+![Die Detailansicht einer installierten App](https://filex.sh/shots/apps/apps-detail-1440.b7f6ec845458.png)
 
 <sub>Eine installierte App - woher sie stammt, ihr Fingerabdruck und jede Berechtigung, die sie hat, in klaren Worten (ihre Einstellungen und ihre Aktionen folgen weiter unten auf der Seite)</sub>
 
@@ -810,7 +810,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 <tr>
 <td width="50%" valign="top">
 
-![Die Prüfung bei der Installation einer App mit eigener Oberfläche](https://filex.sh/shots/apps/app-interface-review-1440.51df0aa460ad.png)
+![Die Prüfung bei der Installation einer App mit eigener Oberfläche](https://filex.sh/shots/apps/app-interface-review-1440.877a89c82359.png)
 
 <sub>Eine App, die ihre eigene Oberfläche mitbringt - die Prüfung zeigt den Fingerabdruck des Pakets, jede Adresse außerhalb davon (eine Live-Adresse ist eine Berechtigung, in Gelb) und was ein Browser nicht versprechen kann</sub>
 
@@ -849,7 +849,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 </td>
 <td width="50%" valign="top">
 
-![Plug-ins → Standard-Apps](https://filex.sh/shots/defaultapps/default-apps-1440.27d3c64fe457.png)
+![Plug-ins → Standard-Apps](https://filex.sh/shots/defaultapps/default-apps-1440.0dd62b519f8f.png)
 
 <sub>Standard-Apps - jeder Dateityp, den außer filex noch etwas verarbeitet: wer ihn öffnet und wer sein Vorschaubild erzeugt, in der Reihenfolge, die Sie festlegen ([Standard-Apps](docs/APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail))</sub>
 
@@ -858,14 +858,14 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 <tr>
 <td width="50%" valign="top">
 
-![Ordner, gezeichnet mit ihren neuesten Dateien](https://filex.sh/shots/thumbnails/folders-grid-1440.2b408fb54f7e.png)
+![Ordner, gezeichnet mit ihren neuesten Dateien](https://filex.sh/shots/thumbnails/folders-grid-1440.dd7653d6edca.png)
 
 <sub>Ordnervorschauen - jeder Ordner, gezeichnet mit den drei Dateien, die zuletzt hineingekommen sind; die SVGs zeichnet die integrierte Engine von filex ([docs/thumbnails.md](docs/thumbnails.md#folder-previews))</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Die Installationsprüfung, geöffnet über den Link eines Stores](https://filex.sh/shots/store/store-review-1440.d93b2b571d93.png)
+![Die Installationsprüfung, geöffnet über den Link eines Stores](https://filex.sh/shots/store/store-review-1440.36cf3bbc2a50.png)
 
 <sub>Installation aus einem Store - dieselbe Prüfung, markiert mit **Aus dem Store …**; der Lizenzschlüssel der kostenpflichtigen App ist nur an seinen ersten Zeichen zu sehen ([Installation aus einem Store](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 
@@ -874,14 +874,14 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 <tr>
 <td width="50%" valign="top">
 
-![Der erste Link von einem Store: vertrauen?](https://filex.sh/shots/store/store-trust-1440.94bebecac9fe.png)
+![Der erste Link von einem Store: vertrauen?](https://filex.sh/shots/store/store-trust-1440.8fb07862db1a.png)
 
 <sub>Der erste Link von einem Store - seine Adresse und die Fingerabdrücke seiner Schlüssel, zum Vergleichen, bevor Sie ihm vertrauen ([Vertrauenswürdige Stores](docs/APP-PLUGINS.md#trusted-stores))</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Eine angehaltene kostenpflichtige App, das Hinweisband auf einer Seite des Adminbereichs](https://filex.sh/shots/store/store-license-held-1440.2dd9518d7e87.png)
+![Eine angehaltene kostenpflichtige App, das Hinweisband auf einer Seite des Adminbereichs](https://filex.sh/shots/store/store-license-held-1440.6fd145640e0f.png)
 
 <sub>Eine Lizenz, die der Store widerrufen hat - die App angehalten, *Nicht lizenziert*, nichts entfernt, und ein Hinweisband auf jeder Seite des Adminbereichs ([Kostenpflichtige Apps](docs/APP-PLUGINS.md#paid-apps))</sub>
 
@@ -1017,7 +1017,7 @@ gibt jeder Funktion einen Eintrag mit ihren Grenzen und ihrer Anleitung.
 | **Freigaben** | Öffentliche Links mit PIN, Ablaufdatum und Download-Limit, Dateianforderungen und Einladungen zur Freigabe per E-Mail ([Freigaben](docs/SHARING.md)) |
 | **Schutz** | Papierkorb und Versionsverlauf, optionaler ClamAV-Scan, Ende-zu-Ende-verschlüsselte Ordner, Replikation auf einen zweiten Speicher (mit einer ersten Kopie dessen, was schon da ist) und ein Audit-Protokoll ([Papierkorb & Versionierung](docs/TRASH-VERSIONING.md), [Schutz](docs/PROTECTION.md), [E2E-Verschlüsselung](docs/E2E-ENCRYPTION.md), [Replikation](docs/REPLICATION.md), [Audit-Protokoll](docs/BACKEND.md#admin-audit-log)) |
 | **Vorschauen und Editoren** | Bilder, Video, Audio, PDF, Markdown, Code (Monaco), Office-Dokumente in der Office-Editor-App oder über ONLYOFFICE, draw.io-Diagramme, Mermaid-Diagramme, gezeichnet und als Text bearbeitet, 3D-Modelle und Archive in ZIP, 7z und TAR ([ONLYOFFICE](docs/ONLYOFFICE.md), [Archive](docs/ARCHIVES.md)) |
-| **Suche und Vorschaubilder** | Eingebettete Volltextsuche, die Berechtigungen beachtet, und Vorschaubilder für Bilder, Video, PDF, Ordner und, mit angebundenem ONLYOFFICE, Office-Dokumente ([Suche](docs/SEARCH.md), [Vorschaubilder](docs/thumbnails.md)) |
+| **Suche und Vorschaubilder** | Eingebettete Volltextsuche, die Berechtigungen beachtet, und Vorschaubilder für Bilder, Video, PDF, Ordner und Office-Dokumente - die der Office-Dokumente zeichnet auf dem Server die Engine der Office-Editor-App oder ein angebundenes ONLYOFFICE ([Suche](docs/SEARCH.md), [Vorschaubilder](docs/thumbnails.md)) |
 | **Echtzeit** | Anwesenheit und Live-Aktualisierungen von Dateien über WebSocket, und gemeinsames Bearbeiten einer Datei in einer App, über das Relay von filex ([Echtzeit](docs/REALTIME.md), [Gemeinsam bearbeiten](docs/APP-PLUGINS-API.md#editing-together-coedit-056)) |
 | **Clients** | Eine Desktop-App mit Ordner-Sync, eine Web-App, die sich auf dem Smartphone unter dem Namen und dem Logo Ihrer Instanz installieren lässt, eine CLI, Einbettungen als Vue-, React- und Webkomponente, eine REST-API und ein MCP-Server ([Desktop](docs/DESKTOP.md), [Sync](docs/SYNC.md), [CLI](docs/CLI.md), [Integration](docs/INTEGRATION.md), [MCP](docs/MCP.md)) |
 | **Apps und Sprachen** | Apps in einer Sandbox (E-Signatur, Konvertieren, Office editor, filextext, draw.io), die über filex drucken, eine Datei über sein Relay gemeinsam bearbeiten und die Datei eines verschlüsselten Ordners nur öffnen, wenn Sie es zulassen, in Ihrem Browser entschlüsselt; Sprachpakete und ein Layout von rechts nach links ([Apps](docs/APP-PLUGINS.md), [In einer App bearbeiten](docs/E2E-ENCRYPTION.md#editing-in-an-app), [RTL](docs/RTL.md)) |

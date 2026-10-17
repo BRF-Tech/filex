@@ -36,7 +36,7 @@ func coeditFlag(b bool) int64 {
 	return 0
 }
 
-const coeditSessionCols = `sid, doc_key, storage_id, path, app, build, base_sig, saved_sig, key_mode, sealed_key, user_salt,
+const coeditSessionCols = `sid, doc_key, storage_id, path, app, build, base_sig, saved_sig, saved_to, key_mode, sealed_key, user_salt,
 	rev, head, changes_head, saved_through, log_bytes, blob_bytes, has_base, members, next_client, next_index,
 	lease_holder, lease_until_ms, created_ms, active_ms`
 
@@ -46,7 +46,7 @@ func scanCoEditSession(r interface{ Scan(dst ...any) error }) (*model.CoEditSess
 		hasBase int64
 		members int64
 	)
-	if err := r.Scan(&s.SID, &s.DocKey, &s.StorageID, &s.Path, &s.App, &s.Build, &s.BaseSig, &s.SavedSig, &s.KeyMode, &s.SealedKey, &s.UserSalt,
+	if err := r.Scan(&s.SID, &s.DocKey, &s.StorageID, &s.Path, &s.App, &s.Build, &s.BaseSig, &s.SavedSig, &s.SavedTo, &s.KeyMode, &s.SealedKey, &s.UserSalt,
 		&s.Rev, &s.Head, &s.ChangesHead, &s.SavedThrough, &s.LogBytes, &s.BlobBytes, &hasBase, &members, &s.NextClient, &s.NextIndex,
 		&s.LeaseHolder, &s.LeaseUntilMs, &s.CreatedMs, &s.ActiveMs); err != nil {
 		return nil, err
@@ -94,8 +94,8 @@ func (p *CoEditSQL) InsertCoEditSession(ctx context.Context, s *model.CoEditSess
 		return gerr == nil && again != nil
 	}
 	return insertFirst(ctx, p.Pool, "insert coedit session", &s.Rev, taken, p.q(
-		`INSERT INTO coedit_sessions (`+coeditSessionCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
-		s.SID, s.DocKey, s.StorageID, s.Path, s.App, s.Build, s.BaseSig, s.SavedSig, s.KeyMode, s.SealedKey, s.UserSalt,
+		`INSERT INTO coedit_sessions (`+coeditSessionCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+		s.SID, s.DocKey, s.StorageID, s.Path, s.App, s.Build, s.BaseSig, s.SavedSig, s.SavedTo, s.KeyMode, s.SealedKey, s.UserSalt,
 		1, s.Head, s.ChangesHead, s.SavedThrough, s.LogBytes, s.BlobBytes, coeditFlag(s.HasBase), s.Members, s.NextClient, s.NextIndex,
 		s.LeaseHolder, s.LeaseUntilMs, s.CreatedMs, s.ActiveMs)
 }
@@ -108,11 +108,11 @@ func (p *CoEditSQL) UpdateCoEditSession(ctx context.Context, s *model.CoEditSess
 		return false, errors.New("coedit session: missing id")
 	}
 	return updateAtRev(ctx, p.Pool, "update coedit session", &s.Rev, rev, p.q(
-		`UPDATE coedit_sessions SET rev=?, build=?, base_sig=?, saved_sig=?, sealed_key=?, head=?, changes_head=?, saved_through=?,
+		`UPDATE coedit_sessions SET rev=?, build=?, base_sig=?, saved_sig=?, saved_to=?, sealed_key=?, head=?, changes_head=?, saved_through=?,
 		   log_bytes=?, blob_bytes=?, has_base=?, members=?, next_client=?, next_index=?, lease_holder=?, lease_until_ms=?, active_ms=?,
 		   updated_at=CURRENT_TIMESTAMP
 		 WHERE sid=? AND rev=?`),
-		rev+1, s.Build, s.BaseSig, s.SavedSig, s.SealedKey, s.Head, s.ChangesHead, s.SavedThrough,
+		rev+1, s.Build, s.BaseSig, s.SavedSig, s.SavedTo, s.SealedKey, s.Head, s.ChangesHead, s.SavedThrough,
 		s.LogBytes, s.BlobBytes, coeditFlag(s.HasBase), s.Members, s.NextClient, s.NextIndex, s.LeaseHolder, s.LeaseUntilMs, s.ActiveMs,
 		s.SID, rev)
 }

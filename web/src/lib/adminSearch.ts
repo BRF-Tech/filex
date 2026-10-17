@@ -29,7 +29,7 @@ import { ADMIN_APP_ROUTE, adminNavPages } from '@/lib/adminNav';
 
 /** Where a row goes. */
 export type AdminSearchTarget =
-  | { route: { name: string; params?: Record<string, string>; query?: Record<string, string> } }
+  | { route: { name: string; params?: Record<string, string>; query?: Record<string, string>; hash?: string } }
   | { file: { storage: string; path: string; dir: boolean } };
 
 /** A page's tab with an address of its own. */
@@ -73,7 +73,41 @@ export interface AdminSearchSetting {
   alias?: string;
   /** The page's tab it is on. */
   query?: Record<string, string>;
+  /** The card it is on, by its id: the router scrolls to it (`#thumb-limits`). */
+  hash?: string;
 }
+
+/**
+ * The settings that lived in the environment alone until 0.57 (task #258,
+ * components/settings/InstanceSettingsCard): the card of each page, by the
+ * setting's own label. ⚠ The list is the server's (internal/instancesettings);
+ * web/tests/lib/adminSearch.test.ts holds it to the backend's keys.
+ */
+const INSTANCE_SETTING_PAGES: Record<string, { route: string; query?: Record<string, string>; keys: string[] }> = {
+  general: {
+    route: 'settings',
+    keys: ['instance.default_locale', 'sync.default_interval_minutes', 'upload.staging_ttl_hours', 'cache.max_gb', 'thumbs.sweep', 'thumbs.sweep_interval_minutes'],
+  },
+  protection: { route: 'protection', keys: ['versions.on_overwrite'] },
+  apps: {
+    route: 'plugins',
+    query: { tab: 'apps' },
+    keys: ['apps.max_input_mb', 'apps.max_output_mb', 'apps.max_wasm_mb', 'apps.max_ui_mb', 'apps.request_ttl_days', 'coedit.max_members', 'coedit.unsaved_days'],
+  },
+  notifications: { route: 'notifications', keys: ['notify.enabled'] },
+  webhooks: { route: 'webhooks', keys: ['notify.webhook_lang'] },
+};
+
+export const INSTANCE_SEARCH_SETTINGS: readonly AdminSearchSetting[] = Object.entries(INSTANCE_SETTING_PAGES).flatMap(
+  ([group, page]) =>
+    page.keys.map((key) => ({
+      id: `instance-${key}`,
+      route: page.route,
+      label: `instanceSettings.items.${key.replace(/\./g, '_')}.label`,
+      ...(page.query ? { query: page.query } : {}),
+      hash: `#instance-settings-${group}`,
+    })),
+);
 
 /**
  * The settings. ⚠ Labels are the pages' own keys, so the search says what
@@ -81,9 +115,22 @@ export interface AdminSearchSetting {
  * catalogues and every route to the router.
  */
 export const ADMIN_SEARCH_SETTINGS: readonly AdminSearchSetting[] = [
-  { id: 'site-name', route: 'settings', label: 'settings.siteName' },
-  { id: 'folder-view', route: 'settings', label: 'settings.folderView.title' },
+  // Settings → General (task #258: the thumbnail settings' one home).
   { id: 'smtp', route: 'settings', label: 'settings.smtp.title', alias: 'adminSearch.alias.smtp' },
+  { id: 'thumbnails', route: 'settings', label: 'tools.thumbs.limits.title', alias: 'adminSearch.alias.thumbnails', hash: '#thumb-limits' },
+  { id: 'folder-previews', route: 'settings', label: 'tools.thumbs.limits.folder_previews', hash: '#thumb-limits' },
+  { id: 'search-settings', route: 'settings', label: 'search.settings.title', hash: '#search-settings' },
+  { id: 'search-content', route: 'settings', label: 'search.settings.content.label', hash: '#search-settings' },
+  { id: 'search-memory', route: 'settings', label: 'search.settings.memory.title', hash: '#search-settings' },
+  // The settings that lived in the environment until 0.57, each on its page.
+  ...INSTANCE_SEARCH_SETTINGS,
+  // Settings → Branding and Appearance.
+  { id: 'display-name', route: 'branding', label: 'branding.name', alias: 'adminSearch.alias.displayName' },
+  { id: 'logo', route: 'branding', label: 'branding.logo' },
+  { id: 'accent', route: 'branding', label: 'branding.accent' },
+  { id: 'sso-label', route: 'branding', label: 'branding.ssoLabel' },
+  { id: 'footer-text', route: 'branding', label: 'branding.footerText' },
+  { id: 'folder-view', route: 'appearance', label: 'settings.folderView.title', hash: '#folder-view' },
   { id: 'sign-in-limit', route: 'login-security', label: 'loginSecurity.limit.title' },
   { id: 'allowed-addresses', route: 'login-security', label: 'loginSecurity.allowlist.title', alias: 'adminSearch.alias.allowlist' },
   { id: 'trusted-proxies', route: 'login-security', label: 'loginSecurity.proxies.title' },
@@ -99,10 +146,16 @@ export const ADMIN_SEARCH_SETTINGS: readonly AdminSearchSetting[] = [
   { id: 'who-may-encrypt', route: 'encryption', label: 'encryption.policy.title' },
   { id: 'encryption-requests', route: 'encryption', label: 'encryption.requests.title' },
   { id: 'default-webhook', route: 'webhooks', label: 'webhooks.global.title' },
+  { id: 'digest-defaults', route: 'notifications', label: 'notifications.digest.title' },
+  { id: 'push-key', route: 'notifications', label: 'notifications.push.title' },
+  { id: 'archive-formats', route: 'archives', label: 'archivesAdmin.formats' },
+  { id: 'archive-limits', route: 'archives', label: 'archivesAdmin.maxSize' },
   { id: 'replica-targets', route: 'replica', label: 'replica.targets.title' },
   { id: 'replica-rules', route: 'replica', label: 'replica.rules.title' },
   { id: 'usage-source', route: 'usage', label: 'usage.config.title' },
   { id: 'trusted-stores', route: 'plugins', label: 'appStore.stores.title', alias: 'adminSearch.alias.stores', query: { tab: 'apps' } },
+  { id: 'store-screen', route: 'plugins', label: 'appStore.view.title', query: { tab: 'apps' } },
+  { id: 'install-requests', route: 'plugins', label: 'pluginRequests.title' },
   { id: 'storage-quota', route: 'users', label: 'users.quota.title' },
 ];
 
@@ -222,7 +275,7 @@ export function adminSearchItems(ctx: AdminSearchContext): PanelSearchItem[] {
       detail: page ? ctx.t(page.label) : undefined,
       terms: bothLanguages(ctx, s.label, label, false),
       aliases: bothLanguages(ctx, s.alias, label, true),
-      target: { route: { name: s.route, ...(s.query ? { query: s.query } : {}) } } satisfies AdminSearchTarget,
+      target: { route: { name: s.route, ...(s.query ? { query: s.query } : {}), ...(s.hash ? { hash: s.hash } : {}) } } satisfies AdminSearchTarget,
     });
   }
   return out;

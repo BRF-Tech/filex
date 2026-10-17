@@ -1,7 +1,10 @@
 package filesync
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -105,54 +108,76 @@ func TestConfirmingAHoldUploadsTheFiles(t *testing.T) {
 	}
 }
 
-func TestDiscardingAHoldTrashesTheFilesHere(t *testing.T) {
+// The server's trash holds every held file (the server cleaned them up):
+// all of them are deleted here, and the folder that held only them.
+func TestDiscardingAHoldDeletesTheFilesHere(t *testing.T) {
 	r := staleMirror(t, MassUploadThreshold+1)
 	r.registerPair()
 	r.runStored()
 
-	moved, kept, err := r.engine.Store.DiscardHeld(r.pair(), r.clock)
+	res, err := r.engine.Store.DiscardHeld(context.Background(), r.pair(), trashOfStaleMirror(MassUploadThreshold+1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if moved != MassUploadThreshold+1 || kept != 0 {
-		t.Fatalf("DiscardHeld moved %d, kept %d", moved, kept)
+	if len(res.Deleted) != MassUploadThreshold+1 || len(res.Kept) != 0 || res.StillHeld != 0 {
+		t.Fatalf("DiscardHeld deleted %d, kept %d, still held %d", len(res.Deleted), len(res.Kept), res.StillHeld)
+	}
+	if p := r.pair(); p.HoldNew {
+		t.Fatalf("the hold must be over: %+v", p)
 	}
 	if r.localExists("copies/c000.txt") || r.localExists("copies") {
 		t.Fatal("the held files (and the folder that held only them) must be gone from the mirror")
 	}
-	items, _ := r.engine.Store.ListTrash(r.engine.Pair.ID)
-	if len(items) != MassUploadThreshold+1 {
-		t.Fatalf("they must be recoverable from the local sync trash: %d item(s)", len(items))
+	// Deleted, not moved: no local trash (task #259).
+	if _, err := os.Stat(filepath.Join(r.engine.Store.Dir, "trash")); !os.IsNotExist(err) {
+		t.Fatalf("a local trash was written: %v", err)
 	}
-	res := r.runStored()
-	if res.Uploaded != 0 || res.Planned != 0 {
-		t.Fatalf("after discard the pair is in step: %+v", res)
+	after := r.runStored()
+	if after.Uploaded != 0 || after.Planned != 0 {
+		t.Fatalf("after discard the pair is in step: %+v", after)
 	}
 }
 
 // A file edited after the hold was recorded is not what the person decided
-// about: discard leaves it alone.
+// about: discard leaves it alone - even when the server holds its old bytes
+// - and it stays held, so the next run does not upload it either.
 func TestDiscardLeavesAFileEditedSinceAlone(t *testing.T) {
 	r := staleMirror(t, MassUploadThreshold+1)
 	r.registerPair()
 	r.runStored()
 
 	r.touchLocal("copies/c007.txt", "edited after the hold", r.clock.Add(time.Hour))
-	moved, kept, err := r.engine.Store.DiscardHeld(r.pair(), r.clock)
+	find := trashOfStaleMirror(MassUploadThreshold + 1)
+	res, err := r.engine.Store.DiscardHeld(context.Background(), r.pair(), find)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kept != 1 || moved != MassUploadThreshold {
-		t.Fatalf("moved %d kept %d", moved, kept)
+	if len(res.Kept) != 1 || len(res.Deleted) != MassUploadThreshold {
+		t.Fatalf("deleted %d kept %d", len(res.Deleted), len(res.Kept))
+	}
+	if res.Kept[0].Rel != "copies/c007.txt" || res.Kept[0].Reason != KeptChanged {
+		t.Fatalf("%+v", res.Kept[0])
+	}
+	for _, rel := range find.asked {
+		if rel == "copies/c007.txt" {
+			t.Fatal("a file that changed since it was held is not compared")
+		}
 	}
 	if got := r.readLocal("copies/c007.txt"); got != "edited after the hold" {
 		t.Fatalf("an edited file was touched: %q", got)
 	}
+	if !r.pair().HoldNew {
+		t.Fatal("the edited file must stay held")
+	}
+	if res := r.runStored(); res.Uploaded != 0 {
+		t.Fatalf("the next run uploaded a held file: %+v", res)
+	}
 }
 
 // While a hold is on, a file that differs between a stale mirror and the
-// server is not "resolved" by pushing the stale version over the server's —
-// and discarding the hold lets the server's version come down.
+// server is not "resolved" by pushing the stale version over the server's -
+// and discarding the hold lets the server's version come down, when the
+// server still has the stale version too (here: in its trash).
 func TestAHoldAlsoHoldsFirstRunConflictsAndDiscardLetsTheServerWin(t *testing.T) {
 	r := staleMirror(t, MassUploadThreshold+1)
 	r.writeRemote("real/report.txt", "the server's current version")
@@ -171,12 +196,40 @@ func TestAHoldAlsoHoldsFirstRunConflictsAndDiscardLetsTheServerWin(t *testing.T)
 		t.Fatalf("held count after a second run: %+v", res)
 	}
 
-	if _, _, err := r.engine.Store.DiscardHeld(r.pair(), r.clock); err != nil {
+	find := trashOfStaleMirror(MassUploadThreshold + 1)
+	find.at[hexSum("an old version from the stale mirror")] = "trash: docs://real/report.txt"
+	if _, err := r.engine.Store.DiscardHeld(context.Background(), r.pair(), find); err != nil {
 		t.Fatal(err)
 	}
 	r.runStored()
 	if got := r.readLocal("real/report.txt"); got != "the server's current version" {
 		t.Fatalf("after discard the server's version must come down, got %q", got)
+	}
+}
+
+// The same held conflict when the server does NOT have the stale version:
+// it is the only copy of those bytes, so it stays - held, the server's
+// version not brought down over it - until the person decides otherwise.
+func TestADiscardKeepsAHeldConflictTheServerHasNoCopyOf(t *testing.T) {
+	r := staleMirror(t, MassUploadThreshold+1)
+	r.writeRemote("real/report.txt", "the server's current version")
+	r.writeLocal("real/report.txt", "an old version from the stale mirror")
+	r.registerPair()
+	r.runStored()
+
+	res, err := r.engine.Store.DiscardHeld(context.Background(), r.pair(), trashOfStaleMirror(MassUploadThreshold+1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reasonOf(res, "real/report.txt"); got != KeptNoCopy {
+		t.Fatalf("reason = %q", got)
+	}
+	r.runStored()
+	if got := r.readLocal("real/report.txt"); got != "an old version from the stale mirror" {
+		t.Fatalf("the only copy of the stale version was replaced: %q", got)
+	}
+	if got := string(r.srv.files["real/report.txt"]); got != "the server's current version" {
+		t.Fatalf("server copy changed: %q", got)
 	}
 }
 

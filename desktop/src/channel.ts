@@ -294,20 +294,55 @@ export const APPIMAGE_DESKTOP_ENTRY = 'filex-appimage.desktop';
  * instead, which does not look at Exec (src/main.ts → registerAppImage).
  */
 export function appImageDesktopEntry(appImage: string, mimeTypes: readonly string[]): string {
+  return hiddenDesktopEntry(appImage, mimeTypes, 'filex (AppImage): opens filex:// links and documents');
+}
+
+/**
+ * The entry a .deb, .rpm or AUR install writes in the user's own
+ * applications folder for the kinds of file the apps on the person's servers
+ * open (src/app-kinds.ts): the package's entry, under /usr/share, declares
+ * the office documents and cannot be changed by the running app, so the
+ * kinds that come and go with the servers' apps are said here - only the
+ * ones the package's entry does not already say, or "Open with" would list
+ * filex twice.
+ *
+ * ⚠ Its own name, never the package's `filex-app.desktop`: a user entry of
+ * that name hides the package's (the user's folder wins), and would keep
+ * hiding it, stale, after an update.
+ */
+export const OPENWITH_DESKTOP_ENTRY = 'filex-app-openwith.desktop';
+
+/**
+ * A desktop entry that is not in the menu and only answers files (and, for
+ * the AppImage, links): `program` started with `%U`, `TryExec` so desktops
+ * ignore it once the program is gone.
+ *
+ * Exec follows the Desktop Entry spec: `%` doubled, and a path with a
+ * reserved character (a space, a quote, `$`…) double-quoted with `"` `` ` ``
+ * `$` `\` backslash-escaped - then, because Exec is a string value, every
+ * backslash escaped once more. See appImageDesktopEntry for why it is quoted
+ * only when the spec requires it.
+ */
+export function hiddenDesktopEntry(program: string, mimeTypes: readonly string[], comment: string, icon?: string): string {
   const bs = String.fromCharCode(92);
-  const reserved = /[\s"'\\><~|&;$*?#()`]/.test(appImage);
-  const exec = (reserved ? '"' + appImage.replace(/["`$\\]/g, (c) => bs + c) + '"' : appImage).replace(/%/g, '%%');
+  const reserved = /[\s"'\\><~|&;$*?#()`]/.test(program);
+  const exec = (reserved ? '"' + program.replace(/["`$\\]/g, (c) => bs + c) + '"' : program).replace(/%/g, '%%');
   const asString = (s: string) => s.split(bs).join(bs + bs);
   return [
     '[Desktop Entry]',
     'Type=Application',
     'Name=filex',
-    'Comment=filex (AppImage): opens filex:// links and documents',
-    `TryExec=${asString(appImage)}`,
+    `Comment=${asString(comment.replace(/[\r\n]+/g, ' '))}`,
+    `TryExec=${asString(program)}`,
     `Exec=${asString(exec)} %U`,
+    // The installed icon's name (the package puts it in the icon theme), so
+    // "Open with" draws filex's mark beside the name.
+    ...(icon && /^[A-Za-z0-9._-]+$/.test(icon) ? [`Icon=${icon}`] : []),
     'Terminal=false',
-    // Not in the menu: an AppImage user launches the image, and an integrator
-    // adds a menu entry of its own. This one only answers links and files.
+    // Not in the menu: the menu entry is the package's (or, for an AppImage,
+    // an integrator's). This one only answers links and files - and a
+    // NoDisplay entry is still offered for its types (measured with GLib
+    // 2.88: `gio mime <type>` lists it as registered and recommended).
     'NoDisplay=true',
     `MimeType=${mimeTypes.join(';')};`,
     '',
@@ -329,7 +364,7 @@ export function userHome(ch: StoreChannel | null, env: Record<string, string | u
 }
 
 /**
- * Where the sync engine keeps its state (pairs, baselines, the local trash)
+ * Where the sync engine keeps its state (pairs, baselines)
  * on this channel — handed to it as `FILEX_SYNC_DIR` — or null for the
  * engine's own default, `~/.filex/sync` (backend/internal/filesync/store.go).
  *

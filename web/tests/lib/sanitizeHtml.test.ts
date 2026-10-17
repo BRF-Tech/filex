@@ -46,7 +46,11 @@ describe('sanitizeHtml — document', () => {
     expect(ext.getAttribute('rel')).toBe('noopener noreferrer');
     expect(frag.getAttribute('href')).toBe('#section');
     expect(mail.getAttribute('href')).toBe('mailto:a@example.test');
-    expect(out.querySelectorAll('img')[1].getAttribute('src')).toMatch(/^data:image\/png/);
+    // The picture from another server waits behind a placeholder
+    // (sanitizeRemoteImages.test.ts); the data: one is drawn.
+    expect(out.querySelectorAll('img')).toHaveLength(1);
+    expect(out.querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/png/);
+    expect(out.querySelector('.fe-remote-img')?.getAttribute('data-remote-image')).toBe('https://example.test/a.png');
   });
 
   it('prefixes ids so a document cannot shadow a page global', () => {

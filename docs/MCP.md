@@ -59,7 +59,7 @@ For an `app` token filex refuses every **self-service credential surface** with
 keys**, **Recent**, **Starred** and **Shared with me** (and **My shares**, where
 the host draws it). Nothing else changes:
 same scopes, same RBAC, same confinement, and the panel keeps Upload, the
-storage list, Trash and "How to connect". Inside "How to connect" the guides
+storage list, Trash and "Connections". Inside "Connections" the guides
 stay and the mint forms are replaced by a line saying this session cannot
 create credentials.
 
@@ -726,6 +726,17 @@ and the operator's addresses as the panel does.
   `admin_archives_get` / `_update` / `_test` run the Protection and Archives
   pages' handlers, so a value out of bounds is refused (`400`) - unlike
   `admin_settings_set`, which writes a raw key without that check.
+- **Search settings** (0.57): `admin_search_settings_get` / `_update` read and
+  change the Search page's settings (content extraction, its size limit, the
+  indexing memory share, the automatic repair) through the same handler, with
+  the same bounds ([SEARCH.md](SEARCH.md#get-and-patch-apiadminsearchsettings)).
+- **AI assistant** (0.57): `admin_ai_assistant_get` / `_update` read and
+  change the AI assistant page's settings (on, hide the button, provider,
+  address, model, the budgets, how long conversations are kept) through the
+  page's handler and its bounds; `api_key` is sealed with `FILEX_SECRET_KEY`
+  and never answered back (`has_key` says whether one is stored).
+  `admin_ai_assistant_test` lists the provider's models and asks the model for
+  a reply with a tool on offer ([AI-ASSISTANT.md](AI-ASSISTANT.md)).
 - **App locks** (0.50): `admin_app_locks_list` lists the files apps have
   frozen (a document out for signature) and `admin_app_unlock`
   (`{storage_id, path}`) lifts one by force; the unlock is ONE audit row,
@@ -735,7 +746,7 @@ and the operator's addresses as the panel does.
 The supertenant rule comes from the handlers themselves: webhook targets,
 protection, archives, replica and app locks are the platform operator's in
 multi-tenant mode (`403 supertenant_only` for a tenant's key), exactly as on
-the panel's routes.
+the panel's routes. So are the AI assistant's settings.
 
 ⚠ **Not the whole panel.** A tenant's own domains and its own sign-in
 providers (Admin → My tenant), roles and a person's exceptions, groups
@@ -1040,6 +1051,7 @@ ask.
 
 ## See also
 
+- [AI-ASSISTANT.md](AI-ASSISTANT.md) - the assistant in the explorer: these same tools, called inside the server as the person who asks, against a model the administrator chooses
 - [RBAC.md](RBAC.md) - per-file/folder permissions, self-service token endpoints, and the scope/grant ceiling model
 - [STORAGE.md](STORAGE.md) - storage adapters and the `adapter://path` addressing tokens use
 - [SSO.md](SSO.md) - interactive login (the account roles tokens inherit)

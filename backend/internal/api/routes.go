@@ -144,6 +144,11 @@ type Deps struct {
 	// (internal/assoc, Admin → Plugins → Default apps). Nil when app plugins
 	// are off: filex alone opens and draws every kind.
 	Assoc *assoc.Service
+	// OfficeEngineStates and OfficeEnginesChanged are the office engine's
+	// back ends on the Default apps screen (server/office_backends.go): how
+	// each stands, and "the order changed". Nil: none is said.
+	OfficeEngineStates   func(ctx context.Context) map[string]handlers.EngineBackendState
+	OfficeEnginesChanged func()
 	// PluginRequests keeps the plugin install requests an API key leaves
 	// instead of installing (internal/pluginreq). internal/server builds it
 	// and runs its hourly expiry; nil here builds one from the fields above
@@ -187,6 +192,9 @@ type Deps struct {
 	// decides them. Constructed in BuildRouter from E2EPolicy and Notify when
 	// nil; internal/server runs its hourly expiry after BuildRouter.
 	E2ERequests *e2epolicy.Requests
+	// Assistant is the explorer's AI assistant (task #269). Filled by
+	// BuildRouter; internal/server runs its hourly retention sweep after it.
+	Assistant *handlers.Assistant
 	// CoEdit is the editing-together relay (internal/coedit, task #189):
 	// the app interfaces' coedit.* calls (handlers/coedit.go). Nil = off:
 	// they answer 503 coedit_off and an app edits alone. internal/server
@@ -459,11 +467,14 @@ func BuildRouter(d *Deps) http.Handler {
 	r.Use(corsNever(untrustedOrigins(d)))
 	// Exposed Retry-After: a caller that opted in to the "preparing" answer
 	// (X-Filex-Accept-Prepare) has to be able to read how long to wait.
+	// X-Filex-Text-Dialect: how a .csv an app reads is written (app_ui_csv.go),
+	// read by the explorer embedded on another origin too; X-Filex-Version:
+	// the version an app read, its next save's `expect` (app_ui_beside.go).
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   d.Cfg.CORS.AllowedOrigins,
 		AllowedMethods:   d.Cfg.CORS.AllowedMethods,
 		AllowedHeaders:   d.Cfg.CORS.AllowedHeaders,
-		ExposedHeaders:   []string{"Content-Length", "Content-Disposition", "Content-Range", "Retry-After"},
+		ExposedHeaders:   []string{"Content-Length", "Content-Disposition", "Content-Range", "Retry-After", "X-Filex-Text-Dialect", "X-Filex-Version"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -644,6 +655,13 @@ func BuildRouter(d *Deps) http.Handler {
 	apH.Quota = d.Quota
 	apH.E2EPolicy = d.E2EPolicy
 	apH.CoEditRelay = d.CoEdit
+	apH.Body = d.Body
+	// The document editors' fixed language (#214) is an app's editor's too
+	// (filex 0.57): the setting lives with ONLYOFFICE's, and stays readable
+	// with no Document Server configured.
+	if d.OnlyOffice != nil {
+		apH.EditorLang = d.OnlyOffice.FixedEditorLang
+	}
 	// Plugin install requests (internal/pluginreq): ONE service behind the
 	// panel's /api/admin/plugin-requests and the admin MCP tools.
 	pluginRequests := d.PluginRequests
@@ -761,6 +779,18 @@ func BuildRouter(d *Deps) http.Handler {
 	th.AttachACL(d.ACL)
 	th.AttachSigner(thumbSigner)
 	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
+	// The AI assistant (task #269): its settings with the provider's key
+	// sealed by FILEX_SECRET_KEY, and the explorer's routes. Its tools are the
+	// MCP tools built below (aiMCP), attached once they exist.
+	assistantBox, berr := secretbox.New(d.Cfg.SecretKey)
+	if berr != nil {
+		slog.Warn("assistant: no secret box; an API key cannot be stored", slog.String("err", berr.Error()))
+		assistantBox = nil
+	}
+	assistantCfg := &handlers.AssistantConfig{Store: d.Store, Box: assistantBox}
+	assistantH := handlers.NewAssistant(d.Store, assistantCfg, nil, d.ACL)
+	d.Assistant = assistantH
+	ch.Assistant = assistantH
 	if d.AppPlugins != nil {
 		reg := d.AppPlugins
 		ch.AppDocs = func() []newdoc.Type { return handlers.AppNewDocTypes(reg) }
@@ -1019,6 +1049,7 @@ func BuildRouter(d *Deps) http.Handler {
 	grantsH := handlers.NewGrants(d.Store, d.ACL)
 	grantsH.AttachInvite(d.Share, d.Mailer, d.Cfg.PublicURL)
 	grantsH.AttachTenants(tenants)
+	grantsH.AttachBranding(brandingSrc)
 	selfTokensH := handlers.NewSelfTokens(d.Store, d.ACL, d.ProtocolAuth)
 	desktopAuthH := handlers.NewDesktopAuth(d.Store)
 
@@ -1628,11 +1659,32 @@ func BuildRouter(d *Deps) http.Handler {
 			// proxy (which injects the token); returns {ticket, ws_url} for a
 			// direct cross-origin wss:// connection. Confinement is inherited.
 			r.Post("/ws-ticket", wsh.Ticket)
+			// The AI assistant's panel (handlers/assistant.go). Under
+			// /api/files so an embed's proxy reaches it like every other door
+			// of the explorer; its tools ask each verb and right themselves.
+			// Listed here, not in a sub-router of the handler's, so the
+			// OpenAPI and route-table gates see every one of them.
+			r.Route("/assistant", func(r chi.Router) {
+				r.Get("/", assistantH.Me)
+				r.Put("/prefs", assistantH.SetPrefs)
+				r.Get("/conversations", assistantH.List)
+				r.Delete("/conversations", assistantH.DeleteAll)
+				r.Get("/conversations/{id}", assistantH.Get)
+				r.Delete("/conversations/{id}", assistantH.Delete)
+				r.Post("/chat", assistantH.Chat)
+				r.Post("/conversations/{id}/decide", assistantH.Decide)
+				r.Post("/conversations/{id}/undo", assistantH.Undo)
+			})
 			r.Get("/manager", mh.List)
 			// The verb follows ?action=: delete asks `delete`, every other
 			// action `write` (Manager.Mutate asks it before dispatching).
 			r.Post("/manager", mh.Mutate)
 			r.Get("/manager/trash", trashH.List)
+			// Whether entries of the caller's own trash listing hold exactly the
+			// bytes of a file the caller has (sha256): the sync's "Delete from this
+			// computer" deletes only what the server still has a copy of (#259).
+			// A read: nothing changes, nothing of an entry comes back.
+			r.Post("/manager/trash/same", trashH.Same)
 			// What OTHER people shared with me. Sits beside the trash listing
 			// because it is the same kind of surface: a virtual folder the
 			// navigation panel opens, not a path under a storage.
@@ -2204,6 +2256,15 @@ func BuildRouter(d *Deps) http.Handler {
 					// An app's thumbnail limits (wasmplugin/thumbnails.go).
 					r.Get("/{id}/thumbnails", apAdm.ThumbLimits)
 					r.Put("/{id}/thumbnails", apAdm.PutThumbLimits)
+					// The files an administrator adds to an app: the office
+					// editor's extra dictionaries (wasmplugin/extras.go).
+					r.Get("/{id}/extras", apAdm.Extras)
+					r.Put("/{id}/extras/*", apAdm.PutExtra)
+					r.Delete("/{id}/extras/*", apAdm.DeleteExtra)
+					// What the app's release offers of a kind, installed with
+					// one click (wasmplugin/extras_catalog.go, 0.57).
+					r.Get("/{id}/extras-catalog/{kind}", apAdm.ExtraCatalog)
+					r.Post("/{id}/extras-catalog/{kind}/{item}", apAdm.InstallExtraItem)
 					r.Get("/signing/ca.pem", apAdm.SigningCA)
 					r.Get("/signing/cas", apAdm.SigningCAs)
 					r.Post("/signing/ca/import", apAdm.ImportSigningCA)
@@ -2223,11 +2284,17 @@ func BuildRouter(d *Deps) http.Handler {
 				// Default apps: which app opens a kind of file, and which draws
 				// its thumbnails (handlers/file_types_admin.go, internal/assoc).
 				fileTypesH := handlers.NewFileTypesAdmin(d.Assoc, d.Cfg.Demo.Mode)
+				// And which back end runs the office engine (filex 0.57): an
+				// app's engine or the Document Server, and how each stands.
+				fileTypesH.EngineStates = d.OfficeEngineStates
+				fileTypesH.EnginesChanged = d.OfficeEnginesChanged
 				r.Route("/file-types", func(r chi.Router) {
 					// Like every route group: a `root:` token is held to its
 					// root (it names no path here, so nothing is rewritten).
 					r.Use(confine.Middleware)
 					r.Get("/", fileTypesH.List)
+					r.Put("/engines/{engine}", fileTypesH.PutEngine)
+					r.Delete("/engines/{engine}", fileTypesH.ResetEngine)
 					r.Put("/{ext}", fileTypesH.Put)
 					r.Delete("/{ext}", fileTypesH.Reset)
 				})
@@ -2289,6 +2356,15 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Get("/protection", protH.Get)
 				r.Patch("/protection", protH.Patch)
 
+				// The settings that lived in the environment alone until 0.57
+				// (task #258, internal/instancesettings): the default language,
+				// the sync interval, the apps' limits, the notifications switch...
+				// One handler for every card that draws them; supertenant only,
+				// asked inside.
+				instSetH := handlers.NewInstanceSettings(d.Store)
+				r.Get("/instance-settings", instSetH.Get)
+				r.Patch("/instance-settings", instSetH.Patch)
+
 				// Sign-in security: the attempt limits, the IP allow-list, the
 				// trusted proxies, the locks in force and the sign-in trail
 				// (handlers/login_security.go; internal/loginguard). Supertenant
@@ -2309,6 +2385,13 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Get("/archives", archiveAdminH.Get)
 				r.Patch("/archives", archiveAdminH.Patch)
 				r.Post("/archives/test", archiveAdminH.Test)
+
+				// Admin → Settings → AI assistant (task #269), the platform
+				// operator's (asked in each method).
+				assistantAdminH := &handlers.AssistantAdmin{Config: assistantCfg}
+				r.Get("/assistant", assistantAdminH.Get)
+				r.Patch("/assistant", assistantAdminH.Patch)
+				r.Post("/assistant/test", assistantAdminH.Test)
 
 				// A tenant runs itself (docs/TENANT-ADMIN.md): its own OIDC and
 				// LDAP, its own domains. A tenant's administrator acts on their
@@ -2449,6 +2532,10 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Route("/search", func(r chi.Router) {
 					r.Get("/stats", searchAdmH.Stats)
 					r.Post("/rebuild", searchAdmH.Rebuild)
+					// The search settings (task #261): content extraction,
+					// its size cap, the memory budget, the automatic repair.
+					r.Get("/settings", searchAdmH.Settings)
+					r.Patch("/settings", searchAdmH.UpdateSettings)
 				})
 
 				// Reading the queue is admin.monitor (the delegated group); acting
@@ -2585,6 +2672,8 @@ func BuildRouter(d *Deps) http.Handler {
 		MultiTenant:              d.Cfg.MultiTenant,
 		// The archive settings tools read and probe the panel's engine.
 		ArchiveEngine: archiveEngine,
+		// The AI assistant settings tools: the page's settings and key.
+		Assistant: assistantCfg,
 	})
 	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL)
 	aiMCP.AttachTenants(tenants)
@@ -2596,6 +2685,8 @@ func BuildRouter(d *Deps) http.Handler {
 	aiMCP.AttachBody(d.Body)
 	aiMCP.AttachTickets(uploadTickets)
 	aiMCP.AttachDoors(aiDoors)
+	// The assistant calls these same tools in process, as its person.
+	assistantH.MCP = aiMCP
 	r.Route("/api/ai", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
 		// Agents are tenant-scoped too — resolve the token user's provider
@@ -3158,17 +3249,19 @@ func ftpsFacts(cfg config.Config, live func() string) handlers.FTPSFacts {
 	return f
 }
 
-// envManagedExternal reports which external services are PINNED by env/YAML.
+// envManagedExternal reports which external services env/YAML NAMES.
 //
-// A pinned service is re-asserted onto its `external_services` row at every
-// boot (server.seedExternalDefaults), so an edit made in the admin UI applies
-// live but is reverted the next time filex starts. The admin API says so
-// instead of letting the operator discover it after a restart — the whole point
-// of issue #17 was a UI that looked like it had saved something it had not.
+// Since 0.57 (task #258) a named service is SEEDED (server.seedExternalDefaults):
+// the environment writes a service nothing was configured in, and the admin
+// page's edits stand across restarts - `filex settings reseed --external`
+// writes the environment's value again on request. The admin API says which
+// services the environment named, so the page can say where the first value
+// came from and how to take it again (issue #17: a UI must not leave the
+// operator to discover what is in force).
 //
 // ONLYOFFICE's editor language has a variable of its own
-// (FILEX_ONLYOFFICE_LANG, re-asserted the same way), so it is a key of its
-// own: external.EnvPinEditorLang.
+// (FILEX_ONLYOFFICE_LANG, seeded the same way), so it is a key of its own:
+// external.EnvPinEditorLang.
 func envManagedExternal(cfg config.Config) map[string]bool {
 	return map[string]bool{
 		external.OnlyOffice:       cfg.ExternalServices.OnlyOffice.URL != "",

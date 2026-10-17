@@ -21,15 +21,18 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
+	"github.com/brf-tech/filex/backend/internal/zipstream"
 )
 
 // Archive handles zip-listing, zip-extract, and zip-create operations.
@@ -252,12 +255,17 @@ func (a *Archive) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := make([]archiveListEntry, 0, len(zr.File))
+	// A name in a DOS code page is listed decoded (zip_names.go); the
+	// extraction decodes it the same way, so the name a person selects is
+	// the name that is extracted.
+	names := zipNamesFor(r.Context())
 	for _, f := range zr.File {
+		name := names.name(f)
 		out = append(out, archiveListEntry{
-			Name:  f.Name,
+			Name:  name,
 			Size:  int64(f.UncompressedSize64),
 			Mtime: f.Modified,
-			IsDir: strings.HasSuffix(f.Name, "/"),
+			IsDir: strings.HasSuffix(name, "/"),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": out})
@@ -341,6 +349,13 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// What is inside an archive the caller may not download does not come out
+	// where they could (downloadLift): refused here when the destination
+	// folder itself allows it, and asked again of every member where it lands
+	// (landing.withholds), for a rule that names some names only.
+	if refuseDownloadLift(w, r, a.ACL, a.Store, nil, req.StorageID, req.Path, req.StorageID, dest) {
+		return
+	}
 
 	tmp, err := a.fetchToTemp(r, req.StorageID, req.Path)
 	if err != nil {
@@ -368,8 +383,16 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 				if actor != nil {
 					ctx = auth.WithUser(ctx, actor)
 				}
-				_, err := a.extractArchive(ctx, jobReq, drv, writer, jobTmp, plan.external, progress)
-				return err
+				res, err := a.extractArchive(ctx, jobReq, drv, writer, jobTmp, plan.external, progress)
+				if err != nil {
+					return err
+				}
+				// Members left out for their names: the job finished, and
+				// says which (archiveSkipsError - the op row ends partial).
+				if skips := skipsFromResult(res); skips.count() > 0 {
+					return &archiveSkipsError{skips: skips}
+				}
+				return nil
 			}, func() { _ = os.Remove(jobTmp) })
 		if err != nil {
 			_ = os.Remove(tmp)
@@ -453,8 +476,10 @@ func (a *Archive) inspectArchive(ctx context.Context, archivePath string, req ar
 	}
 	var expanded uint64
 	files := 0
+	names := zipNamesFor(ctx)
 	for _, file := range zr.File {
-		if _, err := sanitizeZipPath(file.Name); err != nil {
+		name := names.name(file)
+		if _, err := sanitizeZipPath(name); err != nil {
 			return archiveExtractPlan{}, fmt.Errorf("%w: archive contains an unsafe member path", archivecli.ErrUnsupported)
 		}
 		mode := file.Mode()
@@ -465,7 +490,7 @@ func (a *Archive) inspectArchive(ctx context.Context, archivePath string, req ar
 			return archiveExtractPlan{}, fmt.Errorf("%w: extraction limit exceeded", archivecli.ErrLimits)
 		}
 		expanded += file.UncompressedSize64
-		if count(file.Name, strings.HasSuffix(file.Name, "/")) {
+		if count(name, strings.HasSuffix(name, "/")) {
 			files++
 		}
 	}
@@ -501,18 +526,20 @@ func (a *Archive) extractArchive(ctx context.Context, req archiveRequest, drv st
 		wanted[member] = true
 	}
 	land := a.newLanding(ctx, req, drv, writer, progress)
+	names := zipNamesFor(ctx)
 	for _, file := range zr.File {
 		if err := ctx.Err(); err != nil {
 			return land.result(), err
 		}
-		if len(wanted) > 0 && !wanted[file.Name] && !wanted[strings.TrimSuffix(file.Name, "/")] {
+		name := names.name(file)
+		if len(wanted) > 0 && !wanted[name] && !wanted[strings.TrimSuffix(name, "/")] {
 			continue
 		}
-		if strings.HasSuffix(file.Name, "/") {
-			land.dir(file.Name)
+		if strings.HasSuffix(name, "/") {
+			land.dir(name)
 			continue
 		}
-		if err := land.file(file.Name, int64(file.UncompressedSize64), file.Open); err != nil {
+		if err := land.file(name, int64(file.UncompressedSize64), file.Open); err != nil {
 			return land.result(), err
 		}
 	}
@@ -551,6 +578,18 @@ type landing struct {
 	// locked counts members that would have landed on a document an app has
 	// frozen (writegate) — skipped, and said, rather than written over it.
 	locked int
+	// skips are the members left out for their NAME (task #238): a path
+	// that leaves the destination, one no door may create (leafname: `...`,
+	// a NUL, a control character), one longer than the storage holds. Listed
+	// one by one in the answer (archive_skips.go).
+	skips memberSkips
+	// withheld counts members of an archive the caller may not download that
+	// would have landed where they could (withholds) — skipped, and said.
+	withheld int
+	// dlSet is the caller's set on the storage, for withholds; dlUnknown is
+	// set when it could not be loaded, and then every member is withheld.
+	dlSet     *acl.Set
+	dlUnknown bool
 }
 
 func (a *Archive) newLanding(ctx context.Context, req archiveRequest, drv storage.Driver, writer storage.Writer, progress func(int)) *landing {
@@ -562,8 +601,21 @@ func (a *Archive) newLanding(ctx context.Context, req archiveRequest, drv storag
 	l.mkdirer, _ = drv.(storage.Mkdirer)
 	if a.ACL != nil {
 		l.locks = a.ACL.Locks(ctx, req.StorageID)
+		set, err := callerSetOn(ctx, a.ACL, a.Store, req.StorageID)
+		l.dlSet, l.dlUnknown = set, err != nil
 	}
 	return l
+}
+
+// withholds reports whether a member landing at target would put what is
+// inside an archive the caller may not download where they could download it
+// (protoperm.DownloadLifted, the rule copies and moves ask). Judged as the
+// person who asked, in the request and in the queued job alike.
+func (l *landing) withholds(target string) bool {
+	if l.a.ACL == nil {
+		return false
+	}
+	return l.dlUnknown || protoperm.DownloadLifted(l.dlSet, l.req.Path, l.dlSet, target)
 }
 
 // target judges where member name would land, or says why it does not.
@@ -571,6 +623,15 @@ func (l *landing) target(name string) (string, bool) {
 	safeRel, err := sanitizeZipPath(name)
 	if err != nil {
 		slog.Warn("archive: skipped zip-slip entry", slog.String("name", name), slog.String("err", err.Error()))
+		l.skips.add(name, skipUnsafePath)
+		return "", false
+	}
+	// Every name on the way through the one name rule every door asks
+	// (leafname, task #238): an archive is a door too, and `...` or a NUL in
+	// a member name must not make a file no other request can open.
+	if err := leafname.CheckPath(safeRel); err != nil {
+		slog.Warn("archive: skipped a member for its name", slog.String("why", err.Error()))
+		l.skips.add(name, skipNameNotAllowed)
 		return "", false
 	}
 	target := path.Join(l.req.DestDir, safeRel)
@@ -626,6 +687,13 @@ func (l *landing) file(name string, size int64, open func() (io.ReadCloser, erro
 	if !ok {
 		return nil
 	}
+	// Not the member's name in the line: its name can say as much as its
+	// contents.
+	if l.withholds(target) {
+		slog.Warn("archive: skipped a member the download rule keeps in the archive")
+		l.withheld++
+		return nil
+	}
 	// An archive carrying both `X` and `X/y` would recreate the collision
 	// this guard exists to stop — skip the member, extract the rest.
 	if kerr := storage.EnsureFileTarget(l.ctx, l.drv, target); kerr != nil {
@@ -674,6 +742,9 @@ func (l *landing) file(name string, size int64, open func() (io.ReadCloser, erro
 			removeIncomplete(l.ctx, l.drv, target, existed)
 			return l.ctx.Err()
 		}
+		if reason := reasonOfWrite(err); reason != "" {
+			l.skips.add(name, reason)
+		}
 		slog.Warn("archive: extract write", slog.String("target", target), slog.String("err", err.Error()))
 		return nil
 	}
@@ -686,7 +757,7 @@ func (l *landing) file(name string, size int64, open func() (io.ReadCloser, erro
 }
 
 func (l *landing) result() map[string]any {
-	return map[string]any{"keys": l.keys, "count": len(l.keys), "refused": l.refused, "locked": l.locked}
+	return l.skips.fields(map[string]any{"keys": l.keys, "count": len(l.keys), "refused": l.refused, "locked": l.locked, "withheld": l.withheld})
 }
 
 // errArchiveSnapshotRefused: nothing landed, and it was REFUSED rather than
@@ -759,6 +830,10 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 	// strip them and assume same storage as the target archive.
 	for i := range req.Files {
 		_, srcRel := splitAdapterPath(req.Files[i].Source)
+		if pathHasDotDot(srcRel) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
+			return
+		}
 		if srcRel != "" {
 			req.Files[i].Source = srcRel
 		}
@@ -779,14 +854,15 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// RBAC: writing the archive needs ≥editor on the target; each source ≥viewer.
+	// RBAC: writing the archive needs ≥editor on the target. Each source's
+	// bytes go into the archive, so each asks what packing asks
+	// (packSourceRefusal: files.download on it), as archive/create does.
 	if !aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(req.Path, "/"), acl.LevelEditor) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		return
 	}
 	for _, f := range req.Files {
-		if !aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(f.Source, "/"), acl.LevelViewer) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + f.Source})
+		if refusePackSource(w, r, a.ACL, a.Store, req.StorageID, strings.Trim(f.Source, "/"), f.Source) {
 			return
 		}
 		if refuseUnavailableID(w, r, a.Store, req.StorageID, strings.Trim(f.Source, "/")) {
@@ -860,8 +936,11 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 
 	zw := zip.NewWriter(tmp)
 	addedNames := map[string]bool{}
+	// The same name given twice is written twice, as it always was; two
+	// names that become one saved name are numbered (memberNamer).
+	namer := newMemberNamer()
 	for _, e := range req.Files {
-		safe, err := sanitizeZipPath(e.Name)
+		safe, _, err := namer.name(e.Name)
 		if err != nil {
 			continue
 		}
@@ -953,6 +1032,13 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 //  3. Fall back to storages[0].
 func (a *Archive) resolveStorage(ctx context.Context, explicitID int64, fullPath string) (int64, string, error) {
 	adapter, rel := splitAdapterPath(fullPath)
+	// The read side's path guard, as every other door asks it (task #238):
+	// the ACL cleans `/` only, while a Windows host's local driver also
+	// splits on `\`, so `ok\..\denied` was judged as one name and landed in
+	// `denied/`.
+	if pathHasDotDot(rel) {
+		return 0, "", errors.New("bad path")
+	}
 	if explicitID > 0 {
 		return explicitID, strings.Trim(rel, "/"), nil
 	}
@@ -1016,4 +1102,39 @@ func (a *Archive) fetchToTemp(r *http.Request, storageID int64, p string) (strin
 // Returns the cleaned RELATIVE path or an error.
 func sanitizeZipPath(name string) (string, error) {
 	return archivecli.CleanMemberPath(name)
+}
+
+// memberNamer names the members of an archive filex WRITES - archive create,
+// archive add, the agent's zip - which someone unpacks on their own disk:
+//
+//   - the saved form: a bidi control or a control character becomes `_`
+//     (leafname.SavedRune, the rule zipstream.EntryName and a download's file
+//     name follow, task #238). Never for a member read OUT of an archive: that
+//     lands in filex under the name it has, through the name rule;
+//   - numbered " (2)" when two DIFFERENT names become one saved name
+//     (`a` TAB `b.txt` and `a_b.txt`), with zipstream.Dedupe, the numbering
+//     the selection download already uses - the owner's decision for 0.57,
+//     instead of refusing the whole archive;
+//   - the SAME name given again answers the name it got the first time, and
+//     says so (dup): each door keeps its own rule for a real duplicate.
+type memberNamer struct {
+	used  map[string]bool
+	byRaw map[string]string
+}
+
+func newMemberNamer() *memberNamer {
+	return &memberNamer{used: map[string]bool{}, byRaw: map[string]string{}}
+}
+
+func (m *memberNamer) name(raw string) (name string, dup bool, err error) {
+	clean, err := sanitizeZipPath(raw)
+	if err != nil {
+		return "", false, err
+	}
+	if prev, ok := m.byRaw[clean]; ok {
+		return prev, true, nil
+	}
+	name = zipstream.Dedupe(m.used, strings.Map(leafname.SavedRune, clean))
+	m.byRaw[clean] = name
+	return name, false, nil
 }

@@ -67,6 +67,13 @@ type ContentIndexer struct {
 	body     *filebody.Resolver
 	index    *search.Index
 	maxBytes int64
+	// maxBytesFn and onFn, when set, are asked on every eligibility check
+	// instead of the fixed maxBytes and "always on": the Search page's
+	// settings (search.content_max_mb, search.content, task #261) apply to
+	// the next file without a restart. The antivirus job's AttachMaxBytes is
+	// the same shape.
+	maxBytesFn func() int64
+	onFn       func() bool
 	// slots bounds how many jobs read and extract at once (nil: no bound).
 	slots chan struct{}
 }
@@ -83,6 +90,27 @@ func NewContentIndexer(store NodeGetter, resolver func(int64) (storage.Driver, e
 // AttachBody wires the byte-source resolver so a re-queued extraction of a file
 // that is still being transferred reads the staged bytes.
 func (c *ContentIndexer) AttachBody(b *filebody.Resolver) { c.body = b }
+
+// AttachSettings makes the size cap and the on/off switch live: maxBytes and
+// on are consulted per eligibility check (nil keeps the fixed cap from the
+// constructor, and "on"). Off, nothing is enqueued and a job already queued
+// does nothing when it comes up; the text already indexed stays.
+func (c *ContentIndexer) AttachSettings(maxBytes func() int64, on func() bool) {
+	c.maxBytesFn, c.onFn = maxBytes, on
+}
+
+// limit is the size cap in force.
+func (c *ContentIndexer) limit() int64 {
+	if c.maxBytesFn != nil {
+		if v := c.maxBytesFn(); v > 0 {
+			return v
+		}
+	}
+	return c.maxBytes
+}
+
+// on reports whether content extraction is switched on.
+func (c *ContentIndexer) on() bool { return c.onFn == nil || c.onFn() }
 
 // LimitExtraction lets at most n jobs read and extract a file at the same
 // time. n < 1 removes the limit.
@@ -115,7 +143,7 @@ func (c *ContentIndexer) Eligible(n *model.Node) bool {
 	if n == nil || n.Type != model.NodeTypeFile || n.DeletedAt != nil {
 		return false
 	}
-	if n.Size <= 0 || n.Size > c.maxBytes {
+	if n.Size <= 0 || n.Size > c.limit() {
 		return false
 	}
 	/* wiring:e2 — the encrypted-folder marker is metadata, never content. */
@@ -130,7 +158,7 @@ func (c *ContentIndexer) Eligible(n *model.Node) bool {
 // enqueue failures are logged, never surfaced — search freshness must not
 // cost a write.
 func (c *ContentIndexer) Enqueue(ctx context.Context, drv Driver, n *model.Node) {
-	if drv == nil || !c.Eligible(n) {
+	if drv == nil || !c.on() || !c.Eligible(n) {
 		return
 	}
 	if _, err := drv.Enqueue(ctx, Op{
@@ -156,7 +184,7 @@ func (c *ContentIndexer) Handle(ctx context.Context, op Op) error {
 		// Deleted before the worker got to it — nothing to index.
 		return nil
 	}
-	if !c.Eligible(n) {
+	if !c.on() || !c.Eligible(n) {
 		return nil
 	}
 	ex := extract.For(n.Mime, nodeExt(n.Name))
@@ -210,7 +238,7 @@ func (c *ContentIndexer) Handle(ctx context.Context, op Op) error {
 	body := io.MultiReader(bytes.NewReader(head[:nRead]), rc)
 	/* /wiring:e2 */
 
-	text, err := ex.Extract(ctx, io.LimitReader(body, c.maxBytes), extract.DefaultLimit)
+	text, err := ex.Extract(ctx, io.LimitReader(body, c.limit()), extract.DefaultLimit)
 	if err != nil {
 		// Extraction error — log + index empty content anyway so the
 		// fingerprint lands and the node stops re-enqueueing.

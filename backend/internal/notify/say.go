@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
@@ -279,8 +280,13 @@ func (c *composer) word(name string) string {
 	return srvtext.Text(c.lang, notifyKey+"word."+name, nil)
 }
 
-// isolate wraps a value placed in a right-to-left sentence (see the header).
+// isolate is a value as it is placed in a sentence: its bidi controls shown as
+// U+FFFD (leafname.Visible - a file named with a RIGHT-TO-LEFT OVERRIDE would
+// otherwise reverse the rest of the sentence and hide its own extension, and
+// an isolate does not stop it; task #238), and in a right-to-left sentence
+// wrapped in FSI ... PDI (see the header).
 func (c *composer) isolate(v string) string {
+	v = leafname.Visible(v)
 	if !c.rtl || v == "" {
 		return v
 	}

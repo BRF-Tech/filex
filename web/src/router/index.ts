@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { stashDesktopHandoff } from '@/lib/desktopHandoff';
 import { applyDocumentTitle } from '@/lib/documentTitle';
+import { holdInView } from '@/lib/anchorHold';
 import { startRouteName } from '@/lib/startPage';
 import { tenancyOn } from '@/lib/tenancy';
 import { captureStoreFragment, captureStoreLink, dropStoreFragment, hasStoreLink, isStoreInstallPath, takeStoreLink } from '@/lib/storeLink';
@@ -421,7 +422,7 @@ const routes: RouteRecordRaw[] = [
         path: 'settings',
         name: 'settings',
         component: () => import('@/views/Settings.vue'),
-        meta: { breadcrumb: 'nav.settings' },
+        meta: { breadcrumb: 'nav.general' },
       },
       {
         // Multi-tenant mode (task #167): the platform operator's switch. The
@@ -577,6 +578,13 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.archives' },
       },
       {
+        // The AI assistant (task #269): the platform operator's.
+        path: 'ai-assistant',
+        name: 'ai-assistant',
+        component: () => import('@/views/AiAssistant.vue'),
+        meta: { breadcrumb: 'nav.aiAssistant' },
+      },
+      {
         path: 'search',
         name: 'search',
         component: () => import('@/views/SearchTest.vue'),
@@ -719,6 +727,11 @@ const routes: RouteRecordRaw[] = [
 // Firefox and WebKit, e2e 202).
 captureStoreLink();
 
+/** How far under the window's top a card a hash names is put. */
+const ANCHOR_TOP = 16;
+/** Ends the hold of the last hash's card (lib/anchorHold). */
+let releaseAnchor: (() => void) | undefined;
+
 const router = createRouter({
   // Whichever prefix served this document, under the base path the server
   // published (lib/appBase in the core). Vite's build `base` stays '/admin/' —
@@ -726,8 +739,28 @@ const router = createRouter({
   // base), so the same document works from any mount.
   history: createWebHistory(appBase() + mountBase),
   routes: onPublicPageBase() ? publicRoutes(currentPublicKind() as PublicKind) : routes,
-  scrollBehavior(_to, _from, saved) {
-    return saved ?? { top: 0 };
+  async scrollBehavior(to, _from, saved) {
+    releaseAnchor?.();
+    releaseAnchor = undefined;
+    if (saved) return saved;
+    // A card of a page by its id (`/admin/settings#thumb-limits`, the panel's
+    // search and Tools → Thumbnail repair link there, task #258). The page
+    // draws its cards after its data arrives, so the card is waited for a
+    // moment; a hash that never appears leaves the page at its top.
+    // ⚠ Found is not settled: the cards above it are still growing and the
+    // page being left is still fading out above it, so the card is held in
+    // place for a few seconds (lib/anchorHold) - and the scroll is a jump, as
+    // a smooth one would be overtaken by the page moving under it (e2e 256).
+    if (to.hash && /^#[A-Za-z][\w-]*$/.test(to.hash)) {
+      for (let i = 0; i < 30; i++) {
+        if (document.querySelector(to.hash)) {
+          releaseAnchor = holdInView(to.hash, ANCHOR_TOP);
+          return { el: to.hash, top: ANCHOR_TOP };
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+    return { top: 0 };
   },
 });
 

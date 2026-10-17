@@ -43,6 +43,71 @@ import { applyAccountLocale, i18n, t } from '@/i18n';
 import { applyAccountTimeZone } from '@/lib/timezone';
 import { forgetWebPush } from '@/lib/webPush';
 
+/**
+ * What a failed `GET /api/auth/me` says about the session.
+ *
+ * ⚠⚠ ONLY TWO STATUSES MEAN "NOBODY". The server says it with 401 - no
+ * session, one that lapsed, the maintenance lock-out
+ * (auth/middleware.go, auth/maintenance.go) - and 403, an account that may
+ * not have one: disabled (`reason: account_disabled`), or a token whose name
+ * or verbs it refuses. A session waiting on two-factor enrolment is a 200
+ * here (`two_factor_required`), never a 403. Everything else is the server
+ * NOT answering, and nothing the store believes may change on it:
+ *
+ *   'busy'     reached, and could not answer: a 5xx (filex, or a proxy in
+ *              front of it while it restarts) or a 429. Asked again a moment
+ *              later (askWho).
+ *   'silent'   no response at all - the browser dropped the request because
+ *              the page is being left, the page cancelled it, the connection
+ *              is down, it timed out - or any other status, which is not about
+ *              the session.
+ */
+type MeFailure = 'nobody' | 'busy' | 'silent';
+
+function statusOf(e: unknown): number | undefined {
+  const status = (e as { response?: { status?: unknown } } | null | undefined)?.response?.status;
+  return typeof status === 'number' ? status : undefined;
+}
+
+function meFailure(e: unknown): MeFailure {
+  const status = statusOf(e);
+  if (status === 401 || status === 403) return 'nobody';
+  if (status === 429 || (status !== undefined && status >= 500 && status <= 599)) return 'busy';
+  return 'silent';
+}
+
+/** How long to wait before asking again a server that could not answer. */
+const ME_RETRY_MS = [500, 1500];
+/** The most a 429's Retry-After may make a page wait for its session. */
+const ME_RETRY_AFTER_CAP_MS = 3000;
+
+function retryDelay(e: unknown, planned: number): number {
+  const raw = (e as { response?: { headers?: Record<string, unknown> } } | null | undefined)?.response?.headers?.[
+    'retry-after'
+  ];
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || seconds <= 0) return planned;
+  return Math.min(Math.max(planned, seconds * 1000), ME_RETRY_AFTER_CAP_MS);
+}
+
+/**
+ * `GET /api/auth/me`, asked again while the server is reachable but cannot
+ * answer ('busy'): twice, after 0.5 s and 1.5 s. A cold load that met a
+ * restarting server would otherwise have no user, and the router guard would
+ * send a person whose session is alive to the sign-in page.
+ */
+async function askWho(): Promise<Awaited<ReturnType<typeof AuthApi.me>>> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await AuthApi.me();
+    } catch (e) {
+      if (attempt >= ME_RETRY_MS.length || meFailure(e) !== 'busy') throw e;
+      const wait = retryDelay(e, ME_RETRY_MS[attempt] ?? 0);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null);
   const permissions = ref<string[]>([]);
@@ -64,6 +129,17 @@ export const useAuthStore = defineStore('auth', () => {
    */
   const signInReason = ref<SsoRefusalReason | null>(null);
   const ready = ref(false);
+  /**
+   * Whether the server has said, in this document, who is signed in: a
+   * `GET /api/auth/me` that got an answer (the person, or a 401/403), a
+   * sign-in or a sign-out. False until then, and a question the server did
+   * not answer leaves it as it was (meFailure, fetchMe).
+   *
+   * ⚠ `user === null` alone cannot tell "nobody is signed in" from "nobody has
+   * been asked yet", and `App.vue` forgets the person's look and the session
+   * hint on the first of the two only (see there).
+   */
+  const sessionAnswered = ref(false);
 
   const isAuthenticated = computed(() => user.value !== null);
   const isAdmin = computed(() => user.value?.role === 'admin');
@@ -71,7 +147,8 @@ export const useAuthStore = defineStore('auth', () => {
   async function fetchMe(): Promise<User | null> {
     loading.value = true;
     try {
-      const me = await AuthApi.me();
+      const me = await askWho();
+      sessionAnswered.value = true;
       user.value = me.user;
       permissions.value = me.permissions ?? [];
       permissionsInFolders.value = me.permissions_in_folders ?? [];
@@ -94,7 +171,23 @@ export const useAuthStore = defineStore('auth', () => {
       signInReason.value = null;
       return me.user;
     } catch (e: unknown) {
-      // 401 is the normal "not logged in" path; don't surface as error.
+      // ⚠⚠ NO ANSWER IS NOT "NOBODY" (meFailure). A question the server did
+      // not answer - no response, a 5xx or 429 still there after askWho's
+      // retries, a status that is not about the session - changes nothing
+      // the store believes, and returns who it believed. Taken as "signed
+      // out", it nulled the user, and `App.vue`'s no-session branch then
+      // cleared `filex.session` and the person's look from this browser's
+      // storage, which the NEXT page reads at its first paint. WebKit and
+      // Firefox run the error handlers of a page that is being left
+      // (Chromium does not): leaving /admin/explore while its own `fetchMe`
+      // was in flight booted /admin/users as a signed-out window, with the
+      // stock palette instead of the person's (e2e 98, WebKit, 0.57 second
+      // full chain); a proxy's 502 while filex restarted did the same on any
+      // engine. Other tabs heard it too: the removed `filex.session` is the
+      // cross-tab sign-out signal (lib/instanceThemes).
+      if (meFailure(e) !== 'nobody') return user.value;
+      sessionAnswered.value = true;
+      // 401 (or 403) is the normal "not logged in" path; don't surface as error.
       signInReason.value = axios.isAxiosError(e)
         ? ssoRefusalReason((e.response?.data as Record<string, unknown> | undefined)?.reason)
         : null;
@@ -187,6 +280,7 @@ export const useAuthStore = defineStore('auth', () => {
     } catch {
       // ignore — we still clear local state
     } finally {
+      sessionAnswered.value = true;
       user.value = null;
       permissions.value = [];
       permissionsInFolders.value = [];
@@ -239,6 +333,7 @@ export const useAuthStore = defineStore('auth', () => {
     refusal,
     signInReason,
     ready,
+    sessionAnswered,
     isAuthenticated,
     isAdmin,
     hasAdminArea,

@@ -401,6 +401,9 @@ type uiBundle struct {
 	idx   *uiIndex
 	// mirrors: served path (ext/<host>/<path>) → the file and its type.
 	mirrors map[string]uiMirror
+	// extras are the kinds of added file this version names (`ui.extras`,
+	// extras_catalog.go): the only ones served under its address.
+	extras map[string]bool
 }
 
 type uiMirror struct {
@@ -436,7 +439,7 @@ func loadUIBundle(dir, name, sum string, m *Manifest) (*uiBundle, error) {
 		return nil, err
 	}
 	idx.sum = strings.ToLower(sum)
-	b := &uiBundle{app: name, sum: idx.sum, short: idx.sum[:uiShortLen], zip: file, idx: idx, mirrors: map[string]uiMirror{}}
+	b := &uiBundle{app: name, sum: idx.sum, short: idx.sum[:uiShortLen], zip: file, idx: idx, mirrors: map[string]uiMirror{}, extras: declaredExtras(m)}
 	if m != nil && m.UI != nil {
 		for _, e := range m.UI.External {
 			if e.SHA256 == "" {

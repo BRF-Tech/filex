@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -132,8 +131,8 @@ func syncCmd() *cobra.Command {
 			"Nothing is deleted on the first run of a pair: with no record of a previous\n" +
 			"sync there is no way to tell \"you deleted this\" from \"you have not\n" +
 			"downloaded it yet\", so the two folders are merged instead. Afterwards\n" +
-			"deletes do propagate, and anything removed from this machine is kept in a\n" +
-			"local trash for 30 days (`filex sync trash`).\n\n" +
+			"deletes do propagate: a file deleted on the server is deleted here, and the\n" +
+			"server's trash is where either side's deletions are restored from.\n\n" +
 			"When a file changed in both places, both versions are kept: yours keeps its\n" +
 			"name and the server's copy lands beside it.",
 	}
@@ -148,9 +147,8 @@ func syncCmd() *cobra.Command {
 		syncMoveCmd(),
 		syncRemoveCmd(),
 		syncRunCmd(opts, &lang),
-		syncTrashCmd(),
 		syncConfirmCmd(),
-		syncDiscardCmd(),
+		syncDiscardCmd(opts, &lang),
 		syncWindowCmd(&lang),
 	)
 	return c
@@ -698,6 +696,17 @@ func writeResult(out, errOut io.Writer, p filesync.Pair, res filesync.Result) {
 	for _, e := range res.Errors {
 		fmt.Fprintf(errOut, "%s: ! %s\n", p.ID, e)
 	}
+	// Names the pass could not use as they are (task #238), in the stream's
+	// own English sentence: one wording for both. Synced under another name
+	// is a note; the rest were not synced.
+	for _, nr := range res.Names {
+		mark, w := "!", errOut
+		if nr.Reason == filesync.ReasonSyncedAs {
+			mark, w = "note:", out
+		}
+		fmt.Fprintf(w, "%s: %s %s\n", p.ID, mark, syncText("en", "pass.name."+nr.Reason, nil,
+			srvtext.Vars{"name": nr.Rel, "local": nr.Other, "other": nr.Other}))
+	}
 	// Not errors: the other side moved while this pass ran, nothing was
 	// overwritten, and the next pass keeps both versions.
 	for _, rc := range res.Raced {
@@ -709,8 +718,8 @@ func writeResult(out, errOut io.Writer, p filesync.Pair, res filesync.Result) {
 		fmt.Fprintf(errOut, "%s: note: skipped %d unreadable or non-regular item(s), e.g. %s\n", p.ID, n, res.Skipped[0])
 	}
 	if res.DeletedLocal > 0 {
-		fmt.Fprintf(out, "%s: %d file(s) moved to the local trash - recover with `filex sync trash --pair %s`\n",
-			p.ID, res.DeletedLocal, p.ID)
+		fmt.Fprintf(out, "%s: %d item(s) deleted here because they were deleted on the server - restore them from the server's trash\n",
+			p.ID, res.DeletedLocal)
 	}
 }
 
@@ -760,17 +769,28 @@ func syncConfirmCmd() *cobra.Command {
 	})
 }
 
-func syncDiscardCmd() *cobra.Command {
-	return quiet(&cobra.Command{
+func syncDiscardCmd(opts *clientOpts, langArg *string) *cobra.Command {
+	var asJSON bool
+	c := &cobra.Command{
 		Use:   "discard <pair-id>",
-		Short: "Move the items a pair is holding into the local sync trash",
+		Short: "Delete from this computer the held files the server still has a copy of",
 		Long: "The other answer to a hold: the files are not wanted on the server (typically\n" +
-			"they were cleaned up there, and this machine's copy is stale). They move into\n" +
-			"the pair's local sync trash - recoverable with `filex sync trash` for 30 days -\n" +
-			"and the next run makes this folder match the server. A file edited after it\n" +
-			"was held is left where it is.",
+			"they were cleaned up there, and this machine's copy is stale).\n\n" +
+			"A held file is DELETED from this computer - not moved anywhere - only when\n" +
+			"the server still holds an identical copy of it (the same bytes, sha256): in\n" +
+			"your trash on the server, or elsewhere in the pair's storage. Nothing is\n" +
+			"then lost. Every other held file stays where it is and stays held, and the\n" +
+			"command says why, file by file: the server has no copy, the file changed\n" +
+			"after it was held, or the server could not be asked. `filex sync confirm`\n" +
+			"sends what is still held; deleting it yourself is the other way.\n\n" +
+			"It asks the server, so it needs to be signed in (as `sync run` does). With\n" +
+			"--json every report is one JSON object per line, {event, pair, code,\n" +
+			"params, message}, the message in the --lang language (docs/SYNC.md).",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			want := langWant(*langArg)
+			rep := &syncReporter{asJSON: asJSON, lang: srvtext.Pick(want), out: cmd.OutOrStdout(), errOut: cmd.ErrOrStderr()}
 			st, err := syncStore()
 			if err != nil {
 				return err
@@ -779,124 +799,26 @@ func syncDiscardCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			api, err := opts.api(true)
+			if err != nil {
+				return authHint(err)
+			}
+			if asJSON {
+				rep.lang = syncLanguage(ctx, want, api)
+				rep.hello()
+			}
 			if !p.HoldNew {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s is not holding anything.\n", p.ID)
+				rep.discardNotHolding(p.ID)
 				return nil
 			}
-			moved, kept, err := st.DiscardHeld(p, time.Now())
+			res, err := st.DiscardHeld(ctx, p, newServerCopies(api, p.Remote))
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s: moved %d held file(s) to the local sync trash", p.ID, moved)
-			if kept > 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "; %d changed since and were left in place", kept)
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), ".")
-			return nil
-		},
-	})
-}
-
-func syncTrashCmd() *cobra.Command {
-	var (
-		pairID  string
-		restore string
-		asJSON  bool
-	)
-	c := &cobra.Command{
-		Use:   "trash",
-		Short: "List or restore files sync removed from this machine",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			st, err := syncStore()
-			if err != nil {
-				return err
-			}
-			pairs, err := st.LoadPairs()
-			if err != nil {
-				return err
-			}
-			// The desktop app reads this; parsing the human table would break
-			// the moment a column moved.
-			if asJSON && restore == "" {
-				type row struct {
-					Pair    string `json:"pair"`
-					Rel     string `json:"rel"`
-					Deleted string `json:"deleted"`
-					Size    int64  `json:"size"`
-				}
-				out := []row{}
-				for _, p := range pairs {
-					if pairID != "" && p.ID != pairID {
-						continue
-					}
-					items, err := st.ListTrash(p.ID)
-					if err != nil {
-						return err
-					}
-					for _, it := range items {
-						out = append(out, row{p.ID, it.Rel, it.Deleted.Format(time.RFC3339), it.Size})
-					}
-				}
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(out)
-			}
-			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			shown := 0
-			for _, p := range pairs {
-				if pairID != "" && p.ID != pairID {
-					continue
-				}
-				items, err := st.ListTrash(p.ID)
-				if err != nil {
-					return err
-				}
-				for _, it := range items {
-					if restore != "" {
-						if it.Rel != restore {
-							continue
-						}
-						root := p.Local
-						if p.File {
-							// A file pair's Local IS the file; restores land beside it.
-							root = filepath.Dir(p.Local)
-						}
-						dest := filepath.Join(root, filepath.FromSlash(it.Rel))
-						if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-							return err
-						}
-						if err := os.Rename(it.Path, dest); err != nil {
-							return err
-						}
-						fmt.Fprintf(cmd.OutOrStdout(), "restored %s\n", dest)
-						fmt.Fprintln(cmd.OutOrStdout(), "The next sync will treat it as a new file and put it back on the server.")
-						return nil
-					}
-					if shown == 0 {
-						fmt.Fprintln(w, "PAIR\tDELETED\tSIZE\tPATH")
-					}
-					shown++
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", it.PairID,
-						it.Deleted.Local().Format("2006-01-02 15:04"), humanSize(it.Size), it.Rel)
-				}
-			}
-			if restore != "" {
-				return fmt.Errorf("nothing in the trash matches %q", restore)
-			}
-			if shown == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "Nothing in the sync trash.")
-				return nil
-			}
-			if err := w.Flush(); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "\nKept for %d days. Restore with `filex sync trash --restore <path>`.\n", filesync.TrashRetentionDays)
+			rep.discardResult(p.ID, res)
 			return nil
 		},
 	}
-	c.Flags().StringVar(&pairID, "pair", "", "limit to one pair")
-	c.Flags().StringVar(&restore, "restore", "", "put this path back into its sync folder")
-	c.Flags().BoolVar(&asJSON, "json", false, "print the recoverable items as JSON")
+	c.Flags().BoolVar(&asJSON, "json", false, "print one JSON event per line on stdout instead of the plain lines (for programs: the desktop app)")
 	return quiet(c)
 }

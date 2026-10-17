@@ -13,6 +13,11 @@ type CoEditSession struct {
 	Build     string
 	BaseSig   string
 	SavedSig  string
+	// SavedTo is where the session's saves are written when it is not its
+	// own file (migration 00133): beside it in another format (a .doc
+	// session's `rapor.docx`) or a conflict copy. SavedSig is then that
+	// file's; "" while the saves go over the file itself.
+	SavedTo string
 	// KeyMode is "server" (the server made the key and keeps it sealed with
 	// its secret key) or "folder" (the members' browsers sealed it with the
 	// folder key; the server cannot open it).

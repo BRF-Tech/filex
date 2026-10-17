@@ -1,0 +1,101 @@
+# The Microsoft Store package's activation checks on a GitHub runner, under an
+# account that is not the built-in Administrator (task #248, path A).
+#
+# This workflow is the whole of a separate, single-purpose public repository
+# (BRF-Tech/store-e2e-lab: `.github/workflows/store-e2e.yml` and
+# `run-store-e2e-as.ps1` beside it at the root), so trying it changes
+# nothing in filex's own release. docs/CONTRIBUTING.md, "The Store check
+# without a Windows desktop", says how it is set up and what it decides.
+#
+#   gh workflow run store-e2e.yml -R BRF-Tech/store-e2e-lab -f tag=v0.56.3
+#
+# It checks the release out from BRF-Tech/filex at that tag, builds what the
+# release tool's Store check builds (the UI, the Windows CLI, the desktop
+# app) as the runner's own account, and runs desktop/scripts/store-e2e.mjs
+# as a second local administrator in an interactive session of its own
+# (run-store-e2e-as.ps1). No check may only warn there: green means the
+# package activated - the protocol launch, the app inside the package, the
+# toast under the package, the startup task.
+name: Store e2e lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The filex release tag to check (v1.2.3)."
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  store-e2e:
+    name: Store package activation (second account, interactive session)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lab
+      - uses: actions/checkout@v4
+        with:
+          repository: BRF-Tech/filex
+          ref: ${{ inputs.tag }}
+          path: filex
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: filex/backend/go.mod
+      # What the release tool's Store check builds (scripts/release/plan.mjs,
+      # storeCopyDeferred): the UI, the Windows binary, the desktop app and
+      # its CLI. In a folder of the job's, which the second account is given.
+      - name: The UI, the Windows CLI and the desktop app
+        shell: bash
+        working-directory: filex
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm -r --filter './packages/*' build && pnpm --filter ./web build && node scripts/sync-embed.mjs
+          node scripts/build-backend.mjs --out bin/filex-release-e2e.exe
+          cd desktop
+          pnpm run build
+          FILEX_CLI_BIN="$PWD/../bin/filex-release-e2e.exe" node scripts/fetch-cli.mjs --platform win32
+      # An RDP client, for the second account's own interactive session.
+      - name: FreeRDP
+        shell: pwsh
+        run: |
+          choco install freerdp -y --no-progress
+          # A chocolatey shim on PATH, or the client where the package put it.
+          $names = 'wfreerdp.exe', 'sdl3-freerdp.exe', 'sdl-freerdp.exe'
+          $bin = Get-Command $names -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($bin) { $dir = Split-Path -Parent $bin.Source } else {
+            $found = Get-ChildItem 'C:\Program Files\FreeRDP*', 'C:\ProgramData\chocolatey\lib\freerdp*' -Recurse -Include $names -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $found) { throw 'FreeRDP did not install a client (wfreerdp.exe, sdl3-freerdp.exe or sdl-freerdp.exe)' }
+            $dir = $found.DirectoryName
+          }
+          $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: The runner's own account, for the record
+        shell: pwsh
+        run: |
+          whoami /user /groups /fo list
+          Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' | Select-Object EnableLUA, FilterAdministratorToken, ConsentPromptBehaviorAdmin | Format-List
+      - name: store-e2e.mjs as a second account, in its own session
+        shell: pwsh
+        run: |
+          ./lab/run-store-e2e-as.ps1 -Desktop "$env:GITHUB_WORKSPACE\filex\desktop" -Cli "$env:GITHUB_WORKSPACE\filex\bin\filex-release-e2e.exe" -Out "$env:GITHUB_WORKSPACE\out"
+      - name: Keep what it printed
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-e2e-${{ inputs.tag }}
+          path: out/store-e2e.*
+          if-no-files-found: warn
+          retention-days: 30

@@ -268,8 +268,22 @@ export interface Session {
   locale: string;
   dir: 'ltr' | 'rtl';
   theme: Theme;
-  /** The person's display name; never their e-mail, never a token. */
+  /**
+   * The person's display name (their profile's, else their username); never
+   * their e-mail, never a token. '' where nobody is signed in (a public
+   * page). An editor writes it as the author of comments and tracked
+   * changes.
+   */
   user: { name: string };
+  /**
+   * filex 0.57: the language the administrator fixed for document editors
+   * (Admin → External services → ONLYOFFICE → Editor language,
+   * `FILEX_ONLYOFFICE_LANG`; a code such as `de`, `pt-PT`, `zh-TW`). An app
+   * that draws a document editor draws it in this language rather than the
+   * reader's `locale`; its own words stay in `locale`. Absent: each person's
+   * own language decides.
+   */
+  editor_lang?: string;
   files: FileInfo[];
   /** The permissions this app was granted — so it can hide what it may not do. */
   grants: string[];
@@ -285,6 +299,26 @@ export interface ReadParams {
   as?: 'stream' | 'bytes' | 'text';
 }
 
+/**
+ * How a CSV file is written (filex 0.57): `ReadResult.text_dialect` of a
+ * `.csv`, read by the server from the file's own bytes.
+ */
+export interface TextDialect {
+  /** One character: `,`, `;`, `\t` or `|`. */
+  delimiter: string;
+  /** The file starts with a byte order mark. */
+  bom: boolean;
+  /** Its lines end in CRLF (else LF). */
+  crlf: boolean;
+  /**
+   * Its encoding as a browser's TextDecoder names it: `utf-8`, `utf-16le`,
+   * `utf-16be`, or a code page (`windows-1250`, `windows-1251`,
+   * `windows-1252`, `windows-1254`). `file.read` with `as: 'text'` decodes
+   * with it; `bytes` and `stream` hand the bytes as they are.
+   */
+  encoding: string;
+}
+
 export interface ReadResult {
   name: string;
   size: number;
@@ -292,6 +326,33 @@ export interface ReadResult {
   stream?: ReadableStream<Uint8Array>;
   bytes?: ArrayBuffer;
   text?: string;
+  /**
+   * filex 0.57: how a `.csv` is written (its delimiter, byte order mark,
+   * line ends, encoding). Absent for any other file, for a file of an
+   * encrypted folder (the server holds its ciphertext only), and from filex
+   * 0.56 and older.
+   */
+  text_dialect?: TextDialect;
+}
+
+/**
+ * What an app says about the CSV it saves (filex 0.57; `SaveParams.csv`):
+ * how ITS bytes are written. filex reads the same from the bytes and refuses
+ * a save they contradict (`invalid`, message `csv_dialect`): nothing is
+ * written. Whatever the app wrote, the file is written in its own way - its
+ * delimiter, byte order mark, line ends and encoding - with every cell nobody
+ * changed as the file has it. A field left out is not checked; no `csv` at
+ * all is read from the bytes alone.
+ */
+export interface CsvDeclaration {
+  /** One character: `,`, `;`, `\t` or `|`. */
+  delimiter?: string;
+  /** As TextDialect.encoding names it (`utf-8` for a string the SDK sent). */
+  encoding?: string;
+  /** The bytes start with a byte order mark. */
+  bom?: boolean;
+  /** Their line ends. */
+  eol?: 'crlf' | 'lf';
 }
 
 /** `file.save` params: the new content of the opened file. */
@@ -306,11 +367,50 @@ export interface SaveParams {
    * outside a session.
    */
   through?: number;
+  /**
+   * filex 0.57: what the app says about the CSV it saves over a `.csv`
+   * (CsvDeclaration). Ignored for any other file and for a file of an
+   * encrypted folder; filex 0.56 and older ignore it.
+   */
+  csv?: CsvDeclaration;
+  /**
+   * filex 0.57: the save is in this format (an extension: `docx`, `xlsx`,
+   * `pptx`, `docm`, `xlsm`, `pptm`, `odt`, `ods`, `odp`), which the opened
+   * file cannot hold (a `.doc`, `.xls`, `.ppt`...). It is written BESIDE the
+   * file, which is left as it is, under a name filex chooses - the file's own
+   * name with that extension, `rapor (2).docx` when that is taken - and only
+   * for a person who may create files in that folder (`permission_denied`
+   * otherwise). `SaveResult.name` says where; later saves of the same
+   * opening go to that file. The same extension as the file's own: an
+   * ordinary save over it. Refused (`unavailable`) for a file of an
+   * encrypted folder. filex 0.56 and older ignore it and write over the file.
+   */
+  beside?: string;
+  /**
+   * filex 0.57: `'copy'` - when the file changed since the app opened it
+   * (somebody else saved it, a sync client wrote it), the save is written as
+   * a conflict copy beside it (`<name>.filex-conflict-<UTC time>.<ext>`)
+   * instead of being refused, and `SaveResult.conflict` names it; later saves
+   * of the same opening go to that copy. Without it such a save is refused
+   * (`failed`, message `changed`), as in 0.56. A file of an encrypted folder
+   * is never copied: refused as before.
+   */
+  conflict?: 'copy';
 }
 
 export interface SaveResult {
   saved: true;
   size: number;
+  /**
+   * filex 0.57: the name of the file the save was written to when it is not
+   * the opened file - the one beside it (`beside`) or the conflict copy
+   * (`conflict`). Absent for a save over the opened file.
+   */
+  name?: string;
+  /** filex 0.57: the save went beside the file, in the format `beside` named. */
+  beside?: true;
+  /** filex 0.57: the save went to this conflict copy (`conflict: 'copy'`). */
+  conflict?: string;
 }
 
 /**

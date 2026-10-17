@@ -53,6 +53,17 @@ type Outcome struct {
 	Files int
 }
 
+// Supported reports whether Put can keep what it is given on drv: the driver
+// moves, or copies and deletes. On a driver that does neither a delete is for
+// good (files.purge) - what the AI assistant asks before it deletes anything
+// (handlers/assistant_tools.go).
+func Supported(drv storage.Driver) bool {
+	_, hasMover := drv.(storage.Mover)
+	_, hasCopier := drv.(storage.Copier)
+	_, hasDeleter := drv.(storage.Deleter)
+	return hasMover || (hasCopier && hasDeleter)
+}
+
 // Put moves whatever lives at `rel` into a fresh trash key on drv.
 //
 // It handles the three shapes a deletion takes in practice:
@@ -84,9 +95,9 @@ func Put(ctx context.Context, drv storage.Driver, rel string) (Outcome, error) {
 	key := NewKey(base)
 
 	mover, hasMover := drv.(storage.Mover)
-	copier, hasCopier := drv.(storage.Copier)
+	copier, _ := drv.(storage.Copier)
 	deleter, hasDeleter := drv.(storage.Deleter)
-	if !hasMover && !(hasCopier && hasDeleter) {
+	if !Supported(drv) {
 		return Outcome{}, ErrUnsupported
 	}
 

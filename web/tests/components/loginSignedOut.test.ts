@@ -45,7 +45,7 @@ async function mountLogin() {
   const wrapper = mount(Login, {
     global: {
       plugins: [i18n],
-      stubs: { LogoMark: true, LocaleSwitcher: true, DarkModeToggle: true, Input: true, Checkbox: true },
+      stubs: { LogoMark: true, Input: true, Checkbox: true },
     },
   });
   await flushPromises();

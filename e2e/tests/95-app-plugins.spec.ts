@@ -29,10 +29,10 @@
  *      and the retired `/api/p/*` prefix still 301s to it.
  */
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { loginAs, apiLogin } from '../helpers/auth';
+import { apiLogin, openSignedIn } from '../helpers/auth';
 import { underBase } from '../helpers/base';
 import { seedLocalStorage, dropStorageByName, waitForOp } from '../helpers/seed';
-import { APP_INSTALL_ALLOWANCE_MS, guardFixture } from '../helpers/appPlugin';
+import { APP_INSTALL_ALLOWANCE_MS, APP_REVIEW_ALLOWANCE_MS, guardFixture } from '../helpers/appPlugin';
 import { echoFixture } from '../helpers/echoFixture';
 
 const ECHO = echoFixture();
@@ -48,10 +48,14 @@ const STATEFUL = 'stateful.txt';
 /** Its own file again: a lock is not something to leave on a shared fixture. */
 const LOCKED = 'frozen.txt';
 
+/**
+ * The explorer on the test storage, signed in through the API and opened as
+ * the tab's first page, its app rows answered before it is used (task #182:
+ * "Lock probe" was clicked in a menu drawn before the rows came, and the
+ * click waited out its 10 s - full chain gl-2924679562, Chromium).
+ */
 async function openExplorer(page: Page) {
-  await page.addInitScript(() => localStorage.setItem('filex.tourDone', '1'));
-  await loginAs(page);
-  await page.goto(`/admin/explore?storage=${encodeURIComponent(STORAGE)}`);
+  await openSignedIn(page, `/admin/explore?storage=${encodeURIComponent(STORAGE)}`, { answer: '/api/files/plugins/actions' });
   await expect(page.getByTestId(`sidenav-storage-${STORAGE}`)).toBeVisible();
 }
 
@@ -141,9 +145,7 @@ test.describe('App plugins — install, run, output, public page', () => {
   });
 
   test('the wizard reviews permissions before installing', async ({ page }) => {
-    await page.addInitScript(() => localStorage.setItem('filex.tourDone', '1'));
-    await loginAs(page);
-    await page.goto('/admin/plugins');
+    await openSignedIn(page, '/admin/plugins');
     await page.getByTestId('plugins-tab-apps').click();
     await expect(page.getByTestId('app-plugins')).toBeVisible();
     await page.getByTestId('app-plugin-add').click();
@@ -156,7 +158,9 @@ test.describe('App plugins — install, run, output, public page', () => {
     // The review lists every permission the manifest asks for.
     const manifest = ECHO.manifest!;
     const rows = page.getByTestId('app-plugin-permissions');
-    await expect(rows).toBeVisible();
+    // The review uploads the module and the server reads it: on a busy
+    // machine that outran the 5 s default (APP_REVIEW_ALLOWANCE_MS).
+    await expect(rows).toBeVisible({ timeout: APP_REVIEW_ALLOWANCE_MS });
     for (const perm of manifest.permissions) {
       await expect(rows, `permission ${perm} is reviewed`).toContainText(perm);
     }

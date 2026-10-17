@@ -26,9 +26,10 @@ import (
 // group killed when the clock or the job's context ends.
 //
 // The office engine (`office`, alias `libreoffice`) is not a binary: it is the
-// connected OnlyOffice Document Server (office.go). It takes the same request
-// shape - inputs staged in the run directory, results collected from it - so
-// an app does not care which kind of engine it is talking to.
+// engine the Office editor app brings or the connected OnlyOffice Document
+// Server (office.go). It takes the same request shape - inputs staged in the
+// run directory, results collected from it - so an app does not care which
+// kind of engine it is talking to.
 //
 // What keeps a plugin from reading the host through an engine is the ARGUMENT
 // rule, not trust in the engine: every argument is a bare token — no path
@@ -138,7 +139,7 @@ func (e *engineSet) run(ctx context.Context, s *Scope, req *engineRequest) (any,
 			return nil, err
 		}
 		if !e.available(ctx, req.Engine) {
-			return nil, hostErr(wire.ErrUnavailable, officeUnconfiguredMessage(req.Engine))
+			return nil, hostErr(wire.ErrUnavailable, e.officeUnavailableMessage(ctx, req.Engine))
 		}
 		office = job
 	} else {

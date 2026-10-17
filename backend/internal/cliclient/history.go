@@ -67,6 +67,50 @@ func (c *Client) Trash(ctx context.Context, storageID int64, limit, offset int) 
 	return &page, nil
 }
 
+// TrashSameMax is how many entries one TrashSame request may name.
+const TrashSameMax = 50
+
+// TrashSameItem asks whether trash entry ID holds exactly the bytes whose
+// sha256 (lower-case hex) is SHA256.
+type TrashSameItem struct {
+	ID     int64  `json:"id"`
+	SHA256 string `json:"sha256"`
+}
+
+// TrashSameAnswer is the server's answer about one entry. Checked false: the
+// server did not read it (its budget for the request was spent, or the
+// storage could not be read), and Same is not known.
+type TrashSameAnswer struct {
+	ID      int64 `json:"id"`
+	Same    bool  `json:"same"`
+	Checked bool  `json:"checked"`
+}
+
+// TrashSame asks whether entries of the caller's trash hold exactly the bytes
+// of a file the caller has (POST /api/files/manager/trash/same, task #259):
+// the sync's discard deletes a held file only when the server still holds a
+// copy. An entry the caller's trash listing does not show answers "not the
+// same". At most TrashSameMax items.
+func (c *Client) TrashSame(ctx context.Context, items []TrashSameItem) ([]TrashSameAnswer, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	if len(items) > TrashSameMax {
+		return nil, fmt.Errorf("at most %d trash entries at a time, not %d", TrashSameMax, len(items))
+	}
+	raw, err := c.postJSON(ctx, "/api/files/manager/trash/same", map[string]any{"items": items})
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Items []TrashSameAnswer `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse trash/same answer: %w", err)
+	}
+	return out.Items, nil
+}
+
 // RestoreTrash puts one trash entry back where it was deleted from
 // (POST /api/files/manager/restore). A path that is taken again answers
 // 409 EXISTS and nothing moves.

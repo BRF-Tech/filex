@@ -139,6 +139,11 @@ func (r *Registry) serveUIFile(w http.ResponseWriter, req *http.Request, grants 
 
 	rc, size, err := b.open(rel)
 	if err != nil {
+		// Not the package's: a file an administrator added to the app
+		// (extras.go), under extra/, when there is one.
+		if r.serveExtra(w, req, grants, b, rel) {
+			return
+		}
 		http.NotFound(w, req)
 		return
 	}

@@ -436,6 +436,28 @@ type UISpec struct {
 	// dialog can save the PDF too. filex 0.55 and later; an older filex
 	// refuses the field.
 	Print bool `json:"print,omitempty"`
+	// Extras are the kinds of file an administrator may add to the app for
+	// its interface to read under `<package>/extra/<kind>/` - today
+	// `dictionaries` (spell checking and hyphenation of the languages the
+	// package does not bring): `{"dictionaries": {"catalog": {"url": …,
+	// "sha256": …}}}`. A kind named here gets its section on the app's admin
+	// page and is served; one not named never is. Needs package_fetch (the
+	// interface reads them from its own package path). Not a permission: the
+	// administrator adds the files. filex 0.57 and later; an older filex
+	// refuses the field. docs/APP-PLUGINS-API.md → Files an administrator
+	// adds to an app.
+	Extras map[string]UIExtra `json:"extras,omitempty"`
+}
+
+// UIExtra is one kind of file an administrator may add to an app (UISpec.Extras).
+type UIExtra struct {
+	// Catalog is the list of files of this kind the app's release offers
+	// (format `filex-extras/1`), pinned by sha256 like the bundle: the
+	// administrator installs one of its items with a click, filex downloads
+	// and checks every file. URL takes `{tag}` like UIBundle.URL; a relative
+	// one is read beside the manifest. Absent: the administrator uploads the
+	// files themselves.
+	Catalog *UIBundle `json:"catalog,omitempty"`
 }
 
 // NewDocument is one row of the "New" menu an app adds. Ext is the kind
@@ -599,6 +621,39 @@ type Manifest struct {
 	// says it in its own words. filex before 0.56.0 does not know this field
 	// and refuses the manifest - declare it with `filex: ">=0.56.0"`.
 	CoEdit *CoEditSpec `json:"co_edit,omitempty"`
+	// Engines are engines the app brings for filex to run on the SERVER
+	// (filex 0.57.0): `office`, an office engine in WebAssembly that takes
+	// the office conversions apps ask for (`engines:office`) and draws office
+	// thumbnails, the work an ONLYOFFICE Document Server does. Derived
+	// permission `office-engine`, so the install review says it in its own
+	// words. filex before 0.57.0 does not know this field and refuses the
+	// manifest - declare it with `filex: ">=0.57.0"`.
+	Engines *EnginesSpec `json:"engines,omitempty"`
+}
+
+// EnginesSpec is the `engines` block (filex 0.57.0).
+type EnginesSpec struct {
+	// Office is the app's office engine (docs/APP-PLUGINS-API.md →
+	// engines.office).
+	Office *OfficeEngineSpec `json:"office,omitempty"`
+}
+
+// OfficeEngineSpec is `engines.office`: a zip (engine.zip) holding
+// x2t-server.wasm (ONLYOFFICE's converter, a WASI command),
+// layout-host.wasm (QuickJS, a WASI command) and layout/ (worker.js and the
+// scripts it loads besides the editor's). The editor's own scripts and fonts
+// are read from the app's interface bundle, under Editor. filex runs it in a
+// process of its own, never inside its own binary.
+type OfficeEngineSpec struct {
+	// URL is engine.zip's address; it takes `{tag}` like WasmSource.URL and
+	// may be relative like UIBundle.URL. An upload carries the zip itself.
+	URL string `json:"url,omitempty"`
+	// SHA256 pins engine.zip (lower-case hex). Required: the engine runs
+	// code on the server.
+	SHA256 string `json:"sha256"`
+	// Editor is the directory of the interface bundle that holds the
+	// editor's sdkjs/ and fonts/ ("editor" when empty).
+	Editor string `json:"editor,omitempty"`
 }
 
 // CoEditSpec is the `co_edit` block (filex 0.56.0).

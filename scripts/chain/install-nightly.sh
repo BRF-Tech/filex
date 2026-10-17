@@ -11,7 +11,8 @@
 #        [--enable] [--dry-run]
 #
 # It never overwrites the settings file and never deletes anything:
-#   1. copies nightly.mjs, nightly-lib.mjs, report.mjs and env.mjs from THIS
+#   1. copies nightly.mjs, nightly-lib.mjs, report.mjs, env.mjs and the
+#      site publisher (nightly-site.sh, nightly-site-remote.sh) from THIS
 #      checkout to <root>/bin (the run executes those copies, never the
 #      checkout it resets every night - re-run this script to update them);
 #   2. clones --remote into <root>/src when it is not there yet (a remote
@@ -91,7 +92,7 @@ major="$("$NODE" -p 'process.versions.node.split(".")[0]')"
 say "root $ROOT, settings $ENV_FILE, branch $BRANCH, run at $AT, report at $REPORT_AT"
 
 run mkdir -p "$ROOT/bin" "$ROOT/nightly" "$ROOT/runs"
-for f in nightly.mjs nightly-lib.mjs report.mjs env.mjs; do
+for f in nightly.mjs nightly-lib.mjs report.mjs env.mjs nightly-site.sh nightly-site-remote.sh; do
   run install -m 0644 "$HERE/$f" "$ROOT/bin/$f"
 done
 

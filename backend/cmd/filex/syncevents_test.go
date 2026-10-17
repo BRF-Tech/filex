@@ -95,6 +95,52 @@ func TestSyncEvents_APassInTurkish(t *testing.T) {
 	require.Equal(t, "pass.skipped", evs[2]["code"])
 }
 
+// Names a pass could not use as they are (task #238), after the summary, in
+// the reader's language. A server item synced here under another name is a
+// note - it IS synced; one not downloaded because its name is taken here, and
+// one here the server refuses, are the pair's errors until a pass without
+// them. Nothing failed, so the summary says none.
+func TestSyncEvents_NamesAPassCouldNotUse(t *testing.T) {
+	rep, out, _ := jsonReporter("tr")
+	rep.result(p1, filesync.Result{Names: []filesync.NameReport{
+		{Rel: "rapor:2024.txt", Reason: filesync.ReasonSyncedAs, Other: "rapor_2024.txt", Why: "forbidden"},
+		{Rel: "a:b.txt", Reason: filesync.ReasonTaken, Other: "a_b.txt"},
+		{Rel: "satır\tsonu.txt", Reason: filesync.ReasonServerRefuses},
+	}})
+	evs := streamEvents(t, out.String())
+	require.Len(t, evs, 4, out.String())
+	require.Equal(t, "pass.in_step", evs[0]["code"])
+	require.EqualValues(t, 0, param(evs[0], "failed"))
+	// A targeted pass's list is not the whole list: the app adds it to what
+	// it shows instead of replacing that.
+	require.Equal(t, false, param(evs[0], "full"))
+
+	require.Equal(t, "note", evs[1]["event"])
+	require.Equal(t, "pass.name.synced_as", evs[1]["code"])
+	require.Equal(t, "rapor:2024.txt", param(evs[1], "name"))
+	require.Equal(t, "rapor_2024.txt", param(evs[1], "local"))
+	require.Equal(t, "forbidden", param(evs[1], "why"))
+	require.Equal(t, "Bu bilgisayara rapor_2024.txt adıyla eşitlendi: sunucudaki rapor:2024.txt adı burada kullanılamıyor", evs[1]["message"])
+
+	require.Equal(t, "error", evs[2]["event"])
+	require.Equal(t, "pass.name.taken", evs[2]["code"])
+	require.Equal(t, "a:b.txt indirilemedi: burada aynı adda bir dosya zaten var (a_b.txt)", evs[2]["message"])
+
+	require.Equal(t, "error", evs[3]["event"])
+	require.Equal(t, "pass.name.server_refuses", evs[3]["code"])
+	require.Contains(t, evs[3]["message"], "Sunucuya eşitlenmedi: sunucu bu adı kabul etmiyor")
+
+	// The terminal says them too, in English: the note on stdout, the rest
+	// on stderr.
+	var plain, plainErr bytes.Buffer
+	writeResult(&plain, &plainErr, p1, filesync.Result{Names: []filesync.NameReport{
+		{Rel: "CON", Reason: filesync.ReasonSyncedAs, Other: "_CON", Why: "reserved"},
+		{Rel: "a:b.txt", Reason: filesync.ReasonTaken, Other: "a_b.txt"},
+	}})
+	require.Contains(t, plain.String(), "pair-1: note: Synced to this computer as _CON: the server's name CON cannot be used here")
+	require.Contains(t, plainErr.String(), "pair-1: ! Could not download a:b.txt: a file with the same name already exists here (a_b.txt)")
+}
+
 func TestSyncEvents_AClearPassIsInStep(t *testing.T) {
 	rep, out, _ := jsonReporter("en")
 	rep.result(p1, filesync.Result{})

@@ -3,9 +3,11 @@
 Backend `internal/group`. A **group** is a named set of people in one tenant.
 It can be given the two things a person can be given:
 
-- **Folder access** - share a folder or a whole storage with the group in the
-  explorer's sharing panel (Share → People), exactly as with a person. Every
-  member reaches it at the level the group was given
+- **Folder access** - share a folder with the group in the explorer's
+  sharing panel (Share → People), exactly as with a person, or give it a
+  whole storage from the storage's **Access** section
+  ([RBAC.md → A whole storage](RBAC.md#a-whole-storage-for-people-and-groups)).
+  Every member reaches it at the level the group was given
   ([RBAC.md](RBAC.md)).
 - **A role** - a custom role ([PERMISSIONS.md](PERMISSIONS.md)) that every
   member with **no role of their own** holds.
@@ -28,7 +30,7 @@ administrator makes a group nobody is in one.
 - [Audit](#audit)
 - [Things to know](#things-to-know)
 
-![Admin → Groups: where each group's members come from, its role and priority, its members, folders and the SSO or LDAP groups it is linked to](https://filex.sh/shots/groups/groups-list-1440.73224b70e40b.png)
+![Admin → Groups: where each group's members come from, its role and priority, its members, folders and the SSO or LDAP groups it is linked to](https://filex.sh/shots/groups/groups-list-1440.22ff57b029f5.png)
 
 ## Folder access
 
@@ -52,7 +54,7 @@ when they reconnect, as for a person's grant.
 
 ## The role
 
-![A person's page: the role they hold through a group, and the groups they are in](https://filex.sh/shots/groups/user-groups-1440.d6c5428fd5f4.png)
+![A person's page: the role they hold through a group, and the groups they are in](https://filex.sh/shots/groups/user-groups-1440.025a87c15115.png)
 
 Every person has **one** role ([PERMISSIONS.md](PERMISSIONS.md#custom-roles)).
 Groups only fill it in for someone who has none of their own:
@@ -143,7 +145,7 @@ keep it, and who may edit it, as tight as the directory's own admin groups.
 
 ## Members and SSO links
 
-![One group's page: its name, role and role priority, its SSO and LDAP groups, and its members with how each one joined](https://filex.sh/shots/groups/group-page-1440.61f4012ef1b0.png)
+![One group's page: its name, role and role priority, its SSO and LDAP groups, and its members with how each one joined](https://filex.sh/shots/groups/group-page-1440.e3e98c4b2c4c.png)
 
 A membership is either:
 

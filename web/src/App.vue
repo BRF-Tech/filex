@@ -111,7 +111,10 @@ watch(() => auth.user, runHandoffIfPending);
 // on that signal alone, a person who signed in got their own palette only after
 // a full page load — invisible before the sign-in page stopped reading this
 // browser's mirror, and a plainly wrong screen afterwards.
-watch(() => auth.user, () => void applyAccountPrefs());
+// ⚠ `sessionAnswered` as well: a first question that got no answer leaves the
+// user null and decides nothing (below), and the 401 that answers a later one
+// leaves it null too - no change of `auth.user` for this watcher to see.
+watch([() => auth.user, () => auth.sessionAnswered], () => void applyAccountPrefs());
 
 /**
  * Who this window's look was last decided FOR — an account id, `null` for
@@ -147,6 +150,14 @@ let lookDecidedFor: number | null | undefined;
 async function applyAccountPrefs(): Promise<void> {
   const who = auth.user?.id ?? null;
   if (lookDecidedFor === who) return;
+  // ⚠⚠ Nobody - but nobody SAID so. Until the server has answered (401 or
+  // 403; stores/auth meFailure), a null user is "not asked yet", and the
+  // branch below forgets the person and the session hint for good: a cold
+  // load left before its first `/api/auth/me` came back (WebKit and Firefox
+  // run this page's code while the next one loads) booted the next page
+  // signed out, and so did one that met a 502 while the server restarted.
+  // The answer, when it comes, decides through the watcher above.
+  if (who === null && !auth.sessionAnswered) return;
   lookDecidedFor = who;
   // ⚠⚠ THE ANSWER TO "is anybody signed in?", recorded for this browser's
   // NEXT first paint (`@brftech/filex-core` → lib/prefs, SESSION_LS_KEY). It

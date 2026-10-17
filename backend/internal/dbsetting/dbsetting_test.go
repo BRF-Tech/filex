@@ -182,3 +182,70 @@ func TestSeedAll_SurvivesAFailure(t *testing.T) {
 	dbsetting.SeedAll(context.Background(), m, spec)
 	assert.Equal(t, 30, spec.Resolve(context.Background(), m))
 }
+
+// The one resolution order, named and asserted for each of the three kinds
+// (task #258 moved a dozen environment-only settings onto it): the stored row,
+// else the environment's value on a start with no row, else the default.
+func TestResolutionOrder_DbThenEnvThenDefault(t *testing.T) {
+	ctx := context.Background()
+	intSpec := spec
+	boolSpec := dbsetting.BoolSpec{Key: "test.switch", EnvVar: "FILEX_TEST_SWITCH", Default: true}
+	strSpec := dbsetting.StringSpec{Key: "test.lang", EnvVar: "FILEX_TEST_LANG", Default: "en"}
+
+	// 3. Nothing anywhere: the default.
+	m := newMem()
+	dbsetting.SeedAll(ctx, m, intSpec, boolSpec, strSpec)
+	assert.Equal(t, 30, intSpec.Resolve(ctx, m))
+	assert.True(t, boolSpec.Resolve(ctx, m))
+	assert.Equal(t, "en", strSpec.Resolve(ctx, m))
+
+	// 2. The environment, on a start with no row.
+	t.Setenv(intSpec.EnvVar, "10")
+	t.Setenv(boolSpec.EnvVar, "off")
+	t.Setenv(strSpec.EnvVar, "tr")
+	m = newMem()
+	dbsetting.SeedAll(ctx, m, intSpec, boolSpec, strSpec)
+	assert.Equal(t, 10, intSpec.Resolve(ctx, m))
+	assert.False(t, boolSpec.Resolve(ctx, m))
+	assert.Equal(t, "tr", strSpec.Resolve(ctx, m))
+
+	// 1. The row, whatever the environment says on a later start.
+	require.NoError(t, m.UpsertSetting(ctx, intSpec.Key, "50"))
+	require.NoError(t, m.UpsertSetting(ctx, boolSpec.Key, "true"))
+	require.NoError(t, m.UpsertSetting(ctx, strSpec.Key, "de"))
+	dbsetting.SeedAll(ctx, m, intSpec, boolSpec, strSpec)
+	assert.Equal(t, 50, intSpec.Resolve(ctx, m))
+	assert.True(t, boolSpec.Resolve(ctx, m))
+	assert.Equal(t, "de", strSpec.Resolve(ctx, m))
+}
+
+// Reseed is the explicit way back to the environment: the variable's value
+// over the row, for a variable that is set; nothing else is touched, and a
+// value the seed would refuse leaves the row as it was.
+func TestReseed_TheEnvironmentOverTheRowOnRequest(t *testing.T) {
+	ctx := context.Background()
+	m := newMem()
+	other := dbsetting.IntSpec{Key: "test.other", EnvVar: "FILEX_TEST_OTHER", Default: 5, Min: 1, Max: 9}
+	require.NoError(t, m.UpsertSetting(ctx, spec.Key, "12"))
+	require.NoError(t, m.UpsertSetting(ctx, other.Key, "7"))
+
+	t.Setenv(spec.EnvVar, "45")
+	done := dbsetting.Reseed(ctx, m, nil, spec, other)
+	assert.Equal(t, []string{spec.Key}, done)
+	assert.Equal(t, "45", m.rows[spec.Key])
+	assert.Equal(t, "7", m.rows[other.Key], "no variable: the row stands")
+
+	// Narrowed to one key.
+	t.Setenv(other.EnvVar, "3")
+	t.Setenv(spec.EnvVar, "50")
+	done = dbsetting.Reseed(ctx, m, []string{other.Key}, spec, other)
+	assert.Equal(t, []string{other.Key}, done)
+	assert.Equal(t, "45", m.rows[spec.Key])
+	assert.Equal(t, "3", m.rows[other.Key])
+
+	// A value the seed refuses leaves the row as it was.
+	t.Setenv(spec.EnvVar, "lots")
+	done = dbsetting.Reseed(ctx, m, nil, spec)
+	assert.Empty(t, done)
+	assert.Equal(t, "45", m.rows[spec.Key])
+}

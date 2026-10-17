@@ -258,20 +258,25 @@ describe('pluginMenuRows', () => {
     expect(pluginMenuRows([sign], [docx], { locale: 'en', needWords, readOnly: true })).toEqual([]);
   });
 
-  it('says a missing office engine as a server to connect, not a program to install (0.50)', () => {
-    /* `kind: "office"` is the office engine - the connected ONLYOFFICE.
+  it('says a missing office engine as an app to install or a server to connect, never a program and a restart (0.50, 0.57)', () => {
+    /* `kind: "office"` is the office engine: since 0.57 the one the Office
+       editor app brings, or a connected ONLYOFFICE (server/office_backends.go).
        Red before 0.50: every need that was not `engine` read "{name} is not
        available on this server", and the office engine was an `engine` that
-       read "install it and restart filex". */
+       read "install it and restart filex". Red in 0.57's first wave: the
+       sentence named only the Document Server to connect. */
     const t = wordsIn('en');
     const office = gatedNeedWords({ kind: 'office', id: 'libreoffice', name: 'ONLYOFFICE' }, t);
     expect(office).toBe(t('plugin.needs_office', { name: 'ONLYOFFICE' }));
-    expect(office).toContain('External services');
-    expect(office).not.toMatch(/install|restart/i);
+    expect(office).toContain('Office editor app');
+    expect(office).toContain('ONLYOFFICE under External services');
+    expect(office).not.toMatch(/restart/i);
+    expect(office).not.toBe(t('plugin.needs_engine', { name: 'ONLYOFFICE' }));
     expect(gatedNeedWords({ kind: 'engine', id: 'ffmpeg', name: 'FFmpeg' }, t)).toBe(t('plugin.needs_engine', { name: 'FFmpeg' }));
     expect(gatedNeedWords({ kind: 'other', id: 'x', name: 'X' }, t)).toBe(t('plugin.needs_other', { name: 'X' }));
     const tr = wordsIn('tr');
     expect(gatedNeedWords({ kind: 'office', id: 'office', name: 'ONLYOFFICE' }, tr)).toContain('Dış servisler');
+    expect(gatedNeedWords({ kind: 'office', id: 'office', name: 'ONLYOFFICE' }, tr)).toContain('Ofis düzenleyici');
   });
 
   it('writes = the output the server refuses on a read-only storage, nothing else', () => {

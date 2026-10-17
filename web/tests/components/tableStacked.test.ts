@@ -32,6 +32,7 @@
 // and e2e/shots/signing.mjs.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
+import { createCommentVNode, h } from 'vue';
 
 import DataTable from '@brftech/filex-core/src/components/DataTable.vue';
 import {
@@ -42,6 +43,7 @@ import {
   type TableColumnSpec,
 } from '@brftech/filex-core/src/lib/tableColumns';
 import { __resetViewPrefs } from '@brftech/filex-core/src/lib/viewPrefs';
+import { en } from '@brftech/filex-core/src/locales/en';
 
 type Row = { id: string; who: string; state: string; when: string };
 const rows: Row[] = [
@@ -274,6 +276,115 @@ describe('DataTable — a stacked row does everything the row did', () => {
     expect(w.find('.fe-list__head .fe-list__colmenu-btn').exists()).toBe(true);
     // Dragging a header to move a column is the table's, not the stack's.
     expect(w.findAll('.fe-list__head .is-movable').length).toBe(0);
+  });
+});
+
+describe('DataTable — a control column draws nothing where it has nothing to control (task #249)', () => {
+  // The explorer's star column, as ListView draws it: a header with no label,
+  // and a cell slot whose root is `v-if` - a star on a file, NOTHING on a
+  // folder. Vue renders a slot's fallback whenever the slot's content is only
+  // comments, and the fallback was the facts' "no value" dash: every folder
+  // row carried a hidden "-" that showed beside the ⋮ the moment the row was
+  // hovered or focused (the demo at 1280px; the vault's 390px picture).
+  const withStar = [...columns, { id: 'star', label: 'Star', headerLabel: false }];
+  const starSlot = (p: { row: Row }) =>
+    p.row.id === 'a' ? [h('span', { class: 'test-star' }, '★')] : [createCommentVNode('v-if')];
+
+  function starTable(slots: Record<string, unknown> = { 'cell-star': starSlot }) {
+    const w = mount(DataTable, {
+      props: {
+        rows,
+        columns: withStar,
+        rowKey: 'id',
+        locale: 'en',
+        tableId: 'test.stacked.star',
+        rowAttrs: (r: Row) => ({ 'data-testid': `row-${r.id}` }),
+      },
+      slots: slots as never,
+      attachTo: document.body,
+    });
+    mounted.push(w);
+    return w;
+  }
+
+  for (const [where, width] of [['wide', 900], ['stacked', 280]] as const) {
+    it(`${where}: the slot's own nothing stays nothing - no "-"`, async () => {
+      const w = starTable();
+      await paneOf(w, width);
+      expect(isStacked(w)).toBe(width === 280);
+      expect(w.get('[data-testid="row-a"] [data-col="star"] .test-star').exists()).toBe(true);
+      const empty = w.get('[data-testid="row-b"] [data-col="star"]');
+      expect(empty.text(), 'a control with nothing to control drew a dash').toBe('');
+      expect(empty.find('.fe-list__cell-text').exists()).toBe(false);
+    });
+  }
+
+  it('a control column with no slot at all draws nothing either', async () => {
+    const w = starTable({});
+    await paneOf(w, 900);
+    for (const id of ['a', 'b']) expect(w.get(`[data-testid="row-${id}"] [data-col="star"]`).text()).toBe('');
+  });
+
+  it("a FACT with no value still says so: the dash is the facts' and stays", async () => {
+    const w = mount(DataTable, {
+      props: {
+        rows: [{ id: 'c', who: 'Alice', state: '', when: '' }],
+        columns,
+        rowKey: 'id',
+        locale: 'en',
+        tableId: 'test.stacked.empty',
+        rowAttrs: (r: Row) => ({ 'data-testid': `row-${r.id}` }),
+      },
+      attachTo: document.body,
+    });
+    mounted.push(w);
+    for (const width of [900, 280]) {
+      await paneOf(w, width);
+      expect(w.get('[data-testid="row-c"] [data-col="state"]').text()).toBe('-');
+    }
+  });
+});
+
+describe('DataTable — stacked, the header says it is the sort (task #264)', () => {
+  // At 340px "Name ↑ Type Owner Modified Size" ran on one line over rows whose
+  // facts read "Type Folder · Owner System": the same words, the same grey -
+  // "neither a header nor a row". Stacked, the band leads with "Sort by",
+  // drawn by the stylesheet from this attribute (empty alternative text), so
+  // the buttons keep their own names.
+  const head = (w: VueWrapper) => w.get('.fe-list__head');
+
+  it('stacked with a column that sorts: "Sort by"; a table: nothing', async () => {
+    const w = table();
+    await paneOf(w, 900);
+    expect(head(w).attributes('data-sort-label')).toBeUndefined();
+    await paneOf(w, 280);
+    expect(head(w).attributes('data-sort-label')).toBe(en['sort.by']);
+    // The words are CSS, not text: the header row's text is its buttons'.
+    expect(head(w).text()).not.toContain(en['sort.by']);
+    await paneOf(w, 900);
+    expect(head(w).attributes('data-sort-label')).toBeUndefined();
+  });
+
+  it('says nothing when nothing in it can sort', async () => {
+    const w = table({ columns: columns.map((c) => ({ ...c, sortable: false })) });
+    await paneOf(w, 280);
+    expect(isStacked(w)).toBe(true);
+    expect(head(w).attributes('data-sort-label')).toBeUndefined();
+  });
+
+  it('says nothing while the sort is closed (a ranked search, a paged list)', async () => {
+    const w = table({ sortClosed: 'Ranked by relevance' });
+    await paneOf(w, 280);
+    expect(isStacked(w)).toBe(true);
+    expect(head(w).attributes('data-sort-label')).toBeUndefined();
+  });
+
+  it('the tick keeps its (empty) header: one column name per cell, still', async () => {
+    const w = table({ selectable: true });
+    await paneOf(w, 280);
+    const headers = w.findAll('.fe-list__head [role="columnheader"]');
+    expect(headers[0].classes()).toContain('fe-list__col--check');
+    for (const r of w.findAll('.fe-list__row')) expect(r.findAll('[role="gridcell"]').length).toBe(headers.length);
   });
 });
 
