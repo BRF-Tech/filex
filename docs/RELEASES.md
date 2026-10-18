@@ -19,14 +19,48 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.57.0, 17 October 2026
-Office documents no longer need a Document Server: the Office editor app (0.4.0 or later) edits Word, Excel and PowerPoint in the browser and, on the server, converts them and draws their thumbnails with ONLYOFFICE's own converter and page layout compiled to WebAssembly, so a default install no longer runs an ONLYOFFICE container (one can still be connected). The explorer gains an AI assistant - Claude, OpenAI or a local Ollama - that works through filex's own tools with the person's own permissions; it stays off until an administrator turns it on. Every admin setting has one home: the admin menu has a Settings panel, the server's defaults are settings there (environment variables only seed them), and a tenant's administrator sees only the tenant's pages. A whole storage can be given to people and groups, and previews load no picture from another server until you ask. On the desktop, "Open with filex" takes any kind of file an app on your servers opens and moves files of any size without holding them in memory, and folder sync deletes from the computer only what the server still has. File names follow one rule at every door: control characters are refused, a right-to-left override can no longer hide an extension, and archives keep every name. Nightly builds of the desktop app are published every night. Security fixes are listed in the changelog.
+::: tip Latest - v0.57.1, 17 October 2026
+A decimal typed into a CSV in ONLYOFFICE keeps the file's comma: in the Turkish or the German editor a number like 4,5 typed into a semicolon file no longer goes back to the file as 4.5 (or 1,1 as 1.1000000000000001), wherever its column writes decimal commas - and a CSV saved from the Office editor app gets the same rule. Contributed by Berk Başarır.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.57.0
-docker pull ghcr.io/brf-tech/filex:full-v0.57.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.57.1
+docker pull ghcr.io/brf-tech/filex:full-v0.57.1
 ```
+
+## v0.57.1
+
+<span class="filex-release-date">17 October 2026</span>
+
+A decimal typed into a CSV in ONLYOFFICE keeps the file's comma: in the Turkish or the German editor a number like 4,5 typed into a semicolon file no longer goes back to the file as 4.5 (or 1,1 as 1.1000000000000001), wherever its column writes decimal commas - and a CSV saved from the Office editor app gets the same rule. Contributed by Berk Başarır.
+
+## What changed
+
+### Fixed
+
+- **A decimal typed into a CSV in ONLYOFFICE keeps the file's comma.** In the
+  Turkish or the German editor a decimal typed with a comma is a number, and
+  the save wrote it with a point: `3,5` typed over as `4,5` in a semicolon
+  file went to the file as `4.5`, and `1,1` as `1.1000000000000001`, in a
+  column of `3,5` and `1250,75` that ONLYOFFICE kept as they were (measured on
+  Docs 9.4.0). A number written with a point that somebody typed, or put in a
+  row they added, is now written with a decimal comma where its column writes
+  one - a file not separated by commas, a column with decimal commas and no
+  decimal point, still standing where it stood, and a number that did not
+  move there from elsewhere in the file - with 16 or 17 significant digits as
+  the shortest decimal that is the same number (`1,1`). An exponent, a
+  percent and a date are written as before. A CSV saved from the Office
+  editor app gets the same rule
+  ([ONLYOFFICE.md → A decimal you type keeps the file's comma](./ONLYOFFICE.md#a-decimal-you-type-keeps-the-files-comma)).
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0571---2026-10-17)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.57.1) · `ghcr.io/brf-tech/filex:slim-v0.57.1`
 
 ## v0.57.0
 
@@ -3326,236 +3360,13 @@ describes below is in 0.44.1.
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.44.1) · `ghcr.io/brf-tech/filex:slim-v0.44.1`
 
-## v0.44.0
-
-<span class="filex-release-date">25 September 2026</span>
-
-Big local storages open at once: the new lazy catalogue lists a folder straight from disk and catalogues it behind the listing, with a throttled pass that fills in the rest (or only the folders people visit). Archives gain 7z, the TAR family and password-protected ZIP and 7z, contributed by Alex (@ahjephson) and hardened on the way in. The desktop app and the CLI install with Homebrew, winget and Snap, and the desktop app's blank main window from 0.43.0-0.43.2 is fixed.
-
-> ⚠ **Use [v0.44.2](https://github.com/BRF-Tech/filex/releases/tag/v0.44.2) instead.** v0.44.0 published its container images, CLI binaries and npm packages, then stopped at a packaging step of the release (a GoReleaser template), so it has **no desktop app and no store packages**. v0.44.2 carries everything in this release plus those. Nothing published here is broken; it is just incomplete.
-
-## What changed
-
-Big storages open at once, archives come in every common format, and the
-desktop app arrives through the stores. A **lazy catalogue** for local
-storages (`sync_mode: lazy`, the idea from Alex / @ahjephson in #45) lists a
-folder straight from disk the moment it is opened and catalogues it behind the
-listing, with a throttled pass that fills in the rest - or, for a huge
-archive, only the folders people visit. **Archives** gain 7z, TAR and its
-compressed forms and password-protected ZIP and 7z (RAR too, where the
-server's 7-Zip has it), contributed by Alex in #48 and hardened on the way in. The **desktop app and the CLI** ship
-through Homebrew, winget and Snap, with a Microsoft Store build and an `.rpm`
-beside them.
-
-⚠ **Upgrade the desktop app if it is on 0.43.0 - 0.43.2**: its main window
-stayed blank (see *Fixed*). ⚠ On Linux the desktop app's command is now
-`filex-app`. ⚠ The desktop app needs macOS 13 or later (Electron 44). ⚠ The
-full container image moves to Alpine 3.24 and grows by about 390 MB
-unpacked (see *Changed*).
-
-### Added
-
-- **The desktop app and the CLI in package managers.** The desktop app is
-  `filex-app` everywhere and the CLI is plain `filex`: `sudo snap install filex-app` (also in Ubuntu's App Center), `brew install brf-tech/filex/filex-app` and `brew install brf-tech/filex/filex` from the new
-  tap [BRF-Tech/homebrew-filex](https://github.com/BRF-Tech/homebrew-filex),
-  `winget install BRFTech.filex-app` and `winget install BRFTech.filex`. The
-  release job publishes all of them from the release's own files, pinned by
-  SHA-256 to the versioned download (goreleaser for the CLI,
-  `desktop/scripts/pkg-manifests.mjs` for the app), and says so in the run when
-  a store's credentials are missing instead of skipping it quietly. A new
-  winget package waits for winget's review for its first release. A copy
-  installed by a store never runs its own updater: Settings names the store
-  and opens its page.
-- **An `.rpm` for Fedora and openSUSE**, next to the `.deb` and the AppImage.
-- **A Microsoft Store (MSIX) build of the desktop app** (`pnpm dist:store`,
-  checked as an installed Store copy by `pnpm e2e:store`). It is ready for
-  Partner Center; the Store listing comes later. The Store version carries a
-  mapping the Store requires (0.43.x → 1.0.43xx.0); the app keeps reporting its
-  own version.
-- **A privacy page, [filex.sh/privacy](https://filex.sh/privacy/)** (English and
-  Turkish): what the desktop app, the website and the public demo do and do
-  not do with information. The stores link to it.
-
-- **A third install mode, `package`: filex installed by Homebrew, winget or
-  Snap leaves its binary to the package manager.** filex recognizes the
-  layout around the running binary (links followed): a Homebrew
-  `Caskroom`/`Cellar` keg, a winget `WinGet\Packages\<id>_<source>` folder, or
-  `SNAP`/`SNAP_NAME` with the binary under `$SNAP`. There `filex self-update`
-  refuses and prints the manager's command (`brew upgrade --cask filex`,
-  `winget upgrade BRFTech.filex`, `snap refresh filex`), `--check` still
-  reports the release, and no update policy ever replaces the binary - the
-  package manager would otherwise keep recording the old version and write
-  over ours at its next upgrade (a snap is read-only). **Ops → Updates** names
-  the manager and shows its command instead of **Upgrade now**.
-  `FILEX_INSTALL_MODE` also takes `package`, `homebrew`, `winget` and `snap`
-  (a `.deb`/`.rpm`/AUR package can declare itself). See
-  [UPDATES.md](./UPDATES.md#package-manager-installs).
-- **Archives are made, opened and extracted in the explorer, with passwords,
-  in the background.** Select files and choose **Create archive…** for a ZIP,
-  7z, TAR, TAR.GZ, TAR.BZ2 or TAR.XZ, with a password (ZIP, 7z) and hidden
-  file names (7z) if you like; open an archive to browse it like a folder;
-  extract all of it or **Extract here**. An encrypted archive asks for its
-  password first. Both directions run as operations of the queue, in a lane
-  of their own, with progress and cancel in the operations centre, and
-  **Settings → Archives** sets the formats, the size, entry and time limits,
-  and tests the provider. By Alex ([@ahjephson](https://github.com/ahjephson),
-  [#48](https://github.com/BRF-Tech/filex/pull/48)); see `docs/ARCHIVES.md`.
-  - filex reads plain ZIP, TAR, TAR.GZ and TAR.BZ2 itself, on every install.
-    7z, XZ and password-protected ZIP, and creating anything but a plain ZIP,
-    need 7-Zip 25.01 or newer: the full image ships 26.01, and a server
-    without it offers ZIP only, with no password fields. RAR extraction needs
-    a 7-Zip built with RAR support, which Alpine's package (the full image's)
-    is not; `FILEX_ARCHIVE_7Z_BIN` can point at one that is.
-  - An archive is refused before anything is written when it holds a link or
-    a special file - also when 7-Zip shows one only by its file mode (a
-    `zip -y` or `7zz -snl` symlink, a FIFO or device in a TAR, a RAR5 file
-    copy) - or a member that does not declare its size. The size limit stops
-    a TAR-family archive at the exact byte, a gzip whose trailer lies
-    included, because filex reads those itself. The archive type comes from
-    the file name, never from its bytes; a password reaches 7-Zip on its
-    standard input, never on its command line; and every member lands
-    through the same gate as any other write, so it cannot replace a document
-    an app has locked or land in filex's own folders.
-
-- **Lazy catalogue for big local storages - `sync_mode: lazy`**
-  ([#45](https://github.com/BRF-Tech/filex/issues/45); the idea is Alex's,
-  @ahjephson). Every other mode catalogues a storage by walking all of it first;
-  on a multi-terabyte NAS that is hours before the first folder is right. Now
-  the folder somebody opens is listed straight from disk at once, with what the
-  catalogue already knows laid over it, and is catalogued first in the
-  background. Two behaviours per storage: **click first, fill in the
-  background** (the default - a slow pass catalogues the rest, slowing down
-  while people use the storage, honouring scan exclusions and carrying on after
-  a restart) and **only on open** (nothing runs in the background; an
-  administrator can catalogue everything once). Opened folders are watched for
-  outside changes within a budget (`lazy_max_watches`, `lazy_watch_ttl`), and a
-  desktop sync pair gets its whole subtree catalogued and kept current. ⚠ A
-  folder nobody visited is never treated as deleted: rows are only removed from
-  a folder that was just listed in full, each one confirmed gone. See
-  [docs/STORAGE.md](./STORAGE.md#lazy-catalogue) and the design in
-  [docs/LAZY-CATALOGUE.md](./LAZY-CATALOGUE.md).
-- **The storage form offers the sync mode.** It could only be set through the
-  API; the new and edit forms now have **Sync mode**, and the lazy catalogue's
-  settings drawn from the driver descriptor (`lazy_fields`).
-- **Search, folder sizes and drive usage say when they do not cover a whole
-  storage.** One line above the listing and the search results names the
-  reason (a first sync still running, a lazy catalogue still filling, a storage
-  catalogued only on open); a folder whose size leaves something out reads
-  `≥ 1.2 GB`, or `-` when nothing below it is catalogued yet; Home's drive card
-  says *at least … used*. The storage page shows the catalogue's progress, the
-  background pass and the watch budget.
-
-### Changed
-
-- **Linux: the desktop app's command is now `filex-app`,** and so is its
-  package (`.deb`, `.rpm`) and desktop entry - `filex` is the CLI's name, and
-  with both installed the command you typed depended on the order of your
-  `PATH`. Installing the new package replaces the old `filex` one in a single
-  step, and the app moves its *Start when I sign in* entry and the default-app
-  choices made under the old name.
-- **The container images move from Alpine 3.20 to 3.24, and the full image
-  grows by about 390 MB** (its download by 134 MB, 545 → 679 MB). Alpine
-  3.20 left support in April 2026, and archives need 7-Zip 25.01 or newer
-  (25.00 and 25.01 fixed its ZIP symlink traversal, a RAR5 overflow, a
-  compound-document crash and link handling during extraction:
-  CVE-2025-11001/11002, CVE-2025-53816/53817, CVE-2025-55188). 3.24 ships
-  7-Zip 26.01 and newer ffmpeg (8.1),
-  Ghostscript (10.07), ImageMagick, poppler, librsvg and LibreOffice (25.8).
-  On Alpine since 3.22, LibreOffice depends on Qt 6, which brings Mesa and
-  LLVM with it: the full image's package layer grows from 1.13 GB to 1.52 GB.
-  Thumbnails and every conversion engine (ffmpeg, ImageMagick, LibreOffice,
-  Ghostscript, poppler, rsvg) were smoke-tested on the new image. The slim
-  image moves to 3.24 as well and still ships no 7-Zip.
-
-### Fixed
-
-- **A right-click menu taller than the window scrolls.** With a few apps
-  installed the menu outgrew a small window and its last items could not be
-  reached; it now fits the window and scrolls inside itself.
-- **Desktop app (0.43.0 - 0.43.2): the main window runs again.** An HTML
-  comment in the Settings template quoted a function name in backticks inside
-  a JavaScript template literal, which ended the literal early; the browser
-  rejected the page's whole script, so after signing in the window drew its
-  static frame and nothing worked. A test now parses every inline script of
-  the desktop pages.
-- **Desktop app (0.43.0 - 0.43.2): Settings shows your synced folders again.**
-  The folder cards read a value that 0.43.0 had moved into another function,
-  so with any folder paired Settings stopped drawing at that point: no folder
-  card, no status line, no *Stop* button.
-- **Linux: signing in through the browser returns to the app.** No Linux
-  package declared the `filex://` link, so the browser had nothing to hand
-  the sign-in back to and only pasting the code worked.
-- **Linux: without a keyring the app says so before the sign-in.** It used to
-  send you through the browser, spend the one-time code and then fail in
-  English; it now refuses up front and explains what to install or connect
-  (for the snap, the exact `snap connect` command).
-- **Desktop app: a failed browser sign-in shows its reason again** (the error
-  window did not refresh when it was already open).
-
-- **Two filex on one computer no longer sync the same folder at the same
-  time.** Nothing stopped a second engine on a pair that one was already
-  syncing - the desktop app and `filex sync run` in a terminal, or an
-  installed copy of the app and the Microsoft Store one, which reads the same
-  sign-ins and, living in its own virtualised profile, does not see the other
-  copy's single-instance lock. Both planned from the same history, so files
-  were uploaded twice, conflict copies appeared out of nothing and a delete
-  could travel to the side that did not ask for it - silently. Every run now
-  holds an operating-system lock on its pair (`~/.filex/sync/locks/`,
-  `LockFileEx` on Windows, `flock` elsewhere), released by the OS however the
-  process ends. A pair another process holds is left untouched: `filex sync run` says `lock: busy`, syncs the rest and exits with status 4; `--watch`
-  waits and takes the pair over when the other process stops; the desktop app
-  shows *Another filex on this computer is syncing this folder* under it
-  instead of an error, and does not restart its engine.
-
-- **During a storage's first sync, a folder shows everything in it.** A
-  partly catalogued folder - above all the root of a big storage - used to list
-  only the entries the sync had reached so far, for as long as it ran. Until the
-  first sync has finished, a folder is listed from the storage with the
-  catalogue laid over it (ids, owners, thumbnails and tags kept), on every
-  driver.
-- **A full sync that met another writer at a folder no longer skips that
-  folder's contents.** When the insert of a folder row lost a race, the walk
-  gave up on the subtree and the sync finished with a hole in the catalogue;
-  it now carries on with the row the other writer created.
-- **The desktop's upload precondition is judged against the disk when the
-  listing came from the disk.** A file with no catalogue row (or a drifted one)
-  is compared with the file that is actually there, and `expect=none` is
-  refused when a file already sits at that path.
-
-### Security
-
-- **Desktop: the app runs on Electron 44** (Chromium 152, Node 24), up from
-  Electron 31, whose support ended on 2025-01-14 - every Chromium security fix
-  since then was missing from the desktop app. Electron 44 is supported until
-  2027-03-02. **The macOS build now needs macOS 13 (Ventura) or later**; Windows
-  10/11 64-bit and 64-bit Linux are unchanged. An account signed in under the
-  old runtime stays signed in (measured: a profile written by Electron 31 opens
-  signed in under 44, and the other way round). The Windows installer grows
-  from 96 MB to 132 MB: the runtime binary itself grew (181 → 246 MB unpacked;
-  ANGLE is linked into it now) and Chromium ships a DirectX shader compiler
-  (27 MB).
-  Three behaviour changes of the new runtime are handled in the app rather
-  than shipped: a failed browser sign-in still says why (the sign-in window
-  had stopped redrawing when it was sent to the address it was already on),
-  "Copy link" in the share menu waits for the now-asynchronous clipboard, and
-  the Settings folder picker opens where the last pick was made instead of in
-  Downloads every time.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0440---2026-09-25)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.44.0) · `ghcr.io/brf-tech/filex:slim-v0.44.0`
-
 ## Earlier releases
 
-The 121 releases before v0.44.0, in brief. Full notes are on GitHub.
+The 122 releases before v0.44.1, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.44.0](https://github.com/BRF-Tech/filex/releases/tag/v0.44.0) | 25 September 2026 | Big local storages open at once: the new lazy catalogue lists a folder straight from disk and catalogues it behind the listing, with a throttled pass that fills in the rest (or only the folders people visit). |
 | [v0.43.2](https://github.com/BRF-Tech/filex/releases/tag/v0.43.2) | 24 September 2026 | The release that 0.43.1 was meant to be: container images for everything in 0.43.0 (whose images never published), the storage-credential scrub, Berk Başarır's per-tile thumbnail rendering and a desktop sign-in fix for servers… |
 | [v0.43.0](https://github.com/BRF-Tech/filex/releases/tag/v0.43.0) | 24 September 2026 | Apps. filex gains a second kind of plugin: a sandboxed WebAssembly app that adds actions to the file menu, screens filex draws for it, and public pages for people without an account - installed from a GitHub repository, a file or… |
 | [v0.42.2](https://github.com/BRF-Tech/filex/releases/tag/v0.42.2) | 19 September 2026 | A fix release for the issue 32 follow-up and three things that were wrong on screen. The context menu is now the same on Recent, Starred, Shared with me, tag views, the Home cards and the Recently-opened tray as in a folder -… |
@@ -3680,4 +3491,4 @@ The 121 releases before v0.44.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-10-17 from 141 published releases.</small>
+<small>Last refreshed 2026-10-17 from 142 published releases.</small>

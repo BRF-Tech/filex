@@ -368,6 +368,10 @@ describe('the pull requests the land merges', () => {
       const pub = path.join(tmp, 'pub');
       fs.mkdirSync(pub);
       g(pub, 'init', '-q');
+      // landMerge runs git in its own process, without this test's env: the
+      // identity goes in the checkout itself (GitHub's runners have none).
+      g(pub, 'config', 'user.name', 'Release Test');
+      g(pub, 'config', 'user.email', 'release@test.invalid');
       g(pub, 'remote', 'add', 'origin', remote);
       put(pub, 'csv_keep.go', 'package officesave\n\nfunc Keep() {}\n');
       g(pub, 'add', '-A');

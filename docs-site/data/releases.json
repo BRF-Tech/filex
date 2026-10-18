@@ -3,6 +3,21 @@
   "generatedAt": "2026-10-17",
   "releases": [
     {
+      "tag": "v0.57.1",
+      "date": "2026-10-17T16:39:12Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.57.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Fixed\n\n- **A decimal typed into a CSV in ONLYOFFICE keeps the file's comma.** In the\n  Turkish or the German editor a decimal typed with a comma is a number, and\n  the save wrote it with a point: `3,5` typed over as `4,5` in a semicolon\n  file went to the file as `4.5`, and `1,1` as `1.1000000000000001`, in a\n  column of `3,5` and `1250,75` that ONLYOFFICE kept as they were (measured on\n  Docs 9.4.0). A number written with a point that somebody typed, or put in a\n  row they added, is now written with a decimal comma where its column writes\n  one - a file not separated by commas, a column with decimal commas and no\n  decimal point, still standing where it stood, and a number that did not\n  move there from elsewhere in the file - with 16 or 17 significant digits as\n  the shortest decimal that is the same number (`1,1`). An exponent, a\n  percent and a date are written as before. A CSV saved from the Office\n  editor app gets the same rule\n  ([ONLYOFFICE.md → A decimal you type keeps the file's comma](docs/ONLYOFFICE.md#a-decimal-you-type-keeps-the-files-comma)).\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0571---2026-10-17)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.57.1",
+        "ghcr.io/brf-tech/filex:full-v0.57.1"
+      ],
+      "hasDesktop": false,
+      "assetCount": 15
+    },
+    {
       "tag": "v0.57.0",
       "date": "2026-10-17T03:14:26Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.57.0",
