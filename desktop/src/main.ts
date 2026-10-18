@@ -5163,7 +5163,7 @@ function wireIpc(): void {
     // the tray and the window and restarts that account's watchers). With
     // nobody signed in there is no account to write to: the app speaks the
     // system's language and the choice is not offered (app.html).
-    if (patch.locale === 'en' || patch.locale === 'tr') {
+    if (typeof patch.locale === 'string' && /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/i.test(patch.locale)) {
       const acc = activeAccount(state);
       if (acc && !acc.signedOut && (await writeAccountLocale(acc, patch.locale))) {
         applyAccountLocale(acc, patch.locale);

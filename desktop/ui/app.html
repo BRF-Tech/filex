@@ -864,9 +864,13 @@
       // state arrives — the boot screens draw before any IPC — the browser
       // locale is the best guess.
       let LANG = (navigator.language || 'en').toLowerCase().startsWith('tr') ? 'tr' : 'en';
+      function explorerLocale() {
+        // Packs translate the file surfaces; native chrome keeps its fallback.
+        return state.accountLocale || LANG;
+      }
       function applyLang(next) {
         const lang = next === 'tr' || next === 'en' ? next : LANG;
-        if (lang === LANG) return false;
+        const changed = lang !== LANG;
         LANG = lang;
         document.documentElement.lang = lang;
         // The explorer is a web component that WATCHES its config, so the file
@@ -885,9 +889,11 @@
         // switch that leaves half the window in the old language is not a
         // switch. Same rule, same trap: reassign `config`.
         for (const el of document.querySelectorAll('filex-explorer, filex-connections')) {
-          if (el.config) el.config = { ...el.config, locale: lang };
+          if (el.config && el.config.locale !== explorerLocale()) {
+            el.config = { ...el.config, locale: explorerLocale() };
+          }
         }
-        return true;
+        return changed;
       }
       const STRINGS = {
         'boot.no_account':      ['No account is signed in', 'Giriş yapılmış hesap yok'],
@@ -1476,6 +1482,9 @@
         // find the storages itself. Mounting without this produced an empty "/"
         // that never even asked the server for a listing, which reads as a dead
         // connection rather than a missing option.
+        // IPC branding does not populate the bundled explorer's registry.
+        await filexWc.loadLocales({ base: account.serverUrl });
+        if (mountedFor !== account.id) return;
         let storages = [];
         try {
           storages = await window.filexApp.storages(account.id);
@@ -1545,10 +1554,9 @@
           // This device). Touch is untouched: a tap always opens. Default:
           // double-click opens.
           openTrigger: openTriggerPref(),
-          // One language for the whole window. The component defaults to
-          // Turkish, so without this an English desktop showed English chrome
-          // around a Turkish file list.
-          locale: LANG,
+          // Preserve the account language even when native chrome falls back
+          // to a built-in language; the explorer can use server packs.
+          locale: explorerLocale(),
           // Selective sync — folder menus grow "Keep on this computer".
           // The account id is captured HERE, at mount: a rail switch swaps
           // the whole explorer, so these hooks can never cross accounts.
@@ -2539,7 +2547,7 @@
             // fetched from the main process per call rather than handed to
             // this page up front.
             auth: { kind: 'bearer', token: () => window.filexApp.token(active.id) },
-            locale: LANG,
+            locale: explorerLocale(),
             theme: 'auto',
           };
           el.addEventListener('close', () => toggleConnections(false));
