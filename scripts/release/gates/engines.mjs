@@ -58,11 +58,14 @@ async function up() {
 
 function goTest() {
   const backend = path.join(REPO, 'backend');
-  // -timeout 30m: on a slow disk MySQL's DDL alone took internal/db past go
-  // test's default 10 minutes (the 0.50 integration run, a loaded test machine).
-  const test = 'go test -count=1 -timeout 30m -v ./internal/db/...';
+  // -timeout 60m: on a slow disk MySQL's DDL alone took internal/db past go
+  // test's default 10 minutes (the 0.50 integration run, a loaded test machine),
+  // and the package outgrew 30 minutes too: v0.57.2's pretag on the build host
+  // timed out at 30m0s twice (once loaded, once quiet), every engine test
+  // passing, in TestSubtreeQuestionsHoldAtTheEdgeOfTheIndexKeyOnEveryEngine/mysql.
+  const test = 'go test -count=1 -timeout 60m -v ./internal/db/...';
   if (nativeGo()) {
-    return sh('go', ['test', '-count=1', '-timeout', '30m', '-v', './internal/db/...'], {
+    return sh('go', ['test', '-count=1', '-timeout', '60m', '-v', './internal/db/...'], {
       cwd: backend,
       env: { ...process.env, FILEX_TEST_PG_DSN: PG_DSN, FILEX_TEST_MYSQL_DSN: MY_DSN },
     });

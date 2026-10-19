@@ -15457,9 +15457,25 @@ filex-explorer {
   list-style: none;
 }
 .fx-mega__bar {
+  /* The entries are the bar's full height, so a panel hung from one of them
+     (below) still opens at the bar's bottom edge; the button stays centred. */
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+.fx-mega__top {
   display: flex;
   align-items: center;
-  gap: 2px;
+}
+/* A one-column panel hangs from its own button. Hung from the menu's start
+   like the wide ones, "People" and "Maintenance & records" opened under the
+   dashboard link, two or three buttons away from the one that was pressed
+   (the owner's report, 2026-10-19). A one-column panel is 262px: under the
+   last button it still ends inside the 1024px window the bar starts at. The
+   panels with several columns keep the menu's start, where they have room. */
+.fx-mega__top--narrow {
+  position: relative;
 }
 .fx-mega__toplink,
 .fx-mega__topbtn {

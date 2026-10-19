@@ -620,7 +620,17 @@ type Store interface {
 	// fails before a single byte reaches the client, so a storage error does
 	// not silently eat one of the downloads the owner granted.
 	ReleaseShareDownload(ctx context.Context, id int64) error
-	IncrementShareUpload(ctx context.Context, id int64, n int) error
+	// ReserveShareUpload claims n files against a file request's total cap
+	// (max_uploads) and reports whether it got them - the same claim as
+	// ReserveShareDownload, for the same reason: a handler that read
+	// upload_count, wrote the files and only then added to it let every
+	// request that started inside that gap through (GHSA-4pc6-66f4-q2x4: a
+	// link capped at ONE file took fifteen overlapping uploads). A link with
+	// no cap always gets them; its count still moves. Claim, then write.
+	ReserveShareUpload(ctx context.Context, id int64, n int) (bool, error)
+	// ReleaseShareUpload hands back the claimed files that were never written,
+	// so a storage error does not eat the owner's allowance. Never below zero.
+	ReleaseShareUpload(ctx context.Context, id int64, n int) error
 	DeleteShare(ctx context.Context, id int64) error
 	DeleteExpiredShares(ctx context.Context) error
 	// ── App-plugin page shares (00046) ──

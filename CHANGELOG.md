@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.57.2] - 2026-10-19
+
+### Security
+
+- **A file request's total cap holds when uploads overlap**
+  ([GHSA-4pc6-66f4-q2x4](https://github.com/BRF-Tech/filex/security/advisories/GHSA-4pc6-66f4-q2x4)).
+  `max_uploads` was checked against the count the request had read and the
+  count moved only after the files were written, so uploads sent at the same
+  time all passed: a link capped at one file took fifteen concurrent uploads,
+  and where the owner's account has no quota the files could keep coming.
+  A submission's files are now claimed against the cap in one database
+  statement before the first is written, and a file the storage did not take
+  gives its place back. Reported by @Refaelyk.
+
+### Fixed
+
+- **The snap says what a plug allows before it asks you to connect it.** The
+  Snap Store leaves `password-manager-service` and `removable-media` for you
+  to connect, so the desktop app now asks snapd (`snapctl is-connected`)
+  instead of guessing. With the keyring plug not connected, the sign-in window
+  says that connecting it lets filex keep its tokens encrypted in GNOME
+  Keyring or KWallet, gives the snap access to the secrets stored there and
+  lets other apps that reach the keyring read what filex puts there, and only
+  then shows the command; with the plug connected and no keyring answering,
+  it says to start or unlock the keyring. A sync folder chosen under
+  `/media`, `/run/media` or `/mnt` while `removable-media` is not connected
+  ended in a permission error that did not say why; it is now refused with
+  what the plug allows and a button that copies the command
+  ([DESKTOP.md → The plugs you connect](docs/DESKTOP.md#the-plugs-you-connect)).
+- **The desktop app's file list speaks the account's language from a
+  language pack.** The explorer inside the desktop window stayed in English or
+  Turkish when the account used a language a language pack adds on the
+  server: the window never loaded the server's list of languages, and handed
+  the explorer its own built-in fallback instead of the account's language.
+  It now loads the active server's languages before the explorer opens,
+  follows the account's language (the window's own menus keep English or
+  Turkish), forgets the previous server's languages on a server switch and
+  ignores a late answer from it. Contributed by @chengjie (#122).
+- **The admin panel's one-column menus open under their own button.** In the
+  top bar, *People* and *Maintenance & records* opened their panel at the
+  bar's start, under the dashboard link, two or three buttons away from the
+  one that was pressed. A one-column panel now hangs from its own button (in
+  a right-to-left interface, from its right edge); the wide panels with
+  several columns keep the bar's start, where they have room.
+
 ## [0.57.1] - 2026-10-17
 
 ### Fixed

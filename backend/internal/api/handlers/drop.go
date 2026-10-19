@@ -326,6 +326,17 @@ func (h *Drop) refuse(w http.ResponseWriter, r *http.Request, status int, body m
 	writeJSON(w, status, body)
 }
 
+// refuseOverCap answers an upload the link's total cap has no room for:
+// remaining is what the cap leaves. None left is an ended link (410); some is
+// "send fewer" (422).
+func (h *Drop) refuseOverCap(w http.ResponseWriter, r *http.Request, remaining int) {
+	if remaining <= 0 {
+		h.refuse(w, r, http.StatusGone, map[string]any{"error": "expired"})
+		return
+	}
+	h.refuse(w, r, http.StatusUnprocessableEntity, map[string]any{"error": "exceeds_remaining", "remaining": remaining})
+}
+
 // dropWriteCeiling bounds a drop's writes once its request has fully arrived
 // and no longer ends with the client: a storage that stopped answering must
 // not hold the work for ever.
@@ -477,15 +488,12 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 			return
 		}
 	}
-	// Total-files cap across the link's lifetime.
+	// Total-files cap across the link's lifetime: the quick answer, from the
+	// row this request read. It is not the enforcement - the claim before the
+	// first write is.
 	if sh.MaxUploads != nil {
-		remaining := *sh.MaxUploads - sh.UploadCount
-		if remaining <= 0 {
-			h.refuse(w, r, http.StatusGone, map[string]any{"error": "expired"})
-			return
-		}
-		if len(files) > remaining {
-			h.refuse(w, r, http.StatusUnprocessableEntity, map[string]any{"error": "exceeds_remaining", "remaining": remaining})
+		if remaining := *sh.MaxUploads - sh.UploadCount; len(files) > remaining {
+			h.refuseOverCap(w, r, remaining)
 			return
 		}
 	}
@@ -519,12 +527,41 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	if h.refusesE2E(w, r, sh, st, subRel, names) {
 		return
 	}
+	// ⚠⚠ Claim the files against the cap BEFORE anything is written
+	// (GHSA-4pc6-66f4-q2x4). The check above reads the row this request
+	// loaded, and the count used to move only once the files had landed:
+	// every upload that overlapped another read the same count, passed, and
+	// was written - a link capped at ONE file took fifteen concurrent
+	// uploads. The database decides now, in one statement, and what could
+	// not be written is handed back (the deferred release below).
+	claim := len(files)
+	got, err := h.Service.ReserveUpload(r.Context(), sh.ID, claim)
+	if err != nil {
+		h.refuse(w, r, http.StatusInternalServerError, map[string]any{"error": "storage_error"})
+		return
+	}
+	if !got {
+		// The cap as it is now: another upload may have taken the last
+		// places while this one was arriving.
+		remaining := 0
+		if cur, err := h.Store.GetShareByID(r.Context(), sh.ID); err == nil && cur != nil && cur.MaxUploads != nil {
+			remaining = *cur.MaxUploads - cur.UploadCount
+		}
+		h.refuseOverCap(w, r, remaining)
+		return
+	}
+	saved := 0
+	defer func() {
+		if unused := claim - saved; unused > 0 {
+			_ = h.Service.ReleaseUpload(r.Context(), sh.ID, unused)
+		}
+	}()
+
 	if _, err := h.Manager.EnsureDir(r.Context(), st, subRel); err != nil {
 		h.failWrite(w, r, err, "mkdir", st, subRel, 0)
 		return
 	}
 
-	saved := 0
 	// Keep the LAST write error: with `saved == 0` it is the only account of
 	// why nothing landed, and it decides what the visitor is told.
 	var lastErr error
@@ -560,7 +597,6 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 		_, _ = h.Manager.IngestFile(r.Context(), st, subRel, "NOT.txt", strings.NewReader(body), int64(len(body)))
 	}
 
-	_ = h.Service.IncrementUpload(r.Context(), sh.ID, saved)
 	h.notifyOwner(r, sh, node, saved, uploaderName, sub)
 
 	// Live: a public drop created a new submission subfolder — refresh anyone

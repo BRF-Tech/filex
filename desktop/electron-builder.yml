@@ -417,8 +417,8 @@ rpm:
 #     Settings explains the file manager's "Open with" instead of running
 #     `xdg-mime` in the sandbox (defaultHandlerRoute).
 #   - No keyring until `password-manager-service` is connected: the app then
-#     refuses to store the sign-in and says which command connects it
-#     (src/keychain.ts).
+#     refuses to store the sign-in, says what connecting allows and which
+#     command does it (src/keychain.ts, src/snap-plugs.ts).
 snapcraft:
   # ⚠⚠ core24 (#68, 0.55), electron-builder's own core24 build: a
   # snapcraft.yaml with the `gnome` extension (gnome-46-2404, mesa-2404 and
@@ -502,12 +502,15 @@ snapcraft:
       # without it. electron-builder 26 adds one by itself only when `plugs`
       # is not given at all, and then WITH allow-sandbox (below).
       - browser-support
-      # The keyring (libsecret over D-Bus). Does NOT connect by itself: until
-      # it is (`snap connect filex-app:password-manager-service`, or a store
-      # auto-connect grant) Chromium falls back to `basic_text` and the app
-      # refuses to store the sign-in, saying why.
+      # The keyring (libsecret over D-Bus). Does NOT connect by itself, and
+      # the Snap Store declined an auto-connect grant (forum.snapcraft.io/t/
+      # 53584): until `snap connect filex-app:password-manager-service`
+      # Chromium falls back to `basic_text` and the app refuses to store the
+      # sign-in, saying why (src/snap-plugs.ts).
       - password-manager-service
-      # Folders under /media, /run/media and /mnt. Also manual until granted.
+      # Folders under /media, /run/media and /mnt. Also manual (the same
+      # forum thread): a sync folder chosen there is refused with the command
+      # until it is connected (src/snap-plugs.ts).
       - removable-media
       # ⚠⚠ NO `browser-support` plug with `allow-sandbox: true` (removed in
       # 0.52). 0.50 and 0.51 asked for one so Chromium could build its own

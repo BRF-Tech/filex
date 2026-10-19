@@ -220,7 +220,7 @@ watch(currentKey, close);
       <li
         v-for="(entry, i) in shown"
         :key="entry.id"
-        class="fx-mega__top"
+        :class="['fx-mega__top', !isLinkEntry(entry) && (entry.sections?.length ?? 0) <= 1 && 'fx-mega__top--narrow']"
       >
         <a
           v-if="isLinkEntry(entry)"

@@ -124,6 +124,7 @@
       .keychain { margin: 0 0 18px; padding: 12px 14px; border-radius: 8px; font-size: var(--fe-text-sm, 12.5px);
         border: 1px solid var(--fe-danger, LinkText); color: var(--fe-text, CanvasText); }
       .keychain strong { display: block; margin-bottom: 6px; color: var(--fe-danger, LinkText); }
+      .keychain p { margin: 8px 0 0; }
       .keychain code { display: block; margin-top: 8px; padding: 6px 8px; border-radius: 6px; user-select: all;
         font-family: ui-monospace, monospace; background: var(--fe-bg-hover, Canvas); }
     </style>
@@ -171,8 +172,15 @@
         'keychain.title':  ['Your sign-in has nowhere safe to go', 'Oturumunu saklayacak güvenli bir yer yok'],
         'keychain.linux-keyring': ['No keyring answered - neither GNOME Keyring nor KWallet. filex keeps your sign-in only in the keyring and will not write it to disk where anyone who can read the file could use it. Start or unlock your keyring (on a minimal desktop, install gnome-keyring), then restart filex.',
                             'Hiçbir anahtarlık yanıt vermedi - ne GNOME Keyring ne KWallet. filex oturumunu yalnızca anahtarlıkta saklar; dosyayı okuyabilen herkesin kullanabileceği biçimde diske yazmaz. Anahtarlığını başlat ya da kilidini aç (yalın bir masaüstünde gnome-keyring paketini kur), sonra filex’i yeniden başlat.'],
-        'keychain.snap-connect': ['This snap is not connected to your keyring yet, and filex keeps your sign-in only there. Run this once in a terminal, then restart filex:',
-                            'Bu snap henüz anahtarlığına bağlı değil; filex oturumunu yalnızca orada saklar. Bir terminalde bunu bir kez çalıştır, sonra filex’i yeniden başlat:'],
+        // ⚠ What connecting allows comes BEFORE the command (the Snap Store's
+        // condition for leaving the plug to the person, src/snap-plugs.ts):
+        // they decide knowing it, not after running it.
+        'keychain.snap-connect': ['This snap is not connected to your keyring yet, and filex keeps your sign-in only there.',
+                            'Bu snap henüz anahtarlığına bağlı değil; filex oturumunu yalnızca orada saklar.'],
+        'keychain.snap-connect.allows': ['Once connected, filex keeps your sign-in tokens encrypted in the system keyring (GNOME Keyring or KWallet). The connection gives this snap access to the secrets stored in your keyring, and other apps that can reach your keyring can also read the secrets filex puts there.',
+                            'Bağlandığında filex oturum jetonlarını sistemin anahtarlığında (GNOME Keyring ya da KWallet) şifreli tutar. Bu bağlantı snap’e anahtarlığında saklanan sırlara erişim verir; anahtarlığa erişebilen diğer uygulamalar da filex’in oraya koyduğu sırları okuyabilir.'],
+        'keychain.snap-connect.run': ['If that is fine with you, run this once in a terminal, then restart filex:',
+                            'Buna razıysan bir terminalde bunu bir kez çalıştır, sonra filex’i yeniden başlat:'],
         'keychain.os-storage': ['This computer’s secure storage is not available, so filex cannot keep your sign-in. Once it is, restart filex.',
                             'Bu bilgisayarın güvenli depolaması kullanılamıyor; filex oturumunu saklayamaz. Kullanılabilir olduğunda filex’i yeniden başlat.'],
       };
@@ -200,14 +208,17 @@
       // ── Connect: the ONLY thing asked for is where the server is. Credentials
       //    are typed into the server's own login page, in the real browser.
       // Why a sign-in cannot start here, when it cannot (publicState().keychain,
-      // decided in src/keychain.ts). A snap is told the one command that fixes
-      // it — its keyring plug does not connect by itself — spelled by the main
-      // process from the name snapd runs it under (keychainCommand).
+      // decided in src/keychain.ts). A snap whose keyring plug snapd says is
+      // not connected is told what connecting allows, then the one command
+      // that does it, spelled by the main process from the name snapd runs it
+      // under (keychainCommand).
       function keychainNotice() {
         const advice = state && state.keychainAdvice;
         if (!advice) return '';
+        const snap = advice === 'snap-connect';
         return `<div class="keychain" id="keychain"><strong>${esc(T('keychain.title'))}</strong>${esc(T('keychain.' + advice))}${
-          state.keychainCommand ? `<code>${esc(state.keychainCommand)}</code>` : ''}</div>`;
+          snap ? `<p>${esc(T('keychain.snap-connect.allows'))}</p>` : ''}${
+          snap && state.keychainCommand ? `<p>${esc(T('keychain.snap-connect.run'))}</p><code>${esc(state.keychainCommand)}</code>` : ''}</div>`;
       }
 
       function connectView() {

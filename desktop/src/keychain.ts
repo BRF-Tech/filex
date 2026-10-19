@@ -25,10 +25,16 @@
 //    name as well; it is the only way to tell (Electron's own advice).
 //
 // A strict snap sees exactly case 1 until `password-manager-service` is
-// connected (it does not connect by itself), so its advice names the command.
+// connected (it does not connect by itself, and the Snap Store declined to
+// auto-connect it: src/snap-plugs.ts), so its advice names the command - after
+// saying what connecting it allows. Whether the plug is connected is asked of
+// snapd (`snapctl is-connected`): when it is, the command would change nothing
+// and the keyring itself is what did not answer.
 //
 // ⚠ No `electron` import, so node:test can drive it; src/accounts.ts feeds it
 // what safeStorage reports.
+
+import type { PlugState } from './snap-plugs.ts';
 
 /**
  * ok           — the keychain encrypts; the store may be read and written.
@@ -61,17 +67,36 @@ export function keychainState(p: KeychainProbe): KeychainState {
 /**
  * What the sign-in window tells the person, when a sign-in cannot be kept.
  *
- *   snap-connect   a snap: its keyring plug is not connected — one command.
- *   linux-keyring  another Linux package: no keyring answered — start or
- *                  install one (GNOME Keyring, KWallet).
+ *   snap-connect   a snap: its keyring plug is not connected — what that
+ *                  allows, and one command.
+ *   linux-keyring  another Linux package, or a snap whose plug snapd says IS
+ *                  connected: no keyring answered — start or install one
+ *                  (GNOME Keyring, KWallet).
  *   os-storage     Windows/macOS: the OS's own storage is not available.
+ *
+ * `keyringPlug` is `snapctl is-connected password-manager-service` in a snap
+ * (src/snap-plugs.ts). Not known (no answer, or not asked) keeps the snap
+ * advice.
  */
 export type KeychainAdvice = 'snap-connect' | 'linux-keyring' | 'os-storage';
 
-export function keychainAdvice(k: KeychainState, platform: string, channel: string | null): KeychainAdvice | null {
+export function keychainAdvice(
+  k: KeychainState,
+  platform: string,
+  channel: string | null,
+  keyringPlug: PlugState = 'unknown',
+): KeychainAdvice | null {
   if (k === 'ok') return null;
-  if (platform === 'linux') return channel === 'snap' ? 'snap-connect' : 'linux-keyring';
+  if (platform === 'linux') {
+    if (channel !== 'snap') return 'linux-keyring';
+    return keyringPlug === 'connected' ? 'linux-keyring' : 'snap-connect';
+  }
   return 'os-storage';
+}
+
+/** The command the sign-in window shows under `advice`: only the snap advice has one. */
+export function keychainCommand(advice: KeychainAdvice | null, env: Record<string, string | undefined>): string | null {
+  return advice === 'snap-connect' ? snapConnectCommand(env) : null;
 }
 
 /**
@@ -84,5 +109,5 @@ export function keychainAdvice(k: KeychainState, platform: string, channel: stri
  */
 export function snapConnectCommand(env: Record<string, string | undefined>, plug = 'password-manager-service'): string | null {
   const name = env.SNAP_INSTANCE_NAME || env.SNAP_NAME;
-  return name ? `snap connect ${name}:${plug}` : null;
+  return name ? `sudo snap connect ${name}:${plug}` : null;
 }

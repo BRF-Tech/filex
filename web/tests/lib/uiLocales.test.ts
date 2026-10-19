@@ -223,3 +223,39 @@ describe('what the instance offers', () => {
     expect(hasLocale('fa')).toBe(true);
   });
 });
+
+describe('switching desktop servers', () => {
+  const answer = (code: string) => ({
+    ok: true,
+    json: async () => ({ ui_locales: [{ code, source: 'plugin' }] }),
+  } as Response);
+
+  it('a failed new server cannot retain the previous server language pack', async () => {
+    await loadLocales({ base: 'https://first.test', fetchImpl: vi.fn(async () => answer('es')) });
+    expect(hasLocale('es')).toBe(true);
+    await loadLocales({ base: 'https://second.test', fetchImpl: vi.fn(async () => { throw new Error('offline'); }) });
+    expect(availableLocales().map((l) => l.code)).toEqual(['en', 'tr']);
+    expect(localesKnown.value).toBe(true);
+    expect(localeTable('es')['ctx.download']).toBe(localeTable('en')['ctx.download']);
+  });
+
+  it('an older branding body cannot replace the active server registry', async () => {
+    let finish!: (value: unknown) => void;
+    const body = new Promise((resolve) => { finish = resolve; });
+    const old = loadLocales({ base: 'https://first.test', fetchImpl: vi.fn(async () => ({ ok: true, json: () => body } as Response)) });
+    await loadLocales({ base: 'https://second.test', fetchImpl: vi.fn(async () => answer('ja')) });
+    finish({ ui_locales: [{ code: 'es', source: 'plugin' }] });
+    await old;
+    expect(availableLocales().map((l) => l.code)).toEqual(['en', 'tr', 'ja']);
+  });
+
+  it('a late response after reset does not restore removed languages', async () => {
+    let finish!: (value: Response) => void;
+    const old = loadLocales({ base: 'https://first.test', fetchImpl: vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; })) });
+    resetLocales();
+    finish(answer('es'));
+    await old;
+    expect(hasLocale('es')).toBe(false);
+    expect(localesKnown.value).toBe(false);
+  });
+});

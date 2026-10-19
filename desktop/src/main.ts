@@ -49,7 +49,8 @@ import {
 } from './accounts.js';
 import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } from './browser-auth.js';
 import { failureOf, signInView, type SignInFailure } from './signin-flow.js';
-import { keychainAdvice, snapConnectCommand } from './keychain.js';
+import { keychainAdvice, keychainCommand } from './keychain.js';
+import { snapPlugState, syncFolderAdvice, type PlugAdvice, type PlugState } from './snap-plugs.js';
 import {
   APPIMAGE_DESKTOP_ENTRY,
   CURRENT_CHANNEL,
@@ -1643,8 +1644,19 @@ const rootMoves = new Set<string>();
  *  sentence, `filex sync window --json`), until a window is accepted. */
 let syncWindowProblem: string | null = null;
 
+/**
+ * In the snap, with no usable keychain: whether snapd says the keyring plug
+ * (`password-manager-service`) is connected (src/snap-plugs.ts). Asked once
+ * at start - the keychain is chosen at start too, so connecting the plug
+ * means a restart either way - and `state:get` waits for the answer, so the
+ * sign-in window's first drawing already has it.
+ */
+let keyringPlug: PlugState = 'unknown';
+let keyringPlugAsked: Promise<void> = Promise.resolve();
+
 function publicState() {
   const keychainNow = keychain();
+  const keychainAdviceNow = keychainAdvice(keychainNow, process.platform, CURRENT_CHANNEL, keyringPlug);
   return {
     rootMoving: [...rootMoves],
     accounts: state.accounts.map(({ token, ...rest }) => rest), // never hand the token to a renderer
@@ -1720,9 +1732,10 @@ function publicState() {
     // (src/keychain.ts). Anything but 'ok' and the sign-in window explains it
     // instead of starting a sign-in it would have to throw away.
     keychain: keychainNow,
-    keychainAdvice: keychainAdvice(keychainNow, process.platform, CURRENT_CHANNEL),
-    // The exact command for a snap (its name comes from snapd, not from us).
-    keychainCommand: CURRENT_CHANNEL === 'snap' ? snapConnectCommand(process.env) : null,
+    keychainAdvice: keychainAdviceNow,
+    // The exact command for a snap whose keyring plug is not connected (its
+    // name comes from snapd, not from us); null for every other advice.
+    keychainCommand: keychainCommand(keychainAdviceNow, process.env),
     // Another copy of filex on this computer: the Store copy found the
     // filex.sh copy ('direct'), or a .deb/.rpm/AppImage copy found the snap
     // ('snap'). Settings says so and how to remove one (src/channel.ts →
@@ -1860,6 +1873,19 @@ const SYNC_STRINGS: Bilingual = {
     'Pick a folder that is not inside the current one (and does not contain it).',
     'Şu ankinin içinde olmayan (ve onu içermeyen) bir klasör seç.',
   ],
+  // A folder under /media, /run/media or /mnt, chosen in the snap while its
+  // removable-media plug is not connected (src/snap-plugs.ts): nothing is
+  // paired, and this says what connecting allows before the command.
+  mediaTitle: ['filex cannot reach this folder yet', 'filex bu klasöre henüz erişemiyor'],
+  mediaMessage: [
+    '{dir} is on a removable drive or a mounted disk, and this snap is not connected to them yet.',
+    '{dir} çıkarılabilir bir sürücüde ya da bağlanmış bir diskte; bu snap henüz onlara bağlı değil.',
+  ],
+  mediaDetail: [
+    'Connecting lets filex read and write every folder under /media, /run/media and /mnt - all of them, not only this one. If that is fine with you, run this once in a terminal, then choose the folder again:\n\n{command}',
+    'Bağlandığında filex /media, /run/media ve /mnt altındaki her klasörü okuyup yazabilir - yalnızca bunu değil, hepsini. Buna razıysan bir terminalde bunu bir kez çalıştır, sonra klasörü yeniden seç:\n\n{command}',
+  ],
+  mediaCopy: ['Copy the command', 'Komutu kopyala'],
   unexpectedTitle: ['filex hit an unexpected error', 'filex beklenmedik bir hatayla karşılaştı'],
   discardTitle: ['Delete held items from this computer', 'Bekleyen öğeleri bu bilgisayardan sil'],
   discardMessageOne: ['Delete the 1 held item from this computer?', 'Bekleyen 1 öğe bu bilgisayardan silinsin mi?'],
@@ -2206,6 +2232,57 @@ async function askChoice(opts: Electron.MessageBoxOptions): Promise<number> {
   return response;
 }
 
+/**
+ * The picker for a folder to sync into: every place a sync folder is chosen
+ * (a pair in Settings, the keep flow's root, a moved root) comes through here.
+ *
+ * ⚠ The snap reaches /media, /run/media and /mnt only once its
+ * `removable-media` plug is connected, which the person does by hand (the
+ * Snap Store declined to auto-connect it). A folder there, chosen while
+ * snapd says the plug is not connected, is refused here with the reason and
+ * the command, instead of being handed on to end in a permission error that
+ * does not say why (EACCES from AppArmor). An answer snapd did not give goes
+ * ahead as chosen (src/snap-plugs.ts → syncFolderAdvice).
+ */
+async function pickSyncFolder(opts: { title?: string; buttonLabel?: string; defaultPath?: string } = {}): Promise<string | null> {
+  const dir = await pickDirectory(opts);
+  if (!dir) return null;
+  const advice = await syncFolderAdvice(dir, CURRENT_CHANNEL, process.env);
+  if (!advice) return dir;
+  await explainRemovableMedia(dir, advice);
+  return null;
+}
+
+/** What connecting `removable-media` allows, then the command, with a button
+ *  that copies it. Logged, and no dialog under the automated-run flag (the
+ *  same convention as tellUser). */
+async function explainRemovableMedia(dir: string, advice: PlugAdvice): Promise<void> {
+  log('sync', 'a folder under the removable-media roots was chosen while the snap plug is not connected; nothing paired', {
+    dir,
+    command: advice.command,
+  });
+  if (process.env.FILEX_NO_BROWSER === '1') return;
+  const command = advice.command;
+  const buttons = command ? [syncText('mediaCopy'), openText('ok')] : [openText('ok')];
+  const opts: Electron.MessageBoxOptions = {
+    type: 'warning',
+    title: syncText('mediaTitle'),
+    message: syncText('mediaMessage', { dir }),
+    // ⚠ No snap name is typed out: snapd names it (snapConnectCommand), and in
+    // the snap channel it always does - SNAP_NAME is half of how the channel
+    // is recognised. The placeholder is only a type's fallback.
+    detail: syncText('mediaDetail', { command: command ?? `sudo snap connect <snap>:${advice.plug}` }),
+    buttons,
+    defaultId: 0,
+    cancelId: buttons.length - 1,
+    noLink: true,
+  };
+  const { response } = await (mainWindow ? dialog.showMessageBox(mainWindow, opts) : dialog.showMessageBox(opts)).catch(
+    () => ({ response: -1 }),
+  );
+  if (command && response === 0) clipboard.writeText(command);
+}
+
 /** `~/filex/<host>`, in the home the user's file manager opens — not a
  *  snap's private `HOME` (src/channel.ts → userHome). */
 function defaultSyncRoot(acc: Account): string {
@@ -2227,7 +2304,7 @@ async function ensureSyncRoot(acc: Account): Promise<string | null> {
   if (acc.syncRoot) return acc.syncRoot;
   const def = defaultSyncRoot(acc);
   await fs.promises.mkdir(def, { recursive: true });
-  const dir = await pickDirectory({
+  const dir = await pickSyncFolder({
     title: syncText('rootTitle'),
     buttonLabel: syncText('rootButton'),
     defaultPath: def,
@@ -4649,7 +4726,12 @@ function runMountHelper(
 }
 
 function wireIpc(): void {
-  ipcMain.handle('state:get', () => publicState());
+  // Waits for snapd's answer about the keyring plug (asked once, at start), so
+  // the sign-in window's first drawing gives the right advice.
+  ipcMain.handle('state:get', async () => {
+    await keyringPlugAsked;
+    return publicState();
+  });
 
   ipcMain.handle('auth:begin', (_e, serverUrl: string) => {
     // ⚠ Refused before the browser opens: a sign-in whose token could not be
@@ -5163,7 +5245,7 @@ function wireIpc(): void {
     // the tray and the window and restarts that account's watchers). With
     // nobody signed in there is no account to write to: the app speaks the
     // system's language and the choice is not offered (app.html).
-    if (patch.locale === 'en' || patch.locale === 'tr') {
+    if (typeof patch.locale === 'string' && /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/i.test(patch.locale)) {
       const acc = activeAccount(state);
       if (acc && !acc.signedOut && (await writeAccountLocale(acc, patch.locale))) {
         applyAccountLocale(acc, patch.locale);
@@ -5189,7 +5271,7 @@ function wireIpc(): void {
     if (!remote.includes('://')) {
       throw new Error('Enter the server folder as storage://path, for example docs://reports');
     }
-    const localDir = await pickDirectory();
+    const localDir = await pickSyncFolder();
     if (!localDir) return publicState();
     await addPair(localDir, remote, acc.id);
     await refreshPairs();
@@ -5607,7 +5689,7 @@ function wireIpc(): void {
     if (rootMoves.has(acc.id)) return publicState();
     const def = acc.syncRoot ?? defaultSyncRoot(acc);
     await fs.promises.mkdir(def, { recursive: true });
-    const newRoot = await pickDirectory({
+    const newRoot = await pickSyncFolder({
       title: syncText('rootTitle'),
       buttonLabel: syncText('rootButton'),
       defaultPath: def,
@@ -5925,6 +6007,15 @@ if (!app.requestSingleInstanceLock()) {
       // this is what a bug report carries (src/keychain.ts).
       const k = keychain();
       if (k !== 'ok') log('keychain', 'no usable OS keychain - accounts are neither read nor stored', { state: k });
+      // In the snap, whether the keyring plug is connected decides the advice
+      // (src/keychain.ts → keychainAdvice); snapd is asked only when there is
+      // advice to give.
+      if (k !== 'ok' && CURRENT_CHANNEL === 'snap') {
+        keyringPlugAsked = snapPlugState('password-manager-service').then((plug) => {
+          keyringPlug = plug;
+          log('keychain', 'snapctl is-connected password-manager-service', { plug });
+        });
+      }
     }
     wireAuthHeaderInjection();
     // The supervisor keeps a `filex sync run --watch` alive per account. It is

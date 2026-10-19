@@ -84,3 +84,19 @@ func updateAtRev(ctx context.Context, pool *sql.DB, what string, rev *int64, fro
 	*rev = from + 1
 	return true, nil
 }
+
+// Claimed reads a conditional UPDATE's answer: whether it changed a row. It is
+// a cap's whole enforcement (ReserveShareDownload, ReserveShareUpload in every
+// driver): the database, not a count read earlier, decides whether a place was
+// left. Every claim it reads adds to a counter, so a matched row is a changed
+// row (MySQL counts changed rows).
+func Claimed(res sql.Result, err error) (bool, error) {
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}

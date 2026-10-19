@@ -280,12 +280,15 @@ the `snapcraft:` block of `electron-builder.yml`):
   real `~/.filex` is a hidden directory the `home` interface does not reach.
   ⚠ A terminal `filex sync` outside the snap therefore does not see the snap's
   pairings.
-- Two plugs do not connect by themselves: `snap connect
-  filex-app:password-manager-service` (the keyring; until then the sign-in
-  window says so - with the command spelled from the snap's own name - and
-  does not start a sign-in) and `snap connect filex-app:removable-media`
-  (folders under `/media`, `/run/media`, `/mnt`). 0.50 and 0.51 had a third,
-  `browser-sandbox`; it is gone (below).
+- Two plugs do not connect by themselves (the Snap Store declined to
+  auto-connect them): `sudo snap connect filex-app:password-manager-service` (the
+  keyring) and `sudo snap connect filex-app:removable-media` (folders under
+  `/media`, `/run/media`, `/mnt`). The app asks snapd (`snapctl is-connected`,
+  `src/snap-plugs.ts`) and, when a plug is not connected, says what connecting
+  it allows before the command spelled from the snap's own name: the sign-in
+  window does not start a sign-in, and a sync folder chosen under those roots
+  is not paired. An answer snapd does not give changes nothing. 0.50 and 0.51
+  had a third, `browser-sandbox`; it is gone (below).
 - `filex://` and "Open with" come from the desktop entry snapd installs
   (`filex-app_filex-app.desktop`). "Make filex the default" cannot reach the
   desktop from inside the snap, so Settings explains the file manager's *Open

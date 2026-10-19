@@ -331,10 +331,18 @@ func (s *Service) ReleaseDownload(ctx context.Context, id int64) error {
 	return s.store.ReleaseShareDownload(context.WithoutCancel(ctx), id)
 }
 
-// IncrementUpload bumps a drop link's received-file counter by n. Feeds the
-// MaxUploads cap enforced by Share.IsExpired.
-func (s *Service) IncrementUpload(ctx context.Context, id int64, n int) error {
-	return s.store.IncrementShareUpload(ctx, id, n)
+// ReserveUpload claims n files against a drop link's total cap (MaxUploads)
+// BEFORE they are written, and reports whether it got them. False means fewer
+// than n are left and the caller must write nothing. Detached from the request
+// for the reason ReserveDownload is.
+func (s *Service) ReserveUpload(ctx context.Context, id int64, n int) (bool, error) {
+	return s.store.ReserveShareUpload(context.WithoutCancel(ctx), id, n)
+}
+
+// ReleaseUpload hands back claimed files that were never written. A file that
+// landed is a file received, and stays counted.
+func (s *Service) ReleaseUpload(ctx context.Context, id int64, n int) error {
+	return s.store.ReleaseShareUpload(context.WithoutCancel(ctx), id, n)
 }
 
 // ListByNode returns all shares pointing at a given node.

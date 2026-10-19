@@ -49,11 +49,14 @@ func TestGrants_UnqualifiedPathIsRejected(t *testing.T) {
 // createRBACStorage makes an RBAC-enabled local storage and returns its id.
 func createRBACStorage(t *testing.T, baseURL string, client *http.Client, name string) int64 {
 	t.Helper()
+	// The path is escaped: a Windows temp dir's backslashes are not valid JSON
+	// as they stand, and the storage was refused with "bad json" before the
+	// test began.
 	status, raw := doReq(t, client, http.MethodPost, baseURL+"/api/admin/storages", model.Storage{
 		Name:        name,
 		Driver:      "local",
 		MountPath:   "/" + name,
-		ConfigJSON:  json.RawMessage(`{"path":"` + t.TempDir() + `"}`),
+		ConfigJSON:  json.RawMessage(`{"path":"` + escapeJSON(t.TempDir()) + `"}`),
 		SyncMode:    model.SyncModeOnDemand,
 		Enabled:     true,
 		RBACEnabled: true,

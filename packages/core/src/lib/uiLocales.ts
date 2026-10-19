@@ -437,6 +437,10 @@ export function setLocalesFromBranding(
  * would keep somebody's interface in a language nothing can serve.
  */
 export async function loadLocales(opts: LoadLocalesOptions = {}): Promise<PublicLocaleOption[]> {
+  if (apiRootOr(source.base) !== apiRootOr(opts.base)) {
+    setLocales([]);
+    localesKnown.value = false;
+  }
   source = opts;
   const doFetch = opts.fetchImpl ?? (typeof fetch === 'function' ? fetch : null);
   if (!doFetch) return availableLocales();
@@ -449,13 +453,19 @@ export async function loadLocales(opts: LoadLocalesOptions = {}): Promise<Public
       credentials: 'same-origin',
     });
     if (res.ok) {
-      setLocalesFromBranding((await res.json()) as PublicBranding);
+      const branding = (await res.json()) as PublicBranding;
+      // Another server (or sign-out) may have replaced this request while
+      // either the headers or body were in flight.
+      if (source !== opts) return availableLocales();
+      setLocalesFromBranding(branding);
       return availableLocales();
     }
   } catch {
     /* the two built-in languages are a perfectly good answer */
   }
-  localesKnown.value = true;
-  localesVersion.value += 1;
+  if (source === opts) {
+    localesKnown.value = true;
+    localesVersion.value += 1;
+  }
   return availableLocales();
 }

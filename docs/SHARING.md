@@ -374,6 +374,17 @@ per-file size, an optional extension allowlist, an optional PIN, an expiry, a
 lifetime `max_uploads` cap, and **per-IP rate limiting** on the anonymous upload
 endpoint. Read-only storages reject drops.
 
+**The upload cap is exact.** A submission's files are claimed against
+`max_uploads` *before* the first one is written, in one database statement, so
+"accept 5 files" takes five even when several people send at once. (Until
+0.57.2 the count moved only after the files had landed, so every upload that
+began while another was still writing read the same count and was let through:
+a link capped at ONE file took fifteen concurrent uploads - GHSA-4pc6-66f4-q2x4.)
+An upload refused by the cap writes nothing - `410 expired` when no place is
+left, `422 exceeds_remaining` with the `remaining` count when fewer places are
+left than files sent - and a file the storage did not take gives its place
+back.
+
 **The creator's own limits apply too.** What is dropped lands in the
 creator's storage as the creator's file, so their role's limits hold on top
 of the link's: a file type their role blocks is refused (`415

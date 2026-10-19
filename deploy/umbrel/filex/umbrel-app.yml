@@ -2,10 +2,13 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.57.1"
+version: "0.57.2"
 releaseNotes: |-
-  filex v0.57.1 - 2026-10-17
-  • A decimal typed into a CSV in ONLYOFFICE keeps the file's comma.
+  filex v0.57.2 - 2026-10-19
+  • A file request's total cap holds when uploads overlap
+  • The snap says what a plug allows before it asks you to connect it.
+  • The desktop app's file list speaks the account's language from a language pack.
+  • The admin panel's one-column menus open under their own button.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

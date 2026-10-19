@@ -2312,16 +2312,8 @@ func (s *Store) IncrementShareVisit(ctx context.Context, id int64) error {
 // statement, so overlapping requests cannot all pass a check that each of them
 // read before any of them wrote. False = the cap is already spent.
 func (s *Store) ReserveShareDownload(ctx context.Context, id int64) (bool, error) {
-	res, err := s.conn(ctx).ExecContext(ctx, `UPDATE shares SET download_count = download_count + 1
-		WHERE id=? AND (max_downloads IS NULL OR download_count < max_downloads)`, id)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
+	return db.Claimed(s.conn(ctx).ExecContext(ctx, `UPDATE shares SET download_count = download_count + 1
+		WHERE id=? AND (max_downloads IS NULL OR download_count < max_downloads)`, id))
 }
 
 // ReleaseShareDownload hands a reserved slot back, never below zero.
@@ -2331,8 +2323,24 @@ func (s *Store) ReleaseShareDownload(ctx context.Context, id int64) error {
 	return err
 }
 
-func (s *Store) IncrementShareUpload(ctx context.Context, id int64, n int) error {
-	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE shares SET upload_count = upload_count + ? WHERE id=?`, n, id)
+// ReserveShareUpload claims n files against a file request's total cap in a
+// single statement, the upload side of ReserveShareDownload. False = fewer
+// than n are left.
+func (s *Store) ReserveShareUpload(ctx context.Context, id int64, n int) (bool, error) {
+	if n < 1 {
+		return false, nil
+	}
+	return db.Claimed(s.conn(ctx).ExecContext(ctx, `UPDATE shares SET upload_count = upload_count + ?
+		WHERE id=? AND (max_uploads IS NULL OR upload_count + ? <= max_uploads)`, n, id, n))
+}
+
+// ReleaseShareUpload hands n claimed files back, never below zero.
+func (s *Store) ReleaseShareUpload(ctx context.Context, id int64, n int) error {
+	if n < 1 {
+		return nil
+	}
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE shares
+		SET upload_count = CASE WHEN upload_count > ? THEN upload_count - ? ELSE 0 END WHERE id=?`, n, n, id)
 	return err
 }
 

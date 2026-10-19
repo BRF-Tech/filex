@@ -439,6 +439,8 @@ declare global {
 }
 
 export type { ExplorerConfig } from '@brftech/filex-core';
+// Share the source registry used by the bundled explorer, not a second core build.
+export { loadLocales } from '../../core/src/lib/uiLocales';
 /* #196 - a host's own sign-out (the desktop app) forgets the menu answers the
  * explorer remembered on this browser, as the web app's sign-out does. */
 export { clearMenuAnswers } from '@brftech/filex-core';

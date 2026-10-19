@@ -48,7 +48,7 @@ The desktop app is **`filex-app`** in every one of them; plain `filex` is the
 
 | Platform | Command | Notes |
 |---|---|---|
-| Ubuntu and other Linux with snapd | `sudo snap install filex-app` | The Snap Store build, for x64 and arm64 (snapd picks the one for the machine). To keep the sign-in in your keyring: `sudo snap connect filex-app:password-manager-service` (the app says when it is needed). See [the snap and the sandbox](#the-snap-and-the-sandbox), and for the nightly build [the Snap Store's channels](#the-snap-stores-channels). |
+| Ubuntu and other Linux with snapd | `sudo snap install filex-app` | The Snap Store build, for x64 and arm64 (snapd picks the one for the machine). Two plugs are yours to connect, and the app asks for each only when it is needed, saying first what it allows: `password-manager-service` to keep the sign-in in your keyring, `removable-media` to sync a folder under `/media`, `/run/media` or `/mnt`. See [the plugs you connect](#the-plugs-you-connect), [the snap and the sandbox](#the-snap-and-the-sandbox), and for the nightly build [the Snap Store's channels](#the-snap-stores-channels). |
 | macOS 13+ (Apple Silicon) | `brew install brf-tech/filex/filex-app` | Homebrew tap [`BRF-Tech/homebrew-filex`](https://github.com/BRF-Tech/homebrew-filex); `brew upgrade` keeps it current (the Mac app does not update itself). The app is not signed with a Developer ID, so the first launch is blocked once, as below. |
 | Windows 10/11 | [Microsoft Store](https://apps.microsoft.com/detail/9PKXDJLVZWXW) - *filex File Manager* | **The one code-signed Windows build** (Microsoft signs it): no SmartScreen prompt, and the Store updates it. Beside the installer below, both read the same accounts and folders (App settings says so). |
 | Windows 10/11 | `winget install BRFTech.filex-app` - **not installable yet** | The same per-user installer as the download below, updating itself the same way. The desktop app's package is still waiting for its first review by the winget moderators, and until it is approved no release touches it - a new submission would put it back at the end of their queue - so `winget` does not find it yet; once approved, every release updates it. The [CLI](CLI.md)'s package, `BRFTech.filex`, is on winget already. |
@@ -191,6 +191,29 @@ for x64 and arm64. Its first install also brings the GNOME 46 runtime
 (`gtk-common-themes`), which other snaps share. The window opens through X11
 (XWayland on a Wayland desktop). Every release installs the snap on x64 and
 arm64 Ubuntu 24.04 machines and checks this confinement before it publishes.
+
+#### The plugs you connect
+
+Two of the snap's plugs reach more than the app's own files, so connecting
+them is your choice and the Snap Store does not connect them for you. The app
+asks snapd whether each is connected (`snapctl is-connected`) and, when one is
+not, says what connecting it allows before it shows the command:
+
+| Plug | What connecting it allows | When the app asks |
+|---|---|---|
+| `password-manager-service` | filex keeps your sign-in tokens encrypted in the system keyring (GNOME Keyring or KWallet). The plug gives the snap access to the secrets stored in your keyring, and other apps that can reach your keyring can also read the secrets filex puts there. | Before the first sign-in. Without a keyring filex keeps no sign-in at all (never on disk in plain text), so the sign-in window explains this and shows the command instead of starting a sign-in. |
+| `removable-media` | filex reads and writes every folder under `/media`, `/run/media` and `/mnt`, not only the one you chose. | When you choose a folder there to sync into: a folder in *App settings → Synced folders*, the filex folder that *Keep on this computer* asks for, or a new place for it ([The filex folder on this computer](#the-filex-folder-on-this-computer)). Nothing is paired or moved; the message says what the plug allows and has a button that copies the command. |
+
+```bash
+sudo snap connect filex-app:password-manager-service   # then restart filex
+sudo snap connect filex-app:removable-media            # then choose the folder again
+```
+
+The command the app shows names the snap as snapd runs it, so a parallel
+install (`filex-app_beta`) gets its own name. When snapd says the keyring plug
+is connected and the keyring still does not answer, the sign-in window says to
+start or unlock the keyring instead. When snapd gives no answer, the sign-in
+window shows the command and a folder is paired as chosen.
 
 ### The Snap Store's channels
 
