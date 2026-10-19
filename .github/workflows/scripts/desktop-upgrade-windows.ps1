@@ -84,10 +84,14 @@ function Get-Numbers([string] $v) {
   return $v
 }
 
+# A process's Path is read ONCE: Process.Path asks Windows each time it is read,
+# and a copy that is exiting answers the first read and not the second - the
+# arm64 check of v0.57.2's tag run stopped on "You cannot call a method on a
+# null-valued expression" between the two.
 function Stop-App {
-  Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force
+  Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $p = $_.Path; $p -and $p.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force
   for ($i = 0; $i -lt 15; $i++) {
-    $left = Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) }
+    $left = Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $p = $_.Path; $p -and $p.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) }
     if (-not $left) { return }
     Start-Sleep -Seconds 1
   }
@@ -150,7 +154,7 @@ if ($code -ne 0) { Fail "this installer, run as the updater runs it, exited $cod
 # The relaunch --force-run asks for (reported only, see the top).
 $back = $false
 for ($i = 0; $i -lt 30; $i++) {
-  if (Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) }) { $back = $true; break }
+  if (Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $p = $_.Path; $p -and $p.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) }) { $back = $true; break }
   Start-Sleep -Seconds 2
 }
 if ($back) { Write-Host 'the app came back after the update (--force-run)' }
