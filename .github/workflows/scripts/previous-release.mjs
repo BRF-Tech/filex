@@ -57,11 +57,23 @@ export function compareVersions(a, b) {
 /**
  * The newest published release lower than `below`, from GitHub's list
  * (objects with tag_name, draft, prerelease, assets). null when none is.
+ *
+ * With `wanted` (asset names), the newest one that carries every one of
+ * them: a release that reached the server alone (a server patch, #252)
+ * publishes no desktop packages, and there is nothing to update FROM in it.
+ * v0.57.2's dry run picked v0.57.1, a server patch, and every Linux row
+ * stopped on "the previous release has no filex-desktop-amd64.deb". When no
+ * older release carries them all, the newest older one, as before.
  */
-export function previousRelease(releases, below) {
+export function previousRelease(releases, below, wanted = []) {
   if (!parseVersion(below)) throw new Error(`not a version: ${below}`);
   const older = releases.filter((r) => !r.draft && !r.prerelease && parseVersion(r.tag_name) && compareVersions(r.tag_name, below) < 0);
   older.sort((a, b) => compareVersions(b.tag_name, a.tag_name));
+  if (wanted.length) {
+    const has = (r) => wanted.every((n) => (r.assets ?? []).some((a) => a.name === n));
+    const full = older.find(has);
+    if (full) return full;
+  }
   return older[0] ?? null;
 }
 
@@ -108,7 +120,7 @@ function parse(argv) {
 
 async function main(argv) {
   const o = parse(argv);
-  const prev = previousRelease(await listReleases(o.repo), o.below);
+  const prev = previousRelease(await listReleases(o.repo), o.below, o.assets);
   if (!prev) {
     console.error(`${o.repo} has no published release below ${o.below}`);
     return 1;
