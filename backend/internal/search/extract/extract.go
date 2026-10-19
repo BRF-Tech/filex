@@ -42,6 +42,21 @@ type Extractor interface {
 	Extract(ctx context.Context, r io.Reader, limit int64) (string, error)
 }
 
+// Isolated marks an extractor whose parser runs in a process of its own
+// (internal/search/extract/contain, GitHub #123). A parser that walks a
+// document's structure - PDF objects, an office archive's XML - can be led by
+// one file into memory without end, and inside filex that takes the whole
+// server down with it; in a child it takes only the child.
+type Isolated interface {
+	Isolated() bool
+}
+
+// Isolate reports whether e runs in a process of its own.
+func Isolate(e Extractor) bool {
+	i, ok := e.(Isolated)
+	return ok && i.Isolated()
+}
+
 var (
 	regMu      sync.RWMutex
 	extractors []Extractor

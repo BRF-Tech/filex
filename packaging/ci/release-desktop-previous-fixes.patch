@@ -1,0 +1,68 @@
+diff --git a/.github/workflows/scripts/desktop-upgrade-windows.ps1 b/.github/workflows/scripts/desktop-upgrade-windows.ps1
+index 83f50d4b..712e8c21 100644
+--- a/.github/workflows/scripts/desktop-upgrade-windows.ps1
++++ b/.github/workflows/scripts/desktop-upgrade-windows.ps1
+@@ -84,10 +84,14 @@ function Get-Numbers([string] $v) {
+   return $v
+ }
+ 
++# A process's Path is read ONCE: Process.Path asks Windows each time it is read,
++# and a copy that is exiting answers the first read and not the second - the
++# arm64 check of v0.57.2's tag run stopped on "You cannot call a method on a
++# null-valued expression" between the two.
+ function Stop-App {
+-  Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force
++  Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $p = $_.Path; $p -and $p.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force
+   for ($i = 0; $i -lt 15; $i++) {
+-    $left = Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) }
++    $left = Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $p = $_.Path; $p -and $p.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) }
+     if (-not $left) { return }
+     Start-Sleep -Seconds 1
+   }
+@@ -150,7 +154,7 @@ if ($code -ne 0) { Fail "this installer, run as the updater runs it, exited $cod
+ # The relaunch --force-run asks for (reported only, see the top).
+ $back = $false
+ for ($i = 0; $i -lt 30; $i++) {
+-  if (Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) }) { $back = $true; break }
++  if (Get-Process filex -ErrorAction SilentlyContinue | Where-Object { $p = $_.Path; $p -and $p.StartsWith($Home_, [StringComparison]::OrdinalIgnoreCase) }) { $back = $true; break }
+   Start-Sleep -Seconds 2
+ }
+ if ($back) { Write-Host 'the app came back after the update (--force-run)' }
+diff --git a/.github/workflows/scripts/previous-release.mjs b/.github/workflows/scripts/previous-release.mjs
+index 71f78188..921fcc7a 100644
+--- a/.github/workflows/scripts/previous-release.mjs
++++ b/.github/workflows/scripts/previous-release.mjs
+@@ -57,11 +57,23 @@ export function compareVersions(a, b) {
+ /**
+  * The newest published release lower than `below`, from GitHub's list
+  * (objects with tag_name, draft, prerelease, assets). null when none is.
++ *
++ * With `wanted` (asset names), the newest one that carries every one of
++ * them: a release that reached the server alone (a server patch, #252)
++ * publishes no desktop packages, and there is nothing to update FROM in it.
++ * v0.57.2's dry run picked v0.57.1, a server patch, and every Linux row
++ * stopped on "the previous release has no filex-desktop-amd64.deb". When no
++ * older release carries them all, the newest older one, as before.
+  */
+-export function previousRelease(releases, below) {
++export function previousRelease(releases, below, wanted = []) {
+   if (!parseVersion(below)) throw new Error(`not a version: ${below}`);
+   const older = releases.filter((r) => !r.draft && !r.prerelease && parseVersion(r.tag_name) && compareVersions(r.tag_name, below) < 0);
+   older.sort((a, b) => compareVersions(b.tag_name, a.tag_name));
++  if (wanted.length) {
++    const has = (r) => wanted.every((n) => (r.assets ?? []).some((a) => a.name === n));
++    const full = older.find(has);
++    if (full) return full;
++  }
+   return older[0] ?? null;
+ }
+ 
+@@ -108,7 +120,7 @@ function parse(argv) {
+ 
+ async function main(argv) {
+   const o = parse(argv);
+-  const prev = previousRelease(await listReleases(o.repo), o.below);
++  const prev = previousRelease(await listReleases(o.repo), o.below, o.assets);
+   if (!prev) {
+     console.error(`${o.repo} has no published release below ${o.below}`);
+     return 1;

@@ -1019,7 +1019,7 @@ func (d *Driver) RecoverOrphans(ctx context.Context, olderThan time.Duration) (i
 	var recovered int64
 	for _, id := range ids {
 		fields, err := d.client.HMGet(ctx, d.dataKey(id),
-			"status", "started_at", "priority", "seq").Result()
+			"status", "started_at", "priority", "seq", "attempts", "max_attempts").Result()
 		if err != nil {
 			return recovered, fmt.Errorf("queue/redis: recover hmget: %w", err)
 		}
@@ -1027,6 +1027,8 @@ func (d *Driver) RecoverOrphans(ctx context.Context, olderThan time.Duration) (i
 		startedRaw, _ := fields[1].(string)
 		priorityRaw, _ := fields[2].(string)
 		seqRaw, _ := fields[3].(string)
+		attemptsRaw, _ := fields[4].(string)
+		maxRaw, _ := fields[5].(string)
 		if status != queue.StatusRunning {
 			// Stale list entry; clean it out so subsequent runs don't
 			// see this id again.
@@ -1039,6 +1041,25 @@ func (d *Driver) RecoverOrphans(ctx context.Context, olderThan time.Duration) (i
 				// Still within the heartbeat window — leave it.
 				continue
 			}
+		}
+		// Its attempts spent, the op is failed instead of handed out
+		// again (GitHub #123): the process died while running it.
+		attempts, _ := strconv.Atoi(attemptsRaw)
+		if maxAttempts, _ := strconv.Atoi(maxRaw); maxAttempts > 0 && attempts >= maxAttempts {
+			pipe := d.client.TxPipeline()
+			pipe.LRem(ctx, d.runningKey(), 1, id)
+			pipe.HSet(ctx, d.dataKey(id),
+				"status", queue.StatusFailed,
+				"last_error", queue.OrphanSpent,
+				"started_at", "",
+				"finished_at", formatTime(time.Now().UTC()),
+			)
+			pipe.LPush(ctx, d.failedKey(), id)
+			if _, err := pipe.Exec(ctx); err != nil {
+				return recovered, fmt.Errorf("queue/redis: recover spent: %w", err)
+			}
+			recovered++
+			continue
 		}
 		// Move id back to the tail of pending and reset its
 		// running-state fields. Note we deliberately don't decrement

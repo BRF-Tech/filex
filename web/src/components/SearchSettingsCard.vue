@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
  * The search settings (task #261): content extraction, its size cap, the
- * memory budget and the automatic repair - settings-table rows since 0.57,
- * db -> env -> default. FILEX_SEARCH_* only gave them their first value.
+ * memory budget, the memory ceiling of one extraction (GitHub #123) and the
+ * automatic repair - settings-table rows since 0.57, db -> env -> default.
+ * FILEX_SEARCH_* only gave them their first value.
  *
  * A component of its own, on the Search page for now: the settings hub
  * (task #258) places it, and it carries everything it needs - its own load,
@@ -38,18 +39,22 @@ const loadError = ref<string | null>(null);
 
 const contentMax = ref<number>(5);
 const memoryPercent = ref<number>(25);
+const extractMemory = ref<number>(0);
 const errContentMax = ref<string | null>(null);
 const errMemory = ref<string | null>(null);
+const errExtract = ref<string | null>(null);
 
 const savingContent = ref(false);
 const savingContentMax = ref(false);
 const savingMemory = ref(false);
+const savingExtract = ref(false);
 const savingAutoRebuild = ref(false);
 
 function apply(next: SearchSettings) {
   settings.value = next;
   contentMax.value = next.content_max_mb;
   memoryPercent.value = next.memory_percent;
+  extractMemory.value = next.extract_memory_mb;
 }
 
 async function load() {
@@ -88,6 +93,8 @@ const saveContentMax = () =>
   save({ content_max_mb: contentMax.value }, savingContentMax, errContentMax, t('search.settings.savedOk'));
 const saveMemory = () =>
   save({ memory_percent: memoryPercent.value }, savingMemory, errMemory, t('search.settings.savedOk'));
+const saveExtract = () =>
+  save({ extract_memory_mb: extractMemory.value }, savingExtract, errExtract, t('search.settings.savedOk'));
 const saveAutoRebuild = (v: boolean) =>
   save({ auto_rebuild: v }, savingAutoRebuild, null, t('search.settings.savedNextStart'));
 
@@ -101,6 +108,20 @@ const budgetLine = computed(() => {
     given: formatBytes(s.memory_given_bytes, locale.value),
     from: t(`search.settings.memory.from.${s.memory_from_kind}`),
   });
+});
+
+/**
+ * The extraction ceiling in force, and where it came from - in the field's
+ * own unit (the server's MB is 2^20 bytes, formatBytes' base 1024), so 768
+ * typed reads back as 768.
+ */
+const ceilingLine = computed(() => {
+  const s = settings.value;
+  if (!s || !s.index_enabled || !s.extract_memory_bytes) return '';
+  const ceiling = formatBytes(s.extract_memory_bytes, locale.value, 1024);
+  return s.extract_memory_auto
+    ? t('search.settings.extractMemory.auto', { ceiling })
+    : t('search.settings.extractMemory.set', { ceiling });
 });
 </script>
 
@@ -187,6 +208,37 @@ const budgetLine = computed(() => {
         </p>
         <div class="flex justify-end pt-1">
           <Button type="submit" :loading="savingMemory" data-testid="search-settings-memory-save">
+            <Save class="h-4 w-4" />
+            {{ t('common.save') }}
+          </Button>
+        </div>
+      </form>
+
+      <form
+        class="space-y-3 border-t border-zinc-200 pt-3 dark:border-zinc-800"
+        novalidate
+        @submit.prevent="saveExtract"
+      >
+        <h3 class="text-sm font-semibold">{{ t('search.settings.extractMemory.title') }}</h3>
+        <p class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('search.settings.extractMemory.desc') }}</p>
+        <Input
+          :model-value="extractMemory"
+          type="number"
+          :min="settings.extract_memory_mb_min"
+          :max="settings.extract_memory_mb_max"
+          :step="1"
+          :label="t('search.settings.extractMemory.label')"
+          :hint="t('search.settings.extractMemory.hint', { min: settings.extract_memory_mb_min, max: settings.extract_memory_mb_max })"
+          :error="errExtract"
+          class="max-w-xs"
+          data-testid="search-settings-extract-memory"
+          @update:model-value="(v) => ((extractMemory = v as number), (errExtract = null))"
+        />
+        <p v-if="ceilingLine" class="text-xs text-zinc-500 dark:text-zinc-400" data-testid="search-settings-extract-ceiling">
+          {{ ceilingLine }}
+        </p>
+        <div class="flex justify-end pt-1">
+          <Button type="submit" :loading="savingExtract" data-testid="search-settings-extract-memory-save">
             <Save class="h-4 w-4" />
             {{ t('common.save') }}
           </Button>

@@ -1014,6 +1014,14 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		// than the shared pool's few workers; extraction itself stays at
 		// that many at once (queue.ContentIndexWorkers, issue #115).
 		contentIdx.LimitExtraction(srvObj.qpool.Workers())
+		// PDF and office files are read in a process of their own, stopped
+		// at a memory ceiling: search.extract_memory_mb, or the budget
+		// shared by the extractions that run at once (GitHub #123).
+		idx.SetExtractionWorkers(srvObj.qpool.Workers())
+		contentIdx.AttachExtractMemory(func() uint64 {
+			ceiling, _ := idx.ExtractMemory(context.Background(), store)
+			return ceiling
+		})
 		srvObj.contentPool = queue.NewPool(srvObj.queue, queue.ContentIndexWorkers,
 			queue.WithPollInterval(queue.ContentIndexPoll))
 		srvObj.contentPool.Register(queue.TypeContentIndex, contentIdx.Handle)

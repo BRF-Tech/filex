@@ -62,6 +62,10 @@ const (
 	TypeReplicaInitialCopy = "replica_initial_copy"
 )
 
+// OrphanSpent is the error RecoverOrphans gives a running op whose attempts
+// are spent: it is failed, not handed out again.
+const OrphanSpent = "interrupted: filex stopped while running it, and its attempts are spent"
+
 // DefaultMaxAttempts is the retry budget when an Op enqueue request omits
 // the field. Three attempts strikes a useful balance: transient network
 // errors usually resolve by attempt 2; a third gives the upstream service
@@ -165,6 +169,12 @@ type Driver interface {
 	// RecoverOrphans flips long-running rows back to pending. Called on
 	// boot to handle ungraceful shutdowns. olderThan is the threshold
 	// (running rows whose started_at < now - olderThan re-queued).
+	//
+	// ⚠ A row whose attempts are spent (attempts >= max_attempts) goes to
+	// failed instead, with OrphanSpent as its error (GitHub #123): the
+	// process died while running it, and a job that brings filex down
+	// would otherwise come back at every start, without end. The count is
+	// every row moved, both ways.
 	RecoverOrphans(ctx context.Context, olderThan time.Duration) (int64, error)
 
 	// Close releases resources. Pool calls this on Stop.

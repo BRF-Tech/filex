@@ -597,12 +597,32 @@ Search settings**, default **5 MB**, 1-1024) are skipped entirely; extracted tex
 always capped at **200 KiB** per file. Corrupt or unextractable files index as "no content" -
 never as job failures.
 
+**PDF and office files are read in a process of their own** (since 0.57.3,
+[GitHub #123](https://github.com/BRF-Tech/filex/issues/123)). A parser that
+walks a document's structure can be sent into memory without end by one file -
+a PDF of about a megabyte took a filex to 27 GB, and the kernel killed the
+whole server. filex now starts its own binary again for each such file, and
+that process holds itself to a memory ceiling, **Memory for reading one file**
+(`search.extract_memory_mb`, below), and to a time limit of **two minutes**;
+on Linux it is also the first process the kernel's OOM killer picks. A file
+that passes either is stopped, indexed by its name only (no retry), and logged:
+
+```
+level=WARN msg="content-index: extract failed; indexing without content" node=42 path=/reports/q3.pdf err="extraction stopped: over its memory ceiling of 512 MB"
+```
+
+The ceiling's automatic value (`0`, the default) is the indexing budget below,
+shared by the extractions that run at once, between 256 MB and 1 GB (512 MB
+when the memory filex was given cannot be read). Plain text and code are read
+in filex itself: they are streamed, never parsed.
+
 **Memory.** Extracted texts that are ready at the same time are written to the
 index together, in one batch. Indexing also has a memory budget: the
 **Memory for indexing** share on **Admin → Settings → General** (the Search index page links there) (default **25**, between
 **1** and **50**) percent of the memory filex was given - the container's limit
 when it has one, the machine's RAM otherwise - on top of what filex held when
-the budget was first set. A new share applies the moment it is saved. Over it,
+the budget was first set (the [extraction ceiling](#content-search) is a share
+of the same budget). A new share applies the moment it is saved. Over it,
 extraction and a [rebuild](#post-apiadminsearchrebuild) wait until the index's
 background merges give the memory back; nothing is dropped and nothing is
 stopped. The startup log says what it read:
@@ -621,8 +641,9 @@ clients see the ordering they always did.
 **Turning it off / tuning.** Since 0.57 these are settings an administrator
 changes on **Admin → Settings → General → Search settings** (or `PATCH /api/admin/search/settings`,
 [below](#get-and-patch-apiadminsearchsettings)): **Search inside files** (the
-switch), the **size limit** and **Memory for indexing**. The switch and the
-limit apply to the next file written, the memory share at once - no restart.
+switch), the **size limit**, **Memory for indexing** and **Memory for reading
+one file**. The switch, the limit and the ceiling apply to the next file, the
+memory share at once - no restart.
 Switched off, nothing new is read and a queued extraction does nothing when it
 comes up; text already in the index keeps matching. Switched back on, files
 are read as they change - a rebuild with `?content=1` catches up the rest.
@@ -637,6 +658,7 @@ nothing; change the setting instead.
 FILEX_SEARCH_CONTENT=0            # first value of "Search inside files" (default: on)
 FILEX_SEARCH_CONTENT_MAX=5242880  # first value of the size limit, in BYTES (stored in MB, rounded up)
 FILEX_SEARCH_MEMORY_PERCENT=25    # first value of "Memory for indexing" (1-50, default 25)
+FILEX_SEARCH_EXTRACT_MEMORY_MB=0  # first value of "Memory for reading one file" (MB, 0 = from the budget)
 ```
 
 ```yaml
@@ -677,9 +699,10 @@ Search is **on by default**:
 | `search.content` | Admin → Settings → General; first value from `FILEX_SEARCH_CONTENT` / `search.content` | `true` | [Content search](#content-search) switch - off stops reading file text (already-indexed content keeps matching). Live. |
 | `search.content_max_mb` | Admin → Settings → General; first value from `FILEX_SEARCH_CONTENT_MAX` (bytes) / `search.content_max_bytes` | `5` (MB, 1-1024) | Source files above this size are never content-extracted. Live. |
 | `search.memory_percent` | Admin → Settings → General; first value from `FILEX_SEARCH_MEMORY_PERCENT` / `search.memory_percent` | `25` (1-50) | Share of the memory filex was given (container limit, else machine RAM) that indexing may take. Over it, extraction and a rebuild wait. Applied when saved. See [Content search](#content-search). |
+| `search.extract_memory_mb` | Admin → Settings → General; first value from `FILEX_SEARCH_EXTRACT_MEMORY_MB` | `0` (MB, 0-16384; 0 = from the budget) | Memory one PDF or office extraction process may reach before it is stopped and the file is indexed by its name only. Automatic: the budget shared by the extractions that run at once, 256 MB to 1 GB. Under 64 counts as 64. Live. See [Content search](#content-search). |
 | `search.auto_rebuild` | Admin → Settings → General; first value from `FILEX_SEARCH_AUTO_REBUILD` / `search.auto_rebuild` | `true` | Repair an index written by an older document schema, in the background, at startup. Off leaves it alone - the index keeps reporting `needs_rebuild` and you rebuild when it suits you. Read at startup. See [Upgrading an existing index](#upgrading-an-existing-index). |
 
-⚠ The four rows above are **settings**, kept in the database: the variable or
+⚠ The five rows above are **settings**, kept in the database: the variable or
 YAML key gives a setting its first value on a boot where it has none, and is
 ignored from then on (the rule every admin-editable setting follows -
 [CONFIGURATION.md](CONFIGURATION.md)). `FILEX_SEARCH_ENABLED` and
@@ -972,7 +995,10 @@ index).
   "memory_from": "cgroup v2 memory.max",
   "memory_from_kind": "container",
   "auto_rebuild": true,
-  "index_enabled": true
+  "index_enabled": true,
+  "extract_memory_mb": 0, "extract_memory_mb_min": 0, "extract_memory_mb_max": 16384,
+  "extract_memory_bytes": 268435456,
+  "extract_memory_auto": true
 }
 ```
 
@@ -982,12 +1008,16 @@ index).
   and indexing runs without a budget).
 - `index_enabled` - whether this server opened the index (`FILEX_SEARCH_ENABLED`,
   read-only). The settings can be changed either way and apply once it is on.
+- `extract_memory_bytes` / `extract_memory_auto` - the memory ceiling of one
+  extraction process in force, and whether it came from the budget
+  (`extract_memory_mb` is `0`).
 
 `PATCH` takes any of `content`, `content_max_mb`, `memory_percent`,
-`auto_rebuild` and answers the same shape. A number outside its bounds is
-**refused** (`400` with `field` and a `message` in the reader's language),
-never clamped; `content` and `content_max_mb` apply to the next file,
-`memory_percent` at once, `auto_rebuild` at the next start.
+`auto_rebuild`, `extract_memory_mb` and answers the same shape. A number outside
+its bounds is **refused** (`400` with `field` and a `message` in the reader's
+language), never clamped; `content`, `content_max_mb` and `extract_memory_mb`
+apply to the next file, `memory_percent` at once, `auto_rebuild` at the next
+start.
 
 ```bash
 curl -X PATCH https://files.example.com/api/admin/search/settings -b cookies.txt \

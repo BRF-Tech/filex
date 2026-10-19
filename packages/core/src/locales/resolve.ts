@@ -56,20 +56,34 @@ export function resolveLocale(explicit?: LocaleCode | '' | null): LocaleCode {
  * would take down the whole explorer over a language choice.
  */
 export function detectLocale(): LocaleCode {
+  return browserLocale(navigatorLanguages()) || FALLBACK;
+}
+
+/**
+ * The languages this browser asks for, most wanted first
+ * (`navigator.languages`, else `navigator.language`). Empty outside a browser.
+ */
+export function navigatorLanguages(): readonly string[] {
   try {
     const nav = typeof navigator === 'undefined' ? undefined : navigator;
-    if (!nav) return FALLBACK;
-    const wanted = nav.languages && nav.languages.length ? nav.languages : [nav.language];
-    for (const tag of wanted) {
-      if (!tag) continue;
-      // An offered language, built-in or added by a pack: a visitor whose
-      // browser asks for Spanish on an instance with a Spanish pack reads
-      // Spanish. (`hasLocale` is reactive, so a caller inside a computed
-      // re-decides when the pack list arrives.)
-      if (hasLocale(tag)) return normalizeLocaleCode(tag);
-    }
+    if (!nav) return [];
+    return nav.languages && nav.languages.length ? nav.languages : [nav.language];
   } catch {
     /* a hostile or exotic runtime is not a reason to fail to render */
+    return [];
   }
-  return FALLBACK;
+}
+
+/**
+ * The first of `wanted` this instance offers, or `''` when it offers none of
+ * them. An offered language, built-in or added by a pack: a visitor whose
+ * browser asks for Spanish on an instance with a Spanish pack reads Spanish.
+ * (`hasLocale` is reactive, so a caller inside a computed re-decides when the
+ * pack list arrives.)
+ */
+export function browserLocale(wanted: readonly (string | null | undefined)[]): LocaleCode | '' {
+  for (const tag of wanted) {
+    if (tag && hasLocale(tag)) return normalizeLocaleCode(tag);
+  }
+  return '';
 }

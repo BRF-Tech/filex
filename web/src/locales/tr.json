@@ -1360,6 +1360,14 @@
           "host": "makinenin belleği"
         }
       },
+      "extractMemory": {
+        "title": "Tek dosyayı okuma belleği",
+        "desc": "PDF ve ofis dosyaları kendi süreçlerinde okunur. Bundan fazla bellek isteyen dosyanın okunması durdurulur ve dosya yalnızca adıyla bulunur; filex çalışmaya devam eder. 0, sınırı indeksleme belleğinden alır ve aynı anda okunan dosyalar arasında paylaştırır.",
+        "label": "Sınır (MB)",
+        "hint": "{min} ile {max} MB arası, otomatik için 0. Okunan bir sonraki dosyadan itibaren geçerli.",
+        "auto": "Şu an {ceiling}, indeksleme belleğinden.",
+        "set": "Şu an {ceiling}."
+      },
       "autoRebuild": {
         "label": "Eskimiş indeksi açılışta onar",
         "desc": "İndeksin içeriğini değiştiren bir yükseltmeden sonra indeksi, aramalara cevap veren indeksin yanında arka planda yeniden oluşturur. Bir sonraki açılışta geçerli olur."

@@ -180,6 +180,10 @@ const GLYPHS: Record<string, string> = {
     '<path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/>',
   /* zaman:z3 — a clock face, for the Time zone row. */
   timezone: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3.2 2"/>',
+  /* #275 — a globe, for an embed's Language row. */
+  language:
+    '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/>' +
+    '<path d="M12 3.5c2.3 2.3 3.5 5.1 3.5 8.5s-1.2 6.2-3.5 8.5c-2.3-2.3-3.5-5.1-3.5-8.5s1.2-6.2 3.5-8.5z"/>',
   tour:
     '<path d="M2.5 9L12 4.5 21.5 9 12 13.5z"/>' +
     '<path d="M6.6 11.1v4.4c0 1.6 2.4 2.9 5.4 2.9s5.4-1.3 5.4-2.9v-4.4"/>',

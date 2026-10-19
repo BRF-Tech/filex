@@ -459,6 +459,43 @@ func TestDriverContract_EachOpIsClaimedExactlyOnce(t *testing.T) {
 
 // freshMySQLQueueDB gives each subtest its own database on the configured
 // server, so a run leaves nothing behind and two runs cannot collide.
+// An op left running by a process that died is handed out again only while
+// it is owed an attempt (GitHub #123). A file that kills filex while it is
+// read would otherwise come back at every start, and kill it again.
+func TestDriverContract_RecoverOrphansFailsAnOpWhoseAttemptsAreSpent(t *testing.T) {
+	for name, mk := range configuredDrivers(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			drv := mk(t)
+
+			spentID, err := drv.Enqueue(ctx, queue.Op{Type: "orphan-spent", MaxAttempts: 1})
+			require.NoError(t, err)
+			owedID, err := drv.Enqueue(ctx, queue.Op{Type: "orphan-owed", MaxAttempts: 3})
+			require.NoError(t, err)
+			_, err = drv.Dequeue(ctx, []string{"orphan-spent"})
+			require.NoError(t, err)
+			_, err = drv.Dequeue(ctx, []string{"orphan-owed"})
+			require.NoError(t, err)
+
+			// The process dies here; the next start recovers both.
+			n, err := drv.RecoverOrphans(ctx, 0)
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, n, "both orphans are moved, one each way")
+
+			spent, err := drv.Get(ctx, spentID)
+			require.NoError(t, err)
+			assert.Equal(t, queue.StatusFailed, spent.Status, "a spent op is not handed out again")
+			assert.Equal(t, queue.OrphanSpent, spent.LastError)
+			owed, err := drv.Get(ctx, owedID)
+			require.NoError(t, err)
+			assert.Equal(t, queue.StatusPending, owed.Status, "an op owed an attempt is requeued")
+
+			_, err = drv.Dequeue(ctx, []string{"orphan-spent"})
+			assert.ErrorIs(t, err, queue.ErrEmpty, "the spent op came back")
+		})
+	}
+}
+
 func freshMySQLQueueDB(t *testing.T, admin string) *sql.DB {
 	t.Helper()
 

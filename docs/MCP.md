@@ -728,8 +728,9 @@ and the operator's addresses as the panel does.
   `admin_settings_set`, which writes a raw key without that check.
 - **Search settings** (0.57): `admin_search_settings_get` / `_update` read and
   change the Search page's settings (content extraction, its size limit, the
-  indexing memory share, the automatic repair) through the same handler, with
-  the same bounds ([SEARCH.md](SEARCH.md#get-and-patch-apiadminsearchsettings)).
+  indexing memory share, the memory ceiling of one PDF or office extraction
+  (0.57.3), the automatic repair) through the same handler, with the same
+  bounds ([SEARCH.md](SEARCH.md#get-and-patch-apiadminsearchsettings)).
 - **AI assistant** (0.57): `admin_ai_assistant_get` / `_update` read and
   change the AI assistant page's settings (on, hide the button, provider,
   address, model, the budgets, how long conversations are kept) through the

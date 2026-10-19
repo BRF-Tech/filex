@@ -569,6 +569,16 @@ export const en: Record<string, string> = {
   'tz.more': '{n} more - keep typing to narrow the list.',
   'tz.hint': 'Saved in this browser only. Every date is stored as one moment in time and shown on the clock you pick here.',
   'tz.now': 'Right now in {zone}: {time}',
+  /* #275 - an embed's own language setting ("⋯" → Language), kept in this browser */
+  'lang.menu': 'Language',
+  'lang.title': 'Language',
+  'lang.label': 'Interface language',
+  'lang.default.browser': 'Browser language ({lang})',
+  'lang.default.account': "Your account's language ({lang})",
+  'lang.default.host': "This site's default ({lang})",
+  'lang.default.default': 'Default ({lang})',
+  'lang.hint': 'Saved in this browser only.',
+  'lang.hint_account': 'Saved in this browser and on your account, so your other devices and your notifications use it too.',
   /* === wiring:c2 - customizable shortcuts + quick look === */
   'shortcuts.quicklook': 'Quick look',
   'shortcuts.customize': 'Customize',

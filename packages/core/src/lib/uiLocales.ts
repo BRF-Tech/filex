@@ -216,6 +216,7 @@ export function resetLocales(): void {
   extras.clear();
   inflight.clear();
   source = {};
+  listing = null;
   localesKnown.value = false;
   localesVersion.value += 1;
 }
@@ -347,10 +348,26 @@ export interface LoadLocalesOptions {
   fetchImpl?: typeof fetch;
   /** Per-call auth for a host that does not ride on cookies. */
   headers?: () => Promise<Record<string, string>> | Record<string, string>;
+  /**
+   * Give up on the LIST after this many milliseconds (`LOCALES_LIST_TIMEOUT_MS`
+   * is the one the desktop app and an embed pass). The built-in languages are
+   * then the answer and the list counts as known, exactly as for a failed
+   * request. Absent: no limit.
+   *
+   * ⚠ For a server that accepts the connection and never answers: the desktop
+   * app awaits the list before it mounts the explorer, and without a limit its
+   * "connecting" screen waited forever with no Retry on it.
+   */
+  timeoutMs?: number;
 }
+
+/** How long a host waits for the language list before going on with English and Turkish. */
+export const LOCALES_LIST_TIMEOUT_MS = 10_000;
 
 /** Where the list came from — the strings are fetched from the same place. */
 let source: LoadLocalesOptions = {};
+/** The list request in flight, for `loadLocalesOnce`. */
+let listing: Promise<PublicLocaleOption[]> | null = null;
 
 /**
  * Fetch one added language's strings (`GET /api/public/ui-locales/{code}`).
@@ -434,9 +451,66 @@ export function setLocalesFromBranding(
  * fetches. ⚠ A failure is not an error: the two built-in languages are
  * already on the picker, and the list is then treated as KNOWN (a held
  * choice falls back) — waiting forever for an answer that will not come
- * would keep somebody's interface in a language nothing can serve.
+ * would keep somebody's interface in a language nothing can serve. A server
+ * that never answers at all is the same failure once `timeoutMs` has passed.
  */
-export async function loadLocales(opts: LoadLocalesOptions = {}): Promise<PublicLocaleOption[]> {
+export function loadLocales(opts: LoadLocalesOptions = {}): Promise<PublicLocaleOption[]> {
+  const p = loadLocalesNow(opts);
+  listing = p;
+  void p.finally(() => {
+    if (listing === p) listing = null;
+  });
+  return p;
+}
+
+/**
+ * `loadLocales`, unless the registry already holds a list or one is on its
+ * way — what an embedded explorer calls when it mounts. A host that loaded
+ * the list itself (the exported `loadLocales`, or the desktop app, which does
+ * it per account), or a second explorer on the same page, costs no second
+ * request.
+ */
+export function loadLocalesOnce(opts: LoadLocalesOptions = {}): Promise<PublicLocaleOption[]> {
+  if (listing) return listing;
+  if (localesKnown.value) return Promise.resolve(availableLocales());
+  return loadLocales(opts);
+}
+
+/** The branding answer, or `null` (refused, unreachable, or later than `timeoutMs`). */
+async function askBranding(doFetch: typeof fetch, opts: LoadLocalesOptions): Promise<PublicBranding | null> {
+  const limit = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : 0;
+  const ctl = limit && typeof AbortController === 'function' ? new AbortController() : null;
+  const attempt = (async () => {
+    try {
+      const extra = opts.headers ? await opts.headers() : {};
+      const res = await doFetch(`${apiRootOr(opts.base)}/api/public/branding`, {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...extra },
+        credentials: 'same-origin',
+        ...(ctl ? { signal: ctl.signal } : {}),
+      });
+      return res.ok ? ((await res.json()) as PublicBranding) : null;
+    } catch {
+      /* the two built-in languages are a perfectly good answer */
+      return null;
+    }
+  })();
+  if (!limit) return attempt;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => {
+      ctl?.abort();
+      resolve(null);
+    }, limit);
+  });
+  try {
+    return await Promise.race([attempt, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function loadLocalesNow(opts: LoadLocalesOptions): Promise<PublicLocaleOption[]> {
   if (apiRootOr(source.base) !== apiRootOr(opts.base)) {
     setLocales([]);
     localesKnown.value = false;
@@ -444,28 +518,15 @@ export async function loadLocales(opts: LoadLocalesOptions = {}): Promise<Public
   source = opts;
   const doFetch = opts.fetchImpl ?? (typeof fetch === 'function' ? fetch : null);
   if (!doFetch) return availableLocales();
-  const base = apiRootOr(opts.base);
-  try {
-    const extra = opts.headers ? await opts.headers() : {};
-    const res = await doFetch(`${base}/api/public/branding`, {
-      method: 'GET',
-      headers: { Accept: 'application/json', ...extra },
-      credentials: 'same-origin',
-    });
-    if (res.ok) {
-      const branding = (await res.json()) as PublicBranding;
-      // Another server (or sign-out) may have replaced this request while
-      // either the headers or body were in flight.
-      if (source !== opts) return availableLocales();
-      setLocalesFromBranding(branding);
-      return availableLocales();
-    }
-  } catch {
-    /* the two built-in languages are a perfectly good answer */
+  const branding = await askBranding(doFetch, opts);
+  // Another server (or sign-out) may have replaced this request while either
+  // the headers or the body were in flight.
+  if (source !== opts) return availableLocales();
+  if (branding) {
+    setLocalesFromBranding(branding);
+    return availableLocales();
   }
-  if (source === opts) {
-    localesKnown.value = true;
-    localesVersion.value += 1;
-  }
+  localesKnown.value = true;
+  localesVersion.value += 1;
   return availableLocales();
 }

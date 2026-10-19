@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.57.3] - 2026-10-19
+
+### Changed
+
+- **An embedded explorer speaks its visitor's language, and has a Language
+  setting of its own.** `<filex-explorer>` - and the explorer in any host that
+  does not keep the person's preferences on their account - put the host's
+  `config.locale` above everything, so every visitor read the host's language
+  whatever their browser asked for. It now speaks the language picked in this
+  browser under **⋯ → Language** (kept in the browser, sent nowhere), then the
+  account's language when a person is behind the credential, then the
+  browser's languages that the server offers (language packs included: the
+  embed loads the server's list when it mounts), then `config.locale`, then
+  English. In such a personal embed a language picked there is saved to the
+  account too, and the host's `config.locale` is no longer written to an
+  account that has no language. The filex web app and desktop app keep the
+  account's language ([INTEGRATION.md → Language](docs/INTEGRATION.md#language),
+  task #275).
+
+### Fixed
+
+- **A PDF or office file can no longer take the server down while its text is
+  read** ([GitHub #123](https://github.com/BRF-Tech/filex/issues/123)). Some
+  PDFs of about a megabyte sent the PDF reader into memory without end: one
+  install's filex reached 27 GB and the kernel killed it, three times in a
+  minute. PDF and office files are now read in a process of their own, with a
+  memory ceiling and a two-minute limit; one that passes either is stopped,
+  the file is found by its name only, and filex goes on. The ceiling is a new
+  setting on **Admin → Settings → General → Search settings**, **Memory for
+  reading one file** (`search.extract_memory_mb`, first value from
+  `FILEX_SEARCH_EXTRACT_MEMORY_MB`): `0`, the default, shares the indexing
+  memory budget between the files read at once (256 MB to 1 GB). A job
+  cancelled while filex stops is no longer recorded as a file without text
+  ([SEARCH.md → Content search](docs/SEARCH.md#content-search)).
+- **A queued job whose attempts are spent is not handed out again after a
+  crash.** The orphan recovery at startup put every job left running back in
+  the queue, so a job that brought filex down came back at every start; one
+  whose attempts are spent is now failed (`interrupted: filex stopped while
+  running it, and its attempts are spent`), on SQLite, MySQL, PostgreSQL and
+  Redis ([GitHub #123](https://github.com/BRF-Tech/filex/issues/123)).
+- **The desktop app no longer waits forever for a server's languages.** A
+  server that accepted the connection and never answered kept the window on
+  "Connecting" with no Retry; the list is given up after ten seconds and the
+  file list opens in English or Turkish (task #275).
+- **`@brftech/filex`'s type declarations are valid TypeScript again.**
+  `dist/index.d.ts` carried `loadLocales` as its source - a function body and a
+  default value in a declaration file - which a project that type-checks its
+  libraries refused; it is now declared with `@brftech/filex-core`'s type
+  (task #275).
+- **The `locale` attribute of `<filex-explorer>` takes a language pack's
+  language** (`locale="es"`), as the package README says; it took only `en`
+  and `tr`, and anything else was dropped (task #275).
+
 ## [0.57.2] - 2026-10-19
 
 ### Security

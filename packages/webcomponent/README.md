@@ -144,7 +144,7 @@ Simple attributes are auto-parsed into the underlying `config` prop:
 |---|---|
 | `api-base` | `config.apiBase` |
 | `endpoint` | `config.endpoint` (legacy Vuefinder-compat) |
-| `locale` | `config.locale` - `en`, `tr`, or any language the server has a language pack for (`es`, `de`, `fr`, …). A right-to-left language lays **this element** out right to left, from its own locale rather than the host page's. |
+| `locale` | `config.locale` - `en`, `tr`, or any language the server has a language pack for (`es`, `de`, `fr`, …). It is the element's **default**: the language a visitor picked in the explorer's ⋯ → Language (kept in their browser), their account's language when the credential is theirs, and their browser's languages come first ([Language](https://github.com/BRF-Tech/filex/blob/main/docs/INTEGRATION.md#language)). A right-to-left language lays **this element** out right to left, from its own locale rather than the host page's. |
 | `theme` | `config.theme` (`light` / `dark` / `auto`) |
 | `trash-visible` | `config.trashVisible` |
 | `sidenav` | `config.sideNav` - the navigation panel (the "+ New" menu · Home / Shared with me / My shares / Recent / Starred / Trash · your tags in two groups, personal and team · an Apps section, one row per installed app's own page · the storages this caller can reach). Present or `="true"` is on, `="false"` off; absent keeps the default, which is on. |

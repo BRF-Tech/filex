@@ -78,9 +78,20 @@ export interface SearchSettings {
   auto_rebuild: boolean;
   /** Whether this server opened the index at all (environment only). */
   index_enabled: boolean;
+  /** The memory one extraction process (PDF, office) may reach, in MB; 0
+   *  takes it from the memory budget (GitHub #123). Live. */
+  extract_memory_mb: number;
+  extract_memory_mb_min: number;
+  extract_memory_mb_max: number;
+  /** The ceiling in force, and whether it came from the budget (0 / false
+   *  when the index is not open). */
+  extract_memory_bytes: number;
+  extract_memory_auto: boolean;
 }
 
-export type SearchSettingsPatch = Partial<Pick<SearchSettings, 'content' | 'content_max_mb' | 'memory_percent' | 'auto_rebuild'>>;
+export type SearchSettingsPatch = Partial<
+  Pick<SearchSettings, 'content' | 'content_max_mb' | 'memory_percent' | 'auto_rebuild' | 'extract_memory_mb'>
+>;
 
 export const SearchApi = {
   async query(params: SearchParams): Promise<SearchPage> {

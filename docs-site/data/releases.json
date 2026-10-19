@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-10-17",
+  "generatedAt": "2026-10-19",
   "releases": [
+    {
+      "tag": "v0.57.2",
+      "date": "2026-10-19T08:45:41Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.57.2",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Security\n\n- **A file request's total cap holds when uploads overlap**\n  ([GHSA-4pc6-66f4-q2x4](https://github.com/BRF-Tech/filex/security/advisories/GHSA-4pc6-66f4-q2x4)).\n  `max_uploads` was checked against the count the request had read and the\n  count moved only after the files were written, so uploads sent at the same\n  time all passed: a link capped at one file took fifteen concurrent uploads,\n  and where the owner's account has no quota the files could keep coming.\n  A submission's files are now claimed against the cap in one database\n  statement before the first is written, and a file the storage did not take\n  gives its place back. Reported by @Refaelyk.\n\n### Fixed\n\n- **The snap says what a plug allows before it asks you to connect it.** The\n  Snap Store leaves `password-manager-service` and `removable-media` for you\n  to connect, so the desktop app now asks snapd (`snapctl is-connected`)\n  instead of guessing. With the keyring plug not connected, the sign-in window\n  says that connecting it lets filex keep its tokens encrypted in GNOME\n  Keyring or KWallet, gives the snap access to the secrets stored there and\n  lets other apps that reach the keyring read what filex puts there, and only\n  then shows the command; with the plug connected and no keyring answering,\n  it says to start or unlock the keyring. A sync folder chosen under\n  `/media`, `/run/media` or `/mnt` while `removable-media` is not connected\n  ended in a permission error that did not say why; it is now refused with\n  what the plug allows and a button that copies the command\n  ([DESKTOP.md → The plugs you connect](docs/DESKTOP.md#the-plugs-you-connect)).\n- **The desktop app's file list speaks the account's language from a\n  language pack.** The explorer inside the desktop window stayed in English or\n  Turkish when the account used a language a language pack adds on the\n  server: the window never loaded the server's list of languages, and handed\n  the explorer its own built-in fallback instead of the account's language.\n  It now loads the active server's languages before the explorer opens,\n  follows the account's language (the window's own menus keep English or\n  Turkish), forgets the previous server's languages on a server switch and\n  ignores a late answer from it. Contributed by @chengjie (#122).\n- **The admin panel's one-column menus open under their own button.** In the\n  top bar, *People* and *Maintenance & records* opened their panel at the\n  bar's start, under the dashboard link, two or three buttons away from the\n  one that was pressed. A one-column panel now hangs from its own button (in\n  a right-to-left interface, from its right edge); the wide panels with\n  several columns keep the bar's start, where they have room.\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0572---2026-10-19)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.57.2",
+        "ghcr.io/brf-tech/filex:full-v0.57.2"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
     {
       "tag": "v0.57.1",
       "date": "2026-10-17T16:39:12Z",

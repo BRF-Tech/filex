@@ -105,6 +105,13 @@ const props = defineProps<{
   canWrite?: boolean;
   locale: LocaleCode;
   /**
+   * #275 — offer a "Language" row in the "⋯" menu: an embed's own language
+   * setting, kept in the browser (lib/explorerLocale). The explorer sets it for
+   * an embed only; the web and desktop apps choose their language in their own
+   * settings, so a second door there would be a second answer to one question.
+   */
+  languageRow?: boolean;
+  /**
    * bag:b4 — narrow/embed mini mode. When true the toolbar collapses to
    * [↑?] [🔍] [⬆] [⋯]: secondary actions (New Folder, Refresh, density,
    * view switcher, selection actions, Paste) move into the "⋯" overflow
@@ -201,6 +208,7 @@ const emit = defineEmits<{
   (e: 'open-theme'): void /* wiring:c1 — tema galerisi */;
   (e: 'open-shortcut-settings'): void /* wiring:c2 */;
   (e: 'open-timezone'): void /* zaman:z3 */;
+  (e: 'open-language'): void /* #275 */;
   /* surucu:d1 — escalate this query into the command palette (⌘K/Ctrl+K). */
   (e: 'open-palette', query: string): void;
 }>();
@@ -719,6 +727,8 @@ const utilityActions = computed<ContextAction[]>(() => {
      filex web app) claims the settings half and drops this row, because its
      dialog already carries the same picker. */
   list.push({ key: 'timezone', label: t('tz.menu') });
+  /* #275 — the embed's language, beside its time zone and for the same reason. */
+  if (props.languageRow) list.push({ key: 'language', label: t('lang.menu') });
   list.push({ key: 'shortcut-settings', label: t('shortcuts.settings.menu') }) /* wiring:c2 */;
   list.push({ key: 'tour', label: t('tour.restart') }); /* wiring:c4 */
   return list;
@@ -961,6 +971,9 @@ function onMoreSelect(a: ContextAction) {
       break;
     case 'timezone' /* zaman:z3 */:
       emit('open-timezone');
+      break;
+    case 'language' /* #275 */:
+      emit('open-language');
       break;
     case 'tour' /* wiring:c4 — bubbles to the FileExplorer root listener */:
       /* ⚠ From the TOOLBAR's root, not from the "⋯" button. That button is no

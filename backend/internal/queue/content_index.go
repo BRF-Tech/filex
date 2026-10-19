@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/search/extract"
+	"github.com/brf-tech/filex/backend/internal/search/extract/contain"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -76,6 +77,9 @@ type ContentIndexer struct {
 	onFn       func() bool
 	// slots bounds how many jobs read and extract at once (nil: no bound).
 	slots chan struct{}
+	// extractMemory is the memory ceiling of one extraction process, asked
+	// per file (search.Index.ExtractMemory; nil: search.AutoExtractUnknown).
+	extractMemory func() uint64
 }
 
 // NewContentIndexer wires the job. maxBytes <= 0 falls back to
@@ -107,6 +111,24 @@ func (c *ContentIndexer) limit() int64 {
 		}
 	}
 	return c.maxBytes
+}
+
+// AttachExtractMemory makes the memory ceiling of an extraction process live
+// (GitHub #123): fn is asked for every file read in a process of its own.
+func (c *ContentIndexer) AttachExtractMemory(fn func() uint64) { c.extractMemory = fn }
+
+// extract reads the text of n through ex: in a process of its own, with a
+// memory ceiling and a time limit, when ex walks a document's structure
+// (extract.Isolated: PDF, office - GitHub #123), here otherwise.
+func (c *ContentIndexer) extract(ctx context.Context, ex extract.Extractor, n *model.Node, r io.Reader) (string, error) {
+	if !extract.Isolate(ex) {
+		return ex.Extract(ctx, r, extract.DefaultLimit)
+	}
+	ceiling := uint64(search.AutoExtractUnknown)
+	if c.extractMemory != nil {
+		ceiling = c.extractMemory()
+	}
+	return contain.Extract(ctx, n.Mime, nodeExt(n.Name), r, extract.DefaultLimit, ceiling)
 }
 
 // on reports whether content extraction is switched on.
@@ -238,10 +260,18 @@ func (c *ContentIndexer) Handle(ctx context.Context, op Op) error {
 	body := io.MultiReader(bytes.NewReader(head[:nRead]), rc)
 	/* /wiring:e2 */
 
-	text, err := ex.Extract(ctx, io.LimitReader(body, c.limit()), extract.DefaultLimit)
+	text, err := c.extract(ctx, ex, n, io.LimitReader(body, c.limit()))
 	if err != nil {
+		if ctx.Err() != nil {
+			// The job itself was stopped (filex is shutting down): nothing
+			// was learnt about the file, so it is not recorded as empty -
+			// the job comes back.
+			return ctx.Err()
+		}
 		// Extraction error — log + index empty content anyway so the
-		// fingerprint lands and the node stops re-enqueueing.
+		// fingerprint lands and the node stops re-enqueueing. An extraction
+		// stopped over its memory ceiling or its time limit lands here too
+		// (contain.ErrStopped): the file is found by its name.
 		slog.Warn("content-index: extract failed; indexing without content",
 			slog.Int64("node", n.ID), slog.String("path", n.Path), slog.String("err", err.Error()))
 		text = ""

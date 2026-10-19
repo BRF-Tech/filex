@@ -329,7 +329,16 @@ import { followOpenWithChoices, openWithChoice, setOpenWithChoice } from './lib/
 import OpenWithDialog from './modals/OpenWithDialog.vue';
 import PluginConfirmModal from './components/plugin/PluginConfirmModal.vue';
 import DestinationPickerModal from './modals/DestinationPickerModal.vue'; /* tasi:m1 */
-import { resolveLocale } from './locales/resolve';
+import { navigatorLanguages } from './locales/resolve';
+import {
+  accountLanguage,
+  embedLocaleChoice,
+  explorerIsEmbedded,
+  pickEmbedLanguage,
+  resolveExplorerLocale,
+  type AccountLanguageDeps,
+} from './lib/explorerLocale';
+import { LOCALES_LIST_TIMEOUT_MS, loadLocalesOnce } from './lib/uiLocales';
 /* The bell, the full list and the avatar — the web's own components, drawn here
    for a host that asks through `config.notifications` / `config.account`. */
 import NotificationBell from './components/NotificationBell.vue';
@@ -388,6 +397,7 @@ const PreviewModal = lazySurface(() => import('./modals/PreviewModal.vue'));
 const QuickLook = lazySurface(() => import('./components/QuickLook.vue'));
 const UserSettingsDialog = lazySurface(() => import('./components/UserSettingsDialog.vue'));
 const TimeZoneDialog = lazySurface(() => import('./components/TimeZoneDialog.vue'));
+const LanguageDialog = lazySurface(() => import('./components/LanguageDialog.vue'));
 const PermissionsModal = lazySurface(() => import('./modals/PermissionsModal.vue'));
 const AdvancedSearch = lazySurface(() => import('./components/AdvancedSearch.vue'));
 const CommandPalette = lazySurface(() => import('./components/CommandPalette.vue'));
@@ -472,7 +482,47 @@ const emit = defineEmits<{
 // State
 // --------------------------------------------------------------------
 
-const api = useFileApi(props.config);
+// Locale up-front: the pendingOps onSettled callback below (and the undo-toast
+// helpers) need `t()` at runtime, so the catalogue must be constructed before
+// they are wired - and the API client says things in it (`screenLocale`), so
+// it comes before that too. Depends only on props and two refs — safe this
+// early.
+//
+// ⚠⚠ Which language, and in what order, is lib/explorerLocale's
+// (`resolveExplorerLocale`), never decided here:
+//   - the web app and the desktop app (#191, the maintainers' rule,
+//     2026-10-08): the language of the ACCOUNT behind the credential - the one
+//     its notifications, the person's phone and their emails speak - then the
+//     host's `locale` (what it draws until the account answers, what a page
+//     with nobody signed in keeps, and the starting value an account with no
+//     language of its own takes, `adoptAccountLocale` below). A host that
+//     changes its language while mounted (both write the account first) is
+//     followed.
+//   - an embed (#275, the owner's rule, 2026-10-19): the person's own pick in
+//     this browser ("⋯" → Language), the account's language when a person is
+//     behind the credential, the browser's languages, the host's `locale`,
+//     English.
+const accountLocale = ref('');
+/** Embedded in another product (no host wired the account's preferences). */
+const embedded = computed(() => explorerIsEmbedded(props.config));
+const resolvedLocale = computed(() =>
+  resolveExplorerLocale({
+    embedded: embedded.value,
+    chosen: embedLocaleChoice(),
+    account: accountLocale.value,
+    browser: navigatorLanguages(),
+    host: props.config.locale,
+  }),
+);
+const locale = computed(() => resolvedLocale.value.locale);
+/** The host's config in the language on screen, for the panels this explorer
+ *  opens over itself (Connections, API keys): they read `config.locale`. The
+ *  host's own object when the two already agree. */
+const screenConfig = computed<ExplorerConfig>(() =>
+  props.config.locale === locale.value ? props.config : { ...props.config, locale: locale.value },
+);
+
+const api = useFileApi(props.config, { screenLocale: () => locale.value });
 
 /* The account's permissions (filex internal/perm). The host may pass them
  * (`config.permissions` / `permissionsByFolder` — the web app does); when it
@@ -505,20 +555,6 @@ function loadOwnPermissions(): void {
 }
 onMounted(loadOwnPermissions);
 
-// Locale up-front: the pendingOps onSettled callback below (and the undo-toast
-// helpers) need `t()` at runtime, so the catalogue must be constructed before
-// they are wired. Depends only on props and one ref — safe this early.
-//
-// ⚠⚠ #191 (the maintainers' rule, 2026-10-08): the explorer speaks the
-// language of the ACCOUNT behind its credential - the same one its
-// notifications, the person's phone and their emails speak. The host's
-// `locale` is what it draws until the account answers, what a page with
-// nobody signed in keeps (a public link), and the starting value an account
-// with no language of its own takes (`adoptAccountLocale`, below). A host that
-// changes its language while mounted (the web panel, the desktop app - both
-// write the account first) is followed.
-const accountLocale = ref('');
-const locale = computed(() => resolveLocale(accountLocale.value || props.config.locale));
 // Every dialog under this explorer speaks its language (EXPLORER_LOCALE).
 provide(EXPLORER_LOCALE, () => locale.value);
 /* surucu:d1-sort — the alphabet the `type` key sorts in (lib/sortOrder sorts
@@ -1595,44 +1631,35 @@ function onNotificationOpen(item: NotificationRowData) {
 
 /* ── the account's language (#191) ─────────────────────────────────────── */
 
+/** A PERSON is behind this credential (a cookie session or their own API key). */
+const personCaller = computed(() => (props.config.callerKind ?? capabilitiesData.value?.caller_kind) === 'user');
+/** The account behind this credential, as lib/explorerLocale asks it. */
+function accountLanguageDeps(): AccountLanguageDeps {
+  return {
+    person: personCaller.value,
+    embedded: embedded.value,
+    host: props.config.locale,
+    me: fetchMeOnce,
+    updateProfile: (patch) => userSettingsApi(api.jsonFetch, connectionsBase(props.config)).updateProfile(patch),
+  };
+}
 /**
  * Takes the language of the account behind this credential (`users.locale`,
- * from `/api/auth/me`). Nobody signed in (a public link, a refused
- * credential): the host's stays. An account that holds NO language takes the
- * host's as its own - written to the account, so its notifications and every
- * other surface agree with what this explorer shows (the desktop's
- * pinToAdopt does the same; the web panel's sign-in has the server do it,
- * handlers/auth.go adoptSignInLanguage).
+ * from `/api/auth/me`) - lib/explorerLocale `accountLanguage` says when it is
+ * asked, and when an account with none takes the host's (the web and desktop
+ * apps, never an embed).
  */
 function adoptAccountLocale(): void {
-  fetchMeOnce()
-    .then((body) => {
-      const user = body?.user as { locale?: unknown } | null | undefined;
-      if (!user) return;
-      const own = typeof user.locale === 'string' ? user.locale.trim() : '';
-      if (own) {
-        accountLocale.value = own;
-        return;
-      }
-      const seed = String(props.config.locale ?? '').trim();
-      if (!seed) return;
-      userSettingsApi(api.jsonFetch, connectionsBase(props.config))
-        .updateProfile({ locale: seed })
-        .catch(() => {
-          /* an account that may not edit its profile keeps none; the host's
-             language stays on screen */
-        });
-    })
-    .catch(() => {
-      /* nobody signed in: the host's language */
-    });
+  void accountLanguage(accountLanguageDeps()).then((own) => {
+    if (own) accountLocale.value = own;
+  });
 }
 // Only for a PERSON's credential - the same question the account's time zone
 // asks (useExplorerTimeZone): an app's token is nobody's account, and its
 // host's language stays.
 let accountLocaleAsked = false;
 watch(
-  () => (props.config.callerKind ?? capabilitiesData.value?.caller_kind) === 'user',
+  personCaller,
   (person) => {
     if (!person) {
       accountLocale.value = '';
@@ -1646,13 +1673,49 @@ watch(
 );
 // The host moved to another language while mounted: follow it (a host that
 // binds its language to the account - the web panel, the desktop app - has
-// written the account already).
+// written the account already). ⚠ Not in an embed: there the host's language
+// ranks below the account's, so a new default from the host changes nothing
+// the account said.
 watch(
   () => props.config.locale,
   () => {
+    if (embedded.value) return;
     accountLocale.value = '';
   },
 );
+
+/* ── an embed's own language setting (#275) ────────────────────────────── */
+
+/** "⋯" → Language: an embed's only door to its language (lib/explorerLocale). */
+const showLanguage = ref(false);
+/** What this explorer speaks with no pick of this browser's - the dialog's first row names it. */
+const embedLocaleFallback = computed(() =>
+  resolveExplorerLocale({
+    embedded: true,
+    chosen: '',
+    account: accountLocale.value,
+    browser: navigatorLanguages(),
+    host: props.config.locale,
+  }),
+);
+/** A language picked in the embed's dialog: this browser, and a personal embed's account. Applied at once, without remounting. */
+function pickEmbedLocale(code: string): void {
+  const picked = pickEmbedLanguage(code, accountLanguageDeps());
+  if (picked && personCaller.value) accountLocale.value = picked;
+}
+// An embed asks this server which languages it offers (its language packs),
+// or the browser's language could only ever match English or Turkish. Once
+// per page: a host that loaded the list itself, or a second explorer, costs
+// no second request. Not on the app surfaces - the web app reads the list
+// with its branding and the desktop app per account.
+onMounted(() => {
+  if (!embedded.value) return;
+  void loadLocalesOnce({
+    base: connectionsBase(props.config),
+    headers: () => api.authHeaders(),
+    timeoutMs: LOCALES_LIST_TIMEOUT_MS,
+  });
+});
 
 /** Who is signed in — the host's word, or `/api/auth/me` with this credential. */
 const accountPerson = ref<(AccountPerson & SettingsUser) | null>(props.config.account?.person ?? null);
@@ -11930,6 +11993,7 @@ function closeRecoveryKey() {
       :at-virtual-root="atVirtualRoot"
       :can-write="canWriteHere"
       :locale="locale"
+      :language-row="embedded && !accountSettingsHooks()?.language /* #275 - an embed's own Language row */"
       :narrow="isNarrow /* bag:b4 */"
       :theme="themeMode /* bag:b4 */"
       :inspector-open="showInspector /* koru:k1 */"
@@ -11953,6 +12017,7 @@ function closeRecoveryKey() {
       @update:density="density = $event"
       @open-shortcut-settings="showShortcutSettings = true /* wiring:c2 */"
       @open-timezone="showTimeZone = true /* zaman:z3 */"
+      @open-language="showLanguage = true /* #275 */"
       @new-folder="showNewFolder = true"
       @upload="triggerUpload"
       @refresh="refreshAll /* gorunum:v2-topbar */"
@@ -12913,7 +12978,7 @@ function closeRecoveryKey() {
       <div class="fe-overlay__card" @click.stop>
         <ConnectionsPanel
           v-if="showConnections"
-          :config="config"
+          :config="screenConfig"
           closable
           @close="closeOverlays"
           @error="onConnectionsError"
@@ -12931,7 +12996,7 @@ function closeRecoveryKey() {
               ×
             </button>
           </header>
-          <TokensPanel :config="config" full />
+          <TokensPanel :config="screenConfig" full />
         </template>
       </div>
     </div>
@@ -13642,6 +13707,19 @@ function closeRecoveryKey() {
       :locale="locale"
       :theme="themeMode"
       @close="showTimeZone = false"
+    />
+
+    <!-- #275 — the embed's own language setting (kept in this browser) -->
+    <LanguageDialog
+      v-if="embedded"
+      :open="showLanguage"
+      :locale="locale"
+      :theme="themeMode"
+      :chosen="embedLocaleChoice()"
+      :fallback="embedLocaleFallback"
+      :personal="personCaller"
+      @pick="pickEmbedLocale"
+      @close="showLanguage = false"
     />
 
     <!-- wiring:c2 — shortcut settings modal + Space quick-look overlay -->

@@ -222,4 +222,30 @@ describe('an installed copy of the previous release updates to this one', () => 
     );
     expect(order).toEqual([1, -1, -1, 1, 0]);
   });
+
+  // A server patch (#252) publishes no desktop packages: there is nothing to
+  // update FROM in it. v0.57.2's dry run picked v0.57.1 and both Linux rows
+  // stopped on "the previous release has no filex-desktop-amd64.deb".
+  it.runIf(!!DIR)('previous-release.mjs skips an older release without the packages a row asks for', () => {
+    const releases = [
+      { tag_name: 'v0.57.1', draft: false, prerelease: false, assets: [{ name: 'filex_0.57.1_linux_amd64.tar.gz' }] },
+      { tag_name: 'v0.57.0', draft: false, prerelease: false, assets: [{ name: 'filex-desktop-amd64.deb' }, { name: 'filex-desktop-x86_64.AppImage' }] },
+    ];
+    const pick = (wanted: string[]) =>
+      inNode<string | null>('previous-release.mjs', `const r = m.previousRelease(${JSON.stringify(releases)}, '0.57.2', ${JSON.stringify(wanted)}); return r ? r.tag_name : null;`);
+    expect(pick(['filex-desktop-amd64.deb', 'filex-desktop-x86_64.AppImage'])).toBe('v0.57.0');
+    // No names, or names no older release carries: the newest older one, as before.
+    expect(pick([])).toBe('v0.57.1');
+    expect(pick(['no-such-package.bin'])).toBe('v0.57.1');
+    expect(code('scripts/previous-release.mjs')).toMatch(/previousRelease\(await listReleases\(o\.repo\), o\.below, o\.assets\)/);
+  });
+
+  // Process.Path asks Windows on every read: an exiting copy answers the
+  // first read and not the second (v0.57.2's arm64 check, after the update
+  // had worked).
+  it.runIf(!!DIR)('the Windows update check reads a process path once', () => {
+    const ps = code('scripts/desktop-upgrade-windows.ps1');
+    expect(ps).not.toMatch(/\$_\.Path -and \$_\.Path\./);
+    expect(ps).toMatch(/\$p = \$_\.Path; \$p -and \$p\.StartsWith\(/);
+  });
 });

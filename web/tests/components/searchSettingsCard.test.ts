@@ -1,4 +1,4 @@
-// The search settings card (task #261): the four settings the Search page
+// The search settings card (task #261): the five settings the Search page
 // edits since 0.57, each saved through PATCH /api/admin/search/settings and
 // read back from the server's answer; a number the server refuses keeps the
 // server's sentence under its field; the memory budget in force is said in
@@ -27,6 +27,11 @@ const state: { now: SearchSettings } = {
     memory_from_kind: 'container',
     auto_rebuild: true,
     index_enabled: true,
+    extract_memory_mb: 0,
+    extract_memory_mb_min: 0,
+    extract_memory_mb_max: 16384,
+    extract_memory_bytes: 512 * 1024 ** 2,
+    extract_memory_auto: true,
   },
 };
 const updateSettings = vi.fn();
@@ -117,6 +122,29 @@ describe('SearchSettingsCard', () => {
     const line = w.get('[data-testid="search-settings-budget"]').text();
     expect(line).toContain(tr.search.settings.memory.from.container);
     expect(line).not.toContain('cgroup');
+    w.unmount();
+  });
+
+  // GitHub #123: the memory one extraction process may reach.
+  it('the extraction ceiling: 0 is automatic and says so; a number is saved as typed', async () => {
+    const w = await card('tr');
+    await flushPromises();
+    const field = w.get('[data-testid="search-settings-extract-memory"] input');
+    expect((field.element as HTMLInputElement).value).toBe('0');
+    expect(w.get('[data-testid="search-settings-extract-ceiling"]').text()).toContain('indeksleme belleğinden');
+
+    updateSettings.mockImplementationOnce(async (patch: Record<string, unknown>) => {
+      state.now = { ...state.now, ...patch, extract_memory_bytes: 768 * 1024 ** 2, extract_memory_auto: false } as SearchSettings;
+      return { ...state.now };
+    });
+    await field.setValue('768');
+    await formOf(w, 'search-settings-extract-memory').trigger('submit');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith({ extract_memory_mb: 768 });
+    const line = w.get('[data-testid="search-settings-extract-ceiling"]').text();
+    expect(line).not.toContain('indeksleme belleğinden');
+    expect(line).toContain('768');
+    state.now = { ...state.now, extract_memory_mb: 0, extract_memory_bytes: 512 * 1024 ** 2, extract_memory_auto: true };
     w.unmount();
   });
 

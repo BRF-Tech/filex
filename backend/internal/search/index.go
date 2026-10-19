@@ -89,6 +89,9 @@ type Index struct {
 	// budget is the last memory budget ApplyMemoryPercent set, for the
 	// Search page (settings.go).
 	budget budgetNote
+	// extract is how many extractions run at once, which the automatic
+	// extraction ceiling shares the budget by (settings.go, GitHub #123).
+	extract extractWorkers
 }
 
 // Open returns an Index ready to use. Pass empty path to disable.

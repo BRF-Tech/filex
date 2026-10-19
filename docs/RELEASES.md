@@ -19,14 +19,74 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.57.1, 17 October 2026
-A decimal typed into a CSV in ONLYOFFICE keeps the file's comma: in the Turkish or the German editor a number like 4,5 typed into a semicolon file no longer goes back to the file as 4.5 (or 1,1 as 1.1000000000000001), wherever its column writes decimal commas - and a CSV saved from the Office editor app gets the same rule. Contributed by Berk Başarır.
+::: tip Latest - v0.57.2, 19 October 2026
+Security patch: a file request's total cap now holds when uploads overlap. Uploads sent at the same time all passed the max_uploads check, so a link capped at one file took fifteen (GHSA-4pc6-66f4-q2x4); a submission's files are now claimed against the cap before the first one is written. This patch is not installed automatically: update by hand. In the desktop app, the file list follows an account's language from a language pack (contributed by @chengjie, #122), the snap says what the keyring and removable-media plugs allow before it shows the command that connects them, and the admin panel's one-column menus open under their own button.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.57.1
-docker pull ghcr.io/brf-tech/filex:full-v0.57.1
+docker pull ghcr.io/brf-tech/filex:slim-v0.57.2
+docker pull ghcr.io/brf-tech/filex:full-v0.57.2
 ```
+
+## v0.57.2
+
+<span class="filex-release-date">19 October 2026</span>
+
+Security patch: a file request's total cap now holds when uploads overlap. Uploads sent at the same time all passed the max_uploads check, so a link capped at one file took fifteen (GHSA-4pc6-66f4-q2x4); a submission's files are now claimed against the cap before the first one is written. This patch is not installed automatically: update by hand. In the desktop app, the file list follows an account's language from a language pack (contributed by @chengjie, #122), the snap says what the keyring and removable-media plugs allow before it shows the command that connects them, and the admin panel's one-column menus open under their own button.
+
+## What changed
+
+### Security
+
+- **A file request's total cap holds when uploads overlap**
+  ([GHSA-4pc6-66f4-q2x4](https://github.com/BRF-Tech/filex/security/advisories/GHSA-4pc6-66f4-q2x4)).
+  `max_uploads` was checked against the count the request had read and the
+  count moved only after the files were written, so uploads sent at the same
+  time all passed: a link capped at one file took fifteen concurrent uploads,
+  and where the owner's account has no quota the files could keep coming.
+  A submission's files are now claimed against the cap in one database
+  statement before the first is written, and a file the storage did not take
+  gives its place back. Reported by @Refaelyk.
+
+### Fixed
+
+- **The snap says what a plug allows before it asks you to connect it.** The
+  Snap Store leaves `password-manager-service` and `removable-media` for you
+  to connect, so the desktop app now asks snapd (`snapctl is-connected`)
+  instead of guessing. With the keyring plug not connected, the sign-in window
+  says that connecting it lets filex keep its tokens encrypted in GNOME
+  Keyring or KWallet, gives the snap access to the secrets stored there and
+  lets other apps that reach the keyring read what filex puts there, and only
+  then shows the command; with the plug connected and no keyring answering,
+  it says to start or unlock the keyring. A sync folder chosen under
+  `/media`, `/run/media` or `/mnt` while `removable-media` is not connected
+  ended in a permission error that did not say why; it is now refused with
+  what the plug allows and a button that copies the command
+  ([DESKTOP.md → The plugs you connect](./DESKTOP.md#the-plugs-you-connect)).
+- **The desktop app's file list speaks the account's language from a
+  language pack.** The explorer inside the desktop window stayed in English or
+  Turkish when the account used a language a language pack adds on the
+  server: the window never loaded the server's list of languages, and handed
+  the explorer its own built-in fallback instead of the account's language.
+  It now loads the active server's languages before the explorer opens,
+  follows the account's language (the window's own menus keep English or
+  Turkish), forgets the previous server's languages on a server switch and
+  ignores a late answer from it. Contributed by @chengjie (#122).
+- **The admin panel's one-column menus open under their own button.** In the
+  top bar, *People* and *Maintenance & records* opened their panel at the
+  bar's start, under the dashboard link, two or three buttons away from the
+  one that was pressed. A one-column panel now hangs from its own button (in
+  a right-to-left interface, from its right edge); the wide panels with
+  several columns keep the bar's start, where they have room.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0572---2026-10-19)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.57.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.57.2`
 
 ## v0.57.1
 
@@ -3326,46 +3386,13 @@ describes below is in 0.44.2.
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.44.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.44.2`
 
-## v0.44.1
-
-<span class="filex-release-date">25 September 2026</span>
-
-Tagged, but it stopped at the same winget step as 0.44.0; its container images, npm packages and CLI binaries were published. Use 0.44.2.
-
-> ⚠ **Use [v0.44.2](https://github.com/BRF-Tech/filex/releases/tag/v0.44.2) instead.** v0.44.1 published its container images, CLI binaries and npm packages, then stopped at a packaging step of the release (a GoReleaser template), so it has **no desktop app and no store packages**. v0.44.2 carries everything in this release plus those. Nothing published here is broken; it is just incomplete.
-
-## What changed
-
-0.44.0 as it was meant to ship, and **the one to install the desktop app
-from**. v0.44.0's npm packages, container images and CLI binaries went out,
-but its release stopped at the winget step, so its desktop packages and every
-store and package-manager step behind it never ran. Everything 0.44.0
-describes below is in 0.44.1.
-
-### Fixed
-
-- **The release reaches the desktop packages and the stores again.** The
-  winget and Homebrew-tap sections of `.goreleaser.yml` guarded their tokens
-  with a template function the release's GoReleaser does not define
-  (`envOrDefault`); it was evaluated only when publishing, after the Release,
-  npm and the images were out. They use `&#123;&#123; index .Env "NAME" }}` now, and a
-  test fails on any template function GoReleaser does not have.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0441---2026-09-25)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.44.1) · `ghcr.io/brf-tech/filex:slim-v0.44.1`
-
 ## Earlier releases
 
-The 122 releases before v0.44.1, in brief. Full notes are on GitHub.
+The 123 releases before v0.44.2, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.44.1](https://github.com/BRF-Tech/filex/releases/tag/v0.44.1) | 25 September 2026 | Tagged, but it stopped at the same winget step as 0.44.0; its container images, npm packages and CLI binaries were published. |
 | [v0.44.0](https://github.com/BRF-Tech/filex/releases/tag/v0.44.0) | 25 September 2026 | Big local storages open at once: the new lazy catalogue lists a folder straight from disk and catalogues it behind the listing, with a throttled pass that fills in the rest (or only the folders people visit). |
 | [v0.43.2](https://github.com/BRF-Tech/filex/releases/tag/v0.43.2) | 24 September 2026 | The release that 0.43.1 was meant to be: container images for everything in 0.43.0 (whose images never published), the storage-credential scrub, Berk Başarır's per-tile thumbnail rendering and a desktop sign-in fix for servers… |
 | [v0.43.0](https://github.com/BRF-Tech/filex/releases/tag/v0.43.0) | 24 September 2026 | Apps. filex gains a second kind of plugin: a sandboxed WebAssembly app that adds actions to the file menu, screens filex draws for it, and public pages for people without an account - installed from a GitHub repository, a file or… |
@@ -3491,4 +3518,4 @@ The 122 releases before v0.44.1, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-10-17 from 142 published releases.</small>
+<small>Last refreshed 2026-10-19 from 143 published releases.</small>

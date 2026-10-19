@@ -40,6 +40,11 @@ func (officeExtractor) Supports(mime, ext string) bool {
 	return ok
 }
 
+// Isolated: the archive and its XML are read in a process of its own, like a
+// PDF (GitHub #123). memberXMLCap bounds the XML read per member, not what
+// a hostile archive's directory and members cost on the way there.
+func (officeExtractor) Isolated() bool { return true }
+
 // memberXMLCap bounds how much RAW XML is read per archive member — a
 // decompression-bomb guard on top of the source-size cap (a 5 MiB zip can
 // inflate far beyond it). Text collection also stops at `limit`, so this

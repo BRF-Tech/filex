@@ -415,7 +415,23 @@ export interface ExplorerConfig {
    */
   appHomePage?: boolean;
 
-  /** UI dil kodu */
+  /**
+   * The interface language: `en`, `tr`, or any language a language pack on the
+   * server adds (`es`, `de`, `pt-br`, ...).
+   *
+   * ⚠ What it decides depends on the host (lib/explorerLocale):
+   *
+   *   - the filex web app and desktop app bind the language to the ACCOUNT:
+   *     the account's language wins, this value is what is drawn until the
+   *     account answers and what an account with no language takes as its own;
+   *   - an EMBED (no host wired `accountPrefs` / core's `configurePrefs`) ranks
+   *     it LAST but one: the language the person picked in this browser (the
+   *     explorer's "⋯" → Language), then the account's language when a person
+   *     is behind the credential (`callerKind` `user`), then the browser's
+   *     languages that this server offers, then this value, then English. It
+   *     is a default for visitors whose browser asks for nothing the server
+   *     offers, and it is never written to the account.
+   */
   locale?: LocaleCode;
 
   /**
@@ -709,6 +725,11 @@ export interface ExplorerConfig {
    * The server keeps one document per surface, `web` or `desktop`. Absent (an
    * embed): the look stays this browser's, as it always was. ⚠ One explorer
    * per window may set it: the store is the window's.
+   *
+   * ⚠ It is also what tells an app surface from an embed for the LANGUAGE
+   * (`locale`, lib/explorerLocale): set here, or wired by the host with core's
+   * `configurePrefs` (the web app), the language follows the account; neither,
+   * and the explorer is an embed with its own "⋯" → Language.
    */
   accountPrefs?: { surface: 'web' | 'desktop' };
 

@@ -43,8 +43,10 @@ import { defineCustomElement, h, ref, watch, type PropType } from 'vue';
 import FileExplorer from '@brftech/filex-core/src/FileExplorer.vue';
 import ConnectionsPanel from '@brftech/filex-core/src/components/ConnectionsPanel.vue';
 import type { ExplorerConfig, LocaleCode, ThemeMode } from '@brftech/filex-core';
-import { resolveUiProfile } from '@brftech/filex-core';
+import { plausibleLocale, resolveUiProfile } from '@brftech/filex-core';
 import coreCss from '@brftech/filex-core/style.css?inline';
+import type { loadLocales as coreLoadLocales } from '@brftech/filex-core';
+import { loadLocales as sourceLoadLocales } from '../../core/src/lib/uiLocales';
 
 /**
  * Inject the core stylesheet into <head> once. We `?inline` it (handled
@@ -86,7 +88,11 @@ function buildConfig(
   const base: ExplorerConfig = {};
   if (attrs.apiBase) base.apiBase = attrs.apiBase;
   if (attrs.endpoint) base.endpoint = attrs.endpoint;
-  if (attrs.locale === 'tr' || attrs.locale === 'en') base.locale = attrs.locale as LocaleCode;
+  // Any language tag, a language pack's (`es`, `pt-br`) included, as the
+  // README promises: core holds a plausible tag while the server's list is on
+  // its way and falls through when the server does not offer it. ⚠ It was
+  // `en` or `tr` only, and `locale="es"` was dropped without a word.
+  if (attrs.locale && plausibleLocale(attrs.locale)) base.locale = attrs.locale as LocaleCode;
   if (attrs.theme === 'light' || attrs.theme === 'dark' || attrs.theme === 'auto') {
     base.theme = attrs.theme as ThemeMode;
   }
@@ -439,8 +445,17 @@ declare global {
 }
 
 export type { ExplorerConfig } from '@brftech/filex-core';
-// Share the source registry used by the bundled explorer, not a second core build.
-export { loadLocales } from '../../core/src/lib/uiLocales';
+/* Share the source registry used by the bundled explorer, not a second core
+ * build: `@brftech/filex-core` itself resolves to core's dist, a second copy of
+ * the module with a language list of its own - so the VALUE comes from core's
+ * source, the module FileExplorer.vue imports.
+ * ⚠ The TYPE comes from `@brftech/filex-core`, the package this one depends on.
+ * Re-exported straight from the relative source path, the function was rolled
+ * into dist/index.d.ts as its SOURCE - a body and a default value in a
+ * declaration file (measured with `pnpm -C packages/webcomponent build`, task
+ * #275); `@brftech/filex-core/src/lib/uiLocales` does not resolve for
+ * TypeScript at all (the package's `src/*` export adds no extension). */
+export const loadLocales: typeof coreLoadLocales = sourceLoadLocales;
 /* #196 - a host's own sign-out (the desktop app) forgets the menu answers the
  * explorer remembered on this browser, as the web app's sign-out does. */
 export { clearMenuAnswers } from '@brftech/filex-core';

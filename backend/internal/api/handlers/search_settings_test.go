@@ -33,8 +33,14 @@ type searchSettingsBody struct {
 	MemoryGivenBytes  uint64 `json:"memory_given_bytes"`
 	AutoRebuild       bool   `json:"auto_rebuild"`
 	IndexEnabled      bool   `json:"index_enabled"`
-	Field             string `json:"field"`
-	Message           string `json:"message"`
+	// GitHub #123.
+	ExtractMemoryMB    int    `json:"extract_memory_mb"`
+	ExtractMemoryMBMin int    `json:"extract_memory_mb_min"`
+	ExtractMemoryMBMax int    `json:"extract_memory_mb_max"`
+	ExtractMemoryBytes uint64 `json:"extract_memory_bytes"`
+	ExtractMemoryAuto  bool   `json:"extract_memory_auto"`
+	Field              string `json:"field"`
+	Message            string `json:"message"`
 }
 
 func searchSettingsServer(t *testing.T) (*search.Index, func(method string, body any) (int, searchSettingsBody)) {
@@ -80,6 +86,28 @@ func TestSearchSettings_DefaultsAndBounds(t *testing.T) {
 	assert.Equal(t, 50, got.MemoryPercentMax)
 	assert.True(t, got.AutoRebuild)
 	assert.True(t, got.IndexEnabled)
+	assert.Equal(t, 0, got.ExtractMemoryMB, "the extraction ceiling defaults to the budget's")
+	assert.Equal(t, 0, got.ExtractMemoryMBMin)
+	assert.Equal(t, search.MaxExtractMemoryMB, got.ExtractMemoryMBMax)
+	assert.True(t, got.ExtractMemoryAuto)
+	assert.NotZero(t, got.ExtractMemoryBytes, "the ceiling in force is said")
+}
+
+// GitHub #123: the ceiling of one extraction process is a setting of its
+// own, stored, answered with what it comes to, and back to the budget at 0.
+func TestSearchSettings_TheExtractionCeiling(t *testing.T) {
+	_, call := searchSettingsServer(t)
+	code, got := call(http.MethodPatch, map[string]any{"extract_memory_mb": 768})
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, 768, got.ExtractMemoryMB)
+	assert.False(t, got.ExtractMemoryAuto)
+	assert.Equal(t, uint64(768<<20), got.ExtractMemoryBytes)
+
+	_, again := call(http.MethodGet, nil)
+	assert.Equal(t, 768, again.ExtractMemoryMB, "the row answers")
+
+	_, auto := call(http.MethodPatch, map[string]any{"extract_memory_mb": 0})
+	assert.True(t, auto.ExtractMemoryAuto, "0 is the budget's ceiling again")
 }
 
 func TestSearchSettings_PatchStoresAndAnswersTheNewState(t *testing.T) {
@@ -117,6 +145,7 @@ func TestSearchSettings_OutOfRangeIsRefusedNotClamped(t *testing.T) {
 		v     int
 	}{
 		{"memory_percent", 0}, {"memory_percent", 51}, {"content_max_mb", 0}, {"content_max_mb", 4096},
+		{"extract_memory_mb", -1}, {"extract_memory_mb", search.MaxExtractMemoryMB + 1},
 	} {
 		code, got := call(http.MethodPatch, map[string]any{c.field: c.v})
 		assert.Equal(t, http.StatusBadRequest, code, "%s=%d", c.field, c.v)

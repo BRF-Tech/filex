@@ -196,6 +196,9 @@ export function useUploadChunked(
   /** Client-side default. The server's answer at `begin` is binding — this only
    *  decides what to ask for and what counts as "large enough to chunk". */
   const DEFAULT_CHUNK = config.chunkSize ?? 8 * 1024 * 1024;
+  /** The language a failure is said in: the client's screen language (an
+   *  explorer's may not be `config.locale` - lib/explorerLocale). */
+  const lang = () => api.screenLocale?.() ?? resolveLocale(config.locale);
 
   /** Base of the staged routes, derived from the manager endpoint the same way
    *  every other derived route is, so an embedder that passes only `endpoint`
@@ -423,7 +426,7 @@ export function useUploadChunked(
         // person, and the byte count is only for whoever is debugging.
         if (next <= acked) {
           console.warn('[filex] upload stalled at byte', acked);
-          throw new Error(wordsIn(resolveLocale(config.locale))('err.upload_stalled'));
+          throw new Error(wordsIn(lang())('err.upload_stalled'));
         }
         acked = next;
         if (chunkExpiry !== undefined) expiresAt = chunkExpiry;
@@ -536,12 +539,12 @@ export function useUploadChunked(
           }
           // Said (lib/errorWords): the upload row used to read
           // "chunk 0-8388607 → 500". Status and body still ride along.
-          reject(requestFailure(xhr.status, xhr.responseText || '', resolveLocale(config.locale)));
+          reject(requestFailure(xhr.status, xhr.responseText || '', lang()));
         };
         xhr.onerror = () => {
           inFlight = null;
           noteRequestFailed('action');
-          reject(networkFailure(resolveLocale(config.locale)));
+          reject(networkFailure(lang()));
         };
         xhr.onabort = () => {
           inFlight = null;

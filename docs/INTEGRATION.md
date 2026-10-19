@@ -80,7 +80,8 @@ const config = {
   //   or { kind: 'csrf', csrf: '<token>' }  for cookie-session hosts
   //   or { kind: 'none' }                    for an open/dev backend
 
-  locale: 'tr',            // 'tr' | 'en' | any language a pack adds; sets this
+  locale: 'tr',            // 'tr' | 'en' | any language a pack adds; in an embed,
+                           // a default below the visitor's own (see Language)
   theme: 'auto',           // 'light' | 'dark' | 'auto'
   // The signed-in person's display name, else their username - never their
   // e-mail. An app's interface is told it (`session.user.name`): the office
@@ -379,6 +380,41 @@ scroll inside itself instead of moving, and a bottom sheet keeps the height it
 opened with. The next opening draws the menu in its own order again. Nothing
 needs configuring: a host that changes `actions` while its menu is open gets
 the same behaviour.
+
+### Language
+
+An embed speaks the first of these that gives an answer:
+
+1. the language picked **in this browser** - the explorer's **⋯ → Language**,
+   kept in `localStorage` (`filex.embed.locale`) and sent nowhere;
+2. the account's language, when a person is behind the credential
+   (`callerKind` `user`: a session cookie or the person's own API token);
+3. the browser's languages (`navigator.languages`), the first one this server
+   offers - English, Turkish or a language pack's;
+4. `config.locale`;
+5. English.
+
+So `config.locale` is a default for the visitors whose browser asks for nothing
+the server offers: set it to `tr` and a reader whose browser asks for English
+still reads English. The explorer loads the server's list of languages
+(`GET /api/public/branding`) when it mounts, once per page and for at most ten
+seconds; a host that already called `loadLocales` from `@brftech/filex` costs no
+second request.
+
+In ⋯ → Language the first row clears this browser's pick and names what the
+embed falls back to - *Browser language (English)*, or the account's language
+in a personal embed whose account has one. In a personal embed (2.) a
+language picked there is saved to the account as well, so the person's other
+devices and their notifications use it; going back to the first row clears only
+this browser's pick. An embed behind an `app` token never reads or writes an
+account's language, and no embed writes `config.locale` to an account.
+
+The filex web app and desktop app are not embeds: their language is the
+account's, chosen in User settings, and the row is not drawn there. The explorer
+tells them apart by what the host wires - `config.accountPrefs` (the desktop
+app) or core's `configurePrefs` (the web app); a host that wires neither is an
+embed. A host whose `account.settings` carries a `language` row of its own does
+not get the ⋯ row either.
 
 ### Themes
 

@@ -130,7 +130,8 @@ The tables below mark each such variable as a **seed**: the ClamAV family
 `FILEX_APPS_E2E_PLAINTEXT`, the `FILEX_THUMBS_SVG_*`, `FILEX_THUMBS_OFFICE_*`
 and `FILEX_THUMBS_FOLDER_PREVIEWS` thumbnail settings, the `FILEX_USAGE_*`
 family, `FILEX_SEARCH_CONTENT`, `FILEX_SEARCH_CONTENT_MAX`,
-`FILEX_SEARCH_MEMORY_PERCENT` and `FILEX_SEARCH_AUTO_REBUILD` (edited on
+`FILEX_SEARCH_MEMORY_PERCENT`, `FILEX_SEARCH_AUTO_REBUILD` and
+`FILEX_SEARCH_EXTRACT_MEMORY_MB` (edited on
 **Admin → Settings → General**), and the server defaults edited on the admin
 panel: `FILEX_DEFAULT_LOCALE`, `FILEX_SYNC_INTERVAL`,
 `FILEX_UPLOAD_STAGING_TTL`, `FILEX_CACHE_MAX_BYTES`,
@@ -1277,6 +1278,7 @@ configuration. See [thumbnails.md](thumbnails.md).
 | `FILEX_SEARCH_CONTENT` | `true` | **Seed** of `search.content` (Admin → Settings → General → Search settings, "Search inside files"): extract text from files into the index (content search). `0` stops reading file text; text already indexed keeps matching. |
 | `FILEX_SEARCH_CONTENT_MAX` | `5242880` | **Seed** of `search.content_max_mb`: source files larger than this are never content-extracted. In BYTES here, stored in MB (rounded up, 1-1024). |
 | `FILEX_SEARCH_MEMORY_PERCENT` | `25` | **Seed** of `search.memory_percent`: share, in percent (1-50), of the memory filex was given - the container's limit, or the machine's RAM - that indexing may take. Over it, content extraction and a rebuild wait for the index to give memory back. |
+| `FILEX_SEARCH_EXTRACT_MEMORY_MB` | `0` (automatic) | **Seed** of `search.extract_memory_mb`: the memory, in MB (0-16384), one extraction process may reach. PDF and office files are read in a process of their own; one that passes this is stopped, the file is found by its name only, and filex goes on. `0` takes it from the indexing budget above, shared by the extractions that run at once (between 256 MB and 1 GB; 512 MB when the memory filex was given cannot be read). A value under 64 counts as 64. |
 | `FILEX_SEARCH_AUTO_REBUILD` | `true` | **Seed** of `search.auto_rebuild`: rebuild the index in the background at startup when it was written by an older document schema. The replacement is built alongside the live index and swapped in, so search never goes dark. Off leaves the index alone and reports `needs_rebuild` instead. |
 | `FILEX_TESSERACT_BIN` | unset (`tesseract` on `$PATH`) | Path to the `tesseract` binary used to OCR images (png/jpg/webp/tiff) into the content index. **When set it is authoritative:** a value that does not resolve turns OCR *off* rather than falling back to `$PATH`. Unset, filex looks for `tesseract` on `$PATH`; if there is none, images are skipped silently and the capabilities endpoint reports `ocr: false`. |
 

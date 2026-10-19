@@ -18,9 +18,13 @@ import { formatByteSize, formatWhen, formatWhenFull, localeTag, translate } from
  * A byte count for the admin panel — `formatByteSize`, decimal (1000), with
  * the viewer's number format ("1,43 MB") and the catalogue's unit words
  * (`unit.*`, so a language pack's "Go" reaches the admin tables too).
+ *
+ * `base` 1024 is `formatByteSize`'s mirror case: a figure the server keeps
+ * in its own 2^20-byte MB, beside the field a person types it into (the
+ * search settings' `*_mb`), so 768 typed reads back as 768 MB, not 805 MB.
  */
-export function formatBytes(n: number, locale = 'en'): string {
-  return formatByteSize(n, { numberLocale: localeTag(locale), unit: (key) => translate(locale, key) });
+export function formatBytes(n: number, locale = 'en', base: 1000 | 1024 = 1000): string {
+  return formatByteSize(n, { numberLocale: localeTag(locale), unit: (key) => translate(locale, key), base });
 }
 
 export function formatNumber(n: number | null | undefined, locale = 'en'): string {

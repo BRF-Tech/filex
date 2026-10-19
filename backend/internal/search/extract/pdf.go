@@ -21,13 +21,19 @@ func (pdfExtractor) Supports(mime, ext string) bool {
 	return ext == "pdf" || mime == "application/pdf" || mime == "application/x-pdf"
 }
 
+// Isolated: the reader runs in a process of its own (GitHub #123). Some
+// small PDFs send GetPlainText into memory without end, and nothing in this
+// function can stop it: the source cap does not bound what the parser builds,
+// the text cap applies after it returns, and recover cannot catch the kernel.
+func (pdfExtractor) Isolated() bool { return true }
+
 func (pdfExtractor) Extract(_ context.Context, r io.Reader, limit int64) (text string, err error) {
 	if limit <= 0 {
 		limit = DefaultLimit
 	}
 	// The pdf reader needs io.ReaderAt + size, so buffer the source. The
-	// caller caps source size (FILEX_SEARCH_CONTENT_MAX), keeping this
-	// bounded.
+	// caller caps source size (search.content_max_mb); what the parse takes
+	// beyond it is bounded by the process this runs in (Isolated).
 	data, rerr := io.ReadAll(r)
 	if rerr != nil {
 		return "", rerr // transport failure — the queue may retry

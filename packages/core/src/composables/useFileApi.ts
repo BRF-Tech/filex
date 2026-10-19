@@ -24,7 +24,7 @@
 import type { StorageInfo } from '../lib/catalogCoverage';
 import type { EncryptedKind } from '../lib/encryptedRow';
 import type { MeasuredDrive } from '../lib/storageLine';
-import type { ExplorerConfig, AuthConfig, EndpointMap, SearchAccount } from '../types/ExplorerConfig';
+import type { ExplorerConfig, AuthConfig, EndpointMap, LocaleCode, SearchAccount } from '../types/ExplorerConfig';
 import type { CsvDeclaration, LicenseInfo } from '@brftech/filex-app-ui/protocol';
 import { resolveLocale } from '../locales/resolve';
 import { listingAddress } from '../lib/internalPaths';
@@ -457,7 +457,18 @@ function normalizeAuth(auth: AuthConfig | undefined): { kind: 'bearer'; token: s
  *  held to it by a drift test (web/tests/lib/serverRuleVectors.test.ts). */
 export const UI_SAVE_CHUNK = 8 << 20;
 
-export function useFileApi(config: ExplorerConfig) {
+export interface FileApiOptions {
+  /**
+   * The language on SCREEN, when the host of this client knows it better than
+   * `config.locale` - the explorer, whose language may come from the account,
+   * an embed's own Language pick or the browser (lib/explorerLocale). Every
+   * request's `Accept-Language`, the `lang=` of an app call and the words of a
+   * refusal follow it. Absent: `config.locale`, as before.
+   */
+  screenLocale?: () => LocaleCode;
+}
+
+export function useFileApi(config: ExplorerConfig, options: FileApiOptions = {}) {
   const endpoints = resolveEndpoints(config);
   const authConf = normalizeAuth(config.auth);
 
@@ -529,7 +540,7 @@ export function useFileApi(config: ExplorerConfig) {
      called `fetch` itself; those printed "save failed: 500 {…}" and
      "Config fetch 503: {…}". The raw body rides along as `.detail`, for an
      administrator's second line and for `lockedRefusal`, never the sentence. */
-  const lang = () => resolveLocale(config.locale);
+  const lang = (): LocaleCode => options.screenLocale?.() ?? resolveLocale(config.locale);
 
   async function jsonFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
     const res = await rawRequest(url, init);
@@ -565,7 +576,7 @@ export function useFileApi(config: ExplorerConfig) {
       // set to, so a Turkish window asked a signing wizard for its screens
       // and got "Identity" and an English help line in the middle of Turkish
       // ones. The window's own language is the only right answer here.
-      'Accept-Language': localeTag(resolveLocale(config.locale)),
+      'Accept-Language': localeTag(lang()),
       ...(await authHeaders()),
       ...((init.headers as Record<string, string> | undefined) ?? {}),
     };
@@ -2058,6 +2069,8 @@ export function useFileApi(config: ExplorerConfig) {
   }
 
   return {
+    /** The language this client says things in (`FileApiOptions.screenLocale`). */
+    screenLocale: lang,
     // Realtime
     wsTicket,
     // Manager

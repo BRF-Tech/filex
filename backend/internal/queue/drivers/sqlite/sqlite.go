@@ -535,15 +535,24 @@ func (d *Driver) RecoverOrphans(ctx context.Context, olderThan time.Duration) (i
 	if cutoffSec < 0 {
 		cutoffSec = 0
 	}
+	orphan := `status='running'
+		   AND (started_at IS NULL OR started_at <= ` + d.nowOffset(-cutoffSec) + `)`
+	// Spent first: the rows still owed an attempt are the ones requeued.
+	spent, err := d.db.ExecContext(ctx,
+		`UPDATE ops_queue SET status='failed', last_error=?, started_at=NULL, finished_at=`+d.nowExpr()+`
+		 WHERE `+orphan+` AND max_attempts > 0 AND attempts >= max_attempts`, queue.OrphanSpent)
+	if err != nil {
+		return 0, fmt.Errorf("queue/sqlite: recover spent: %w", err)
+	}
 	res, err := d.db.ExecContext(ctx,
 		`UPDATE ops_queue SET status='pending', started_at=NULL
-		 WHERE status='running'
-		   AND (started_at IS NULL OR started_at <= `+d.nowOffset(-cutoffSec)+`)`)
+		 WHERE `+orphan)
 	if err != nil {
 		return 0, fmt.Errorf("queue/sqlite: recover: %w", err)
 	}
+	failed, _ := spent.RowsAffected()
 	n, _ := res.RowsAffected()
-	return n, nil
+	return failed + n, nil
 }
 
 // ─── helpers ───────────────────────────────────────────────────────

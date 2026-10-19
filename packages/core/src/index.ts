@@ -427,6 +427,8 @@ export {
   hasLocale,
   isBuiltinLocale,
   loadLocales,
+  loadLocalesOnce,
+  LOCALES_LIST_TIMEOUT_MS,
   localeLabel,
   localeOwnTable,
   localeStrings,
@@ -442,7 +444,24 @@ export {
   unregisterPluginLocales,
   BUILTIN_LOCALES,
 } from './lib/uiLocales';
-export type { OwnLocaleTable } from './lib/uiLocales';
+export type { LoadLocalesOptions, OwnLocaleTable } from './lib/uiLocales';
+/* #275 - which language an explorer speaks (an embed's order) and an embed's
+ * own pick, kept in the browser. */
+export {
+  EMBED_LOCALE_LS_KEY,
+  accountLanguage,
+  embedLocaleChoice,
+  explorerIsEmbedded,
+  pickEmbedLanguage,
+  resolveExplorerLocale,
+  setEmbedLocaleChoice,
+} from './lib/explorerLocale';
+export type {
+  AccountLanguageDeps,
+  ExplorerLocaleSources,
+  ExplorerLocaleTier,
+  ResolvedExplorerLocale,
+} from './lib/explorerLocale';
 /* v0.43.0 — CLDR plural categories: a language pack writes as many forms as
  * its language has (Arabic six, Russian four), in both catalogues. */
 export {

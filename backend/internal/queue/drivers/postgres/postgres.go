@@ -459,6 +459,16 @@ func (d *Driver) RecoverOrphans(ctx context.Context, olderThan time.Duration) (i
 	if cutoffSec < 0 {
 		cutoffSec = 0
 	}
+	// Spent first: the rows still owed an attempt are the ones requeued.
+	spent, err := d.db.ExecContext(ctx,
+		`UPDATE ops_queue SET status='failed', last_error=$2, started_at=NULL, finished_at=NOW()
+		 WHERE status='running'
+		   AND (started_at IS NULL OR started_at <= NOW() - make_interval(secs => $1))
+		   AND max_attempts > 0 AND attempts >= max_attempts`,
+		cutoffSec, queue.OrphanSpent)
+	if err != nil {
+		return 0, fmt.Errorf("queue/postgres: recover spent: %w", err)
+	}
 	res, err := d.db.ExecContext(ctx,
 		`UPDATE ops_queue SET status='pending', started_at=NULL
 		 WHERE status='running'
@@ -467,8 +477,9 @@ func (d *Driver) RecoverOrphans(ctx context.Context, olderThan time.Duration) (i
 	if err != nil {
 		return 0, fmt.Errorf("queue/postgres: recover: %w", err)
 	}
+	failed, _ := spent.RowsAffected()
 	n, _ := res.RowsAffected()
-	return n, nil
+	return failed + n, nil
 }
 
 // ─── helpers ───────────────────────────────────────────────────────

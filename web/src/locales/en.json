@@ -1360,6 +1360,14 @@
           "host": "the machine's memory"
         }
       },
+      "extractMemory": {
+        "title": "Memory for reading one file",
+        "desc": "PDF and office files are read in a process of their own. A file that needs more memory than this is stopped and found by its name only; filex goes on. 0 takes the limit from the memory for indexing, shared by the files read at once.",
+        "label": "Limit (MB)",
+        "hint": "From {min} to {max} MB, 0 for automatic. Applies to the next file read.",
+        "auto": "Now {ceiling}, from the memory for indexing.",
+        "set": "Now {ceiling}."
+      },
       "autoRebuild": {
         "label": "Repair an outdated index at startup",
         "desc": "After an upgrade that changes what the index holds, rebuild it in the background, beside the index that keeps answering searches. Applies at the next start."

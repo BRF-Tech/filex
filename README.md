@@ -661,7 +661,8 @@ import { FileManager } from '@brftech/filex-react';
 <FileManager config={{ apiBase: 'http://localhost:5212' }} onError={(e) => console.error(e)} />
 ```
 
-Styles, bundlers, the `sidenav` / `connections` / `ui-profile` attributes, confined tokens
+Styles, bundlers, the `sidenav` / `connections` / `ui-profile` attributes, the language an
+embed speaks (its visitor's, with a Language setting of its own), confined tokens
 for multi-tenant hosts, a session cookie from another origin and printing from an app:
 [docs/INTEGRATION.md](docs/INTEGRATION.md), summed up in
 [docs/FEATURES.md → Embedding](docs/FEATURES.md#embedding). ⚠ Keep the packages and the

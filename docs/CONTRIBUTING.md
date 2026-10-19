@@ -3623,6 +3623,17 @@ ones not yet published apply on top of one another in this order:
     "latest" release), and `npm` and `desktop` do not run. It needs
     `.goreleaser.yml`'s `make_latest` in the tree, so it lands with the export
     that brings it.
+13. `release-desktop-previous-fixes.patch` (#273, 0.57.2), on top of 12 -
+    already on the public `main` (e190ab82, 5397c16c): pushed from the
+    public checkout while v0.57.2 waited at its gate and its tag run, the
+    release tool's "a fault in a workflow" path. `previous-release.mjs` takes
+    the asset names a row asks for and picks the newest older release that
+    carries all of them: a server patch publishes no desktop packages, and
+    v0.57.2's dry run picked v0.57.1 and stopped both Linux rows on "the
+    previous release has no filex-desktop-amd64.deb". `desktop-upgrade-windows.ps1`
+    reads a process's `Path` once: read twice, an exiting copy answered the
+    first read and not the second, and the arm64 check stopped on "You cannot
+    call a method on a null-valued expression" after the update had worked.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and

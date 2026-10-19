@@ -557,6 +557,16 @@ export const tr: Record<string, string> = {
   'tz.more': '{n} kayıt daha var - listeyi daraltmak için yazmayı sürdürün.',
   'tz.hint': 'Yalnızca bu tarayıcıda saklanır. Her tarih tek bir an olarak saklanır ve burada seçtiğiniz saatle gösterilir.',
   'tz.now': '{zone} bölgesinde şu an: {time}',
+  /* #275 - gömmenin kendi dil ayarı ("⋯" → Dil), bu tarayıcıda tutulur */
+  'lang.menu': 'Dil',
+  'lang.title': 'Dil',
+  'lang.label': 'Arayüz dili',
+  'lang.default.browser': 'Tarayıcının dili ({lang})',
+  'lang.default.account': 'Hesabınızın dili ({lang})',
+  'lang.default.host': 'Bu sitenin varsayılanı ({lang})',
+  'lang.default.default': 'Varsayılan ({lang})',
+  'lang.hint': 'Yalnızca bu tarayıcıda saklanır.',
+  'lang.hint_account': 'Bu tarayıcıda ve hesabınızda saklanır; diğer cihazlarınız ve bildirimleriniz de bu dili kullanır.',
   /* === wiring:c2 - özelleştirilebilir kısayollar + hızlı bakış === */
   'shortcuts.quicklook': 'Hızlı bakış',
   'shortcuts.customize': 'Özelleştir',

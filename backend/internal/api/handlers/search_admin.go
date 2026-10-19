@@ -6,7 +6,8 @@
 //	POST  /api/admin/search/rebuild   — drop and rebuild the index from nodes
 //	GET   /api/admin/search/settings  — the search settings (task #261)
 //	PATCH /api/admin/search/settings  — {content?, content_max_mb?,
-//	                                     memory_percent?, auto_rebuild?}
+//	                                     memory_percent?, auto_rebuild?,
+//	                                     extract_memory_mb?}
 package handlers
 
 import (
@@ -133,7 +134,7 @@ func (h *SearchAdmin) Rebuild(w http.ResponseWriter, r *http.Request) {
 const searchIsInstanceWide = "the search index is one instance-wide index"
 
 // searchSettingsResponse is what both verbs of /api/admin/search/settings
-// answer. The four settings are settings-table rows (internal/search
+// answer. The five settings are settings-table rows (internal/search
 // settings.go): db, then the variable on a first boot, then the default.
 //
 // The bounds travel with the values, so the page offers exactly the range
@@ -167,6 +168,16 @@ type searchSettingsResponse struct {
 	// AutoRebuild: repair an index written by an older document schema at
 	// startup. Read at startup, so a change applies at the next start.
 	AutoRebuild bool `json:"auto_rebuild"`
+	// ExtractMemoryMB: the memory one extraction process (PDF, office) may
+	// reach, in MB; 0 takes it from the memory budget (GitHub #123). Live:
+	// the next file read.
+	ExtractMemoryMB    int `json:"extract_memory_mb"`
+	ExtractMemoryMBMin int `json:"extract_memory_mb_min"`
+	ExtractMemoryMBMax int `json:"extract_memory_mb_max"`
+	// ExtractMemoryBytes is the ceiling in force and ExtractMemoryAuto
+	// whether it came from the budget. 0 / false when the index is not open.
+	ExtractMemoryBytes uint64 `json:"extract_memory_bytes"`
+	ExtractMemoryAuto  bool   `json:"extract_memory_auto"`
 	// IndexEnabled is whether this process opened the index at all
 	// (FILEX_SEARCH_ENABLED, environment only). Read-only.
 	IndexEnabled bool `json:"index_enabled"`
@@ -179,6 +190,7 @@ type searchSettingsPatch struct {
 	ContentMaxMB  *int  `json:"content_max_mb"`
 	MemoryPercent *int  `json:"memory_percent"`
 	AutoRebuild   *bool `json:"auto_rebuild"`
+	ExtractMemory *int  `json:"extract_memory_mb"`
 }
 
 // Settings answers GET /api/admin/search/settings.
@@ -206,7 +218,7 @@ func (h *SearchAdmin) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if req.Content == nil && req.ContentMaxMB == nil && req.MemoryPercent == nil && req.AutoRebuild == nil {
+	if req.Content == nil && req.ContentMaxMB == nil && req.MemoryPercent == nil && req.AutoRebuild == nil && req.ExtractMemory == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no fields to update"})
 		return
 	}
@@ -217,6 +229,7 @@ func (h *SearchAdmin) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}{
 		{"content_max_mb", req.ContentMaxMB, search.ContentMaxSetting},
 		{"memory_percent", req.MemoryPercent, search.MemoryPercentSetting},
+		{"extract_memory_mb", req.ExtractMemory, search.ExtractMemorySetting},
 	} {
 		if n.v == nil {
 			continue
@@ -240,6 +253,9 @@ func (h *SearchAdmin) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if v := req.AutoRebuild; v != nil {
 		writes[search.AutoRebuildSetting.Key] = dbsetting.FormatBool(*v)
 	}
+	if v := req.ExtractMemory; v != nil {
+		writes[search.ExtractMemorySetting.Key] = strconv.Itoa(*v)
+	}
 	for key, value := range writes {
 		if err := h.Store.UpsertSetting(ctx, key, value); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -254,8 +270,8 @@ func (h *SearchAdmin) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.settingsSnapshot(r))
 }
 
-// settingsSnapshot reads the four settings as they are in force, and the
-// budget the running index was given.
+// settingsSnapshot reads the five settings as they are in force, the budget
+// the running index was given and the extraction ceiling it came to.
 func (h *SearchAdmin) settingsSnapshot(r *http.Request) searchSettingsResponse {
 	ctx := r.Context()
 	out := searchSettingsResponse{
@@ -268,8 +284,13 @@ func (h *SearchAdmin) settingsSnapshot(r *http.Request) searchSettingsResponse {
 		MemoryPercentMax: search.MemoryPercentSetting.Max,
 		AutoRebuild:      search.AutoRebuildSetting.Resolve(ctx, h.Store),
 		IndexEnabled:     h.Index != nil,
+
+		ExtractMemoryMB:    search.ExtractMemorySetting.Resolve(ctx, h.Store),
+		ExtractMemoryMBMin: search.ExtractMemorySetting.Min,
+		ExtractMemoryMBMax: search.ExtractMemorySetting.Max,
 	}
 	if h.Index != nil {
+		out.ExtractMemoryBytes, out.ExtractMemoryAuto = h.Index.ExtractMemory(ctx, h.Store)
 		b := h.Index.AppliedMemoryBudget()
 		out.MemoryBudgetBytes, out.MemoryGivenBytes, out.MemoryFrom = b.Bytes, b.GivenBytes, b.From
 		switch {

@@ -2,13 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.57.2"
+version: "0.57.3"
 releaseNotes: |-
-  filex v0.57.2 - 2026-10-19
-  • A file request's total cap holds when uploads overlap
-  • The snap says what a plug allows before it asks you to connect it.
-  • The desktop app's file list speaks the account's language from a language pack.
-  • The admin panel's one-column menus open under their own button.
+  filex v0.57.3 - 2026-10-19
+  • An embedded explorer speaks its visitor's language, and has a Language setting of its own.
+  • A PDF or office file can no longer take the server down while its text is read
+  • A queued job whose attempts are spent is not handed out again after a crash.
+  • The desktop app no longer waits forever for a server's languages.
+  • @brftech/filex's type declarations are valid TypeScript again.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

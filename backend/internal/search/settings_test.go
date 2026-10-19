@@ -26,7 +26,7 @@ func (m rowsStore) UpsertSetting(_ context.Context, key, value string) error {
 // noSearchEnv clears every search variable for the test.
 func noSearchEnv(t *testing.T) {
 	t.Helper()
-	for _, s := range []string{"FILEX_SEARCH_CONTENT", "FILEX_SEARCH_CONTENT_MAX", "FILEX_SEARCH_MEMORY_PERCENT", "FILEX_SEARCH_AUTO_REBUILD"} {
+	for _, s := range []string{"FILEX_SEARCH_CONTENT", "FILEX_SEARCH_CONTENT_MAX", "FILEX_SEARCH_MEMORY_PERCENT", "FILEX_SEARCH_AUTO_REBUILD", "FILEX_SEARCH_EXTRACT_MEMORY_MB"} {
 		t.Setenv(s, "")
 	}
 }
@@ -194,5 +194,61 @@ func TestBytesToMB_RoundsUp(t *testing.T) {
 		if _, ok := bytesToMB(raw); ok {
 			t.Errorf("bytesToMB(%q) accepted", raw)
 		}
+	}
+}
+
+// GitHub #123: the ceiling of one extraction process.
+
+func TestAutoExtractMemory_SharesTheBudgetWithinItsBounds(t *testing.T) {
+	for _, c := range []struct {
+		budget  uint64
+		workers int
+		want    uint64
+	}{
+		{0, 4, AutoExtractUnknown},
+		{2 << 30, 4, 512 << 20},
+		{8 << 30, 4, autoExtractCeiling},
+		{512 << 20, 4, autoExtractFloor},
+		{768 << 20, 0, 768 << 20},
+	} {
+		if got := autoExtractMemory(c.budget, c.workers); got != c.want {
+			t.Errorf("budget %d MiB over %d: %d MiB, want %d MiB", c.budget>>20, c.workers, got>>20, c.want>>20)
+		}
+	}
+}
+
+func TestExtractMemory_TheSettingElseTheBudget(t *testing.T) {
+	idx, err := Open(filepath.Join(t.TempDir(), "idx.bleve"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+	idx.ApplyMemoryPercent(25)
+	idx.SetExtractionWorkers(4)
+	ctx := context.Background()
+	rows := rowsStore{}
+
+	got, auto := idx.ExtractMemory(ctx, rows)
+	if want := autoExtractMemory(idx.AppliedMemoryBudget().Bytes, 4); !auto || got != want {
+		t.Errorf("unset: %d MiB auto=%v, want %d MiB from the budget", got>>20, auto, want>>20)
+	}
+	rows[ExtractMemorySetting.Key] = "2048"
+	if got, auto := idx.ExtractMemory(ctx, rows); auto || got != 2048<<20 {
+		t.Errorf("2048: %d MiB auto=%v, want 2048 MiB as set", got>>20, auto)
+	}
+	rows[ExtractMemorySetting.Key] = "10"
+	if got, _ := idx.ExtractMemory(ctx, rows); got != MinExtractMemoryMB<<20 {
+		t.Errorf("10: %d MiB, want the %d MiB floor", got>>20, MinExtractMemoryMB)
+	}
+}
+
+func TestSeedSettings_TheExtractCeilingFromItsVariable(t *testing.T) {
+	noSearchEnv(t)
+	t.Setenv("FILEX_SEARCH_EXTRACT_MEMORY_MB", "768")
+	st := rowsStore{}
+	ctx := context.Background()
+	SeedSettings(ctx, st, config.Default().Search)
+	if got := ExtractMemorySetting.Resolve(ctx, st); got != 768 {
+		t.Errorf("extract_memory_mb = %d, want 768", got)
 	}
 }

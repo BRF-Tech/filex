@@ -9,6 +9,7 @@
 //	search.content_max_mb   FILEX_SEARCH_CONTENT_MAX (B)   5        yes - the next eligibility check
 //	search.memory_percent   FILEX_SEARCH_MEMORY_PERCENT    25       yes - applied the moment it is saved
 //	search.auto_rebuild     FILEX_SEARCH_AUTO_REBUILD      true     at the next start (it is a startup action)
+//	search.extract_memory_mb FILEX_SEARCH_EXTRACT_MEMORY_MB 0 (auto) yes - the next file read in its own process
 //
 // ⚠⚠ The variables are SEEDS, not overrides (internal/dbsetting): consumed on
 // a boot where no row exists yet - for an upgrading install, the first boot of
@@ -35,6 +36,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/dbsetting"
@@ -105,9 +107,39 @@ var AutoRebuildSetting = dbsetting.BoolSpec{
 	Default: true,
 }
 
+// The bounds of ExtractMemorySetting, in megabytes, and what its automatic
+// value (0) comes to. A set value under MinExtractMemoryMB counts as that
+// much: below it, a Go process has room for little more than its own start.
+const (
+	MinExtractMemoryMB = 64
+	MaxExtractMemoryMB = 16384
+
+	autoExtractFloor   = 256 << 20
+	autoExtractCeiling = 1 << 30
+	// AutoExtractUnknown is the ceiling when the memory filex was given
+	// could not be read, and the one a caller without an index uses.
+	AutoExtractUnknown = 512 << 20
+)
+
+// ExtractMemorySetting is the memory one extraction process may reach, in
+// megabytes (GitHub #123). PDF and office files are read in a process of
+// their own (internal/search/extract/contain), which is stopped at this
+// ceiling: the file is then found by its name only, and the server is not
+// touched. 0, the default, takes the ceiling from the indexing budget above
+// (search.memory_percent): the budget shared by the extractions that run at
+// once, between 256 MiB and 1 GiB.
+var ExtractMemorySetting = dbsetting.IntSpec{
+	Key:     "search.extract_memory_mb",
+	EnvVar:  "FILEX_SEARCH_EXTRACT_MEMORY_MB",
+	Default: 0,
+	Min:     0,
+	Max:     MaxExtractMemoryMB,
+	Unit:    "MB",
+}
+
 // Settings is the family, in the order it is seeded.
 func Settings() []dbsetting.Seeder {
-	return []dbsetting.Seeder{ContentSetting, ContentMaxSetting, MemoryPercentSetting, AutoRebuildSetting}
+	return []dbsetting.Seeder{ContentSetting, ContentMaxSetting, MemoryPercentSetting, AutoRebuildSetting, ExtractMemorySetting}
 }
 
 // SeedSettings writes the first values of the search settings, on a boot
@@ -235,4 +267,34 @@ func (i *Index) AppliedMemoryBudget() MemoryBudget {
 	i.budget.mu.Lock()
 	defer i.budget.mu.Unlock()
 	return i.budget.last
+}
+
+// extractWorkers is how many extractions run at once (the content job's
+// LimitExtraction), the number the automatic ceiling shares the budget by.
+type extractWorkers struct{ n atomic.Int32 }
+
+// SetExtractionWorkers tells the index how many extractions run at once.
+func (i *Index) SetExtractionWorkers(n int) { i.extract.n.Store(int32(n)) }
+
+// ExtractMemory is the memory ceiling of one extraction process in force,
+// in bytes, and whether it is the automatic one: the setting when it is set
+// (never under MinExtractMemoryMB), else the indexing budget shared by the
+// extractions that run at once (see ExtractMemorySetting). Read per file, so
+// a change on the Search page and a new memory share apply to the next one.
+func (i *Index) ExtractMemory(ctx context.Context, g dbsetting.Getter) (bytes uint64, auto bool) {
+	if mb := ExtractMemorySetting.Resolve(ctx, g); mb > 0 {
+		return uint64(max(mb, MinExtractMemoryMB)) * bytesPerMB, false
+	}
+	return autoExtractMemory(i.AppliedMemoryBudget().Bytes, int(i.extract.n.Load())), true
+}
+
+// autoExtractMemory is the automatic ceiling: budget shared by workers,
+// between autoExtractFloor and autoExtractCeiling; AutoExtractUnknown when
+// there is no budget.
+func autoExtractMemory(budget uint64, workers int) uint64 {
+	if budget == 0 {
+		return AutoExtractUnknown
+	}
+	share := budget / uint64(max(workers, 1))
+	return min(max(share, autoExtractFloor), autoExtractCeiling)
 }

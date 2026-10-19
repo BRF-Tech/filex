@@ -1483,7 +1483,11 @@
         // that never even asked the server for a listing, which reads as a dead
         // connection rather than a missing option.
         // IPC branding does not populate the bundled explorer's registry.
-        await filexWc.loadLocales({ base: account.serverUrl });
+        // ⚠ With a limit: a server that takes the connection and never answers
+        // kept this "connecting" screen up forever, with no Retry on it - past
+        // the limit the explorer opens in English and Turkish. `?.`: an older
+        // app/filex.js in a development tree has no loadLocales at all.
+        await filexWc.loadLocales?.({ base: account.serverUrl, timeoutMs: 10000 });
         if (mountedFor !== account.id) return;
         let storages = [];
         try {

@@ -969,11 +969,11 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(_ adminVoidIn) reqSpec {
 			return reqSpec{handler: a.searchAdm.Rebuild, method: http.MethodPost, path: "/api/ai/admin/search/rebuild"}
 		})
-	regAdminTool(r, "admin_search_settings_get", "The search settings (Admin, Search): content (extract file text into the index), content_max_mb (larger files are not extracted), memory_percent (share of the memory filex was given that indexing may take, with the budget it came to), auto_rebuild (repair an older index at startup), each with its bounds; index_enabled says whether the index is open at all (FILEX_SEARCH_ENABLED, environment only). The platform operator's only in multi-tenant mode.",
+	regAdminTool(r, "admin_search_settings_get", "The search settings (Admin, Search): content (extract file text into the index), content_max_mb (larger files are not extracted), memory_percent (share of the memory filex was given that indexing may take, with the budget it came to), auto_rebuild (repair an older index at startup), extract_memory_mb (the memory one PDF or office extraction process may reach before it is stopped; 0 = from the budget, with the ceiling in force as extract_memory_bytes), each with its bounds; index_enabled says whether the index is open at all (FILEX_SEARCH_ENABLED, environment only). The platform operator's only in multi-tenant mode.",
 		func(_ adminVoidIn) reqSpec {
 			return reqSpec{handler: a.searchAdm.Settings, method: http.MethodGet, path: "/api/ai/admin/search/settings"}
 		})
-	regAdminTool(r, "admin_search_settings_update", "Change search settings, validated as the Search page validates them (a number out of bounds is refused, not stored). body: any of {content (bool), content_max_mb (1-1024), memory_percent (1-50), auto_rebuild (bool)}. content, content_max_mb and memory_percent apply at once; auto_rebuild at the next start.",
+	regAdminTool(r, "admin_search_settings_update", "Change search settings, validated as the Search page validates them (a number out of bounds is refused, not stored). body: any of {content (bool), content_max_mb (1-1024), memory_percent (1-50), auto_rebuild (bool), extract_memory_mb (0-16384, 0 = from the budget)}. content, content_max_mb, memory_percent and extract_memory_mb apply at once; auto_rebuild at the next start.",
 		func(in adminBodyIn) reqSpec {
 			return reqSpec{handler: a.searchAdm.UpdateSettings, method: http.MethodPatch, path: "/api/ai/admin/search/settings", body: in.Body}
 		})
