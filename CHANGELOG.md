@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.57.4] - 2026-10-20
+
+### Fixed
+
+- **The built-in viewer shows a PDF in Chrome again, and its "Open in new
+  tab" opens the PDF instead of downloading it**
+  ([GitHub #124](https://github.com/BRF-Tech/filex/issues/124), reported by
+  @chengjie). Since 0.48.0 filex's pages name the frames they may show of
+  filex by path, and Chrome checks a PDF in the viewer's `<object>` against
+  that list: the preview URL was not on it, so Chrome showed the "could not
+  show" fallback instead of the document. A PDF's preview now has a path of
+  its own, `GET /api/files/pdf/{name}?path=`, the one API path filex's pages
+  may frame. It answers only a PDF, always as a preview, with the manager's
+  checks and `Range`; servers that have it say `pdf_preview` in their
+  capabilities, and the explorer uses it for PDFs there (an embed on an older
+  server keeps the manager's URL). The fallback's **Open in new tab** pointed
+  at the download; it now opens the preview, and **Download** still
+  downloads ([BACKEND.md](docs/BACKEND.md#get-apifilespdfname-)).
+
 ## [0.57.3] - 2026-10-19
 
 ### Changed

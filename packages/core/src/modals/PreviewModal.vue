@@ -2347,7 +2347,10 @@ onBeforeUnmount(() => {
                 <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons -->
                 <span class="fe-preview__fallback-icon" aria-hidden="true" v-html="tileHtml"></span>
                 <p>{{ t('viewer.pdf_inline_failed') }}</p>
-                <a :href="download" class="fe-btn fe-btn--primary" target="_blank" rel="noopener">{{ t('viewer.open_in_new_tab') }}</a>
+                <!-- The preview, as it says - not the download (GitHub #124):
+                     a new tab shows the PDF in the browser's own viewer. The
+                     Download control downloads. -->
+                <a :href="src" class="fe-btn fe-btn--primary" target="_blank" rel="noopener">{{ t('viewer.open_in_new_tab') }}</a>
               </div>
             </object>
           </template>

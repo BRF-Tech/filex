@@ -194,6 +194,11 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	// for every app, read per request like the doors read it. Always present;
 	// the explorer offers no app there while it is false.
 	merged["apps_e2e_plaintext"] = wasmplugin.E2EPlaintextSetting.Resolve(r.Context(), h.Store)
+	// A PDF's preview has a path of its own, the one API path filex's pages may
+	// frame (GET /api/files/pdf/{name}, GitHub #124, manager_pdf.go). Always
+	// true here; an explorer talking to an older server finds it absent and
+	// keeps the manager's preview URL, which that server still answers.
+	merged["pdf_preview"] = true
 
 	// Per-tenant branding: identify only the tenant this host belongs to.
 	if h.MultiTenant && h.Store != nil {

@@ -2,14 +2,10 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.57.3"
+version: "0.57.4"
 releaseNotes: |-
-  filex v0.57.3 - 2026-10-19
-  • An embedded explorer speaks its visitor's language, and has a Language setting of its own.
-  • A PDF or office file can no longer take the server down while its text is read
-  • A queued job whose attempts are spent is not handed out again after a crash.
-  • The desktop app no longer waits forever for a server's languages.
-  • @brftech/filex's type declarations are valid TypeScript again.
+  filex v0.57.4 - 2026-10-20
+  • The built-in viewer shows a PDF in Chrome again, and its "Open in new tab" opens the PDF instead of downloading it
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

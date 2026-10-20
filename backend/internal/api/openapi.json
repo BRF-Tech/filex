@@ -4879,6 +4879,70 @@
         }
       }
     },
+    "/api/files/pdf/{name}": {
+      "get": {
+        "operationId": "pdfPreview",
+        "summary": "A PDF's preview, on the one API path filex's pages may frame",
+        "description": "The same answer as `GET /api/files/manager?action=preview` for a PDF, on a path of its own (GitHub #124): filex's pages name their own frames by path, and Chrome checks the built-in viewer's `<object>` against `frame-src`. The verb is always preview (an `action` or `q` sent here is ignored), and a path that does not end in `.pdf` answers `400`. The storages the caller can see, the token's root, the drafts and traversal guards and `Range` are the manager's. Servers that have it say `pdf_preview: true` in `GET /api/files/capabilities`.",
+        "tags": [
+          "Files"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The file's name, for the browser's viewer only (its title and the name it saves under). The file is `path`."
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The PDF, `<storage>://<path>`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The PDF (`application/pdf`, inline).",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "A range of the PDF.",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#get-apifilespdfname-"
+        },
+        "x-filex-token-verb": "read"
+      }
+    },
     "/api/files/manager/recent": {
       "get": {
         "operationId": "listRecent",

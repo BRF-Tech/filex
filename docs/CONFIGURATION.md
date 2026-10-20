@@ -1471,7 +1471,7 @@ not a reverse proxy adds anything:
 |---|---|---|
 | `X-Content-Type-Options` | `nosniff` | every answer |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | every answer |
-| `Content-Security-Policy` | `frame-ancestors 'self'` + `FILEX_FRAME_ANCESTORS`; `frame-src` filex's own `/_appui/`, `/z/` and `/_print/` + the editors below | filex's own pages (HTML) |
+| `Content-Security-Policy` | `frame-ancestors 'self'` + `FILEX_FRAME_ANCESTORS`; `frame-src` filex's own `/_appui/`, `/z/`, `/_print/` and `/api/files/pdf/` (a PDF's preview, 0.57.4) + the editors below | filex's own pages (HTML) |
 
 | Env var | Default | Description |
 |---|---|---|

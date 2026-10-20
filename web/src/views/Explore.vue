@@ -636,6 +636,9 @@ const panelConfig = computed<ExplorerConfig>(() => ({
   apiBase: getServerRoot(),
   endpoint: `${getServerRoot()}/api/files/manager`,
   capabilities: `${getServerRoot()}/api/files/capabilities`,
+  // A PDF's preview on its own path (GitHub #124): this server has it, so
+  // the explorer uses it from the first PDF on, before its capabilities.
+  pdfPreview: `${getServerRoot()}/api/files/pdf`,
   auth: explorerAuth(),
   theme: currentTheme.value,
   // ⚠ The ACTIVE language, whatever it is — a language pack's included. This

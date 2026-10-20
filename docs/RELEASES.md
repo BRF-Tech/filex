@@ -19,14 +19,81 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.57.2, 19 October 2026
-Security patch: a file request's total cap now holds when uploads overlap. Uploads sent at the same time all passed the max_uploads check, so a link capped at one file took fifteen (GHSA-4pc6-66f4-q2x4); a submission's files are now claimed against the cap before the first one is written. This patch is not installed automatically: update by hand. In the desktop app, the file list follows an account's language from a language pack (contributed by @chengjie, #122), the snap says what the keyring and removable-media plugs allow before it shows the command that connects them, and the admin panel's one-column menus open under their own button.
+::: tip Latest - v0.57.3, 19 October 2026
+A PDF or an office file can no longer take the server down while its text is read for search. Some PDFs of about a megabyte sent the PDF reader into memory without end, and the kernel killed filex (#123). Their text is now read in a process of its own, with a memory ceiling and a two-minute limit; a file that passes either is found by its name only, and filex goes on. The ceiling is a new setting, Memory for reading one file, on Admin → Settings → General, shared from the indexing memory by default. A queued job whose attempts are spent is no longer handed out again after a crash. An embedded explorer now speaks its visitor's language and has a Language setting of its own, the desktop app stops waiting for a server's languages after ten seconds, and @brftech/filex's type declarations are valid TypeScript again. This patch is not installed automatically: update by hand.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.57.2
-docker pull ghcr.io/brf-tech/filex:full-v0.57.2
+docker pull ghcr.io/brf-tech/filex:slim-v0.57.3
+docker pull ghcr.io/brf-tech/filex:full-v0.57.3
 ```
+
+## v0.57.3
+
+<span class="filex-release-date">19 October 2026</span>
+
+A PDF or an office file can no longer take the server down while its text is read for search. Some PDFs of about a megabyte sent the PDF reader into memory without end, and the kernel killed filex (#123). Their text is now read in a process of its own, with a memory ceiling and a two-minute limit; a file that passes either is found by its name only, and filex goes on. The ceiling is a new setting, Memory for reading one file, on Admin → Settings → General, shared from the indexing memory by default. A queued job whose attempts are spent is no longer handed out again after a crash. An embedded explorer now speaks its visitor's language and has a Language setting of its own, the desktop app stops waiting for a server's languages after ten seconds, and @brftech/filex's type declarations are valid TypeScript again. This patch is not installed automatically: update by hand.
+
+## What changed
+
+### Changed
+
+- **An embedded explorer speaks its visitor's language, and has a Language
+  setting of its own.** `<filex-explorer>` - and the explorer in any host that
+  does not keep the person's preferences on their account - put the host's
+  `config.locale` above everything, so every visitor read the host's language
+  whatever their browser asked for. It now speaks the language picked in this
+  browser under **⋯ → Language** (kept in the browser, sent nowhere), then the
+  account's language when a person is behind the credential, then the
+  browser's languages that the server offers (language packs included: the
+  embed loads the server's list when it mounts), then `config.locale`, then
+  English. In such a personal embed a language picked there is saved to the
+  account too, and the host's `config.locale` is no longer written to an
+  account that has no language. The filex web app and desktop app keep the
+  account's language ([INTEGRATION.md → Language](./INTEGRATION.md#language),
+  task #275).
+
+### Fixed
+
+- **A PDF or office file can no longer take the server down while its text is
+  read** ([GitHub #123](https://github.com/BRF-Tech/filex/issues/123)). Some
+  PDFs of about a megabyte sent the PDF reader into memory without end: one
+  install's filex reached 27 GB and the kernel killed it, three times in a
+  minute. PDF and office files are now read in a process of their own, with a
+  memory ceiling and a two-minute limit; one that passes either is stopped,
+  the file is found by its name only, and filex goes on. The ceiling is a new
+  setting on **Admin → Settings → General → Search settings**, **Memory for
+  reading one file** (`search.extract_memory_mb`, first value from
+  `FILEX_SEARCH_EXTRACT_MEMORY_MB`): `0`, the default, shares the indexing
+  memory budget between the files read at once (256 MB to 1 GB). A job
+  cancelled while filex stops is no longer recorded as a file without text
+  ([SEARCH.md → Content search](./SEARCH.md#content-search)).
+- **A queued job whose attempts are spent is not handed out again after a
+  crash.** The orphan recovery at startup put every job left running back in
+  the queue, so a job that brought filex down came back at every start; one
+  whose attempts are spent is now failed (`interrupted: filex stopped while running it, and its attempts are spent`), on SQLite, MySQL, PostgreSQL and
+  Redis ([GitHub #123](https://github.com/BRF-Tech/filex/issues/123)).
+- **The desktop app no longer waits forever for a server's languages.** A
+  server that accepted the connection and never answered kept the window on
+  "Connecting" with no Retry; the list is given up after ten seconds and the
+  file list opens in English or Turkish (task #275).
+- **`@brftech/filex`'s type declarations are valid TypeScript again.**
+  `dist/index.d.ts` carried `loadLocales` as its source - a function body and a
+  default value in a declaration file - which a project that type-checks its
+  libraries refused; it is now declared with `@brftech/filex-core`'s type
+  (task #275).
+- **The `locale` attribute of `<filex-explorer>` takes a language pack's
+  language** (`locale="es"`), as the package README says; it took only `en`
+  and `tr`, and anything else was dropped (task #275).
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0573---2026-10-19)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.57.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.57.3`
 
 ## v0.57.2
 
@@ -3350,48 +3417,13 @@ tagged.
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.45.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.45.1`
 
-## v0.44.2
-
-<span class="filex-release-date">25 September 2026</span>
-
-The release 0.44.0 was meant to be, and the one to install the desktop app from, including through Homebrew, winget and Snap. 0.44.0 and 0.44.1 both published their container images, npm packages and CLI binaries, then stopped at the winget step before the desktop packages and the stores. Everything 0.44.0 describes is in 0.44.2.
-
-## What changed
-
-0.44.0 as it was meant to ship, and **the one to install the desktop app
-from**. v0.44.0 and v0.44.1 both published their npm packages, container
-images and CLI binaries and then stopped at the winget step, so neither
-shipped the desktop packages or reached the stores. Everything 0.44.0
-describes below is in 0.44.2.
-
-### Fixed
-
-- **The release reaches the desktop packages and the stores.** GoReleaser
-  accepts a publisher's repository token only as a single `.Env` variable
-  reference - nothing around it, not even an `index` lookup - and checks it
-  only when it publishes. The winget token is written that way now, and the
-  template test checks every token against GoReleaser's own rule and that the
-  release hands each variable to the GoReleaser step.
-- **A desktop page that cannot load now stops the release.** Nothing ran
-  the desktop unit tests before, which is how 0.43.x shipped a main window
-  whose script never parsed; the release's gate now runs them. Found and
-  proposed by Berk Başarır ([#52](https://github.com/BRF-Tech/filex/pull/52)).
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0442---2026-09-25)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.44.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.44.2`
-
 ## Earlier releases
 
-The 123 releases before v0.44.2, in brief. Full notes are on GitHub.
+The 124 releases before v0.45.1, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.44.2](https://github.com/BRF-Tech/filex/releases/tag/v0.44.2) | 25 September 2026 | The release 0.44.0 was meant to be, and the one to install the desktop app from, including through Homebrew, winget and Snap. |
 | [v0.44.1](https://github.com/BRF-Tech/filex/releases/tag/v0.44.1) | 25 September 2026 | Tagged, but it stopped at the same winget step as 0.44.0; its container images, npm packages and CLI binaries were published. |
 | [v0.44.0](https://github.com/BRF-Tech/filex/releases/tag/v0.44.0) | 25 September 2026 | Big local storages open at once: the new lazy catalogue lists a folder straight from disk and catalogues it behind the listing, with a throttled pass that fills in the rest (or only the folders people visit). |
 | [v0.43.2](https://github.com/BRF-Tech/filex/releases/tag/v0.43.2) | 24 September 2026 | The release that 0.43.1 was meant to be: container images for everything in 0.43.0 (whose images never published), the storage-credential scrub, Berk Başarır's per-tile thumbnail rendering and a desktop sign-in fix for servers… |
@@ -3518,4 +3550,4 @@ The 123 releases before v0.44.2, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-10-19 from 143 published releases.</small>
+<small>Last refreshed 2026-10-19 from 144 published releases.</small>

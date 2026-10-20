@@ -3,6 +3,21 @@
   "generatedAt": "2026-10-19",
   "releases": [
     {
+      "tag": "v0.57.3",
+      "date": "2026-10-19T14:43:19Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.57.3",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Changed\n\n- **An embedded explorer speaks its visitor's language, and has a Language\n  setting of its own.** `<filex-explorer>` - and the explorer in any host that\n  does not keep the person's preferences on their account - put the host's\n  `config.locale` above everything, so every visitor read the host's language\n  whatever their browser asked for. It now speaks the language picked in this\n  browser under **⋯ → Language** (kept in the browser, sent nowhere), then the\n  account's language when a person is behind the credential, then the\n  browser's languages that the server offers (language packs included: the\n  embed loads the server's list when it mounts), then `config.locale`, then\n  English. In such a personal embed a language picked there is saved to the\n  account too, and the host's `config.locale` is no longer written to an\n  account that has no language. The filex web app and desktop app keep the\n  account's language ([INTEGRATION.md → Language](docs/INTEGRATION.md#language),\n  task #275).\n\n### Fixed\n\n- **A PDF or office file can no longer take the server down while its text is\n  read** ([GitHub #123](https://github.com/BRF-Tech/filex/issues/123)). Some\n  PDFs of about a megabyte sent the PDF reader into memory without end: one\n  install's filex reached 27 GB and the kernel killed it, three times in a\n  minute. PDF and office files are now read in a process of their own, with a\n  memory ceiling and a two-minute limit; one that passes either is stopped,\n  the file is found by its name only, and filex goes on. The ceiling is a new\n  setting on **Admin → Settings → General → Search settings**, **Memory for\n  reading one file** (`search.extract_memory_mb`, first value from\n  `FILEX_SEARCH_EXTRACT_MEMORY_MB`): `0`, the default, shares the indexing\n  memory budget between the files read at once (256 MB to 1 GB). A job\n  cancelled while filex stops is no longer recorded as a file without text\n  ([SEARCH.md → Content search](docs/SEARCH.md#content-search)).\n- **A queued job whose attempts are spent is not handed out again after a\n  crash.** The orphan recovery at startup put every job left running back in\n  the queue, so a job that brought filex down came back at every start; one\n  whose attempts are spent is now failed (`interrupted: filex stopped while\n  running it, and its attempts are spent`), on SQLite, MySQL, PostgreSQL and\n  Redis ([GitHub #123](https://github.com/BRF-Tech/filex/issues/123)).\n- **The desktop app no longer waits forever for a server's languages.** A\n  server that accepted the connection and never answered kept the window on\n  \"Connecting\" with no Retry; the list is given up after ten seconds and the\n  file list opens in English or Turkish (task #275).\n- **`@brftech/filex`'s type declarations are valid TypeScript again.**\n  `dist/index.d.ts` carried `loadLocales` as its source - a function body and a\n  default value in a declaration file - which a project that type-checks its\n  libraries refused; it is now declared with `@brftech/filex-core`'s type\n  (task #275).\n- **The `locale` attribute of `<filex-explorer>` takes a language pack's\n  language** (`locale=\"es\"`), as the package README says; it took only `en`\n  and `tr`, and anything else was dropped (task #275).\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0573---2026-10-19)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.57.3",
+        "ghcr.io/brf-tech/filex:full-v0.57.3"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
+    {
       "tag": "v0.57.2",
       "date": "2026-10-19T08:45:41Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.57.2",

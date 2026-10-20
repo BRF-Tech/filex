@@ -375,6 +375,12 @@ export interface Capabilities {
    *  (`apps.e2e_plaintext`). Absent (an older server, which has no such door)
    *  or false: no app is offered an encrypted file. */
   apps_e2e_plaintext?: boolean;
+  /** filex 0.57.4 (GitHub #124) — the server answers a PDF's preview on a
+   *  path of its own (`GET /api/files/pdf/{name}?path=`), the one API path
+   *  filex's pages may frame, so the built-in viewer's `<object>` is not
+   *  refused by their frame-src in Chrome. Absent (an older server): the
+   *  manager's preview URL, as before (lib/pdfPreview). */
+  pdf_preview?: boolean;
 }
 
 /**

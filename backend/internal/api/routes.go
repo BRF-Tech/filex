@@ -1676,6 +1676,10 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Post("/conversations/{id}/undo", assistantH.Undo)
 			})
 			r.Get("/manager", mh.List)
+			// A PDF's preview on a path of its own (GitHub #124): the one API
+			// path filex's pages may frame (pageOwnFrames), so Chrome shows a
+			// PDF in the built-in viewer. Always a preview, only of a PDF.
+			r.Get("/pdf/{name}", mh.PDF)
 			// The verb follows ?action=: delete asks `delete`, every other
 			// action `write` (Manager.Mutate asks it before dispatching).
 			r.Post("/manager", mh.Mutate)
@@ -3345,8 +3349,10 @@ func officeFrameHost(origin, basePath string, frame func() http.Handler) func(ht
 // pageOwnFrames is what a filex page may show of filex ITSELF in a frame, by
 // path (security review UI-11): the app interfaces (`/_appui/`, unless they
 // have an origin of their own), the download frame an archive starts in
-// (`/z/`) and the page an app's PDF is printed from (`/_print/`,
-// internal/printframe). Named for the host the page was asked on and, when the operator
+// (`/z/`), the page an app's PDF is printed from (`/_print/`,
+// internal/printframe) and a PDF's preview (`/api/files/pdf/`,
+// handlers.PDFPreviewPath: Chrome checks the built-in viewer's <object>
+// against frame-src, GitHub #124). Named for the host the page was asked on and, when the operator
 // set one, the public URL's host too — behind a proxy that does not pass the
 // Host on, that is the one the browser used.
 func pageOwnFrames(d *Deps) func(*http.Request) []string {
@@ -3368,6 +3374,7 @@ func pageOwnFrames(d *Deps) func(*http.Request) []string {
 			}
 			out = append(out, host+base+"/z/")
 			out = append(out, host+base+printframe.Path)
+			out = append(out, host+base+handlers.PDFPreviewPath)
 		}
 		return out
 	}

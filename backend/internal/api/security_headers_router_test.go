@@ -35,14 +35,14 @@ func newHeadersServer(t *testing.T, ancestors []string) *httptest.Server {
 }
 
 // ownFrames is what a page served at srv may frame of filex itself (security
-// review UI-11): the app interfaces, the download frame and the print page
-// (`ui.print`, #189), by path.
+// review UI-11): the app interfaces, the download frame, the print page
+// (`ui.print`, #189) and a PDF's preview (GitHub #124), by path.
 func ownFrames(srv *httptest.Server, interfaces bool) string {
 	host := strings.TrimPrefix(srv.URL, "http://")
 	if !interfaces {
-		return host + "/z/ " + host + "/_print/"
+		return host + "/z/ " + host + "/_print/ " + host + "/api/files/pdf/"
 	}
-	return host + "/_appui/ " + host + "/z/ " + host + "/_print/"
+	return host + "/_appui/ " + host + "/z/ " + host + "/_print/ " + host + "/api/files/pdf/"
 }
 
 func headersOf(t *testing.T, url string) http.Header {
@@ -135,7 +135,7 @@ func TestSecurityHeaders_OwnFramesNameThePublicHostToo(t *testing.T) {
 	})
 	testutil.SeedAdmin(t, store)
 	h := headersOf(t, srv.URL+"/admin/")
-	assert.Equal(t, "frame-ancestors 'self'; frame-src "+ownFrames(srv, true)+" files.example.com/_appui/ files.example.com/z/ files.example.com/_print/", h.Get("Content-Security-Policy"))
+	assert.Equal(t, "frame-ancestors 'self'; frame-src "+ownFrames(srv, true)+" files.example.com/_appui/ files.example.com/z/ files.example.com/_print/ files.example.com/api/files/pdf/", h.Get("Content-Security-Policy"))
 }
 
 // FILEX_APP_UI_ORIGIN: filex's pages may frame the interface origin, and

@@ -72,6 +72,9 @@ export interface EndpointMap {
   shareDelete: string | null;
   limits: string | null;
   capabilities: string | null;
+  /** A PDF's preview on a path of its own (`/api/files/pdf`, GitHub #124);
+   *  used only when the server's capabilities say `pdf_preview`. */
+  pdfPreview: string | null;
   /** The signed-in account (`/api/auth/me`): its role and permissions. */
   me: string | null;
   archiveList: string | null;
@@ -154,6 +157,13 @@ export interface ExplorerConfig {
 
   limits?: string;
   capabilities?: string;
+  /**
+   * `/api/files/pdf` - where the built-in viewer reads a PDF (GitHub #124):
+   * the one API path filex's own pages may frame, so Chrome does not refuse
+   * the viewer's `<object>`. Used only when the server's capabilities say
+   * `pdf_preview`; otherwise PDFs preview from the manager like every file.
+   */
+  pdfPreview?: string;
   /**
    * `/api/auth/me` — the explorer reads the account's permissions from it
    * when the host passes none (`permissions` below), so every surface

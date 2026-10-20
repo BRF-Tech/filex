@@ -31,6 +31,7 @@ import { listingAddress } from '../lib/internalPaths';
 import { serverLimit, takeServerRules } from '../lib/serverRules';
 import { draftsClient, type DraftDto } from '../lib/drafts';
 import { csvDeclarationQuery } from '../lib/textDialect';
+import { isPdfPath, pdfPreviewAddress, PDF_PREVIEW_ROUTE } from '../lib/pdfPreview';
 import { localeTag } from './useLocale';
 import { networkFailure, requestFailure } from '../lib/errorWords';
 // ⚠ The same folding rule the web app's axios layer applies, applied by the
@@ -362,6 +363,7 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     shareDelete: derive(config.shareDelete, '/api/files/share/{uuid}'),
     limits: derive(config.limits, '/api/files/limits'),
     capabilities: derive(config.capabilities, '/api/files/capabilities'),
+    pdfPreview: derive(config.pdfPreview, PDF_PREVIEW_ROUTE),
     me: derive(config.me, '/api/auth/me'),
     archiveList: derive(config.archiveList, '/api/files/archive/list'),
     archiveExtract: derive(config.archiveExtract, '/api/files/archive/extract'),
@@ -1218,7 +1220,18 @@ export function useFileApi(config: ExplorerConfig, options: FileApiOptions = {})
     return managerUrl('download', { path });
   }
 
+  // GitHub #124: a PDF's preview on a path of its own, the one API path
+  // filex's pages may frame (lib/pdfPreview). A host that names the path
+  // (`pdfPreview`, as the web app does for its own server) has it from the
+  // start; one derived from `apiBase` is used once the server's capabilities
+  // say `pdf_preview` - until then, and on an older server, a PDF previews
+  // from the manager like every other file.
+  let serverPdfPreview = !!config.pdfPreview;
+
   function previewUrl(path: string): string {
+    if (serverPdfPreview && endpoints.pdfPreview && isPdfPath(path)) {
+      return pdfPreviewAddress(endpoints.pdfPreview, path);
+    }
     return managerUrl('preview', { path });
   }
 
@@ -1303,6 +1316,7 @@ export function useFileApi(config: ExplorerConfig, options: FileApiOptions = {})
     // The server's rules (edit kinds, input limits) for every component on
     // the page - lib/serverRules (#211).
     takeServerRules(caps);
+    if (caps.pdf_preview === true) serverPdfPreview = true;
     return caps;
   }
 

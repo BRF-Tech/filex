@@ -54,6 +54,12 @@ their own). Two things follow for the page that embeds the explorer:
   its apps to print; otherwise the browser refuses the page and the app is
   told printing is `unavailable`
   ([CONFIGURATION.md → Security headers and framing](CONFIGURATION.md#security-headers-and-framing)).
+- **The built-in PDF viewer** shows a PDF in an `<object>` from your
+  `apiBase` (`…/api/files/pdf/<name>?path=` on a server that says
+  `pdf_preview`, 0.57.4; the manager's preview URL before). Chrome checks
+  that `<object>` against your page's `frame-src`, so allow the origin your
+  `apiBase` is on - your own origin when a proxy carries it - or the viewer
+  shows its "open in a new tab" fallback instead of the document.
 
 ⚠ The stylesheet column is not a detail: the look is one global sheet plus the
 `--fe-*` tokens on it, and only the Vue wrapper imports it by hand. The web

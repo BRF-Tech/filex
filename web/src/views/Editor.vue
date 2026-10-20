@@ -54,8 +54,6 @@ function readBearerToken(): string | null {
 // Every address below is under the server root — '' at the root, `/filex`
 // under a sub-path (FILEX_BASE_PATH; runtimeConfig.getServerRoot).
 const api = (path: string) => `${getServerRoot()}${path}`;
-const previewUrl = (p: string) =>
-  api(`/api/files/manager?action=preview&path=${encodeURIComponent(p)}`);
 const downloadUrl = (p: string) =>
   api(`/api/files/manager?action=download&path=${encodeURIComponent(p)}`);
 
@@ -131,7 +129,10 @@ async function loadCapabilities(): Promise<void> {
  * (`app=plugin/view`, or `builtin`). The same default plugin endpoints the
  * explorer derives its own from.
  */
-const fileApi = useFileApi({ apiBase: getServerRoot(), auth: explorerAuth() } as ExplorerConfig);
+const fileApi = useFileApi({ apiBase: getServerRoot(), pdfPreview: api('/api/files/pdf'), auth: explorerAuth() } as ExplorerConfig);
+// The package's rule, so a PDF previews from its own path - the one API path
+// this page may frame (GitHub #124) - like it does in the explorer.
+const previewUrl = (p: string) => fileApi.previewUrl(p);
 const appViews = ref<PluginViewRow[]>([]);
 /** 0.50 - the administrator's open rules (Default apps), by kind. */
 const appRules = ref<Record<string, OpenRule>>({});

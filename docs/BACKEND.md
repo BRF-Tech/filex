@@ -573,6 +573,32 @@ file never carry it (one rule, `encryptedKind` in
 
 **Status codes:** `200` ok · `403` forbidden · `404` path missing.
 
+### `GET /api/files/pdf/{name}` ![user](https://img.shields.io/badge/-user-blue)
+A PDF's preview, on a path of its own (0.57.4, GitHub #124). It answers what
+`GET /api/files/manager?action=preview` answers for a PDF: the same storages,
+the token's root, the drafts and traversal guards, and `Range`.
+
+It exists for the built-in viewer. filex's own pages name the frames they may
+show of filex by path (`frame-src`, [CONFIGURATION.md](CONFIGURATION.md#security-headers-and-framing)),
+and Chrome checks a PDF in an `<object>` against `frame-src`. The manager's
+preview URL is not on that list, so Chrome showed the viewer's fallback
+instead of the document. This path is on it, and it answers only a PDF's
+preview, so a page that may frame it can frame nothing else of the API.
+
+| Param | Notes |
+|-------|-------|
+| `{name}` | The file's name, for the browser's viewer only (its title and the name it saves under). |
+| `path` | The PDF, `<storage>://<path>`. A path that does not end in `.pdf` answers `400`. |
+
+The verb is always preview: an `action` or `q` sent here is ignored, so the
+path cannot be turned into a download. A server that has it says
+`pdf_preview: true` in `GET /api/files/capabilities`; the explorer uses it for
+PDFs then (and from the start in the web app), and the manager's preview URL
+otherwise.
+
+**Status codes:** `200` ok · `206` a range · `400` not a PDF, or a bad path ·
+`403` forbidden · `404` path missing.
+
 ### Names filex keeps for itself
 
 `.filex-trash`, `.versions`, `.thumbs`, the desktop app's `.filex-open` (at any
