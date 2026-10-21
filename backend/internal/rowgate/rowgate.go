@@ -60,6 +60,24 @@
 // overlapping changes is not judged until the stream pauses. Its scan is
 // deferred, never wrong.
 //
+// # A change that waits is first too
+//
+// ⚠⚠ "Changes first" holds for a change that WAITS, not only for one that holds
+// the gate (issue #127). A scan lets go of the gate after one directory and
+// asks for it again microseconds later for the next one; a change that only
+// looked whether the gate was free, or woke when it opened, lost that race
+// nearly every time. On a local storage of tens of thousands of entries the
+// operations queue's delete sat "Queued" for the whole scan, minutes, and ran
+// two seconds after it ended. So the gate counts the changes waiting for it:
+// those waiting in MoveCtx, FenceCtx or Await while a judgement holds it, and
+// those announced with Want (the operations queue never waits in the gate - its
+// one worker would stand there - and announces the job it put back instead). A
+// judgement steps back for a waiting change as for a holding one: the scan
+// finishes the directory or batch in hand and takes the next only after the
+// change had its turn. A Want stands for a short while only (WantFor, well
+// under the scan's own budget), so a job that is not run after all - its lane
+// busy elsewhere, its row cancelled - holds the scan back that long, no longer.
+//
 // # Fences
 //
 // A folder moved or trashed object by object (an object store) is the long
@@ -70,7 +88,8 @@
 // storage is scanned as usual.
 //
 // ⚠ Never hold Move and ask for Judge on the same goroutine: the judgement
-// waits for every change to let go, its own caller's included. Take the gate
+// waits for every change to let go, its own caller's included. The same goes
+// for a Want: a judgement asked under one waits until it runs out. Take the gate
 // at the outermost step of the change (the queue's job, the request handler, a
 // protocol server's verb through protocolsync's Relocate, Discard and Purge),
 // not inside the shared helpers it calls, and never twice for one change.
@@ -114,8 +133,14 @@ type gate struct {
 	next    uint64
 	// judged: a judgement holds the gate alone.
 	judged bool
-	// eased is closed, and replaced, every time a holder lets go: whoever
-	// waits for the gate tries again then.
+	// waiting counts the changes waiting for the gate now (MoveCtx, FenceCtx,
+	// Await while a judgement holds it); wants the ones announced without
+	// waiting (Want) that still stand. A judgement does not take the gate
+	// while either is above zero (open).
+	waiting, wants int
+	// eased is closed, and replaced, every time a holder lets go, a waiting
+	// change stops waiting or a Want ends: whoever waits for the gate tries
+	// again then.
 	eased chan struct{}
 
 	// moves counts the two-step changes that have finished on the storage
@@ -123,8 +148,9 @@ type gate struct {
 	moves atomic.Uint64
 	// long counts changes that held the gate for LongHold or more; deferred
 	// counts judgements that stopped waiting for it (ErrBusy, or their
-	// context ended).
-	long, deferred atomic.Uint64
+	// context ended); lapsed counts Wants that ran out before their change
+	// called them off.
+	long, deferred, lapsed atomic.Uint64
 
 	// fences holds the long changes fencing prefixes of the storage now
 	// (FenceCtx), by token; fenced is the set they make, rebuilt under mu
@@ -151,6 +177,63 @@ func of(storageID int64) *gate {
 func (g *gate) ease() {
 	close(g.eased)
 	g.eased = make(chan struct{})
+}
+
+// open reports whether a judgement may take the gate now: nothing holds it,
+// and no change waits for it or has announced itself (Want). Called with g.mu
+// held.
+func (g *gate) open() bool {
+	return !g.judged && len(g.changes) == 0 && g.waiting == 0 && g.wants == 0
+}
+
+// whenFree waits on ctx until no judgement holds the gate and then runs take
+// with g.mu held, in the same instant: what a change takes (MoveCtx's place
+// among the holders, FenceCtx's fence, nothing for Await). While it waits it
+// is counted among the changes waiting for the gate, and a judgement steps
+// back for it (open). On ctx's end it takes nothing and answers ctx's error,
+// also when the gate is free (a request already gone starts nothing).
+func (g *gate) whenFree(ctx context.Context, take func()) error {
+	waits := false
+	for {
+		if err := ctx.Err(); err != nil {
+			g.stopWaiting(waits)
+			return err
+		}
+		g.mu.Lock()
+		if !g.judged {
+			take()
+			if waits {
+				g.waiting--
+				g.ease()
+			}
+			g.mu.Unlock()
+			return nil
+		}
+		if !waits {
+			g.waiting++
+			waits = true
+		}
+		wait := g.eased
+		g.mu.Unlock()
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			g.stopWaiting(waits)
+			return ctx.Err()
+		}
+	}
+}
+
+// stopWaiting takes a change that gave up out of the waiting count, and wakes
+// the judgements stepping back for it.
+func (g *gate) stopWaiting(waits bool) {
+	if !waits {
+		return
+	}
+	g.mu.Lock()
+	g.waiting--
+	g.ease()
+	g.mu.Unlock()
 }
 
 // enter records one change holding the gate. Called with g.mu held.
@@ -195,26 +278,17 @@ func noop() {}
 // from the client (storage.DetachMutation): a client that has gone, or goes
 // while the change waits, takes nothing, and the change is not made. It then
 // answers ctx's error and a release that does nothing.
+//
+// While it waits it is counted among the changes waiting for the gate: the
+// judgement holding the gate finishes its directory or batch, and no new one
+// starts before this change has the gate (issue #127).
 func MoveCtx(ctx context.Context, storageID int64) (release func(), err error) {
 	g := of(storageID)
-	for {
-		if err := ctx.Err(); err != nil {
-			return noop, err
-		}
-		g.mu.Lock()
-		if !g.judged {
-			tok := g.enter()
-			g.mu.Unlock()
-			return g.leaver(storageID, tok), nil
-		}
-		wait := g.eased
-		g.mu.Unlock()
-		select {
-		case <-wait:
-		case <-ctx.Done():
-			return noop, ctx.Err()
-		}
+	var tok uint64
+	if err := g.whenFree(ctx, func() { tok = g.enter() }); err != nil {
+		return noop, err
 	}
+	return g.leaver(storageID, tok), nil
 }
 
 // Move is MoveCtx for a change nobody can call off while it waits (the
@@ -239,7 +313,8 @@ func TryMove(storageID int64) (release func(), ok bool) {
 
 // Judged reports whether a judgement holds storageID's gate right now: a
 // change asking for it now would wait. The operations queue asks it before it
-// starts a job, and puts the job back rather than wait.
+// starts a job, and puts the job back rather than wait - and announces it
+// (Want), or the next judgement takes the gate before the job asks again.
 func Judged(storageID int64) bool {
 	g := of(storageID)
 	g.mu.Lock()
@@ -251,24 +326,57 @@ func Judged(storageID int64) bool {
 // nothing. A change whose first step runs outside the gate - a copy to another
 // storage before the source is deleted under it - asks it before that step,
 // so a request that goes while a judgement holds the gate starts nothing.
+// While it waits it is counted among the changes waiting for the gate, as
+// MoveCtx is: the judgement holding the gate is the last one before it.
 func Await(ctx context.Context, storageID int64) error {
+	return of(storageID).whenFree(ctx, func() {})
+}
+
+// WantFor is how long a Want stands when its caller names no time of its own.
+// Well under the storage sync's GateWait (30 s): a judgement steps back for a
+// Want, and one that stepped back for all of GateWait defers the whole pass.
+var WantFor = 10 * time.Second
+
+// Want announces a change that will ask for storageID's gate soon, without
+// waiting for it: from now on, for at most ttl (WantFor when ttl <= 0), no new
+// judgement takes the gate, as if the change were waiting in MoveCtx. The
+// judgement holding the gate now finishes what it holds (Await says when).
+// cancel ends the Want - once the change holds the gate, or will not run; it
+// is safe to call more than once, and after the Want ran out.
+//
+// The operations queue announces each job it puts back for a judgement
+// (internal/ops gate_lane.go): its one worker never waits in the gate, so
+// without this the job asked again only at random moments, and a scan that
+// lets go of the gate for microseconds between two directories was nearly
+// always holding it again (issue #127).
+//
+// ⚠ Never hold a Want and ask for a judgement of the same storage on the same
+// goroutine: the judgement waits for the Want, which then ends only by
+// running out.
+func Want(storageID int64, ttl time.Duration) (cancel func()) {
+	if ttl <= 0 {
+		ttl = WantFor
+	}
 	g := of(storageID)
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		g.mu.Lock()
-		if !g.judged {
+	g.mu.Lock()
+	g.wants++
+	g.mu.Unlock()
+	var once sync.Once
+	end := func(lapsed bool) {
+		once.Do(func() {
+			if lapsed {
+				g.lapsed.Add(1)
+			}
+			g.mu.Lock()
+			g.wants--
+			g.ease()
 			g.mu.Unlock()
-			return nil
-		}
-		wait := g.eased
-		g.mu.Unlock()
-		select {
-		case <-wait:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		})
+	}
+	timer := time.AfterFunc(ttl, func() { end(true) })
+	return func() {
+		timer.Stop()
+		end(false)
 	}
 }
 
@@ -295,20 +403,19 @@ func ChangeCtx(ctx context.Context, storageID int64, move func() error, follow f
 }
 
 // JudgeCtx holds storageID's gate alone for one judgement of the catalogue
-// against the storage. It tries the gate, and while a change holds it, steps
-// back until the gate is free - without keeping any change out in the
-// meantime - or ctx ends, which it answers (and a release that does
-// nothing). release is safe to call more than once.
+// against the storage. It tries the gate; while a change holds it, waits for
+// it or has announced itself (Want), the judgement steps back until the gate
+// is free - without keeping any change out in the meantime - or ctx ends,
+// which it answers (and a release that does nothing). release is safe to call
+// more than once.
 func JudgeCtx(ctx context.Context, storageID int64) (release func(), err error) {
 	g := of(storageID)
 	for {
-		if release, ok := tryJudge(g); ok {
-			return release, nil
-		}
 		g.mu.Lock()
-		if !g.judged && len(g.changes) == 0 {
+		if g.open() {
+			g.judged = true
 			g.mu.Unlock()
-			continue
+			return g.judgeLeaver(), nil
 		}
 		wait := g.eased
 		g.mu.Unlock()
@@ -335,19 +442,21 @@ func JudgeWithin(ctx context.Context, storageID int64, wait time.Duration) (rele
 	return release, err
 }
 
-// TryJudge holds storageID's gate alone if nothing holds it now, and reports
-// whether it did. It never waits.
+// TryJudge holds storageID's gate alone if nothing holds it now and no change
+// waits for it, and reports whether it did. It never waits.
 func TryJudge(storageID int64) (release func(), ok bool) {
-	return tryJudge(of(storageID))
-}
-
-func tryJudge(g *gate) (func(), bool) {
+	g := of(storageID)
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.judged || len(g.changes) > 0 {
+	if !g.open() {
 		return noop, false
 	}
 	g.judged = true
+	return g.judgeLeaver(), true
+}
+
+// judgeLeaver is the release of the judgement holding g.
+func (g *gate) judgeLeaver() func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
@@ -356,7 +465,7 @@ func tryJudge(g *gate) (func(), bool) {
 			g.ease()
 			g.mu.Unlock()
 		})
-	}, true
+	}
 }
 
 // Judge is JudgeCtx with no end: it waits until the gate is free. Tests use
@@ -384,16 +493,22 @@ type State struct {
 	OldestChange time.Duration
 	// Judged: a judgement holds the gate now.
 	Judged bool
+	// Waiting is how many changes wait for the gate now: in MoveCtx, FenceCtx
+	// or Await while a judgement holds it, or announced (Want). No new
+	// judgement starts while it is above zero.
+	Waiting int
 	// Fences is how many prefixes long changes fence now (FenceCtx), and
 	// OldestFence how long the fence that came first has stood (0 with
 	// none).
 	Fences      int
 	OldestFence time.Duration
 	// LongChanges counts the changes that held the gate for LongHold or
-	// more; DeferredJudgements the judgements that stopped waiting for it.
-	// Both since the process started.
+	// more; DeferredJudgements the judgements that stopped waiting for it;
+	// LapsedWants the Wants that ran out before their change called them off
+	// (its job was not run in time). All since the process started.
 	LongChanges        uint64
 	DeferredJudgements uint64
+	LapsedWants        uint64
 }
 
 // Snapshot reads every storage's gate, ordered by storage id (the metrics
@@ -403,9 +518,9 @@ func Snapshot() []State {
 	var out []State
 	gates.Range(func(k, v any) bool {
 		g := v.(*gate)
-		s := State{StorageID: k.(int64), LongChanges: g.long.Load(), DeferredJudgements: g.deferred.Load()}
+		s := State{StorageID: k.(int64), LongChanges: g.long.Load(), DeferredJudgements: g.deferred.Load(), LapsedWants: g.lapsed.Load()}
 		g.mu.Lock()
-		s.Changes, s.Judged = len(g.changes), g.judged
+		s.Changes, s.Judged, s.Waiting = len(g.changes), g.judged, g.waiting+g.wants
 		for _, t := range g.changes {
 			if d := now.Sub(t); d > s.OldestChange {
 				s.OldestChange = d

@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-10-19",
+  "generatedAt": "2026-10-20",
   "releases": [
+    {
+      "tag": "v0.57.4",
+      "date": "2026-10-20T13:43:52Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.57.4",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Fixed\n\n- **The built-in viewer shows a PDF in Chrome again, and its \"Open in new\n  tab\" opens the PDF instead of downloading it**\n  ([GitHub #124](https://github.com/BRF-Tech/filex/issues/124), reported by\n  @chengjie). Since 0.48.0 filex's pages name the frames they may show of\n  filex by path, and Chrome checks a PDF in the viewer's `<object>` against\n  that list: the preview URL was not on it, so Chrome showed the \"could not\n  show\" fallback instead of the document. A PDF's preview now has a path of\n  its own, `GET /api/files/pdf/{name}?path=`, the one API path filex's pages\n  may frame. It answers only a PDF, always as a preview, with the manager's\n  checks and `Range`; servers that have it say `pdf_preview` in their\n  capabilities, and the explorer uses it for PDFs there (an embed on an older\n  server keeps the manager's URL). The fallback's **Open in new tab** pointed\n  at the download; it now opens the preview, and **Download** still\n  downloads ([BACKEND.md](docs/BACKEND.md#get-apifilespdfname-)).\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0574---2026-10-20)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.57.4",
+        "ghcr.io/brf-tech/filex:full-v0.57.4"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
     {
       "tag": "v0.57.3",
       "date": "2026-10-19T14:43:19Z",

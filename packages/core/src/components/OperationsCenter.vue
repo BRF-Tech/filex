@@ -120,7 +120,9 @@ function outputModeTitle(o: Operation): string {
 function statusText(o: Operation): string {
   if (o.status === 'running') {
     if (o.cancelling) return t('opc.cancelling');
-    if (o.queued) return t('opc.queued');
+    // Why it has not started, when the server says (#127: a scan of the
+    // storage holds it back for a moment), in the reader's words already.
+    if (o.queued) return o.waitText || t('opc.queued');
     // A plugin job says what it is doing in its own words (`job_progress`
     // message); that beats a bare count.
     if (o.message) return o.message;

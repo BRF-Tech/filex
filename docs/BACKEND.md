@@ -2244,6 +2244,16 @@ cancel, all of them.
   3 items permanently…", "2 items restored - 1 item was not restored:
   something already has the name “b.txt”"). The explorer and the admin Trash
   page show it as it is when the job ends; `error` stays the job's own record.
+- A `pending` row whose job waits for a scan of its storage carries
+  **`wait_reason`** (since 0.57.5, [GitHub #127](https://github.com/BRF-Tech/filex/issues/127)):
+  `storage_scan` - a move, delete, rename or restore needs the storage's row
+  gate while the scan holds it for one directory, and runs as soon as the scan
+  lets it through ([ARCHITECTURE.md → The row gate](ARCHITECTURE.md#the-row-gate)).
+  **`wait_text`** says it in the reader's language ("Waiting for its turn: the
+  storage is being scanned"), and **`waiting_since`** is when the job first
+  had to wait. Both trays show `wait_text` instead of "Queued". Live, from the
+  worker's memory like the byte counters: absent once the job runs, and on a
+  row that simply waits its turn in the queue.
 
 ### `GET /api/files/ops/:id` ![user](https://img.shields.io/badge/-user-blue)
 Single op detail with **every** source (no `source_count` / `source_dir`),

@@ -19,14 +19,48 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.57.3, 19 October 2026
-A PDF or an office file can no longer take the server down while its text is read for search. Some PDFs of about a megabyte sent the PDF reader into memory without end, and the kernel killed filex (#123). Their text is now read in a process of its own, with a memory ceiling and a two-minute limit; a file that passes either is found by its name only, and filex goes on. The ceiling is a new setting, Memory for reading one file, on Admin → Settings → General, shared from the indexing memory by default. A queued job whose attempts are spent is no longer handed out again after a crash. An embedded explorer now speaks its visitor's language and has a Language setting of its own, the desktop app stops waiting for a server's languages after ten seconds, and @brftech/filex's type declarations are valid TypeScript again. This patch is not installed automatically: update by hand.
+::: tip Latest - v0.57.4, 20 October 2026
+The built-in viewer shows a PDF in Chrome again. Since 0.48.0 filex's pages name the frames they may show of filex by path, and Chrome checks a PDF in the viewer against that list, so it showed the "could not show" fallback instead of the document (#124). A PDF's preview now has a path of its own, the one API path filex's pages may frame: it answers only a PDF, always as a preview, with the same checks as before. The fallback's Open in new tab opens the PDF instead of downloading it, and Download still downloads.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.57.3
-docker pull ghcr.io/brf-tech/filex:full-v0.57.3
+docker pull ghcr.io/brf-tech/filex:slim-v0.57.4
+docker pull ghcr.io/brf-tech/filex:full-v0.57.4
 ```
+
+## v0.57.4
+
+<span class="filex-release-date">20 October 2026</span>
+
+The built-in viewer shows a PDF in Chrome again. Since 0.48.0 filex's pages name the frames they may show of filex by path, and Chrome checks a PDF in the viewer against that list, so it showed the "could not show" fallback instead of the document (#124). A PDF's preview now has a path of its own, the one API path filex's pages may frame: it answers only a PDF, always as a preview, with the same checks as before. The fallback's Open in new tab opens the PDF instead of downloading it, and Download still downloads.
+
+## What changed
+
+### Fixed
+
+- **The built-in viewer shows a PDF in Chrome again, and its "Open in new
+  tab" opens the PDF instead of downloading it**
+  ([GitHub #124](https://github.com/BRF-Tech/filex/issues/124), reported by
+  @chengjie). Since 0.48.0 filex's pages name the frames they may show of
+  filex by path, and Chrome checks a PDF in the viewer's `<object>` against
+  that list: the preview URL was not on it, so Chrome showed the "could not
+  show" fallback instead of the document. A PDF's preview now has a path of
+  its own, `GET /api/files/pdf/{name}?path=`, the one API path filex's pages
+  may frame. It answers only a PDF, always as a preview, with the manager's
+  checks and `Range`; servers that have it say `pdf_preview` in their
+  capabilities, and the explorer uses it for PDFs there (an embed on an older
+  server keeps the manager's URL). The fallback's **Open in new tab** pointed
+  at the download; it now opens the preview, and **Download** still
+  downloads ([BACKEND.md](./BACKEND.md#get-apifilespdfname-)).
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0574---2026-10-20)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.57.4) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.57.4`
 
 ## v0.57.3
 
@@ -3210,219 +3244,13 @@ entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.46.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.46.0`
 
-## v0.45.1
-
-<span class="filex-release-date">25 September 2026</span>
-
-## What changed
-
-0.45.0 as it was meant to ship. **v0.45.0 was tagged but never published**:
-one of its unit tests read a file only the maintainers' private repository has,
-the release workflow's test gate failed on it in the public tree, and nothing -
-no images, binaries, npm packages or desktop apps - went out. Everything
-0.45.0 carried is below, in this release, together with the fix and a new
-release gate that runs the web tests in the public tree before anything is
-tagged.
-
-### Security
-
-- **A token confined to one folder could reach files outside it through the
-  app doors and the selection archive.** A `root:`-scoped API token (the kind
-  a host application hands an embed, confined to the tenant's folder) could
-  run an app on any file of the storage - its result written next to that
-  file - and put files from outside its folder into a selection archive
-  (`POST /api/files/archive/download`). The path confinement rewrote the body
-  keys it knew and passed a `paths` array through untouched, and those doors
-  checked the person's permissions but not the token's root. Both layers now
-  refuse: the confinement covers `paths`, and every app door (run, view
-  events, the chosen output folder) and the archive check each path against
-  the token's root. Found while building #71.
-
-### Added
-
-- **Drag a file out of the web admin onto the desktop (#71).** The admin app
-  signs its requests with a bearer token, which the browser's drag-out
-  download cannot carry, so it offered no drag-out. The explorer now asks the
-  server for a one-file link while the pointer rests on a row or a ⌘K result
-  (`POST /api/files/archive/download` with `"mode":"file"` → `/z/<ticket>`, on
-  the existing archive tickets): it lasts a minute at most and works once, and
-  at the drop it is checked again as its owner - account, token, tenant host,
-  tenant storage and at least viewer on the file. Every drag-out download is in
-  the audit log (`file.download_link`, `file.download_link_refused`); the link
-  itself never is. Folders are refused (`409 IS_FOLDER`). A cookie session
-  keeps its plain download URL.
-
-- **Desktop: Mount as a drive.** One button in Settings attaches a filex
-  server as a drive of the operating system over WebDAV, and one detaches it -
-  the one-click counterpart of the connection guide, whose commands now come
-  from the same code. The account's own API token is the WebDAV credential and
-  reaches the OS on stdin, never on a command line. On Windows it uses
-  WNetAddConnection2, starts the WebClient service if it is stopped, and says
-  up front what WebClient needs (HTTPS for a password). The macOS and Linux
-  paths are there but not yet verified on those systems (#36).
-- **⌘K search results you can act on.** A result in the palette's
-  *Everywhere* group has a Download button (a folder arrives as one zip) and
-  drags out like a row of the file list - through the desktop app's own drag,
-  or as the browser's single-file download where the session is a cookie. A
-  drag let go on the palette itself no longer starts an upload (#47).
-- **Desktop: ⌘K searches every account on the rail.** Results are grouped
-  under one badge per account, the one you are looking at first. Each account
-  is searched, downloaded and dragged with its own sign-in, and opening another
-  account's result switches the rail to it. Embedders get the same through the
-  new `accountSearch` config hook
-  ([docs/INTEGRATION.md](./INTEGRATION.md)) (#47).
-- **`pnpm release X.Y.Z` cuts a release in order, and a red gate stops it.**
-  The release process in [docs/CONTRIBUTING.md](./CONTRIBUTING.md) is one
-  command now: preflight, the README/screenshot/docs audit, the doc gates, the
-  version stamp, the whole pre-tag chain (both images, three database engines,
-  TZ=UTC, Cypress, Playwright), the public export and its guards, then the
-  signed tags, the push, the workflow's output and the deploy. No option skips
-  a gate. The tool never signs, pushes or deploys: at those steps it prints the
-  commands, and on `--resume` it checks what was done - each tag's signature
-  and target, what both remotes hold, and what the servers, the update feed,
-  the desktop feeds (bytes against their sha512) and docs.filex.sh serve.
-  `--dry-run` runs every gate and writes nothing (#48).
-
-### Fixed
-
-- **The Storage line says how full the drives are, not how much you uploaded
-  (#54, Berk Başarır).** The line at the foot of the explorer's navigation
-  (web and desktop) and the storage chip in the admin top bar printed the
-  person's own upload counter under a label about the drive: on an S3 drive
-  holding 245.3 GB it read 523.5 MB, because files a sync discovered belong to
-  nobody. With a quota the line still shows the person's usage against it;
-  without one it shows the size of the drives the panel lists, the figure
-  Home's cards print, and "at least …" where a drive is not fully counted.
-  Refresh reads it again, and a failed poll keeps the last figure.
-- **The release checks the public tree the way the release workflow does.**
-  `pnpm release` built and tested the web code only in the private tree; it
-  now runs the Frontend job (packages, admin build, web and package unit
-  tests) in the exported tree as well, and `--resume` gets past its own
-  export after a red export gate instead of stopping until the checkout is
-  cleared by hand.
-- **Desktop app: the sidebar entries are left-aligned again (#53).** Home,
-  Trash, each storage and *How to connect* sat centred in their rows on macOS
-  and Windows. The explorer renders into the page that hosts it, and the
-  desktop app's own rule for its dialog buttons (`justify-content: center`)
-  reached the sidebar's buttons, which left that property unsaid. They say it
-  now, so a host page with a global button rule no longer moves them.
-- **WebDAV: a file saved through a mapped Windows drive keeps its content.**
-  Windows' WebDAV client sends a PROPPATCH with the Win32 times after every
-  save, and answering it committed an empty upload over the file - so every
-  file saved through a mapped drive landed on the server empty, with no error
-  anywhere. A write-open that is not an upload now only describes the file.
-- **A big local storage is catalogued about three times faster (#70).** A
-  folder's catalogue rows were written one statement at a time and every new
-  file indexed for search on its own, a disk-bound write each. They now go in
-  one database transaction per folder (SQLite, PostgreSQL and MySQL), the
-  folder's deletions included, and into the search index in one batch after it
-  commits. On a 100,020-file tree the lazy catalogue's background fill went
-  from 34 to 95 files/s and a full scan from 46 to 162 files/s; the lazy
-  catalogue's deletion-safety rules are unchanged. Content extraction, queued
-  per file as before, now trails behind the catalogue
-  ([docs/LAZY-CATALOGUE.md](./LAZY-CATALOGUE.md)).
-- **WebDAV storages no longer cut transfers at 60 seconds (#73).** The driver
-  bounded every request, body included, to one minute, so any upload or
-  download longer than that failed however well it was moving. Now only
-  silence is bounded: connecting, the answer and each next piece of a transfer
-  each wait `attempt_timeout_s` (30 s); copies, moves and deletes wait up to 10
-  minutes. A dead server is reported as unavailable within seconds, failures
-  that can pass are retried within `total_timeout_s`, and an upload is never
-  sent twice. The driver speaks HTTP/1.1.
-- **An FTP server that stops answering no longer freezes its storage (#73).**
-  Only the connect was bounded: the liveness check held the storage's single
-  connection forever, so every other operation on it waited too, and so did a
-  server that never greeted and a transfer that stopped. Every wait now ends
-  after `attempt_timeout_s` (15 s), a fresh connection is tried within the
-  budget, a request whose client leaves stops waiting, and moving transfers
-  are never cut. FTPS data connections are encrypted by the driver itself.
-  WebDAV and FTP storages have the same three time settings as S3 on the
-  storage form.
-- **S3: a store that is down is reported within seconds, not a minute and a
-  half (#44).** A drop into an S3 folder while the object storage was down
-  answered `503 storage_unavailable` after 85 s; a refused port took 26 s, a
-  host off the network ~145 s, and a store that accepted the connection but
-  never answered did not return at all. Every wait that is not a moving
-  transfer is now bounded per attempt - connecting (DNS included), the TLS
-  handshake, the answer after the request, an answer that stops arriving, an
-  upload the store stops taking - and retries are held to a time budget: with
-  the defaults a dead store is reported within 15 s as
-  `s3 endpoint … is unavailable: <reason> (N attempts in Xs)`. A transfer that
-  keeps moving is never cut; copies, renames and multipart completion wait up
-  to 10 minutes. A certificate that does not verify is no longer retried, and
-  uploads over 2 MB (`Expect: 100-continue`) have an answer limit too. New
-  storage settings `attempt_timeout_s` (10), `max_attempts` (6) and
-  `total_timeout_s` (15) appear in the storage form; see
-  [docs/STORAGE.md](./STORAGE.md).
-- **Ops → Updates no longer promises what the install cannot do (#72).** On
-  an install a package manager owns (Homebrew, winget, Snap, a distribution
-  package) or a container, a saved policy of `patch` or `minor` made the badge
-  read "Policy: install patches" although filex never replaces such a binary.
-  The server works out the effective behaviour in one place, shared with the
-  upgrade decision, and the status carries `behavior` and `policy_limit`: the
-  badge reads **Announces only**, and the line under it says the saved policy
-  has no effect on this install, with the package manager and its command.
-  Checking switched off reads **Checking off**; `minor` on 0.x reads
-  **Installs patches**. The saved policy is kept as set.
-- **The release badges on Ops → Updates have their colours again.** Security,
-  schema change and the size of the step all rendered grey: they passed a
-  property the badge component does not have.
-- **App screens wear the theme everywhere (#57).** On a branded, dark
-  instance the wizard's current-step number and the people picker's avatar
-  were white on the theme's primary (2.3:1 on a pale one); they now use the
-  palette's `--fe-text-on-primary`, like filex's own buttons, and a signing
-  box's number takes its ink from the signer's colour. An app's page and a
-  public page (share, file request, signing link) now turn with light and dark
-  while they are open, instead of keeping the mode they were opened in.
-  [docs/APP-PLUGINS-API.md](./APP-PLUGINS-API.md) lists the theme tokens
-  each surface node reads and what stays fixed on purpose (the PDF page,
-  signer colours, the signature pad's paper), and a test fails when a surface
-  node carries a fixed colour, corner or font.
-- **Apps: a modal screen opened on several files keeps all of them.** An
-  action that applies to a selection and opens a view saw every file on its
-  first screen, but from the first form edit (or the submit) on it was
-  answered about the first file only, and the job it queued ran on that one
-  file (#64). The explorer now sends the whole selection with every view
-  event; the server re-checks each path for the person asking, re-checks
-  `applies` on every file at submit, and takes at most 500 paths, as `run`
-  does.
-- **Desktop: a copy prepared for one account's drag-out is not handed to
-  another account's.** Two accounts with a storage of the same name (the same
-  server, or the same drive name) shared the prepared copy of a path, so a drag
-  from the second could carry the first account's file. The copies are keyed
-  by account as well now (#47).
-- **Linux: the desktop app opens on a minimal install.** Electron loads the
-  ALSA sound library at start, and the `.deb` and `.rpm` did not depend on it:
-  on a system without it the app did not open. They now require
-  `libasound2 | libasound2t64` (Debian, Ubuntu) and `(alsa-lib or libasound2)`
-  (Fedora, openSUSE).
-- **Linux: the desktop app warns when the Snap Store copy is installed too.**
-  The snap keeps its own accounts and its own sync history, so a folder paired
-  in both copies was synced by two apps that did not know about each other -
-  duplicate uploads, conflict copies, a delete reaching the wrong side. A
-  `.deb`, `.rpm`, AppImage or AUR copy now says so in Settings, with the
-  commands to keep one.
-- **`filex self-update` leaves a distribution package alone.** A filex in
-  `/usr/bin` (or `/usr/sbin`, `/bin`, `/sbin`) was put there by a package
-  manager, and is now treated like a Homebrew, winget or Snap install: no
-  self-replacement, upgrade with the package manager. A hand install in
-  `/usr/local/bin`, where [docs/CLI.md](./CLI.md) puts it, is unchanged.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0451---2026-09-25)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.45.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.45.1`
-
 ## Earlier releases
 
-The 124 releases before v0.45.1, in brief. Full notes are on GitHub.
+The 125 releases before v0.46.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.45.1](https://github.com/BRF-Tech/filex/releases/tag/v0.45.1) | 25 September 2026 | 0.45.0 as it was meant to ship. **v0.45.0 was tagged but never published**: |
 | [v0.44.2](https://github.com/BRF-Tech/filex/releases/tag/v0.44.2) | 25 September 2026 | The release 0.44.0 was meant to be, and the one to install the desktop app from, including through Homebrew, winget and Snap. |
 | [v0.44.1](https://github.com/BRF-Tech/filex/releases/tag/v0.44.1) | 25 September 2026 | Tagged, but it stopped at the same winget step as 0.44.0; its container images, npm packages and CLI binaries were published. |
 | [v0.44.0](https://github.com/BRF-Tech/filex/releases/tag/v0.44.0) | 25 September 2026 | Big local storages open at once: the new lazy catalogue lists a folder straight from disk and catalogues it behind the listing, with a throttled pass that fills in the rest (or only the folders people visit). |
@@ -3550,4 +3378,4 @@ The 124 releases before v0.45.1, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-10-19 from 144 published releases.</small>
+<small>Last refreshed 2026-10-20 from 145 published releases.</small>

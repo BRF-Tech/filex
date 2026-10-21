@@ -127,6 +127,7 @@ watch(
           error: op.status === 'error' ? failureOf(op).text : null,
           errorDetail: op.status === 'error' ? (failureOf(op).detail ?? null) : null,
           queued: op.status === 'pending',
+          waitText: op.status === 'pending' ? (op.wait_text ?? null) : null,
           cancelling: op.status === 'cancelling',
           doneCount: op.progress_done,
           totalCount: op.progress_total,

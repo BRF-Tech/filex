@@ -439,7 +439,7 @@ tenant's copies, moves, deletes and upload commits), until the long change
 let go. Now:
 
 - **A judgement never queues ahead of a change.** It takes the gate only while
-  no change holds it; while one does it steps back, without keeping any change
+  no change holds it or waits for it; while one does it steps back, without keeping any change
   out, for at most 30 seconds (`sync.GateWait`, `rowgate.JudgeWithin`), and is
   then deferred: the walk stops and the run is recorded with the reason, the
   tombstone pass leaves its remaining candidates to the next pass, a lazy
@@ -451,6 +451,19 @@ let go. Now:
   request's context** (`rowgate.MoveCtx`). A client that gives up while it
   waits takes nothing and changes nothing. Once the gate is held the change
   detaches from the client (`storage.DetachMutation`) and runs to its end.
+- **A change that waits is let through before the next judgement** (since
+  0.57.5, [GitHub #127](https://github.com/BRF-Tech/filex/issues/127)). The
+  scan lets go of the gate after one directory and asks for it again a few
+  microseconds later for the next; a change woken when the gate opened lost
+  that race nearly every time, and on a local storage of tens of thousands of
+  entries a queued delete waited for the whole scan. So the gate counts the
+  changes waiting for it (`rowgate.MoveCtx`, `FenceCtx` and `Await` while a
+  judgement holds it, and the queue's announced jobs, `rowgate.Want`), and a
+  judgement steps back for them as for a change that holds it: the scan
+  finishes the directory or the batch in hand and takes the next one after the
+  change. An announcement runs out after 10 seconds (`rowgate.WantFor`, well
+  under the scan's 30), so a job the queue does not reach in time holds the
+  scan back no longer than that.
 - **What was checked before the wait is asked again under the gate.** The
   destination found free (WebDAV `Overwrite: F` and the destination
   x/net/webdav removed for `Overwrite: T`, SFTP's v3 rename, the explorer's
@@ -470,7 +483,14 @@ let go. Now:
   back to the queue as it was, the storage's later jobs stay where they are
   for that round (one storage's jobs keep their order), and the other
   storages' jobs run (`ops/gate_lane.go`, both the main worker and the
-  finishing lane). A move to another storage asks again before each item's
+  finishing lane). The job put back is announced to the gate (`rowgate.Want`)
+  and its lane is woken the moment the judgement in hand lets go
+  (`rowgate.Await`), not at its next 5-second round; the announcement ends
+  when the job holds the gate (or its fence), is cancelled, or runs out.
+  Meanwhile the row says why it waits (`wait_reason: storage_scan`, and
+  `wait_text` in the reader's language), and the trays show that instead of
+  "Queued" ([BACKEND.md](BACKEND.md#get-apifilesops-)). A move to another
+  storage asks again before each item's
   copy: with its source storage being judged, the job goes back with the
   items it has not reached (their count stays on the row). Once an item's
   bytes are on the far side, the delete of its source waits for the gate on
@@ -522,8 +542,10 @@ let go. Now:
   it.
 - **A long hold is visible.** `filex_rowgate_oldest_change_seconds`,
   `filex_rowgate_changes`, `filex_rowgate_long_changes_total` and
-  `filex_rowgate_deferred_judgements_total` per storage, and for fences
-  `filex_rowgate_fences` and `filex_rowgate_oldest_fence_seconds`
+  `filex_rowgate_deferred_judgements_total` per storage, for fences
+  `filex_rowgate_fences` and `filex_rowgate_oldest_fence_seconds`, and for
+  the changes waiting `filex_rowgate_waiting_changes` and
+  `filex_rowgate_lapsed_wants_total`
   ([METRICS.md](METRICS.md#the-row-gate)), and a warning in the log when a
   change lets go after holding the gate for a minute or more.
 

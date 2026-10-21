@@ -277,6 +277,10 @@ func (s *Service) crossTransfer(ctx context.Context, srcDrv, dstDrv storage.Driv
 	if move && rowgate.Judged(op.StorageID) {
 		return errSourceJudged
 	}
+	// The job has started: its turn at the source's gate is over (the copy
+	// takes no gate, and the source delete waits for it on its own, counted
+	// among the changes waiting: rowgate.FencedChangeCtx).
+	s.endTurn(op.ID)
 	hooks := TransferHooks{}
 	if s.dbsync != nil {
 		hooks.OnDir = func(a, b string) { s.dbsync.SyncCopyAcross(ctx, op.StorageID, a, op.DestStorageID, b) }

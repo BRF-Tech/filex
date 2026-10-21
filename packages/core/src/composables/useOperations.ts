@@ -49,6 +49,9 @@ export interface OperationInput {
   errorDetail?: string | null;
   /** Queue op accepted but not started yet ("Queued"). */
   queued?: boolean;
+  /** Why a queued op has not started, in the server's words (`wait_text`):
+   *  shown instead of "Queued" when the server says. */
+  waitText?: string | null;
   /** Cancellation was accepted and the worker is stopping/cleaning up. */
   cancelling?: boolean;
   /** Progress counters for queue ops (3/5 items). */
@@ -98,6 +101,7 @@ export interface Operation {
   error: string | null;
   errorDetail: string | null;
   queued: boolean;
+  waitText: string | null;
   cancelling: boolean;
   doneCount: number | null;
   totalCount: number | null;
@@ -128,6 +132,7 @@ function toOperation(key: string, input: OperationInput, prev?: Operation): Oper
     error: input.error ?? null,
     errorDetail: input.errorDetail ?? null,
     queued: input.queued ?? false,
+    waitText: input.waitText ?? null,
     cancelling: input.cancelling ?? false,
     doneCount: input.doneCount ?? null,
     totalCount: input.totalCount ?? null,

@@ -119,6 +119,8 @@ two consumers - so the graph and the cache can never disagree.
 | `filex_rowgate_deferred_judgements_total` | counter | `storage` | storage scan judgements (a directory of the walk, a batch of the tombstone pass, a folder of the lazy catalogue) deferred because the gate stayed held - by a change, or by another judgement - for all of their 30-second wait |
 | `filex_rowgate_fences` | gauge | `storage` | prefixes fenced now by long changes - a folder moved or trashed object by object on an object store fences its path and its destination's; the scan leaves them alone and goes on everywhere else |
 | `filex_rowgate_oldest_fence_seconds` | gauge | `storage` | how long the oldest fence on the storage has stood; 0 with none. Its prefixes have not been scanned for that long |
+| `filex_rowgate_waiting_changes` | gauge | `storage` | changes waiting for the gate now - a rename, move, delete or restore waiting while the scan holds it for a directory, or a queued job put back for the scan and announced to the gate (since 0.57.5). No new scan judgement starts while it is above zero, so it is 0 or 1 for an instant almost always |
+| `filex_rowgate_lapsed_wants_total` | counter | `storage` | queued jobs announced to the gate that the queue did not run before the announcement ran out (10 seconds; since 0.57.5): the scan went on without them. A rise means the queue was busy with another storage's long job while this storage was scanned |
 
 A change never waits for a scan that is only waiting, so a long change does not
 hold up the other changes or the operations queue; what it holds up is the

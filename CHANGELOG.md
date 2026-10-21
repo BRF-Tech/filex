@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.57.5] - 2026-10-21
+
+### Fixed
+
+- **An upload from Safari no longer stops for good after its first chunk**
+  ([GitHub #125](https://github.com/BRF-Tech/filex/issues/125), fixed by
+  @chengjie in [PR #126](https://github.com/BRF-Tech/filex/pull/126)). In
+  Safari a chunk sent straight from a file on disk could reach the server and
+  get its whole answer back, yet the request never finished, so the upload
+  waited on that chunk forever and its retries never ran. Each chunk is now
+  read into memory before it is sent (one chunk at a time, so the extra
+  memory is the chunk size per running upload, not the file size), and a
+  chunk whose bytes stop moving for two minutes is cut off and handed to the
+  retry path, which first asks the server how much arrived and sends only the
+  rest. A slow upload that keeps moving is never cut off, and the stall
+  message is in the explorer's own language.
+- **A delete, move, rename or restore queued while its storage is being
+  scanned starts at once instead of waiting for the whole scan**
+  ([GitHub #127](https://github.com/BRF-Tech/filex/issues/127), reported by
+  @chengjie). On a local storage of tens of thousands of entries a folder
+  delete sat in the operations centre as "Delete · Queued" for the scan's
+  four or five minutes and ran two seconds after it ended. The scan holds the
+  storage's row gate for one directory at a time and takes it again a few
+  microseconds after letting go; the queue put the job back whenever the scan
+  held the gate and asked again only at its next round, so every try met the
+  scan. A job put back now tells the gate it is waiting: the scan finishes the
+  directory in hand and lets the job through before the next one, and the
+  queue is woken as soon as that directory is done. The gate gives the same
+  turn to every change that waits for it (a WebDAV or SFTP rename, a delete
+  in the explorer). A job that is not run within 10 seconds of saying it waits
+  (its queue busy with another storage's job) no longer holds the scan back.
+  While a job waits for the scan its row says so in the reader's language,
+  and the operations centre shows that instead of "Queued": the ops rows
+  carry `wait_reason` (`storage_scan`), `wait_text` and `waiting_since`
+  ([BACKEND.md](docs/BACKEND.md#get-apifilesops-)). New metrics
+  `filex_rowgate_waiting_changes` and `filex_rowgate_lapsed_wants_total`
+  ([METRICS.md](docs/METRICS.md#the-row-gate)).
+
 ## [0.57.4] - 2026-10-20
 
 ### Fixed

@@ -173,7 +173,7 @@ func (s *Service) runOneFinishing(ctx context.Context, stop <-chan struct{}, hel
 	// A storage being judged: the job goes back, and the lane carries on
 	// with the other storages' (gate_lane.go).
 	if waitsForAJudgement(op) {
-		s.putBack(ctx, op)
+		s.holdBack(ctx, op, s.pokeFinishing)
 		*held = append(*held, op.StorageID)
 		return true
 	}
@@ -230,7 +230,7 @@ func (s *Service) runRename(ctx context.Context, drv storage.Driver, op *Op, src
 	// A folder on an object store moves one object at a time, for as long as
 	// it is large: it fences its old and new prefixes instead of holding the
 	// whole storage's scan off (holdFor, rowgate.FenceCtx).
-	release, _ := holdFor(work, drv, op.StorageID, src, dst)
+	release, _ := s.holdFor(work, drv, op, src, dst)
 	defer release()
 	// ⚠ Asked again, although the handler asked when it queued the rename:
 	// other work may have run in between, and every driver's Move replaces
@@ -289,6 +289,7 @@ func (s *Service) runRestore(ctx context.Context, op *Op, src string) error {
 	}
 	release, _ := rowgate.HoldCtx(context.Background(), op.StorageID, fence...)
 	defer release()
+	s.endTurn(op.ID)
 	return s.restorer.RestoreNode(work, op.StorageID, ids[0])
 }
 
@@ -314,10 +315,13 @@ func cancellable(op *Op) bool {
 // gate): a fence on src and the other paths given (the destination) when src
 // is a folder moved or trashed object by object (storage.FenceAt), the
 // storage's row gate otherwise (rowgate.HoldCtx makes the choice; it never
-// takes both). fenced reports which it took.
-func holdFor(ctx context.Context, drv storage.Driver, storageID int64, src string, more ...string) (release func(), fenced bool) {
+// takes both). fenced reports which it took. Once it holds either, the job's
+// turn ends (endTurn): an announcement kept up for the length of a long fenced
+// change would hold the rest of the storage's scan back for nothing.
+func (s *Service) holdFor(ctx context.Context, drv storage.Driver, op *Op, src string, more ...string) (release func(), fenced bool) {
 	fence := storage.FenceAt(ctx, drv, append([]string{src}, more...)...)
-	release, _ = rowgate.HoldCtx(context.Background(), storageID, fence...)
+	release, _ = rowgate.HoldCtx(context.Background(), op.StorageID, fence...)
+	s.endTurn(op.ID)
 	return release, len(fence) > 0
 }
 

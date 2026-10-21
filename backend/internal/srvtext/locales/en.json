@@ -862,6 +862,7 @@
   "server.trash.purge.failed.forbidden_one": "{count} item was not deleted: you may not delete it for good",
   "server.trash.purge.failed.other": "{count} items could not be deleted permanently",
   "server.trash.purge.failed.other_one": "{count} item could not be deleted permanently",
+  "server.ops.wait.storage_scan": "Waiting for its turn: the storage is being scanned",
   "server.unit.bytes": "B",
   "server.unit.gb": "GB",
   "server.unit.kb": "KB",

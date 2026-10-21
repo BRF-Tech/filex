@@ -2,10 +2,11 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.57.4"
+version: "0.57.5"
 releaseNotes: |-
-  filex v0.57.4 - 2026-10-20
-  • The built-in viewer shows a PDF in Chrome again, and its "Open in new tab" opens the PDF instead of downloading it
+  filex v0.57.5 - 2026-10-21
+  • An upload from Safari no longer stops for good after its first chunk
+  • A delete, move, rename or restore queued while its storage is being scanned starts at once instead of waiting for the whole scan
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

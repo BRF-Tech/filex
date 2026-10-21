@@ -1,6 +1,7 @@
 package ops
 
 // What a trash job says: a restore, a permanent delete, "empty the trash".
+// And why a queued job has not started yet (SayWait, since 0.57.5).
 //
 // ⚠⚠ Why here (0.54, findings A4 and A15). These sentences were written in
 // the browser, twice: the explorer built "Trash emptied, but 3 items could not
@@ -221,20 +222,43 @@ func rowReason(msg string) (reason, name string) {
 	return ReasonFailed, ""
 }
 
-// sayRows fills the Summary of the trash rows, in the language of the reader
-// the request names (srvtext.WithReader; the instance default otherwise).
+// waitWords is the sentence for each WaitReason (attachWait). Every key is
+// written out (srvtext's tree scan checks the literal keys exist).
+var waitWords = map[string]string{
+	WaitStorageScan: "server.ops.wait.storage_scan",
+}
+
+// SayWait is why a queued row has not started, in lang: the sentence for its
+// WaitReason, "" for none.
+func SayWait(lang, reason string) string {
+	key, ok := waitWords[reason]
+	if !ok {
+		return ""
+	}
+	return srvtext.Text(lang, key, nil)
+}
+
+// sayRows fills the Summary of the trash rows and the WaitText of the rows
+// waiting for their turn (attachWait), in the language of the reader the
+// request names (srvtext.WithReader; the instance default otherwise).
 func sayRows(ctx context.Context, rows []*Op) {
 	var lang string
+	say := func() string {
+		if lang == "" {
+			lang = srvtext.Pick(srvtext.Reader(ctx))
+		}
+		return lang
+	}
 	for _, op := range rows {
 		if op == nil {
 			continue
 		}
+		if op.WaitReason != "" {
+			op.WaitText = SayWait(say(), op.WaitReason)
+		}
 		if op.Kind != OpTrashEmpty && op.Kind != OpRestore && op.Kind != OpPurge {
 			continue
 		}
-		if lang == "" {
-			lang = srvtext.Pick(srvtext.Reader(ctx))
-		}
-		op.Summary = sayRow(lang, op)
+		op.Summary = sayRow(say(), op)
 	}
 }

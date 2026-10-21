@@ -368,6 +368,16 @@ var (
 		"Storage scan judgements (a directory, a tombstone batch, a lazy folder) deferred because the row gate stayed held - by a change, or by another judgement - for all of their wait.",
 		[]string{"storage"}, nil,
 	)
+	rowgateWaitingDesc = prometheus.NewDesc(
+		"filex_rowgate_waiting_changes",
+		"Changes waiting for a storage's row gate now, or announced by the operations queue for a job it put back (rowgate.Want): no new scan judgement starts while it is above zero.",
+		[]string{"storage"}, nil,
+	)
+	rowgateLapsedDesc = prometheus.NewDesc(
+		"filex_rowgate_lapsed_wants_total",
+		"Jobs the operations queue announced for a storage's row gate that were not run before the announcement ran out (rowgate.WantFor): the scan went on without them.",
+		[]string{"storage"}, nil,
+	)
 )
 
 type rowgateCollector struct{}
@@ -379,6 +389,8 @@ func (rowgateCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- rowgateDeferredDesc
 	ch <- rowgateFencesDesc
 	ch <- rowgateOldestFenceDesc
+	ch <- rowgateWaitingDesc
+	ch <- rowgateLapsedDesc
 }
 
 func (rowgateCollector) Collect(ch chan<- prometheus.Metric) {
@@ -390,6 +402,8 @@ func (rowgateCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(rowgateDeferredDesc, prometheus.CounterValue, float64(s.DeferredJudgements), lbl)
 		ch <- prometheus.MustNewConstMetric(rowgateFencesDesc, prometheus.GaugeValue, float64(s.Fences), lbl)
 		ch <- prometheus.MustNewConstMetric(rowgateOldestFenceDesc, prometheus.GaugeValue, s.OldestFence.Seconds(), lbl)
+		ch <- prometheus.MustNewConstMetric(rowgateWaitingDesc, prometheus.GaugeValue, float64(s.Waiting), lbl)
+		ch <- prometheus.MustNewConstMetric(rowgateLapsedDesc, prometheus.CounterValue, float64(s.LapsedWants), lbl)
 	}
 }
 

@@ -147,6 +147,15 @@ type Op struct {
 	// (say.go): a restore, a permanent delete or "empty the trash". Filled by
 	// Get/List for those kinds, never stored.
 	Summary string `json:"summary,omitempty"`
+	// WaitReason says why a queued row has not started yet: WaitStorageScan
+	// while its job waits for its turn at its storage's row gate, which a
+	// scan holds (gate_lane.go). WaitText is that in the reader's language
+	// (say.go) - what the tray shows instead of a bare "Queued" - and
+	// WaitingSince when the job was first put back for it. Live, from the
+	// worker's memory, never stored; only on a pending row.
+	WaitReason   string     `json:"wait_reason,omitempty"`
+	WaitText     string     `json:"wait_text,omitempty"`
+	WaitingSince *time.Time `json:"waiting_since,omitempty"`
 
 	// An OpTrashEmpty row's request (trash_empty.go): kept out of the
 	// answers, which carry its counts only.
@@ -219,6 +228,12 @@ type Service struct {
 
 	// live holds the byte counters of running cross-storage ops (progress.go).
 	live sync.Map
+
+	// turns holds, by op id, the turn of each job put back for a judgement
+	// holding its storage's row gate (gate_lane.go announce), and heldSince
+	// when each such job was first put back (WaitingSince).
+	turns     sync.Map
+	heldSince sync.Map
 
 	// deleteWorkers bounds how many items of ONE delete job are trashed at
 	// the same time (SetDeleteWorkers; delete_pool.go).
@@ -397,6 +412,9 @@ func (s *Service) Cancel(ctx context.Context, id int64) (bool, error) {
 			queued.cleanup()
 		}
 		s.forgetSettled(id)
+		// A job waiting for its turn at its storage's gate will not run: its
+		// announcement goes now, not when it runs out (gate_lane.go).
+		s.forgetHeld(id)
 		return true, nil
 	}
 	if v, ok := s.cancels.Load(id); ok {
@@ -670,6 +688,7 @@ func (s *Service) Get(ctx context.Context, id int64) (*Op, error) {
 	op, err := scanOp(row)
 	if err == nil {
 		s.attachLive(op)
+		s.attachWait(op)
 		if s.decorator != nil {
 			s.decorator(ctx, []*Op{op})
 		}
@@ -772,6 +791,7 @@ func (s *Service) ListFor(ctx context.Context, status string, v Viewer) ([]*Op, 
 		_ = json.Unmarshal([]byte(srcJSON), &op.Sources)
 		shape(op)
 		s.attachLive(op)
+		s.attachWait(op)
 		op.Cancellable = cancellable(op)
 		out = append(out, op)
 	}
@@ -951,6 +971,8 @@ func (s *Service) runArchiveLane(ctx context.Context, stop <-chan struct{}) {
 // A job whose storage a judgement holds the gate of right now goes back to
 // the queue (gate_lane.go), and so does every later job of that storage this
 // round, so one storage's jobs keep their order; the other storages' run on.
+// The job put back is announced to the gate, and the worker is woken for it
+// as soon as the judgement lets go (announce): not at its next tick.
 func (s *Service) drain(ctx context.Context) {
 	var held []int64
 	for {
@@ -963,12 +985,13 @@ func (s *Service) drain(ctx context.Context) {
 			return
 		}
 		if waitsForAJudgement(op) {
-			s.putBack(ctx, op)
+			s.holdBack(ctx, op, s.poke)
 			held = append(held, op.StorageID)
 			continue
 		}
 		s.execute(ctx, op)
 		if op.putBack {
+			s.announce(op, s.poke)
 			held = append(held, op.StorageID)
 		}
 	}
@@ -1045,10 +1068,14 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 		return
 	}
 	// A row put back to the queue (putBackFrom) keeps what its submission
-	// settled: it runs again.
+	// settled: it runs again. Its turn at the gate ends here whatever
+	// happened (the lane announces a row put back again: drain), and once
+	// the job is over, so does the record of its waits.
 	defer func() {
+		s.endTurn(op.ID)
 		if !op.putBack {
 			s.forgetSettled(op.ID)
+			s.heldSince.Delete(op.ID)
 		}
 	}()
 	if s.storageResolver == nil {
@@ -1359,7 +1386,7 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 		// entry the person could restore from would be lost with it. A folder
 		// on an object store goes to the trash object by object: it fences
 		// its prefix instead (holdFor).
-		release, _ := holdFor(ctx, drv, op.StorageID, src)
+		release, _ := s.holdFor(ctx, drv, op, src)
 		defer release()
 		out, terr := trash.Put(ctx, drv, src)
 		switch {
@@ -1414,7 +1441,7 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 		// A folder on an object store fences its prefix, and its
 		// destination's once picked, instead of holding the storage's gate
 		// (holdFor, fenceToo).
-		release, fenced := holdFor(ctx, drv, op.StorageID, src)
+		release, fenced := s.holdFor(ctx, drv, op, src)
 		defer release()
 		dst, err := MoveDest(ctx, drv, src, joinIntoDir(op.Dest, src))
 		if err != nil {

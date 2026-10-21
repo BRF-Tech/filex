@@ -122,7 +122,8 @@ func waitForPending(t *testing.T, svc *ops.Service, id int64, d time.Duration, w
 }
 
 // waitForOpWithin is waitForOp with a deadline of its own: a job put back for
-// its storage's gate runs at the worker's next round (its 5 s ticker).
+// its storage's gate runs once the judgement lets go (its lane is woken for it,
+// gate_lane.go announce), and the deadline says how soon that must be.
 func waitForOpWithin(t *testing.T, svc *ops.Service, id int64, d time.Duration) *ops.Op {
 	t.Helper()
 	deadline := time.Now().Add(d)

@@ -82,6 +82,9 @@ function percentFor(op: PendingOp): number | null {
 }
 
 function progressLine(op: PendingOp): string {
+  // Why a queued job has not started, when the server says (#127): the same
+  // sentence the explorer's operations centre shows, in the reader's words.
+  if (op.status === 'pending' && op.wait_text) return op.wait_text;
   const bytesDone = op.bytes_done ?? 0;
   const bytesTotal = op.bytes_total ?? 0;
   if (bytesTotal > 0) {

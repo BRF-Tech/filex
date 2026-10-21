@@ -115,7 +115,8 @@ func Fences(storageID int64) *FenceSet {
 // first object moves and call release once the last row has followed (release
 // is safe to call more than once; only the first call counts, and it counts as
 // a finished change, Moves). It waits, on ctx, only while a judgement holds
-// the gate; a ctx that ends first takes nothing and answers its error and a
+// the gate, counted among the changes waiting for it (no new judgement starts
+// meanwhile); a ctx that ends first takes nothing and answers its error and a
 // release that does nothing. While the fence stands, judgements take the gate
 // and leave the prefixes alone (Fences); no change waits for it.
 //
@@ -127,27 +128,17 @@ func FenceCtx(ctx context.Context, storageID int64, prefixes ...string) (release
 		return MoveCtx(ctx, storageID)
 	}
 	g := of(storageID)
-	for {
-		if err := ctx.Err(); err != nil {
-			return noop, err
-		}
-		g.mu.Lock()
-		if !g.judged {
-			g.next++
-			tok := g.next
-			g.fences[tok] = fenceHold{prefixes: ps, since: time.Now()}
-			g.refence()
-			g.mu.Unlock()
-			return g.fenceLeaver(tok), nil
-		}
-		wait := g.eased
-		g.mu.Unlock()
-		select {
-		case <-wait:
-		case <-ctx.Done():
-			return noop, ctx.Err()
-		}
+	var tok uint64
+	err = g.whenFree(ctx, func() {
+		g.next++
+		tok = g.next
+		g.fences[tok] = fenceHold{prefixes: ps, since: time.Now()}
+		g.refence()
+	})
+	if err != nil {
+		return noop, err
 	}
+	return g.fenceLeaver(tok), nil
 }
 
 // HoldCtx holds what one two-step change on storageID needs, and is where the

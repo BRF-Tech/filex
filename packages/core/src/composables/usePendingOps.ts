@@ -73,6 +73,11 @@ export interface PendingOp {
    *  said by the server in the reader's language (0.54, findings A4/A15):
    *  what the explorer says when the job ends. Absent on other rows. */
   summary?: string;
+  /** Why a queued row has not started yet, said by the server in the
+   *  reader's language (0.57.5, #127): a scan of its storage holds the job
+   *  back for a moment (`wait_reason: "storage_scan"`). Shown instead of a
+   *  bare "Queued"; absent when the row simply waits its turn in the queue. */
+  wait_text?: string;
   /** Files the job committed, once finished. */
   outputs?: PendingOpOutput[];
   /**
@@ -171,6 +176,7 @@ export function normalizeOp(raw: Record<string, unknown>): PendingOp {
     label: str(raw.label) ?? undefined,
     message: str(raw.message) ?? undefined,
     summary: str(raw.summary) ?? undefined,
+    wait_text: str(raw.wait_text) ?? undefined,
     outputs,
     ...(open ? { open } : {}),
   };

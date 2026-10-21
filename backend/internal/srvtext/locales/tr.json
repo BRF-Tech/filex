@@ -793,6 +793,7 @@
   "server.trash.purge.failed.not_found": "{count} öğe silinmedi: artık çöp kutusunda değil",
   "server.trash.purge.failed.forbidden": "{count} öğe silinmedi: kalıcı olarak silme izniniz yok",
   "server.trash.purge.failed.other": "{count} öğe kalıcı olarak silinemedi",
+  "server.ops.wait.storage_scan": "Sırasını bekliyor: depo taranıyor",
   "server.unit.bytes": "B",
   "server.unit.gb": "GB",
   "server.unit.kb": "KB",
