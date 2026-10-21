@@ -3,7 +3,7 @@
 // read back from the server's answer; a number the server refuses keeps the
 // server's sentence under its field; the memory budget in force is said in
 // the reader's language; an index switched off says so.
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeAll, beforeEach } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { createI18n } from 'vue-i18n';
@@ -56,6 +56,14 @@ function card(locale: 'en' | 'tr' = 'en') {
     mount(m.default, { global: { plugins: [i18n] }, attachTo: document.body }),
   );
 }
+
+// ⚠ The first import of the card transforms its whole module graph; that cost
+// landed on the first test, which timed out at 5 s two runs in three on the
+// maintainer's PC alone and on the v0.57.5 pretag (2026-10-21). Pay it once,
+// here, with a budget of its own (as tests/api/client.test.ts does).
+beforeAll(async () => {
+  await import('@/components/SearchSettingsCard.vue');
+}, 30_000);
 
 beforeEach(() => {
   setActivePinia(createPinia());
