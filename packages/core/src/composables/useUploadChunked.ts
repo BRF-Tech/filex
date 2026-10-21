@@ -381,7 +381,14 @@ export function useUploadChunked(
       while (acked < total) {
         if (cancelled) throw new DOMException('Aborted by user', 'AbortError');
         const end = Math.min(acked + chunkSize, total);
-        const blob = src ? await src.read(acked, end) : opts.file.slice(acked, end);
+        // Safari can receive the entire response yet never finish a PUT whose
+        // body is a disk-backed File slice. Materialize only this chunk, once
+        // per retry group; sending the ArrayBuffer directly also stalls with
+        // upload progress listeners. Stream sources already make memory blobs.
+        const blob = src
+          ? await src.read(acked, end)
+          : new Blob([await opts.file.slice(acked, end).arrayBuffer()]);
+        if (cancelled) throw new DOMException('Aborted by user', 'AbortError');
 
         let next = -1;
         let lastErr: Error | null = null;
@@ -408,6 +415,7 @@ export function useUploadChunked(
             }
           }
           try {
+            if (cancelled) throw new DOMException('Aborted by user', 'AbortError');
             next = await putChunk(uploadId, blob, acked, end, total);
             break;
           } catch (err) {
@@ -511,6 +519,27 @@ export function useUploadChunked(
     ): Promise<number> {
       return new Promise<number>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
+        // An inactivity limit, not a total-duration limit: slow uploads that
+        // keep moving must survive. A stalled success is reconciled by the
+        // existing GET-offset retry path, never by trusting progress alone.
+        const IDLE_MS = 120_000;
+        let idleTimer: ReturnType<typeof setTimeout>;
+        let sent = 0;
+        let received = 0;
+        const cleanup = () => {
+          clearTimeout(idleTimer);
+          inFlight = null;
+          xhr.onload = xhr.onerror = xhr.onabort = xhr.onprogress = null;
+          xhr.upload.onprogress = null;
+        };
+        const touch = () => {
+          clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => {
+            cleanup();
+            xhr.abort();
+            reject(new Error(wordsIn(resolveLocale(config.locale))('err.upload_stalled')));
+          }, IDLE_MS);
+        };
         inFlight = xhr;
         xhr.open('PUT', `${stagedBase()}/${encodeURIComponent(uploadId)}`);
         const headers = api.authHeadersSync({
@@ -520,10 +549,20 @@ export function useUploadChunked(
         for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
         xhr.withCredentials = api.credentialsMode() === 'include';
         xhr.upload.onprogress = (ev) => {
+          if (ev.loaded > sent) {
+            sent = ev.loaded;
+            touch();
+          }
           if (ev.lengthComputable) report(ev.loaded);
         };
+        xhr.onprogress = (ev) => {
+          if (ev.loaded > received) {
+            received = ev.loaded;
+            touch();
+          }
+        };
         xhr.onload = () => {
-          inFlight = null;
+          cleanup();
           noteRequestSucceeded();
           if (xhr.status >= 200 && xhr.status < 300) {
             try {
@@ -542,15 +581,21 @@ export function useUploadChunked(
           reject(requestFailure(xhr.status, xhr.responseText || '', lang()));
         };
         xhr.onerror = () => {
-          inFlight = null;
+          cleanup();
           noteRequestFailed('action');
           reject(networkFailure(lang()));
         };
         xhr.onabort = () => {
-          inFlight = null;
+          cleanup();
           reject(new DOMException('Aborted', 'AbortError'));
         };
-        xhr.send(blob);
+        touch();
+        try {
+          xhr.send(blob);
+        } catch (err) {
+          cleanup();
+          reject(err);
+        }
       });
     }
 
