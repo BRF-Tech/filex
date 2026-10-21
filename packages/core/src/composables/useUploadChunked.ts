@@ -537,7 +537,7 @@ export function useUploadChunked(
           idleTimer = setTimeout(() => {
             cleanup();
             xhr.abort();
-            reject(new Error(wordsIn(resolveLocale(config.locale))('err.upload_stalled')));
+            reject(new Error(wordsIn(lang())('err.upload_stalled')));
           }, IDLE_MS);
         };
         inFlight = xhr;
