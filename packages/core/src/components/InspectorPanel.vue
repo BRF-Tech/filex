@@ -583,15 +583,16 @@ async function loadPeople(): Promise<void> {
 
 /* One rule for naming a person (lib/personName). */
 function grantPerson(g: Grant) {
+  if (g.kind === 'group') return { name: g.group_name };
   return { name: g.user_name, display_name: g.user_display_name, email: g.user_email };
 }
 
 function personName(g: Grant): string {
-  return nameOfPerson(grantPerson(g)) || `#${g.user_id}`;
+  return nameOfPerson(grantPerson(g)) || `#${g.kind === 'group' ? g.group_id : g.user_id}`;
 }
 
 function personInitial(g: Grant): string {
-  return initialOfPerson(grantPerson(g), localeTag(props.locale)) || '?';
+  return initialOfPerson(grantPerson(g), localeTag(props.locale)) || (g.kind === 'group' ? '#' : '?');
 }
 
 /** The share-link row: the first live link, or the Create button. */
@@ -1139,11 +1140,12 @@ watch(
           {{ t('inspector.people.empty') }}
         </p>
         <ul v-else class="fe-inspector__people">
-          <li v-for="g in people" :key="`${g.id}-${g.user_id}`" class="fe-inspector__person">
+          <li v-for="g in people" :key="`${g.kind ?? 'user'}-${g.id}-${g.inherited ? 'inherited' : 'direct'}`" class="fe-inspector__person">
             <span class="fe-inspector__avatar" aria-hidden="true">{{ personInitial(g) }}</span>
             <span class="fe-inspector__person-main">
-              <span class="fe-inspector__person-name" :title="g.user_email">{{ personName(g) }}</span>
+              <span class="fe-inspector__person-name" :title="g.kind === 'group' ? t('access.ui.group_title', { name: personName(g) }) : g.user_email">{{ personName(g) }}</span>
               <span class="fe-inspector__person-sub">
+                <template v-if="g.kind === 'group'">{{ t('access.ui.group') }} · </template>
                 {{ permLabel(g.level) }}<template v-if="g.inherited"> · {{ t('inspector.people.inherited') }}</template>
               </span>
             </span>
