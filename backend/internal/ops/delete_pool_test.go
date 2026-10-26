@@ -47,6 +47,13 @@ type movingDriver struct {
 	afterMove func()
 }
 
+// moving reports whether a Move is under way.
+func (d *movingDriver) moving() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.inFlight > 0
+}
+
 func (d *movingDriver) Move(ctx context.Context, src, dst string) error {
 	d.mu.Lock()
 	d.inFlight++

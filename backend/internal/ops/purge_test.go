@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -71,15 +72,23 @@ func TestSubmit_APurgeNamesTrashEntriesByID(t *testing.T) {
 type slowDeletes struct {
 	*local.Driver
 	hold time.Duration
+	// began is set by the first Delete: the purge has started.
+	began atomic.Bool
 }
 
 func (d *slowDeletes) Delete(ctx context.Context, p string) error {
+	d.began.Store(true)
 	time.Sleep(d.hold)
 	return d.Driver.Delete(ctx, p)
 }
 
 // A running purge is not cancelled half-way either: a folder stopped between
 // two objects is half gone, and its row still in the trash.
+//
+// ⚠ "running" in the table is not yet "started": from 0.57.6 a row its lane
+// has claimed and not begun is cancelled whole, nothing of it run (#282), and
+// on GitHub's -race runner the poll below landed in that window (v0.57.6
+// gate, 2026-10-26). So the cancel waits for the purge's first delete.
 func TestOpsWorker_ARunningPurgeIsNotStoppedHalfWay(t *testing.T) {
 	f := newOpsFixture(t)
 	slow := &slowDeletes{Driver: f.drv, hold: 300 * time.Millisecond}
@@ -99,11 +108,11 @@ func TestOpsWorker_ARunningPurgeIsNotStoppedHalfWay(t *testing.T) {
 	for {
 		cur, err := f.svc.Get(ctx, op.ID)
 		require.NoError(t, err)
-		if cur.Status == ops.StatusRunning {
+		if cur.Status == ops.StatusRunning && slow.began.Load() {
 			assert.False(t, cur.Cancellable, "a running purge is advertised as cancellable")
 			break
 		}
-		require.True(t, time.Now().Before(deadline), "the purge never started (status %s)", cur.Status)
+		require.True(t, time.Now().Before(deadline), "the purge never started (status %s, first delete %v)", cur.Status, slow.began.Load())
 		time.Sleep(5 * time.Millisecond)
 	}
 	ok, err := f.svc.Cancel(ctx, op.ID)

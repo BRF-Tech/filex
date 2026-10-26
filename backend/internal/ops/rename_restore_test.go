@@ -209,8 +209,12 @@ func (f *opsFixture) seedIn(t *testing.T, dir, name, body string) {
 
 // A running rename cannot be cancelled: stopped between two objects, a folder
 // is left in two places. While it waits in the queue it still can be.
+//
+// ⚠ As for the purge (purge_test.go): a claimed row that has not begun is
+// cancelled whole (#282), so the cancel waits for the rename's first move.
 func TestOpsWorker_ARunningRenameIsNotStoppedHalfWay(t *testing.T) {
-	f := newPoolFixture(t, 1, &movingDriver{hold: 300 * time.Millisecond})
+	drv := &movingDriver{hold: 300 * time.Millisecond}
+	f := newPoolFixture(t, 1, drv)
 	f.seedDir(t, "Leon")
 	f.seedIn(t, "Leon", "a.txt", "a")
 	ctx := context.Background()
@@ -225,11 +229,11 @@ func TestOpsWorker_ARunningRenameIsNotStoppedHalfWay(t *testing.T) {
 	for {
 		cur, err := f.svc.Get(ctx, op.ID)
 		require.NoError(t, err)
-		if cur.Status == ops.StatusRunning {
+		if cur.Status == ops.StatusRunning && drv.moving() {
 			assert.False(t, cur.Cancellable, "a running rename is advertised as cancellable")
 			break
 		}
-		require.True(t, time.Now().Before(deadline), "the rename never started (status %s)", cur.Status)
+		require.True(t, time.Now().Before(deadline), "the rename never started (status %s, moving %v)", cur.Status, drv.moving())
 		time.Sleep(5 * time.Millisecond)
 	}
 	ok, err := f.svc.Cancel(ctx, op.ID)
