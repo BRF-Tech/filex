@@ -132,7 +132,7 @@ func (s *Service) runFinishingLane(ctx context.Context, stop <-chan struct{}) {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	for {
-		var held []int64
+		held := s.stillJudged(true)
 		for s.runOneFinishing(ctx, stop, &held) {
 		}
 		select {

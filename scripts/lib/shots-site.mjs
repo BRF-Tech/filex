@@ -775,10 +775,17 @@ export async function mapLimit(items, limit, fn) {
  * bytes? `[{ url, ok, why }]`. A 200 with other bytes is a failure too: a
  * name that carries a hash and serves something else is the one thing this
  * scheme must never do.
+ *
+ * ⚠ No answer at all (a timeout, a dropped connection: status 0) is asked
+ * again, `attempts` times in all; an HTTP error or other bytes is an answer
+ * and fails at once. The v0.57.6 audit went red twice on one picture of 122
+ * that hung for 30 s on the build host's home line (a different one each
+ * time; from the main host 60 of 60 answered within 0.42 s), 2026-10-26.
  */
-export async function verifyPublished(entries, { concurrency = 6, fetchImpl, timeoutMs } = {}) {
+export async function verifyPublished(entries, { concurrency = 6, fetchImpl, timeoutMs, attempts = 3 } = {}) {
   return mapLimit(entries, concurrency, async ({ url, sha256: want }) => {
-    const r = await fetchBytes(url, { fetchImpl, timeoutMs });
+    let r = await fetchBytes(url, { fetchImpl, timeoutMs });
+    for (let i = 1; i < attempts && !r.ok && r.status === 0; i++) r = await fetchBytes(url, { fetchImpl, timeoutMs });
     if (!r.ok) return { url, ok: false, why: r.why };
     const got = sha256(r.bytes);
     return got === want ? { url, ok: true, why: '' } : { url, ok: false, why: `serves other bytes (sha256 ${got.slice(0, HASH_CHARS)}…)` };

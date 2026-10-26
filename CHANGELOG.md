@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.57.6] - 2026-10-26
+
+### Fixed
+
+- **Cancelling a job at the instant the queue picks it up works the first
+  time.** For a moment between the queue taking a job and the job starting
+  (or going back to wait for a storage scan), the cancel button answered
+  "could not be cancelled", and only a second press got through. The cancel
+  is now noted in that moment, and the job ends without running. A rename or
+  restore can still be cancelled until it starts, and not after.
+- **A job waiting for a storage scan keeps showing why it waits.** While the
+  scan held the storage, the queue picked the waiting job up again every few
+  seconds only to put it back, and each time the operations centre showed it
+  as running ("Deleting") for a moment, without the "waiting for its turn"
+  reason. The queue now leaves that storage's jobs alone while the scan
+  holds it, and still starts the job the moment the scan lets go.
+- **A group's grant shows the group in the details panel** (fixed by
+  @chengjie in [PR #129](https://github.com/BRF-Tech/filex/pull/129)). When
+  a folder was shared with a group, directly or through a folder above it,
+  the details panel's people list read the grant as a person's and showed
+  `#undefined` with a `?` in place of the group. It now names the group (its
+  number, for a group without a name), says it is a group, and keeps the
+  permission level and the "inherited" note. Only the display changed: who
+  can open the folder is as before.
+- **An app with its own interface fills the window below its heading**
+  (fixed by @chengjie in
+  [PR #130](https://github.com/BRF-Tech/filex/pull/130)). An app's home page
+  with its own interface, opened from the Apps menu, sat in a card whose
+  minimum height did not count the heading above it, so in a short window
+  the whole page scrolled as well as the app. The app now gets the space
+  below the heading, without the card's border and inner padding, and
+  scrolls inside its own frame, on a phone too. Home pages drawn from a
+  Surface keep their card and scroll as a document, and the app's sandbox
+  and permissions are unchanged.
+
 ## [0.57.5] - 2026-10-21
 
 ### Fixed

@@ -77,27 +77,18 @@ func TestOpsWorker_AJobHeldBackByAScanSaysWhyInTheReadersWords(t *testing.T) {
 	assert.Equal(t, "Waiting for its turn: the storage is being scanned", en.WaitText)
 	assert.Equal(t, ops.SayWait("en", ops.WaitStorageScan), en.WaitText)
 
-	// The list is read until the row is back in the queue: the lane's tick
-	// claims it again every round, and a claimed row reads as running, with
-	// no reason, until it is put back (heldBack waits the same way).
-	deadline := time.Now().Add(5 * time.Second)
+	// The lane does not claim the row again while the scan holds the gate
+	// (#282), so the list reads it queued, with its reason, at any moment.
+	rows, err := f.svc.List(srvtext.WithReader(ctx, "tr"), "")
+	require.NoError(t, err)
 	var listed *ops.Op
-	for {
-		rows, err := f.svc.List(srvtext.WithReader(ctx, "tr"), "")
-		require.NoError(t, err)
-		listed = nil
-		for _, r := range rows {
-			if r.ID == op.ID {
-				listed = r
-			}
+	for _, r := range rows {
+		if r.ID == op.ID {
+			listed = r
 		}
-		require.NotNil(t, listed, "the job is not in the list")
-		if listed.Status == ops.StatusPending {
-			break
-		}
-		require.False(t, time.Now().After(deadline), "the job never read as queued in the list (status %s)", listed.Status)
-		time.Sleep(5 * time.Millisecond)
 	}
+	require.NotNil(t, listed, "the job is not in the list")
+	assert.Equal(t, ops.StatusPending, listed.Status)
 	assert.Equal(t, "Sırasını bekliyor: depo taranıyor", listed.WaitText, "the list (the tray's poll) does not say why the job waits")
 
 	// The directory ends: the job runs at once, not at the worker's next
@@ -129,21 +120,12 @@ func TestOpsWorker_ACancelledJobCallsItsAnnouncementOff(t *testing.T) {
 	heldBack(t, f.svc, op.ID, "en")
 	require.NotZero(t, waitingOn(f.st.ID), "the job put back was not announced to its storage's gate")
 
-	// The lane may be claiming the row again at this instant (Submit's poke
-	// still queued when Run started): a claimed row is "running" with no
-	// cancel handle until it is put back, and Cancel answers false for that
-	// instant. Ask again until the row is back in the queue.
+	// One ask is enough: a job its lane is claiming at this instant is
+	// cancelled as well (#282, cancel_claim_test.go).
+	ok, err := f.svc.Cancel(ctx, op.ID)
+	require.NoError(t, err)
+	require.True(t, ok, "the job held back for the scan could not be cancelled")
 	deadline := time.Now().Add(2 * time.Second)
-	for {
-		ok, err := f.svc.Cancel(ctx, op.ID)
-		require.NoError(t, err)
-		if ok {
-			break
-		}
-		require.False(t, time.Now().After(deadline), "the job held back for the scan could not be cancelled")
-		time.Sleep(5 * time.Millisecond)
-	}
-	deadline = time.Now().Add(2 * time.Second)
 	for waitingOn(f.st.ID) != 0 {
 		require.False(t, time.Now().After(deadline), "a cancelled job still keeps the storage's scan back")
 		time.Sleep(5 * time.Millisecond)

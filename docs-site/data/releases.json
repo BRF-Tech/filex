@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-10-20",
+  "generatedAt": "2026-10-21",
   "releases": [
+    {
+      "tag": "v0.57.5",
+      "date": "2026-10-21T13:45:14Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.57.5",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Fixed\n\n- **An upload from Safari no longer stops for good after its first chunk**\n  ([GitHub #125](https://github.com/BRF-Tech/filex/issues/125), fixed by\n  @chengjie in [PR #126](https://github.com/BRF-Tech/filex/pull/126)). In\n  Safari a chunk sent straight from a file on disk could reach the server and\n  get its whole answer back, yet the request never finished, so the upload\n  waited on that chunk forever and its retries never ran. Each chunk is now\n  read into memory before it is sent (one chunk at a time, so the extra\n  memory is the chunk size per running upload, not the file size), and a\n  chunk whose bytes stop moving for two minutes is cut off and handed to the\n  retry path, which first asks the server how much arrived and sends only the\n  rest. A slow upload that keeps moving is never cut off, and the stall\n  message is in the explorer's own language.\n- **A delete, move, rename or restore queued while its storage is being\n  scanned starts at once instead of waiting for the whole scan**\n  ([GitHub #127](https://github.com/BRF-Tech/filex/issues/127), reported by\n  @chengjie). On a local storage of tens of thousands of entries a folder\n  delete sat in the operations centre as \"Delete · Queued\" for the scan's\n  four or five minutes and ran two seconds after it ended. The scan holds the\n  storage's row gate for one directory at a time and takes it again a few\n  microseconds after letting go; the queue put the job back whenever the scan\n  held the gate and asked again only at its next round, so every try met the\n  scan. A job put back now tells the gate it is waiting: the scan finishes the\n  directory in hand and lets the job through before the next one, and the\n  queue is woken as soon as that directory is done. The gate gives the same\n  turn to every change that waits for it (a WebDAV or SFTP rename, a delete\n  in the explorer). A job that is not run within 10 seconds of saying it waits\n  (its queue busy with another storage's job) no longer holds the scan back.\n  While a job waits for the scan its row says so in the reader's language,\n  and the operations centre shows that instead of \"Queued\": the ops rows\n  carry `wait_reason` (`storage_scan`), `wait_text` and `waiting_since`\n  ([BACKEND.md](docs/BACKEND.md#get-apifilesops-)). New metrics\n  `filex_rowgate_waiting_changes` and `filex_rowgate_lapsed_wants_total`\n  ([METRICS.md](docs/METRICS.md#the-row-gate)).\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0575---2026-10-21)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.57.5",
+        "ghcr.io/brf-tech/filex:full-v0.57.5"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
     {
       "tag": "v0.57.4",
       "date": "2026-10-20T13:43:52Z",

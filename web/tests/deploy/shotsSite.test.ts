@@ -679,6 +679,37 @@ describe('reading a published picture back', () => {
     const [missing] = await verifyPublished([{ url: 'u', sha256: want }], { fetchImpl: answer(404, Buffer.alloc(0)) });
     expect(missing).toEqual({ url: 'u', ok: false, why: 'HTTP 404' });
   });
+
+  it('asks again when nothing answered, never when an answer was wrong', async () => {
+    const want = sha256(bytes);
+    let calls = 0;
+    const dropsTwice = async () => {
+      if (++calls <= 2) throw new TypeError('fetch failed');
+      return answer(200, bytes)();
+    };
+    expect(await verifyPublished([{ url: 'u', sha256: want }], { fetchImpl: dropsTwice })).toEqual([{ url: 'u', ok: true, why: '' }]);
+    expect(calls).toBe(3);
+
+    calls = 0;
+    const neverAnswers = async () => {
+      calls++;
+      throw new TypeError('fetch failed');
+    };
+    const [gone] = await verifyPublished([{ url: 'u', sha256: want }], { fetchImpl: neverAnswers });
+    expect(gone).toEqual({ url: 'u', ok: false, why: 'fetch failed' });
+    expect(calls).toBe(3);
+
+    for (const wrong of [answer(404, Buffer.alloc(0)), answer(200, Buffer.from('other'))]) {
+      calls = 0;
+      const counted = async () => {
+        calls++;
+        return wrong();
+      };
+      const [r] = await verifyPublished([{ url: 'u', sha256: want }], { fetchImpl: counted });
+      expect(r.ok).toBe(false);
+      expect(calls, 'an answer, even a wrong one, is not asked again').toBe(1);
+    }
+  });
 });
 
 // ─── this repository ────────────────────────────────────────────────────────

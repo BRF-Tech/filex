@@ -5,10 +5,14 @@
 // through scripts/lib/settings.mjs; the keys are in
 // scripts/train/train.env.example):
 //
-//   notify  a JSON POST {group, source, severity, title, message} with a
-//           Bearer key read from a file: FILEX_NOTIFY_URL, FILEX_NOTIFY_KEY_FILE,
-//           FILEX_NOTIFY_GROUP, FILEX_NOTIFY_SOURCE. The build host's test
-//           chain posts the same shape (scripts/chain/run.mjs, CHAIN_NOTIFY_*).
+//   notify  a JSON POST {group, source, severity, title, message, action_url?}
+//           with a Bearer key read from a file: FILEX_NOTIFY_URL,
+//           FILEX_NOTIFY_KEY_FILE, FILEX_NOTIFY_GROUP, FILEX_NOTIFY_SOURCE,
+//           FILEX_NOTIFY_ACTION_URL. action_url is where a click on the
+//           notification goes: the step's own page when it has one (the
+//           ship's GitHub release, the matrix's CI run), else the setting,
+//           else nothing (the service picks). The build host's test chain
+//           posts the same shape (scripts/chain/run.mjs, CHAIN_NOTIFY_*).
 //   wake    an MCP server's `notify` tool, called over HTTP (JSON-RPC
 //           `tools/call`), once for every agent FILEX_WAKE_AGENT names: an
 //           agent whose session waits on its inbox wakes up on it, and a
@@ -35,6 +39,16 @@ import { listSetting } from './settings.mjs';
 
 const MESSAGE_MAX = 7900;
 const WAKE_MAX = 4000;
+const ACTION_URL_MAX = 1024;
+
+/**
+ * The click target a notification carries (action_url): an absolute http(s)
+ * URL, or '' - a relative or empty one would send the reader nowhere.
+ */
+export function actionUrlOf(url) {
+  const s = String(url ?? '').trim();
+  return /^https?:\/\/\S+$/i.test(s) && s.length <= ACTION_URL_MAX ? s : '';
+}
 
 /** The severity a sink is sent for a result: green, red, or waiting for a person. */
 export function severityOf(result) {
@@ -55,6 +69,7 @@ export function notifySettings(env = process.env) {
         keyFile: env.FILEX_NOTIFY_KEY_FILE || '',
         group: env.FILEX_NOTIFY_GROUP || 'infra',
         source: env.FILEX_NOTIFY_SOURCE || 'filex-train',
+        actionUrl: env.FILEX_NOTIFY_ACTION_URL || '',
       }
     : null;
   const wake = env.FILEX_WAKE_URL
@@ -82,15 +97,17 @@ function readSecretFile(file) {
 
 /**
  * POSTs one notification. Returns { sent, status?, why? }.
+ * `actionUrl` is this notification's click target; without one, cfg.actionUrl.
  * `keyVar` only names, in a log line, the setting that should hold the key.
  */
-export async function postNotify(cfg, { title, message, severity = 'info' }, { fetch = globalThis.fetch, log = () => {}, keyVar = 'FILEX_NOTIFY_KEY_FILE' } = {}) {
+export async function postNotify(cfg, { title, message, severity = 'info', actionUrl = '' }, { fetch = globalThis.fetch, log = () => {}, keyVar = 'FILEX_NOTIFY_KEY_FILE' } = {}) {
   if (!cfg?.url) return { sent: false, why: 'off' };
   const key = readSecretFile(cfg.keyFile);
   if (!key) {
     log(`notify skipped: no key in ${keyVar} (${cfg.keyFile || 'unset'})`);
     return { sent: false, why: 'no key' };
   }
+  const action = actionUrlOf(actionUrl) || actionUrlOf(cfg.actionUrl);
   try {
     const res = await fetch(cfg.url, {
       method: 'POST',
@@ -101,6 +118,7 @@ export async function postNotify(cfg, { title, message, severity = 'info' }, { f
         severity,
         title: String(title).slice(0, 250),
         message: String(message ?? '').slice(0, MESSAGE_MAX),
+        ...(action ? { action_url: action } : {}),
       }),
       signal: AbortSignal.timeout(20_000),
     });
@@ -205,13 +223,14 @@ export async function wake(cfg, body, { fetch = globalThis.fetch, log = () => {}
 /**
  * Both sinks at once: `result` is 'ok', 'red', 'waiting' or 'info'. The wake
  * body is the title and the message, so an agent reads it without a second
- * call.
+ * call. `actionUrl` (optional) is where a click on the person's notification
+ * goes; without one, FILEX_NOTIFY_ACTION_URL.
  */
-export async function announce(env, { title, message = '', result = 'info' }, { fetch = globalThis.fetch, log = () => {} } = {}) {
+export async function announce(env, { title, message = '', result = 'info', actionUrl = '' }, { fetch = globalThis.fetch, log = () => {} } = {}) {
   const cfg = notifySettings(env);
   const severity = severityOf(result);
   const [n, w] = await Promise.all([
-    postNotify(cfg.notify, { title, message, severity }, { fetch, log }),
+    postNotify(cfg.notify, { title, message, severity, actionUrl }, { fetch, log }),
     wake(cfg.wake, `${title}\n\n${message}`.trim(), { fetch, log, env }),
   ]);
   return { notify: n, wake: w };

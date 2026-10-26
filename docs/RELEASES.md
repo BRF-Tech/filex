@@ -19,14 +19,67 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.57.4, 20 October 2026
-The built-in viewer shows a PDF in Chrome again. Since 0.48.0 filex's pages name the frames they may show of filex by path, and Chrome checks a PDF in the viewer against that list, so it showed the "could not show" fallback instead of the document (#124). A PDF's preview now has a path of its own, the one API path filex's pages may frame: it answers only a PDF, always as a preview, with the same checks as before. The fallback's Open in new tab opens the PDF instead of downloading it, and Download still downloads.
+::: tip Latest - v0.57.5, 21 October 2026
+Two fixes reported by @chengjie. An upload from Safari no longer stops for good after its first chunk: Safari could get the server's whole answer to a chunk sent straight from a file on disk and still never finish the request (#125). Each chunk is now read into memory before it is sent, and a chunk whose bytes stop moving for two minutes is retried from what the server already has (PR #126, by @chengjie). And a delete, move, rename or restore queued while its storage is being scanned starts at once instead of waiting minutes for the whole scan (#127): the scan finishes the folder in hand and lets the job through, and while a job waits its row says why instead of only "Queued".
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.57.4
-docker pull ghcr.io/brf-tech/filex:full-v0.57.4
+docker pull ghcr.io/brf-tech/filex:slim-v0.57.5
+docker pull ghcr.io/brf-tech/filex:full-v0.57.5
 ```
+
+## v0.57.5
+
+<span class="filex-release-date">21 October 2026</span>
+
+Two fixes reported by @chengjie. An upload from Safari no longer stops for good after its first chunk: Safari could get the server's whole answer to a chunk sent straight from a file on disk and still never finish the request (#125). Each chunk is now read into memory before it is sent, and a chunk whose bytes stop moving for two minutes is retried from what the server already has (PR #126, by @chengjie). And a delete, move, rename or restore queued while its storage is being scanned starts at once instead of waiting minutes for the whole scan (#127): the scan finishes the folder in hand and lets the job through, and while a job waits its row says why instead of only "Queued".
+
+## What changed
+
+### Fixed
+
+- **An upload from Safari no longer stops for good after its first chunk**
+  ([GitHub #125](https://github.com/BRF-Tech/filex/issues/125), fixed by
+  @chengjie in [PR #126](https://github.com/BRF-Tech/filex/pull/126)). In
+  Safari a chunk sent straight from a file on disk could reach the server and
+  get its whole answer back, yet the request never finished, so the upload
+  waited on that chunk forever and its retries never ran. Each chunk is now
+  read into memory before it is sent (one chunk at a time, so the extra
+  memory is the chunk size per running upload, not the file size), and a
+  chunk whose bytes stop moving for two minutes is cut off and handed to the
+  retry path, which first asks the server how much arrived and sends only the
+  rest. A slow upload that keeps moving is never cut off, and the stall
+  message is in the explorer's own language.
+- **A delete, move, rename or restore queued while its storage is being
+  scanned starts at once instead of waiting for the whole scan**
+  ([GitHub #127](https://github.com/BRF-Tech/filex/issues/127), reported by
+  @chengjie). On a local storage of tens of thousands of entries a folder
+  delete sat in the operations centre as "Delete · Queued" for the scan's
+  four or five minutes and ran two seconds after it ended. The scan holds the
+  storage's row gate for one directory at a time and takes it again a few
+  microseconds after letting go; the queue put the job back whenever the scan
+  held the gate and asked again only at its next round, so every try met the
+  scan. A job put back now tells the gate it is waiting: the scan finishes the
+  directory in hand and lets the job through before the next one, and the
+  queue is woken as soon as that directory is done. The gate gives the same
+  turn to every change that waits for it (a WebDAV or SFTP rename, a delete
+  in the explorer). A job that is not run within 10 seconds of saying it waits
+  (its queue busy with another storage's job) no longer holds the scan back.
+  While a job waits for the scan its row says so in the reader's language,
+  and the operations centre shows that instead of "Queued": the ops rows
+  carry `wait_reason` (`storage_scan`), `wait_text` and `waiting_since`
+  ([BACKEND.md](./BACKEND.md#get-apifilesops-)). New metrics
+  `filex_rowgate_waiting_changes` and `filex_rowgate_lapsed_wants_total`
+  ([METRICS.md](./METRICS.md#the-row-gate)).
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0575---2026-10-21)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.57.5) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.57.5`
 
 ## v0.57.4
 
@@ -3138,118 +3191,13 @@ entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.46.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.46.1`
 
-## v0.46.0
-
-<span class="filex-release-date">26 September 2026</span>
-
-## What changed
-
-### Added
-
-- **Put the storages in the navigation panel in your own order (#57).** Drag a
-  storage row, or use its menu (right click, a long press, or Shift+F10):
-  Move up, Move down, Sort by name, Use default order. The order is kept on
-  your account, so it follows you to every browser, and Home's storage cards
-  follow it too.
-- **Administrators set the order everybody starts from (#57).** The admin
-  Storages page is a table now: drag a row by its handle, use Move up / Move
-  down in its Actions menu or the arrow keys on the handle, and Reset to
-  default order. People who have not arranged their own see this order;
-  `PUT /api/admin/storages/order` sets it (migration 00060 adds
-  `storages.sort_order`).
-
-### Changed
-
-- **New document: name the file anything - `LICENSE`, `Makefile`,
-  `test.conf`, `example.custom` (#56).** The dialog drew the type's extension
-  as a read-only suffix, so a Plain text document was always `<name>.txt`. The
-  name field now holds the whole file name: the type prefills it
-  (`Untitled.txt`), focusing it selects the stem like a rename, and a type
-  switch keeps what you typed (only swapping the previous type's default
-  extension). The type still decides the contents and the editor - `LICENSE`
-  made as Plain text opens in the text editor, `README` made as Markdown in
-  the markdown editor. Office documents and diagrams keep their extension,
-  because their editors find them by it: the dialog says "will be created as
-  `report.docx`" instead of locking the field, and an empty `x.docx` made as
-  Plain text is refused. Behind it: `POST /api/files/manager?action=newfile`
-  takes `exact_name: true` (without it the extension is appended exactly as
-  before, so older clients are unchanged), `newdoc_types` rows carry
-  `ext_required`, and a refused borrowed extension answers `400 EXT_NEEDS_TYPE`. Name checks - a leaf, no `..`, reserved names - are as
-  strict as they were.
-- **A text file whose name has no known extension opens as text and can be
-  saved (#56).** `LICENSE`, `NOTICE` or `notes.custom` fell through to the
-  viewer's Download fallback, and save-text - which allows by extension -
-  refused them with `415`. The viewer now opens such a file as plain text when
-  the server's mime for it says text, and save-text saves an existing file the
-  catalogue calls text (a file it calls anything else, or a path with no
-  catalogue row, is refused as before). The listing draws such a file with the
-  text icon and names it "Plain text" instead of "?" and "-".
-
-### Fixed
-
-- **A new document opens once in the desktop app.** It came up twice: in its
-  own window and in the viewer over the explorer, because creating a document
-  opened the in-page viewer before telling the app. It now takes the same path
-  as every other open (the app's window only). Found while building #56.
-- **An app screen speaks the language ON SCREEN, not the account's.** An
-  embedded explorer (`<filex-explorer>` with `config.locale: 'tr'`) draws the
-  language its host page chose, and nobody asked the account - whose language
-  defaults to English. The server told every app the ACCOUNT's language
-  (Accept-Language ranks below it on purpose), so an app's plain strings came
-  out English in a Turkish popup: the signing app's wizard asked "Identity"
-  with "One signer per line…" under it. The explorer now names its language on
-  every app call (`?lang=` on `…/run`, the view `GET`, every `…/event`), and
-  the server puts that explicit choice first - then the account's, then
-  Accept-Language, as before. The standalone app is unchanged: its language
-  and the account's are the same one.
-- **The operations tray says an app's job in the reader's language.** The job
-  row froze the action's label and the app's result in ONE language when the
-  job was created, so a Turkish embed read "Convert…" and an English result.
-  The row now keeps every language the app wrote and the tray's poll
-  (`/api/files/ops?lang=`) reads them in its reader's - the label, the result,
-  and the reason an app gave for failing. Rows written before read as they
-  were; no migration.
-- **Every core dialog's close button is named in the explorer's language.**
-  The × of every dialog (modals/Modal.vue) took its accessible name from the
-  dialog's own `locale` prop and fell back to English, and not one of the
-  twenty core dialogs passed it: a screen reader said "Close" over a Turkish
-  app popup. A dialog now inherits the language of the explorer it sits in
-  (an explicit `locale` still wins).
-- **An archive being made no longer looks like a click that did nothing.** An
-  archive job read "0%" beside an empty ring for most of its run: reading the
-  members off their storage - most of the time on a remote store - was worth
-  0-10% of the bar, counted per member, and the built-in ZIP and the write of
-  the result reported nothing. Measured in production, 175 files off S3: two
-  minutes between 0% and 9%, and the person who started it saw no sign of it.
-  Each phase now moves in bytes while it runs - reading 0-45%, compressing
-  45-90%, writing 90-99% - and creating or extracting an archive opens the
-  operations panel on the job, so its name, progress bar and Cancel are on
-  screen when the dialog closes rather than a small badge in the corner.
-
-- **Typing in the code editor no longer triggers the explorer's shortcuts.**
-  In Chrome and Edge the editor types through the browser's EditContext, so
-  its focused element is not a text field, and the explorer took the
-  keystrokes: `I` opened the info panel, `S` starred the file, Space opened
-  quick look and Backspace went up a folder - "MIT License" typed into a new
-  file arrived as "MLcene". The shortcut guard and quick look's arrow keys now
-  treat the editor (and any `role="textbox"`) as typing. Found while building
-  #56.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0460---2026-09-26)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.46.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.46.0`
-
 ## Earlier releases
 
-The 125 releases before v0.46.0, in brief. Full notes are on GitHub.
+The 126 releases before v0.46.1, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.46.0](https://github.com/BRF-Tech/filex/releases/tag/v0.46.0) | 26 September 2026 | storage row, or use its menu (right click, a long press, or Shift+F10): |
 | [v0.45.1](https://github.com/BRF-Tech/filex/releases/tag/v0.45.1) | 25 September 2026 | 0.45.0 as it was meant to ship. **v0.45.0 was tagged but never published**: |
 | [v0.44.2](https://github.com/BRF-Tech/filex/releases/tag/v0.44.2) | 25 September 2026 | The release 0.44.0 was meant to be, and the one to install the desktop app from, including through Homebrew, winget and Snap. |
 | [v0.44.1](https://github.com/BRF-Tech/filex/releases/tag/v0.44.1) | 25 September 2026 | Tagged, but it stopped at the same winget step as 0.44.0; its container images, npm packages and CLI binaries were published. |
@@ -3378,4 +3326,4 @@ The 125 releases before v0.46.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-10-20 from 145 published releases.</small>
+<small>Last refreshed 2026-10-21 from 146 published releases.</small>

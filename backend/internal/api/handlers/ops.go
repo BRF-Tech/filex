@@ -994,11 +994,12 @@ func (o *Ops) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		// Read again: the row may have been claimed between the read above
-		// and the cancel. A rename, a restore or a purge that has started
-		// runs to its end (ops.Op.Cancellable is false) — it is not finished,
-		// and saying so sent the person looking for a result that was still
-		// on its way.
+		// Read again: the row may have started between the read above and
+		// the cancel (a row its lane has only claimed is cancelled all the
+		// same: ops.Service.Cancel). A rename, a restore or a purge that has
+		// started runs to its end (ops.Op.Cancellable is false) — it is not
+		// finished, and saying so sent the person looking for a result that
+		// was still on its way.
 		if cur, gerr := o.Service.Get(r.Context(), id); gerr == nil &&
 			(cur.Status == ops.StatusPending || cur.Status == ops.StatusRunning) {
 			writeError(w, r, http.StatusConflict, "not_cancellable", nil, "code", "NOT_CANCELLABLE")

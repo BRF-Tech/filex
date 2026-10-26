@@ -487,6 +487,11 @@ let go. Now:
   and its lane is woken the moment the judgement in hand lets go
   (`rowgate.Await`), not at its next 5-second round; the announcement ends
   when the job holds the gate (or its fence), is cancelled, or runs out.
+  While a job waits like that, its lane does not pick it up again every round
+  only to put it back (`stillJudged`): it leaves that storage's
+  jobs where they are until the judgement lets go. A job cancelled in the
+  instant between its lane taking it and starting it (or putting it back) is
+  ended without running; Cancel answers yes for it, not "not cancellable".
   Meanwhile the row says why it waits (`wait_reason: storage_scan`, and
   `wait_text` in the reader's language), and the trays show that instead of
   "Queued" ([BACKEND.md](BACKEND.md#get-apifilesops-)). A move to another

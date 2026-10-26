@@ -2777,6 +2777,7 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    | `deploy/helm/*/Chart.yaml` | shown by `helm search` |
    | `package.json` descriptions | shown on npm |
    | `deploy/compose/*.yml` | new env vars and **published ports** with the traps beside them |
+   | **Guides outside this repository** - [authentik's integration guide](https://github.com/goauthentik/authentik/blob/main/website/integrations/chat-communication-collaboration/filex/index.mdx) | they quote filex's screen labels, menu paths, routes and variables word for word, so a rename makes them lie to everybody who follows them and nothing in this tree notices. `web/tests/deploy/externalGuides.test.ts` pins every name each guide quotes: when it goes red, open a pull request against the guide in the same release, then update its entry. A new outside guide gets an entry there |
 
    > ⚠ The dangerous case is not a missing page, it is a **page that lies**.
    > On 2026-08-17 `STORAGE.md` still said *"There is no `nfs` or `smb` driver,

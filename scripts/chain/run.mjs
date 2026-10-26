@@ -259,6 +259,10 @@ function settings(env, args) {
       keyFile: env.CHAIN_NOTIFY_KEY_FILE || '',
       group: env.CHAIN_NOTIFY_GROUP || 'infra',
       source: env.CHAIN_NOTIFY_SOURCE || 'filex-chain',
+      // Where a click on the end-of-run post goes: the setting, else the
+      // pipeline that ran the chain (GitLab CI sets CI_PIPELINE_URL), else
+      // nothing (the notify service picks).
+      actionUrl: env.CHAIN_NOTIFY_ACTION_URL || env.CI_PIPELINE_URL || '',
     },
     // CHAIN_PAUSE_CMD / CHAIN_RESUME_CMD: run.sh runs them, this process only
     // says what the pause did (hookSettings, pauseOf).
@@ -1364,7 +1368,7 @@ class Chain {
   }
 
   async notify(r) {
-    const { url, keyFile, group, source } = this.cfg.notify;
+    const { url, keyFile, group, source, actionUrl } = this.cfg.notify;
     if (!url) return;
     const bad = r.jobs.filter((j) => j.status !== 'passed');
     const warned = r.jobs.filter((j) => j.warnings?.length);
@@ -1377,7 +1381,7 @@ class Chain {
     ].filter(Boolean);
     // The one poster every maintainer tool shares (scripts/lib/notify.mjs).
     await postNotify(
-      { url, keyFile, group, source },
+      { url, keyFile, group, source, actionUrl },
       {
         severity: r.ok ? (warned.length ? 'warning' : 'success') : 'danger',
         title: `filex chain ${r.profile}: ${r.ok ? (warned.length ? 'green, with warnings' : 'green') : r.stopped ? 'stopped' : 'RED'} in ${r.wall} (${r.sha.slice(0, 8)})`,

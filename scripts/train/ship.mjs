@@ -731,6 +731,8 @@ async function main(argv) {
       title: `filex ship ${tag}: ${ok ? 'deployed and read back' : 'RED'} in ${since(t0)}`,
       message: [...reds, ...(ok ? ['What is left is a person\'s:', ...lines] : [`logs: ${slash(path.join(runDir, 'logs'))}`])].join('\n'),
       result: ok ? 'ok' : 'red',
+      // A click opens the release being shipped.
+      actionUrl: `https://github.com/${cfg.githubRepo}/releases/tag/${tag}`,
     },
     { log },
   );

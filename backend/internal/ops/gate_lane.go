@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -95,25 +96,58 @@ func waitsForAJudgement(op *Op) bool {
 
 // putBack returns a claimed job to the queue as it was before the claim: it
 // is waiting again, and a job claimed for the first time does not read as
-// begun (claimWhere's resumed).
-func (s *Service) putBack(ctx context.Context, op *Op) {
+// begun (claimWhere's resumed). It reports whether it did: a job a Cancel
+// came for while it was claimed is ended instead (endClaimed).
+func (s *Service) putBack(ctx context.Context, op *Op) bool {
+	s.claimMu.Lock()
+	defer s.claimMu.Unlock()
+	cancelled := s.claimed[op.ID]
+	delete(s.claimed, op.ID)
+	if cancelled {
+		s.endClaimed(ctx, op)
+		return false
+	}
 	q := `UPDATE pending_ops SET status=?, started_at=NULL WHERE id=? AND status=?`
 	if op.resumed {
 		q = `UPDATE pending_ops SET status=? WHERE id=? AND status=?`
 	}
 	if _, err := s.db.ExecContext(context.WithoutCancel(ctx), s.q(q), StatusPending, op.ID, StatusRunning); err != nil {
 		slog.Warn("ops: put a job back for its storage's row gate", slog.Int64("op", op.ID), slog.String("err", err.Error()))
-		return
+		return false
 	}
 	op.Status = StatusPending
+	return true
 }
 
 // holdBack puts op back for the judgement holding its storage's gate (putBack)
 // and announces it (announce), so wake - its lane's poke - runs it as soon as
 // that judgement lets go.
 func (s *Service) holdBack(ctx context.Context, op *Op, wake func()) {
-	s.putBack(ctx, op)
-	s.announce(op, wake)
+	if s.putBack(ctx, op) {
+		s.announce(op, wake)
+	}
+}
+
+// stillJudged is the storages whose put-back jobs of one lane (the finishing
+// lane's when finishing, the main worker's otherwise) still wait for a
+// judgement holding their gate: the lane leaves those storages' jobs where
+// they are for the round, as it does a storage it puts a job back for.
+//
+// ⚠ Up to 0.57.5 the lane claimed such a job again at every round - its 5 s
+// tick, any job submitted - only to put it back: for that moment the tray
+// showed the row as running ("Deleting") without the reason it waits (#282).
+// Its turn's watcher wakes the lane the moment the judgement lets go
+// (announce), so nothing is lost by leaving it.
+func (s *Service) stillJudged(finishing bool) []int64 {
+	var held []int64
+	s.turns.Range(func(_, v any) bool {
+		t := v.(*turn)
+		if t.finishing == finishing && !slices.Contains(held, t.storageID) && rowgate.Judged(t.storageID) {
+			held = append(held, t.storageID)
+		}
+		return true
+	})
+	return held
 }
 
 // WaitStorageScan is a queued row's WaitReason while a judgement of its
@@ -134,9 +168,12 @@ var turnFor = func() *atomic.Int64 {
 }()
 
 // turn is one put-back job's turn at its storage's gate: end calls off its
-// announcement (rowgate.Want) and the watcher that wakes its lane.
+// announcement (rowgate.Want) and the watcher that wakes its lane. storageID
+// and finishing (the job is the finishing lane's) are what stillJudged reads.
 type turn struct {
-	end func()
+	end       func()
+	storageID int64
+	finishing bool
 }
 
 // announce tells op's storage gate that op, just put back, wants it
@@ -163,7 +200,7 @@ func (s *Service) announce(op *Op, wake func()) {
 	cancelWant := rowgate.Want(op.StorageID, lasts)
 	runsOut := time.Now().Add(lasts)
 	ctx, stopWatch := context.WithCancel(s.lifeCtx())
-	t := &turn{}
+	t := &turn{storageID: op.StorageID, finishing: finishesOnceStarted(op.Kind)}
 	var once sync.Once
 	t.end = func() {
 		once.Do(func() {
@@ -195,6 +232,11 @@ func (s *Service) announce(op *Op, wake func()) {
 		}
 		if s.turns.CompareAndDelete(id, t) {
 			t.end()
+			// The job has not run (its run ends the turn first): the lane
+			// left its storage alone while the turn stood (stillJudged),
+			// so it looks again now - and a judgement taken since puts the
+			// job back with a turn of its own.
+			wake()
 		}
 	}()
 }

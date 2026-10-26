@@ -218,6 +218,12 @@ type Service struct {
 
 	// cancels holds the cancel handle of every running op (Cancel).
 	cancels sync.Map
+	// claimed holds every row a lane has claimed and not yet started or put
+	// back, and whether a Cancel came for it meanwhile (Cancel, begin,
+	// putBack). Under claimMu, which Cancel holds while it looks at both
+	// this and cancels.
+	claimMu sync.Mutex
+	claimed map[int64]bool
 	jobsMu  sync.Mutex
 	jobs    map[int64]queuedJob
 
@@ -391,37 +397,95 @@ func (s *Service) SetDecorator(fn func(ctx context.Context, rows []*Op)) { s.dec
 // running row has its context cancelled, which tears down the plugin
 // instance (or stops the transfer loop), and is marked cancelled when the
 // worker returns. Unknown or finished rows are a no-op with ok=false.
+//
+// ⚠ A row a lane has just claimed is `running` with no cancel handle yet,
+// until the lane starts it or puts it back for its storage's gate. Up to
+// 0.57.5 Cancel answered false for that instant, and the tray's cancel button
+// said "could not be cancelled" (#282). Now the cancel is noted (claimed), and
+// the lane ends the row instead of starting it (begin) or putting it back
+// (putBack). claimMu keeps the lane from slipping between the looks below.
 func (s *Service) Cancel(ctx context.Context, id int64) (bool, error) {
+	if ok, err := s.cancelQueued(ctx, id); ok || err != nil {
+		return ok, err
+	}
+	s.claimMu.Lock()
+	defer s.claimMu.Unlock()
+	if v, ok := s.cancels.Load(id); ok {
+		v.(*cancelHandle).cancel()
+		return true, nil
+	}
+	if _, ok := s.claimed[id]; ok {
+		s.claimed[id] = true
+		return true, nil
+	}
+	// The lane may have put the row back since the first look.
+	return s.cancelQueued(ctx, id)
+}
+
+// cancelQueued marks a pending row cancelled, and reports whether it was
+// pending.
+func (s *Service) cancelQueued(ctx context.Context, id int64) (bool, error) {
 	res, err := s.db.ExecContext(ctx, s.q(
 		`UPDATE pending_ops SET status=?, finished_at=CURRENT_TIMESTAMP WHERE id=? AND status=?`),
 		StatusCancelled, id, StatusPending)
 	if err != nil {
 		return false, err
 	}
-	if n, _ := res.RowsAffected(); n > 0 {
-		// A queued trash empty already has its goroutine, waiting for its
-		// turn: tell it to stop waiting.
-		if v, ok := s.cancels.Load(id); ok {
-			v.(*cancelHandle).cancel()
-		}
-		s.jobsMu.Lock()
-		queued := s.jobs[id]
-		delete(s.jobs, id)
-		s.jobsMu.Unlock()
-		if queued.cleanup != nil {
-			queued.cleanup()
-		}
-		s.forgetSettled(id)
-		// A job waiting for its turn at its storage's gate will not run: its
-		// announcement goes now, not when it runs out (gate_lane.go).
-		s.forgetHeld(id)
-		return true, nil
+	if n, _ := res.RowsAffected(); n == 0 {
+		return false, nil
 	}
+	// A queued trash empty already has its goroutine, waiting for its
+	// turn: tell it to stop waiting.
 	if v, ok := s.cancels.Load(id); ok {
 		v.(*cancelHandle).cancel()
-		return true, nil
 	}
-	return false, nil
+	s.dropCancelled(id)
+	return true, nil
+}
+
+// endClaimed ends a row its lane claimed and a Cancel came for before it
+// started (Cancel): cancelled, nothing of it run.
+func (s *Service) endClaimed(ctx context.Context, op *Op) {
+	if _, err := s.db.ExecContext(context.WithoutCancel(ctx), s.q(
+		`UPDATE pending_ops SET status=?, finished_at=CURRENT_TIMESTAMP WHERE id=? AND status=?`),
+		StatusCancelled, op.ID, StatusRunning); err != nil {
+		slog.Warn("ops: end a job cancelled as it was claimed", slog.Int64("op", op.ID), slog.String("err", err.Error()))
+		return
+	}
+	op.Status = StatusCancelled
+	s.dropCancelled(op.ID)
+}
+
+// dropCancelled lets go of what a job cancelled before it started kept: its
+// queued job (and what that holds), what its submission settled, and its turn
+// at its storage's gate.
+func (s *Service) dropCancelled(id int64) {
+	s.jobsMu.Lock()
+	queued := s.jobs[id]
+	delete(s.jobs, id)
+	s.jobsMu.Unlock()
+	if queued.cleanup != nil {
+		queued.cleanup()
+	}
+	s.forgetSettled(id)
+	// A job waiting for its turn at its storage's gate will not run: its
+	// announcement goes now, not when it runs out (gate_lane.go).
+	s.forgetHeld(id)
+}
+
+// begin starts a claimed row: it reports whether a Cancel came for the row
+// while it was claimed (the caller ends it: endClaimed), and otherwise
+// registers ch, so Cancel ends the job from here on - a rename, a restore
+// and a purge excepted, which cannot be cancelled once running.
+func (s *Service) begin(op *Op, ch *cancelHandle) (cancelled bool) {
+	s.claimMu.Lock()
+	defer s.claimMu.Unlock()
+	cancelled = s.claimed[op.ID]
+	delete(s.claimed, op.ID)
+	if !cancelled && !finishesOnceStarted(op.Kind) {
+		s.cancels.Store(op.ID, ch)
+	}
+	return cancelled
 }
 
 type cancelHandle struct {
@@ -972,9 +1036,10 @@ func (s *Service) runArchiveLane(ctx context.Context, stop <-chan struct{}) {
 // the queue (gate_lane.go), and so does every later job of that storage this
 // round, so one storage's jobs keep their order; the other storages' run on.
 // The job put back is announced to the gate, and the worker is woken for it
-// as soon as the judgement lets go (announce): not at its next tick.
+// as soon as the judgement lets go (announce): not at its next tick. Until
+// then its storage's jobs are left where they are (stillJudged).
 func (s *Service) drain(ctx context.Context) {
-	var held []int64
+	held := s.stillJudged(false)
 	for {
 		op, ok, err := s.claimWhere(ctx, skipping(mainLaneCond, held))
 		if err != nil {
@@ -1036,13 +1101,30 @@ func (s *Service) claimWhere(ctx context.Context, cond string) (*Op, bool, error
 	if err := tx.Commit(); err != nil {
 		return nil, false, err
 	}
+	s.claimMu.Lock()
+	if s.claimed == nil {
+		s.claimed = map[int64]bool{}
+	}
+	s.claimed[id] = false
+	s.claimMu.Unlock()
 	op, err := s.Get(ctx, id)
 	if err != nil {
+		s.claimMu.Lock()
+		delete(s.claimed, id)
+		s.claimMu.Unlock()
 		return nil, false, err
 	}
 	op.resumed = begun == 1
+	if h := claimHook.Load(); h != nil {
+		(*h)(id)
+	}
 	return op, true, nil
 }
+
+// claimHook, when set (SetClaimHook, tests only), runs once a lane has
+// claimed a row and before it does anything with it: the instant Cancel used
+// to miss (#282).
+var claimHook atomic.Pointer[func(id int64)]
 
 // execute runs a single Op against the storage driver and persists progress.
 //
@@ -1062,7 +1144,10 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 		defer cancelOp()
 		ch := &cancelHandle{}
 		ch.cancel = func() { ch.cancelled.Store(true); cancelOp() }
-		s.cancels.Store(op.ID, ch)
+		if s.begin(op, ch) {
+			s.endClaimed(ctx, op)
+			return
+		}
 		defer s.cancels.Delete(op.ID)
 		s.executeJob(ctx, op)
 		return
@@ -1078,13 +1163,28 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 			s.heldSince.Delete(op.ID)
 		}
 	}()
+	// Every running op can be cancelled (Cancel): the handle ends this
+	// context, and a plugin instance or a transfer loop stops with it. A
+	// rename or a restore cannot, once running (rename_restore.go). One
+	// cancelled while its lane held it claimed ends here, before it starts.
+	parent := ctx
+	ctx, cancelOp := context.WithCancel(ctx)
+	defer cancelOp()
+	ch := &cancelHandle{}
+	ch.cancel = func() { ch.cancelled.Store(true); cancelOp() }
+	if s.begin(op, ch) {
+		s.endClaimed(parent, op)
+		return
+	}
+	defer s.cancels.Delete(op.ID)
+
 	if s.storageResolver == nil {
-		s.fail(ctx, op, "no storage resolver")
+		s.fail(parent, op, "no storage resolver")
 		return
 	}
 	drv, err := s.storageResolver(op.StorageID)
 	if err != nil {
-		s.fail(ctx, op, "storage: "+err.Error())
+		s.fail(parent, op, "storage: "+err.Error())
 		return
 	}
 	// Cross-storage ops need BOTH drivers up front: failing the whole op here
@@ -1094,22 +1194,9 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 	if op.DestStorageID != 0 && op.DestStorageID != op.StorageID {
 		dstDrv, err = s.storageResolver(op.DestStorageID)
 		if err != nil {
-			s.fail(ctx, op, "destination storage: "+err.Error())
+			s.fail(parent, op, "destination storage: "+err.Error())
 			return
 		}
-	}
-
-	// Every running op can be cancelled (Cancel): the handle ends this
-	// context, and a plugin instance or a transfer loop stops with it. A
-	// rename or a restore cannot, once running (rename_restore.go).
-	parent := ctx
-	ctx, cancelOp := context.WithCancel(ctx)
-	defer cancelOp()
-	ch := &cancelHandle{}
-	ch.cancel = func() { ch.cancelled.Store(true); cancelOp() }
-	if !finishesOnceStarted(op.Kind) {
-		s.cancels.Store(op.ID, ch)
-		defer s.cancels.Delete(op.ID)
 	}
 
 	if op.Kind == OpPluginAction {

@@ -2,11 +2,13 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.57.5"
+version: "0.57.6"
 releaseNotes: |-
-  filex v0.57.5 - 2026-10-21
-  • An upload from Safari no longer stops for good after its first chunk
-  • A delete, move, rename or restore queued while its storage is being scanned starts at once instead of waiting for the whole scan
+  filex v0.57.6 - 2026-10-26
+  • Cancelling a job at the instant the queue picks it up works the first time.
+  • A job waiting for a storage scan keeps showing why it waits.
+  • A group's grant shows the group in the details panel
+  • An app with its own interface fills the window below its heading
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

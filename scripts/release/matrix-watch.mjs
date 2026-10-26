@@ -139,6 +139,7 @@ async function main(argv) {
   const t0 = Date.now();
   let unanswered = 0;
   let shown = '';
+  let runUrl = '';
   let v;
   for (;;) {
     const ci = gh.runs({ workflow: 'ci.yml', sha, event: 'push' });
@@ -161,6 +162,7 @@ async function main(argv) {
     }
     unanswered = 0;
     v = watchVerdict(run.state, parts);
+    runUrl = run.run?.url ?? runUrl;
     const line = `${run.run?.url ?? 'ci.yml'}: ${v.action} - ${v.why}`;
     if (line !== shown) {
       say(line);
@@ -199,6 +201,7 @@ async function main(argv) {
         title: `filex ${tag}: GitHub's full matrix is RED behind the server patch - auto_ok stays off`,
         message: [`${shown}`, '', `Installs that update by themselves do not take ${tag}; asked, they still can.`, `When it is fixed: a new patch, or after a re-run that passed, node scripts/release/matrix-watch.mjs ${version}`].join('\n'),
         result: 'red',
+        actionUrl: runUrl,
       }, { log: (l) => say(`notify: ${l}`) });
     }
     return 1;
@@ -241,6 +244,7 @@ async function main(argv) {
     title: `filex ${tag}: GitHub's full matrix is green${ok ? ' - auto_ok is on' : ', but auto_ok did not turn on'}`,
     message: [shown, ok ? `Installs that update by themselves take ${tag} now.` : `Read ${MANIFEST_URL}; switch it with FILEX_MANIFEST_AUTO=${tag} and the manifest command.`].join('\n'),
     result: ok ? 'ok' : 'red',
+    actionUrl: ok ? runUrl : MANIFEST_URL,
   }, { log: (l) => say(`notify: ${l}`) });
   return ok ? 0 : 1;
 }

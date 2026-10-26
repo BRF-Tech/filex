@@ -18,7 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { announce, notifySettings, postNotify, severityOf, wake, wakeRequest, wakeVerdict } from '../../../scripts/lib/notify.mjs';
+import { actionUrlOf, announce, notifySettings, postNotify, severityOf, wake, wakeRequest, wakeVerdict } from '../../../scripts/lib/notify.mjs';
 import { listSetting, loadSettings, parseEnvFile } from '../../../scripts/lib/settings.mjs';
 import { parseEnvFile as envParseEnvFile } from '../../../scripts/chain/env.mjs';
 import { parseEnvFile as chainParseEnvFile } from '../../../scripts/chain/run.mjs';
@@ -112,6 +112,21 @@ describe('a person: the JSON POST', () => {
   it('maps a result to the severity the service knows', () => {
     expect([severityOf('ok'), severityOf('red'), severityOf('waiting'), severityOf('info')]).toEqual(['success', 'danger', 'warning', 'info']);
   });
+
+  // Without action_url a click on the notification opened the notify
+  // service's own default page, not the release or the run it was about.
+  it('carries the click target: its own, else the setting, else none', async () => {
+    const f = fakeFetch();
+    const cfg = { ...notifySettings({ FILEX_NOTIFY_URL: 'https://n.example/send', FILEX_NOTIFY_ACTION_URL: 'https://ci.example/pipelines' }).notify!, keyFile: keyFile('k') };
+    await postNotify(cfg, { title: 't', actionUrl: 'https://github.com/BRF-Tech/filex/releases/tag/v0.57.5' }, { fetch: f.fn });
+    await postNotify(cfg, { title: 't' }, { fetch: f.fn });
+    await postNotify({ ...cfg, actionUrl: '' }, { title: 't' }, { fetch: f.fn });
+    await postNotify(cfg, { title: 't', actionUrl: '/relative/goes/nowhere' }, { fetch: f.fn });
+    const sent = f.calls.map((c) => JSON.parse(c.init.body).action_url);
+    expect(sent).toEqual(['https://github.com/BRF-Tech/filex/releases/tag/v0.57.5', 'https://ci.example/pipelines', undefined, 'https://ci.example/pipelines']);
+    expect(actionUrlOf('https://x.example/a b')).toBe('');
+    expect(actionUrlOf(`https://x.example/${'a'.repeat(1100)}`)).toBe('');
+  });
 });
 
 describe('an agent: the MCP notify call', () => {
@@ -164,10 +179,11 @@ describe('an agent: the MCP notify call', () => {
       FILEX_WAKE_TOKEN_FILE: keyFile('t'),
       FILEX_WAKE_AGENT: 'release-session',
     };
-    const r = await announce(env, { title: 'merge queue: done', message: '3 merged', result: 'ok' }, { fetch: f.fn });
+    const r = await announce(env, { title: 'merge queue: done', message: '3 merged', result: 'ok', actionUrl: 'https://ci.example/mr' }, { fetch: f.fn });
     expect(r.notify.sent).toBe(true);
     expect(r.wake).toEqual([{ agent: 'release-session', sent: true }]);
     expect(JSON.parse(f.calls.find((c) => !c.url.includes('mcp'))!.init.body).severity).toBe('success');
+    expect(JSON.parse(f.calls.find((c) => !c.url.includes('mcp'))!.init.body).action_url).toBe('https://ci.example/mr');
     expect(JSON.parse(f.calls.find((c) => c.url.includes('mcp'))!.init.body).params.arguments.body).toBe('merge queue: done\n\n3 merged');
   });
 });
