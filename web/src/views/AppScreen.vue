@@ -67,7 +67,7 @@ const auth = useAuthStore();
 </script>
 
 <template>
-  <section class="mx-auto w-full max-w-5xl space-y-4 p-4 sm:p-6" data-testid="app-screen">
+  <section class="app-screen mx-auto w-full max-w-5xl space-y-4 p-4 sm:p-6" data-testid="app-screen">
     <header class="flex flex-wrap items-start justify-between gap-3">
       <div class="min-w-0">
         <button type="button" class="app-screen__back inline-flex items-center gap-1 text-sm" data-testid="app-screen-back" @click="back">
@@ -117,4 +117,23 @@ const auth = useAuthStore();
   display: block;
   color: var(--fe-text-muted);
 }
+/* Own-interface apps own their chrome and scroll inside the remaining page.
+   Surface-based apps retain their existing document layout. */
+.app-screen:has(.fe-apppage__body--ui) {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.app-screen:has(.fe-apppage__body--ui) > header { flex: none; }
+.app-screen:has(.fe-apppage__body--ui) > .card {
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.app-screen :deep(.fe-apppage:has(> .fe-apppage__body--ui)) { height: 100%; }
+.app-screen :deep(.fe-apppage__body--ui) { min-height: 0; padding: 0; }
+.app-screen :deep(.fe-apppage__body--ui > .fe-appframe) { flex: 1; min-height: 0; }
 </style>
