@@ -719,7 +719,7 @@ bitten. Fünf gibt es als öffentliche Repositorys:
 |---|---|
 | [E-Signatur](https://github.com/BRF-Tech/filex-sign) | Ein PDF unterschreiben oder andere darum bitten: Personen auf diesem filex unterschreiben darin, alle anderen über einen privaten Link, standardmäßig hinter einer PIN |
 | [Konvertieren](https://github.com/BRF-Tech/filex-convert) | **Konvertieren…** für jede Datei oder Auswahl: Bilder, Video, Audio, Dokumente, E-Books, Archive, Daten, Untertitel und Schriftarten |
-| [Office editor](https://github.com/BRF-Tech/filex-office-editor) | Word-, Excel- und PowerPoint-Dokumente im Editor von ONLYOFFICE, im Browser und ohne Document Server; seine für filex 0.56 gebauten Versionen 0.2.0 und 0.3.0 bringen verschlüsselte Ordner und mehrere Personen gleichzeitig dazu |
+| [Office editor](https://github.com/BRF-Tech/filex-office-editor) | Word-, Excel- und PowerPoint-Dokumente im Editor von ONLYOFFICE, im Browser und ohne Document Server; seine für filex 0.56 gebauten Versionen 0.2.0 und 0.3.0 bringen verschlüsselte Ordner und mehrere Personen gleichzeitig dazu |; Version 0.4.0, für filex 0.57 gebaut, öffnet jede Art, die ein Document Server öffnet (`.doc`, `.xls`, `.ppt`, `.csv`...), und bringt eine Office-Engine mit, die filex auf dem Server für Office-Vorschaubilder und -Konvertierungen ausführt ([docs/OFFICE-EDITOR.md](docs/OFFICE-EDITOR.md))
 | [filextext](https://github.com/BRF-Tech/filextext-app) | Ein Ende-zu-Ende-verschlüsselter Text-Arbeitsbereich in einer einzigen `.fxtxt`-Datei |
 | [draw.io](https://github.com/BRF-Tech/filex-drawio) | Der Diagrammeditor draw.io, für `.drawio`- und `.dio`-Dateien |
 

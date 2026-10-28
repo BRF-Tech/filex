@@ -179,6 +179,11 @@ winget:
       - sftp
       - s3
       - cli
+      # A winget moderator added these two to 0.57.5 (#460771); a later
+      # version with fewer tags is flagged "Manifest-Metadata-Consistency"
+      # and waits for a moderator (0.57.6, #462370).
+      - artificial-intelligence
+      - artificialintelligence
     # ⚠ No `additional_locales`: goreleaser (v2.18) copies `Moniker` into the
     # extra locale manifest, which the schema allows only in the default one —
     # `winget validate` answers "Unknown field. [Moniker]" (measured on a

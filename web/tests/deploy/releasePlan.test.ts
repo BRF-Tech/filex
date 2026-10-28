@@ -55,6 +55,9 @@ const MIGRATIONS = 'go: migrations on sqlite, postgres AND mysql';
 
 /** gate-name fragment → why it is in the plan */
 const REQUIRED: Record<string, Record<string, string>> = {
+  preflight: {
+    'winget: the token for ': '0.57.6: the tag run died at winget on an expired WINGET_TOKEN after the Release and the CLI were out (#290)',
+  },
   docs: {
     'every relative link resolves': 'CONTRIBUTING step 3',
     'the site builds': 'lesson #34: a broken code span kills the build',
@@ -141,7 +144,7 @@ describe("this repository's release plan", () => {
   });
 
   it('gate names are unique (each writes its own log, and keys its own cache entry)', () => {
-    for (const stage of ['audit', 'docs', 'pretag', 'heavy', 'exportGates', 'published', 'deployed']) {
+    for (const stage of ['preflight', 'audit', 'docs', 'pretag', 'heavy', 'exportGates', 'published', 'deployed']) {
       const n = names(p[stage]);
       expect(new Set(n).size, stage).toBe(n.length);
     }

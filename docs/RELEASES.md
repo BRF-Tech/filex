@@ -19,14 +19,64 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.57.5, 21 October 2026
-Two fixes reported by @chengjie. An upload from Safari no longer stops for good after its first chunk: Safari could get the server's whole answer to a chunk sent straight from a file on disk and still never finish the request (#125). Each chunk is now read into memory before it is sent, and a chunk whose bytes stop moving for two minutes is retried from what the server already has (PR #126, by @chengjie). And a delete, move, rename or restore queued while its storage is being scanned starts at once instead of waiting minutes for the whole scan (#127): the scan finishes the folder in hand and lets the job through, and while a job waits its row says why instead of only "Queued".
+::: tip Latest - v0.57.6, 26 October 2026
+Three fixes, two of them by @chengjie. A folder shared with a group shows the group in the details panel's people list, by its name, instead of "#undefined" with a question mark (PR #129, by @chengjie). An app with its own interface fills the window below its heading and scrolls inside its own frame, on a phone and in a short window too, instead of sitting in a card that made the whole page scroll (PR #130, by @chengjie). And cancelling a job at the very moment the queue picks it up works the first time, and a job waiting for a storage scan keeps showing why it waits instead of flickering to "Deleting".
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.57.5
-docker pull ghcr.io/brf-tech/filex:full-v0.57.5
+docker pull ghcr.io/brf-tech/filex:slim-v0.57.6
+docker pull ghcr.io/brf-tech/filex:full-v0.57.6
 ```
+
+## v0.57.6
+
+<span class="filex-release-date">26 October 2026</span>
+
+Three fixes, two of them by @chengjie. A folder shared with a group shows the group in the details panel's people list, by its name, instead of "#undefined" with a question mark (PR #129, by @chengjie). An app with its own interface fills the window below its heading and scrolls inside its own frame, on a phone and in a short window too, instead of sitting in a card that made the whole page scroll (PR #130, by @chengjie). And cancelling a job at the very moment the queue picks it up works the first time, and a job waiting for a storage scan keeps showing why it waits instead of flickering to "Deleting".
+
+## What changed
+
+### Fixed
+
+- **Cancelling a job at the instant the queue picks it up works the first
+  time.** For a moment between the queue taking a job and the job starting
+  (or going back to wait for a storage scan), the cancel button answered
+  "could not be cancelled", and only a second press got through. The cancel
+  is now noted in that moment, and the job ends without running. A rename or
+  restore can still be cancelled until it starts, and not after.
+- **A job waiting for a storage scan keeps showing why it waits.** While the
+  scan held the storage, the queue picked the waiting job up again every few
+  seconds only to put it back, and each time the operations centre showed it
+  as running ("Deleting") for a moment, without the "waiting for its turn"
+  reason. The queue now leaves that storage's jobs alone while the scan
+  holds it, and still starts the job the moment the scan lets go.
+- **A group's grant shows the group in the details panel** (fixed by
+  @chengjie in [PR #129](https://github.com/BRF-Tech/filex/pull/129)). When
+  a folder was shared with a group, directly or through a folder above it,
+  the details panel's people list read the grant as a person's and showed
+  `#undefined` with a `?` in place of the group. It now names the group (its
+  number, for a group without a name), says it is a group, and keeps the
+  permission level and the "inherited" note. Only the display changed: who
+  can open the folder is as before.
+- **An app with its own interface fills the window below its heading**
+  (fixed by @chengjie in
+  [PR #130](https://github.com/BRF-Tech/filex/pull/130)). An app's home page
+  with its own interface, opened from the Apps menu, sat in a card whose
+  minimum height did not count the heading above it, so in a short window
+  the whole page scrolled as well as the app. The app now gets the space
+  below the heading, without the card's border and inner padding, and
+  scrolls inside its own frame, on a phone too. Home pages drawn from a
+  Surface keep their card and scroll as a document, and the app's sandbox
+  and permissions are unchanged.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0576---2026-10-26)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.57.6) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.57.6`
 
 ## v0.57.5
 
@@ -3165,38 +3215,13 @@ entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.47.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.47.0`
 
-## v0.46.1
-
-<span class="filex-release-date">26 September 2026</span>
-
-## What changed
-
-### Fixed
-
-- **The version line no longer runs off the menu.** The server reports its
-  version as the release followed by the full commit hash and the build time,
-  and the line printed all of it: the explorer's avatar menu grew a sideways
-  scroll bar, the sign-in page carried the 40-character hash twice, and the
-  About page ran it off its card. The account menus, user settings and the
-  sign-in page now name the release only (`filex v0.46.1`); the About page
-  shows the release with the commit shortened to seven characters and the
-  build date under it, and its copy button still copies the whole string.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0461---2026-09-26)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.46.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.46.1`
-
 ## Earlier releases
 
-The 126 releases before v0.46.1, in brief. Full notes are on GitHub.
+The 127 releases before v0.47.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.46.1](https://github.com/BRF-Tech/filex/releases/tag/v0.46.1) | 26 September 2026 | version as the release followed by the full commit hash and the build time, |
 | [v0.46.0](https://github.com/BRF-Tech/filex/releases/tag/v0.46.0) | 26 September 2026 | storage row, or use its menu (right click, a long press, or Shift+F10): |
 | [v0.45.1](https://github.com/BRF-Tech/filex/releases/tag/v0.45.1) | 25 September 2026 | 0.45.0 as it was meant to ship. **v0.45.0 was tagged but never published**: |
 | [v0.44.2](https://github.com/BRF-Tech/filex/releases/tag/v0.44.2) | 25 September 2026 | The release 0.44.0 was meant to be, and the one to install the desktop app from, including through Homebrew, winget and Snap. |
@@ -3326,4 +3351,4 @@ The 126 releases before v0.46.1, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-10-21 from 146 published releases.</small>
+<small>Last refreshed 2026-10-26 from 147 published releases.</small>

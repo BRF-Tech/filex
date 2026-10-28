@@ -162,6 +162,7 @@ export default defineConfig({
           { text: 'MCP & AI Tokens', link: '/MCP' },
           { text: 'AI assistant', link: '/AI-ASSISTANT' },
           { text: 'Office editing', link: '/ONLYOFFICE' },
+          { text: 'The Office editor app', link: '/OFFICE-EDITOR' },
           { text: 'ShareX', link: '/SHAREX' },
           { text: 'SSO (OIDC)', link: '/SSO' },
           { text: 'LDAP', link: '/LDAP' },

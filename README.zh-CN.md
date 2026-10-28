@@ -639,7 +639,7 @@ import { FileManager } from '@brftech/filex-react';
 |---|---|
 | [e-Signature](https://github.com/BRF-Tech/filex-sign) | 签署一份 PDF，或者请别人签署：这个 filex 上的人在 filex 内部签署，其他任何人通过私密链接签署，默认设有 PIN |
 | [Convert](https://github.com/BRF-Tech/filex-convert) | 任何文件或所选内容上的 **Convert…**（转换）：图片、视频、音频、文档、电子书、压缩包、数据、字幕和字体 |
-| [Office editor](https://github.com/BRF-Tech/filex-office-editor) | 在浏览器中用 ONLYOFFICE 的编辑器处理 Word、Excel 和 PowerPoint 文档，不需要 Document Server；它为 filex 0.56 制作的 0.2.0 和 0.3.0 版本增加了加密文件夹和多人同时编辑 |
+| [Office editor](https://github.com/BRF-Tech/filex-office-editor) | 在浏览器中用 ONLYOFFICE 的编辑器处理 Word、Excel 和 PowerPoint 文档，不需要 Document Server；它为 filex 0.56 制作的 0.2.0 和 0.3.0 版本增加了加密文件夹和多人同时编辑 |；它为 filex 0.57 制作的 0.4.0 版本能打开 Document Server 能打开的所有类型（`.doc`、`.xls`、`.ppt`、`.csv`……），并带来一个办公引擎，filex 在服务器上用它生成办公文档缩略图并进行转换（[docs/OFFICE-EDITOR.md](docs/OFFICE-EDITOR.md)）
 | [filextext](https://github.com/BRF-Tech/filextext-app) | 装在单个 `.fxtxt` 文件里的端到端加密的文本工作区 |
 | [draw.io](https://github.com/BRF-Tech/filex-drawio) | draw.io 图表编辑器，用于 `.drawio` 和 `.dio` 文件 |
 

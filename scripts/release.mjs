@@ -200,6 +200,7 @@ const plan = {
   signingKeys: [],
   privateHosts: { allow: [], forbid: [] },
   docSurfaces: [],
+  preflight: [],
   audit: [],
   docs: [],
   jobs: 1,
@@ -241,7 +242,7 @@ if (opts.plan) {
   const sel = selectGates(plan, profile, changed, { source });
   const ci = source === 'circleci' ? 'CircleCI' : 'GitHub';
   console.log(`${bold(`filex release ${tag}`)} — the plan, profile ${bold(profile)}${source !== 'github' ? `, gate ${bold(source)}` : ''}${since ? ` (${changed?.length ?? '?'} file(s) changed since ${since})` : ''} (nothing runs)\n`);
-  const byStage = { audit: plan.audit, docs: plan.docs, pretag: sel.pretag, export: plan.exportGates, gate: sel.local, ci: plan.published, deploy: plan.deployed };
+  const byStage = { preflight: plan.preflight, audit: plan.audit, docs: plan.docs, pretag: sel.pretag, export: plan.exportGates, gate: sel.local, ci: plan.published, deploy: plan.deployed };
   STAGES.forEach((s, i) => {
     console.log(`${String(i + 1).padStart(2)}. ${bold(s.title.padEnd(10))} ${s.what}`);
     for (const g of s.builtin ?? []) console.log(`      ${dim('·')} ${dim(g)}`);

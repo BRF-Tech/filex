@@ -378,7 +378,9 @@ office thumbnails and the apps' office conversions. So **you do not need a
 Document Server** - not to edit office documents, alone or together, and not
 for filex's office thumbnails or server-side office conversions: the office
 editor app is enough, and a Document Server you have stays supported and
-optional ([ONLYOFFICE.md → The office engine without a Document Server](ONLYOFFICE.md#the-office-engine-without-a-document-server)).
+optional ([ONLYOFFICE.md → The office engine without a Document Server](ONLYOFFICE.md#the-office-engine-without-a-document-server);
+everything the app does, and moving from a Document Server to it:
+[OFFICE-EDITOR.md](OFFICE-EDITOR.md)).
 
 What an app adds lives where everything else does: rows in the file menu, screens
 filex draws for it or its own interface, jobs in the same

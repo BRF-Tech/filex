@@ -48,6 +48,16 @@
 // Every question either CI is asked is counted in FIXTURE_GH/asked.json
 // ({ github: n, circleci: n }), so a test shows which one the gate read.
 //
+// The preflight asks for the winget token as the real plan does (#290), with
+// the real winget-token.mjs, but its token and GitHub's answer are stand-ins
+// steered by FIXTURE_WINGET:
+//   (unset)   200, public_repo, push to the fork, no expiry: green
+//   expired   401 Bad credentials
+//   expiring  green otherwise, and 3 days left
+//   offline   GitHub cannot be reached
+//   unset     FILEX_WINGET_TOKEN_CMD is not set: no command reads the token
+// Every question it asks GitHub is counted in FIXTURE_GH/winget-asked.json.
+//
 // FIXTURE_DEFER set adds a pretag gate this machine cannot run, as the real
 // plan's Store copy off Windows (#248): `deferred`, with the real acks'
 // names, and a `check` that is red if anything ever runs it.
@@ -58,6 +68,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { workflowRun, workflowUrl } from './circleci.mjs';
+import { readWingetToken, wingetTokenGate } from './winget-token.mjs';
 import { desktopFeeds, docsSite, readmePictures, runningRelease, updateManifest } from './verify.mjs';
 
 const env = process.env;
@@ -257,6 +268,37 @@ const DEFERRED = {
   check: () => ({ ok: false, detail: 'a deferred gate was run' }),
 };
 
+/** The token the stand-in vault holds; the release must never print it. */
+export const FIXTURE_WINGET_TOKEN = 'fixture-winget-token-not-a-real-one';
+
+/** The stand-in for GitHub's answer to GET /repos/<fork> (FIXTURE_WINGET). */
+async function wingetFetch(url, init) {
+  const f = path.join(env.FIXTURE_GH, 'winget-asked.json');
+  fs.mkdirSync(env.FIXTURE_GH, { recursive: true });
+  fs.writeFileSync(f, String((fs.existsSync(f) ? Number(fs.readFileSync(f, 'utf8')) : 0) + 1));
+  const how = env.FIXTURE_WINGET ?? '';
+  if (how === 'offline') throw new TypeError('fetch failed', { cause: { code: 'ENOTFOUND' } });
+  if (init?.headers?.Authorization !== `Bearer ${FIXTURE_WINGET_TOKEN}`) return new Response('{"message":"Bad credentials"}', { status: 401 });
+  if (how === 'expired') return new Response('{"message":"Bad credentials"}', { status: 401 });
+  const headers = { 'x-oauth-scopes': 'public_repo' };
+  if (how === 'expiring') headers['github-authentication-token-expiration'] = new Date(Date.now() + 3 * 86_400_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+  return new Response(JSON.stringify({ full_name: 'fixture/winget-pkgs', permissions: { push: true } }), { status: 200, headers });
+}
+
+const wingetGate = () =>
+  wingetTokenGate({
+    fork: 'fixture/winget-pkgs',
+    repo: 'fixture/fixture',
+    // The real reader, the stand-in vault: a command that prints the token.
+    readToken: (ctx) =>
+      readWingetToken({
+        bash: ctx?.bash,
+        settings: () => ({ env: env.FIXTURE_WINGET === 'unset' ? {} : { FILEX_WINGET_TOKEN_CMD: `printf %s ${FIXTURE_WINGET_TOKEN}` }, file: '' }),
+      }),
+    fetch: wingetFetch,
+    sleep: async () => {},
+  });
+
 export default function plan({ version, tag }) {
   return {
     exportDir: env.FIXTURE_EXPORT,
@@ -265,6 +307,7 @@ export default function plan({ version, tag }) {
       allow: ['security@brf.sh', 'hello@brf.sh'],
       forbid: [/brf\.sh/, /gitlab\.com[/:]brftech/],
     },
+    preflight: [wingetGate()],
     docSurfaces: ['README.md', 'docs/*.md'],
     audit: [readmePictures()],
     docs: [{ name: 'the fixture docs gate', cmd: redWhen('FIXTURE_DOCS_FAIL') }],

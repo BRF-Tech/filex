@@ -225,6 +225,15 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   Server's origin, not in filex's pages) (0.53);
   [the editor's language](ONLYOFFICE.md#the-editors-language): each person's
   own filex language, or one for everybody (`FILEX_ONLYOFFICE_LANG`) (0.54)
+- [The Office editor app](OFFICE-EDITOR.md) - what the app does from its 0.4.0
+  (filex 0.57): 45 kinds in the browser (`.doc`, `.xls`, `.ppt`, `.rtf`, `.csv`
+  and the templates included), saves beside the file and conflict copies,
+  password-protected documents, dictionaries, macros, editing together and
+  encrypted folders; on the server the office engine (`engine.zip`, x2t and
+  the editor's layout in WebAssembly) that draws office thumbnails and runs
+  the apps' office conversions; installing and updating it, which release for
+  which filex, running without a Document Server, moving from one (the
+  External services row the environment leaves behind), known limits
 
 ## Features
 
@@ -327,8 +336,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   Server answered in the browser, a relay that orders sealed entries), and
   what of it exists: filex 0.56 carries filex's half (the relay, and the
   document handed over and taken back by the browser); the editor's side is
-  an AGPL app of its own (`filex-office-editor`, whose 0.2.0 and 0.3.0 are
-  made for filex 0.56), and filex provides the platform it runs on; how the
+  an AGPL app of its own (`filex-office-editor`: 0.2.0 and 0.3.0/0.3.1 for
+  filex 0.56, 0.4.0 for filex 0.57 - [OFFICE-EDITOR.md](OFFICE-EDITOR.md)),
+  and filex provides the platform it runs on; how the
   app prints (filex's `ui.print`) and [what it does on a phone](E2E-OFFICE.md#on-a-phone)
   (it reads, **Edit** opens the folded desktop editor)
 - [Multi-tenancy](MULTI-TENANCY.md) - provider/tenant mode and its switch on

@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-10-21",
+  "generatedAt": "2026-10-26",
   "releases": [
+    {
+      "tag": "v0.57.6",
+      "date": "2026-10-26T18:29:30Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.57.6",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Fixed\n\n- **Cancelling a job at the instant the queue picks it up works the first\n  time.** For a moment between the queue taking a job and the job starting\n  (or going back to wait for a storage scan), the cancel button answered\n  \"could not be cancelled\", and only a second press got through. The cancel\n  is now noted in that moment, and the job ends without running. A rename or\n  restore can still be cancelled until it starts, and not after.\n- **A job waiting for a storage scan keeps showing why it waits.** While the\n  scan held the storage, the queue picked the waiting job up again every few\n  seconds only to put it back, and each time the operations centre showed it\n  as running (\"Deleting\") for a moment, without the \"waiting for its turn\"\n  reason. The queue now leaves that storage's jobs alone while the scan\n  holds it, and still starts the job the moment the scan lets go.\n- **A group's grant shows the group in the details panel** (fixed by\n  @chengjie in [PR #129](https://github.com/BRF-Tech/filex/pull/129)). When\n  a folder was shared with a group, directly or through a folder above it,\n  the details panel's people list read the grant as a person's and showed\n  `#undefined` with a `?` in place of the group. It now names the group (its\n  number, for a group without a name), says it is a group, and keeps the\n  permission level and the \"inherited\" note. Only the display changed: who\n  can open the folder is as before.\n- **An app with its own interface fills the window below its heading**\n  (fixed by @chengjie in\n  [PR #130](https://github.com/BRF-Tech/filex/pull/130)). An app's home page\n  with its own interface, opened from the Apps menu, sat in a card whose\n  minimum height did not count the heading above it, so in a short window\n  the whole page scrolled as well as the app. The app now gets the space\n  below the heading, without the card's border and inner padding, and\n  scrolls inside its own frame, on a phone too. Home pages drawn from a\n  Surface keep their card and scroll as a document, and the app's sandbox\n  and permissions are unchanged.\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0576---2026-10-26)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.57.6",
+        "ghcr.io/brf-tech/filex:full-v0.57.6"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
     {
       "tag": "v0.57.5",
       "date": "2026-10-21T13:45:14Z",

@@ -4,8 +4,10 @@
 > folders opens and saves a document of an unlocked encrypted folder or a
 > vault, and an app that asks for editing together runs its session through
 > filex's relay ([E2E-ENCRYPTION.md → Editing in an app](E2E-ENCRYPTION.md#editing-in-an-app)).
-> The editor's half is `filex-office-editor` 0.2.0 (encrypted folders) and
-> 0.3.0 (editing together). filex's own viewer still opens such a document
+> The editor's half is `filex-office-editor`: 0.2.0 brought encrypted
+> folders and 0.3.0 editing together, both released for filex 0.56 (install
+> 0.3.1 there), and 0.4.0, for filex 0.57, keeps both
+> ([OFFICE-EDITOR.md](OFFICE-EDITOR.md)). filex's own viewer still opens such a document
 > read-only, and ONLYOFFICE is never offered for it
 > ([E2E-ENCRYPTION.md, feature trade-offs](E2E-ENCRYPTION.md#feature-trade-offs)).
 > This page is the design of editing it - alone or with other people, in the
@@ -27,8 +29,8 @@ all MIT.
 | The relay: one order for the editors' sealed entries, the changes lease, who is in a session and who only watches, which part of the log a save holds | `backend/internal/coedit` | **filex 0.56**: its routes and socket, its tables (migrations 00107 and 00109: cursors reach every filex process through the database) and blob store, the `files:co-edit` permission ([APP-PLUGINS-API.md → Editing together](APP-PLUGINS-API.md#editing-together-coedit-056)) |
 | Session keys, sealed entries, the reader that refuses a log the editors did not write | `packages/core/src/lib/e2eoffice.ts`, `lib/coeditSession.ts`, `lib/coeditOutbox.ts` | **filex 0.56**: the frame an app's interface runs in seals, orders and checks a session's log for it - in an ordinary folder with the server's session key, in an encrypted folder with a key the members' browsers seal with the folder key - and keeps the changes not yet placed in the browser (sealed there in an encrypted folder) until they are |
 | Who saves, and when | `packages/core/src/lib/e2eofficeSave.ts` | Prototype: no screen uses it |
-| The bridge (a Document Server for one editor, in the browser), the socket.io stand-in, the x2t driver | the `filex-office-editor` app (AGPL-3.0-or-later) | One person: released (0.1.0, 0.1.1). Several people through filex's relay: its 0.3.0, built for filex 0.56 and released once it is measured there |
-| The app's page and editor frame, ONLYOFFICE's editor files in its package, the x2t WebAssembly build | the `filex-office-editor` app | Built and measured in Chromium, Firefox and WebKit, one person editing an ordinary (not encrypted) document, with Download as and Print through x2t and a phone layout ([On a phone](#on-a-phone)), and in filex 0.55 itself; released as 0.1.0 and 0.1.1, which carries the app's own x2t, built from ONLYOFFICE core at the editor's tag. A document in an encrypted folder: its 0.2.0, built for filex 0.56 and released once it is measured there |
+| The bridge (a Document Server for one editor, in the browser), the socket.io stand-in, the x2t driver | the `filex-office-editor` app (AGPL-3.0-or-later) | One person: released (0.1.0, 0.1.1). Several people through filex's relay: released in 0.3.0 and 0.3.1 for filex 0.56 and measured there in Chromium, Firefox and WebKit; 0.4.0 for filex 0.57 ([OFFICE-EDITOR.md](OFFICE-EDITOR.md)) |
+| The app's page and editor frame, ONLYOFFICE's editor files in its package, the x2t WebAssembly build | the `filex-office-editor` app | Built and measured in Chromium, Firefox and WebKit, one person editing an ordinary (not encrypted) document, with Download as and Print through x2t and a phone layout ([On a phone](#on-a-phone)), and in filex 0.55 itself; released as 0.1.0 and 0.1.1, which carries the app's own x2t, built from ONLYOFFICE core at the editor's tag. A document in an encrypted folder: released in 0.2.0 for filex 0.56 and measured there (two people in one encrypted folder: 0.3.1, in Chromium) |
 | The platform features the app needs | filex | 0.55: a frame of its own package, `blob:` reads, printing, the `encrypted` field; 0.56: the plaintext of a document in an unlocked encrypted folder, handed over and taken back by the browser ([What filex gives the app](#what-filex-gives-the-app)) |
 | An encrypted folder's editing session - its key sealed with the folder key - and editing together there | filex | **filex 0.56** ([E2E-ENCRYPTION.md → Editing in an app](E2E-ENCRYPTION.md#editing-in-an-app)); not in a vault, not a `.fxe` |
 
@@ -280,16 +282,19 @@ trademark. The platform features above are filex's and stay MIT.
 
 ## What is not built yet
 
-In the app (`filex-office-editor`; released: 0.1.0 and 0.1.1, one person
-editing a document that is not encrypted, with ONLYOFFICE's editor files
-from the official Document Server image at a pinned release, checked every
-week for a newer one, the stand-in in place of socket.io, the app's page,
-saving, pictures added while editing, Download as, PDF and Print through
-the app's own x2t, and the phone layout; built for filex 0.56 and released
-once they are measured in it: 0.2.0, a document in an encrypted folder, and
-0.3.0, editing together):
+In the app (`filex-office-editor`; released: 0.1.0 and 0.1.1 for filex
+0.55, one person editing a document that is not encrypted, with ONLYOFFICE's
+editor files from the official Document Server image at a pinned release,
+checked every week for a newer one, the stand-in in place of socket.io, the
+app's page, saving, pictures added while editing, Download as, PDF and Print
+through the app's own x2t, and the phone layout; 0.2.0, a document in an
+encrypted folder, and 0.3.0 and 0.3.1, editing together, for filex 0.56;
+0.4.0 for filex 0.57, with every kind a Document Server opens and the office
+engine filex runs on the server - [OFFICE-EDITOR.md](OFFICE-EDITOR.md)):
 
-- Comparing the editor with a Document Server on a body of real documents.
+- Comparing the editor with a Document Server on a larger body of real
+  documents than the ones 0.4.0 was measured with (the app's
+  `docs/PARITY.md` names the kinds that still need a sample).
 - A lighter first download, once filex serves an app's package compressed
   (the planned row in [What filex gives the app](#what-filex-gives-the-app)).
 

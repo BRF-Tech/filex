@@ -717,7 +717,7 @@ una aplicación o un complemento de almacenamiento. Cinco se distribuyen como re
 |---|---|
 | [Firma electrónica](https://github.com/BRF-Tech/filex-sign) | Firme un PDF, o pida a otras personas que lo firmen: las personas de este filex firman dentro de él, cualquier otra persona mediante un enlace privado, detrás de un PIN de forma predeterminada |
 | [Convertir](https://github.com/BRF-Tech/filex-convert) | **Convertir…** en cualquier archivo o selección: imágenes, video, audio, documentos, libros electrónicos, archivos comprimidos, datos, subtítulos y fuentes |
-| [Office editor](https://github.com/BRF-Tech/filex-office-editor) | Documentos de Word, Excel y PowerPoint en el editor de ONLYOFFICE, en el navegador y sin Document Server; sus versiones 0.2.0 y 0.3.0, hechas para filex 0.56, añaden las carpetas cifradas y varias personas a la vez |
+| [Office editor](https://github.com/BRF-Tech/filex-office-editor) | Documentos de Word, Excel y PowerPoint en el editor de ONLYOFFICE, en el navegador y sin Document Server; sus versiones 0.2.0 y 0.3.0, hechas para filex 0.56, añaden las carpetas cifradas y varias personas a la vez |; su 0.4.0, hecha para filex 0.57, abre todos los tipos que abre un Document Server (`.doc`, `.xls`, `.ppt`, `.csv`...) y trae un motor de ofimática que filex ejecuta en el servidor para las miniaturas y las conversiones de documentos de oficina ([docs/OFFICE-EDITOR.md](docs/OFFICE-EDITOR.md))
 | [filextext](https://github.com/BRF-Tech/filextext-app) | Un espacio de trabajo de texto cifrado de extremo a extremo en un único archivo `.fxtxt` |
 | [draw.io](https://github.com/BRF-Tech/filex-drawio) | El editor de diagramas draw.io, en archivos `.drawio` y `.dio` |
 

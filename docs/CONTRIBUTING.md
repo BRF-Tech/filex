@@ -2659,6 +2659,41 @@ pnpm release 0.45.1 --merge-pr 120,121   # the export commit merges these outsid
 > four releases were re-cut, each for a step that was written down here and
 > skipped anyway.
 
+**Before anything is written, the preflight** (`--plan` lists every gate):
+the checkout is on `main`, clean (untracked files too) and pushed; the number
+is valid and newer than the last tag, and tagged nowhere yet, here or on
+GitHub; `[Unreleased]` has something in it; the deployment targets still name
+the current release; the public checkout is there, clean, its workflows
+committed and in step with GitHub. Then this repository's own preflight gates
+(`preflight` in `scripts/release/plan.mjs`), asked again on every resume until
+the tags are out:
+
+- **The winget token works, with more than 14 days left** (#290). The tag run
+  opens the winget pull requests with the repository secret `WINGET_TOKEN`: a
+  classic token, scope `public_repo`, of the account that owns the fork
+  `.goreleaser.yml` publishes from (`brkfun/winget-pkgs`). On 0.57.6 it had
+  run out - made with GitHub's 30-day default - and the tag run published the
+  GitHub Release and the CLI, then died at winget on `401 Bad credentials`;
+  every desktop, Snap Store, Microsoft Store and AUR job behind it was skipped,
+  and `releases/latest` answered 404 for the desktop installers until a new
+  token was made and the Release was deleted and run again. GitHub never gives
+  a secret's value back, so the preflight asks with the vault's copy, read by
+  the command in `FILEX_WINGET_TOKEN_CMD` (the release train's settings,
+  `scripts/train/train.env.example`; it prints the token on a pipe, and the
+  token is never shown, logged or written to the run's record). It asks
+  `GET /repos/brkfun/winget-pkgs` and is red on a 401 or 403, on a token that
+  is no classic one, lacks `public_repo` or may not push to the fork, and when
+  `GitHub-Authentication-Token-Expiration` is 14 days away or less; a token
+  without an expiry passes. GitHub not answering (the network, a 5xx, the rate
+  limit) is asked three times and then red: unknown does not pass. No
+  `FILEX_WINGET_TOKEN_CMD` is red too, and says so. A server patch does not
+  ask: it hands goreleaser no winget secret. **The fix**, by the fork's owner:
+  a new classic token at
+  <https://github.com/settings/tokens/new?scopes=public_repo&description=filex%20winget%20releases>
+  with a long expiry, its value into the vault entry the command reads, then
+  into the secret - `<the command> | gh secret set WINGET_TOKEN -R BRF-Tech/filex`
+  reads it from the pipe, so it never shows - and resume: the gate asks again.
+
 **Around the tool, three more commands** ([The release train's
 tools](#the-release-trains-tools)): `pnpm train X.Y.Z` writes the day's
 release note (the rule above, the cut, what is on the train, the merge queue),
@@ -4023,7 +4058,9 @@ not green, the replies on the issues, the language packs.
 
 **Where it runs.** The release workspace (a container on the build host)
 holds both checkouts, the release train's settings
-(`~/.config/filex-train.env`, the keys in `scripts/train/train.env.example`),
+(`~/.config/filex-train.env`, the keys in `scripts/train/train.env.example`;
+`FILEX_WINGET_TOKEN_CMD` among them, the vault reader the preflight asks
+GitHub about the winget token with),
 the narrow GitHub token wrapper and the signing command. The build host
 starts it: `scripts/train/install-auto.sh` installs
 `filex-release-auto.timer` (a round every half hour) and
@@ -4248,7 +4285,9 @@ or the file `FILEX_TRAIN_ENV` or `--env` names, KEY=VALUE, the process
 environment winning - whose keys `scripts/train/train.env.example` lists with
 placeholders. No server name and no secret is in the repository: hosts, paths
 and the publishing commands are settings, and a key is a file (or the name of a
-variable the session already holds) that is read when it is used.
+variable the session already holds, or a command that reads it from the vault:
+`FILEX_WINGET_TOKEN_CMD`, which `pnpm release` reads too) that is read when it
+is used.
 
 > Why they exist (measured in #165): 0.51 took 10 h 34 min from its cut to the
 > last surface, and a good part of it was not testing. Branches were merged by

@@ -63,7 +63,7 @@ server.
 | **Convert** | [`BRF-Tech/filex-convert`](https://github.com/BRF-Tech/filex-convert) | **Convert…** on any file or selection: images, video, audio, documents, e-books, archives, data, subtitles and fonts. See [Converting files](#converting-files). |
 | **filextext** | [`BRF-Tech/filextext-app`](https://github.com/BRF-Tech/filextext-app) | An end-to-end encrypted text workspace in one `.fxtxt` file - pages and folders, AFFiNE's BlockSuite editor - encrypted in the browser with filex's own [end-to-end keys](E2E-ENCRYPTION.md), so the server stores ciphertext only. Opens `.fxtxt` in place of the preview and adds *Encrypted workspace (.fxtxt)* to **New document**. In English and Turkish. |
 | **draw.io** | [`BRF-Tech/filex-drawio`](https://github.com/BRF-Tech/filex-drawio) | The draw.io diagram editor: `.drawio` and `.dio` open in it in place of the preview, **Save** writes a new version, **New document** gets *draw.io diagram*. Loads its translations, shapes and templates from its own package (`ui:package-fetch`) and reaches nothing else. |
-| **Office editor** | [`BRF-Tech/filex-office-editor`](https://github.com/BRF-Tech/filex-office-editor) | ONLYOFFICE's editor in the browser, with no Document Server: Word, Excel and PowerPoint documents and their OpenDocument, legacy and template kinds open in it in place of the preview, several people edit one at once through filex's relay, a file of an unlocked encrypted folder too. **Save** writes a new version; a format it cannot write (`.doc`, `.xls`, `.ppt`) is saved beside the file, a file changed meanwhile gets a conflict copy, as with a Document Server. **New document** gets the office rows. From its 0.4.0 it also brings the [office engine](#the-office-engine) filex runs on the server - office conversions for apps and office thumbnails, with no Document Server - and [dictionaries](#dictionaries-for-the-office-editor) for more languages. AGPL-3.0. See [docs/ONLYOFFICE.md → The Office editor app](ONLYOFFICE.md#the-office-editor-app). |
+| **Office editor** | [`BRF-Tech/filex-office-editor`](https://github.com/BRF-Tech/filex-office-editor) | ONLYOFFICE's editor in the browser, with no Document Server: Word, Excel and PowerPoint documents and their OpenDocument, legacy and template kinds open in it in place of the preview, several people edit one at once through filex's relay, a file of an unlocked encrypted folder too. **Save** writes a new version; a format it cannot write (`.doc`, `.xls`, `.ppt`) is saved beside the file, a file changed meanwhile gets a conflict copy, as with a Document Server. **New document** gets the office rows. From its 0.4.0 it also brings the [office engine](#the-office-engine) filex runs on the server - office conversions for apps and office thumbnails, with no Document Server - and [dictionaries](#dictionaries-for-the-office-editor) for more languages. AGPL-3.0. See [OFFICE-EDITOR.md](OFFICE-EDITOR.md) (everything 0.4.0 does, installing, updating, moving from a Document Server) and [docs/ONLYOFFICE.md → The Office editor app](ONLYOFFICE.md#the-office-editor-app). |
 
 ## Install one
 
@@ -152,8 +152,13 @@ signature beside the module.
 ## Installing from a store
 
 An **app store** is a catalogue of reviewed apps (the reference one is
-[filex Apps](https://apps.filex.sh)). Pressing **Install** on an app there
-asks for this filex's address and opens an **install link** on it:
+[filex Apps](https://apps.filex.sh)). The store's software is open source too,
+[BRF-Tech/filex-apps](https://github.com/BRF-Tech/filex-apps) (MIT): anyone can
+run a store of their own and be its administrator
+([its SELF-HOSTING.md](https://github.com/BRF-Tech/filex-apps/blob/main/docs/SELF-HOSTING.md)),
+and a filex trusts it the same way, by its keys ([Trusted stores](#trusted-stores)).
+Pressing **Install** on an app there asks for this filex's address and opens an
+**install link** on it:
 
 ```
 https://files.example.com/admin/store-install#store=https%3A%2F%2Fapps.filex.sh&intent=<token>

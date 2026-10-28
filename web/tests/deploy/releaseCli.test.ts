@@ -54,6 +54,7 @@ const COPY = [
   'scripts/release/stages.mjs',
   'scripts/release/verify.mjs',
   'scripts/release/circleci.mjs',
+  'scripts/release/winget-token.mjs',
   'scripts/release/surfaces.mjs',
   'scripts/lib/notify.mjs',
   'scripts/lib/settings.mjs',
@@ -462,6 +463,56 @@ describe.concurrent('pnpm release — preflight stops before anything is written
     const empty = await release(fx, [VERSION]);
     expect(empty.code).toBe(1);
     expect(empty.out).toContain('the [Unreleased] section is empty');
+  });
+
+  // ⚠⚠ #290: 0.57.6's tag run died at winget on an expired WINGET_TOKEN,
+  // after the Release and the CLI were out. The plan's own preflight gate
+  // asks GitHub with the vault's copy first (the real winget-token.mjs, a
+  // stand-in vault and GitHub: web/tests/fixtures/release/plan.mjs).
+  it('(c) the winget token ran out: red with the fix, the token never printed; renewed, the resume asks again', { timeout: TIMEOUT }, async ({ expect }) => {
+    const fx = fixture();
+    const before = footprint(fx);
+    const r = await release(fx, [VERSION], { FIXTURE_WINGET: 'expired' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('FAILED  winget: the token for fixture/winget-pkgs works, with more than 14 days left');
+    expect(r.out).toContain('GitHub refuses the winget token: 401 "Bad credentials"');
+    expect(r.out).toContain('https://github.com/settings/tokens/new?scopes=public_repo&description=filex%20winget%20releases');
+    expect(r.out).toContain('gh secret set WINGET_TOKEN -R fixture/fixture');
+    expect(r.out).toContain('STOPPED at preflight');
+    expect(r.out).not.toContain(banner('audit'));
+    expect(r.out).not.toContain('fixture-winget-token-not-a-real-one');
+    const logs = path.join(fx.src, '.git', 'filex-release', TAG, 'logs');
+    for (const f of fs.readdirSync(logs)) expect(fs.readFileSync(path.join(logs, f), 'utf8'), f).not.toContain('fixture-winget-token-not-a-real-one');
+    expect(fs.readFileSync(path.join(fx.src, '.git', 'filex-release', `${TAG}.json`), 'utf8')).not.toContain('fixture-winget-token-not-a-real-one');
+    const after = footprint(fx);
+    expect(after.src.refs).toBe(before.src.refs);
+    expect(after.exp).toEqual(before.exp);
+
+    const renewed = await release(fx, [VERSION, '--resume']);
+    expect(renewed.out).toMatch(/ok +winget: the token for fixture\/winget-pkgs works/);
+    expect(renewed.out).toContain('WAITING at audit');
+    expect(renewed.code).toBe(3);
+  });
+
+  it('(d) the winget token has 14 days or less left, no command reads it, or GitHub cannot be asked: red, never a pass', { timeout: TIMEOUT }, async ({ expect }) => {
+    const fx = fixture();
+    const soon = await release(fx, [VERSION], { FIXTURE_WINGET: 'expiring' });
+    expect(soon.code).toBe(1);
+    expect(soon.out).toMatch(/the winget token expires on \d{4}-\d{2}-\d{2}, in 2 day\(s\): a release wants more than 14 days left on it/);
+    expect(soon.out).toContain('STOPPED at preflight');
+
+    const none = await release(fx, [VERSION, '--resume'], { FIXTURE_WINGET: 'unset' });
+    expect(none.code).toBe(1);
+    expect(none.out).toContain('FILEX_WINGET_TOKEN_CMD is not set');
+    expect(none.out).toContain('scripts/train/train.env.example');
+
+    const offline = await release(fx, [VERSION, '--resume'], { FIXTURE_WINGET: 'offline' });
+    expect(offline.code).toBe(1);
+    expect(offline.out).toContain('could not ask GitHub whether the winget token works');
+    expect(offline.out).toContain('3 tries, the last: fetch failed (ENOTFOUND)');
+    expect(offline.out).toContain('unknown does not pass');
+    // expiring, then offline three times; no command, no question.
+    expect(Number(fs.readFileSync(path.join(fx.root, 'gh', 'winget-asked.json'), 'utf8'))).toBe(4);
   });
 });
 

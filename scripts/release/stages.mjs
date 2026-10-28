@@ -69,7 +69,16 @@ import { SURFACES_LINE, affectedSurfaces, publishes, releaseSurfaces, serverPatc
 export const STAGES = [
   {
     id: 'preflight', title: 'preflight', what: 'before anything is written',
-    builtin: ['on main, tree clean (untracked too)', 'the number is valid and newer than the last tag', 'main is pushed', 'the tag exists nowhere yet (private and public)', '[Unreleased] has content', 'deployment targets name the current release', 'public checkout: present, clean, workflows committed, in step with GitHub'],
+    builtin: [
+      'on main, tree clean (untracked too)',
+      'the number is valid and newer than the last tag',
+      'main is pushed',
+      'the tag exists nowhere yet (private and public)',
+      '[Unreleased] has content',
+      'deployment targets name the current release',
+      'public checkout: present, clean, workflows committed, in step with GitHub',
+      "(after them) the plan's own preflight gates, on every resume until the tags are out",
+    ],
   },
   { id: 'audit', title: 'audit', what: 'README, screenshots, documentation — a person', builtin: ['waits for: --ack audit (bound to the commit it was given on)'] },
   { id: 'docs', title: 'docs', what: 'links, site build, anchors, YAML', builtin: [] },
@@ -400,6 +409,12 @@ export async function preflight(R) {
     gates.push({ name: 'deployment targets name the current release (before the bump)', cmd: ['node', 'scripts/sync-deploy-versions.mjs', '--check'] });
     gates.push(...exportCheckoutGates(R));
   }
+  // This repository's own (plan.mjs → preflight), on every run until the tags
+  // are out, the stamped resumes too: what they ask can change while a release
+  // waits (#290: the winget token runs out, or is revoked, between the start
+  // and the tag). Those of a surface this release does not publish are named
+  // and not asked.
+  gates.push(...ofThisRelease(R, R.plan.preflight ?? []));
 
   const ok = await R.gates.all('preflight', gates, R.ctx());
   if (!ok) return red();

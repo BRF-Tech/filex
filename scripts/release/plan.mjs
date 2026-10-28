@@ -23,6 +23,7 @@ import { docker, dockerImageId, run, shq, slash } from './engine.mjs';
 import { circleciPipelines } from './circleci.mjs';
 import { githubActions } from './github.mjs';
 import { ALL_SURFACES, publishes } from './surfaces.mjs';
+import { wingetTokenGate } from './winget-token.mjs';
 
 /**
  * vitest's forks for the unit suites run here, beside the other lanes of the
@@ -620,6 +621,13 @@ export function npmPackages(repo) {
 }
 
 // `platform`: the machine the release runs on (a test asks for both).
+/**
+ * The repository goreleaser's winget publisher pushes the manifest to, and
+ * opens the pull request on microsoft/winget-pkgs from (.goreleaser.yml,
+ * winget → repository): the account that owns WINGET_TOKEN.
+ */
+export const WINGET_FORK = 'brkfun/winget-pkgs';
+
 export default function plan({ repo, version, tag, platform = process.platform }) {
   const exportDir = path.resolve(process.env.FILEX_EXPORT_DIR ?? path.join(repo, '..', 'filex-export'));
   const win = platform === 'win32';
@@ -666,6 +674,17 @@ export default function plan({ repo, version, tag, platform = process.platform }
       allow: ['security@brf.sh', 'hello@brf.sh', 'helm.brf.sh'],
       forbid: [/brf\.sh/, /gitlab\.com[/:]brftech/],
     },
+
+    // ── 1. preflight: this repository's own, on every run until the tags ──
+    // #290: 0.57.6's tag run published the Release and the CLI, then died at
+    // winget on an expired WINGET_TOKEN (GitHub's 30-day default), and every
+    // desktop, store and AUR job behind it was skipped. The vault's copy of
+    // the token is asked before anything is written (winget-token.mjs; read
+    // by FILEX_WINGET_TOKEN_CMD, scripts/train/train.env.example). Red on a
+    // refused token, a missing public_repo, no push to the fork, or 14 days
+    // or less left. The fork is .goreleaser.yml's winget repository
+    // (web/tests/deploy/releaseWingetToken.test.ts keeps the two the same).
+    preflight: [wingetTokenGate({ fork: WINGET_FORK, repo: 'BRF-Tech/filex' })],
 
     // Every text that describes the product (CONTRIBUTING step 3). The audit
     // prints which of them this release touched — a reminder, never a list

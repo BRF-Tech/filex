@@ -714,7 +714,7 @@ herkese açık repo olarak gelir:
 |---|---|
 | [e-İmza](https://github.com/BRF-Tech/filex-sign) | Bir PDF'i imzalayın ya da başkalarından imzalamalarını isteyin: bu filex kurulumundaki kişiler filex'in içinde imzalar, diğer herkes varsayılan olarak PIN arkasında duran özel bir bağlantıyla |
 | [Dönüştür](https://github.com/BRF-Tech/filex-convert) | Herhangi bir dosyada ya da seçimde **Dönüştür…**: görseller, video, ses, belgeler, e-kitaplar, arşivler, veri, altyazılar ve yazı tipleri |
-| [Ofis düzenleyici](https://github.com/BRF-Tech/filex-office-editor) | Word, Excel ve PowerPoint belgeleri ONLYOFFICE düzenleyicisinde, tarayıcıda ve Document Server olmadan; filex 0.56 için yapılan 0.2.0 ve 0.3.0 sürümleri şifreli klasörleri ve aynı anda birkaç kişiyle düzenlemeyi ekler |
+| [Ofis düzenleyici](https://github.com/BRF-Tech/filex-office-editor) | Word, Excel ve PowerPoint belgeleri ONLYOFFICE düzenleyicisinde, tarayıcıda ve Document Server olmadan; filex 0.56 için yapılan 0.2.0 ve 0.3.0 sürümleri şifreli klasörleri ve aynı anda birkaç kişiyle düzenlemeyi ekler |; filex 0.57 için yapılan 0.4.0 bir Document Server'ın açtığı her türü (`.doc`, `.xls`, `.ppt`, `.csv`...) açar ve filex'in sunucuda ofis küçük resimleri ve dönüşümleri için çalıştırdığı bir ofis motoru getirir ([docs/OFFICE-EDITOR.md](docs/OFFICE-EDITOR.md))
 | [filextext](https://github.com/BRF-Tech/filextext-app) | Tek bir `.fxtxt` dosyasında uçtan uca şifreli bir metin çalışma alanı |
 | [draw.io](https://github.com/BRF-Tech/filex-drawio) | `.drawio` ve `.dio` dosyalarında draw.io diyagram düzenleyicisi |
 

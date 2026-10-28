@@ -10,11 +10,12 @@ into the storage the file came from. There are two ways to do it:
 | What it opens | the standard ONLYOFFICE set, the older `doc`, `xls`, `ppt`, `rtf` and `.csv` included (0.4.0; before it `docx`, `xlsx`, `pptx`, `odt`, `ods`, `odp`) | the standard ONLYOFFICE set ([Supported file types](#supported-file-types)), the older `doc`, `xls`, `ppt` and `.csv` included |
 | Editing together | yes, through filex's own relay | yes, through the Document Server |
 | Print, *Download as*, PDF | yes, in the browser | yes |
-| **+ New** | Word, Excel, PowerPoint | Word, Excel, PowerPoint and OpenDocument |
+| **+ New** | Word, Excel, PowerPoint and OpenDocument (0.4.0; before it Word, Excel, PowerPoint) | Word, Excel, PowerPoint and OpenDocument |
 | A file of an encrypted folder | yes, decrypted in your browser | no |
 | Office thumbnails, the apps' office conversions | yes, on the server, through the app's [office engine](#the-office-engine-without-a-document-server) (0.4.0, filex 0.57) | yes |
 
-**Start with the app** ([The Office editor app](#the-office-editor-app)): it
+**Start with the app** ([The Office editor app](#the-office-editor-app), and
+the whole of what it does on its own page, [OFFICE-EDITOR.md](OFFICE-EDITOR.md)): it
 needs no server, no address and no secret, and since its 0.4.0 it also brings
 the [office engine](#the-office-engine-without-a-document-server) that filex
 runs on the server for the [thumbnails](#thumbnails) of office documents and
@@ -69,9 +70,11 @@ other, AGPL-3.0, based on ONLYOFFICE Docs by Ascensio System SIA.
 
 Read the permission review and press **Install**. From then on:
 
-- **Opening.** A `.docx`, `.xlsx`, `.pptx`, `.odt`, `.ods` or `.odp` opens in
-  the editor in place of the preview; a person who may only read it cannot
-  save it. The editor's frame loads pictures, styles and fonts only from the
+- **Opening.** A `.docx`, `.xlsx`, `.pptx`, `.odt`, `.ods` or `.odp` - and,
+  from 0.4.0, every kind of [Supported file types](#supported-file-types),
+  45 in all - opens in the editor in place of the preview; a person who may
+  only read it cannot save it. A password-protected document opens after the
+  editor asks for its password, and stays protected. The editor's frame loads pictures, styles and fonts only from the
   app's own package, `data:` and `blob:` (the app asks for no address of its
   own), so a document's linked picture from another server is not fetched. On a phone a document opens to read, with **Edit**
   ([On a phone](E2E-OFFICE.md#on-a-phone)).
@@ -93,8 +96,9 @@ Read the permission review and press **Install**. From then on:
   ([Editing together](APP-PLUGINS-API.md#editing-together-coedit-056)).
 - **Print, *Download as*, PDF.** Through filex, from the editor's menus; a PDF
   is made in the browser from the editor's own page layout.
-- **+ New.** *New document* gets Word, Excel and PowerPoint rows
-  ([Creating new documents](#creating-new-documents)).
+- **+ New.** *New document* gets Word, Excel and PowerPoint rows, and from
+  0.4.0 OpenDocument rows too ([Creating new documents](#creating-new-documents)).
+- **Macros** run after the editor asks whether they should (0.4.0).
 - **Encrypted folders.** A file of an encrypted folder you have unlocked
   opens in the app, decrypted in your browser and encrypted again before a
   save leaves it ([E2E-OFFICE.md](E2E-OFFICE.md)).
@@ -1502,8 +1506,9 @@ Nothing breaks. With no Document Server URL and secret - from either source:
   anybody else.
 - **+ New → New document** offers the types a built-in editor opens -
   Markdown, plain text, CSV, JSON, YAML, XML, HTML and the code formats - and
-  the Office editor app's Word, Excel and PowerPoint rows when it is
-  installed; with neither, it names the missing service for the office types
+  the Office editor app's Word, Excel and PowerPoint rows (and, from its
+  0.4.0, OpenDocument rows) when it is installed; with neither, it names the
+  missing service for the office types
   (see [Creating new documents](#creating-new-documents)).
 - The editor endpoint returns `onlyoffice: not configured` if called directly.
 - Office conversions for apps and office thumbnails run on the Office

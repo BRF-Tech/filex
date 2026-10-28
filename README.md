@@ -698,13 +698,15 @@ server on one version ([docs/API.md](docs/API.md)).
 An app is a WebAssembly module that runs inside filex in a sandbox, an interface of its own
 in a sandboxed frame, or both. You install it from a store link or its GitHub address, read
 every permission it asks for, and nothing updates itself. The people of your filex can browse a
-trusted store on its **App store** screen and ask you for an app or a storage plugin. Five ship as public repositories:
+trusted store on its **App store** screen and ask you for an app or a storage plugin. The reference store,
+[filex Apps](https://apps.filex.sh), is open source as well ([BRF-Tech/filex-apps](https://github.com/BRF-Tech/filex-apps)):
+anyone can run a store of their own. Five apps ship as public repositories:
 
 | App | What it adds |
 |---|---|
 | [e-Signature](https://github.com/BRF-Tech/filex-sign) | Sign a PDF, or ask others to: people on this filex sign inside it, anybody else by a private link, behind a PIN by default |
 | [Convert](https://github.com/BRF-Tech/filex-convert) | **Convert…** on any file or selection: images, video, audio, documents, e-books, archives, data, subtitles and fonts |
-| [Office editor](https://github.com/BRF-Tech/filex-office-editor) | Word, Excel and PowerPoint documents in ONLYOFFICE's editor, running in the browser with no Document Server; its 0.2.0 and 0.3.0, made for filex 0.56, add encrypted folders and several people at once, and its 0.4.0, made for filex 0.57, every kind a Document Server opens (`.doc`, `.xls`, `.ppt`, `.csv`...) and an office engine filex runs on the server for office thumbnails and conversions ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#the-office-engine-without-a-document-server)) |
+| [Office editor](https://github.com/BRF-Tech/filex-office-editor) | Word, Excel and PowerPoint documents in ONLYOFFICE's editor, running in the browser with no Document Server; its 0.2.0 and 0.3.0, made for filex 0.56, add encrypted folders and several people at once, and its 0.4.0, made for filex 0.57, every kind a Document Server opens (`.doc`, `.xls`, `.ppt`, `.csv`...) and an office engine filex runs on the server for office thumbnails and conversions ([docs/OFFICE-EDITOR.md](docs/OFFICE-EDITOR.md), [docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#the-office-engine-without-a-document-server)) |
 | [filextext](https://github.com/BRF-Tech/filextext-app) | An end-to-end encrypted text workspace in a single `.fxtxt` file |
 | [draw.io](https://github.com/BRF-Tech/filex-drawio) | The draw.io diagram editor, on `.drawio` and `.dio` files |
 

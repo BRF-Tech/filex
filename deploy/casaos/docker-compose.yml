@@ -75,8 +75,8 @@ x-casaos:
       makes a folder or a document: Markdown, text, CSV or code straight
       away, and Word, Excel or PowerPoint once you install the office
       editor app, which edits them in the browser with no document server
-      (an ONLYOFFICE Document Server stays optional, and adds OpenDocument
-      templates). The templates are real documents compiled into the
+      (OpenDocument too; an ONLYOFFICE Document Server stays
+      optional). The templates are real documents compiled into the
       binary, so no LibreOffice is installed anywhere. A multi-file
       selection downloads as one streamed ZIP. Public share links with PIN
       and expiry, file-drop upload links, resumable uploads, full-text

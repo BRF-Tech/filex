@@ -1358,3 +1358,137 @@ export function deferredWork(state, version) {
   }
   return out;
 }
+
+// ── the winget token (task #290) ────────────────────────────────────────────
+//
+// ⚠⚠ v0.57.6 (2026-10-26): the repository secret WINGET_TOKEN - the classic
+// token goreleaser's winget publisher pushes the manifest to the fork with,
+// and opens the pull request on microsoft/winget-pkgs with - had run out: it
+// was made with GitHub's 30-day default. The tag run published the GitHub
+// Release and the CLI, then died at winget on "401 Bad credentials"; every
+// desktop, Snap Store, Microsoft Store and AUR job behind it was skipped, and
+// releases/latest answered 404 for the desktop installers until a new token
+// was made and the Release was deleted and run again. Nothing before the tag
+// had asked whether the token worked. The preflight asks now
+// (scripts/release/winget-token.mjs reads the token and asks GitHub; the
+// judgement is here). GitHub never gives a secret's value back, so the
+// vault's copy is what is asked: the two are kept the same.
+
+/** The days a release wants left on the winget token: two weeks of trains. */
+export const WINGET_TOKEN_DAYS = 14;
+
+/** Where the fork's owner makes a new one: a classic token, public_repo ticked. */
+export const WINGET_TOKEN_NEW_URL = 'https://github.com/settings/tokens/new?scopes=public_repo&description=filex%20winget%20releases';
+
+const DAY_MS = 86_400_000;
+
+/**
+ * GitHub's `GitHub-Authentication-Token-Expiration` header as milliseconds
+ * since the epoch, or null when it does not read as a date. GitHub writes
+ * "2027-10-25 09:00:00 UTC", or the time with a numeric offset
+ * ("2027-10-25 12:00:00 +0300"); an ISO time is taken too.
+ */
+export function githubTokenExpiry(value) {
+  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.\d+)?\s*(UTC|GMT|Z|[+-]\d{2}:?\d{2})?$/i.exec(String(value ?? '').trim());
+  if (!m) return null;
+  let zone = (m[3] ?? 'Z').toUpperCase();
+  if (zone === 'UTC' || zone === 'GMT') zone = 'Z';
+  else if (/^[+-]\d{4}$/.test(zone)) zone = `${zone.slice(0, 3)}:${zone.slice(3)}`;
+  const t = Date.parse(`${m[1]}T${m[2]}${zone}`);
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * What renews the winget token, as lines for a red gate. `reader` is the
+ * command that read the vault's copy (FILEX_WINGET_TOKEN_CMD), when known:
+ * piped into `gh secret set`, the new value reaches the repository secret
+ * without being shown.
+ */
+export function wingetTokenFix({ fork, repo, reader = '' }) {
+  return [
+    `the fix, by the account that owns ${fork}:`,
+    '  1. a new classic token, scope public_repo, with a long expiry (GitHub offers 30 days unless told otherwise):',
+    `     ${WINGET_TOKEN_NEW_URL}`,
+    '  2. the new value into the vault entry FILEX_WINGET_TOKEN_CMD reads, and the same value into the repository secret:',
+    `     gh secret set WINGET_TOKEN -R ${repo}`,
+    `     (it reads the value from its standard input${reader ? `: ${reader} | gh secret set WINGET_TOKEN -R ${repo}` : ''})`,
+    '  3. resume the release: this gate asks GitHub again',
+  ];
+}
+
+/**
+ * The verdict on the winget token from GitHub's answer to
+ * `GET /repos/<fork>` asked with it: { status, headers: { lower-case name:
+ * value }, body }. Returns { ok, detail }, with `renew` when the fix is a new
+ * token (wingetTokenFix) and `unknown` when GitHub did not say (a 5xx, a rate
+ * limit) - which does not pass either.
+ *
+ * Green needs all of: 200; a classic token (GitHub names its scopes in
+ * X-OAuth-Scopes - a fine-grained token cannot open the pull request on
+ * microsoft/winget-pkgs); public_repo among them (or repo, which holds it);
+ * push rights on the fork; and more than `days` days left, or no expiry.
+ */
+export function wingetTokenVerdict(answer, { fork, now = Date.now(), days = WINGET_TOKEN_DAYS } = {}) {
+  const status = Number(answer?.status) || 0;
+  const h = answer?.headers ?? {};
+  const message = typeof answer?.body?.message === 'string' ? answer.body.message.slice(0, 200) : '';
+  const said = message ? ` "${message}"` : '';
+  if (status === 401) {
+    return {
+      ok: false,
+      renew: true,
+      detail: `GitHub refuses the winget token: 401${said} - it ran out or was revoked. 0.57.6's tag run died at winget on exactly this, after the Release and the CLI were out, and skipped every desktop, Snap Store, Microsoft Store and AUR job`,
+    };
+  }
+  const limited = (status === 403 || status === 429) && (h['x-ratelimit-remaining'] === '0' || /rate limit/i.test(message));
+  if (limited || status >= 500) {
+    const reset = Number(h['x-ratelimit-reset']);
+    const until = limited && Number.isFinite(reset) && reset > 0 ? `, the limit resets at ${new Date(reset * 1000).toISOString()}` : '';
+    return { ok: false, unknown: true, detail: `GitHub did not say whether the winget token works (${status}${said}${until}): unknown does not pass - resume once GitHub answers` };
+  }
+  if (status === 403) return { ok: false, renew: true, detail: `GitHub answers 403${said} to the winget token: it may not read ${fork}` };
+  if (status === 404) {
+    return {
+      ok: false,
+      renew: true,
+      detail: `${fork} is not there for the winget token (404${said}): the token is another account's, or the fork goreleaser pushes the manifest to (.goreleaser.yml, winget → repository) is gone`,
+    };
+  }
+  if (status !== 200) return { ok: false, detail: `GitHub answered ${status || 'nothing'}${said} to GET /repos/${fork} with the winget token: unknown does not pass` };
+
+  const scopesHeader = h['x-oauth-scopes'];
+  if (scopesHeader === undefined || scopesHeader === null) {
+    return {
+      ok: false,
+      renew: true,
+      detail: 'the winget token is no classic token (GitHub names no scopes for it): goreleaser opens the pull request on microsoft/winget-pkgs, which a fine-grained token cannot write to',
+    };
+  }
+  const scopes = String(scopesHeader).split(',').map((s) => s.trim()).filter(Boolean);
+  if (!scopes.some((s) => s === 'public_repo' || s === 'repo')) {
+    return { ok: false, renew: true, detail: `the winget token's scopes are ${scopes.length ? scopes.join(', ') : 'none'}: the winget pull request needs public_repo` };
+  }
+  const perms = answer?.body?.permissions;
+  if (perms && typeof perms === 'object' && perms.push !== true) {
+    return { ok: false, renew: true, detail: `the winget token may not push to ${fork}: it is not the token of the account that owns the fork goreleaser commits the manifest to` };
+  }
+  const what = `${scopes.join(', ')}, may push to ${fork}`;
+  const raw = h['github-authentication-token-expiration'];
+  if (raw === undefined || raw === null || String(raw).trim() === '') return { ok: true, detail: `${what}, no expiry` };
+  const at = githubTokenExpiry(raw);
+  if (at === null) {
+    return { ok: false, detail: `GitHub says the winget token expires "${raw}", which does not read as a date (checks.mjs → githubTokenExpiry): unknown does not pass` };
+  }
+  const left = at - now;
+  const when = new Date(at).toISOString().slice(0, 10);
+  if (left <= 0) return { ok: false, renew: true, detail: `the winget token expired on ${when}` };
+  if (left <= days * DAY_MS) {
+    const inDays = left < DAY_MS ? 'in less than a day' : `in ${Math.floor(left / DAY_MS)} day(s)`;
+    return {
+      ok: false,
+      renew: true,
+      detail: `the winget token expires on ${when}, ${inDays}: a release wants more than ${days} days left on it. 0.57.6's token ran out between two releases (GitHub's 30-day default), and nothing said so before the tag run died on it`,
+    };
+  }
+  return { ok: true, detail: `${what}, expires on ${when} (in ${Math.floor(left / DAY_MS)} days)` };
+}

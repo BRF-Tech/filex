@@ -726,7 +726,7 @@ dépôts publics :
 |---|---|
 | [Signature électronique](https://github.com/BRF-Tech/filex-sign) | Signez un PDF, ou demandez à d’autres de le faire : les personnes de ce filex y signent, n’importe qui d’autre par un lien privé, protégé par défaut par un PIN |
 | [Convertir](https://github.com/BRF-Tech/filex-convert) | **Convertir…** sur n’importe quel fichier ou n’importe quelle sélection : images, vidéo, audio, documents, livres numériques, archives, données, sous-titres et polices |
-| [Office editor](https://github.com/BRF-Tech/filex-office-editor) | Les documents Word, Excel et PowerPoint dans l’éditeur d’ONLYOFFICE, dans le navigateur et sans Document Server ; ses versions 0.2.0 et 0.3.0, faites pour filex 0.56, ajoutent les dossiers chiffrés et l’édition à plusieurs en même temps |
+| [Office editor](https://github.com/BRF-Tech/filex-office-editor) | Les documents Word, Excel et PowerPoint dans l’éditeur d’ONLYOFFICE, dans le navigateur et sans Document Server ; ses versions 0.2.0 et 0.3.0, faites pour filex 0.56, ajoutent les dossiers chiffrés et l’édition à plusieurs en même temps | ; sa 0.4.0, faite pour filex 0.57, ouvre tous les types qu’ouvre un Document Server (`.doc`, `.xls`, `.ppt`, `.csv`...) et apporte un moteur bureautique que filex exécute sur le serveur pour les vignettes et les conversions des documents bureautiques ([docs/OFFICE-EDITOR.md](docs/OFFICE-EDITOR.md))
 | [filextext](https://github.com/BRF-Tech/filextext-app) | Un espace de travail texte chiffré de bout en bout dans un seul fichier `.fxtxt` |
 | [draw.io](https://github.com/BRF-Tech/filex-drawio) | L’éditeur de diagrammes draw.io, sur les fichiers `.drawio` et `.dio` |
 

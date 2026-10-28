@@ -10,8 +10,9 @@
 // scripts/train/train.env.example); the real file lives in ~/.config.
 //
 // ⚠ A secret is never a value here: a setting names the FILE a key is in (or,
-// for a token the session already holds, the variable it is in), and the tool
-// reads it when it needs it. A value in a settings file ends up in a backup,
+// for a token the session already holds, the variable it is in; or the
+// command that reads it from the vault onto a pipe, FILEX_WINGET_TOKEN_CMD),
+// and the tool reads it when it needs it. A value in a settings file ends up in a backup,
 // a paste or a screenshot.
 //
 // ⚠ The parser is scripts/chain/env.mjs's, re-exported: that file is copied
