@@ -20,7 +20,7 @@
 // packages/core has no runner of its own; the gate lives here, like coreKeys
 // and archiveViewerEndpoint.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { mount, flushPromises } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import PreviewModal from '@brftech/filex-core/src/modals/PreviewModal.vue';
@@ -111,7 +111,34 @@ describe('viewer overlay chrome', () => {
   it('shows the zoom pill for images', () => {
     const w = mountViewer();
     expect(w.find('.fe-viewer__zoom').exists()).toBe(true);
-    expect(w.find('.fe-viewer__zoom-level').text()).toBe('100%');
+    expect(w.find('[title="Reset zoom"]').text()).toBe('100%');
+  });
+
+  it('fits long images to width, uses natural pixels, and resets on navigation', async () => {
+    const w = mountViewer();
+    await flushPromises();
+    const img = w.find('img.fe-preview__image');
+    Object.defineProperty(img.element, 'naturalWidth', { value: 1200 });
+    vi.spyOn(img.element, 'getBoundingClientRect').mockReturnValue({ width: 40 } as DOMRect);
+    const scrollTo = vi.fn();
+    img.element.parentElement!.scrollTo = scrollTo;
+    await img.trigger('load');
+    const button = (label: string) => w.findAll('button').find(b => b.text() === label)!;
+    await button('Fit width').trigger('click');
+    expect((img.element as HTMLImageElement).style.width).toBe('100%');
+    expect((img.element as HTMLImageElement).style.maxHeight).toBe('none');
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, left: 0 });
+    await button('Original size').trigger('click');
+    expect((img.element as HTMLImageElement).style.width).toBe('1200px');
+    await w.find('[title="Zoom in"]').trigger('click');
+    expect((img.element as HTMLImageElement).style.width).toBe('1500px');
+    await w.find('[title="Reset zoom"]').trigger('click');
+    expect((img.element as HTMLImageElement).style.width).toBe('');
+    await button('Original size').trigger('click');
+    await w.setProps({ file: node({ path: 'qldemo://photos/next.jpg', basename: 'next.jpg' }) });
+    expect((img.element as HTMLImageElement).style.width).toBe('');
+    expect(button('Original size').attributes('aria-pressed')).toBe('false');
+    w.unmount();
   });
 
   it.each([

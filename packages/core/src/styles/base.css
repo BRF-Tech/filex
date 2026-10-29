@@ -8229,6 +8229,12 @@ filex-explorer {
   max-height: 100%;
 }
 
+/* Leave the last pixels scrollable above the floating image controls,
+   including the two-row toolbar on narrow screens. */
+.fe-viewer:not(.fe-viewer--bare) .fe-preview--image-expanded {
+  padding-bottom: calc(var(--fe-h-sm) * 2 + 48px);
+}
+
 /* Editors and document surfaces take every pixel — the old 70vh/78vh heights
    were sized for a card that no longer exists and would leave a dead band
    under the editor. */
@@ -8279,6 +8285,10 @@ filex-explorer {
 
 /* ---- Zoom pill ---- */
 .fe-viewer__zoom {
+  max-width: calc(100% - 24px);
+  width: max-content;
+  flex-wrap: wrap;
+  justify-content: center;
   position: absolute;
   left: 50%; /* rtl-physical: centred by translate(-50%) — the same place in both directions */
   bottom: 20px;
@@ -8286,9 +8296,9 @@ filex-explorer {
   display: inline-flex;
   align-items: center;
   gap: var(--fe-gap-xs);
-  height: var(--fe-h-md);
-  padding: 0 var(--fe-gap-sm);
-  border-radius: 999px;
+  min-height: var(--fe-h-md);
+  padding: var(--fe-gap-xs) var(--fe-gap-sm);
+  border-radius: var(--fe-radius-lg);
   border: 1px solid var(--fe-border);
   background: var(--fe-bg-elev);
   box-shadow: var(--fe-shadow);
@@ -8330,6 +8340,11 @@ filex-explorer {
 .fe-viewer__zoom-level:hover {
   background: var(--fe-bg-hover);
   color: var(--fe-text);
+}
+.fe-viewer__zoom-level[aria-pressed="true"] {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+  box-shadow: inset 0 0 0 1px var(--fe-border);
 }
 .fe-viewer__zoom-btn:disabled {
   opacity: 0.4;

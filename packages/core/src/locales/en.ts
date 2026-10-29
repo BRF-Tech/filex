@@ -1981,6 +1981,7 @@ export const en: Record<string, string> = {
   'viewer.nav_next': 'Next file',
   /* The counter in the top bar's meta line: "246.3 KB • Sep 9, 2026 • 1 of 9". */
   'viewer.counter': '{i} of {n}',
+  'viewer.original_size': 'Original size',
   'viewer.zoom_reset': 'Reset zoom',
   'viewer.fullscreen': 'Full screen',
   'viewer.exit_fullscreen': 'Exit full screen',

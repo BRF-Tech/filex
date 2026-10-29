@@ -1952,6 +1952,7 @@ export const tr: Record<string, string> = {
   'viewer.nav_next': 'Sonraki dosya',
   /* Üst çubuğun künye satırındaki sayaç: "246,3 KB • 9 Eyl 2026 • 1 / 9". */
   'viewer.counter': '{i} / {n}',
+  'viewer.original_size': 'Özgün boyut',
   'viewer.zoom_reset': 'Yakınlaştırmayı sıfırla',
   'viewer.fullscreen': 'Tam ekran',
   'viewer.exit_fullscreen': 'Tam ekrandan çık',
