@@ -3756,11 +3756,17 @@ A workflow pushed ahead of its export goes red on GitHub (0.52.0).
     rebuilds and republishes the site -
     but it reads a **snapshot** at `/root/filex-docs-src`, and it deliberately
     refreshes only `RELEASES.md` inside it. Everything else in `docs/` reaches
-    the site when a person copies it there, and nothing scripted does that.
+    the site when it is copied there, and nothing on the server does that.
+    The ship's `docs` step (`scripts/train/ship.mjs`, when `SHIP_DOCS_SRC` is
+    set) does it; by hand, from the repository root:
 
     ```bash
-    ssh main 'cp -a /root/filex-docs-src /root/filex-docs-src.bak-$(date +%Y%m%d-%H%M%S)'
-    ssh main 'rm -rf /root/filex-docs-src/docs'
+    # The ship's own first half (scripts/train/remote/docs-prepare.sh): a copy
+    # of the snapshot, the two newest copies kept and older ones removed by
+    # name, then docs/ cleared.
+    stamp=$(date -u +%Y%m%d-%H%M%S)
+    cat scripts/train/remote/common.sh scripts/train/remote/docs-prepare.sh |
+      ssh main 'f=$(mktemp) && cat > "$f" && bash "$f" /root/filex-docs-src '"$stamp"'; rc=$?; rm -f "$f"; exit $rc'
     # ⚠⚠ From the EXPORT, not from here. docs.filex.sh is a public site, and
     # this tree carries the private module path: `docs/PLUGINS.md` tells a
     # plugin author to import `github.com/brf-tech/filex/backend/pkg/
@@ -3782,8 +3788,17 @@ A workflow pushed ahead of its export goes red on GitHub (0.52.0).
     ```
 
     > ⚠ Keep `docs-site/node_modules` on the server: the refresh script builds
-    > there and does not install. The `rm -rf` above is scoped to `docs/` for
+    > there and does not install. `docs-prepare.sh` empties only `docs/` for
     > that reason.
+    >
+    > ⚠ The copy is the only way back to what the site was built from (the
+    > snapshot is not a git checkout), and every copy carries that
+    > `node_modules`. Until 2026-10-29 the step copied and never removed:
+    > 34 copies, 7.8 GB, had piled up on the server since 2026-09-05. The
+    > script now keeps the two newest, ordered by the stamp in the name and
+    > not by mtime (`cp -a` keeps the snapshot's mtime, so `ls -t` sorts the
+    > copies by when the site last changed). A name that is not exactly
+    > `filex-docs-src.bak-YYYYMMDD-HHMMSS` is never touched.
     >
     > Why this is a numbered step: measured 2026-09-05, hours after v0.32.0 was
     > tagged and deployed, `/root/filex-docs-src/docs/index.md` was still the

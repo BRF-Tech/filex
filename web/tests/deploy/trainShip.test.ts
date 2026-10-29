@@ -475,6 +475,52 @@ describe.skipIf(!BASH)('the server scripts', () => {
     expect(fs.readFileSync(compose, 'utf8')).toBe(text);
   });
 
+  // ⚠ 2026-10-29: the docs step copied the snapshot and never removed a copy;
+  // 34 of them (7.8 GB, each with docs-site/node_modules) had piled up on the
+  // server. Two stay, ordered by the stamp in the name: `cp -a` keeps the
+  // snapshot's mtime, so an mtime order would keep the wrong ones.
+  const DOCS_PREPARE = posixPath(path.join(REMOTE, 'docs-prepare.sh'));
+  const docsPrepare = (d: string, src: string, stamp: string) =>
+    sh('cat "$1" "$2" > "$3/run.sh" && bash "$3/run.sh" "$4" "$5"', COMMON, DOCS_PREPARE, posixPath(d), posixPath(src), stamp);
+
+  it('keep the two newest docs snapshot copies, remove older ones by name, and touch nothing else', () => {
+    const d = tmp();
+    const src = path.join(d, 'docs-src');
+    const copy = (stamp: string) => path.join(d, `docs-src.bak-${stamp}`);
+    fs.mkdirSync(path.join(src, 'docs-site', 'node_modules'), { recursive: true });
+    fs.mkdirSync(path.join(src, 'docs'));
+    fs.writeFileSync(path.join(src, 'docs', 'index.md'), '# yesterday\n');
+    for (const s of ['20260101-000000', '20260201-000000', '20260301-000000']) fs.mkdirSync(copy(s));
+    fs.mkdirSync(path.join(d, 'docs-src.bak-by-hand'));
+    fs.writeFileSync(path.join(d, 'docs-src.bak-20250101-000000.tgz'), 'x');
+    const old = new Date('2020-01-01T00:00:00Z');
+    fs.utimesSync(copy('20260301-000000'), old, old);
+    fs.utimesSync(copy('20260101-000000'), new Date(), new Date());
+    fs.utimesSync(src, old, old);
+
+    const r = docsPrepare(d, src, '20260401-000000');
+    expect(r.status, r.stderr + r.stdout).toBe(0);
+    expect(fs.readdirSync(d).filter((n) => n.startsWith('docs-src.bak-')).sort()).toEqual([
+      'docs-src.bak-20250101-000000.tgz',
+      'docs-src.bak-20260301-000000',
+      'docs-src.bak-20260401-000000',
+      'docs-src.bak-by-hand',
+    ]);
+    expect(fs.readFileSync(path.join(copy('20260401-000000'), 'docs', 'index.md'), 'utf8')).toBe('# yesterday\n');
+    expect(fs.existsSync(path.join(src, 'docs'))).toBe(false);
+    expect(fs.existsSync(path.join(src, 'docs-site', 'node_modules'))).toBe(true);
+  });
+
+  it('refuse a docs snapshot stamp that is not YYYYMMDD-HHMMSS, and copy nothing', () => {
+    const d = tmp();
+    const src = path.join(d, 'docs-src');
+    fs.mkdirSync(path.join(src, 'docs-site'), { recursive: true });
+    const r = docsPrepare(d, src, '2026-10-29');
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('YYYYMMDD-HHMMSS');
+    expect(fs.readdirSync(d).filter((n) => n.startsWith('docs-src.bak-'))).toEqual([]);
+  });
+
   it('refuse an instance whose directory is not an absolute path below /', () => {
     const r = sh('source "$1"; parse_instance "prod:relative/dir:5213:data/instance.sqlite:filex"', COMMON);
     expect(r.status).not.toBe(0);
