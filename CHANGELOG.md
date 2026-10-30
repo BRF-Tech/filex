@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.57.7] - 2026-10-30
+
+### Added
+
+- **A tall picture can be read in the image viewer** (by @chengjie in
+  [PR #131](https://github.com/BRF-Tech/filex/pull/131)). An image opens
+  fitted to the window, so a long scan or screenshot showed as a narrow strip
+  whose text could not be read. Two buttons beside the zoom controls change
+  that: **Fit width** makes the picture as wide as the viewer and lets it
+  scroll down to its last line, which stays clear of the controls, and
+  **Original size** shows it at its own pixels, scrolling either way. Zoom
+  steps from the chosen mode, the percentage takes the picture back to the
+  window, and the next image opens fitted again. The controls wrap onto two
+  rows on a narrow screen, and the chosen mode is announced to screen
+  readers.
+
+### Fixed
+
+- **The macOS, Microsoft Store and snap packages offer "Open with filex"
+  for every kind the app store's apps open again.** These packages declare
+  their file types when they are built, from the store's signed catalog.
+  The Office editor 0.4.0 came to the store after 0.57.6 was built and opens
+  the older Office formats too (`.doc`, `.xls`, `.ppt`, `.rtf`, their
+  templates and macro-enabled forms, and the OpenDocument flat and template
+  files), so those packages did not offer filex for them. They now declare
+  62 kinds instead of 23. Windows' installer and Linux learn the kinds from
+  your servers while the app runs, and already had them.
+
 ## [0.57.6] - 2026-10-26
 
 ### Fixed

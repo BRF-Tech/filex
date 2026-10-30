@@ -58,17 +58,51 @@
               <uap:FileType>.afphoto</uap:FileType>
               <uap:FileType>.afpub</uap:FileType>
               <uap:FileType>.dio</uap:FileType>
+              <uap:FileType>.docm</uap:FileType>
+              <uap:FileType>.dot</uap:FileType>
+              <uap:FileType>.dotm</uap:FileType>
+              <uap:FileType>.dotx</uap:FileType>
+              <uap:FileType>.dps</uap:FileType>
+              <uap:FileType>.dpt</uap:FileType>
               <uap:FileType>.drawio</uap:FileType>
+              <uap:FileType>.et</uap:FileType>
+              <uap:FileType>.ett</uap:FileType>
+              <uap:FileType>.fodp</uap:FileType>
+              <uap:FileType>.fods</uap:FileType>
+              <uap:FileType>.fodt</uap:FileType>
               <uap:FileType>.fxdoom</uap:FileType>
               <uap:FileType>.fxtxt</uap:FileType>
               <uap:FileType>.jsdos</uap:FileType>
+              <uap:FileType>.mht</uap:FileType>
+              <uap:FileType>.mhtml</uap:FileType>
               <uap:FileType>.otf</uap:FileType>
+              <uap:FileType>.otp</uap:FileType>
+              <uap:FileType>.ots</uap:FileType>
+              <uap:FileType>.ott</uap:FileType>
+              <uap:FileType>.pot</uap:FileType>
+              <uap:FileType>.potm</uap:FileType>
+              <uap:FileType>.potx</uap:FileType>
+              <uap:FileType>.pps</uap:FileType>
+              <uap:FileType>.ppsm</uap:FileType>
+              <uap:FileType>.ppsx</uap:FileType>
+              <uap:FileType>.pptm</uap:FileType>
               <uap:FileType>.psb</uap:FileType>
               <uap:FileType>.psd</uap:FileType>
               <uap:FileType>.pxd</uap:FileType>
+              <uap:FileType>.stw</uap:FileType>
+              <uap:FileType>.sxc</uap:FileType>
+              <uap:FileType>.sxi</uap:FileType>
+              <uap:FileType>.sxw</uap:FileType>
               <uap:FileType>.wad</uap:FileType>
               <uap:FileType>.woff</uap:FileType>
               <uap:FileType>.woff2</uap:FileType>
+              <uap:FileType>.wps</uap:FileType>
+              <uap:FileType>.wpt</uap:FileType>
+              <uap:FileType>.xlsb</uap:FileType>
+              <uap:FileType>.xlsm</uap:FileType>
+              <uap:FileType>.xlt</uap:FileType>
+              <uap:FileType>.xltm</uap:FileType>
+              <uap:FileType>.xltx</uap:FileType>
             </uap:SupportedFileTypes>
           </uap3:FileTypeAssociation>
         </uap3:Extension>

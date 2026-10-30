@@ -744,19 +744,33 @@ const imgEl = ref<HTMLImageElement | null>(null);
  *  Everything else is a multiple of it, which is what makes "100%" mean
  *  "the size you first saw" rather than "the pixel size of the file". */
 const fitWidth = ref(0);
+const imageMode = ref<'fit' | 'width' | 'original'>('fit');
+const naturalWidth = ref(0);
+
+function selectImageMode(mode: 'width' | 'original'): void {
+  imageMode.value = mode;
+  zoom.value = 1;
+  void nextTick(() => imgEl.value?.parentElement?.scrollTo({ top: 0, left: 0 }));
+}
 
 const canZoom = computed(() => showChrome.value && kind.value === 'image');
 
 function measureFit(): void {
-  if (zoom.value !== 1 || !imgEl.value) return;
+  if (!imgEl.value) return;
+  naturalWidth.value = imgEl.value.naturalWidth;
+  if (imageMode.value !== 'fit' || zoom.value !== 1) return;
   const w = imgEl.value.getBoundingClientRect().width;
   if (w > 0) fitWidth.value = w;
 }
 
 const imageStyle = computed(() => {
-  if (zoom.value === 1 || !fitWidth.value) return undefined;
+  if (imageMode.value === 'fit' && (zoom.value === 1 || !fitWidth.value)) return undefined;
+  if (imageMode.value === 'original' && !naturalWidth.value) return undefined;
+  const width = imageMode.value === 'width'
+    ? `${zoom.value * 100}%`
+    : `${Math.round((imageMode.value === 'original' ? naturalWidth.value : fitWidth.value) * zoom.value)}px`;
   return {
-    width: `${Math.round(fitWidth.value * zoom.value)}px`,
+    width,
     height: 'auto',
     maxWidth: 'none',
     maxHeight: 'none',
@@ -774,6 +788,7 @@ function stepZoom(dir: 1 | -1): void {
 }
 
 function resetZoom(): void {
+  imageMode.value = 'fit';
   zoom.value = 1;
   void nextTick(measureFit);
 }
@@ -1247,6 +1262,8 @@ async function runOrchestration(open: boolean, url: string, k: string): Promise<
    * the previous photo means the next one opens mid-crop with no hint why. */
   zoom.value = 1;
   fitWidth.value = 0;
+  naturalWidth.value = 0;
+  imageMode.value = 'fit';
   disposeOnlyOfficeEditor();
   disposeMonaco();
   if (!open || !url) return;
@@ -2322,7 +2339,7 @@ onBeforeUnmount(() => {
         data-testid="viewer-stage"
         @click.self="onGroundClick"
       >
-        <div v-if="file" class="fe-preview" :class="stageModifier" @click.self="onGroundClick">
+        <div v-if="file" class="fe-preview" :class="[stageModifier, { 'fe-preview--image-expanded': canZoom && imageMode !== 'fit' }]" @click.self="onGroundClick">
           <template v-if="kind === 'image'">
             <img
               ref="imgEl"
@@ -2597,6 +2614,19 @@ onBeforeUnmount(() => {
            paint their own zoom inside their surface, and a second percentage
            that the content does not obey is a control that lies. -->
       <div v-if="canZoom" class="fe-viewer__zoom">
+        <button
+          type="button"
+          class="fe-viewer__zoom-level"
+          :aria-pressed="imageMode === 'width'"
+          @click="selectImageMode('width')"
+        >{{ t('viewer.fit_width') }}</button>
+        <button
+          type="button"
+          class="fe-viewer__zoom-level"
+          :aria-pressed="imageMode === 'original'"
+          @click="selectImageMode('original')"
+        >{{ t('viewer.original_size') }}</button>
+        <span class="fe-viewer__zoom-sep" aria-hidden="true"></span>
         <button
           type="button"
           class="fe-viewer__zoom-btn"

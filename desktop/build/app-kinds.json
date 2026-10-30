@@ -2,7 +2,7 @@
   "about": "The kinds of file the app store's apps open, for the packages that declare them at build time (macOS, the Microsoft Store, the snap). Written by `pnpm --dir desktop app-kinds:refresh` (scripts/app-kinds.mjs); edit nothing here by hand.",
   "store": "https://apps.filex.sh",
   "index_key": "df18ded0d71e46e2d53cd479526744ebb9c3ddadb854a32879448fa64453636c",
-  "serial": 27,
+  "serial": 36,
   "linux_types_from": "shared-mime-info 2.4 (Ubuntu 26.04)",
   "apps": [
     {
@@ -19,7 +19,7 @@
     },
     {
       "name": "office-editor",
-      "version": "0.3.1"
+      "version": "0.4.0"
     },
     {
       "name": "retro",
@@ -56,9 +56,34 @@
       "linux": []
     },
     {
+      "ext": "csv",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "text/csv"
+      ]
+    },
+    {
       "ext": "dio",
       "apps": [
         "drawio"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "doc",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/msword"
+      ]
+    },
+    {
+      "ext": "docm",
+      "apps": [
+        "office-editor"
       ],
       "linux": []
     },
@@ -72,11 +97,92 @@
       ]
     },
     {
+      "ext": "dot",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/msword-template",
+        "text/vnd.graphviz"
+      ]
+    },
+    {
+      "ext": "dotm",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "dotx",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.template"
+      ]
+    },
+    {
+      "ext": "dps",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "dpt",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": []
+    },
+    {
       "ext": "drawio",
       "apps": [
         "drawio"
       ],
       "linux": []
+    },
+    {
+      "ext": "et",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "ett",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "fodp",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.oasis.opendocument.presentation-flat-xml"
+      ]
+    },
+    {
+      "ext": "fods",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.oasis.opendocument.spreadsheet-flat-xml"
+      ]
+    },
+    {
+      "ext": "fodt",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.oasis.opendocument.text-flat-xml"
+      ]
     },
     {
       "ext": "fxdoom",
@@ -98,6 +204,24 @@
         "retro"
       ],
       "linux": []
+    },
+    {
+      "ext": "mht",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/x-mimearchive"
+      ]
+    },
+    {
+      "ext": "mhtml",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/x-mimearchive"
+      ]
     },
     {
       "ext": "odp",
@@ -137,6 +261,100 @@
       ]
     },
     {
+      "ext": "otp",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.oasis.opendocument.presentation-template"
+      ]
+    },
+    {
+      "ext": "ots",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.oasis.opendocument.spreadsheet-template"
+      ]
+    },
+    {
+      "ext": "ott",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.oasis.opendocument.text-template"
+      ]
+    },
+    {
+      "ext": "pot",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.ms-powerpoint",
+        "text/x-gettext-translation-template"
+      ]
+    },
+    {
+      "ext": "potm",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "potx",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.openxmlformats-officedocument.presentationml.template"
+      ]
+    },
+    {
+      "ext": "pps",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.ms-powerpoint"
+      ]
+    },
+    {
+      "ext": "ppsm",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "ppsx",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.openxmlformats-officedocument.presentationml.slideshow"
+      ]
+    },
+    {
+      "ext": "ppt",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.ms-powerpoint"
+      ]
+    },
+    {
+      "ext": "pptm",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": []
+    },
+    {
       "ext": "pptx",
       "apps": [
         "office-editor"
@@ -167,6 +385,51 @@
         "media-thumbs"
       ],
       "linux": []
+    },
+    {
+      "ext": "rtf",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/rtf"
+      ]
+    },
+    {
+      "ext": "stw",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.sun.xml.writer.template"
+      ]
+    },
+    {
+      "ext": "sxc",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.sun.xml.calc"
+      ]
+    },
+    {
+      "ext": "sxi",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.sun.xml.impress"
+      ]
+    },
+    {
+      "ext": "sxw",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.sun.xml.writer"
+      ]
     },
     {
       "ext": "ttf",
@@ -205,12 +468,76 @@
       ]
     },
     {
+      "ext": "wps",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.ms-works"
+      ]
+    },
+    {
+      "ext": "wpt",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "xls",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.ms-excel"
+      ]
+    },
+    {
+      "ext": "xlsb",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "xlsm",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": []
+    },
+    {
       "ext": "xlsx",
       "apps": [
         "office-editor"
       ],
       "linux": [
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      ]
+    },
+    {
+      "ext": "xlt",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.ms-excel"
+      ]
+    },
+    {
+      "ext": "xltm",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": []
+    },
+    {
+      "ext": "xltx",
+      "apps": [
+        "office-editor"
+      ],
+      "linux": [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.template"
       ]
     }
   ]

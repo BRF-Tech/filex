@@ -1929,6 +1929,15 @@
       "scene": "capture.mjs",
       "taken": "2026-10-07T01:02:26.153Z",
       "checked": "2026-10-16T23:32:53.970Z"
+    },
+    "viewer/image-fit-width-1280.png": {
+      "sha256": "0cfd1217d7aeae50e5237343821c7cf592a6bc6e577f215821294ae5cee0504a",
+      "width": 2560,
+      "height": 1720,
+      "bytes": 62312,
+      "scene": "viewer.mjs",
+      "taken": "2026-10-30T17:29:09.839Z",
+      "checked": "2026-10-30T17:29:09.839Z"
     }
   },
   "scenes": {
@@ -2036,6 +2045,9 @@
     },
     "vault.mjs": {
       "digest": "462087e7c426ef0efa623e72ea1a7cb2a4ddfc6b8b2c7c319e552bea4475183e"
+    },
+    "viewer.mjs": {
+      "digest": "f82c9e196504649d8209f060f5a181b03cc78692ed62e62e94475370f948b268"
     }
   }
 }

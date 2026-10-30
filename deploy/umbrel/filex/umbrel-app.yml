@@ -2,13 +2,11 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.57.6"
+version: "0.57.7"
 releaseNotes: |-
-  filex v0.57.6 - 2026-10-26
-  • Cancelling a job at the instant the queue picks it up works the first time.
-  • A job waiting for a storage scan keeps showing why it waits.
-  • A group's grant shows the group in the details panel
-  • An app with its own interface fills the window below its heading
+  filex v0.57.7 - 2026-10-30
+  • A tall picture can be read in the image viewer
+  • The macOS, Microsoft Store and snap packages offer "Open with filex" for every kind the app store's apps open again.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-
