@@ -21,7 +21,7 @@ const EVERY_PAGE = [
   '/admin/explore', '/admin/files', '/admin/shares', '/admin/trash', '/admin/tagged', '/admin/duplicates', '/admin/search',
   '/admin/storages', '/admin/connections', '/admin/sync', '/admin/replica', '/admin/usage',
   '/admin/users', '/admin/groups', '/admin/roles', '/admin/grants',
-  '/admin/auth-providers', '/admin/login-security', '/admin/encryption', '/admin/protection', '/admin/api-mcp',
+  '/admin/auth-providers', '/admin/login-security', '/admin/bot-protection', '/admin/encryption', '/admin/protection', '/admin/api-mcp',
   '/admin/plugins', '/admin/external', '/admin/webhooks', '/admin/notifications', '/admin/ai-assistant',
   '/admin/settings', '/admin/tenancy', '/admin/branding', '/admin/appearance', '/admin/archives',
   '/admin/queue', '/admin/tools', '/admin/audit', '/admin/updates', '/admin/about',
