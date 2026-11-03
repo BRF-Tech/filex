@@ -176,6 +176,16 @@ that documents it. The [README](../README.md) is the short tour, with pictures;
   ([docs/CONFIGURATION.md](CONFIGURATION.md#sign-in-attempt-limits)); since 0.57 the variable
   seeds the page's list at the first start and the saved list wins after that
   ([Trusted proxies](CONFIGURATION.md#trusted-proxies)).
+- **Bot protection** (0.58) - Cloudflare Turnstile or Google reCAPTCHA v2 on the
+  forms anybody can post: the sign-in, a demo's one-click sign-in, a link's PIN
+  and the upload into a file request, each on or off by itself on **Admin → Bot
+  protection** (or `CAPTCHA_*`, read live while the page leaves a
+  field empty). Off by default. The check runs before the password or the PIN
+  is compared, so a refusal spends no attempt. When the provider cannot be
+  reached, or its keys cannot work, the browser does a short proof of work
+  instead and the administrators are told; a refusal from the provider (a 429
+  too) is never taken for an outage. Several instances share the outage and the
+  once-only marks through the database ([docs/BOT-PROTECTION.md](BOT-PROTECTION.md)).
 - **Changes from another site are refused** - a request that changes something and
   carries only the visitor's session (the cookie, or a trusted proxy's sign-in header)
   must come from filex's own pages, its own address or an origin listed in

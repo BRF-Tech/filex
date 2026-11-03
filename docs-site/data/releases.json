@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-10-26",
+  "generatedAt": "2026-10-30",
   "releases": [
+    {
+      "tag": "v0.57.7",
+      "date": "2026-10-30T20:15:02Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.57.7",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Added\n\n- **A tall picture can be read in the image viewer** (by @chengjie in\n  [PR #131](https://github.com/BRF-Tech/filex/pull/131)). An image opens\n  fitted to the window, so a long scan or screenshot showed as a narrow strip\n  whose text could not be read. Two buttons beside the zoom controls change\n  that: **Fit width** makes the picture as wide as the viewer and lets it\n  scroll down to its last line, which stays clear of the controls, and\n  **Original size** shows it at its own pixels, scrolling either way. Zoom\n  steps from the chosen mode, the percentage takes the picture back to the\n  window, and the next image opens fitted again. The controls wrap onto two\n  rows on a narrow screen, and the chosen mode is announced to screen\n  readers.\n\n### Fixed\n\n- **The macOS, Microsoft Store and snap packages offer \"Open with filex\"\n  for every kind the app store's apps open again.** These packages declare\n  their file types when they are built, from the store's signed catalog.\n  The Office editor 0.4.0 came to the store after 0.57.6 was built and opens\n  the older Office formats too (`.doc`, `.xls`, `.ppt`, `.rtf`, their\n  templates and macro-enabled forms, and the OpenDocument flat and template\n  files), so those packages did not offer filex for them. They now declare\n  62 kinds instead of 23. Windows' installer and Linux learn the kinds from\n  your servers while the app runs, and already had them.\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0577---2026-10-30)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.57.7",
+        "ghcr.io/brf-tech/filex:full-v0.57.7"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
     {
       "tag": "v0.57.6",
       "date": "2026-10-26T18:29:30Z",

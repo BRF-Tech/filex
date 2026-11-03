@@ -30,6 +30,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/capability"
+	"github.com/brf-tech/filex/backend/internal/captcha"
 	cloudpkg "github.com/brf-tech/filex/backend/internal/cloud" /* kimlik:e3 cloud */
 	"github.com/brf-tech/filex/backend/internal/coedit"
 	"github.com/brf-tech/filex/backend/internal/config"
@@ -187,6 +188,9 @@ type Deps struct {
 	// SFTP, FTPS and NFS listeners after BuildRouter. Constructed in
 	// BuildRouter from Store and ACL when nil.
 	E2EPolicy *e2epolicy.Service
+	// Captcha is the bot check on the forms anybody can post (internal/captcha).
+	// Constructed in BuildRouter when nil.
+	Captcha *captcha.Verifier
 	// E2ERequests keeps the approval policy's encryption requests
 	// (internal/e2epolicy requests.go): the explorer leaves them, the panel
 	// decides them. Constructed in BuildRouter from E2EPolicy and Notify when
@@ -293,6 +297,12 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.ACL == nil {
 		d.ACL = acl.New(d.Store)
 	}
+	// The bot check (internal/captcha): before the security headers, whose
+	// frame-src names the provider's widget while it is on.
+	if d.Captcha == nil {
+		d.Captcha = newCaptchaVerifier(d)
+	}
+	captchaH := handlers.NewCaptcha(d.Captcha)
 	// The vault (encryption level 3, docs/E2E-VAULT-FORMAT.md → Writes from
 	// anywhere else): inside a vault folder only the vault API writes. The
 	// resolver's sets are what every write door hands writegate - the
@@ -694,6 +704,9 @@ func BuildRouter(d *Deps) http.Handler {
 	pubAPI.AttachDrop(dh)
 	pubAPI.AttachLocale(d.Cfg.DefaultLocale)
 	pubAPI.AttachACL(d.ACL)
+	pubAPI.AttachCaptcha(captchaH)
+	dh.AttachCaptcha(captchaH)
+	sh.AttachCaptcha(captchaH)
 	// The SPA shell for /s/ and /d/ when a JavaScript browser asks for HTML;
 	// the Go pages below stay as the no-JS answer. See handlers.PublicShell.
 	//
@@ -850,6 +863,15 @@ func BuildRouter(d *Deps) http.Handler {
 	authh := handlers.NewAuth(d.Store, d.LocalAuth, d.OIDCAuth, d.Cfg.PublicURL, d.Cfg.MultiTenant, d.Cfg.CookieDomain)
 	authh.OIDCLocalLogout = d.Cfg.Auth.OIDC.LocalLogout()
 	authh.Guard = d.LoginGuard
+	// The bot check on the password sign-in; a demo's one-click account is
+	// its own form (demo_login).
+	authh.Captcha = captchaH
+	if d.Cfg.Demo.Mode {
+		authh.DemoUser = strings.TrimSpace(d.Cfg.Demo.User)
+		if authh.DemoUser == "" {
+			authh.DemoUser = "demo@demo.com"
+		}
+	}
 	// What a realm's sign-in may use (GET /api/auth/methods), and the
 	// buttons the sign-in page first draws (/api/capabilities `auth_sso`).
 	authh.Live = d.AuthLive
@@ -1082,8 +1104,16 @@ func BuildRouter(d *Deps) http.Handler {
 	r.Route("/api/public/d/{token}", func(r chi.Router) {
 		r.Get("/", pubAPI.DropState)
 		r.Post("/pin", pubAPI.PIN)
+		// The bot check's pass for the upload below (handlers/captcha.go).
+		r.Post("/captcha", captchaH.DropPass)
 		r.Post("/upload", pubAPI.DropUpload)
 	})
+
+	// ────── the bot check (internal/captcha) ──────
+	// What a form draws, and the local fallback when the widget's script did
+	// not load. No session, no secret, throttled per address.
+	r.Get("/api/captcha/config", captchaH.Config)
+	r.Post("/api/captcha/local/challenge", captchaH.LocalChallenge)
 	r.Handle("/p/{token}", handlers.RetiredPagePrefix())
 	r.Handle("/p/{token}/*", handlers.RetiredPagePrefix())
 	r.Handle("/api/p/{token}", handlers.RetiredPageAPI())
@@ -2397,6 +2427,14 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Patch("/assistant", assistantAdminH.Patch)
 				r.Post("/assistant/test", assistantAdminH.Test)
 
+				// Admin → Bot protection (internal/captcha), the
+				// platform operator's (asked in each method). The secret is
+				// written, never read back.
+				captchaAdminH := &handlers.CaptchaAdmin{V: d.Captcha}
+				r.Get("/captcha", captchaAdminH.Get)
+				r.Patch("/captcha", captchaAdminH.Patch)
+				r.Post("/captcha/test", captchaAdminH.Test)
+
 				// A tenant runs itself (docs/TENANT-ADMIN.md): its own OIDC and
 				// LDAP, its own domains. A tenant's administrator acts on their
 				// own tenant; the platform operator names one (?tenant=<id>).
@@ -3309,6 +3347,10 @@ func pageFrameSources(d *Deps) func(*http.Request) []string {
 		// The ONLYOFFICE editor's frame (task #92), when its origin is not
 		// already the document server's above.
 		if fo := d.Cfg.ExternalServices.OnlyOffice.FrameOrigin; fo != "" {
+			out = append(out, fo)
+		}
+		// The bot check's widget (Turnstile / reCAPTCHA), while it is on.
+		if fo := captchaFrameSource(d.Captcha, r); fo != "" {
 			out = append(out, fo)
 		}
 		return out

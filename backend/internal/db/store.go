@@ -1242,6 +1242,15 @@ type Store interface {
 	// cards). nil storageIDs is every storage; an empty slice is none.
 	ThumbnailGenerators(ctx context.Context, storageIDs []int64) (map[string]int64, error)
 
+	// The bot check's shared state (migration 00134, internal/captcha): the
+	// outage flag and the once-only marks, a key and the unix second it ends.
+	// Written once for every engine (CaptchaMarkSQL).
+	CaptchaMarkUntil(ctx context.Context, key string) (int64, bool, error)
+	// AddCaptchaMark: false when a mark with the key is still live at now.
+	AddCaptchaMark(ctx context.Context, key string, expires, now int64) (bool, error)
+	PutCaptchaMark(ctx context.Context, key string, expires int64) error
+	PruneCaptchaMarks(ctx context.Context, now int64) (int64, error)
+
 	// Sign-in attempt counters (migration 00072, internal/loginguard): how many
 	// wrong attempts an account identifier or an address has made, and until
 	// when it is locked. Written once for every engine (LoginThrottleSQL).

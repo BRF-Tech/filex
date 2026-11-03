@@ -79,6 +79,11 @@ func (c *Client) Login(ctx context.Context, in LoginRequest) (*LoginResponse, er
 		if IsTOTPRequired(err) {
 			return nil, fmt.Errorf("%w (this account has two-factor auth - pass --totp <code>)", err)
 		}
+		if IsCaptchaRefusal(err) {
+			// The bot check runs in a browser; a terminal cannot answer it,
+			// and nothing here goes around it.
+			return nil, fmt.Errorf("%w (this server protects the password sign-in with a bot check: create an API key in the browser (Connections, API keys) and use it with FILEX_TOKEN)", err)
+		}
 		return nil, err
 	}
 	var ans struct {
@@ -151,6 +156,20 @@ func handoffTarget(base, origin string) (string, error) {
 		return "", fmt.Errorf("the server handed this sign-in from an encrypted address to an unencrypted one (%s); the CLI does not send the one-use code there - sign in at the tenant's https address with --url, and ask the operator to check the tenant's address and FILEX_PUBLIC_URL", origin)
 	}
 	return strings.TrimRight(origin, "/"), nil
+}
+
+// IsCaptchaRefusal reports whether the server refused a sign-in for its bot
+// check (internal/captcha: 422 / 409 / 503 with a `captcha` field).
+func IsCaptchaRefusal(err error) bool {
+	var ae *APIError
+	if !errors.As(err, &ae) {
+		return false
+	}
+	var extra struct {
+		Captcha string `json:"captcha"`
+	}
+	_ = json.Unmarshal(ae.Body, &extra)
+	return extra.Captcha != ""
 }
 
 // IsTOTPRequired reports whether err is the server asking for (or refusing)

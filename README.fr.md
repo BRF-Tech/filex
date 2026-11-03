@@ -286,7 +286,7 @@ Toutes les fonctionnalités de l’explorateur en détail : [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![La page de connexion portant le thème de l’opérateur](https://filex.sh/shots/appearance/themed-signin-1440.b891c6431444.png)
+![La page de connexion portant le thème de l’opérateur](https://filex.sh/shots/appearance/themed-signin-1440.0da9ad45502b.png)
 
 <sub>…et la page de connexion, avant que quiconque ne se soit connecté</sub>
 
@@ -355,7 +355,7 @@ Toutes les fonctionnalités de stockage et de protocoles en détail : [docs/FEA
 </td>
 <td width="50%" valign="top">
 
-![Clés d’API](https://filex.sh/shots/sidenav/apikeys-minted-1440.3464cb59b2f8.png)
+![Clés d’API](https://filex.sh/shots/sidenav/apikeys-minted-1440.cbad664dfed5.png)
 
 <sub>Clés d’API - créez les vôtres, dans l’explorateur ou dans une intégration (la session ou la clé d’une personne ; une intégration relayée par un proxy avec une seule clé partagée de type *app* n’a pas cette entrée)</sub>
 
@@ -411,7 +411,7 @@ Toutes les fonctionnalités de partage et de protection en détail : [docs/FEAT
 <tr>
 <td width="50%" valign="top">
 
-![Boîte de dialogue de partage](https://filex.sh/shots/share-modal.87cb16a1a6f0.png)
+![Boîte de dialogue de partage](https://filex.sh/shots/share-modal.3c132b06cd19.png)
 
 <sub>Partage - PIN, expiration, limite de téléchargements, `curl` en une ligne</sub>
 
@@ -443,7 +443,7 @@ Toutes les fonctionnalités de partage et de protection en détail : [docs/FEAT
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/admin-table-actions-1440.0fffdc146eb1.png)
+![Admin → Partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/admin-table-actions-1440.679f7daec8a4.png)
 
 <sub>Chaque tableau d’administration - un menu **Actions** épinglé par ligne, le même menu qu’ouvre le ⋮ de l’explorateur</sub>
 
@@ -482,7 +482,9 @@ Toutes les fonctionnalités de partage et de protection en détail : [docs/FEAT
   peuvent suivre les groupes de votre annuaire, et les exceptions par personne l’emportent
   sur le rôle.
 - Deviner un mot de passe prend du temps : les mots de passe erronés sont comptés par compte
-  et par adresse, sur le formulaire web comme sur WebDAV, FTPS et SFTP.
+  et par adresse, sur le formulaire web comme sur WebDAV, FTPS et SFTP ; une vérification
+  anti-robot (Cloudflare Turnstile ou reCAPTCHA) peut protéger la connexion, le code PIN d’un lien
+  et le dépôt dans une demande de fichiers.
 - Multilocataire par conception, derrière un seul interrupteur : chaque locataire a ses
   propres fournisseurs de connexion, son propre domaine et son propre certificat, et
   s’administre lui-même. Désactivé, aucun écran ne montre de locataire.
@@ -492,7 +494,7 @@ Toutes les fonctionnalités pour les personnes et l’accès en détail : [docs
 <p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png" alt="Admin → Rôles : les rôles intégrés et deux rôles personnalisés" width="860"></p>
 
 <details>
-<summary><b>Captures d’écran des personnes et de l’accès</b> - les rôles, les groupes, la sécurité de connexion, un compte verrouillé, le panneau d’administration et son menu</summary>
+<summary><b>Captures d’écran des personnes et de l’accès</b> - les rôles, les groupes, la sécurité de connexion, un compte verrouillé, la protection anti-robot, le panneau d’administration et son menu</summary>
 
 <table>
 <tr>
@@ -530,14 +532,14 @@ Toutes les fonctionnalités pour les personnes et l’accès en détail : [docs
 <tr>
 <td width="50%" valign="top">
 
-![Le formulaire de connexion d’un compte verrouillé](https://filex.sh/shots/loginsecurity/login-locked-1440.42e1fe6f1937.png)
+![Le formulaire de connexion d’un compte verrouillé](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
 
 <sub>…et ce que dit le formulaire de connexion d’un compte verrouillé, avec le compte à rebours du verrouillage sur son bouton</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Tableau de bord d’administration](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
+![Tableau de bord d’administration](https://filex.sh/shots/admin-dashboard.3becd8ffe998.png)
 
 <sub>Panneau d’administration</sub>
 
@@ -546,14 +548,30 @@ Toutes les fonctionnalités pour les personnes et l’accès en détail : [docs
 <tr>
 <td width="50%" valign="top">
 
-![Page d’accueil de la démo](https://filex.sh/shots/demo-landing.64f23c6f8cb3.png)
+![Admin → Protection anti-robot, en thème sombre](https://filex.sh/shots/botprotection/bot-protection-dark-1440.0aaf54749fc8.png)
+
+<sub>Protection anti-robot - Cloudflare Turnstile ou Google reCAPTCHA, ses clés et les formulaires qu’elle protège ; quand le fournisseur ne répond pas, le navigateur fait à la place une courte preuve de travail ([docs/BOT-PROTECTION.md](docs/BOT-PROTECTION.md))</sub>
+
+</td>
+<td width="50%" valign="top">
+
+![Le formulaire de connexion avec la vérification au-dessus de son bouton](https://filex.sh/shots/botprotection/login-captcha-dark-1440.099dd770db5c.png)
+
+<sub>…et le formulaire de connexion, la vérification au-dessus de son bouton</sub>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![Page d’accueil de la démo](https://filex.sh/shots/demo-landing.fba2be2d2961.png)
 
 <sub>Page d’accueil de la démo</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Le panneau Paramètres du menu d’administration, ouvert par-dessus Admin → Paramètres → Général](https://filex.sh/shots/megamenu/settings-panel-1440.23a710915f9c.png)
+![Le panneau Paramètres du menu d’administration, ouvert par-dessus Admin → Paramètres → Général](https://filex.sh/shots/megamenu/settings-panel-1440.42b03e9a539f.png)
 
 <sub>Le menu d’administration - toutes les pages en quatre panneaux, **Fichiers et stockage**, **Utilisateurs**, **Paramètres** (Général, Sécurité et données, Traitement des fichiers et intégrations) et **Maintenance et journaux**, avec une courte ligne sous chacune ; un téléphone affiche les mêmes pages dans un tiroir ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
 
@@ -786,7 +804,7 @@ partage ordinaire.
 <tr>
 <td width="50%" valign="top">
 
-![Le document verrouillé, son panneau Signatures ouvert](https://filex.sh/shots/signing/sign-status-1440.54c60e832ced.png)
+![Le document verrouillé, son panneau Signatures ouvert](https://filex.sh/shots/signing/sign-status-1440.537429f5f44b.png)
 
 <sub>Tant que la demande est en cours - le document gelé pour tout le monde et, dans ses détails, qui a signé</sub>
 
@@ -1021,7 +1039,7 @@ limites et son guide.
 | **L’explorateur** | Une même mise en page dans l’application d’administration, l’application de bureau et chaque intégration : un panneau de navigation, des vues liste, grille et galerie, des onglets, des étiquettes personnelles et d’équipe, une palette de commandes ⌘K, des raccourcis clavier reconfigurables, de nouveaux documents depuis le menu **+ Nouveau** et des thèmes composés par l’opérateur ([Intégration](docs/INTEGRATION.md), [Thèmes](docs/INTEGRATION.md#themes)) |
 | **Stockage** | Disques locaux, S3, FTP, SFTP, WebDAV et SMB/NAS montés côte à côte, la copie et le déplacement de l’un à l’autre, et une extension pour tout le reste, depuis le panneau d’administration ou une boutique d’applications ([Stockage](docs/STORAGE.md), [Extensions de stockage](docs/PLUGINS.md)) |
 | **Sans navigateur** | La même arborescence servie en S3, SFTP, FTPS, NFSv3 et WebDAV - un déplacement ou une suppression faits par là sont aussi sûrs, à côté d’une analyse du stockage, que dans l’interface web - plus `filex mount` en HTTPS ([Protocoles](docs/PROTOCOLS.md)) |
-| **Connexion** | OIDC, LDAP / Active Directory, comptes Windows et Linux, et limites de tentatives de connexion ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [Comptes du système](docs/OS-LOGIN.md)) |
+| **Connexion** | OIDC, LDAP / Active Directory, comptes Windows et Linux, limites de tentatives de connexion et une vérification anti-robot à la connexion et sur les formulaires publics - Turnstile ou reCAPTCHA, avec une preuve de travail locale quand le fournisseur ne répond pas ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [Comptes du système](docs/OS-LOGIN.md), [Protection anti-robot](docs/BOT-PROTECTION.md)) |
 | **Personnes et accès** | Rôles et autorisations par personne, groupes, accès par dossier et multilocataire natif ([Autorisations](docs/PERMISSIONS.md), [Groupes](docs/GROUPS.md), [Multilocataire](docs/MULTI-TENANCY.md)) |
 | **Partage** | Liens publics avec PIN, expiration et limite de téléchargements, demandes de fichiers et invitations au partage par e-mail ([Partage](docs/SHARING.md)) |
 | **Protection** | Corbeille et historique des versions, analyse ClamAV facultative, dossiers chiffrés de bout en bout, réplication vers un second stockage (avec une copie initiale de ce qui s’y trouve déjà) et un journal d’audit ([Corbeille et versions](docs/TRASH-VERSIONING.md), [Protection](docs/PROTECTION.md), [Chiffrement de bout en bout](docs/E2E-ENCRYPTION.md), [Réplication](docs/REPLICATION.md), [Journal d’audit](docs/BACKEND.md#admin-audit-log)) |

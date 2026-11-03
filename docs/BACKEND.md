@@ -106,6 +106,15 @@ username, and with a Windows provider also `.\alex` or `CORP\alex`.
 The session cookie is set by the same response. The Bearer token is for SPA
 embeds that prefer header auth.
 
+**The bot check.** While [bot protection](BOT-PROTECTION.md) is on for `login`
+(or `demo_login`, a demo's documented account), the body carries the widget's
+answer, `captcha_token` - or, during an outage, the local solution
+`captcha_local` - and it is judged before the password is compared:
+**422** `captcha_required` / `captcha_failed` / `captcha_expired` /
+`captcha_fallback_inactive` (`captcha` names the reason; the attempt is not
+counted against the account), **409** `captcha_fallback` with a `challenge`.
+A token is spent by the attempt, whatever the password turns out to be.
+
 **The account's language.** An account that holds no language yet is given
 the one its sign-in arrived in: the request's `Accept-Language` (the web panel
 sends the language on its screen; a browser back from an identity provider
@@ -1643,6 +1652,52 @@ is [`POST /api/public/s/{token}/pin`](#post-apipublicstokenpin-) below.
 
 ---
 
+## The bot check
+
+[BOT-PROTECTION.md](BOT-PROTECTION.md) is the whole story; the anonymous
+doors are these two, both `no-store` and limited per address.
+
+### `GET /api/captcha/config` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+What a form draws: `{"provider": "turnstile", "site_key": "0x4AAA…", "script":
+"https://challenges.cloudflare.com/turnstile/v0/api.js", "fallback": "local",
+"forms": ["login", "demo_login", "share_password", "file_request"],
+"misconfigured": false, "fallback_active": false, "local_field":
+"captcha_local", "token_field": "captcha_token"}`. Off: `provider: "none"`,
+`site_key` and `script` null, `forms` empty. Never the secret.
+
+### `POST /api/captcha/local/challenge` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+Asked by a page whose widget script did not load. **200** `{"captcha":
+"fallback", "challenge": {algorithm, salt, hash, signature, maxnumber}}` when
+the server cannot reach the provider either (or its keys cannot work) - the
+outage flag is raised; **409** `{"captcha": "provider"}` when it can (an ad
+blocker is not an outage); **404** when the check is off.
+
+### `GET /api/admin/captcha` ![admin](https://img.shields.io/badge/-admin-red)
+
+Admin → Bot protection, the platform operator's (`supertenant_only`
+for a tenant's administrator): `stored` (the panel's own values, `has_secret`
+in place of the secret), `effective` (what is in force), `sources` (`db`,
+`env` or `default` per field), `misconfigured`, `secret_key_configured`,
+`fallback_active`, `fallback_total`, `all_forms`, `providers`, `bounds`.
+
+### `PATCH /api/admin/captcha` ![admin](https://img.shields.io/badge/-admin-red)
+
+`{provider?, site_key?, secret?, clear_secret?, forms?, clear_forms?,
+fallback?, verify_timeout_ms?}`; an empty string clears a field, so the
+environment applies to it again. The secret is sealed and never answered; the
+audit row names the fields changed, never a value. **400** `captcha_bad_value`
+/ `captcha_out_of_bounds`, **409** `captcha_no_secret_key` (no
+`FILEX_SECRET_KEY` to seal it with).
+
+### `POST /api/admin/captcha/test` ![admin](https://img.shields.io/badge/-admin-red)
+
+`{provider?, site_key?, secret?}` - the page's values, saved or not - → `{ok,
+reachable, secret_ok, codes, misconfigured, cause, message}`: the provider is
+asked with a token it refuses, so `secret_ok` says whether it took the secret.
+The stored secret goes only to the provider it was saved for.
+
 ## The public surface
 
 Everything a stranger reaches through a filex link - a download share, a file
@@ -1800,6 +1855,9 @@ for an anonymous request.
 `{"pin": "1234"}` → **200** with the object above (`unlocked: true`) plus the
 unlock cookie · **401** `pin_wrong` · **429** `locked` (audited as
 `share.pin_locked`; the audit row carries the token's hash, never the token).
+With [bot protection](BOT-PROTECTION.md) on for `share_password` the body also
+carries `captcha_token` (or `captcha_local`), judged before the PIN: a refusal
+(**422** / **409**, as on the sign-in) spends none of the attempts.
 
 ### `POST /api/public/s/{token}/event` ![public](https://img.shields.io/badge/-public-lightgrey)
 
@@ -1869,7 +1927,20 @@ rather than cutting it. `pin_max` is present with `needs_pin`, as on a share.
 
 The same gate, the same cookie and the same statuses as the `/s/` PIN.
 
+### `POST /api/public/d/{token}/captcha` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+The [bot check](BOT-PROTECTION.md#file-requests-the-upload-pass) of one
+submission, before its upload: `{"captcha_token": "…"}` (or `captcha_local`)
+→ **200** `{"pass": "…", "expires_at": "…"}` - signed, for this link only,
+ten minutes, spent by the upload - or the check's **422** / **409**. While
+`file_request` is not protected: **200** `{"pass": ""}`.
+
 ### `POST /api/public/d/{token}/upload` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+While `file_request` is protected, the header `X-Captcha-Pass` carries the pass
+above; without one (or with a spent one, or another link's) the upload is
+refused before its body is read: **422** `captcha_required` / `captcha_failed`
+(`captcha`: `missing_pass` / `bad_pass`).
 
 `multipart/form-data` with `file[]` (or `file`), and optionally one `name[]`
 field per file, in the same order, carrying the file's exact name (a browser

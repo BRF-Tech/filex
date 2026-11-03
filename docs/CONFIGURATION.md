@@ -152,6 +152,9 @@ reaches the install. The first admin, SMTP, branding and default storage of
 [external services](#external-services) are seeded the same
 way, once, when their record is absent.
 
+⚠ The bot check's `CAPTCHA_*` variables are **not** seeds: they are read live
+whenever the page's field is empty ([Bot protection](#bot-protection-captcha)).
+
 Most of the server defaults are read when filex starts: a change on the admin
 panel applies at the next start, and its row says *Applies at the next start*
 until then. The default webhook's language applies at once.
@@ -633,9 +636,9 @@ next). Nothing to switch on: it is on by default.
 | **What counts** | A wrong password, and a wrong second-factor code. Not: the form asking for the code, a right password on a disabled account, an API token (not a password). |
 | **What resets** | A success resets the *account's* counter - never the address's, so one valid login between guesses cannot launder a spray. A protocol's cached credential and an API token do not reset it either (a busy client would wipe the counter with every request). |
 
-![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.d1df80168e82.png)
+![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.a664b97511f4.png)
 
-![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.42e1fe6f1937.png)
+![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
 
 **The IP allow-list** (`login.ip_allowlist`) is the way back in. An address on it is
 exempt from the per-address limit, and may sign in to **any** locked account (the
@@ -699,7 +702,7 @@ instance within a minute. A database read that fails keeps the last value known
 (the default when there is none). A `login.*` key written through the generic
 settings API reaches the running limit the same way.
 
-![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](https://filex.sh/shots/loginsecurity/login-security-page-1440.3b370a593b47.png)
+![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](https://filex.sh/shots/loginsecurity/login-security-page-1440.c5ef17eaa971.png)
 
 | Key | Default | Range |
 |---|---|---|
@@ -716,6 +719,32 @@ settings API reaches the running limit the same way.
 no password to guess), NFS (an export is bound to an address, not a password), API
 tokens (256-bit), and the *current password* prompts on a signed-in account's
 profile.
+
+---
+
+## Bot protection (CAPTCHA)
+
+A bot check (Cloudflare Turnstile or Google reCAPTCHA v2, with a local proof of
+work when the provider cannot be reached) on the sign-in, a demo's one-click
+sign-in, a link's PIN and the upload into a file request. **Off by default.**
+Set it on **Admin → Bot protection**; the whole story is in
+[BOT-PROTECTION.md](BOT-PROTECTION.md).
+
+| Variable | Default | |
+|---|---|---|
+| `CAPTCHA_PROVIDER` | `none` | `turnstile`, `recaptcha`, `none` |
+| `CAPTCHA_SITE_KEY` | - | the provider's public key |
+| `CAPTCHA_SECRET` | - | the provider's secret (on the page it is stored sealed with [`FILEX_SECRET_KEY`](#the-secret-key)) |
+| `CAPTCHA_FORMS` | every form | comma-separated: `login`, `demo_login`, `share_password`, `file_request` |
+| `CAPTCHA_FALLBACK` | `local` | `off` answers 503 instead of the proof of work (tests only) |
+| `CAPTCHA_VERIFY_TIMEOUT_MS` | `4000` | 1000 - 15000 |
+
+> ⚠ **Read live, not seeded** - the one exception to
+> [Variables that seed a stored setting](#variables-that-seed-a-stored-setting).
+> Each field is the page's when the page holds one, else the variable's, else
+> off; the variable is never copied into the database, and a field cleared on
+> the page is the variable's again. Every product that shares this bot check
+> uses that order.
 
 ---
 

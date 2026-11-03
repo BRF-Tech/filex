@@ -277,7 +277,7 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.b891c6431444.png)
+![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.0da9ad45502b.png)
 
 <sub>…and the sign-in page, before anybody has signed in</sub>
 
@@ -345,7 +345,7 @@ Every storage and protocol feature in full: [docs/FEATURES.md → Storage and pr
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.3464cb59b2f8.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.cbad664dfed5.png)
 
 <sub>API keys - mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry)</sub>
 
@@ -399,7 +399,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Share modal](https://filex.sh/shots/share-modal.87cb16a1a6f0.png)
+![Share modal](https://filex.sh/shots/share-modal.3c132b06cd19.png)
 
 <sub>Sharing - PIN, expiry, download limit, one-line `curl`</sub>
 
@@ -431,7 +431,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.0fffdc146eb1.png)
+![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.679f7daec8a4.png)
 
 <sub>Every admin table - one pinned **Actions** menu per row, the same menu the explorer's ⋮ opens</sub>
 
@@ -469,7 +469,8 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
   permissions. Groups carry folder access - up to a whole storage - and a role, can follow
   your directory's groups, and per-person exceptions beat the role.
 - Guessing a password is slow: wrong passwords are counted per account and per address, on
-  the web form, WebDAV, FTPS and SFTP alike.
+  the web form, WebDAV, FTPS and SFTP alike; a bot check (Cloudflare Turnstile or reCAPTCHA)
+  can guard the sign-in, a link's PIN and a file request's upload.
 - Multi-tenant by design, behind one switch: each tenant has its own sign-in providers, its
   own domain and certificate, and runs itself. Switched off, no screen shows a tenant.
 
@@ -478,7 +479,7 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png" alt="Admin → Roles: the built-in roles and two custom ones" width="860"></p>
 
 <details>
-<summary><b>Screenshots of people and access</b> - roles, groups, sign-in security, a locked account, the admin panel and its menu</summary>
+<summary><b>Screenshots of people and access</b> - roles, groups, sign-in security, a locked account, bot protection, the admin panel and its menu</summary>
 
 <table>
 <tr>
@@ -516,14 +517,14 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.42e1fe6f1937.png)
+![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
 
 <sub>…and what a locked account's sign-in form says, counting the lock down on its button</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Admin dashboard](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
+![Admin dashboard](https://filex.sh/shots/admin-dashboard.3becd8ffe998.png)
 
 <sub>Admin panel</sub>
 
@@ -532,14 +533,30 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <tr>
 <td width="50%" valign="top">
 
-![Demo landing](https://filex.sh/shots/demo-landing.64f23c6f8cb3.png)
+![Admin → Bot protection, in the dark theme](https://filex.sh/shots/botprotection/bot-protection-dark-1440.0aaf54749fc8.png)
+
+<sub>Bot protection - Cloudflare Turnstile or Google reCAPTCHA, its keys and the forms it guards; when the provider cannot be reached, the browser does a short proof of work instead ([docs/BOT-PROTECTION.md](docs/BOT-PROTECTION.md))</sub>
+
+</td>
+<td width="50%" valign="top">
+
+![The sign-in form with the bot check above its button](https://filex.sh/shots/botprotection/login-captcha-dark-1440.099dd770db5c.png)
+
+<sub>…and the sign-in form, the bot check above its button</sub>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![Demo landing](https://filex.sh/shots/demo-landing.fba2be2d2961.png)
 
 <sub>Demo landing</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![The Settings panel of the admin menu, open over Admin → Settings → General](https://filex.sh/shots/megamenu/settings-panel-1440.23a710915f9c.png)
+![The Settings panel of the admin menu, open over Admin → Settings → General](https://filex.sh/shots/megamenu/settings-panel-1440.42b03e9a539f.png)
 
 <sub>The admin menu - every page in four panels, **Files & storage**, **People**, **Settings** (General, Security & data, File processing & integrations) and **Maintenance & records**, with a short line under each; a phone gets the same pages in a drawer ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
 
@@ -764,7 +781,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.54c60e832ced.png)
+![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.537429f5f44b.png)
 
 <sub>While it is out - the document frozen for everybody, who has signed in its details</sub>
 
@@ -1005,7 +1022,7 @@ entry with its limits and its guide.
 | **The explorer** | One layout in the admin app, the desktop app and every embed: a navigation panel, list, grid and gallery views, tabs, personal and team tags, a ⌘K command palette, remappable keyboard shortcuts, new documents from the **+ New** menu and themes an operator composes ([Integration](docs/INTEGRATION.md), [Themes](docs/INTEGRATION.md#themes)) |
 | **Storage** | Local disks, S3, FTP, SFTP, WebDAV and SMB/NAS mounted side by side, copy and move across them, and a plugin for anything else, from the admin panel or an app store ([Storage](docs/STORAGE.md), [Storage plugins](docs/PLUGINS.md)) |
 | **Without a browser** | The same tree served as S3, SFTP, FTPS, NFSv3 and WebDAV - a move or delete there is as safe beside a storage scan as one in the web UI - plus `filex mount` over HTTPS ([Protocols](docs/PROTOCOLS.md)) |
-| **Sign-in** | OIDC, LDAP / Active Directory, Windows and Linux accounts, and sign-in attempt limits ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [OS accounts](docs/OS-LOGIN.md)) |
+| **Sign-in** | OIDC, LDAP / Active Directory, Windows and Linux accounts, sign-in attempt limits, and a bot check on the sign-in and the public forms - Turnstile or reCAPTCHA, with a local proof of work when the provider is down ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [OS accounts](docs/OS-LOGIN.md), [Bot protection](docs/BOT-PROTECTION.md)) |
 | **People and access** | Roles and per-person permissions, groups, per-folder access and native multi-tenancy ([Permissions](docs/PERMISSIONS.md), [Groups](docs/GROUPS.md), [Multi-tenancy](docs/MULTI-TENANCY.md)) |
 | **Sharing** | Public links with a PIN, an expiry and a download limit, file requests and share invites by email ([Sharing](docs/SHARING.md)) |
 | **Protection** | Trash and version history, optional ClamAV scanning, end-to-end encrypted folders, replication to a second storage (with an initial copy of what is already there) and an audit log ([Trash & versioning](docs/TRASH-VERSIONING.md), [Protection](docs/PROTECTION.md), [E2E encryption](docs/E2E-ENCRYPTION.md), [Replication](docs/REPLICATION.md), [Audit log](docs/BACKEND.md#admin-audit-log)) |

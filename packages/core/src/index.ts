@@ -387,6 +387,7 @@ export {
   shareDownloadUrl,
   shareNoJsUrl,
   PublicLinkError,
+  publicCaptchaReply,
 } from './composables/usePublicLink';
 export type {
   PublicLinkOptions,
@@ -395,7 +396,40 @@ export type {
   PublicRoot,
   PublicStatus,
   PublicUpload,
+  PublicUploadPass,
 } from './composables/usePublicLink';
+/* The bot check of every anonymous form (#294): the provider's widget, the
+ * local proof of work for an outage, and the one rule a form sends by. ONE
+ * component and ONE composable; the sign-in page and the public pages share
+ * them. */
+export { useCaptcha, useCaptchaConfig } from './composables/useCaptcha';
+export type { CaptchaStore, CaptchaOptions, CaptchaState, CaptchaConfigSource, CaptchaOutcome } from './composables/useCaptcha';
+export { default as CaptchaWidget } from './components/CaptchaWidget.vue';
+export {
+  CAPTCHA_FORMS,
+  CAPTCHA_LOCAL_FIELD,
+  CAPTCHA_TOKEN_FIELD,
+  CAPTCHA_WORKER_SOURCE,
+  captchaAnswerOf,
+  captchaFormOn,
+  captchaUrl,
+  challengeOf,
+  encodeCaptchaSolution,
+  fetchCaptchaConfig,
+  readCaptchaConfig,
+  requestCaptchaChallenge,
+  solveCaptchaChallenge,
+  turnstileLanguage,
+} from './lib/captcha';
+export type {
+  CaptchaChallenge,
+  CaptchaFields,
+  CaptchaForm,
+  CaptchaProvider,
+  CaptchaPublicConfig,
+  CaptchaReply,
+  CaptchaSolution,
+} from './lib/captcha';
 export { usePublicBranding, normalizeAccent, shade, inkOn, accentStyleOf, DEFAULT_BRAND_NAME } from './composables/usePublicBranding';
 export { usePublicText, loadPublicText, providePublicText, publicSentence, PUBLIC_TEXT } from './composables/usePublicText';
 export type { PublicTextSource, PublicStringsAnswer } from './composables/usePublicText';

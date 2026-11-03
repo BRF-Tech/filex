@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/basepath"
+	"github.com/brf-tech/filex/backend/internal/captcha"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -46,6 +47,11 @@ import (
 
 // Share handles share creation and the public viewer endpoints.
 type Share struct {
+	// Captcha is the bot check on the PIN. The no-JavaScript form and a PIN
+	// in the address (?pin=, X-Filex-Pin) cannot carry it: while
+	// `share_password` is protected they are refused (pinNeedsCaptcha) and the
+	// PIN is answered on the JavaScript page only. Nil = none.
+	Captcha         *Captcha
 	Service         *share.Service
 	Store           db.Store
 	StorageResolver func(int64) (storage.Driver, error)
@@ -121,6 +127,9 @@ func (h *Share) AttachACL(r *acl.Resolver) { h.ACL = r }
 
 // AttachShell wires the SPA document served to JavaScript browsers.
 func (h *Share) AttachShell(shell http.Handler) { h.Shell = shell }
+
+// AttachCaptcha wires the bot check on the PIN (`share_password`).
+func (h *Share) AttachCaptcha(c *Captcha) { h.Captcha = c }
 
 // AttachApps wires the app-plugin handler for the no-JS app page.
 func (h *Share) AttachApps(a *AppPlugins) { h.Apps = a }
@@ -1046,6 +1055,15 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// for something already answered is how a public page loses the person it
 	// was sent to.
 	unlocked := sh.PinHash == "" || shareUnlocked(h.Service, r, sh)
+
+	// The bot check runs in the browser: while the PIN is protected by it,
+	// neither this form nor a PIN in the address can answer (the JavaScript
+	// page can, through /api/public/s/{token}/pin), and the page says so
+	// instead of offering a form that cannot succeed.
+	if !unlocked && h.Captcha.Protected(r.Context(), captcha.FormSharePassword) {
+		h.renderErrorPage(w, r, http.StatusUnprocessableEntity, "captcha_js")
+		return
+	}
 
 	// PIN required and none supplied: the form.
 	if !unlocked && pin == "" {

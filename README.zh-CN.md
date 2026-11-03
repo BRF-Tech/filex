@@ -260,7 +260,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![套用了运维人员主题的登录页](https://filex.sh/shots/appearance/themed-signin-1440.b891c6431444.png)
+![套用了运维人员主题的登录页](https://filex.sh/shots/appearance/themed-signin-1440.0da9ad45502b.png)
 
 <sub>…登录页也是，这时还没有任何人登录</sub>
 
@@ -322,7 +322,7 @@ docker run -p 5212:5212 \
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.3464cb59b2f8.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.cbad664dfed5.png)
 
 <sub>API keys（API 密钥）：在资源管理器或嵌入端里签发你自己的密钥（凭某个人的会话或令牌；用一个共享的*应用*令牌做代理的嵌入端没有这个条目）</sub>
 
@@ -370,7 +370,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![共享对话框](https://filex.sh/shots/share-modal.87cb16a1a6f0.png)
+![共享对话框](https://filex.sh/shots/share-modal.3c132b06cd19.png)
 
 <sub>共享：PIN、过期时间、下载次数上限、单行 `curl` 命令</sub>
 
@@ -402,7 +402,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.0fffdc146eb1.png)
+![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.679f7daec8a4.png)
 
 <sub>管理面板里的每张表格：每行一个固定的 **Actions**（操作）菜单，与资源管理器的 ⋮ 打开的是同一个菜单</sub>
 
@@ -436,7 +436,7 @@ docker run -p 5212:5212 \
 
 - 用本地密码、OIDC、LDAP / Active Directory、认证代理，或者运行 filex 的那台机器上的 Windows 或 Linux 账户登录。
 - 每个人都有一个角色：Administrator（管理员）、User（用户）、Viewer（查看者），或者你自己定义的角色，由具名权限构成。群组带有文件夹访问权限和一个角色，可以跟随你目录中的群组；针对个人的例外优先于角色。
-- 猜密码快不起来：输错的密码按账户、按地址分别计数，Web 表单、WebDAV、FTPS 和 SFTP 都一样。
+- 猜密码快不起来：输错的密码按账户、按地址分别计数，Web 表单、WebDAV、FTPS 和 SFTP 都一样；登录、链接的 PIN 和文件请求的上传还可以加上机器人校验（Cloudflare Turnstile 或 reCAPTCHA）。
 - 从设计上就是多租户，由一个开关控制：每个租户有自己的登录提供方、自己的域名和证书，并且自己管理自己。关闭时，任何界面都不显示租户。
 
 人员与访问的全部功能：[docs/FEATURES.md → People and access](docs/FEATURES.md#people-and-access)。
@@ -444,7 +444,7 @@ docker run -p 5212:5212 \
 <p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png" alt="Admin → Roles：内置角色和两个自定义角色" width="860"></p>
 
 <details>
-<summary><b>人员与访问截图</b> - 角色、群组、登录安全、被锁定的账户、管理面板及其菜单</summary>
+<summary><b>人员与访问截图</b> - 角色、群组、登录安全、被锁定的账户、机器人防护、管理面板及其菜单</summary>
 
 <table>
 <tr>
@@ -482,14 +482,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![账户被锁定时的登录表单](https://filex.sh/shots/loginsecurity/login-locked-1440.42e1fe6f1937.png)
+![账户被锁定时的登录表单](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
 
 <sub>…以及账户被锁定时登录表单显示的内容，锁定的倒计时就在按钮上</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![管理仪表盘](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
+![管理仪表盘](https://filex.sh/shots/admin-dashboard.3becd8ffe998.png)
 
 <sub>管理面板</sub>
 
@@ -498,14 +498,30 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![演示首页](https://filex.sh/shots/demo-landing.64f23c6f8cb3.png)
+![管理 → 机器人防护，深色主题](https://filex.sh/shots/botprotection/bot-protection-dark-1440.0aaf54749fc8.png)
+
+<sub>机器人防护 - Cloudflare Turnstile 或 Google reCAPTCHA、它的密钥和它保护的表单；服务商不可达时，浏览器改做一次简短的工作量证明（[docs/BOT-PROTECTION.md](docs/BOT-PROTECTION.md)）</sub>
+
+</td>
+<td width="50%" valign="top">
+
+![按钮上方带机器人校验的登录表单](https://filex.sh/shots/botprotection/login-captcha-dark-1440.099dd770db5c.png)
+
+<sub>……以及登录表单，按钮上方是机器人校验</sub>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![演示首页](https://filex.sh/shots/demo-landing.fba2be2d2961.png)
 
 <sub>演示首页</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![管理菜单的 Settings 面板已打开，覆盖在 Admin → Settings → General 之上](https://filex.sh/shots/megamenu/settings-panel-1440.23a710915f9c.png)
+![管理菜单的 Settings 面板已打开，覆盖在 Admin → Settings → General 之上](https://filex.sh/shots/megamenu/settings-panel-1440.42b03e9a539f.png)
 
 <sub>管理菜单：所有页面分在 **Files & storage**（文件与存储）、**People**（人员）、**Settings**（设置：General、Security & data、File processing & integrations）和 **Maintenance & records**（维护与记录）四个菜单面板里，每个页面下面都有一行简短说明；在手机上，同一批页面放在抽屉里（[docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md)）</sub>
 
@@ -692,7 +708,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 <tr>
 <td width="50%" valign="top">
 
-![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.54c60e832ced.png)
+![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.537429f5f44b.png)
 
 <sub>等待签署期间：文档对每个人都是冻结的，谁已签署，在文档的详细信息里可以看到</sub>
 
@@ -882,7 +898,7 @@ filex 可以运行在独立的主机的根路径上，也可以运行在共用�
 | **资源管理器** | 管理端、桌面应用和每个嵌入端都用同一套布局：导航面板，列表、网格和画廊视图，标签页，个人标签和团队标签，⌘K 命令面板，可重新映射的键盘快捷键，从 **+ New**（新建）菜单创建的新文档，以及运维人员组合出的主题（[集成](docs/INTEGRATION.md)、[主题](docs/INTEGRATION.md#themes)） |
 | **存储** | 本地磁盘、S3、FTP、SFTP、WebDAV 和 SMB/NAS 并排挂载，可以在它们之间复制和移动；其他任何存储都可以用插件接入，从管理面板或应用商店安装（[存储](docs/STORAGE.md)、[存储插件](docs/PLUGINS.md)） |
 | **不用浏览器** | 同一棵文件树以 S3、SFTP、FTPS、NFSv3 和 WebDAV 的形式提供访问（在那里移动或删除，与存储扫描并行时和在 Web 界面里一样安全），另有基于 HTTPS 的 `filex mount`（[协议](docs/PROTOCOLS.md)） |
-| **登录** | OIDC、LDAP / Active Directory、Windows 和 Linux 账户，以及登录尝试次数限制（[SSO](docs/SSO.md)、[LDAP](docs/LDAP.md)、[操作系统账户](docs/OS-LOGIN.md)） |
+| **登录** | OIDC、LDAP / Active Directory、Windows 和 Linux 账户、登录尝试次数限制，以及登录和公开表单上的机器人校验 - Turnstile 或 reCAPTCHA，服务商不可达时改用本地工作量证明（[SSO](docs/SSO.md)、[LDAP](docs/LDAP.md)、[操作系统账户](docs/OS-LOGIN.md)、[机器人防护](docs/BOT-PROTECTION.md)） |
 | **人员与访问** | 角色和按人设置的权限、群组、按文件夹的访问权限，以及原生多租户（[权限](docs/PERMISSIONS.md)、[群组](docs/GROUPS.md)、[多租户](docs/MULTI-TENANCY.md)） |
 | **共享** | 带 PIN、过期时间和下载次数上限的公开链接，文件请求，以及通过电子邮件发送的共享邀请（[共享](docs/SHARING.md)） |
 | **防护** | 回收站和版本历史、可选的 ClamAV 扫描、端到端加密文件夹、复制到第二个存储（已有的文件会先做一次初始复制），以及审计日志（[回收站与版本管理](docs/TRASH-VERSIONING.md)、[防护](docs/PROTECTION.md)、[端到端加密](docs/E2E-ENCRYPTION.md)、[复制](docs/REPLICATION.md)、[审计日志](docs/BACKEND.md#admin-audit-log)） |

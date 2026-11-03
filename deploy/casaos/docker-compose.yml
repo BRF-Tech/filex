@@ -7,7 +7,7 @@
 name: filex
 services:
   filex:
-    image: ghcr.io/brf-tech/filex:v0.57.7
+    image: ghcr.io/brf-tech/filex:v0.58.0
     container_name: filex
     network_mode: bridge
     restart: unless-stopped
@@ -112,8 +112,8 @@ x-casaos:
   # each, and `node scripts/shots-site.mjs relink` keeps these three on it.
   screenshot_link:
     - https://filex.sh/shots/explorer-grid-light.475b0b61faab.png
-    - https://filex.sh/shots/admin-dashboard.233358b87c3e.png
-    - https://filex.sh/shots/share-modal.87cb16a1a6f0.png
+    - https://filex.sh/shots/admin-dashboard.3becd8ffe998.png
+    - https://filex.sh/shots/share-modal.3c132b06cd19.png
   tips:
     before_install:
       en_US: >-
@@ -127,7 +127,7 @@ x-casaos:
   port_map: "5212"
   scheme: http
   store_app_id: filex
-  version: "0.57.7"
+  version: "0.58.0"
   website: https://filex.sh
   repo: https://github.com/BRF-Tech/filex
   support: https://github.com/BRF-Tech/filex/issues

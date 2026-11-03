@@ -69,6 +69,17 @@ const (
 	// gone). The provider is left out of the running set; every other way in
 	// keeps working. Once per distinct reason.
 	EventAuthProviderDown EventType = "auth_provider_down"
+	// EventCaptchaFallback fires when more than one form in ten minutes could
+	// not reach the bot check's provider and was checked with the local proof
+	// of work instead (internal/captcha). Once per window. Meta `count`,
+	// `minutes`, `cause`, `form`, and the sentence per language.
+	EventCaptchaFallback EventType = "captcha_fallback"
+	// EventCaptchaMisconfigured fires when a bot check provider is chosen and
+	// its keys cannot work (no site key, no secret, a secret that does not
+	// open or that the provider refuses): the forms stay protected by the
+	// local fallback until somebody fixes them. Once an hour per reason. Meta
+	// `reason`, `form`, and the sentence per language.
+	EventCaptchaMisconfigured EventType = "captcha_misconfigured"
 	// EventLDAPLegacyAccountElsewhere fires ONCE per older directory account
 	// (keyed by a bare login name before the e-mail rule) that a sign-in by the
 	// same name found in ANOTHER tenant. The account is left alone — the tenant
@@ -165,6 +176,7 @@ const (
 var operatorEvents = []EventType{
 	EventReplicaFail, EventReplicaFailSpike, EventReplicaReconcileDone, EventReplicaStatusReport,
 	EventPrimaryReadFail, EventQuotaNearFull, EventQuotaFull, EventQueueStuck, EventAuthFailSpike, EventAuthProviderDown,
+	EventCaptchaFallback, EventCaptchaMisconfigured,
 	EventLDAPLegacyAccountElsewhere, EventPermissionGaps,
 	EventDiskFull, EventUpdateAvailable, EventUpdateApplied,
 	EventAppUpdated, EventAppUpdateAvailable, EventAppUpdateNeedsApproval, EventAppUpdateFailed,

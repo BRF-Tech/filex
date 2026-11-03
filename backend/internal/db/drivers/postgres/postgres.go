@@ -127,6 +127,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.E2ERequestSQL = &db.E2ERequestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	// The app store's state (00081), written once in internal/db.
 	s.AppStoreSQL = &db.AppStoreSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
+	// The bot check's marks (00134); times are unix seconds.
+	s.CaptchaMarkSQL = &db.CaptchaMarkSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// The notification digest (00087), written once in internal/db.
 	s.DigestSQL = &db.DigestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	// Web Push (task #191), written once in internal/db.
@@ -173,6 +175,8 @@ type Store struct {
 	*db.PluginRequestSQL
 	// The app store's state (internal/db app_store_sql.go, migration 00081).
 	*db.AppStoreSQL
+	// The bot check's marks (internal/db captcha_marks_sql.go, 00134).
+	*db.CaptchaMarkSQL
 	// The sign-in attempt counters (internal/db login_throttle_sql.go).
 	*db.LoginThrottleSQL
 	// The office editing sessions (internal/db office_session_sql.go,

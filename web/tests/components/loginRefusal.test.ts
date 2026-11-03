@@ -22,6 +22,8 @@ import tr from '@/locales/tr.json';
 
 let answer: { status: number; data: Record<string, unknown>; headers?: Record<string, string> } | null = null;
 
+// #294: the sign-in page asks which forms the bot check guards; none here.
+vi.mock('@/api/captcha', () => ({ CaptchaPublicApi: { config: async () => null } }));
 vi.mock('@/api/branding', () => ({ BrandingApi: { get: vi.fn().mockResolvedValue({}) } }));
 vi.mock('@/api/capabilities', () => ({ CapabilitiesApi: { fetch: vi.fn(async () => ({})) } }));
 vi.mock('vue-router', () => ({

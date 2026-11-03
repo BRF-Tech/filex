@@ -166,7 +166,8 @@ export default defineConfig({
           { text: 'ShareX', link: '/SHAREX' },
           { text: 'SSO (OIDC)', link: '/SSO' },
           { text: 'LDAP', link: '/LDAP' },
-          { text: 'OS accounts', link: '/OS-LOGIN' }
+          { text: 'OS accounts', link: '/OS-LOGIN' },
+          { text: 'Bot protection', link: '/BOT-PROTECTION' }
         ]
       },
       {

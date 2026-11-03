@@ -65,6 +65,10 @@ The codes the server says with a catalogue sentence (`server.error.<code>` in
 | `drafts_unavailable`, `draft_limit`, `draft_folder_gone` | Drafts ([BACKEND.md → Drafts](BACKEND.md#drafts)); `code` as before. |
 | `entry_unavailable` | The storage could not say whether the entry still exists (`code: ENTRY_UNAVAILABLE`, `path`, `reason`). |
 | `no_secret_key` | The server has no encryption key, so it cannot issue an access key (`admin_hint` for an administrator). |
+| `captcha_required`, `captcha_failed`, `captcha_expired`, `captcha_fallback_inactive` | The [bot check](BOT-PROTECTION.md#how-a-form-is-checked) refused a form (422): no answer, a refused one, a used or expired one, a local solution while the provider is reachable. `captcha` is the reason (`missing_token`, `invalid_token`, `token_expired`, `bad_token`, `provider_rejected`, `replayed`, `fallback_inactive`, `missing_pass`, `bad_pass`, or the [local fallback's](BOT-PROTECTION.md#the-local-proof-of-work) own). Reset the widget and ask again. |
+| `captcha_fallback` | The bot check's provider cannot be reached (409): `challenge` is the [local proof of work](BOT-PROTECTION.md#when-the-provider-is-down); solve it and send the same request with `captcha_local`. |
+| `captcha_unavailable` | The provider cannot be reached and the fallback is off (503; tests only). |
+| `captcha_bad_value`, `captcha_out_of_bounds`, `captcha_no_secret_key` | Admin → Bot protection refused a value (`params.field`; the bounds as `min`/`max`), or there is no `FILEX_SECRET_KEY` to store the secret with (409). |
 | `e2e_policy_undecided` | The encryption policy could not be checked (500). |
 | `kind_mismatch`, `not_requestable`, `path_missing`, `too_many_pending` | An encryption request that no longer fits the folder ([BACKEND.md → Encryption policy](BACKEND.md#encryption-policy)). `not_requestable` with a `reason` says the rule's own sentence. |
 | `not_in_trash`, `restarted` | A queued job's failure: the entry left the trash meanwhile / the server restarted before an archive job finished. |

@@ -285,7 +285,7 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 <tr>
 <td width="50%" valign="top">
 
-![Die Anmeldeseite trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-signin-1440.b891c6431444.png)
+![Die Anmeldeseite trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-signin-1440.0da9ad45502b.png)
 
 <sub>…und die Anmeldeseite, bevor sich irgendjemand angemeldet hat</sub>
 
@@ -354,7 +354,7 @@ Alle Funktionen zu Speicher und Protokollen im Detail: [docs/FEATURES.md → Sto
 </td>
 <td width="50%" valign="top">
 
-![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.3464cb59b2f8.png)
+![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.cbad664dfed5.png)
 
 <sub>API-Schlüssel - erstellen Sie Ihre eigenen, im Explorer oder in einer Einbettung (Sitzung oder Schlüssel einer Person; eine Einbettung, die über einen Proxy mit einem gemeinsamen *App*-Schlüssel läuft, bekommt diesen Eintrag nicht)</sub>
 
@@ -410,7 +410,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.87cb16a1a6f0.png)
+![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.3c132b06cd19.png)
 
 <sub>Freigaben - PIN, Ablaufdatum, Download-Limit, `curl`-Einzeiler</sub>
 
@@ -442,7 +442,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.0fffdc146eb1.png)
+![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.679f7daec8a4.png)
 
 <sub>Jede Tabelle im Adminbereich - ein angeheftetes Menü **Aktionen** pro Zeile, dasselbe Menü, das sich über das ⋮ des Explorers öffnet</sub>
 
@@ -481,7 +481,9 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
   aufgebaut aus benannten Berechtigungen. Gruppen bringen Ordnerzugriff und eine Rolle mit,
   können den Gruppen Ihres Verzeichnisses folgen, und Ausnahmen pro Person gehen der Rolle vor.
 - Passwörter zu erraten dauert lange: Falsche Passwörter werden pro Konto und pro Adresse
-  gezählt, im Webformular ebenso wie bei WebDAV, FTPS und SFTP.
+  gezählt, im Webformular ebenso wie bei WebDAV, FTPS und SFTP; eine Bot-Prüfung (Cloudflare
+  Turnstile oder reCAPTCHA) kann die Anmeldung, die PIN eines Links und den Upload in eine
+  Dateianfrage schützen.
 - Von Grund auf mandantenfähig, hinter einem einzigen Schalter: Jeder Mandant hat eigene
   Anmeldeanbieter, eine eigene Domain und ein eigenes Zertifikat und verwaltet sich selbst.
   Ausgeschaltet zeigt keine Seite einen Mandanten.
@@ -491,7 +493,7 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png" alt="Admin → Rollen: die integrierten Rollen und zwei benutzerdefinierte" width="860"></p>
 
 <details>
-<summary><b>Screenshots zu Personen und Zugriff</b> - Rollen, Gruppen, Anmeldesicherheit, ein gesperrtes Konto, der Adminbereich und sein Menü</summary>
+<summary><b>Screenshots zu Personen und Zugriff</b> - Rollen, Gruppen, Anmeldesicherheit, ein gesperrtes Konto, Bot-Schutz, der Adminbereich und sein Menü</summary>
 
 <table>
 <tr>
@@ -529,14 +531,14 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <tr>
 <td width="50%" valign="top">
 
-![Das Anmeldeformular bei einem gesperrten Konto](https://filex.sh/shots/loginsecurity/login-locked-1440.42e1fe6f1937.png)
+![Das Anmeldeformular bei einem gesperrten Konto](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
 
 <sub>…und was das Anmeldeformular eines gesperrten Kontos sagt, während es die Sperre auf seiner Schaltfläche herunterzählt</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Übersicht im Adminbereich](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
+![Übersicht im Adminbereich](https://filex.sh/shots/admin-dashboard.3becd8ffe998.png)
 
 <sub>Adminbereich</sub>
 
@@ -545,14 +547,30 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <tr>
 <td width="50%" valign="top">
 
-![Startseite der Demo](https://filex.sh/shots/demo-landing.64f23c6f8cb3.png)
+![Admin → Bot-Schutz, im dunklen Design](https://filex.sh/shots/botprotection/bot-protection-dark-1440.0aaf54749fc8.png)
+
+<sub>Bot-Schutz - Cloudflare Turnstile oder Google reCAPTCHA, die Schlüssel und die Formulare, die er schützt; ist der Anbieter nicht erreichbar, rechnet der Browser stattdessen kurz einen Proof of Work ([docs/BOT-PROTECTION.md](docs/BOT-PROTECTION.md))</sub>
+
+</td>
+<td width="50%" valign="top">
+
+![Das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche](https://filex.sh/shots/botprotection/login-captcha-dark-1440.099dd770db5c.png)
+
+<sub>…und das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche</sub>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![Startseite der Demo](https://filex.sh/shots/demo-landing.fba2be2d2961.png)
 
 <sub>Startseite der Demo</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Der Bereich „Einstellungen“ des Adminmenüs, geöffnet über der Seite Admin → Einstellungen → Allgemein](https://filex.sh/shots/megamenu/settings-panel-1440.23a710915f9c.png)
+![Der Bereich „Einstellungen“ des Adminmenüs, geöffnet über der Seite Admin → Einstellungen → Allgemein](https://filex.sh/shots/megamenu/settings-panel-1440.42b03e9a539f.png)
 
 <sub>Das Adminmenü - alle Seiten in vier Bereichen, **Dateien & Speicher**, **Personen**, **Einstellungen** (Allgemein, Sicherheit & Daten, Dateiverarbeitung & Integrationen) und **Wartung & Protokolle**, mit einer kurzen Zeile unter jeder Seite; ein Smartphone bekommt dieselben Seiten in einer ausfahrbaren Leiste ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
 
@@ -778,7 +796,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 <tr>
 <td width="50%" valign="top">
 
-![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.54c60e832ced.png)
+![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.537429f5f44b.png)
 
 <sub>Solange es im Umlauf ist - das Dokument ist für alle eingefroren, in seinen Details steht, wer unterschrieben hat</sub>
 
@@ -1012,7 +1030,7 @@ gibt jeder Funktion einen Eintrag mit ihren Grenzen und ihrer Anleitung.
 | **Der Explorer** | Ein einziges Layout im Adminbereich, in der Desktop-App und in jeder Einbettung: ein Navigationsbereich, Listen-, Raster- und Galerieansicht, Tabs, persönliche Tags und Team-Tags, eine ⌘K-Befehlspalette, neu belegbare Tastenkürzel, neue Dokumente aus dem Menü **+ Neu** und Designs, die ein Betreiber zusammenstellt ([Integration](docs/INTEGRATION.md), [Designs](docs/INTEGRATION.md#themes)) |
 | **Speicher** | Lokale Datenträger, S3, FTP, SFTP, WebDAV und SMB/NAS nebeneinander eingebunden, Kopieren und Verschieben zwischen ihnen und ein Plug-in für alles andere, aus dem Adminbereich oder aus einem App-Store ([Speicher](docs/STORAGE.md), [Speicher-Plug-ins](docs/PLUGINS.md)) |
 | **Ohne Browser** | Derselbe Baum, bereitgestellt als S3, SFTP, FTPS, NFSv3 und WebDAV - ein Verschieben oder Löschen dort ist neben einem Speicher-Scan so sicher wie eines in der Weboberfläche -, dazu `filex mount` über HTTPS ([Protokolle](docs/PROTOCOLS.md)) |
-| **Anmeldung** | OIDC, LDAP / Active Directory, Windows- und Linux-Konten und die Begrenzung der Anmeldeversuche ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [Betriebssystemkonten](docs/OS-LOGIN.md)) |
+| **Anmeldung** | OIDC, LDAP / Active Directory, Windows- und Linux-Konten, die Begrenzung der Anmeldeversuche und eine Bot-Prüfung bei der Anmeldung und den öffentlichen Formularen - Turnstile oder reCAPTCHA, mit einem lokalen Proof of Work, wenn der Anbieter nicht erreichbar ist ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [Betriebssystemkonten](docs/OS-LOGIN.md), [Bot-Schutz](docs/BOT-PROTECTION.md)) |
 | **Personen und Zugriff** | Rollen und Berechtigungen pro Person, Gruppen, Zugriff pro Ordner und native Mandantenfähigkeit ([Berechtigungen](docs/PERMISSIONS.md), [Gruppen](docs/GROUPS.md), [Mandantenfähigkeit](docs/MULTI-TENANCY.md)) |
 | **Freigaben** | Öffentliche Links mit PIN, Ablaufdatum und Download-Limit, Dateianforderungen und Einladungen zur Freigabe per E-Mail ([Freigaben](docs/SHARING.md)) |
 | **Schutz** | Papierkorb und Versionsverlauf, optionaler ClamAV-Scan, Ende-zu-Ende-verschlüsselte Ordner, Replikation auf einen zweiten Speicher (mit einer ersten Kopie dessen, was schon da ist) und ein Audit-Protokoll ([Papierkorb & Versionierung](docs/TRASH-VERSIONING.md), [Schutz](docs/PROTECTION.md), [E2E-Verschlüsselung](docs/E2E-ENCRYPTION.md), [Replikation](docs/REPLICATION.md), [Audit-Protokoll](docs/BACKEND.md#admin-audit-log)) |

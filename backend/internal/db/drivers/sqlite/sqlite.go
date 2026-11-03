@@ -140,6 +140,8 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	s.E2ERequestSQL = &db.E2ERequestSQL{Pool: sqlDB, Time: db.CatalogueTime}
 	// The app store's state (00081), the same way.
 	s.AppStoreSQL = &db.AppStoreSQL{Pool: sqlDB, Time: db.CatalogueTime}
+	// The bot check's marks (00134), the same way; times are unix seconds.
+	s.CaptchaMarkSQL = &db.CaptchaMarkSQL{Pool: sqlDB}
 	// The notification digest (00087), the same way and with the same
 	// timestamp spelling.
 	s.DigestSQL = &db.DigestSQL{Pool: sqlDB, Time: db.CatalogueTime}
@@ -186,6 +188,9 @@ type Store struct {
 	*db.PluginRequestSQL
 	// The app store's state (internal/db app_store_sql.go, migration 00081).
 	*db.AppStoreSQL
+	// The bot check's marks (internal/db captcha_marks_sql.go, migration
+	// 00134).
+	*db.CaptchaMarkSQL
 	// The sign-in attempt counters (internal/db login_throttle_sql.go).
 	*db.LoginThrottleSQL
 	// The office editing sessions (internal/db office_session_sql.go,

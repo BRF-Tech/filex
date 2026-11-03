@@ -27,13 +27,13 @@ People, Settings, Maintenance & records:
 | | Storage | Storages, Connections, Sync runs, Replica, Usage & cost - see [Storage](STORAGE.md), [Protocols](PROTOCOLS.md), [Replication](REPLICATION.md), [Usage & cost](USAGE.md) |
 | **People** | People & access | Users, Groups, Roles, Folder access, Tenants - see [Roles & permissions](PERMISSIONS.md), [Groups](GROUPS.md), [RBAC & folder access](RBAC.md), [Multi-tenancy](MULTI-TENANCY.md) |
 | **Settings** | General | General (the server's defaults - default language, sync interval, unfinished uploads, file cache, thumbnail cache upkeep - the thumbnail settings, the search settings and the mail server), Branding, Appearance (themes, the default folder view, the stylesheet), Multi-tenant mode, My tenant - see [Configuration](CONFIGURATION.md), [Thumbnails](thumbnails.md), [Multi-tenancy](MULTI-TENANCY.md), [Tenant self-service](TENANT-ADMIN.md) |
-| | Security & data | Identity providers, Sign-in security, Encryption, Protection - see [SSO](SSO.md), [LDAP](LDAP.md), [End-to-end encryption](E2E-ENCRYPTION.md), [Protection](PROTECTION.md) |
+| | Security & data | Identity providers, Sign-in security, Bot protection, Encryption, Protection - see [SSO](SSO.md), [LDAP](LDAP.md), [Bot protection](BOT-PROTECTION.md), [End-to-end encryption](E2E-ENCRYPTION.md), [Protection](PROTECTION.md) |
 | | File processing & integrations | Archives, Plugins (with Install requests, the trusted stores and who sees [the store screen](APP-PLUGINS.md#the-store-screen)), External services, Webhooks, Notifications (the history and the [notification digest](NOTIFICATIONS.md#the-digest)'s defaults), API / MCP, AI assistant - see [Archives](ARCHIVES.md), [Storage plugins](PLUGINS.md), [Apps](APP-PLUGINS.md), [OnlyOffice](ONLYOFFICE.md), [Notifications & webhooks](NOTIFICATIONS.md), [MCP](MCP.md), [AI assistant](AI-ASSISTANT.md) |
 | **Maintenance & records** | Maintenance & records | Queue, Tools, Audit log, Updates, About - see [Updates](UPDATES.md) |
 
-![The Settings panel open over Admin → Settings → General: three columns, a line under every page](https://filex.sh/shots/megamenu/settings-panel-1440.23a710915f9c.png)
+![The Settings panel open over Admin → Settings → General: three columns, a line under every page](https://filex.sh/shots/megamenu/settings-panel-1440.42b03e9a539f.png)
 
-![The Settings panel in Turkish, in the dark theme](https://filex.sh/shots/megamenu/settings-dark-tr-1440.53abae9d3fd2.png)
+![The Settings panel in Turkish, in the dark theme](https://filex.sh/shots/megamenu/settings-dark-tr-1440.9b8bf80addd3.png)
 
 Every page is two clicks away: the panel's button, then the page. The
 page's own sub-pages (a storage's settings, a person's page, a file's
@@ -84,7 +84,7 @@ the same rule the server applies to each page's API:
   | Panel | Pages a tenant's administrator is not offered |
   |---|---|
   | Files & storage | Search index, Replica, Usage & cost |
-  | Settings | General, Appearance, Multi-tenant mode, Identity providers, Sign-in security, Protection, Archives, Plugins, External services, Webhooks, AI assistant |
+  | Settings | General, Appearance, Multi-tenant mode, Identity providers, Sign-in security, Bot protection, Protection, Archives, Plugins, External services, Webhooks, AI assistant |
   | Maintenance & records | Queue, Updates |
 
   What they are offered works on their tenant: Files, File history, Shares,

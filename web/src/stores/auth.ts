@@ -7,7 +7,7 @@ import { extractError } from '@/api/client';
 import { readLoginRefusal, type LoginRefusal } from '@/lib/loginRefusal';
 import { ssoRefusalReason, type SsoRefusalReason } from '@/lib/ssoRefusal';
 import axios from 'axios';
-import { attachViewPrefsHttp, detachViewPrefsStore, forgetPersonalPrefs } from '@brftech/filex-core';
+import { attachViewPrefsHttp, detachViewPrefsStore, forgetPersonalPrefs, type CaptchaReply } from '@brftech/filex-core';
 import { getBearerToken, getServerRoot, getUseCredentials } from '@/api/runtimeConfig';
 
 /**
@@ -122,6 +122,12 @@ export const useAuthStore = defineStore('auth', () => {
   /** What the last refused sign-in said beyond "no": tries left, or a lock's wait. */
   const refusal = ref<LoginRefusal | null>(null);
   /**
+   * The last refused sign-in's status and body, for the bot check
+   * (`useCaptcha().protect`): a 409 carries the fallback's challenge, a 422
+   * the check's own refusal. Null after a sign-in that went through.
+   */
+  const captchaReply = ref<CaptchaReply | null>(null);
+  /**
    * Why the server refused the person it was told about without a form - the
    * header proxy named them, the first-login rule said no, a disabled account
    * - as the reason code on /api/auth/me's 401/403 (lib/ssoRefusal). The
@@ -215,6 +221,7 @@ export const useAuthStore = defineStore('auth', () => {
     loading.value = true;
     error.value = null;
     refusal.value = null;
+    captchaReply.value = null;
     handoff.value = null;
     try {
       // The language on screen goes with the sign-in: an account that holds
@@ -230,6 +237,10 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (e: unknown) {
       error.value = extractError(e, t('login.errGeneric'));
       refusal.value = readLoginRefusal(e);
+      captchaReply.value =
+        axios.isAxiosError(e) && e.response
+          ? { status: e.response.status, body: (e.response.data ?? null) as Record<string, unknown> | null }
+          : null;
       return false;
     } finally {
       loading.value = false;
@@ -331,6 +342,7 @@ export const useAuthStore = defineStore('auth', () => {
     loading,
     error,
     refusal,
+    captchaReply,
     signInReason,
     ready,
     sessionAnswered,

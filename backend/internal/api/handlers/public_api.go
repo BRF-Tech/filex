@@ -48,6 +48,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/basepath"
+	"github.com/brf-tech/filex/backend/internal/captcha"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/httpx"
@@ -82,6 +83,9 @@ type PublicAPI struct {
 	// DefaultLocale is the instance's fallback language, reported in
 	// /branding so the shell can pick one before a person has.
 	DefaultLocale string
+	// Captcha is the bot check on a link's PIN (`share_password`). Nil =
+	// none.
+	Captcha *Captcha
 }
 
 // NewPublicAPI constructs the handler.
@@ -103,6 +107,9 @@ func (h *PublicAPI) AttachLocale(def string) { h.DefaultLocale = def }
 
 // AttachACL wires the permission resolver for linkCreatorAllows.
 func (h *PublicAPI) AttachACL(r *acl.Resolver) { h.ACL = r }
+
+// AttachCaptcha wires the bot check.
+func (h *PublicAPI) AttachCaptcha(c *Captcha) { h.Captcha = c }
 
 func (h *PublicAPI) headers(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -491,9 +498,16 @@ func (h *PublicAPI) PIN(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		PIN string `json:"pin"`
+		captcha.Fields
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
+	// ⚠ 16 KiB, not 4: a provider token or a local solution rides along.
+	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	// The bot check before the PIN is compared: a refused check spends none
+	// of the attempts before the lock.
+	if sh.PinHash != "" && !h.Captcha.Gate(w, r, captcha.FormSharePassword, req.Fields) {
 		return
 	}
 	switch err := h.Service.CheckPIN(r.Context(), sh, req.PIN); {

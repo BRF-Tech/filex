@@ -397,6 +397,16 @@ export const SCREENSHOTS = [
     depicts: ['web/src/views/Login.vue'],
   },
   {
+    // The sign-in card with the bot check above its button (#294).
+    name: 'botprotection/login-captcha-dark-1440.png',
+    depicts: ['web/src/views/Login.vue', 'packages/core/src/components/CaptchaWidget.vue'],
+  },
+  {
+    // Admin → Bot protection: the provider, its keys, the forms, the fallback.
+    name: 'botprotection/bot-protection-dark-1440.png',
+    depicts: ['web/src/views/BotProtection.vue'],
+  },
+  {
     // Plugins → Default apps: every kind something besides filex handles, one with a rule.
     name: 'defaultapps/default-apps-1440.png',
     depicts: ['web/src/components/plugins/DefaultAppsTab.vue'],

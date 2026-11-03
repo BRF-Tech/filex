@@ -15,6 +15,8 @@
 import { nextTick, onMounted, ref, watch } from 'vue';
 import type { LocaleCode } from '../../types/ExplorerConfig';
 import { useLocale } from '../../composables/useLocale';
+import type { CaptchaStore } from '../../composables/useCaptcha';
+import CaptchaWidget from '../CaptchaWidget.vue';
 
 const props = defineProps<{
   locale: LocaleCode | string;
@@ -31,6 +33,11 @@ const props = defineProps<{
    * Absent = the box does not cut what is typed; the server answers.
    */
   maxLength?: number;
+  /**
+   * The bot check of this box (`share_password`), when the server protects
+   * it. Drawn between the box and the button: it is part of answering.
+   */
+  captcha?: CaptchaStore | null;
 }>();
 
 const emit = defineEmits<{
@@ -104,6 +111,7 @@ function submit(): void {
     <p v-if="message()" class="fe-ppage__error" role="alert" data-testid="public-page-pin-error">
       {{ message() }}<template v-if="lockMessage"> ({{ lockMessage }})</template>
     </p>
+    <CaptchaWidget v-if="captcha?.active.value" :captcha="captcha" :locale="String(locale)" />
     <button
       type="submit"
       class="fe-btn fe-btn--primary"

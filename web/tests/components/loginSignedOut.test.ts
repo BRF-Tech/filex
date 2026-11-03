@@ -16,6 +16,8 @@ import { useCapabilitiesStore } from '@/stores/capabilities';
 import { AuthApi } from '@/api/auth';
 import en from '@/locales/en.json';
 
+// #294: the sign-in page asks which forms the bot check guards; none here.
+vi.mock('@/api/captcha', () => ({ CaptchaPublicApi: { config: async () => null } }));
 vi.mock('@/api/branding', () => ({
   BrandingApi: { get: vi.fn().mockResolvedValue({}) },
 }));

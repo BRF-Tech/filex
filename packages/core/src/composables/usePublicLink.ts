@@ -28,6 +28,8 @@ import type { PublicFailure, PublicRequestInfo, PublicShareInfo } from '../types
 import { usePluginSurface, type PluginSurfaceStore } from './usePluginSurface';
 import { foreignText } from '../lib/direction';
 import { checkDropFiles, type DropRefusal } from '../lib/dropLimits';
+import { captchaAnswerOf, type CaptchaFields, type CaptchaReply } from '../lib/captcha';
+import type { CaptchaOutcome, CaptchaStore } from './useCaptcha';
 
 export type PublicStatus =
   | 'loading'
@@ -49,10 +51,24 @@ export class PublicLinkError extends Error {
     public status: number,
     public code: string,
     message?: string,
+    /** The whole answer, for a reader that needs more than the code (the bot check's challenge). */
+    public body: Record<string, unknown> | null = null,
   ) {
     super(message || code || String(status));
     this.name = 'PublicLinkError';
   }
+}
+
+/** A public call's answer as the bot check reads it (composables/useCaptcha `protect`). */
+export function publicCaptchaReply<T>(outcome: CaptchaOutcome<T>): CaptchaReply | null {
+  if (outcome.ok) return null;
+  const e = outcome.error;
+  return e instanceof PublicLinkError ? { status: e.status, body: e.body } : null;
+}
+
+/** Was this refusal the bot check's (and so already said under the widget)? */
+function isCaptchaRefusal(e: unknown): boolean {
+  return captchaAnswerOf(e instanceof PublicLinkError ? { status: e.status, body: e.body } : null) !== null;
 }
 
 /** Builds the addresses of one link's walk. */
@@ -97,6 +113,19 @@ export interface PublicLinkOptions {
    */
   unansweredText?: () => string;
   fetchImpl?: typeof fetch;
+  /**
+   * The bot check of the two forms a link can have (composables/useCaptcha):
+   * its PIN box (`share_password`) and a file request's drop box
+   * (`file_request`). Absent: the forms are sent as they are.
+   */
+  captcha?: { pin?: CaptchaStore | null; upload?: CaptchaStore | null };
+}
+
+/** What `POST /api/public/d/{token}/captcha` gives a drop: the pass its upload carries. */
+export interface PublicUploadPass {
+  /** `''` when the form is not protected. */
+  pass: string;
+  expires_at?: string;
 }
 
 export function publicLinkClient<TInfo>(url: PublicRoot, opts: PublicLinkOptions) {
@@ -120,7 +149,12 @@ export function publicLinkClient<TInfo>(url: PublicRoot, opts: PublicLinkOptions
     }
     if (!res.ok) {
       const b = (body ?? {}) as { error?: string; message?: string };
-      throw new PublicLinkError(res.status, b.error ?? '', b.message);
+      throw new PublicLinkError(
+        res.status,
+        b.error ?? '',
+        b.message,
+        body && typeof body === 'object' ? (body as Record<string, unknown>) : null,
+      );
     }
     return { status: res.status, body: body as T };
   }
@@ -128,7 +162,17 @@ export function publicLinkClient<TInfo>(url: PublicRoot, opts: PublicLinkOptions
   return {
     /** What the link is and what the visitor may see of it. */
     info: (query = '') => call<TInfo>(query).then((r) => r.body),
-    pin: (pin: string) => call<TInfo>('/pin', { method: 'POST', body: { pin } }).then((r) => r.body),
+    /** The PIN, with the bot check's field when the form is protected. */
+    pin: (pin: string, captcha: CaptchaFields = {}) =>
+      call<TInfo>('/pin', { method: 'POST', body: { pin, ...captcha } }).then((r) => r.body),
+    /**
+     * A file request's upload pass (`POST /captcha`), asked for right before
+     * the upload. ⚠ A multipart upload cannot be answered "solve this first"
+     * halfway through its bytes, so the check is a JSON call of its own and
+     * the upload only carries the pass it returned (`X-Captcha-Pass`).
+     */
+    uploadPass: (captcha: CaptchaFields) =>
+      call<PublicUploadPass>('/captcha', { method: 'POST', body: { ...captcha } }).then((r) => r.body),
     /**
      * The app's opening screen.
      *
@@ -358,7 +402,11 @@ export function usePublicLink<
       // ⚠ Trimmed. A PIN is usually pasted out of a message, and a trailing
       // space is not a wrong code — refusing it spends one of the attempts
       // before the lockout on something the person cannot even see.
-      info.value = await client.pin(pin.trim());
+      const code = pin.trim();
+      const check = opts.captcha?.pin;
+      info.value = check
+        ? await check.protect((f) => client.pin(code, f), publicCaptchaReply)
+        : await client.pin(code);
       if (dead(info.value as TInfo)) {
         status.value = 'gone';
         reason.value = 'gone';
@@ -369,6 +417,9 @@ export function usePublicLink<
       }
     } catch (e) {
       const err = e as PublicLinkError;
+      // The bot check said no: its own sentence is under the widget already,
+      // and the PIN was never looked at - it is not a wrong one.
+      if (isCaptchaRefusal(e)) return;
       if (err?.status === 429) {
         pinFailure.value = 'locked';
         // ⚠ The server's own rate-limit sentence — isolate it.
@@ -508,13 +559,14 @@ const GATEWAY_GAVE_UP = new Set([504, 524]);
 
 export function usePublicRequest(token: string, opts: PublicLinkOptions) {
   const link = usePublicLink<PublicRequestInfo>(requestRoot(opts.base, token), opts);
+  const client = publicLinkClient<PublicRequestInfo>(requestRoot(opts.base, token), opts);
   const uploads = ref<PublicUpload[]>([]);
 
   function patchRange(from: number, to: number, p: Partial<PublicUpload>): void {
     uploads.value = uploads.value.map((u, n) => (n >= from && n < to ? { ...u, ...p } : u));
   }
 
-  function send(files: File[], from: number, name: string): Promise<void> {
+  function send(files: File[], from: number, name: string, pass: string): Promise<void> {
     const to = from + files.length;
     return new Promise<void>((resolve) => {
       let xhr: XMLHttpRequest;
@@ -529,6 +581,8 @@ export function usePublicRequest(token: string, opts: PublicLinkOptions) {
       xhr.withCredentials = true;
       xhr.setRequestHeader('Accept', 'application/json');
       xhr.setRequestHeader('Accept-Language', opts.locale());
+      // The bot check's pass (`uploadPass`), when the drop box is protected.
+      if (pass) xhr.setRequestHeader('X-Captcha-Pass', pass);
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && e.total > 0) patchRange(from, to, { percent: Math.round((e.loaded / e.total) * 100) });
       };
@@ -604,8 +658,39 @@ export function usePublicRequest(token: string, opts: PublicLinkOptions) {
       ...uploads.value,
       ...accepted.map((f) => ({ name: f.name, size: f.size, percent: -1, state: 'sending' as const })),
     ];
-    await send(accepted, from, (o.name ?? '').trim());
+    const pass = await passFor(from);
+    if (pass === null) return;
+    await send(accepted, from, (o.name ?? '').trim(), pass);
     await link.load();
+  }
+
+  /**
+   * The upload pass, when the drop box is protected: '' when it is not, null
+   * when the drop does not go (the rows it just added are taken back).
+   *
+   * ⚠ The rows go when the BOT CHECK said no - its sentence is under the
+   * widget right above the box, and a second copy on each file's row read as
+   * three failures instead of one. Any other failure (the network, a link
+   * that went away) is said on the rows, as an upload's own failure is.
+   */
+  async function passFor(from: number): Promise<string | null> {
+    const check = opts.captcha?.upload;
+    if (!check) return '';
+    await check.load();
+    if (!check.active.value) return '';
+    try {
+      const r = await check.protect((f) => client.uploadPass(f), publicCaptchaReply);
+      return r?.pass ?? '';
+    } catch (e) {
+      if (isCaptchaRefusal(e)) {
+        uploads.value = uploads.value.slice(0, from);
+      } else {
+        const said = e instanceof PublicLinkError ? e.body?.message : '';
+        const msg = typeof said === 'string' ? said : '';
+        patchRange(from, uploads.value.length, { state: 'failed', error: msg || opts.errorText() });
+      }
+      return null;
+    }
   }
 
   return { ...link, uploads, upload };

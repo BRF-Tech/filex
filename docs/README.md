@@ -163,6 +163,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   directories, header auth
 - [Sign in with an operating-system account](OS-LOGIN.md) - Windows (local or domain) and Linux PAM,
   the first-sign-in rule, the e-mail token, and how the provider is tested
+- [Bot protection (CAPTCHA)](BOT-PROTECTION.md) - Cloudflare Turnstile or
+  Google reCAPTCHA on the sign-in, a link's PIN and a file request's upload,
+  with a local proof of work when the provider cannot be reached (0.58)
 - [Sign-in attempt limits](CONFIGURATION.md#sign-in-attempt-limits) - wrong
   passwords counted per account and per address on the web form, WebDAV, FTPS
   and SFTP, the lock that doubles up to 15 minutes, the IP allow-list, the

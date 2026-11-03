@@ -76,7 +76,10 @@ made a second one, and the header's link was also listed again underneath.) Or
 ```
 
 The response includes the public URL (`https://files.example.com/s/<token>`) and,
-if requested, the generated PIN. The PIN is not lost after that: the link's
+if requested, the generated PIN. With [bot protection](BOT-PROTECTION.md) on for
+`share_password`, the PIN screen carries the bot check too, and the PIN is
+answered on the page only: the no-JavaScript form and a PIN in the address
+(`?pin=`, `X-Filex-Pin`) are refused with *JavaScript needed* while it is on. The PIN is not lost after that: the link's
 creator and an administrator can read it back - see
 [Your own links, and their PINs](#your-own-links-and-their-pins).
 
@@ -314,7 +317,9 @@ The inverse of a share link: a public page where anyone can **drop files into a
 folder** - collecting documents, photos, submissions - without an account and
 **without seeing what's already in the folder** ("blind drop"). The target
 folder is resolved server-side from the token; the uploader can never influence
-the destination.
+the destination. With [bot protection](BOT-PROTECTION.md) on for
+`file_request`, every submission passes the bot check first and carries its
+[upload pass](BOT-PROTECTION.md#file-requests-the-upload-pass).
 
 **Create.** On a **folder**, Explorer → **Share**, section **Request files** -
 or **+ New → Request files** for the folder you are in - or `POST

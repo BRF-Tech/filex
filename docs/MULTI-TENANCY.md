@@ -418,7 +418,7 @@ the form has no field):
 
 | The platform's page: the Realm field empty and free | A tenant's own address: the field filled in and read-only |
 |---|---|
-| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.04c63e0ba149.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.ad0cd828c6ac.png) |
+| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.e88130186663.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.9684d2e13dbc.png) |
 
 **The handoff to a tenant's own address.** The session cookie belongs to the
 host it was set on. A realm typed on the platform's page for a tenant that has
@@ -687,6 +687,7 @@ is the honest form of that proof.
 | `/api/admin/auth-providers` | Rewrite the global `auth.*` rows (OIDC issuer + client secret, LDAP bind) - who can sign in at all. |
 | `/api/admin/login-security` | The [sign-in attempt limits](CONFIGURATION.md#sign-in-attempt-limits): switch them off, allow-list an address so it is never limited and may enter any locked account, choose which proxy's forwarded address is believed, unlock other tenants' accounts. Every verb is gated, reads included (the lock list names accounts and addresses). |
 | `/api/admin/update` | Replace the binary every tenant is served by. |
+| `/api/admin/captcha` | Switch the [bot check](BOT-PROTECTION.md) off for every tenant's sign-in and links, or point it at their own keys. One setting for the instance: a tenant's address and a typed realm are checked with it. |
 | `/api/admin/providers` | Tenant lifecycle. |
 | `/api/admin/plugins` | Install a process filex runs. The tenancy check runs **before** the `plugins_disabled` 503, so the refusal does not disclose whether plugins are switched on. |
 | `/api/admin/app-plugins` | Apps are instance-wide (the table has no tenant column): install one into every tenant's file menu, change its grants and settings, or force-lift the file locks it holds. |

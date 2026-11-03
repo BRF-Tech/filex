@@ -70,6 +70,10 @@ export interface LoginRequest {
   /** The tenant realm (multi-tenant installs only; empty = the platform's own
    *  tenant, or the one the address names). */
   realm?: string;
+  /** The bot check's token (#294), when the sign-in form is protected. */
+  captcha_token?: string;
+  /** Or the local fallback's solution, in an outage (base64 of its JSON). */
+  captcha_local?: string;
 }
 
 /** A sign-in typed on the platform's address for a tenant that has an address

@@ -89,6 +89,17 @@ area with no GC is a disk incident waiting, and this project has already lost
 Both label values are pre-registered, so a rule written against them returns `0`
 rather than "no data" before the first refusal ever happens.
 
+### Bot protection
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `filex_captcha_fallback_total{cause="unreachable"}` | counter | forms the [bot check](BOT-PROTECTION.md#when-the-provider-is-down) answered with the local proof of work because its provider could not be reached |
+| `filex_captcha_fallback_total{cause="misconfigured"}` | counter | the same, because the provider's keys cannot work |
+
+Both are pre-registered. Anything above zero means visitors waited a few seconds
+for the proof of work; the operator notifications say why
+(`captcha_fallback`, `captcha_misconfigured`).
+
 ### Transfers and per-storage throughput
 
 | Metric | Type | Labels | Meaning |

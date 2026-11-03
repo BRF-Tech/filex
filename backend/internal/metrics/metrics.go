@@ -136,6 +136,14 @@ var GuardRefusals = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Help: "Requests refused by a guard, by guard name.",
 }, []string{"guard"})
 
+// CaptchaFallbacks counts the local fallback challenges the bot check handed
+// out (internal/captcha), by why: the provider could not be reached
+// (`unreachable`) or its keys cannot work (`misconfigured`).
+var CaptchaFallbacks = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "filex_captcha_fallback_total",
+	Help: "Bot check forms that fell back to the local proof of work, by cause.",
+}, []string{"cause"})
+
 // Guard label values.
 const (
 	GuardDisk  = "disk"
@@ -274,6 +282,7 @@ func init() {
 		StagedCommitted, StagedFailed, StagedChunkRetries, StagedAborted,
 		SweepRuns, Swept,
 		GuardRefusals,
+		CaptchaFallbacks,
 		TransferDuration, TransferBytes,
 		CacheEvents, CacheBytes,
 		QuotaUsageBytes, QuotaAccountedBytes,
@@ -291,6 +300,8 @@ func init() {
 	// instead of "no data" before the first refusal ever happens.
 	GuardRefusals.WithLabelValues(GuardDisk)
 	GuardRefusals.WithLabelValues(GuardQuota)
+	CaptchaFallbacks.WithLabelValues("unreachable")
+	CaptchaFallbacks.WithLabelValues("misconfigured")
 	Swept.WithLabelValues("row")
 	Swept.WithLabelValues("orphan")
 

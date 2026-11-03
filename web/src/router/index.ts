@@ -572,6 +572,14 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.loginSecurity' },
       },
       {
+        // Bot protection (#294): the captcha on the anonymous forms - its
+        // provider, keys, forms and outage fallback (instance-wide).
+        path: 'bot-protection',
+        name: 'bot-protection',
+        component: () => import('@/views/BotProtection.vue'),
+        meta: { breadcrumb: 'nav.botProtection' },
+      },
+      {
         path: 'archives',
         name: 'archives',
         component: () => import('@/views/Archives.vue'),

@@ -26,6 +26,7 @@ import { useLocale } from '../../composables/useLocale';
 import { usePublicBranding } from '../../composables/usePublicBranding';
 import { useSystemDark } from '../../composables/useSystemDark';
 import { usePublicRequest, usePublicShare } from '../../composables/usePublicLink';
+import { useCaptcha, useCaptchaConfig } from '../../composables/useCaptcha';
 import { loadPublicText, providePublicText, publicSentence } from '../../composables/usePublicText';
 import { hasLocale, normalizeLocaleCode } from '../../lib/uiLocales';
 import { localPref, setLocalPref } from '../../lib/prefs';
@@ -141,10 +142,25 @@ const resolvedTheme = computed<'light' | 'dark'>(() => {
 
 /* ── the link itself ──────────────────────────────────────────────────── */
 
+/*
+ * The bot check of the two forms a link can have: its PIN box, and a file
+ * request's drop box. ONE config for both (`/api/captcha/config`, asked once).
+ */
+const captchaConfig = useCaptchaConfig({ base: apiRoot });
+const captchaOpts = {
+  base: apiRoot,
+  locale: () => locale.value,
+  theme: () => resolvedTheme.value,
+  config: captchaConfig,
+};
+const pinCaptcha = useCaptcha({ ...captchaOpts, form: 'share_password' });
+const uploadCaptcha = props.kind === 'request' ? useCaptcha({ ...captchaOpts, form: 'file_request' }) : null;
+
 const opts = {
   base: apiRoot,
   locale: () => locale.value,
   errorText: () => t('plugin.view.error'),
+  captcha: { pin: pinCaptcha, upload: uploadCaptcha },
 };
 
 const share = props.kind === 'share' ? usePublicShare(props.token ?? '', opts) : null;
@@ -285,6 +301,7 @@ onMounted(() => {
   // separate call would be a second unauthenticated round trip on every
   // public page for half of what this one already says.
   void brand.load();
+  void captchaConfig.load();
   if (!props.token) {
     link.status.value = 'not_found';
     return;
@@ -314,6 +331,7 @@ onMounted(() => {
     :pin-failure="link.pinFailure.value"
     :lock-message="link.lockMessage.value"
     :failure="link.failure.value"
+    :pin-captcha="pinCaptcha"
     @pin="(p: string) => link.submitPin(p)"
     @retry="() => link.load()"
     @update:locale="chooseLocale"
@@ -330,6 +348,7 @@ onMounted(() => {
       :info="requestInfo"
       :uploads="request.uploads.value"
       :locale="locale"
+      :captcha="uploadCaptcha"
       hide-folder
       @files="(f: File[], name: string) => request!.upload(f, { name, refusedText })"
     />

@@ -2,11 +2,13 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.57.7"
+version: "0.58.0"
 releaseNotes: |-
-  filex v0.57.7 - 2026-10-30
-  • A tall picture can be read in the image viewer
-  • The macOS, Microsoft Store and snap packages offer "Open with filex" for every kind the app store's apps open again.
+  filex v0.58.0 - 2026-11-03
+  • Bot protection on the forms anybody can post.
+  • When the provider cannot be reached, the form neither opens nor shuts.
+  • The environment can set it too
+  • While a link's PIN or a file request's upload is protected, the pages without JavaScript cannot answer it.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

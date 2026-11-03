@@ -32,6 +32,8 @@ const refusal = (a: { status: number; data: Record<string, unknown> } | null) =>
     response: { status: a?.status, data: a?.data, headers: {} },
   });
 
+// #294: the sign-in page asks which forms the bot check guards; none here.
+vi.mock('@/api/captcha', () => ({ CaptchaPublicApi: { config: async () => null } }));
 vi.mock('@/api/branding', () => ({ BrandingApi: { get: vi.fn().mockResolvedValue({}) } }));
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {} }),

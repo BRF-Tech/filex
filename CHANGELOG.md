@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-11-03
+
+### Added
+
+- **Bot protection on the forms anybody can post.** The sign-in, a demo's
+  one-click sign-in, the PIN of a protected link (a share, an app's page, a
+  file request) and the upload into a file request can now ask for a bot
+  check: [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/)
+  (free, cookieless, invisible to most people) or Google reCAPTCHA v2. It is
+  set on the new **Admin → Bot protection** page: the provider,
+  the site key, the secret (stored sealed with `FILEX_SECRET_KEY`, never shown
+  again), the forms one by one, and **Test the keys**, which asks the provider with the
+  keys on the page. It is **off** until you turn it on. The check runs before
+  anything else: a refused check is not a wrong password and spends none of a
+  PIN's attempts. The widget is one shared component: the sign-in page (the
+  desktop app signs in on it too) and the public link pages show the same one.
+  [Bot protection](docs/BOT-PROTECTION.md).
+- **When the provider cannot be reached, the form neither opens nor shuts.**
+  No connection, no answer in four seconds (asked twice), a server error, an
+  answer that is not the provider's, or keys that cannot work (no site key, no
+  secret, a secret the provider refuses or that no longer opens): the browser
+  does a short proof of work instead - one to three seconds on a desktop - and
+  sends the form again by itself, and the administrators are told
+  (`captcha_fallback`, `captcha_misconfigured`; `filex_captcha_fallback_total`
+  on `/metrics`). The proof of work is accepted only while the provider is
+  down, so a bot cannot skip the widget with it, and a refusal from the
+  provider - a 429 included - is a refusal, never an outage. Several instances
+  share the outage and the once-only marks through the database.
+- **The environment can set it too**: `CAPTCHA_PROVIDER`, `CAPTCHA_SITE_KEY`,
+  `CAPTCHA_SECRET`, `CAPTCHA_FORMS` (and `CAPTCHA_FALLBACK`,
+  `CAPTCHA_VERIFY_TIMEOUT_MS`). ⚠ Unlike filex's other database settings,
+  these are **read live, not seeded**: each field is the page's when the page
+  holds one, else the variable's, else off, and a field cleared on the page is
+  the variable's again ([Configuration](docs/CONFIGURATION.md#bot-protection-captcha)).
+
+### Changed
+
+- **While a link's PIN or a file request's upload is protected, the pages
+  without JavaScript cannot answer it.** The bot check runs in the browser, so
+  the no-JavaScript PIN form, the classic upload page and a PIN in the address
+  (`?pin=`, `X-Filex-Pin`) answer *JavaScript needed* (422) instead of a form
+  that cannot succeed; nothing changes while those forms are not protected.
+  `filex client login` with a password on a protected sign-in says to use an
+  API key (`FILEX_TOKEN`) instead.
+
 ## [0.57.7] - 2026-10-30
 
 ### Added

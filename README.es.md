@@ -284,7 +284,7 @@ Todas las funciones del explorador, en detalle: [docs/FEATURES.md → The explor
 <tr>
 <td width="50%" valign="top">
 
-![La página de inicio de sesión con el tema del operador](https://filex.sh/shots/appearance/themed-signin-1440.b891c6431444.png)
+![La página de inicio de sesión con el tema del operador](https://filex.sh/shots/appearance/themed-signin-1440.0da9ad45502b.png)
 
 <sub>…y la página de inicio de sesión, antes de que nadie haya iniciado sesión</sub>
 
@@ -352,7 +352,7 @@ Todas las funciones de almacenamiento y protocolos, en detalle: [docs/FEATURES.m
 </td>
 <td width="50%" valign="top">
 
-![Claves de API](https://filex.sh/shots/sidenav/apikeys-minted-1440.3464cb59b2f8.png)
+![Claves de API](https://filex.sh/shots/sidenav/apikeys-minted-1440.cbad664dfed5.png)
 
 <sub>Claves de API - cree las suyas, en el explorador o en una integración (la sesión o el token de una persona; una integración servida a través de un proxy con un único token compartido de tipo *app* no recibe esta entrada)</sub>
 
@@ -407,7 +407,7 @@ Todas las funciones de uso compartido y protección, en detalle: [docs/FEATURES.
 <tr>
 <td width="50%" valign="top">
 
-![Cuadro de diálogo Compartir](https://filex.sh/shots/share-modal.87cb16a1a6f0.png)
+![Cuadro de diálogo Compartir](https://filex.sh/shots/share-modal.3c132b06cd19.png)
 
 <sub>Uso compartido - PIN, caducidad, límite de descargas, `curl` de una línea</sub>
 
@@ -439,7 +439,7 @@ Todas las funciones de uso compartido y protección, en detalle: [docs/FEATURES.
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Enlaces compartidos, con el menú Acciones de una fila abierto](https://filex.sh/shots/signing/admin-table-actions-1440.0fffdc146eb1.png)
+![Admin → Enlaces compartidos, con el menú Acciones de una fila abierto](https://filex.sh/shots/signing/admin-table-actions-1440.679f7daec8a4.png)
 
 <sub>Cada tabla de administración - un único menú **Acciones** fijado por fila, el mismo menú que abre el ⋮ del explorador</sub>
 
@@ -477,7 +477,9 @@ Todas las funciones de uso compartido y protección, en detalle: [docs/FEATURES.
   con nombre. Los grupos llevan acceso a carpetas y un rol, pueden seguir los grupos de su
   directorio, y las excepciones por persona prevalecen sobre el rol.
 - Adivinar una contraseña es lento: las contraseñas incorrectas se contabilizan por cuenta y por
-  dirección, por igual en el formulario web, WebDAV, FTPS y SFTP.
+  dirección, por igual en el formulario web, WebDAV, FTPS y SFTP; una verificación contra bots
+  (Cloudflare Turnstile o reCAPTCHA) puede proteger el inicio de sesión, el PIN de un enlace y
+  la subida a una solicitud de archivos.
 - Multiinquilino por diseño, tras un solo interruptor: cada inquilino tiene sus propios proveedores
   de inicio de sesión, su propio dominio y certificado, y se gestiona a sí mismo. Desactivado,
   ninguna pantalla muestra un inquilino.
@@ -487,7 +489,7 @@ Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → Peop
 <p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png" alt="Admin → Roles: los roles integrados y dos personalizados" width="860"></p>
 
 <details>
-<summary><b>Capturas de pantalla de personas y acceso</b> - roles, grupos, seguridad del inicio de sesión, una cuenta bloqueada, el panel de administración y su menú</summary>
+<summary><b>Capturas de pantalla de personas y acceso</b> - roles, grupos, seguridad del inicio de sesión, una cuenta bloqueada, protección contra bots, el panel de administración y su menú</summary>
 
 <table>
 <tr>
@@ -525,14 +527,14 @@ Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → Peop
 <tr>
 <td width="50%" valign="top">
 
-![El formulario de inicio de sesión de una cuenta bloqueada](https://filex.sh/shots/loginsecurity/login-locked-1440.42e1fe6f1937.png)
+![El formulario de inicio de sesión de una cuenta bloqueada](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
 
 <sub>…y lo que dice el formulario de inicio de sesión de una cuenta bloqueada, con el tiempo restante del bloqueo en su botón</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Panel principal de administración](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
+![Panel principal de administración](https://filex.sh/shots/admin-dashboard.3becd8ffe998.png)
 
 <sub>Panel de administración</sub>
 
@@ -541,14 +543,30 @@ Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → Peop
 <tr>
 <td width="50%" valign="top">
 
-![Página de inicio de la demo](https://filex.sh/shots/demo-landing.64f23c6f8cb3.png)
+![Admin → Protección contra bots, con el tema oscuro](https://filex.sh/shots/botprotection/bot-protection-dark-1440.0aaf54749fc8.png)
+
+<sub>Protección contra bots - Cloudflare Turnstile o Google reCAPTCHA, sus claves y los formularios que protege; si no se llega al proveedor, el navegador hace en su lugar una breve prueba de trabajo ([docs/BOT-PROTECTION.md](docs/BOT-PROTECTION.md))</sub>
+
+</td>
+<td width="50%" valign="top">
+
+![El formulario de inicio de sesión con la verificación sobre su botón](https://filex.sh/shots/botprotection/login-captcha-dark-1440.099dd770db5c.png)
+
+<sub>…y el formulario de inicio de sesión, con la verificación sobre su botón</sub>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![Página de inicio de la demo](https://filex.sh/shots/demo-landing.fba2be2d2961.png)
 
 <sub>Página de inicio de la demo</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![El panel Ajustes del menú de administración, abierto encima de Admin → Ajustes → General](https://filex.sh/shots/megamenu/settings-panel-1440.23a710915f9c.png)
+![El panel Ajustes del menú de administración, abierto encima de Admin → Ajustes → General](https://filex.sh/shots/megamenu/settings-panel-1440.42b03e9a539f.png)
 
 <sub>El menú de administración - todas las páginas en cuatro paneles, **Archivos y almacenamiento**, **Personas**, **Ajustes** (General, Seguridad y datos, Procesamiento de archivos e integraciones) y **Mantenimiento y registros**, con una línea breve debajo de cada una; un teléfono recibe las mismas páginas en un panel deslizante ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
 
@@ -776,7 +794,7 @@ la genera filex, y el enlace que recibe el socio es un enlace compartido corrien
 <tr>
 <td width="50%" valign="top">
 
-![El documento bloqueado, con su panel Firmas abierto](https://filex.sh/shots/signing/sign-status-1440.54c60e832ced.png)
+![El documento bloqueado, con su panel Firmas abierto](https://filex.sh/shots/signing/sign-status-1440.537429f5f44b.png)
 
 <sub>Mientras está en curso - el documento congelado para todos y, en sus detalles, quién ha firmado</sub>
 
@@ -1011,7 +1029,7 @@ Empiece por [Instalación](docs/INSTALLATION.md), [Configuración](docs/CONFIGUR
 | **El explorador** | Un solo diseño en la aplicación de administración, la aplicación de escritorio y cada integración: un panel de navegación, vistas de lista, cuadrícula y galería, pestañas, etiquetas personales y de equipo, una paleta de comandos ⌘K, atajos de teclado reasignables, documentos nuevos desde el menú **+ Nuevo** y temas que compone un operador ([Integración](docs/INTEGRATION.md), [Temas](docs/INTEGRATION.md#themes)) |
 | **Almacenamiento** | Discos locales, S3, FTP, SFTP, WebDAV y SMB/NAS montados lado a lado, copiar y mover entre ellos, y un complemento para cualquier otra cosa, desde el panel de administración o una tienda de aplicaciones ([Almacenamiento](docs/STORAGE.md), [Complementos de almacenamiento](docs/PLUGINS.md)) |
 | **Sin navegador** | El mismo árbol servido como S3, SFTP, FTPS, NFSv3 y WebDAV - un movimiento o una eliminación allí es tan seguro junto a un escaneo del almacenamiento como uno en la interfaz web - más `filex mount` por HTTPS ([Protocolos](docs/PROTOCOLS.md)) |
-| **Inicio de sesión** | OIDC, LDAP / Active Directory, cuentas de Windows y Linux, y límites de intentos de inicio de sesión ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [Cuentas del sistema operativo](docs/OS-LOGIN.md)) |
+| **Inicio de sesión** | OIDC, LDAP / Active Directory, cuentas de Windows y Linux, límites de intentos de inicio de sesión y una verificación contra bots en el inicio de sesión y los formularios públicos - Turnstile o reCAPTCHA, con una prueba de trabajo local cuando el proveedor no responde ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [Cuentas del sistema operativo](docs/OS-LOGIN.md), [Protección contra bots](docs/BOT-PROTECTION.md)) |
 | **Personas y acceso** | Roles y permisos por persona, grupos, acceso por carpeta y multiinquilino nativo ([Permisos](docs/PERMISSIONS.md), [Grupos](docs/GROUPS.md), [Multiinquilino](docs/MULTI-TENANCY.md)) |
 | **Uso compartido** | Enlaces públicos con PIN, caducidad y límite de descargas, solicitudes de archivos e invitaciones para compartir por correo electrónico ([Uso compartido](docs/SHARING.md)) |
 | **Protección** | Papelera e historial de versiones, análisis opcional con ClamAV, carpetas cifradas de extremo a extremo, replicación a un segundo almacenamiento (con una copia inicial de lo que ya hay) y un registro de auditoría ([Papelera y versiones](docs/TRASH-VERSIONING.md), [Protección](docs/PROTECTION.md), [Cifrado E2E](docs/E2E-ENCRYPTION.md), [Replicación](docs/REPLICATION.md), [Registro de auditoría](docs/BACKEND.md#admin-audit-log)) |

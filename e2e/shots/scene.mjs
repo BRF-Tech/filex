@@ -563,7 +563,7 @@ export async function installInterfaceApp(admin, { zip, manifest }, { expect = [
  * same picture tonight and next month. Every context a shot script makes goes
  * through stageClock, here or beside its own newContext.
  */
-export async function newContext(browser, { scheme = 'light', width = 1440, height = 900 } = {}) {
+export async function newContext(browser, { scheme = 'light', width = 1440, height = 900, now } = {}) {
   const ctx = await browser.newContext({
     ...SCENE_CONTEXT,
     viewport: { width, height },
@@ -590,7 +590,10 @@ export async function newContext(browser, { scheme = 'light', width = 1440, heig
       /* storage blocked — the defaults will show */
     }
   });
-  await stageClock(ctx);
+  // `now`: a scene whose page talks to a third party that checks the clock
+  // (Cloudflare Turnstile, botprotection.mjs) starts at the real instant; the
+  // display rules and the API's time shift still apply (clock.mjs).
+  await stageClock(ctx, now === undefined ? {} : { now });
   return ctx;
 }
 

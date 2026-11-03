@@ -163,6 +163,7 @@ async function router(at = '/dashboard'): Promise<Router> {
       { path: '/my-tenant', name: 'tenant-self', component: Blank },
       { path: '/api-mcp', name: 'api-mcp', component: Blank },
       { path: '/login-security', name: 'login-security', component: Blank },
+      { path: '/bot-protection', name: 'bot-protection', component: Blank },
       { path: '/settings', name: 'settings', component: Blank },
       { path: '/tenancy', name: 'tenancy', component: Blank },
       { path: '/branding', name: 'branding', component: Blank },

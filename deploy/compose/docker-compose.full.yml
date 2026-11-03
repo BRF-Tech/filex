@@ -126,6 +126,17 @@ services:
       # `filex settings reseed login.trusted_proxies` writes it over the saved one.
       # docs/CONFIGURATION.md -> "Trusted proxies".
       FILEX_TRUSTED_PROXIES: ${FILEX_TRUSTED_PROXIES:-}
+      # Bot protection (CAPTCHA) on the sign-in, a link's PIN and a file
+      # request's upload: turnstile or recaptcha, off when empty. Usually set on
+      # Admin -> Bot protection instead (the secret is stored sealed with
+      # FILEX_SECRET_KEY there).
+      # ⚠ NOT a seed, unlike the variables above: read live whenever the page
+      # leaves the field empty, so a change here applies at the next start
+      # unless the page holds a value of its own. docs/BOT-PROTECTION.md.
+      CAPTCHA_PROVIDER: ${CAPTCHA_PROVIDER:-}
+      CAPTCHA_SITE_KEY: ${CAPTCHA_SITE_KEY:-}
+      CAPTCHA_SECRET: ${CAPTCHA_SECRET:-}
+      CAPTCHA_FORMS: ${CAPTCHA_FORMS:-}
       # SFTP / FTPS / NFS each open a LISTENER, so they stay off until asked
       # for — and each needs its port published below and opened on the
       # firewall. ⚠ FTPS also needs the whole passive range, or transfers hang

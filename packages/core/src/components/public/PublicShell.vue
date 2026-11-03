@@ -39,6 +39,7 @@ import { computed } from 'vue';
 import type { LocaleCode, ThemeMode } from '../../types/ExplorerConfig';
 import type { PublicStatus } from '../../composables/usePublicLink';
 import type { PublicLayout } from '../../lib/publicLayout';
+import type { CaptchaStore } from '../../composables/useCaptcha';
 import { useLocale } from '../../composables/useLocale';
 import { usePublicText } from '../../composables/usePublicText';
 import { DEFAULT_BRAND_NAME } from '../../composables/usePublicBranding';
@@ -99,6 +100,8 @@ const props = defineProps<{
    * page itself, which IS the whole page, keeps its `<main>`.
    */
   embedded?: boolean;
+  /** The PIN box's bot check (composables/useCaptcha), when the server protects it. */
+  pinCaptcha?: CaptchaStore | null;
 }>();
 
 const emit = defineEmits<{
@@ -291,6 +294,7 @@ function pluginNote(plugin: string): string {
         :failure="pinFailure"
         :lock-message="lockMessage"
         :max-length="pinMax ?? undefined"
+        :captcha="pinCaptcha"
         @submit="(p: string) => emit('pin', p)"
       />
 

@@ -21,6 +21,8 @@ import type { PublicRequestInfo } from '../../types/Public';
 import { useLocale } from '../../composables/useLocale';
 import { usePublicText } from '../../composables/usePublicText';
 import { visibleName } from '../../lib/nameRule';
+import type { CaptchaStore } from '../../composables/useCaptcha';
+import CaptchaWidget from '../CaptchaWidget.vue';
 
 const props = defineProps<{
   info: PublicRequestInfo | null;
@@ -33,6 +35,11 @@ const props = defineProps<{
    * printing it again under itself read as a stutter.
    */
   hideFolder?: boolean;
+  /**
+   * The drop box's bot check (`file_request`), when the server protects it.
+   * Above the box: dropping a file sends it, so the check comes first.
+   */
+  captcha?: CaptchaStore | null;
 }>();
 
 const emit = defineEmits<{
@@ -151,6 +158,8 @@ function onDrop(e: DragEvent): void {
         data-testid="public-request-name-input"
       />
     </label>
+
+    <CaptchaWidget v-if="captcha?.active.value && !full" :captcha="captcha" :locale="String(locale)" />
 
     <div
       class="fe-pdrop__zone"

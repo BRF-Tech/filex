@@ -157,6 +157,10 @@ Token saved to /home/you/.filex/cli.yaml (0600)
   carries your token. A re-login also tightens a pre-existing looser mode.
 - `--email` takes a user name too, as the web sign-in form does.
 - Multi-tenant servers: `--realm` names your tenant - see the next section.
+- A server whose sign-in is behind a [bot check](BOT-PROTECTION.md#what-a-visitor-sees)
+  refuses a password sign-in from the CLI, and the CLI says so: create an API
+  key in the browser (**Connections → API keys**) and use it with
+  `FILEX_TOKEN` ([CI / scripts](#ci--scripts-no-config-file)).
 
 ### Multi-tenant servers: the realm
 

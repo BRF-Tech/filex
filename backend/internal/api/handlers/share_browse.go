@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/captcha"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
@@ -244,6 +245,11 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 	// nothing). The unlock cookie the gate mints counts as an answer, as it
 	// does there.
 	if resolved.PinHash != "" && !shareUnlocked(h.Service, r, resolved) {
+		// A PIN in the address cannot carry the bot check (HandleDownload).
+		if h.Captcha.Protected(r.Context(), captcha.FormSharePassword) {
+			http.Error(w, "this link's PIN is protected by a bot check: open the link in a browser", http.StatusUnprocessableEntity)
+			return
+		}
 		if pin == "" {
 			http.Error(w, "pin required", http.StatusUnauthorized)
 			return

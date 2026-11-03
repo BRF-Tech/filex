@@ -1,0 +1,692 @@
+{
+  "$schema_note": "docs/captcha-local-spec.md — yerel yedek captcha (iş-ispatı) test vektörleri. app_key = \"TEST\" (gerçek sır yok). Üretici: Python referans doğrulayıcısıyla doğrulanmış deterministik betik; dosya elle düzenlenmez.",
+  "spec": "docs/captcha-local-spec.md",
+  "algorithm": "SHA-256",
+  "app_key": "TEST",
+  "defaults": {
+    "ttl_seconds": 600,
+    "maxnumber": 200000,
+    "payload_field": "captcha_local",
+    "used_cache_key_prefix": "captcha:local:used:"
+  },
+  "verify_order": [
+    "bad_payload",
+    "bad_algorithm",
+    "bad_salt",
+    "expired",
+    "bad_number",
+    "bad_signature",
+    "bad_hash",
+    "replayed"
+  ],
+  "vectors": [
+    {
+      "id": "P1",
+      "kind": "positive",
+      "description": "number = 0 (alt sınır); hash = sha256(salt + \"0\")",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "number": 0,
+        "maxnumber": 100000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "hash": "29e96605778aa2dae3f2a9c25c6c1993b4c94f8a2e360b120ec3a3cb22291cbd",
+        "signature": "bd23287efe196c1ceb4611dd86a51c14a28c44904e7de8afa826f96e831baf35",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"0123456789abcdef0123456789abcdef?expires=1762300600\",\"number\":0,\"hash\":\"29e96605778aa2dae3f2a9c25c6c1993b4c94f8a2e360b120ec3a3cb22291cbd\",\"signature\":\"bd23287efe196c1ceb4611dd86a51c14a28c44904e7de8afa826f96e831baf35\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmP2V4cGlyZXM9MTc2MjMwMDYwMCIsIm51bWJlciI6MCwiaGFzaCI6IjI5ZTk2NjA1Nzc4YWEyZGFlM2YyYTljMjVjNmMxOTkzYjRjOTRmOGEyZTM2MGIxMjBlYzNhM2NiMjIyOTFjYmQiLCJzaWduYXR1cmUiOiJiZDIzMjg3ZWZlMTk2YzFjZWI0NjExZGQ4NmE1MWMxNGEyOGM0NDkwNGU3ZGU4YWZhODI2Zjk2ZTgzMWJhZjM1In0="
+      },
+      "expected": {
+        "hash": "29e96605778aa2dae3f2a9c25c6c1993b4c94f8a2e360b120ec3a3cb22291cbd",
+        "signature": "bd23287efe196c1ceb4611dd86a51c14a28c44904e7de8afa826f96e831baf35",
+        "verify": {
+          "ok": true,
+          "reason": "ok"
+        }
+      }
+    },
+    {
+      "id": "P2",
+      "kind": "positive",
+      "description": "sıradan çözüm (number 4242, maxnumber 100000)",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "number": 4242,
+        "maxnumber": 100000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"0123456789abcdef0123456789abcdef?expires=1762300600\",\"number\":4242,\"hash\":\"927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d\",\"signature\":\"4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmP2V4cGlyZXM9MTc2MjMwMDYwMCIsIm51bWJlciI6NDI0MiwiaGFzaCI6IjkyN2ZmMjliMmY0ZTc1NjQyYWRkYWY1MjNkOWY1YmU2NWRiNjRiOWE4ZWRkMjU1OGY2Y2IwYTUxYTNlZjY2N2QiLCJzaWduYXR1cmUiOiI0Zjc1YTk5M2Y3MGMwZGI4ZmUyZjdiMjU4OTMzNjc4NGMzNmM3ZTVkNTYyYjIwMTE0Yzk0ZjBlMDVjMWJkMDAyIn0="
+      },
+      "expected": {
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "verify": {
+          "ok": true,
+          "reason": "ok"
+        }
+      }
+    },
+    {
+      "id": "P3",
+      "kind": "positive",
+      "description": "number = maxnumber (üst sınır dahil)",
+      "input": {
+        "app_key": "TEST",
+        "salt": "fedcba9876543210fedcba9876543210?expires=1762300600",
+        "number": 50000,
+        "maxnumber": 50000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "fedcba9876543210fedcba9876543210?expires=1762300600",
+        "hash": "a8c53efb9fa1e2629ec8a7950ba7416e9dd30a77a89b3beeafbcc24ec8a9138e",
+        "signature": "4e05ecd9e3b9efb8e40154dbaaf06e683b5d7949a647a968dbfa2de1fc739b2d",
+        "maxnumber": 50000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"fedcba9876543210fedcba9876543210?expires=1762300600\",\"number\":50000,\"hash\":\"a8c53efb9fa1e2629ec8a7950ba7416e9dd30a77a89b3beeafbcc24ec8a9138e\",\"signature\":\"4e05ecd9e3b9efb8e40154dbaaf06e683b5d7949a647a968dbfa2de1fc739b2d\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6ImZlZGNiYTk4NzY1NDMyMTBmZWRjYmE5ODc2NTQzMjEwP2V4cGlyZXM9MTc2MjMwMDYwMCIsIm51bWJlciI6NTAwMDAsImhhc2giOiJhOGM1M2VmYjlmYTFlMjYyOWVjOGE3OTUwYmE3NDE2ZTlkZDMwYTc3YTg5YjNiZWVhZmJjYzI0ZWM4YTkxMzhlIiwic2lnbmF0dXJlIjoiNGUwNWVjZDllM2I5ZWZiOGU0MDE1NGRiYWFmMDZlNjgzYjVkNzk0OWE2NDdhOTY4ZGJmYTJkZTFmYzczOWIyZCJ9"
+      },
+      "expected": {
+        "hash": "a8c53efb9fa1e2629ec8a7950ba7416e9dd30a77a89b3beeafbcc24ec8a9138e",
+        "signature": "4e05ecd9e3b9efb8e40154dbaaf06e683b5d7949a647a968dbfa2de1fc739b2d",
+        "verify": {
+          "ok": true,
+          "reason": "ok"
+        }
+      }
+    },
+    {
+      "id": "P4",
+      "kind": "positive",
+      "description": "uzak süre sonu + büyük number (200000 tavan)",
+      "input": {
+        "app_key": "TEST",
+        "salt": "00112233445566778899aabbccddeeff?expires=1762386400",
+        "number": 123456,
+        "maxnumber": 200000,
+        "expires": 1762386400,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "00112233445566778899aabbccddeeff?expires=1762386400",
+        "hash": "efa6087344cb7de8d251bb8d312f91c9d7e8211027ad9b9159ddf6fcf4161baa",
+        "signature": "b5f06353696039f5976732813d4fed71802cb640fc2aa26df1021e05a93b374f",
+        "maxnumber": 200000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"00112233445566778899aabbccddeeff?expires=1762386400\",\"number\":123456,\"hash\":\"efa6087344cb7de8d251bb8d312f91c9d7e8211027ad9b9159ddf6fcf4161baa\",\"signature\":\"b5f06353696039f5976732813d4fed71802cb640fc2aa26df1021e05a93b374f\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAwMTEyMjMzNDQ1NTY2Nzc4ODk5YWFiYmNjZGRlZWZmP2V4cGlyZXM9MTc2MjM4NjQwMCIsIm51bWJlciI6MTIzNDU2LCJoYXNoIjoiZWZhNjA4NzM0NGNiN2RlOGQyNTFiYjhkMzEyZjkxYzlkN2U4MjExMDI3YWQ5YjkxNTlkZGY2ZmNmNDE2MWJhYSIsInNpZ25hdHVyZSI6ImI1ZjA2MzUzNjk2MDM5ZjU5NzY3MzI4MTNkNGZlZDcxODAyY2I2NDBmYzJhYTI2ZGYxMDIxZTA1YTkzYjM3NGYifQ=="
+      },
+      "expected": {
+        "hash": "efa6087344cb7de8d251bb8d312f91c9d7e8211027ad9b9159ddf6fcf4161baa",
+        "signature": "b5f06353696039f5976732813d4fed71802cb640fc2aa26df1021e05a93b374f",
+        "verify": {
+          "ok": true,
+          "reason": "ok"
+        }
+      }
+    },
+    {
+      "id": "P5",
+      "kind": "positive",
+      "description": "salt sorgu dizesinde ek parametre (&v=1) yok sayılır",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600&v=1",
+        "number": 777,
+        "maxnumber": 100000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600&v=1",
+        "hash": "1ff8ce5abe236e5a1e782d8d685cca69bac7683445cc0a8b637b50e37b70ad4c",
+        "signature": "8a8e895f345c7922895c73533db7112ebb0da2f3d9a380c437a5c6c4619a65b7",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"0123456789abcdef0123456789abcdef?expires=1762300600&v=1\",\"number\":777,\"hash\":\"1ff8ce5abe236e5a1e782d8d685cca69bac7683445cc0a8b637b50e37b70ad4c\",\"signature\":\"8a8e895f345c7922895c73533db7112ebb0da2f3d9a380c437a5c6c4619a65b7\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmP2V4cGlyZXM9MTc2MjMwMDYwMCZ2PTEiLCJudW1iZXIiOjc3NywiaGFzaCI6IjFmZjhjZTVhYmUyMzZlNWExZTc4MmQ4ZDY4NWNjYTY5YmFjNzY4MzQ0NWNjMGE4YjYzN2I1MGUzN2I3MGFkNGMiLCJzaWduYXR1cmUiOiI4YThlODk1ZjM0NWM3OTIyODk1YzczNTMzZGI3MTEyZWJiMGRhMmYzZDlhMzgwYzQzN2E1YzZjNDYxOWE2NWI3In0="
+      },
+      "expected": {
+        "hash": "1ff8ce5abe236e5a1e782d8d685cca69bac7683445cc0a8b637b50e37b70ad4c",
+        "signature": "8a8e895f345c7922895c73533db7112ebb0da2f3d9a380c437a5c6c4619a65b7",
+        "verify": {
+          "ok": true,
+          "reason": "ok"
+        }
+      },
+      "note": "Doğrulayıcı yalnız `expires` okur; tanımadığı parametreleri yok sayar (ileri uyumluluk)."
+    },
+    {
+      "id": "P6",
+      "kind": "positive",
+      "description": "hash ve signature BÜYÜK harf hex ile gönderildi; doğrulayıcı küçük harfe indirger",
+      "input": {
+        "app_key": "TEST",
+        "salt": "fedcba9876543210fedcba9876543210?expires=1762300600",
+        "number": 31337,
+        "maxnumber": 100000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "fedcba9876543210fedcba9876543210?expires=1762300600",
+        "hash": "b40f9745453e6d9269d5605faaabbfe8fbaee903a1175c4600a22e5cfb489d5b",
+        "signature": "bba83926f11affc2565288d0ba534e4363979edd9ce574b932e9c41055ab074d",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"fedcba9876543210fedcba9876543210?expires=1762300600\",\"number\":31337,\"hash\":\"B40F9745453E6D9269D5605FAAABBFE8FBAEE903A1175C4600A22E5CFB489D5B\",\"signature\":\"BBA83926F11AFFC2565288D0BA534E4363979EDD9CE574B932E9C41055AB074D\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6ImZlZGNiYTk4NzY1NDMyMTBmZWRjYmE5ODc2NTQzMjEwP2V4cGlyZXM9MTc2MjMwMDYwMCIsIm51bWJlciI6MzEzMzcsImhhc2giOiJCNDBGOTc0NTQ1M0U2RDkyNjlENTYwNUZBQUFCQkZFOEZCQUVFOTAzQTExNzVDNDYwMEEyMkU1Q0ZCNDg5RDVCIiwic2lnbmF0dXJlIjoiQkJBODM5MjZGMTFBRkZDMjU2NTI4OEQwQkE1MzRFNDM2Mzk3OUVERDlDRTU3NEI5MzJFOUM0MTA1NUFCMDc0RCJ9"
+      },
+      "expected": {
+        "hash": "b40f9745453e6d9269d5605faaabbfe8fbaee903a1175c4600a22e5cfb489d5b",
+        "signature": "bba83926f11affc2565288d0ba534e4363979edd9ce574b932e9c41055ab074d",
+        "verify": {
+          "ok": true,
+          "reason": "ok"
+        }
+      },
+      "note": "Üretici her zaman küçük harf hex basar; doğrulayıcı karşılaştırmadan önce lower() uygular. HMAC mesajı küçük harfe indirgenmiş hash'tir."
+    },
+    {
+      "id": "P7",
+      "kind": "positive",
+      "description": "now = expires - 1 (son geçerli saniye)",
+      "input": {
+        "app_key": "TEST",
+        "salt": "00112233445566778899aabbccddeeff?expires=1762300001",
+        "number": 5,
+        "maxnumber": 100000,
+        "expires": 1762300001,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "00112233445566778899aabbccddeeff?expires=1762300001",
+        "hash": "2542cf8e98e9bd18f5d3af2b446fb4714293cb513e065945aa0f3104dbf94df1",
+        "signature": "0d5c76486fa855ab5737baedc48a7cff54b8db17226523fe6a255336c5667ef6",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"00112233445566778899aabbccddeeff?expires=1762300001\",\"number\":5,\"hash\":\"2542cf8e98e9bd18f5d3af2b446fb4714293cb513e065945aa0f3104dbf94df1\",\"signature\":\"0d5c76486fa855ab5737baedc48a7cff54b8db17226523fe6a255336c5667ef6\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAwMTEyMjMzNDQ1NTY2Nzc4ODk5YWFiYmNjZGRlZWZmP2V4cGlyZXM9MTc2MjMwMDAwMSIsIm51bWJlciI6NSwiaGFzaCI6IjI1NDJjZjhlOThlOWJkMThmNWQzYWYyYjQ0NmZiNDcxNDI5M2NiNTEzZTA2NTk0NWFhMGYzMTA0ZGJmOTRkZjEiLCJzaWduYXR1cmUiOiIwZDVjNzY0ODZmYTg1NWFiNTczN2JhZWRjNDhhN2NmZjU0YjhkYjE3MjI2NTIzZmU2YTI1NTMzNmM1NjY3ZWY2In0="
+      },
+      "expected": {
+        "hash": "2542cf8e98e9bd18f5d3af2b446fb4714293cb513e065945aa0f3104dbf94df1",
+        "signature": "0d5c76486fa855ab5737baedc48a7cff54b8db17226523fe6a255336c5667ef6",
+        "verify": {
+          "ok": true,
+          "reason": "ok"
+        }
+      }
+    },
+    {
+      "id": "N1",
+      "kind": "negative",
+      "description": "imza bozuk (son hex karakteri değiştirildi) -> bad_signature",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "number": 4242,
+        "maxnumber": 100000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"0123456789abcdef0123456789abcdef?expires=1762300600\",\"number\":4242,\"hash\":\"927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d\",\"signature\":\"4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd000\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmP2V4cGlyZXM9MTc2MjMwMDYwMCIsIm51bWJlciI6NDI0MiwiaGFzaCI6IjkyN2ZmMjliMmY0ZTc1NjQyYWRkYWY1MjNkOWY1YmU2NWRiNjRiOWE4ZWRkMjU1OGY2Y2IwYTUxYTNlZjY2N2QiLCJzaWduYXR1cmUiOiI0Zjc1YTk5M2Y3MGMwZGI4ZmUyZjdiMjU4OTMzNjc4NGMzNmM3ZTVkNTYyYjIwMTE0Yzk0ZjBlMDVjMWJkMDAwIn0="
+      },
+      "expected": {
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "verify": {
+          "ok": false,
+          "reason": "bad_signature"
+        }
+      }
+    },
+    {
+      "id": "N2",
+      "kind": "negative",
+      "description": "salt süresi dolmuş (expires = now - 60) -> expired",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762299940",
+        "number": 4242,
+        "maxnumber": 100000,
+        "expires": 1762299940,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762299940",
+        "hash": "463889bc909e4955e2d5459aaec968c59df52808da9fdb7abc02cc8d7dd142b5",
+        "signature": "96990a21fc60cfc6db93857fe129322c5b6bf8e9529c60ddaeb8861d00521113",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"0123456789abcdef0123456789abcdef?expires=1762299940\",\"number\":4242,\"hash\":\"463889bc909e4955e2d5459aaec968c59df52808da9fdb7abc02cc8d7dd142b5\",\"signature\":\"96990a21fc60cfc6db93857fe129322c5b6bf8e9529c60ddaeb8861d00521113\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmP2V4cGlyZXM9MTc2MjI5OTk0MCIsIm51bWJlciI6NDI0MiwiaGFzaCI6IjQ2Mzg4OWJjOTA5ZTQ5NTVlMmQ1NDU5YWFlYzk2OGM1OWRmNTI4MDhkYTlmZGI3YWJjMDJjYzhkN2RkMTQyYjUiLCJzaWduYXR1cmUiOiI5Njk5MGEyMWZjNjBjZmM2ZGI5Mzg1N2ZlMTI5MzIyYzViNmJmOGU5NTI5YzYwZGRhZWI4ODYxZDAwNTIxMTEzIn0="
+      },
+      "expected": {
+        "hash": "463889bc909e4955e2d5459aaec968c59df52808da9fdb7abc02cc8d7dd142b5",
+        "signature": "96990a21fc60cfc6db93857fe129322c5b6bf8e9529c60ddaeb8861d00521113",
+        "verify": {
+          "ok": false,
+          "reason": "expired"
+        }
+      }
+    },
+    {
+      "id": "N2b",
+      "kind": "negative",
+      "description": "now == expires (sınır, dahil DEĞİL) -> expired",
+      "input": {
+        "app_key": "TEST",
+        "salt": "fedcba9876543210fedcba9876543210?expires=1762300000",
+        "number": 4242,
+        "maxnumber": 100000,
+        "expires": 1762300000,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "fedcba9876543210fedcba9876543210?expires=1762300000",
+        "hash": "8a2c93dcc9a67c67f265a7e2cccb43e60fc919a7ebcc605c5a538bf3c8dffa31",
+        "signature": "b0863d5d2ae8f3b509162747711f1995cc30b025fb017bcd06749f24b8586e79",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"fedcba9876543210fedcba9876543210?expires=1762300000\",\"number\":4242,\"hash\":\"8a2c93dcc9a67c67f265a7e2cccb43e60fc919a7ebcc605c5a538bf3c8dffa31\",\"signature\":\"b0863d5d2ae8f3b509162747711f1995cc30b025fb017bcd06749f24b8586e79\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6ImZlZGNiYTk4NzY1NDMyMTBmZWRjYmE5ODc2NTQzMjEwP2V4cGlyZXM9MTc2MjMwMDAwMCIsIm51bWJlciI6NDI0MiwiaGFzaCI6IjhhMmM5M2RjYzlhNjdjNjdmMjY1YTdlMmNjY2I0M2U2MGZjOTE5YTdlYmNjNjA1YzVhNTM4YmYzYzhkZmZhMzEiLCJzaWduYXR1cmUiOiJiMDg2M2Q1ZDJhZThmM2I1MDkxNjI3NDc3MTFmMTk5NWNjMzBiMDI1ZmIwMTdiY2QwNjc0OWYyNGI4NTg2ZTc5In0="
+      },
+      "expected": {
+        "hash": "8a2c93dcc9a67c67f265a7e2cccb43e60fc919a7ebcc605c5a538bf3c8dffa31",
+        "signature": "b0863d5d2ae8f3b509162747711f1995cc30b025fb017bcd06749f24b8586e79",
+        "verify": {
+          "ok": false,
+          "reason": "expired"
+        }
+      }
+    },
+    {
+      "id": "N3",
+      "kind": "negative",
+      "description": "number yanlış (4243; hash + imza 4242 için) -> bad_hash",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "number": 4243,
+        "maxnumber": 100000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"0123456789abcdef0123456789abcdef?expires=1762300600\",\"number\":4243,\"hash\":\"927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d\",\"signature\":\"4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmP2V4cGlyZXM9MTc2MjMwMDYwMCIsIm51bWJlciI6NDI0MywiaGFzaCI6IjkyN2ZmMjliMmY0ZTc1NjQyYWRkYWY1MjNkOWY1YmU2NWRiNjRiOWE4ZWRkMjU1OGY2Y2IwYTUxYTNlZjY2N2QiLCJzaWduYXR1cmUiOiI0Zjc1YTk5M2Y3MGMwZGI4ZmUyZjdiMjU4OTMzNjc4NGMzNmM3ZTVkNTYyYjIwMTE0Yzk0ZjBlMDVjMWJkMDAyIn0="
+      },
+      "expected": {
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "verify": {
+          "ok": false,
+          "reason": "bad_hash"
+        }
+      },
+      "note": "İmza geçerli (hash sunucunun), ama sha256(salt+4243) != hash. İş-ispatı yapılmamış."
+    },
+    {
+      "id": "N4",
+      "kind": "negative",
+      "description": "aynı çözüm ikinci kez (imza tek-kullanım cache'inde) -> replayed",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "number": 4242,
+        "maxnumber": 100000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": [
+          "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002"
+        ]
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"0123456789abcdef0123456789abcdef?expires=1762300600\",\"number\":4242,\"hash\":\"927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d\",\"signature\":\"4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmP2V4cGlyZXM9MTc2MjMwMDYwMCIsIm51bWJlciI6NDI0MiwiaGFzaCI6IjkyN2ZmMjliMmY0ZTc1NjQyYWRkYWY1MjNkOWY1YmU2NWRiNjRiOWE4ZWRkMjU1OGY2Y2IwYTUxYTNlZjY2N2QiLCJzaWduYXR1cmUiOiI0Zjc1YTk5M2Y3MGMwZGI4ZmUyZjdiMjU4OTMzNjc4NGMzNmM3ZTVkNTYyYjIwMTE0Yzk0ZjBlMDVjMWJkMDAyIn0="
+      },
+      "expected": {
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "verify": {
+          "ok": false,
+          "reason": "replayed"
+        }
+      },
+      "note": "Önce P2 başarıyla doğrulanır ve imzası `captcha:local:used:<signature>` anahtarıyla cache'e yazılır; aynı payload tekrar gelince replayed."
+    },
+    {
+      "id": "N5",
+      "kind": "negative",
+      "description": "number (5000) > maxnumber (1000) -> bad_number",
+      "input": {
+        "app_key": "TEST",
+        "salt": "fedcba9876543210fedcba9876543210?expires=1762300600",
+        "number": 5000,
+        "maxnumber": 1000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "fedcba9876543210fedcba9876543210?expires=1762300600",
+        "hash": "64f208a00acbf6e2f5496e055906ba35bd54b0f16d881bf538368b67be222f39",
+        "signature": "8fbae3010e9dc736991b4ffbf6dffdacd21ee13fb0526cdd180a73d97ce57e0e",
+        "maxnumber": 1000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"fedcba9876543210fedcba9876543210?expires=1762300600\",\"number\":5000,\"hash\":\"64f208a00acbf6e2f5496e055906ba35bd54b0f16d881bf538368b67be222f39\",\"signature\":\"8fbae3010e9dc736991b4ffbf6dffdacd21ee13fb0526cdd180a73d97ce57e0e\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6ImZlZGNiYTk4NzY1NDMyMTBmZWRjYmE5ODc2NTQzMjEwP2V4cGlyZXM9MTc2MjMwMDYwMCIsIm51bWJlciI6NTAwMCwiaGFzaCI6IjY0ZjIwOGEwMGFjYmY2ZTJmNTQ5NmUwNTU5MDZiYTM1YmQ1NGIwZjE2ZDg4MWJmNTM4MzY4YjY3YmUyMjJmMzkiLCJzaWduYXR1cmUiOiI4ZmJhZTMwMTBlOWRjNzM2OTkxYjRmZmJmNmRmZmRhY2QyMWVlMTNmYjA1MjZjZGQxODBhNzNkOTdjZTU3ZTBlIn0="
+      },
+      "expected": {
+        "hash": "64f208a00acbf6e2f5496e055906ba35bd54b0f16d881bf538368b67be222f39",
+        "signature": "8fbae3010e9dc736991b4ffbf6dffdacd21ee13fb0526cdd180a73d97ce57e0e",
+        "verify": {
+          "ok": false,
+          "reason": "bad_number"
+        }
+      },
+      "note": "İmza ve hash geçerli olsa da sayı tavanı aşar; bu kontrol imzadan ÖNCE yapılır."
+    },
+    {
+      "id": "N6",
+      "kind": "negative",
+      "description": "payload base64 değil ('!!bozuk-base64!!') -> bad_payload",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "number": 4242,
+        "maxnumber": 100000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "",
+        "payload_base64": "!!bozuk-base64!!"
+      },
+      "expected": {
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "verify": {
+          "ok": false,
+          "reason": "bad_payload"
+        }
+      }
+    },
+    {
+      "id": "N7",
+      "kind": "negative",
+      "description": "JSON'da `number` alanı yok -> bad_payload",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "number": 4242,
+        "maxnumber": 100000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"0123456789abcdef0123456789abcdef?expires=1762300600\",\"hash\":\"927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d\",\"signature\":\"4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmP2V4cGlyZXM9MTc2MjMwMDYwMCIsImhhc2giOiI5MjdmZjI5YjJmNGU3NTY0MmFkZGFmNTIzZDlmNWJlNjVkYjY0YjlhOGVkZDI1NThmNmNiMGE1MWEzZWY2NjdkIiwic2lnbmF0dXJlIjoiNGY3NWE5OTNmNzBjMGRiOGZlMmY3YjI1ODkzMzY3ODRjMzZjN2U1ZDU2MmIyMDExNGM5NGYwZTA1YzFiZDAwMiJ9"
+      },
+      "expected": {
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "verify": {
+          "ok": false,
+          "reason": "bad_payload"
+        }
+      }
+    },
+    {
+      "id": "N8",
+      "kind": "negative",
+      "description": "algorithm = SHA-512 -> bad_algorithm",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "number": 4242,
+        "maxnumber": 100000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-512\",\"salt\":\"0123456789abcdef0123456789abcdef?expires=1762300600\",\"number\":4242,\"hash\":\"927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d\",\"signature\":\"4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtNTEyIiwic2FsdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmP2V4cGlyZXM9MTc2MjMwMDYwMCIsIm51bWJlciI6NDI0MiwiaGFzaCI6IjkyN2ZmMjliMmY0ZTc1NjQyYWRkYWY1MjNkOWY1YmU2NWRiNjRiOWE4ZWRkMjU1OGY2Y2IwYTUxYTNlZjY2N2QiLCJzaWduYXR1cmUiOiI0Zjc1YTk5M2Y3MGMwZGI4ZmUyZjdiMjU4OTMzNjc4NGMzNmM3ZTVkNTYyYjIwMTE0Yzk0ZjBlMDVjMWJkMDAyIn0="
+      },
+      "expected": {
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "verify": {
+          "ok": false,
+          "reason": "bad_algorithm"
+        }
+      }
+    },
+    {
+      "id": "N9",
+      "kind": "negative",
+      "description": "salt'ta `?expires=` yok -> bad_salt",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef",
+        "number": 4242,
+        "maxnumber": 100000,
+        "expires": null,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef",
+        "hash": "682c03e99ab72839e049b2776c091b0f13e64b510dd31be7b4f58afebdde22a3",
+        "signature": "bff795de67a3712820c288722dbc6fdad1ad560d7c51a75a0db9122a7976c8a6",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"0123456789abcdef0123456789abcdef\",\"number\":4242,\"hash\":\"682c03e99ab72839e049b2776c091b0f13e64b510dd31be7b4f58afebdde22a3\",\"signature\":\"bff795de67a3712820c288722dbc6fdad1ad560d7c51a75a0db9122a7976c8a6\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmIiwibnVtYmVyIjo0MjQyLCJoYXNoIjoiNjgyYzAzZTk5YWI3MjgzOWUwNDliMjc3NmMwOTFiMGYxM2U2NGI1MTBkZDMxYmU3YjRmNThhZmViZGRlMjJhMyIsInNpZ25hdHVyZSI6ImJmZjc5NWRlNjdhMzcxMjgyMGMyODg3MjJkYmM2ZmRhZDFhZDU2MGQ3YzUxYTc1YTBkYjkxMjJhNzk3NmM4YTYifQ=="
+      },
+      "expected": {
+        "hash": "682c03e99ab72839e049b2776c091b0f13e64b510dd31be7b4f58afebdde22a3",
+        "signature": "bff795de67a3712820c288722dbc6fdad1ad560d7c51a75a0db9122a7976c8a6",
+        "verify": {
+          "ok": false,
+          "reason": "bad_salt"
+        }
+      }
+    },
+    {
+      "id": "N10",
+      "kind": "negative",
+      "description": "number = -1 -> bad_number",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "number": -1,
+        "maxnumber": 100000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "hash": "29e96605778aa2dae3f2a9c25c6c1993b4c94f8a2e360b120ec3a3cb22291cbd",
+        "signature": "bd23287efe196c1ceb4611dd86a51c14a28c44904e7de8afa826f96e831baf35",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"0123456789abcdef0123456789abcdef?expires=1762300600\",\"number\":-1,\"hash\":\"29e96605778aa2dae3f2a9c25c6c1993b4c94f8a2e360b120ec3a3cb22291cbd\",\"signature\":\"bd23287efe196c1ceb4611dd86a51c14a28c44904e7de8afa826f96e831baf35\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmP2V4cGlyZXM9MTc2MjMwMDYwMCIsIm51bWJlciI6LTEsImhhc2giOiIyOWU5NjYwNTc3OGFhMmRhZTNmMmE5YzI1YzZjMTk5M2I0Yzk0ZjhhMmUzNjBiMTIwZWMzYTNjYjIyMjkxY2JkIiwic2lnbmF0dXJlIjoiYmQyMzI4N2VmZTE5NmMxY2ViNDYxMWRkODZhNTFjMTRhMjhjNDQ5MDRlN2RlOGFmYTgyNmY5NmU4MzFiYWYzNSJ9"
+      },
+      "expected": {
+        "hash": "29e96605778aa2dae3f2a9c25c6c1993b4c94f8a2e360b120ec3a3cb22291cbd",
+        "signature": "bd23287efe196c1ceb4611dd86a51c14a28c44904e7de8afa826f96e831baf35",
+        "verify": {
+          "ok": false,
+          "reason": "bad_number"
+        }
+      }
+    },
+    {
+      "id": "N11",
+      "kind": "negative",
+      "description": "number JSON dizesi (\"4242\") -> bad_payload (tam sayı şart)",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "number": "4242",
+        "maxnumber": 100000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"0123456789abcdef0123456789abcdef?expires=1762300600\",\"number\":\"4242\",\"hash\":\"927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d\",\"signature\":\"4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmP2V4cGlyZXM9MTc2MjMwMDYwMCIsIm51bWJlciI6IjQyNDIiLCJoYXNoIjoiOTI3ZmYyOWIyZjRlNzU2NDJhZGRhZjUyM2Q5ZjViZTY1ZGI2NGI5YThlZGQyNTU4ZjZjYjBhNTFhM2VmNjY3ZCIsInNpZ25hdHVyZSI6IjRmNzVhOTkzZjcwYzBkYjhmZTJmN2IyNTg5MzM2Nzg0YzM2YzdlNWQ1NjJiMjAxMTRjOTRmMGUwNWMxYmQwMDIifQ=="
+      },
+      "expected": {
+        "hash": "927ff29b2f4e75642addaf523d9f5be65db64b9a8edd2558f6cb0a51a3ef667d",
+        "signature": "4f75a993f70c0db8fe2f7b2589336784c36c7e5d562b20114c94f0e05c1bd002",
+        "verify": {
+          "ok": false,
+          "reason": "bad_payload"
+        }
+      }
+    },
+    {
+      "id": "N12",
+      "kind": "negative",
+      "description": "salt'ın expires'i istemcide uzatıldı (hash + imza eski salt için) -> bad_hash",
+      "input": {
+        "app_key": "TEST",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762300600",
+        "number": 4242,
+        "maxnumber": 100000,
+        "expires": 1762300600,
+        "now": 1762300000,
+        "seen_signatures": []
+      },
+      "challenge": {
+        "algorithm": "SHA-256",
+        "salt": "0123456789abcdef0123456789abcdef?expires=1762299940",
+        "hash": "463889bc909e4955e2d5459aaec968c59df52808da9fdb7abc02cc8d7dd142b5",
+        "signature": "96990a21fc60cfc6db93857fe129322c5b6bf8e9529c60ddaeb8861d00521113",
+        "maxnumber": 100000
+      },
+      "solution": {
+        "payload_json": "{\"algorithm\":\"SHA-256\",\"salt\":\"0123456789abcdef0123456789abcdef?expires=1762300600\",\"number\":4242,\"hash\":\"463889bc909e4955e2d5459aaec968c59df52808da9fdb7abc02cc8d7dd142b5\",\"signature\":\"96990a21fc60cfc6db93857fe129322c5b6bf8e9529c60ddaeb8861d00521113\"}",
+        "payload_base64": "eyJhbGdvcml0aG0iOiJTSEEtMjU2Iiwic2FsdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmP2V4cGlyZXM9MTc2MjMwMDYwMCIsIm51bWJlciI6NDI0MiwiaGFzaCI6IjQ2Mzg4OWJjOTA5ZTQ5NTVlMmQ1NDU5YWFlYzk2OGM1OWRmNTI4MDhkYTlmZGI3YWJjMDJjYzhkN2RkMTQyYjUiLCJzaWduYXR1cmUiOiI5Njk5MGEyMWZjNjBjZmM2ZGI5Mzg1N2ZlMTI5MzIyYzViNmJmOGU5NTI5YzYwZGRhZWI4ODYxZDAwNTIxMTEzIn0="
+      },
+      "expected": {
+        "hash": "463889bc909e4955e2d5459aaec968c59df52808da9fdb7abc02cc8d7dd142b5",
+        "signature": "96990a21fc60cfc6db93857fe129322c5b6bf8e9529c60ddaeb8861d00521113",
+        "verify": {
+          "ok": false,
+          "reason": "bad_hash"
+        }
+      },
+      "note": "İmza hash üzerinden geçerli kalır, ama hash salt'ı bağlar: sha256(yeni_salt+4242) != hash."
+    }
+  ]
+}

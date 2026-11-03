@@ -8,7 +8,7 @@
 // broke the only button on the page, plus the credentials hint printed under
 // it, both of which still said "demo".
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { createI18n } from 'vue-i18n';
 
@@ -17,6 +17,8 @@ import { useAuthStore } from '@/stores/auth';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import en from '@/locales/en.json';
 
+// #294: the sign-in page asks which forms the bot check guards; none here.
+vi.mock('@/api/captcha', () => ({ CaptchaPublicApi: { config: async () => null } }));
 vi.mock('@/api/branding', () => ({
   BrandingApi: { get: vi.fn().mockResolvedValue({}) },
 }));
@@ -80,6 +82,8 @@ describe('demo landing CTA', () => {
     const cta = wrapper.findAll('button').find((b) => b.text().includes(en.demo.openCta));
     expect(cta, 'demo CTA rendered').toBeTruthy();
     await cta!.trigger('click');
+    // #294: the sign-in goes through the bot check first, which reads its config.
+    await flushPromises();
 
     expect(login).toHaveBeenCalledWith(
       expect.objectContaining({ email: 'demo@demo.com', password: 's3cret' }),
@@ -98,6 +102,8 @@ describe('demo landing CTA', () => {
     const wrapper = mountLogin();
     const cta = wrapper.findAll('button').find((b) => b.text().includes(en.demo.openCta));
     await cta!.trigger('click');
+    // #294: the sign-in goes through the bot check first, which reads its config.
+    await flushPromises();
     expect(login).toHaveBeenCalledWith(expect.objectContaining({ password: 'demo' }));
   });
 });

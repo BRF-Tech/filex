@@ -37,6 +37,7 @@ var platformPages = []struct {
 	{"tenancy", "/api/admin/tenancy"},
 	{"auth-providers", "/api/admin/auth-providers"},
 	{"login-security", "/api/admin/login-security"},
+	{"bot-protection", "/api/admin/captcha"},
 	{"protection", "/api/admin/protection"},
 	{"archives", "/api/admin/archives"},
 	{"plugins", "/api/admin/plugins"},

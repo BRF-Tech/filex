@@ -222,9 +222,11 @@
       "audit": "Yönetim panelinde yapılan her değişiklik",
       "updates": "Yeni sürümler ve güncelleme kuralı",
       "about": "Sürüm ve derleme bilgisi",
-      "aiAssistant": "Gezgindeki asistan: sağlayıcı, model, sınırlar"
+      "aiAssistant": "Gezgindeki asistan: sağlayıcı, model, sınırlar",
+      "botProtection": "Oturum açma, PIN ve yükleme kutularında captcha"
     },
-    "aiAssistant": "AI asistanı"
+    "aiAssistant": "AI asistanı",
+    "botProtection": "Bot koruması"
   },
   "login": {
     "title": "Oturum aç",
@@ -1418,7 +1420,9 @@
       "thumbnails": "SVG, önizlemeler, klasör önizlemeleri, Office küçük resimleri",
       "twoFactor": "2FA, TOTP, iki adımlı doğrulama",
       "allowlist": "IP adresleri",
-      "stores": "uygulama mağazası, mağaza"
+      "stores": "uygulama mağazası, mağaza",
+      "botProtection": "captcha, CAPTCHA, Turnstile, reCAPTCHA, Cloudflare, bot, spam",
+      "captcha": "captcha, Turnstile, reCAPTCHA, Cloudflare"
     }
   },
   "tagged": {
@@ -1828,7 +1832,9 @@
       "tenant_domain_suspended": "Kendi alan adı çalışmıyor",
       "tenant_domain_restored": "Kendi alan adı yeniden çalışıyor",
       "permission_gaps": "Rolde izin düşmüş olabilir",
-      "notification_digest": "Bildirim özeti"
+      "notification_digest": "Bildirim özeti",
+      "captcha_fallback": "Bot koruması yerel doğrulamaya düştü",
+      "captcha_misconfigured": "Bot koruması yanlış yapılandırılmış"
     },
     "scopeEveryone": "Herkes",
     "webhookStatus": {
@@ -4360,5 +4366,76 @@
     "retention": "Konuşmaları sakla (gün)",
     "retentionHint": "Bir konuşmanın son kullanımından itibaren sayılır; sonra silinir. Herkes kendi konuşmalarını istediği an silebilir.",
     "saved": "AI asistanı ayarları kaydedildi"
+  },
+  "botProtection": {
+    "title": "Bot koruması",
+    "subtitle": "Hesabı olmayan herkesin erişebildiği formlarda bir doğrulama: oturum açma, bir bağlantının PIN'i, bir dosya isteğinin yükleme kutusu. Sunucu sağlayıcıya ulaşamadığında tarayıcı onun yerine kendi kısa doğrulamasını yapar.",
+    "saved": "Bot koruması kaydedildi",
+    "handBack": "Ortam değişkenindeki değeri kullan",
+    "handedBack": "Ortam değişkenindeki değer yeniden geçerli",
+    "status": {
+      "title": "Durum",
+      "off": "Kapalı",
+      "on": "Açık",
+      "misconfigured": "Çalışmıyor",
+      "fallback": "Yedek devrede",
+      "offLine": "Hiçbir form doğrulama istemiyor. Açmak için aşağıdan bir sağlayıcı seçin.",
+      "onLine": "{provider} aşağıda açık olan formları denetliyor.",
+      "fallbackLine": "Sunucu şu anda sağlayıcıya ulaşamıyor: onun yerine tarayıcının yerel doğrulaması yanıtlıyor.",
+      "fallbackTotal": "Sunucu başladığından beri yerel doğrulamanın yanıtladığı istek: {count}"
+    },
+    "provider": {
+      "title": "Sağlayıcı",
+      "none": "Kapalı",
+      "help": {
+        "none": "Hiçbir formda doğrulama yok.",
+        "turnstile": "Ücretsiz, çerezsiz, çoğu zaman görünmez.",
+        "recaptcha": "Google'ın onay kutusu (v2)."
+      }
+    },
+    "siteKey": "Site anahtarı",
+    "siteKeyHint": "Doğrulama kutusunun çizildiği herkese açık anahtar. Turnstile'da Cloudflare'deki alan adı listesinde bu sunucunun adı olmalı.",
+    "secret": "Gizli anahtar",
+    "secretStored": "Bir gizli anahtar kayıtlı - değiştirmek için yenisini yazın",
+    "secretHint": "Şifreli saklanır ve bir daha gösterilmez. Boş: geçerli olan korunur.",
+    "noSecretKey": "Bu sunucunun şifreleme anahtarı yok (FILEX_SECRET_KEY), bu yüzden gizli anahtar burada saklanamaz. Onun yerine ortamda CAPTCHA_SECRET tanımlayın.",
+    "clearSecret": "Bu sayfada kayıtlı gizli anahtarı kaldır",
+    "test": "Anahtarları test et",
+    "testOk": "Sağlayıcı yanıt veriyor ve gizli anahtarı kabul ediyor.",
+    "testFailed": "Test geçmedi.",
+    "source": {
+      "db": "Bu sayfada ayarlandı.",
+      "env": "Ortam değişkeninden ({env}).",
+      "default": "Varsayılan."
+    },
+    "forms": {
+      "title": "Formlar",
+      "login": "Oturum açma",
+      "loginHint": "Parolayla oturum açma; SSO kurulumundaki yönetici kurtarma oturumu da dahil. Betikler bir API anahtarı kullanmalı.",
+      "demo_login": "Demo oturumu",
+      "demo_loginHint": "Bir demonun tek tıkla oturum açan düğmesi (yalnız demoda).",
+      "share_password": "Bağlantı PIN'i",
+      "share_passwordHint": "Korumalı bir paylaşımın, uygulama sayfasının ya da dosya isteğinin sorduğu PIN.",
+      "file_request": "Dosya isteği yüklemesi",
+      "file_requestHint": "Bir dosya isteğinin açtığı yükleme kutusu: her yüklemeden önce bir kez denetlenir."
+    },
+    "fallback": {
+      "title": "Sağlayıcıya ulaşılamadığında",
+      "lead": "Sağlayıcıdan gelen ağ hatası, zaman aşımı ya da 5xx yanıtı kesintidir. Sağlayıcının reddettiği bir doğrulama kesinti değildir: o kişiden yeniden doğrulama istenir.",
+      "local": "Yerel doğrulama",
+      "localHelp": "Tarayıcı kısa bir iş ispatı çözer (bir iki saniye). Hiçbir şey kapanmaz.",
+      "off": "Reddet",
+      "offHelp": "Sağlayıcı geri gelene kadar form \"kullanılamıyor\" yanıtı verir. Yalnız test için."
+    },
+    "timeout": "Sağlayıcı zaman aşımı (ms)",
+    "timeoutHint": "Sunucunun kesinti saymadan önce sağlayıcıyı ne kadar beklediği; bir kez daha dener.",
+    "mis": {
+      "site_key_missing": "Site anahtarı tanımlı değil: doğrulama kutusu çizilemiyor ve her formu yerel doğrulama yanıtlıyor.",
+      "secret_missing": "Gizli anahtar tanımlı değil: doğrulamalar denetlenemiyor ve her formu yerel doğrulama yanıtlıyor.",
+      "secret_unreadable": "Kayıtlı gizli anahtar açılamıyor (sunucunun şifreleme anahtarı değişmiş). Yeniden yazın.",
+      "invalid_input_secret": "Sağlayıcı gizli anahtarı reddediyor. Bu site anahtarına ait olduğunu kontrol edin.",
+      "missing_input_secret": "Sağlayıcıya gizli anahtar ulaşmadı.",
+      "other": "Kurulum doğrulamaları denetleyemiyor ({code}); bu arada yerel doğrulama yanıtlıyor."
+    }
   }
 }

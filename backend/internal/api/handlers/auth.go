@@ -17,6 +17,7 @@ import (
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/basepath"
+	"github.com/brf-tech/filex/backend/internal/captcha"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -62,6 +63,12 @@ type Auth struct {
 	// which methods a realm has (Methods). Nil on a harness that has none;
 	// Methods then answers from LocalAuth / OIDCAuth alone.
 	Live *authsetup.Live
+	// Captcha is the bot check on the password sign-in (internal/captcha).
+	// Nil = none, which is what a handler built without one had before.
+	Captcha *Captcha
+	// DemoUser is a demo's one-click account (FILEX_DEMO): its sign-in is the
+	// `demo_login` form, every other one `login`. "" outside a demo.
+	DemoUser string
 }
 
 // handoffTTL is how long a sign-in handed to a tenant's address may take to
@@ -104,6 +111,9 @@ type loginReq struct {
 	// only there; a single-tenant install ignores it. Empty = the tenant the
 	// address names, else the platform's own.
 	Realm string `json:"realm"`
+	// The bot check's fields (captcha_token / captcha_local and the
+	// providers' own names), when the sign-in is protected.
+	captcha.Fields
 }
 
 // Login authenticates email + password and sets the session cookie.
@@ -122,6 +132,17 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	// The bot check first, before any password is compared or counted: a
+	// refused check is not a wrong attempt, and a bot never reaches the
+	// account it names. ⚠ A token is spent here whatever the password turns
+	// out to be; the form asks for a new one before the next attempt.
+	form := captcha.FormLogin
+	if h.DemoUser != "" && strings.EqualFold(strings.TrimSpace(req.Email), h.DemoUser) {
+		form = captcha.FormDemoLogin
+	}
+	if !h.Captcha.Gate(w, r, form, req.Fields) {
 		return
 	}
 	// ⚠ Stamp the Host onto the context before the login chain runs. A driver

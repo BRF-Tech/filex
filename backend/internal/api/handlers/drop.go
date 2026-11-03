@@ -17,6 +17,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/basepath"
+	"github.com/brf-tech/filex/backend/internal/captcha"
 	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/leafname"
@@ -63,7 +64,15 @@ type Drop struct {
 	// page in this file is the no-JS answer behind it. nil (frontend not
 	// bundled) means every visitor gets the Go page. See public_shell.go.
 	Shell http.Handler
+	// Captcha is the bot check on the upload (`file_request`: a pass from
+	// POST /api/public/d/{token}/captcha) and on the PIN (`share_password`).
+	// The no-JavaScript page cannot carry it and says so while either is
+	// protected. Nil = none.
+	Captcha *Captcha
 }
+
+// AttachCaptcha wires the bot check.
+func (h *Drop) AttachCaptcha(c *Captcha) { h.Captcha = c }
 
 // AttachShell wires the SPA document served to JavaScript browsers.
 func (h *Drop) AttachShell(shell http.Handler) { h.Shell = shell }
@@ -215,9 +224,18 @@ func (h *Drop) Page(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The bot check runs in the browser: this page cannot carry it, so while
+	// the upload (or the PIN it would ask for) is protected it says so rather
+	// than offer a form that cannot succeed.
+	locked := sh.PinHash != "" && !shareUnlocked(h.Service, r, sh)
+	if h.Captcha.Protected(r.Context(), captcha.FormFileRequest) ||
+		(locked && h.Captcha.Protected(r.Context(), captcha.FormSharePassword)) {
+		h.renderDropError(w, r, http.StatusUnprocessableEntity, "captcha_js")
+		return
+	}
 	// ⚠ An unlock cookie counts as having answered the PIN — the visitor may
 	// have entered it in the SPA shell before falling back here.
-	if sh.PinHash != "" && !shareUnlocked(h.Service, r, sh) {
+	if locked {
 		// GET otherwise shows the PIN form; the accepted uploader page is
 		// reachable via a successful POST (see Upload) or the cookie.
 		h.renderDropPinForm(w, r, tok, "")
@@ -240,6 +258,10 @@ func (h *Drop) Upload(w http.ResponseWriter, r *http.Request) {
 	// PIN form submit.
 	sh, ok := h.resolveKind(w, r, tok)
 	if !ok {
+		return
+	}
+	if sh.PinHash != "" && h.Captcha.Protected(r.Context(), captcha.FormSharePassword) {
+		h.renderDropError(w, r, http.StatusUnprocessableEntity, "captcha_js")
 		return
 	}
 	_ = r.ParseForm()
@@ -352,6 +374,13 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 		h.refuse(w, r, http.StatusTooManyRequests, map[string]any{"error": "rate_limited"})
 		return
 	}
+	// The bot check's pass, before a byte of the body is read: it was earned
+	// on POST /api/public/d/{token}/captcha (a refusal sent while a multipart
+	// body is still arriving cannot be read by the browser), it names this
+	// link, and it is spent here.
+	if !h.Captcha.GateDropUpload(w, r, tok) {
+		return
+	}
 	// Spilled multipart temp files outlive the response unless dropped here —
 	// see the note in AI.Upload. Anonymous drops make this the easiest surface
 	// to fill a disk from, so the cleanup runs even for rejected bodies.
@@ -402,6 +431,12 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	// The PIN may be in the form (the no-JS page embeds it) or already
 	// answered on this browser (the SPA's cookie). One gate, counted.
 	if !shareUnlocked(h.Service, r, sh) {
+		// A PIN in the form cannot carry the bot check: while the PIN is
+		// protected, it is answered on /api/public/d/{token}/pin only.
+		if h.Captcha.Protected(r.Context(), captcha.FormSharePassword) {
+			writeCaptchaRefusal(w, r, captcha.Result{Status: captcha.StatusInvalid, Reason: captcha.ReasonMissingToken})
+			return
+		}
 		switch err := h.Service.CheckPIN(r.Context(), sh, pin); {
 		case errors.Is(err, share.ErrLocked):
 			h.refuse(w, r, http.StatusTooManyRequests, map[string]any{"error": "locked"})

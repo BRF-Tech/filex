@@ -33,7 +33,9 @@ import { BrandingApi, type BrandingConfig } from '@/api/branding'; /* wiring:e1 
 import { accentButtonStyle } from '@/lib/accentButton';
 import { liveTheme } from '@/lib/theme';
 import { handoffTarget, navigateTo, readHandoffFragment } from '@/lib/realmHandoff';
-import { appBase, productVersionLine } from '@brftech/filex-core';
+import { appBase, captchaAnswerOf, CaptchaWidget, productVersionLine, useCaptcha, useCaptchaConfig } from '@brftech/filex-core';
+import { getServerRoot } from '@/api/runtimeConfig';
+import { CaptchaPublicApi } from '@/api/captcha';
 
 import LogoMark from '@/components/LogoMark.vue';
 import Button from '@/components/ui/Button.vue';
@@ -48,7 +50,7 @@ import Checkbox from '@/components/ui/Checkbox.vue';
 // same reason.
 import '@brftech/filex-core/style.css';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
@@ -200,6 +202,27 @@ const ssoLabel = computed(() => branding.value?.sso_label?.trim() || t('login.oi
 /** A button's words: the provider's own label, else the page's. */
 const ssoText = (c: LoginSSO) => c.label?.trim() || ssoLabel.value;
 const wordmark = computed(() => branding.value?.name?.trim() || 'filex');
+
+/*
+ * #294 - the bot check: core's ONE widget and ONE rule (useCaptcha), the same
+ * the public pages use. Two forms on this page: the password sign-in
+ * (`login`, the recovery sign-in of an SSO install included) and a demo's
+ * one-click sign-in (`demo_login`). One config for both.
+ */
+const captchaConfig = useCaptchaConfig({ load: () => CaptchaPublicApi.config() });
+const captchaOpts = {
+  base: getServerRoot(),
+  locale: () => String(locale.value),
+  theme: () => (isDark.value ? ('dark' as const) : ('light' as const)),
+  config: captchaConfig,
+};
+const loginCaptcha = useCaptcha({ ...captchaOpts, form: 'login' });
+const demoCaptcha = useCaptcha({ ...captchaOpts, form: 'demo_login' });
+/** A sign-in is on its way - its check included (a fallback's proof of work runs between two sends). */
+const signingIn = ref(false);
+const busy = computed(() => auth.loading || signingIn.value);
+/** The last refusal was the check's: its sentence is under the widget, not in the form's alert. */
+const checkRefused = () => captchaAnswerOf(auth.captchaReply) !== null;
 async function fetchBranding() {
   try {
     branding.value = await BrandingApi.get();
@@ -210,6 +233,7 @@ async function fetchBranding() {
 
 onMounted(async () => {
   void fetchBranding(); /* wiring:e1 */
+  void captchaConfig.load();
   // Desktop hand-off: remember it NOW. The OIDC round-trip wipes the query
   // string, so reading these later would only ever work for password logins —
   // i.e. exactly the case the desktop flow does not need.
@@ -250,22 +274,29 @@ onMounted(async () => {
 });
 
 async function submit() {
-  if (signInLocked.value) return;
+  if (signInLocked.value || signingIn.value) return;
   localError.value = null;
   applyRefusal(null);
-  const ok = await auth.login({
+  const payload = {
     email: email.value.trim(),
     password: password.value,
     remember: remember.value,
     totp: totp.value || undefined,
     realm: realmEnabled.value ? (lockedRealm.value ?? realm.value.trim()) || undefined : undefined,
-  });
+  };
+  signingIn.value = true;
+  let ok = false;
+  try {
+    ok = await loginCaptcha.protect((f) => auth.login({ ...payload, ...f }), () => auth.captchaReply);
+  } finally {
+    signingIn.value = false;
+  }
   if (ok) {
     const redirect = (route.query.redirect as string) || '/';
     router.push(redirect);
   } else if (auth.handoff) {
     goToTenant();
-  } else {
+  } else if (!checkRefused()) {
     failed();
   }
 }
@@ -289,17 +320,25 @@ async function openDemo() {
   // standalone /explore page (FileExplorer Web Component) — NOT
   // the admin dashboard. Demo visitors should see the actual file
   // browser, not the operator panel.
+  if (signingIn.value) return;
   localError.value = null;
   applyRefusal(null);
-  const ok = await auth.login({
+  const payload = {
     email: demoUser.value,
     password: demoPass.value,
     remember: true,
     realm: realmEnabled.value ? lockedRealm.value || undefined : undefined,
-  });
+  };
+  signingIn.value = true;
+  let ok = false;
+  try {
+    ok = await demoCaptcha.protect((f) => auth.login({ ...payload, ...f }), () => auth.captchaReply);
+  } finally {
+    signingIn.value = false;
+  }
   if (ok) {
     router.push({ name: 'explore' });
-  } else {
+  } else if (!checkRefused()) {
     failed();
   }
 }
@@ -358,7 +397,7 @@ function startOidc(c?: LoginSSO) {
         </p>
 
         <div class="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
-          <Button size="lg" variant="primary" @click="openDemo" :loading="auth.loading">
+          <Button size="lg" variant="primary" data-testid="demo-open" @click="openDemo" :loading="busy">
             <Sparkles class="h-4 w-4" />
             {{ t('demo.openCta') }}
             <ArrowRight class="h-4 w-4" />
@@ -370,6 +409,10 @@ function startOidc(c?: LoginSSO) {
           >
             {{ showSignIn ? t('demo.hideSignIn') : t('demo.showSignIn') }}
           </button>
+        </div>
+        <!-- The one-click sign-in's bot check, under the button it guards. -->
+        <div v-if="demoCaptcha.active.value" class="mx-auto mt-4 w-full max-w-sm text-start">
+          <CaptchaWidget :captcha="demoCaptcha" :locale="String(locale)" />
         </div>
         <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-500">
           {{ t('demo.creds', { email: demoUser, password: demoPass }) }}
@@ -445,10 +488,11 @@ function startOidc(c?: LoginSSO) {
           <Input v-model="email" type="text" autocomplete="username" required :label="t('login.identifier')" name="email" />
           <Input v-model="password" type="password" autocomplete="current-password" required :label="t('common.password')" name="password" />
           <Checkbox v-model="remember" :label="t('login.remember')" />
+          <CaptchaWidget v-if="loginCaptcha.active.value" :captcha="loginCaptcha" :locale="String(locale)" />
           <p v-if="shownError" class="text-sm text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 rounded-md px-3 py-2" role="alert">
             {{ shownError }}
           </p>
-          <Button type="submit" :loading="auth.loading" :disabled="signInLocked" block>
+          <Button type="submit" :loading="busy" :disabled="signInLocked" block>
             <Lock class="h-4 w-4" />
             {{ signInLocked ? t('login.retryIn', { time: lockTime }) : t('login.submit') }}
           </Button>
@@ -671,6 +715,14 @@ function startOidc(c?: LoginSSO) {
                   <span>{{ t('login.remember') }}</span>
                 </label>
 
+                <!-- #294: the bot check, the last thing before the button. -->
+                <CaptchaWidget
+                  v-if="loginCaptcha.active.value"
+                  class="lg-captcha"
+                  :captcha="loginCaptcha"
+                  :locale="String(locale)"
+                />
+
                 <p v-if="shownError" role="alert" class="lg-alert lg-alert--form">
                   {{ shownError }}
                 </p>
@@ -680,10 +732,10 @@ function startOidc(c?: LoginSSO) {
                   class="lg-btn"
                   :class="oidcEnabled ? 'lg-btn--outline' : 'lg-btn--primary'"
                   :style="oidcEnabled ? undefined : accentStyle"
-                  :disabled="auth.loading || signInLocked"
-                  :aria-busy="auth.loading || undefined"
+                  :disabled="busy || signInLocked"
+                  :aria-busy="busy || undefined"
                 >
-                  <span v-if="auth.loading" class="lg-spinner" aria-hidden="true" />
+                  <span v-if="busy" class="lg-spinner" aria-hidden="true" />
                   <Lock v-else class="lg-i18" aria-hidden="true" />
                   {{ signInLocked ? t('login.retryIn', { time: lockTime }) : t('login.submit') }}
                 </button>
@@ -994,6 +1046,11 @@ function startOidc(c?: LoginSSO) {
   color: var(--fe-text-muted);
 }
 
+/* #294 - the bot check, between "remember me" and the button. The widget is
+   core's (CaptchaWidget); only its place on this card is set here. */
+.lg-captcha {
+  margin-top: 20px;
+}
 .lg-check {
   display: flex;
   align-items: center;

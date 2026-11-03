@@ -410,6 +410,8 @@ a problem, which is the worst way to learn your monitoring was never wired.
 | `queue_stuck` | warning | **no** ⚠ | The op queue stopped making progress. |
 | `auth_fail_spike` | warning | **no** ⚠ | A burst of failed logins. |
 | `auth_provider_down` | warning | yes | An operating-system sign-in provider (`windows`, `pam`) that an administrator switched on cannot start; it is left out and every other way in keeps working ([OS-LOGIN.md](OS-LOGIN.md)). Once per reason. |
+| `captcha_fallback` | warning | yes | More than one form in ten minutes could not reach the [bot check](BOT-PROTECTION.md#alarms-and-metrics)'s provider and was checked with the local proof of work instead. Once per ten minutes. |
+| `captcha_misconfigured` | error | yes | A bot check provider is chosen and its keys cannot work (no site key, no secret, a secret that does not open or that the provider refuses); the forms stay protected by the local proof of work. Once an hour per reason. |
 | `ldap_legacy_account_elsewhere` | warning | yes | Multi-tenant: a directory sign-in found the account an older filex opened under the same bare login name in **another** tenant. It is left alone; the person gets the first sign-in rule in their own tenant ([LDAP.md](LDAP.md#accounts-an-older-filex-opened-under-the-bare-name)). **Once** per old account. Only a platform administrator's bell carries it, never a tenant administrator's. Meta: `provider`, `account`, `account_tenant`, `login_tenant`, `title_<lang>`, `body_<lang>`. |
 | `tenant_domain_suspended` | warning | yes | Multi-tenant: a tenant's own domain no longer has its CNAME to the tenant's platform subdomain, so it stopped routing; it is kept and comes back with the record. Told to that tenant's administrators, each in their own bell ([TENANT-ADMIN.md](TENANT-ADMIN.md#bringing-a-domain)). |
 | `tenant_domain_restored` | info | yes | The CNAME of a suspended own domain is back, and the domain routes again. |
@@ -564,7 +566,7 @@ otherwise hit:
 | `notification.digest` | the row's own target for a digest of one row; `dir` - the folder for a digest of one folder; `none` for several | A digest of several folders has no one place; the rows it carries are in the list under it. |
 | `admin_test` · `webhook_test` | `none` | |
 | `update_available` · `update_applied` | `none` | Not about a file. |
-| `auth_provider_down` · `ldap_legacy_account_elsewhere` | `none` | About sign-in, not a file. |
+| `auth_provider_down` · `ldap_legacy_account_elsewhere` · `captcha_fallback` · `captcha_misconfigured` | `none` | About sign-in and the public forms, not a file. |
 | `tenant_domain_suspended` · `tenant_domain_restored` | `none` | About a tenant's address, not a file. |
 | `permission_gaps` | `none` | About roles, which Admin → Roles lists. |
 | `app_updated` · `app_update_available` · `app_update_needs_approval` · `app_update_failed` | `none` | About an app, which is managed on the admin Apps tab. |
@@ -1241,7 +1243,7 @@ say where each switch is saved:
   this device's, and another device keeps its own. The part is drawn only
   where the device has one of them.
 
-![User settings, Notifications in Turkish, dark: Hesabım, with the in-app bell's switch and the events it tells about](https://filex.sh/shots/usersettings/notifications-tr-dark-1440.457bc34d15a0.png)
+![User settings, Notifications in Turkish, dark: Hesabım, with the in-app bell's switch and the events it tells about](https://filex.sh/shots/usersettings/notifications-tr-dark-1440.6807fae616f5.png)
 
 `GET`/`PATCH /api/notifications/settings` stores one preference row per user:
 

@@ -283,7 +283,7 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 <tr>
 <td width="50%" valign="top">
 
-![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.b891c6431444.png)
+![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.0da9ad45502b.png)
 
 <sub>…oturum açma sayfası da, henüz kimse oturum açmadan</sub>
 
@@ -351,7 +351,7 @@ Depolama ve protokollerin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 </td>
 <td width="50%" valign="top">
 
-![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.3464cb59b2f8.png)
+![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.cbad664dfed5.png)
 
 <sub>API anahtarları - kendinizinkini oluşturun, gezginde ya da gömülü bir gezginde (bir kişinin oturumuyla ya da API anahtarıyla; tek bir ortak *uygulama* API anahtarıyla vekil sunucu üzerinden çalışan gömülü bir gezginde bu öğe yer almaz)</sub>
 
@@ -407,7 +407,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.87cb16a1a6f0.png)
+![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.3c132b06cd19.png)
 
 <sub>Paylaşım - PIN, son kullanma tarihi, indirme limiti, tek satırlık `curl`</sub>
 
@@ -439,7 +439,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.0fffdc146eb1.png)
+![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.679f7daec8a4.png)
 
 <sub>Her yönetim tablosu - satır başına sabitlenmiş tek bir **Aksiyon** menüsü, gezgindeki ⋮ ile açılan menünün aynısı</sub>
 
@@ -477,7 +477,9 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
   bir rol - ve roller adlandırılmış izinlerden oluşur. Gruplar klasör erişimi ve bir rol
   taşır, dizininizin gruplarını izleyebilir; kişiye özel istisnalar rolün önüne geçer.
 - Parola tahmin etmek yavaştır: yanlış parolalar web formunda, WebDAV'da, FTPS'te ve SFTP'de
-  aynı şekilde hesap başına ve adres başına sayılır.
+  aynı şekilde hesap başına ve adres başına sayılır; oturum açmayı, bir bağlantının PIN'ini ve
+  bir dosya isteğinin yüklemesini bir bot doğrulaması (Cloudflare Turnstile ya da reCAPTCHA)
+  koruyabilir.
 - Tasarımı gereği çok kiracılı, tek bir anahtarın ardında: her kiracının kendi oturum açma
   sağlayıcıları, kendi alan adı ve sertifikası vardır ve kiracı kendini yönetir. Anahtar
   kapalıyken hiçbir ekran bir kiracı göstermez.
@@ -487,7 +489,7 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <p align="center"><img src="https://filex.sh/shots/roles/roles-list-1440.6bb0779b66e3.png" alt="Yönetim → Roller: yerleşik roller ve iki özel rol" width="860"></p>
 
 <details>
-<summary><b>Kişiler ve erişimin ekran görüntüleri</b> - roller, gruplar, giriş güvenliği, kilitli bir hesap, yönetim paneli ve menüsü</summary>
+<summary><b>Kişiler ve erişimin ekran görüntüleri</b> - roller, gruplar, giriş güvenliği, kilitli bir hesap, bot koruması, yönetim paneli ve menüsü</summary>
 
 <table>
 <tr>
@@ -525,14 +527,14 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <tr>
 <td width="50%" valign="top">
 
-![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.42e1fe6f1937.png)
+![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
 
 <sub>…ve kilitli bir hesabın oturum açma formunun söylediği; düğmesinde kilidin kalan süresi geri sayar</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Yönetim paneli](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
+![Yönetim paneli](https://filex.sh/shots/admin-dashboard.3becd8ffe998.png)
 
 <sub>Yönetim paneli</sub>
 
@@ -541,14 +543,30 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <tr>
 <td width="50%" valign="top">
 
-![Demo açılış sayfası](https://filex.sh/shots/demo-landing.64f23c6f8cb3.png)
+![Yönetim → Bot koruması, karanlık temada](https://filex.sh/shots/botprotection/bot-protection-dark-1440.0aaf54749fc8.png)
+
+<sub>Bot koruması - Cloudflare Turnstile ya da Google reCAPTCHA, anahtarları ve koruduğu formlar; sağlayıcıya ulaşılamazsa tarayıcı onun yerine kısa bir iş ispatı yapar ([docs/BOT-PROTECTION.md](docs/BOT-PROTECTION.md))</sub>
+
+</td>
+<td width="50%" valign="top">
+
+![Düğmesinin üstünde bot doğrulamasıyla oturum açma formu](https://filex.sh/shots/botprotection/login-captcha-dark-1440.099dd770db5c.png)
+
+<sub>…ve düğmesinin üstünde bot doğrulamasıyla oturum açma formu</sub>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![Demo açılış sayfası](https://filex.sh/shots/demo-landing.fba2be2d2961.png)
 
 <sub>Demo açılış sayfası</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Yönetim menüsünün Ayarlar paneli, Yönetim → Ayarlar → Genel sayfasının üzerinde açık](https://filex.sh/shots/megamenu/settings-panel-1440.23a710915f9c.png)
+![Yönetim menüsünün Ayarlar paneli, Yönetim → Ayarlar → Genel sayfasının üzerinde açık](https://filex.sh/shots/megamenu/settings-panel-1440.42b03e9a539f.png)
 
 <sub>Yönetim menüsü - bütün sayfalar dört panelde, **Dosyalar ve depolama**, **Kişiler**, **Ayarlar** (Genel, Güvenlik ve veri, Dosya işleme ve entegrasyonlar) ve **Bakım ve kayıtlar**, her sayfanın altında kısa bir satırla; telefonda aynı sayfalar bir çekmecede yer alır ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
 
@@ -772,7 +790,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 <tr>
 <td width="50%" valign="top">
 
-![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.54c60e832ced.png)
+![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.537429f5f44b.png)
 
 <sub>Belge imzadayken - herkes için dondurulmuş, kimin imzaladığı ayrıntılarında</sub>
 
@@ -1004,7 +1022,7 @@ ayırır.
 | **Gezgin** | Yönetim uygulamasında, masaüstü uygulamasında ve her gömülü gezginde tek düzen: gezinti paneli, liste, ızgara ve galeri görünümleri, sekmeler, kişisel ve ekip etiketleri, ⌘K komut paleti, yeniden atanabilen klavye kısayolları, **+ Yeni** menüsünden yeni belgeler ve işletmecinin oluşturduğu temalar ([Entegrasyon](docs/INTEGRATION.md), [Temalar](docs/INTEGRATION.md#themes)) |
 | **Depolama** | Yan yana bağlanan yerel diskler, S3, FTP, SFTP, WebDAV ve SMB/NAS, aralarında kopyalama ve taşıma, geri kalan her şey için de yönetim panelinden ya da bir uygulama mağazasından kurulan bir eklenti ([Depolama](docs/STORAGE.md), [Depolama eklentileri](docs/PLUGINS.md)) |
 | **Tarayıcı olmadan** | S3, SFTP, FTPS, NFSv3 ve WebDAV olarak sunulan aynı ağaç - orada yapılan bir taşıma ya da silme, bir depo taramasının yanında web arayüzündeki kadar güvenlidir - ayrıca HTTPS üzerinden `filex mount` ([Protokoller](docs/PROTOCOLS.md)) |
-| **Oturum açma** | OIDC, LDAP / Active Directory, Windows ve Linux hesapları ve giriş denemesi sınırları ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [İşletim sistemi hesapları](docs/OS-LOGIN.md)) |
+| **Oturum açma** | OIDC, LDAP / Active Directory, Windows ve Linux hesapları, giriş denemesi sınırları ve oturum açma ile herkese açık formlarda bot doğrulaması - Turnstile ya da reCAPTCHA, sağlayıcıya ulaşılamazsa yerel iş ispatı ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [İşletim sistemi hesapları](docs/OS-LOGIN.md), [Bot koruması](docs/BOT-PROTECTION.md)) |
 | **Kişiler ve erişim** | Roller ve kişiye özel izinler, gruplar, klasör bazlı erişim ve yerleşik çok kiracılılık ([İzinler](docs/PERMISSIONS.md), [Gruplar](docs/GROUPS.md), [Çok kiracılılık](docs/MULTI-TENANCY.md)) |
 | **Paylaşım** | PIN'li, son kullanma tarihli ve indirme limitli herkese açık bağlantılar, dosya istekleri ve e-postayla paylaşım davetleri ([Paylaşım](docs/SHARING.md)) |
 | **Koruma** | Çöp kutusu ve sürüm geçmişi, isteğe bağlı ClamAV taraması, uçtan uca şifreli klasörler, ikinci bir depoya replikasyon (depoda zaten bulunanların ilk kopyasıyla birlikte) ve bir denetim kaydı ([Çöp kutusu ve sürümleme](docs/TRASH-VERSIONING.md), [Koruma](docs/PROTECTION.md), [Uçtan uca şifreleme](docs/E2E-ENCRYPTION.md), [Replikasyon](docs/REPLICATION.md), [Denetim kaydı](docs/BACKEND.md#admin-audit-log)) |

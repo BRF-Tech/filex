@@ -91,6 +91,7 @@ describe('every admin page has one place in the menu', () => {
       'tenant-self': '/my-tenant',
       'auth-providers': '/auth-providers',
       'login-security': '/login-security',
+      'bot-protection': '/bot-protection',
       encryption: '/encryption',
       protection: '/protection',
       'api-mcp': '/api-mcp',
@@ -135,7 +136,7 @@ describe('the owner’s grouping', () => {
         'settings',
         [
           ['general', ['settings', 'branding', 'appearance', 'tenancy', 'tenant-self']],
-          ['security', ['auth-providers', 'login-security', 'encryption', 'protection']],
+          ['security', ['auth-providers', 'login-security', 'bot-protection', 'encryption', 'protection']],
           ['integrations', ['archives', 'plugins', 'external', 'webhooks', 'notifications', 'api-mcp', 'ai-assistant']],
         ],
       ],
@@ -226,6 +227,8 @@ const PLATFORM_PAGES = [
   'auth-providers', 'login-security', 'protection', 'archives', 'plugins', 'external', 'webhooks',
   // The AI assistant (task #269): the instance's provider and key.
   'ai-assistant',
+  // Bot protection (#294): the instance's captcha provider and keys.
+  'bot-protection',
 ];
 
 describe('who sees what - the router guard’s rule, per page', () => {
@@ -237,7 +240,7 @@ describe('who sees what - the router guard’s rule, per page', () => {
     expect(all).toContain('tenancy');
     expect(all).not.toContain('tenants');
     expect(all).not.toContain('tenant-self');
-    expect(all).toHaveLength(1 + 38 - 2); // dashboard link + 38 pages (the AI assistant's since #269) - the two tenant pages
+    expect(all).toHaveLength(1 + 39 - 2); // dashboard link + 39 pages (the AI assistant's since #269, Bot protection since #294) - the two tenant pages
   });
 
   it('Multi-tenant mode to whoever may configure the instance (#167), under Settings → General', () => {

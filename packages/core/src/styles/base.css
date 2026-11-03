@@ -14204,6 +14204,44 @@ filex-explorer {
   font-size: 13.5px;
 }
 
+/* The bot check (CaptchaWidget): the provider's widget, then one line under
+   it - the fallback's progress, or why the check failed. ONE look for every
+   form that shows it (the sign-in page, a link's PIN box, a drop box). The
+   provider draws its own box at its own size; `flexible` Turnstile fills the
+   column, reCAPTCHA is its fixed 304px. */
+.fe-captcha {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.fe-captcha__widget {
+  min-height: 65px;
+  max-width: 100%;
+  overflow: hidden;
+}
+.fe-captcha__widget:empty {
+  min-height: 0;
+}
+.fe-captcha__status {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fe-text-muted);
+}
+.fe-captcha__status:empty {
+  display: none;
+}
+.fe-captcha__status[data-kind='ok'] {
+  color: var(--fe-ok);
+}
+.fe-captcha__status[data-kind='error'] {
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fe-danger) 10%, transparent);
+  color: var(--fe-danger);
+}
+
 /* A card's actions: a full-width row under a rule. ⚠ `width: 100%` is load
    bearing — inside a body that packs its children to the start
    (`__file-one`) the row shrink-wrapped and its rule stopped halfway across

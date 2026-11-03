@@ -25,6 +25,7 @@ The reference deployment is <https://demo.filex.sh>.
 | Admin writes | allowed | **refused, 403** (below) |
 | Own account's password / email / TOTP | allowed | **refused, 403** - the account is shared |
 | Sign-in attempt limits | apply | apply - except the per-**account** lock on the shared demo account, which is counted per **address** only (below) |
+| [Bot protection](BOT-PROTECTION.md) | `login` | the one-click sign-in with the demo account is its own form, `demo_login`, on or off by itself |
 | Audit log, dashboard activity, Sign-in security | show addresses | every visitor's address - and the operator's allow-list and trusted proxies - reads `hidden on the demo` ([below](#what-the-demo-publishes)) |
 | Auth-provider config read-back | full | values that carry a credential are masked |
 

@@ -222,9 +222,11 @@
       "audit": "Every change made in the admin panel",
       "updates": "New releases and the update policy",
       "about": "Version and build",
-      "aiAssistant": "The assistant in the explorer: provider, model, limits"
+      "aiAssistant": "The assistant in the explorer: provider, model, limits",
+      "botProtection": "A captcha on sign-in, PINs and drop boxes"
     },
-    "aiAssistant": "AI assistant"
+    "aiAssistant": "AI assistant",
+    "botProtection": "Bot protection"
   },
   "login": {
     "title": "Sign in",
@@ -1418,7 +1420,9 @@
       "thumbnails": "SVG, previews, folder previews, Office thumbnails",
       "twoFactor": "2FA, TOTP, two-factor",
       "allowlist": "IP addresses",
-      "stores": "app store, store"
+      "stores": "app store, store",
+      "botProtection": "captcha, CAPTCHA, Turnstile, reCAPTCHA, Cloudflare, bots, spam",
+      "captcha": "captcha, Turnstile, reCAPTCHA, Cloudflare"
     }
   },
   "tagged": {
@@ -1828,7 +1832,9 @@
       "tenant_domain_suspended": "Own domain stopped working",
       "tenant_domain_restored": "Own domain works again",
       "permission_gaps": "Role may have lost a permission",
-      "notification_digest": "Notification digest"
+      "notification_digest": "Notification digest",
+      "captcha_fallback": "Bot protection fell back to the local check",
+      "captcha_misconfigured": "Bot protection misconfigured"
     },
     "scopeEveryone": "Everyone",
     "webhookStatus": {
@@ -4360,5 +4366,76 @@
     "retention": "Keep conversations (days)",
     "retentionHint": "Counted from a conversation's last use; then it is deleted. A person can delete theirs at any time.",
     "saved": "AI assistant settings saved"
+  },
+  "botProtection": {
+    "title": "Bot protection",
+    "subtitle": "A check on the forms anybody can reach without an account: the sign-in, a link's PIN, a file request's drop box. When the server cannot reach the provider, the browser does a short check of its own instead.",
+    "saved": "Bot protection saved",
+    "handBack": "Use the environment's value",
+    "handedBack": "The environment's value is in force again",
+    "status": {
+      "title": "Status",
+      "off": "Off",
+      "on": "On",
+      "misconfigured": "Not working",
+      "fallback": "Fallback in use",
+      "offLine": "No form asks for a check. Choose a provider below to turn it on.",
+      "onLine": "{provider} checks the forms switched on below.",
+      "fallbackLine": "The server cannot reach the provider right now: the browser's local check answers for it.",
+      "fallbackTotal": "Answered by the local check since the server started: {count}"
+    },
+    "provider": {
+      "title": "Provider",
+      "none": "Off",
+      "help": {
+        "none": "No check on any form.",
+        "turnstile": "Free, no cookies, usually invisible.",
+        "recaptcha": "Google's checkbox (v2)."
+      }
+    },
+    "siteKey": "Site key",
+    "siteKeyHint": "The public key the check is drawn with. For Turnstile, the widget's hostname list in Cloudflare must include this server's.",
+    "secret": "Secret key",
+    "secretStored": "A secret is stored - type a new one to replace it",
+    "secretHint": "Stored encrypted and never shown again. Empty: the one in force is kept.",
+    "noSecretKey": "This server has no encryption key (FILEX_SECRET_KEY), so a secret cannot be stored here. Set CAPTCHA_SECRET in the environment instead.",
+    "clearSecret": "Remove the secret stored on this page",
+    "test": "Test the keys",
+    "testOk": "The provider answers and takes the secret.",
+    "testFailed": "The test did not pass.",
+    "source": {
+      "db": "Set on this page.",
+      "env": "From the environment ({env}).",
+      "default": "The default."
+    },
+    "forms": {
+      "title": "Forms",
+      "login": "Sign-in",
+      "loginHint": "The password sign-in, the administrator recovery sign-in of an SSO setup included. Scripts should use an API key.",
+      "demo_login": "Demo sign-in",
+      "demo_loginHint": "The one-click button of a demo (only on a demo).",
+      "share_password": "Link PIN",
+      "share_passwordHint": "The PIN a protected share, app page or file request asks for.",
+      "file_request": "File request upload",
+      "file_requestHint": "The drop box a file request opens: checked once before each upload."
+    },
+    "fallback": {
+      "title": "When the provider cannot be reached",
+      "lead": "A network error, a timeout or a 5xx answer from the provider is an outage. A check the provider refuses is not: that person is asked again.",
+      "local": "Local check",
+      "localHelp": "The browser solves a short proof of work (a second or two). Nothing is turned off.",
+      "off": "Refuse",
+      "offHelp": "The form answers \"unavailable\" until the provider is back. For tests only."
+    },
+    "timeout": "Provider timeout (ms)",
+    "timeoutHint": "How long the server waits for the provider before it counts as an outage; it tries once more.",
+    "mis": {
+      "site_key_missing": "No site key is set: the check cannot be drawn, and the local check answers every form.",
+      "secret_missing": "No secret key is set: checks cannot be verified, and the local check answers every form.",
+      "secret_unreadable": "The stored secret cannot be opened (the server's encryption key changed). Type it again.",
+      "invalid_input_secret": "The provider refuses the secret key. Check that it belongs to this site key.",
+      "missing_input_secret": "The provider received no secret key.",
+      "other": "The setup cannot verify checks ({code}); the local check answers meanwhile."
+    }
   }
 }

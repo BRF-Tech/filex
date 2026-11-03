@@ -37,6 +37,7 @@ import {
   BarChart3,
   Bell,
   Blocks,
+  Bot,
   Brush,
   Building2,
   Cable,
@@ -202,6 +203,7 @@ export const ADMIN_NAV: AdminNavEntry[] = [
         pages: [
           { route: 'auth-providers', label: 'nav.authProviders', hint: 'nav.hint.authProviders', icon: Fingerprint, only: 'platform' },
           { route: 'login-security', label: 'nav.loginSecurity', hint: 'nav.hint.loginSecurity', icon: ShieldAlert, only: 'platform' },
+          { route: 'bot-protection', label: 'nav.botProtection', hint: 'nav.hint.botProtection', icon: Bot, only: 'platform' },
           { route: 'encryption', label: 'nav.encryption', hint: 'nav.hint.encryption', icon: Lock },
           { route: 'protection', label: 'nav.protection', hint: 'nav.hint.protection', icon: Shield, only: 'platform' },
         ],
