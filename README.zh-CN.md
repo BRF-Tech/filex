@@ -867,6 +867,10 @@ filex 可以运行在独立的主机的根路径上，也可以运行在共用�
 
 <br>
 
+# 一键部署
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Filex/)
+
 # 文档
 
 指南以网站的形式发布在 [docs.filex.sh](https://docs.filex.sh)，[完整文档索引](docs/README.md)列出了每一页。

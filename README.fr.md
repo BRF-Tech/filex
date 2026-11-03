@@ -1001,6 +1001,10 @@ qui transmet le chemin complet - exemples pour Caddy, nginx et Helm dans
 
 <br>
 
+# Déploiement en un clic
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Filex/)
+
 # Documentation
 
 Les guides sont publiés sous forme de site sur [docs.filex.sh](https://docs.filex.sh), et

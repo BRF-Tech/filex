@@ -992,6 +992,10 @@ ein Proxy, der den vollständigen Pfad weitergibt - Beispiele für Caddy, nginx 
 
 <br>
 
+# Bereitstellung mit einem Klick
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Filex/)
+
 # Dokumentation
 
 Die Anleitungen sind als Website unter [docs.filex.sh](https://docs.filex.sh)

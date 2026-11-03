@@ -992,6 +992,10 @@ que pase la ruta completa - ejemplos para Caddy, nginx y Helm en
 
 <br>
 
+# Despliegue en un clic
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Filex/)
+
 # Documentación
 
 Las guías se publican como sitio en [docs.filex.sh](https://docs.filex.sh), y el

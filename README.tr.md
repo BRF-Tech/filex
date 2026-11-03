@@ -984,6 +984,10 @@ bölümünde.
 
 <br>
 
+# Tek tıkla dağıtım
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Filex/)
+
 # Belgeler
 
 Kılavuzlar [docs.filex.sh](https://docs.filex.sh) adresinde bir site olarak yayımlanır;
