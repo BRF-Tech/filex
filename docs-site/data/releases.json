@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-10-30",
+  "generatedAt": "2026-11-03",
   "releases": [
+    {
+      "tag": "v0.58.0",
+      "date": "2026-11-03T21:02:44Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.58.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Added\n\n- **Bot protection on the forms anybody can post.** The sign-in, a demo's\n  one-click sign-in, the PIN of a protected link (a share, an app's page, a\n  file request) and the upload into a file request can now ask for a bot\n  check: [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/)\n  (free, cookieless, invisible to most people) or Google reCAPTCHA v2. It is\n  set on the new **Admin → Bot protection** page: the provider,\n  the site key, the secret (stored sealed with `FILEX_SECRET_KEY`, never shown\n  again), the forms one by one, and **Test the keys**, which asks the provider with the\n  keys on the page. It is **off** until you turn it on. The check runs before\n  anything else: a refused check is not a wrong password and spends none of a\n  PIN's attempts. The widget is one shared component: the sign-in page (the\n  desktop app signs in on it too) and the public link pages show the same one.\n  [Bot protection](docs/BOT-PROTECTION.md).\n- **When the provider cannot be reached, the form neither opens nor shuts.**\n  No connection, no answer in four seconds (asked twice), a server error, an\n  answer that is not the provider's, or keys that cannot work (no site key, no\n  secret, a secret the provider refuses or that no longer opens): the browser\n  does a short proof of work instead - one to three seconds on a desktop - and\n  sends the form again by itself, and the administrators are told\n  (`captcha_fallback`, `captcha_misconfigured`; `filex_captcha_fallback_total`\n  on `/metrics`). The proof of work is accepted only while the provider is\n  down, so a bot cannot skip the widget with it, and a refusal from the\n  provider - a 429 included - is a refusal, never an outage. Several instances\n  share the outage and the once-only marks through the database.\n- **The environment can set it too**: `CAPTCHA_PROVIDER`, `CAPTCHA_SITE_KEY`,\n  `CAPTCHA_SECRET`, `CAPTCHA_FORMS` (and `CAPTCHA_FALLBACK`,\n  `CAPTCHA_VERIFY_TIMEOUT_MS`). ⚠ Unlike filex's other database settings,\n  these are **read live, not seeded**: each field is the page's when the page\n  holds one, else the variable's, else off, and a field cleared on the page is\n  the variable's again ([Configuration](docs/CONFIGURATION.md#bot-protection-captcha)).\n\n### Changed\n\n- **While a link's PIN or a file request's upload is protected, the pages\n  without JavaScript cannot answer it.** The bot check runs in the browser, so\n  the no-JavaScript PIN form, the classic upload page and a PIN in the address\n  (`?pin=`, `X-Filex-Pin`) answer *JavaScript needed* (422) instead of a form\n  that cannot succeed; nothing changes while those forms are not protected.\n  `filex client login` with a password on a protected sign-in says to use an\n  API key (`FILEX_TOKEN`) instead.\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0580---2026-11-03)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.58.0",
+        "ghcr.io/brf-tech/filex:full-v0.58.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
     {
       "tag": "v0.57.7",
       "date": "2026-10-30T20:15:02Z",

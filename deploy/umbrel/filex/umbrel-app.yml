@@ -2,13 +2,10 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.58.0"
+version: "0.58.1"
 releaseNotes: |-
-  filex v0.58.0 - 2026-11-03
-  • Bot protection on the forms anybody can post.
-  • When the provider cannot be reached, the form neither opens nor shuts.
-  • The environment can set it too
-  • While a link's PIN or a file request's upload is protected, the pages without JavaScript cannot answer it.
+  filex v0.58.1 - 2026-11-05
+  • Mail goes out through servers that take AUTH LOGIN and not AUTH PLAIN
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

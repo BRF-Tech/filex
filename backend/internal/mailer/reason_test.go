@@ -19,6 +19,7 @@ func TestReason(t *testing.T) {
 		{&net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}, "connect"},
 		{errors.New("server does not advertise STARTTLS"), "starttls"},
 		{&textproto.Error{Code: 535, Msg: "5.7.8 Authentication credentials invalid"}, "auth"},
+		{&textproto.Error{Code: 504, Msg: "5.7.4 Unrecognized authentication type"}, "auth"},
 		{fmt.Errorf("rcpt: %w", &textproto.Error{Code: 550, Msg: "5.1.1 no such user"}), "recipient"},
 		{&textproto.Error{Code: 554, Msg: "transaction failed"}, "rejected"},
 		{errors.New("tls: first record does not look like a TLS handshake"), "tls"},

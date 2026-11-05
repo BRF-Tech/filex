@@ -770,10 +770,10 @@ so are configured in [Authentication](#authentication), not here.)
 |---|---|
 | `FILEX_SMTP_HOST` | SMTP server host. |
 | `FILEX_SMTP_PORT` | SMTP server port. |
-| `FILEX_SMTP_USERNAME` | Auth username (optional). |
+| `FILEX_SMTP_USERNAME` | Auth username (optional). filex logs in with PLAIN or LOGIN, whichever the server takes. |
 | `FILEX_SMTP_PASSWORD` | Auth password (optional). |
 | `FILEX_SMTP_FROM` | From address on outbound mail. |
-| `FILEX_SMTP_TLS` | `starttls` · `tls` · `none`. |
+| `FILEX_SMTP_TLS` | `starttls` · `tls` · `none`. The mode does not depend on the port: `starttls` on port 25 works. With `none`, a username and password are sent only to this machine. |
 
 **Branding, trash & drafts:**
 

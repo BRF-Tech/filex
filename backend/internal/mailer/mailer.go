@@ -216,30 +216,20 @@ func smtpClient(cfg Config) (*smtp.Client, error) {
 }
 
 func dialAuthClose(cfg Config) error {
-	c, err := smtpClient(cfg)
+	c, err := openAuthed(cfg, smtpClient)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	if cfg.Username != "" {
-		if err := c.Auth(smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)); err != nil {
-			return err
-		}
-	}
 	return c.Noop()
 }
 
 func sendMail(cfg Config, to string, msg []byte) error {
-	c, err := smtpClient(cfg)
+	c, err := openAuthed(cfg, smtpClient)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	if cfg.Username != "" {
-		if err := c.Auth(smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)); err != nil {
-			return err
-		}
-	}
 	if err := c.Mail(cfg.From); err != nil {
 		return err
 	}

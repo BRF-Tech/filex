@@ -23,7 +23,8 @@ import (
 //	connect         nothing answered at host:port (refused, timed out, unreachable)
 //	tls             the TLS handshake or the certificate failed
 //	starttls        STARTTLS was required and the server does not offer it
-//	auth            the server rejected the username or password
+//	auth            the login failed: the server rejected the username or
+//	                password, or takes neither PLAIN nor LOGIN (504)
 //	recipient       the server refused the address (5xx on RCPT)
 //	rejected        any other SMTP refusal
 //	other           anything else
@@ -52,7 +53,7 @@ func Reason(err error) string {
 	var tp *textproto.Error
 	if errors.As(err, &tp) {
 		switch {
-		case tp.Code == 530 || tp.Code == 534 || tp.Code == 535 || tp.Code == 538:
+		case tp.Code == 504 || tp.Code == 530 || tp.Code == 534 || tp.Code == 535 || tp.Code == 538:
 			return "auth"
 		case tp.Code >= 550 && tp.Code <= 553:
 			return "recipient"

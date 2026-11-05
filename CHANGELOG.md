@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.58.1] - 2026-11-05
+
+### Fixed
+
+- **Mail goes out through servers that take AUTH LOGIN and not AUTH PLAIN**
+  ([GitHub #132](https://github.com/BRF-Tech/filex/issues/132), reported by
+  @kladiv). filex logged in with PLAIN whatever the server offered, so such a
+  server answered `504 5.7.4 Unrecognized authentication type` and no mail
+  left. filex now reads the mechanisms the server offers and logs in with
+  PLAIN or LOGIN accordingly, and a mechanism the server answers with 504 is
+  followed by the other one on a new connection. A wrong password is not tried
+  twice. LOGIN keeps PLAIN's rule: the username and password go only over an
+  encrypted connection, or to this machine. **Send test** now calls a 504 a
+  failed login, with the server's words below it, instead of "The mail server
+  refused the message."
+
 ## [0.58.0] - 2026-11-03
 
 ### Added
