@@ -26,6 +26,7 @@ database and are edited in the admin panel; their variable only
 - [Zero-touch seeding](#zero-touch-seeding)
 - [External services](#external-services)
 - [Protocol endpoints (S3 · SFTP · FTPS · NFS · WebDAV)](#protocol-endpoints-s3--sftp--ftps--nfs--webdav)
+- [Storage connections](#storage-connections)
 - [Storage plugins](#storage-plugins)
   - [App stores allow list](#app-stores-allow-list)
 - [Storage sync](#storage-sync)
@@ -892,6 +893,14 @@ a **listener** stay off until asked for.
 | `FILEX_NFS` | `0` | The NFSv3 endpoint. ⚠⚠ **NFSv3 is unencrypted** - anyone who can read the traffic sees the files, and anyone who learns an export path can mount it. LAN or VPN only; for anything off-LAN the answer is `filex mount`. |
 | `FILEX_NFS_ADDR` | `:2049` | Listen address. ⚠ There is no portmapper on 111, so clients must be given `port=` and `mountport=` explicitly - and Windows' "Client for NFS" cannot say that at all, so it only works on the standard 2049. |
 | `FILEX_DAV` | `1` | The WebDAV endpoint at `/dav`. |
+
+---
+
+## Storage connections
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `FILEX_STORAGE_TLS_SKIP_VERIFY` | `false` | `true` accepts any certificate from the servers S3, WebDAV and FTPS storages connect to. **Insecure**: read [Private and self-signed certificates](STORAGE.md#private-and-self-signed-certificates) first, which also has the way that keeps the check on. Read at startup, with a warning in the log when it is on. YAML: `storage_tls.skip_verify`. |
 
 ---
 

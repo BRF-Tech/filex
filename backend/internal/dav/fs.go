@@ -408,7 +408,7 @@ func (f *davFS) Rename(ctx context.Context, oldName, newName string) error {
 		if err == nil {
 			return nil
 		}
-		if obj.Kind != storage.KindDirectory {
+		if obj.Kind != storage.KindDirectory || errors.Is(err, storage.ErrMoveAcross) {
 			return err
 		}
 		// Directory Move failed (typical for object stores) — move each

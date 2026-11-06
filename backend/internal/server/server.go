@@ -185,6 +185,12 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		return nil, fmt.Errorf("server: mkdir datadir: %w", err)
 	}
 
+	// Before the first storage opens: a driver reads this as it connects.
+	storage.SetSkipTLSVerify(cfg.StorageTLS.SkipVerify)
+	if cfg.StorageTLS.SkipVerify {
+		slog.Warn("storage: FILEX_STORAGE_TLS_SKIP_VERIFY is on - the certificates of S3, WebDAV and FTPS storages are not checked")
+	}
+
 	dbDrv, err := db.Get(cfg.DB.Driver)
 	if err != nil {
 		return nil, err

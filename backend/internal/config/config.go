@@ -228,6 +228,7 @@ type Config struct {
 	CORS             CORSConfig    `yaml:"cors"`
 	Queue            QueueConfig   `yaml:"queue"`
 	Ops              OpsConfig     `yaml:"ops"`
+	StorageTLS       DriverTLS     `yaml:"storage_tls"`
 	Notify           NotifyConfig  `yaml:"notify"`
 	Demo             DemoConfig    `yaml:"demo"`
 	Sentry           SentryConfig  `yaml:"sentry"`
@@ -632,6 +633,14 @@ type QueueConfig struct {
 	// (the legacy ops.Service still handles copy/move/delete in that
 	// case). Default: true.
 	Enabled bool `yaml:"enabled"`
+}
+
+// DriverTLS — how the storage drivers that speak TLS (S3, WebDAV, FTPS) judge
+// the server they connect to (storage.ApplyTLSVerify).
+type DriverTLS struct {
+	// SkipVerify accepts any certificate. FILEX_STORAGE_TLS_SKIP_VERIFY,
+	// default false. Insecure: see internal/storage/tlsverify.go.
+	SkipVerify bool `yaml:"skip_verify"`
 }
 
 // OpsConfig — the copy/move/delete queue (internal/ops).
@@ -1721,6 +1730,9 @@ func applyEnv(c *Config) {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			c.Ops.DeleteWorkers = n
 		}
+	}
+	if b, ok := envBool("FILEX_STORAGE_TLS_SKIP_VERIFY"); ok {
+		c.StorageTLS.SkipVerify = b
 	}
 	if v := os.Getenv("FILEX_QUEUE_ENABLED"); v != "" {
 		c.Queue.Enabled = v == "1" || strings.EqualFold(v, "true")

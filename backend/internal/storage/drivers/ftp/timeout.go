@@ -45,6 +45,7 @@ import (
 
 	goftp "github.com/jlaffaye/ftp"
 
+	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/stall"
 )
 
@@ -180,7 +181,7 @@ func (d *Driver) dial(ctx context.Context) (*goftp.ServerConn, *stall.Conn, erro
 }
 
 func (d *Driver) tlsConfig() *tls.Config {
-	return &tls.Config{ServerName: d.host, RootCAs: testRootCAs}
+	return storage.ApplyTLSVerify(&tls.Config{ServerName: d.host, RootCAs: testRootCAs})
 }
 
 // testRootCAs lets a test trust its own FTPS stand-in. nil in production: the

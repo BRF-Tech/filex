@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.58.2] - 2026-11-06
+
+### Added
+
+- **S3, WebDAV and FTPS storages can reach a server with a private or
+  self-signed certificate**
+  ([GitHub #134](https://github.com/BRF-Tech/filex/issues/134), reported by
+  @kladiv). `FILEX_STORAGE_TLS_SKIP_VERIFY=true` turns the certificate check off
+  for those storages, and the log says so at startup. It is insecure:
+  [STORAGE.md](docs/STORAGE.md#private-and-self-signed-certificates) has what
+  that exposes, and the way that keeps the check on by trusting the certificate
+  with one read-only mount.
+
+### Fixed
+
+- **A file on a mount inside a local storage can be deleted**
+  ([GitHub #133](https://github.com/BRF-Tech/filex/issues/133), reported by
+  @juan11perez). The trash lives at the storage root, so deleting from an rclone
+  mount, an NFS share or a second disk under that root was a rename across
+  filesystems, which the operating system refuses. A move or a restore across
+  such a boundary failed the same way. The local driver now copies and then
+  deletes: the source is removed only once all of it has arrived, a link
+  travels as a link, and a file that lands in a folder while it is being moved
+  stays where it landed.
+  [STORAGE.md](docs/STORAGE.md#a-mount-inside-a-local-storage) has what that
+  costs on a cloud mount, and how to avoid it.
+- **A delete that fails says why.** A file on a local storage whose move into
+  the trash failed reported `open …: not a directory`, whatever the reason was,
+  because the fallback for object-store folders answered in its place.
+
 ## [0.58.1] - 2026-11-05
 
 ### Fixed

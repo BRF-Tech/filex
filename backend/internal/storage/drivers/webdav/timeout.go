@@ -49,6 +49,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/stall"
 )
 
@@ -75,6 +76,7 @@ func (d *Driver) transport() *http.Transport {
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           stall.GuardWrites(dialer.DialContext, d.policy.SendStall()),
 		TLSHandshakeTimeout:   d.policy.AttemptTimeout,
+		TLSClientConfig:       storage.ApplyTLSVerify(nil),
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		ExpectContinueTimeout: time.Second,

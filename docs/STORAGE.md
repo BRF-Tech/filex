@@ -29,7 +29,7 @@ boxes also speak SFTP/FTP/WebDAV natively. See
 - [How storages work](#how-storages-work)
 - [Adding a storage](#adding-a-storage) - [several folders at once](#mounting-several-folders-at-once) · [ordering storages](#ordering-storages)
 - [The storage config](#the-storage-config)
-- [Adapters](#adapters) - [local](#local) · [NAS / SMB / NFS](#nas-nfs-smb-and-friends) · [S3](#s3--s3-compatible) · [SFTP](#sftp) · [WebDAV](#webdav) · [FTP](#ftp--ftps)
+- [Adapters](#adapters) - [local](#local) · [NAS / SMB / NFS](#nas-nfs-smb-and-friends) · [S3](#s3--s3-compatible) · [SFTP](#sftp) · [WebDAV](#webdav) · [FTP](#ftp--ftps) · [private certificates](#private-and-self-signed-certificates)
 - [Sync - staying in step with the backend](#sync)
 - [Slow storage](#slow-storage)
 - [Read-only mounts](#read-only-mounts)
@@ -561,6 +561,30 @@ WARN storage scan: skipped an entry that is not a regular file or folder - filex
 > device the same way - the SSH server would open it for filex and wait just
 > the same.
 
+#### A mount inside a local storage
+
+A `local` root can hold other filesystems: an rclone mount of a cloud drive, an
+NFS share, a second disk, a Docker volume. filex serves them as one storage, but
+a rename cannot cross a filesystem, so a move across the boundary is a **copy
+and then a delete**. That includes **every delete under such a mount**, because
+the [trash](TRASH-VERSIONING.md) lives at the storage root:
+
+- **The bytes travel.** Deleting 10 GB from an rclone mount downloads 10 GB to
+  the disk of the storage root, and that disk needs the room. A restore uploads
+  them again.
+- **A failure changes nothing.** The source is removed only once all of it has
+  arrived. Out of disk space, or on a read-only mount, the delete fails with that
+  reason and the file stays.
+- **Nothing is lost on the way.** A symlink travels as a link and is never
+  followed. A file that lands in a folder while the folder is being moved stays
+  where it landed. A named pipe, socket or device cannot travel, so a folder
+  holding one refuses the move and keeps everything.
+
+To keep a delete on a cloud mount cheap, make the mount **a storage of its own**
+with the mount point as its `path`. The trash then sits on the mount and a
+delete is a rename there. Moving between the two storages works as any
+[cross-storage move](#moving-files-between-storages) does.
+
 ### NAS (NFS, SMB, and friends)
 
 There are two ways, and since v0.20.0 the first one is usually better.
@@ -1048,6 +1072,37 @@ moving. Now each of those waits ends after `attempt_timeout_s`, a fresh
 connection is tried within the budget, and the storage answers
 `503 storage_unavailable`.
 `{"host":"ftp.example.com","user":"filex","password":"…","root":"/files","tls":true}`.
+
+### Private and self-signed certificates
+
+The `s3`, `webdav` and `ftp` (with `tls`) drivers check the certificate of the
+server they connect to, so a private endpoint whose certificate no public
+authority signed fails with a certificate error. There are two ways out.
+
+**1 - trust the certificate (recommended).** The check stays on. Add the CA that
+signed it, or the certificate itself, to the container's trust store with one
+read-only mount and restart filex:
+
+```yaml
+services:
+  filex:
+    volumes:
+      - ./private-ca.pem:/etc/ssl/certs/private-ca.pem:ro
+```
+
+The certificate has to name the host your storage connects to.
+
+**2 - turn the check off.** `FILEX_STORAGE_TLS_SKIP_VERIFY=true` (since v0.58.2)
+accepts any certificate on every S3, WebDAV and FTPS storage of the install. It
+is read when filex starts, and the log says so with a warning.
+
+> ⚠ **Insecure.** Anybody who can sit between filex and that server can read and
+> change every file that crosses, and take a WebDAV or FTPS password. Keep it for
+> a network you trust.
+
+With `disable_presign: false` on an S3 storage the browser connects to the bucket
+itself, and neither way reaches it: the browser has to trust that certificate on
+its own.
 
 ---
 

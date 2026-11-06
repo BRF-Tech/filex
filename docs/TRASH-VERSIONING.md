@@ -61,6 +61,10 @@ replaced it and for how an install that already took the damage repairs itself.
 >   to a real hard delete - and then the item is deliberately **not** listed in
 >   the trash, because a Restore there could never work. None of the shipped
 >   drivers (local, S3, SFTP, FTP, WebDAV) fall into that case.
+> - A file under a **mount inside a `local` storage** (an rclone mount, an NFS
+>   share, a second disk) is on another filesystem than the trash at the storage
+>   root, so its trash step is a copy and a delete as well: see
+>   [A mount inside a local storage](STORAGE.md#a-mount-inside-a-local-storage).
 > - Removing one item from the trash for good is an administrator's action,
 >   `DELETE /api/admin/trash/{id}`. A path under `.filex-trash/` cannot be
 >   deleted (or written, moved or shared) through any person-facing surface -
@@ -344,6 +348,11 @@ counts, on this endpoint or in the operations list.
 > (Contributed by Berk Başarır, [#47](https://github.com/BRF-Tech/filex/pull/47).)
 
 ### Trash - failure modes & troubleshooting
+
+**A delete failed with `open …: not a directory` about a file that is there.**
+Up to v0.58.1 a file on a mount inside a `local` storage could not go to the
+trash, and the error named the wrong problem; update
+([details](STORAGE.md#a-mount-inside-a-local-storage)).
 
 **"Empty trash" seemed to do nothing, or answered 504.**
 Up to v0.42.2 the purge ran inside the request and the first proxy timeout cut

@@ -108,12 +108,15 @@ func Put(ctx context.Context, drv storage.Driver, rel string) (Outcome, error) {
 		if err == nil {
 			return Outcome{Key: key, Trashed: true, Files: 1}, nil
 		}
+		if errors.Is(err, storage.ErrMoveAcross) {
+			return Outcome{}, err
+		}
 		if !errors.Is(err, storage.ErrNotFound) {
 			// Could still be an object-store folder: no object sits at the
 			// prefix, so the rename fails while the contents are perfectly
 			// real. Fall through to the per-object walk and only surface
 			// this error if there is nothing underneath either.
-			out, werr := putChildren(ctx, drv, rel, key, mover, copier, deleter)
+			out, werr := putChildren(ctx, drv, rel, key, mover, copier, deleter, err)
 			if werr != nil {
 				return Outcome{}, werr
 			}
@@ -124,7 +127,7 @@ func Put(ctx context.Context, drv storage.Driver, rel string) (Outcome, error) {
 			return Outcome{}, err
 		}
 		// ErrNotFound: either an empty folder marker or genuinely gone.
-		out, werr := putChildren(ctx, drv, rel, key, mover, copier, deleter)
+		out, werr := putChildren(ctx, drv, rel, key, mover, copier, deleter, nil)
 		if werr != nil {
 			return Outcome{}, werr
 		}
@@ -142,7 +145,7 @@ func Put(ctx context.Context, drv storage.Driver, rel string) (Outcome, error) {
 	}); err == nil {
 		return Outcome{Key: key, Trashed: true, Files: 1}, nil
 	} else if !errors.Is(err, storage.ErrNotFound) {
-		out, werr := putChildren(ctx, drv, rel, key, nil, copier, deleter)
+		out, werr := putChildren(ctx, drv, rel, key, nil, copier, deleter, err)
 		if werr != nil {
 			return Outcome{}, werr
 		}
@@ -152,7 +155,7 @@ func Put(ctx context.Context, drv storage.Driver, rel string) (Outcome, error) {
 		}
 		return Outcome{}, err
 	}
-	out, werr := putChildren(ctx, drv, rel, key, nil, copier, deleter)
+	out, werr := putChildren(ctx, drv, rel, key, nil, copier, deleter, nil)
 	if werr != nil {
 		return Outcome{}, werr
 	}
@@ -190,10 +193,22 @@ func countAttempt(ctx context.Context, attempt func(context.Context) error) erro
 // It counts on the context's tally itself, one per object, and runs each
 // object's move on a context without one: a driver that counts its own moves
 // would otherwise count every object twice.
+//
+// cause is the error of the single-call attempt this walk is a second chance
+// for, nil when that attempt only found nothing.
+//
+// ⚠ A walk that fails answers cause, not its own error. The walk exists for an
+// object-store folder, and of a plain FILE whose move failed it can only say
+// that a file is not a folder: a person whose delete failed for a real reason
+// read `open …: not a directory` about a file they could see was there (issue
+// #133). TakeBack keeps the attempt's error the same way.
 func putChildren(ctx context.Context, drv storage.Driver, rel, key string,
-	mover storage.Mover, copier storage.Copier, deleter storage.Deleter) (Outcome, error) {
+	mover storage.Mover, copier storage.Copier, deleter storage.Deleter, cause error) (Outcome, error) {
 	files, err := walkFiles(ctx, drv, rel, true)
 	if err != nil {
+		if cause != nil {
+			return Outcome{}, cause
+		}
 		return Outcome{}, err
 	}
 	if len(files) == 0 {
@@ -257,6 +272,9 @@ func TakeBack(ctx context.Context, drv storage.Driver, trashKey, origPath string
 	err := countAttempt(ctx, func(ctx context.Context) error { return relocate(ctx, drv, trashKey, origPath) })
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, storage.ErrMoveAcross) {
+		return err
 	}
 	// Either genuinely missing, or a folder that only exists as its contents.
 	files, werr := walkFiles(ctx, drv, trashKey, false)

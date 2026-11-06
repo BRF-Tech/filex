@@ -57,6 +57,7 @@ import (
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 
+	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/stall"
 )
 
@@ -116,6 +117,7 @@ func (p policy) httpClient() aws.HTTPClient {
 		}).
 		WithTransportOptions(func(tr *http.Transport) {
 			tr.TLSHandshakeTimeout = p.AttemptTimeout
+			tr.TLSClientConfig = storage.ApplyTLSVerify(tr.TLSClientConfig)
 			tr.DialContext = stall.GuardWrites(tr.DialContext, p.SendStall())
 		}).
 		Freeze()

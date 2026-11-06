@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-11-03",
+  "generatedAt": "2026-11-05",
   "releases": [
+    {
+      "tag": "v0.58.1",
+      "date": "2026-11-05T17:12:38Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.58.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Fixed\n\n- **Mail goes out through servers that take AUTH LOGIN and not AUTH PLAIN**\n  ([GitHub #132](https://github.com/BRF-Tech/filex/issues/132), reported by\n  @kladiv). filex logged in with PLAIN whatever the server offered, so such a\n  server answered `504 5.7.4 Unrecognized authentication type` and no mail\n  left. filex now reads the mechanisms the server offers and logs in with\n  PLAIN or LOGIN accordingly, and a mechanism the server answers with 504 is\n  followed by the other one on a new connection. A wrong password is not tried\n  twice. LOGIN keeps PLAIN's rule: the username and password go only over an\n  encrypted connection, or to this machine. **Send test** now calls a 504 a\n  failed login, with the server's words below it, instead of \"The mail server\n  refused the message.\"\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0581---2026-11-05)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.58.1",
+        "ghcr.io/brf-tech/filex:full-v0.58.1"
+      ],
+      "hasDesktop": false,
+      "assetCount": 15
+    },
     {
       "tag": "v0.58.0",
       "date": "2026-11-03T21:02:44Z",

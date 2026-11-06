@@ -232,6 +232,17 @@ func CloseDriver(d Driver) {
 	}
 }
 
+// ErrMoveAcross is a Move that had to copy across a filesystem boundary inside
+// a storage (a mount under a local root) and failed. The object is real and its
+// move has been attempted whole.
+//
+// ⚠⚠ A caller that answers a failed folder move by moving what is inside it
+// one object at a time, which is what an object-store folder needs, stops here.
+// Out of disk space half way through a folder, that walk would put the first
+// files in the trash with no row to find them by, and clean up the rest of the
+// folder as a marker (issue #133).
+var ErrMoveAcross = errors.New("storage: move across filesystems failed")
+
 // Mover renames/moves objects.
 type Mover interface {
 	Move(ctx context.Context, src, dst string) error

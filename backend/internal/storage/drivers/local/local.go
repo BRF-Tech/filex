@@ -648,7 +648,7 @@ func (d *Driver) SetMtime(_ context.Context, p string, mtime time.Time) error {
 }
 
 // Move implements storage.Mover.
-func (d *Driver) Move(_ context.Context, src, dst string) error {
+func (d *Driver) Move(ctx context.Context, src, dst string) error {
 	// ⚠ The two ends are judged differently, and measurement says they must
 	// be. os.Rename moves the SOURCE NODE — renaming a symlink moves the link
 	// and leaves its target where it was (measured on both hosts) — so a
@@ -672,7 +672,12 @@ func (d *Driver) Move(_ context.Context, src, dst string) error {
 	// hundred (measured 2026-08-17). Every such holder releases in
 	// milliseconds; see retry.go for why the budget is one second and why only
 	// this class of error is retried. On Unix the retry never engages.
-	if err := retryWhileLocked(func() error { return os.Rename(a, b) }); err != nil {
+	err = retryWhileLocked(func() error { return rename(a, b) })
+	// A mount under the root is another filesystem: see crossdevice.go.
+	if crossDevice(err) {
+		err = moveAcross(ctx, a, b)
+	}
+	if err != nil {
 		// The Driver contract says a missing path is storage.ErrNotFound, and
 		// Read/Stat/List all honour it — Move and Copy did not, and returned
 		// the raw *fs.PathError instead.

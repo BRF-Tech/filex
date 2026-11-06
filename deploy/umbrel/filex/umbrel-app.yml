@@ -2,10 +2,12 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.58.1"
+version: "0.58.2"
 releaseNotes: |-
-  filex v0.58.1 - 2026-11-05
-  • Mail goes out through servers that take AUTH LOGIN and not AUTH PLAIN
+  filex v0.58.2 - 2026-11-06
+  • S3, WebDAV and FTPS storages can reach a server with a private or self-signed certificate
+  • A file on a mount inside a local storage can be deleted
+  • A delete that fails says why.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-
