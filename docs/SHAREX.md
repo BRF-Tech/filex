@@ -170,6 +170,9 @@ stripped, and a confined token can still only write inside its own root.
   it ([SHARING.md](SHARING.md#a-link-follows-its-creator)).
 - **401 unauthorized** - the `X-Filex-Token` header value is wrong or the token
   was revoked. Re-copy it (tokens are shown only once at creation).
+- **`this account is disabled` (403)** - the token is fine, the account it
+  belongs to is switched off (**Admin → Users**). It works again when an
+  administrator switches the account back on.
 - **Link downloads instead of previewing** - confirm the returned URL still ends
   with `?inline=1`; some clients strip query strings when re-sharing.
 - **Wrong host** - the `.sxcu` **Request URL** must point at your filex host's

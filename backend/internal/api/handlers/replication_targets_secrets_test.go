@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
 const storedSecret = "s3cr3t-never-shown"
@@ -108,6 +109,37 @@ func TestReplicationTargets_TheMaskSentBackKeepsTheSecret(t *testing.T) {
 	code, _ = f.do(t, http.MethodPatch, path, map[string]any{"config": cfg})
 	require.Equal(t, http.StatusOK, code)
 	assert.Equal(t, "rotated", storedConfig(t, f, rt.ID)["secret_key"])
+}
+
+// A target's certificate switch is held to what a storage's is.
+func TestReplicationTargets_TurningTheCheckOffNeedsTheKeysTypedAgain(t *testing.T) {
+	f := newLinkFixture(t)
+	rt := secretTarget(t, f)
+	path := "/api/admin/replication-targets/" + strconv.FormatInt(rt.ID, 10)
+	_, shown := f.do(t, http.MethodGet, path, nil)
+	cfg, _ := shown["config"].(map[string]any)
+
+	cfg[storage.SkipTLSVerifyKey] = true
+	code, body := f.do(t, http.MethodPatch, path, map[string]any{"config": cfg})
+	assert.Equal(t, http.StatusBadRequest, code, "the saved keys would have gone to a server nobody checks")
+	assert.Equal(t, "SECRET_NEEDED", body["error"])
+	assert.Nil(t, storedConfig(t, f, rt.ID)[storage.SkipTLSVerifyKey], "the refused save turned the check off")
+
+	cfg["access_key"] = "AKIA-TYPED"
+	cfg["secret_key"] = "typed"
+	code, _ = f.do(t, http.MethodPatch, path, map[string]any{"config": cfg})
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, true, storedConfig(t, f, rt.ID)[storage.SkipTLSVerifyKey])
+
+	// Masked again, as the page shows it: on stays on, and off asks for nothing.
+	cfg["access_key"], cfg["secret_key"] = "***", "***"
+	cfg["bucket"] = "yedek-3"
+	code, _ = f.do(t, http.MethodPatch, path, map[string]any{"config": cfg})
+	require.Equal(t, http.StatusOK, code)
+	cfg[storage.SkipTLSVerifyKey] = false
+	code, _ = f.do(t, http.MethodPatch, path, map[string]any{"config": cfg})
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "typed", storedConfig(t, f, rt.ID)["secret_key"])
 }
 
 func TestReplicationTargets_TheTokenDoorsMaskToo(t *testing.T) {

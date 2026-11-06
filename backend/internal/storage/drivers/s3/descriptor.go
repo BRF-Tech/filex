@@ -96,6 +96,7 @@ func init() {
 				Default:     true,
 				Advanced:    true,
 			},
+			storage.SkipTLSVerifyField(),
 		}, defaults.Fields(timeoutTexts)...),
 	})
 }

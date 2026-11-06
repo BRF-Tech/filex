@@ -38,6 +38,10 @@ func init() {
 					"indexing, virus scanning, quota and deletion.",
 				HelpI18nKey: "storages.fieldHelp.followSymlinks",
 				Advanced:    true,
+				SecurityOff: &storage.SecurityOff{
+					Risk:        "A link can lead anywhere on this machine: whoever may use this storage reaches, changes and deletes what it points at, however far outside this folder that is.",
+					RiskI18nKey: "storages.fieldRisk.followSymlinks",
+				},
 			},
 		},
 	})

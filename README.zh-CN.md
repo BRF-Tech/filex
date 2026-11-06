@@ -260,7 +260,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![套用了运维人员主题的登录页](https://filex.sh/shots/appearance/themed-signin-1440.0da9ad45502b.png)
+![套用了运维人员主题的登录页](https://filex.sh/shots/appearance/themed-signin-1440.ff6bb587c310.png)
 
 <sub>…登录页也是，这时还没有任何人登录</sub>
 
@@ -322,7 +322,7 @@ docker run -p 5212:5212 \
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.cbad664dfed5.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.1870c90ae20a.png)
 
 <sub>API keys（API 密钥）：在资源管理器或嵌入端里签发你自己的密钥（凭某个人的会话或令牌；用一个共享的*应用*令牌做代理的嵌入端没有这个条目）</sub>
 
@@ -370,7 +370,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![共享对话框](https://filex.sh/shots/share-modal.3c132b06cd19.png)
+![共享对话框](https://filex.sh/shots/share-modal.c3b9326fa9fa.png)
 
 <sub>共享：PIN、过期时间、下载次数上限、单行 `curl` 命令</sub>
 
@@ -402,7 +402,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.679f7daec8a4.png)
+![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.bc923c4374cf.png)
 
 <sub>管理面板里的每张表格：每行一个固定的 **Actions**（操作）菜单，与资源管理器的 ⋮ 打开的是同一个菜单</sub>
 
@@ -482,7 +482,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![账户被锁定时的登录表单](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
+![账户被锁定时的登录表单](https://filex.sh/shots/loginsecurity/login-locked-1440.1c2889094cd7.png)
 
 <sub>…以及账户被锁定时登录表单显示的内容，锁定的倒计时就在按钮上</sub>
 
@@ -505,7 +505,7 @@ docker run -p 5212:5212 \
 </td>
 <td width="50%" valign="top">
 
-![按钮上方带机器人校验的登录表单](https://filex.sh/shots/botprotection/login-captcha-dark-1440.099dd770db5c.png)
+![按钮上方带机器人校验的登录表单](https://filex.sh/shots/botprotection/login-captcha-dark-1440.91b31e625fe1.png)
 
 <sub>……以及登录表单，按钮上方是机器人校验</sub>
 
@@ -514,7 +514,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![演示首页](https://filex.sh/shots/demo-landing.fba2be2d2961.png)
+![演示首页](https://filex.sh/shots/demo-landing.a79e6941c259.png)
 
 <sub>演示首页</sub>
 
@@ -708,7 +708,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 <tr>
 <td width="50%" valign="top">
 
-![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.537429f5f44b.png)
+![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.a235075dab8b.png)
 
 <sub>等待签署期间：文档对每个人都是冻结的，谁已签署，在文档的详细信息里可以看到</sub>
 

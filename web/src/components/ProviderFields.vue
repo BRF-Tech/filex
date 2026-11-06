@@ -12,7 +12,9 @@
  */
 import { useI18n } from 'vue-i18n';
 import type { AuthProviderField } from '@/api/types';
+import type { SecretNeeded } from '@/lib/secretNeeded';
 import Input from '@/components/ui/Input.vue';
+import SecurityOffNote from '@/components/ui/SecurityOffNote.vue';
 import Textarea from '@/components/ui/Textarea.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 
@@ -26,6 +28,9 @@ const props = defineProps<{
   /** Fields whose value the upgrade chose (`set_by_upgrade`): their line
    *  says so first (`authProviders.upgradeHints.<key>`). */
   setByUpgrade?: string[];
+  /** The server asked for a saved secret again (lib/secretNeeded): said under
+   *  that box until something is typed in it. */
+  secretNeeded?: SecretNeeded | null;
 }>();
 const emit = defineEmits<{ (e: 'update', key: string, value: string | boolean): void }>();
 
@@ -89,6 +94,10 @@ function placeholder(f: AuthProviderField): string | undefined {
  * or the field's own hint - for a switch such as show_refusal_reason, the
  * warning of what turning it on costs.
  */
+function needed(f: AuthProviderField): string | null {
+  return props.secretNeeded?.field === f.key && !props.values[f.key] ? props.secretNeeded.message : null;
+}
+
 function hint(f: AuthProviderField): string | undefined {
   if (f.kind === 'secret' && props.secretsSet?.[f.key]) return t('authProviders.secretSet');
   if (f.key === 'redirect_url') return t('authProviders.redirectDefault');
@@ -108,7 +117,7 @@ function hint(f: AuthProviderField): string | undefined {
 
 <template>
   <template v-for="f in fields" :key="f.key">
-    <div v-if="f.kind === 'bool'" class="sm:col-span-2 pt-1">
+    <div v-if="f.kind === 'bool'" class="sm:col-span-2 pt-1 space-y-1">
       <Toggle
         :model-value="values[f.key] as boolean"
         :label="fieldLabel(f.key)"
@@ -117,6 +126,7 @@ function hint(f: AuthProviderField): string | undefined {
         :disabled="disabled"
         @update:model-value="(v) => emit('update', f.key, v)"
       />
+      <SecurityOffNote v-if="f.security_off" :risk="t(`authProviders.fieldRisks.${f.key}` as never)" />
     </div>
     <Textarea
       v-else-if="f.kind === 'multiline'"
@@ -140,6 +150,7 @@ function hint(f: AuthProviderField): string | undefined {
       :name="`auth-field-${prefix}-${f.key}`"
       :placeholder="placeholder(f)"
       :hint="hint(f)"
+      :error="needed(f)"
       :monospace="PRESENTATION[f.key]?.monospace"
       :inputmode="PRESENTATION[f.key]?.inputmode"
       :disabled="disabled"

@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -30,6 +31,43 @@ type clientOpts struct {
 	url   string
 	token string
 	json  bool
+	tls   tlsFlag
+}
+
+// tlsFlag is --insecure-skip-tls-verify, and whether it was said: on this
+// command line it beats the environment and the saved connection in both
+// directions (=false checks a server the file says not to).
+type tlsFlag struct{ said, skip bool }
+
+const tlsFlagName = "insecure-skip-tls-verify"
+
+const tlsFlagUsage = "do not check the server's certificate, for a filex server with a self-signed or private one. " +
+	cliclient.InsecureNotice
+
+func (f *tlsFlag) String() string { return strconv.FormatBool(f.skip) }
+func (f *tlsFlag) Type() string   { return "bool" }
+func (f *tlsFlag) Set(v string) error {
+	skip, err := strconv.ParseBool(v)
+	if err != nil {
+		return err
+	}
+	f.said, f.skip = true, skip
+	return nil
+}
+
+// flagOn is the flag of a command; persistentFlagOn of it and those below it.
+func (f *tlsFlag) flagOn(c *cobra.Command) {
+	c.Flags().VarPF(f, tlsFlagName, "", tlsFlagUsage).NoOptDefVal = "true"
+}
+
+func (f *tlsFlag) persistentFlagOn(c *cobra.Command) {
+	c.PersistentFlags().VarPF(f, tlsFlagName, "", tlsFlagUsage).NoOptDefVal = "true"
+}
+
+func (f tlsFlag) apply(conn *cliclient.Conn) {
+	if f.said {
+		conn.InsecureSkipTLSVerify = f.skip
+	}
 }
 
 // api resolves the connection (flags > env > ~/.filex/cli.yaml) and
@@ -44,6 +82,7 @@ func (o *clientOpts) api(requireToken bool) (*cliclient.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	o.tls.apply(&conn)
 	if conn.URL == "" {
 		return nil, errors.New("no server URL - pass --url, set FILEX_URL, or run `filex client login`")
 	}
@@ -86,6 +125,7 @@ func clientCmd() *cobra.Command {
 	c.PersistentFlags().StringVar(&opts.url, "url", "", "filex server URL (default: $FILEX_URL or ~/.filex/cli.yaml)")
 	c.PersistentFlags().StringVar(&opts.token, "token", "", "API or session token (default: $FILEX_TOKEN, else the session ~/.filex/cli.yaml saved for this server URL)")
 	c.PersistentFlags().BoolVar(&opts.json, "json", false, "print raw JSON responses instead of tables")
+	opts.tls.persistentFlagOn(c)
 
 	c.AddCommand(
 		clientLoginCmd(opts),
@@ -131,7 +171,12 @@ func clientLoginCmd(opts *clientOpts) *cobra.Command {
 			"with the address and used again by the next login there; --realm \"\" signs in to the\n" +
 			"platform's own accounts. When the tenant has an address of its own, the server hands\n" +
 			"the sign-in over to it (a one-use handoff code); the CLI follows, and later commands\n" +
-			"use that address. A single-tenant server ignores the realm.",
+			"use that address. A single-tenant server ignores the realm.\n\n" +
+			"--insecure-skip-tls-verify reaches a server with a self-signed or private certificate.\n" +
+			"It is saved with the address, like the session, for the other commands and for filex\n" +
+			"sync and filex mount, and it goes to no other address. A login with =false checks the\n" +
+			"certificate again, and saves the switch off once that passes. Trusting the certificate\n" +
+			"on this computer keeps the check on, and is the better way.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfgPath, err := cliclient.DefaultConfigPath()
@@ -145,6 +190,7 @@ func clientLoginCmd(opts *clientOpts) *cobra.Command {
 			if conn.URL == "" {
 				return errors.New("login needs a server URL - pass --url or set FILEX_URL")
 			}
+			opts.tls.apply(&conn)
 			// The realm: --realm when given (--realm "" = the platform's own
 			// accounts), else the one saved with this address.
 			savedRealm := !cmd.Flags().Changed("realm")
@@ -175,15 +221,20 @@ func clientLoginCmd(opts *clientOpts) *cobra.Command {
 				return errors.New("empty password")
 			}
 
-			api := cliclient.New(cliclient.Conn{URL: conn.URL})
+			api := cliclient.New(cliclient.Conn{URL: conn.URL, InsecureSkipTLSVerify: conn.InsecureSkipTLSVerify})
 			lr, err := api.Login(cmd.Context(), cliclient.LoginRequest{Email: email, Password: password, TOTP: totp, Realm: realm})
 			if err != nil {
 				return realmHint(err, realm, savedRealm)
 			}
 			// lr.URL is the tenant's own address when the server handed the
 			// sign-in over: the session belongs there, and so do later commands.
-			if err := cliclient.SaveFileConfig(cfgPath, cliclient.FileConfig{URL: lr.URL, Token: lr.Token, Realm: realm}); err != nil {
+			if err := cliclient.SaveFileConfig(cfgPath, cliclient.FileConfig{
+				URL: lr.URL, Token: lr.Token, Realm: realm, InsecureSkipTLSVerify: conn.InsecureSkipTLSVerify,
+			}); err != nil {
 				return fmt.Errorf("save %s: %w", cfgPath, err)
+			}
+			if conn.InsecureSkipTLSVerify {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: saved for %s: %s\n", lr.URL, cliclient.InsecureNotice)
 			}
 			if opts.json {
 				b, err := json.Marshal(struct {

@@ -1366,6 +1366,16 @@ func (h *StagedUpload) authorize(w http.ResponseWriter, r *http.Request) (*model
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "upload not found"})
 		return nil, false
 	}
+	// The caller's tenant as it is NOW, on every chunk, status, commit and
+	// abort: Begin resolved the storage under the tenant scope, but the row
+	// pins it by id and lives up to the staging TTL, and the platform operator
+	// may move the storage to another tenant meanwhile. The ACL below is
+	// tenant-blind, so without this an upload begun before the move went on
+	// writing into the other tenant's storage. Answered like an upload that
+	// does not exist (ownsStorage's 404, "upload not found").
+	if !ownsStorage(w, r, row.StorageID, "upload") {
+		return nil, false
+	}
 	// Re-asked on every chunk and at commit: a freeze taken while the bytes
 	// were still arriving stops them landing.
 	if gate(w, r, h.ACL, row.StorageID, writegate.Writes(row.StorageKey)) {

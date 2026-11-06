@@ -39,7 +39,11 @@ Every token is **bound to a user** and inherits that user's account role
 (`admin` / `user` / `viewer`) and RBAC grants. Authenticating with a token is
 exactly like that user signing in - minus the cookie. An optional
 `expires_in_days` sets a hard expiry; an expired token authenticates as nobody
-(401). filex stamps each token's last-used time on every request.
+(401). While its user's account is switched off (**Admin → Users**) a token is
+refused on every route, `/api/ai`, MCP and `/api/sharex` included, with the
+answer a session gets: `403 {"error":"this account is disabled","reason":"account_disabled"}`.
+Switched back on, the same token works again. filex stamps each token's
+last-used time on every request.
 
 ### Token kinds - `user` vs `app`
 
@@ -360,8 +364,14 @@ Notes:
   `next` line for the case with no shell at all (give it to the user). The ticket is
   single-use, short-lived (default 30 min, `max 24 h`), cannot read/list/delete,
   and cannot be pointed anywhere else - the redeemer never supplies a path. The
-  bytes are written as, and billed to, the minter. Tickets live in memory, so a
-  restart drops the unredeemed ones (mint another).
+  bytes are written as, and billed to, the minter. The ticket names the storage
+  by its id, in the minter's tenant, and the upload asks again as the minter: an
+  account that may no longer sign in, the API token it was minted with
+  revoked or expired, a tenant that no longer has the storage, or a storage
+  that is gone makes the ticket no good - it answers like a used
+  one (`404 ticket_not_found`) and nothing is written. A storage renamed in the
+  meantime keeps its tickets. Tickets live in memory, so a restart drops the
+  unredeemed ones (mint another).
 - **Share** mints a public `/s/<token>` link (folders download as a ZIP). The
   target must already be indexed - write or list it first. A generated PIN is
   returned **once**.
@@ -837,9 +847,10 @@ expires after 14 days. The same reads and requests are REST routes under
   function the explorer does, and so do a public link and a revoke.
 - **Administration stays with a person.** An admin-scoped token reads the
   admin surface and manages ordinary accounts, but it cannot install a plugin,
-  make or change an administrator, hand out an admin-area permission or change
-  who may encrypt: those answer `403 session_required` and are done by an
-  administrator signed in to the panel.
+  make or change an administrator (switching one on or off included), hand out
+  an admin-area permission or change who may encrypt: those answer
+  `403 session_required` and are done by an administrator signed in to the
+  panel.
 - **Hashed at rest, shown once, revocable.** Only the sha256 hash is stored; the
   plaintext is displayed a single time; any token can be revoked instantly
   (`DELETE`) or aged out with `expires_in_days`.
@@ -862,6 +873,11 @@ No token, an unknown token (revoked, mistyped, or wrong environment), or an
 expired one. Re-issue and pass it on `X-Filex-Token` or `Authorization: Bearer`.
 A bare **`GET /api/ai/mcp` with no token returns 401** - that's expected; an MCP
 client must send the header on every request.
+
+### 403 Forbidden (`this account is disabled`, `reason: "account_disabled"`)
+The token is valid, but the account it belongs to is switched off
+(**Admin → Users**). Every route refuses it, as it refuses that account's
+sessions; it works again when an administrator switches the account back on.
 
 ### 403 Forbidden (`token missing scope: <x>`)
 The token lacks the scope for that verb (e.g. calling `upload` with a read-only
@@ -898,9 +914,16 @@ may do. No scope changes that.
   ([Plugin tools](#plugin-tools)).
 - **An administrator's credential** - `admin_users_create` with the `admin`
   role, `admin_users_update` promoting an account to administrator, changing
-  an administrator's role or password or removing an administrator's SSO bind
-  (`sso_unlink`), `admin_users_reset_password` on an administrator. Managing accounts that are not administrators works with a
+  an administrator's role or password, removing an administrator's SSO bind
+  (`sso_unlink`) or switching an administrator's account on or off
+  (`enabled`, the key's own account included), `admin_users_reset_password`
+  on an administrator. Managing accounts that are not administrators works with a
   key ([RBAC.md](RBAC.md#administration-and-plugins-need-a-session)).
+- **Suspending or resuming a tenant, or deleting it with its accounts** -
+  `admin_tenants_update` with `enabled` set to what the tenant is not,
+  `admin_tenants_delete` with `force` on a tenant that has accounts. The
+  tenant's other fields change with a key, and an empty tenant is deleted with
+  one ([MULTI-TENANCY.md → Tenant lifecycle](MULTI-TENANCY.md#11-tenant-lifecycle)).
 - **Who may encrypt** - changing a tenant's encryption policy or the operator's
   ceiling, deciding an encryption request, and writing the `e2e.policy` key
   through `admin_settings_set` or `admin_settings_update`
@@ -947,7 +970,7 @@ reaction differs and a bare code cannot express it:
 
 | Status | `error` | What the `hint` tells you to do |
 |---|---|---|
-| 404 | `ticket_not_found` | Unknown **or already redeemed** (deliberately the same answer) - mint a new ticket. |
+| 404 | `ticket_not_found` | Unknown **or already redeemed** (deliberately the same answer), or the minter's account, the token it was minted with, its tenant or the storage no longer stands - mint a new ticket. |
 | 410 | `ticket_expired` | Mint a new ticket and upload to the new URL. |
 | 409 | `ticket_in_use` | Another transfer is in flight - wait, don't start a second one. |
 | 411 | `content_length_required` | The body came chunked; use `curl -T`, which always sends a length. The ticket survives. |

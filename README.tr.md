@@ -283,7 +283,7 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 <tr>
 <td width="50%" valign="top">
 
-![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.0da9ad45502b.png)
+![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.ff6bb587c310.png)
 
 <sub>…oturum açma sayfası da, henüz kimse oturum açmadan</sub>
 
@@ -351,7 +351,7 @@ Depolama ve protokollerin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 </td>
 <td width="50%" valign="top">
 
-![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.cbad664dfed5.png)
+![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.1870c90ae20a.png)
 
 <sub>API anahtarları - kendinizinkini oluşturun, gezginde ya da gömülü bir gezginde (bir kişinin oturumuyla ya da API anahtarıyla; tek bir ortak *uygulama* API anahtarıyla vekil sunucu üzerinden çalışan gömülü bir gezginde bu öğe yer almaz)</sub>
 
@@ -407,7 +407,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.3c132b06cd19.png)
+![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.c3b9326fa9fa.png)
 
 <sub>Paylaşım - PIN, son kullanma tarihi, indirme limiti, tek satırlık `curl`</sub>
 
@@ -439,7 +439,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.679f7daec8a4.png)
+![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.bc923c4374cf.png)
 
 <sub>Her yönetim tablosu - satır başına sabitlenmiş tek bir **Aksiyon** menüsü, gezgindeki ⋮ ile açılan menünün aynısı</sub>
 
@@ -527,7 +527,7 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <tr>
 <td width="50%" valign="top">
 
-![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
+![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.1c2889094cd7.png)
 
 <sub>…ve kilitli bir hesabın oturum açma formunun söylediği; düğmesinde kilidin kalan süresi geri sayar</sub>
 
@@ -550,7 +550,7 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 </td>
 <td width="50%" valign="top">
 
-![Düğmesinin üstünde bot doğrulamasıyla oturum açma formu](https://filex.sh/shots/botprotection/login-captcha-dark-1440.099dd770db5c.png)
+![Düğmesinin üstünde bot doğrulamasıyla oturum açma formu](https://filex.sh/shots/botprotection/login-captcha-dark-1440.91b31e625fe1.png)
 
 <sub>…ve düğmesinin üstünde bot doğrulamasıyla oturum açma formu</sub>
 
@@ -559,7 +559,7 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <tr>
 <td width="50%" valign="top">
 
-![Demo açılış sayfası](https://filex.sh/shots/demo-landing.fba2be2d2961.png)
+![Demo açılış sayfası](https://filex.sh/shots/demo-landing.a79e6941c259.png)
 
 <sub>Demo açılış sayfası</sub>
 
@@ -790,7 +790,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 <tr>
 <td width="50%" valign="top">
 
-![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.537429f5f44b.png)
+![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.a235075dab8b.png)
 
 <sub>Belge imzadayken - herkes için dondurulmuş, kimin imzaladığı ayrıntılarında</sub>
 

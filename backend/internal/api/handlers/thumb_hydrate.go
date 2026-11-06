@@ -149,7 +149,7 @@ func annotateFolderPreviews(ctx context.Context, store db.Store, refresh ThumbRe
 			}
 			p := folderPreview{Name: c.Name}
 			if thumbServable(row) {
-				p.ThumbURL = thumbURL(signer, c.ID, row)
+				p.ThumbURL = thumbURL(signer, c.ID, c.StorageID, row)
 			}
 			previews[dirID] = append(previews[dirID], p)
 		}

@@ -64,6 +64,9 @@ type FTPSFacts struct {
 	// say the channel is encrypted but unverified rather than letting somebody
 	// discover it from a client warning.
 	SelfSigned bool `json:"self_signed"`
+	// AllowPlain is true when the operator permits plain FTP here, so the guide
+	// does not say a client without TLS is refused.
+	AllowPlain bool `json:"allow_plain"`
 }
 
 // NewSSHKeys constructs the handler.

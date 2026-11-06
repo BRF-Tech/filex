@@ -861,7 +861,7 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(in adminBodyIn) reqSpec {
 			return reqSpec{handler: a.storages.Create, method: http.MethodPost, path: "/api/ai/admin/storages", body: in.Body}
 		})
-	regAdminTool(r, "admin_storages_update", "Update a storage by id. body: the full storage object. A credential sent back as *** keeps the saved one, while the driver and the address (host, endpoint, url) stay the same; otherwise it has to be typed again (400 SECRET_NEEDED).",
+	regAdminTool(r, "admin_storages_update", "Update a storage by id. body: the full storage object. A credential sent back as *** keeps the saved one, while the driver and the address (host, endpoint, url) stay the same and the save does not turn insecure_skip_tls_verify on; otherwise it has to be typed again (400 SECRET_NEEDED).",
 		func(in adminIDBodyIn) reqSpec {
 			return reqSpec{handler: a.storages.Update, method: http.MethodPatch, path: "/api/ai/admin/storages/" + itoa(in.ID),
 				urlParams: idParam(in.ID), body: in.Body}

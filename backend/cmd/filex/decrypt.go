@@ -48,6 +48,7 @@ const (
 
 func decryptCmd() *cobra.Command {
 	var out, marker, url, token string
+	var tlsOff tlsFlag
 	var recovery, fromStdin, noWarnings bool
 	var generation uint64
 	c := &cobra.Command{
@@ -99,12 +100,12 @@ func decryptCmd() *cobra.Command {
 				ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 				defer stop()
 				return runDecryptRemoteVault(ctx, cmd, args[0], remoteDecrypt{
-					out: out, url: url, token: token, generation: generation,
+					out: out, url: url, token: token, tls: tlsOff, generation: generation,
 					recovery: recovery, fromStdin: fromStdin, quiet: noWarnings,
 				})
 			}
-			if url != "" || token != "" {
-				return errors.New("--url and --token are for a vault on a server (adapter://path); a copy on this disk needs no server")
+			if url != "" || token != "" || tlsOff.said {
+				return errors.New("--url, --token and --insecure-skip-tls-verify are for a vault on a server (adapter://path); a copy on this disk needs no server")
 			}
 			job, err := e2edecrypt.Open(args[0], e2edecrypt.OpenOptions{Out: out, MarkerPath: marker, Generation: generation})
 			if err != nil {
@@ -159,12 +160,14 @@ func decryptCmd() *cobra.Command {
 	c.Flags().Uint64Var(&generation, "generation", 0, "a vault only: decrypt this older generation (one the vault still keeps) instead of the latest")
 	c.Flags().StringVar(&url, "url", "", "a vault on a server only: filex server URL (default: $FILEX_URL or ~/.filex/cli.yaml)")
 	c.Flags().StringVar(&token, "token", "", "a vault on a server only: API or session token (default: $FILEX_TOKEN, else the saved session)")
+	tlsOff.flagOn(c)
 	return c
 }
 
 // remoteDecrypt are the flags of `filex decrypt adapter://vault`.
 type remoteDecrypt struct {
 	out, url, token string
+	tls             tlsFlag
 	generation      uint64
 	recovery        bool
 	fromStdin       bool
@@ -174,7 +177,7 @@ type remoteDecrypt struct {
 // runDecryptRemoteVault decrypts a vault straight from a server, all or
 // nothing, like a copy: no lock, nothing written on the server.
 func runDecryptRemoteVault(ctx context.Context, cmd *cobra.Command, remote string, o remoteDecrypt) error {
-	api, err := (&clientOpts{url: o.url, token: o.token}).api(true)
+	api, err := (&clientOpts{url: o.url, token: o.token, tls: o.tls}).api(true)
 	if err != nil {
 		return err
 	}

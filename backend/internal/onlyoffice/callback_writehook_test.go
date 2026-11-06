@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -30,6 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
@@ -115,6 +117,21 @@ type harness struct {
 	ds     *httptest.Server
 	dsMu   sync.Mutex
 	dsBody string
+	// store is the test database; editor the account the saves name.
+	store  db.Store
+	editor int64
+}
+
+// editorID is the account the harness's saves name as their editor.
+func (h *harness) editorID(t *testing.T) int64 {
+	t.Helper()
+	if h.editor == 0 {
+		u, err := h.store.CreateUser(context.Background(), "editor@example.com", "x", model.RoleUser, "en", "UTC")
+		require.NoError(t, err)
+		require.NoError(t, h.store.SetUserEnabled(context.Background(), u.ID, true))
+		h.editor = u.ID
+	}
+	return h.editor
 }
 
 func newHarness(t *testing.T) *harness {
@@ -172,7 +189,7 @@ func newHarness(t *testing.T) *harness {
 	})
 
 	h := &harness{
-		node: node, root: root,
+		node: node, root: root, store: store,
 		sink: sink, frames: frames,
 		scanNow: &scanNow, scanSave: &scanSave, reindexed: &reindexed,
 	}
@@ -201,11 +218,16 @@ func (h *harness) save(t *testing.T, status int, body string) map[string]any {
 	// Signed the way a document server with JWT on signs it — an unsigned
 	// callback is refused (TestCallback_UnsignedIsRefused) - for a key filex
 	// made for this document (callback_trust.go).
+	//
+	// It names the session's editor, as Docs does in a status 2 or 6
+	// callback: a save over the document is written only for one who may
+	// still change it (0.59, anEditorMayChange).
 	key := h.svc.keyFor(context.Background(), h.node)
 	saved := h.ds.URL + "/saved.docx"
-	tok, err := signHS256(map[string]any{"key": key, "status": status, "url": saved}, "shh")
+	editor := strconv.FormatInt(h.editorID(t), 10)
+	tok, err := signHS256(map[string]any{"key": key, "status": status, "url": saved, "users": []any{editor}}, "shh")
 	require.NoError(t, err)
-	payload := fmt.Sprintf(`{"key":%q,"status":%d,"url":%q,"token":%q}`, key, status, saved, tok)
+	payload := fmt.Sprintf(`{"key":%q,"status":%d,"url":%q,"users":[%q],"token":%q}`, key, status, saved, editor, tok)
 	req := httptest.NewRequest(http.MethodPost, "/api/files/onlyoffice/callback?node=1",
 		strings.NewReader(payload))
 	resp, err := h.svc.HandleCallback(req, h.node.ID)

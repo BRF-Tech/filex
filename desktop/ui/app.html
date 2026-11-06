@@ -626,6 +626,8 @@
         transition: transform 120ms ease;
       }
       .switch.is-on .switch__knob { transform: translateX(14px); }
+      .tls-row { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--fe-border); gap: 12px; }
+      .security-off { margin-top: 4px; font-size: var(--fe-text-sm, 12.5px); color: var(--fe-warning); }
 
       /* ── dialogs (the folder picker) ──────────
          ⚠ Above #settings (200). Both are opened FROM settings, so a lower
@@ -1917,6 +1919,22 @@
               ${disabled ? 'disabled' : ''}><span class="switch__knob"></span></button>
           </div></div>`;
 
+        /** The account's certificate switch (src/tls-trust.ts), and the warning
+         *  that stands under it whether it is on or not: it has to be read
+         *  before it is turned on. */
+        const tlsRow = (a) => {
+          const w = state.tlsWords || {};
+          const on = a.insecureSkipTLSVerify === true;
+          return `
+          <div class="between tls-row">
+            <div><div class="label">${esc(w.label)}</div>
+              <div class="muted">${esc(w.help)}</div>
+              <div class="security-off"><strong>${esc(w.note)}</strong> ${esc(w.risk)}</div></div>
+            <button data-skiptls="${a.id}" class="switch${on ? ' is-on' : ''}" role="switch"
+              aria-checked="${on ? 'true' : 'false'}" aria-label="${esc(w.label)}"><span class="switch__knob"></span></button>
+          </div>`;
+        };
+
         const accounts = state.accounts.length ? state.accounts.map((a) => `
           <div class="card"><div class="between">
             <div style="min-width:0">
@@ -1929,7 +1947,7 @@
               ${a.signedOut ? `<button class="primary" data-reconnect="${a.id}">${esc(T('set.reconnect'))}</button>` : ''}
               <button class="danger" data-signout="${a.id}">${esc(T('set.signout'))}</button>
             </div>
-          </div></div>`).join('') : `<div class="empty">${esc(T('set.no_accounts'))}</div>`;
+          </div>${tlsRow(a)}</div>`).join('') : `<div class="empty">${esc(T('set.no_accounts'))}</div>`;
 
         // ⚠ Its own lookup: `statusOf` lived in this function until 0.43.0
         // moved it out, and the folder cards kept reading it — a
@@ -2033,6 +2051,10 @@
           </div>
 
           <h2>${esc(T('set.accounts'))}</h2>
+          ${state.tlsRestartNeeded ? `<div class="card"><div class="between">
+            <div class="security-off">${esc((state.tlsWords || {}).restart)}</div>
+            <button class="primary" data-restart-app>${esc((state.tlsWords || {}).restartNow)}</button>
+          </div></div>` : ''}
           ${accounts}
           <!-- ⚠ No "Add an account" button here. The rail's + is the app's one
                door to adding one and it is on screen at every moment, including
@@ -2377,6 +2399,11 @@
           filexWc.clearMenuAnswers?.(); /* #196 */
           render(); renderSettings();
         }));
+        el.querySelectorAll('[data-skiptls]').forEach((b) => b.addEventListener('click', async () => {
+          state = await window.filexApp.setSkipTLSVerify(b.dataset.skiptls, b.getAttribute('aria-checked') !== 'true');
+          renderSettings();
+        }));
+        el.querySelectorAll('[data-restart-app]').forEach((b) => b.addEventListener('click', () => window.filexApp.restartApp()));
         el.querySelectorAll('[data-admin]').forEach((b) => b.addEventListener('click', () =>
           window.filexApp.openAdmin(b.dataset.admin)));
         el.querySelectorAll('[data-reconnect]').forEach((b) => b.addEventListener('click', () => {

@@ -67,6 +67,10 @@ const (
 	GroupNotifications Group = "notifications"
 	// GroupWebhooks: Admin → Settings → Webhooks.
 	GroupWebhooks Group = "webhooks"
+	// GroupConnections: Admin → Settings → Login security, the card about the
+	// protocols filex serves itself. Its own card: it was first drawn under
+	// "Before a file is overwritten", where a TLS row reads as nonsense.
+	GroupConnections Group = "connections"
 )
 
 // Kind is how the page draws the setting.
@@ -94,6 +98,9 @@ type Setting struct {
 	// Restart: read where the server is wired; a change applies at the next
 	// start unless a live hook is registered for the key (SetLive).
 	Restart bool
+	// SecurityOff: on, this takes a protection away. The page draws the one
+	// warning under it, with the row's own `risk` text.
+	SecurityOff bool
 
 	intSpec    *dbsetting.IntSpec
 	boolSpec   *dbsetting.BoolSpec
@@ -211,6 +218,18 @@ var all = []Setting{
 		fromConfig: func(c *config.Config) (any, bool) { return c.VersionsOnOverwrite, !c.VersionsOnOverwrite },
 		toConfig:   func(c *config.Config, v any) { c.VersionsOnOverwrite = v.(bool) },
 	}, dbsetting.BoolSpec{Key: "versions.on_overwrite", Default: true}),
+
+	// ── Connections ────────────────────────────────────────────────────
+	// The owner's words for filex's own endpoints: TLS goes off only when the
+	// server allows it. FTPS is the one endpoint with TLS of its own to give up:
+	// the web app, WebDAV and S3 take theirs from the reverse proxy in front (or
+	// from FILEX_TLS_MODE=acme, where FILEX_LISTEN stays plain as it always
+	// was), SFTP is SSH, and NFS has none.
+	boolSetting(Setting{
+		Key: "ftps.allow_plain", Group: GroupConnections, EnvVar: "FILEX_FTPS_ALLOW_PLAIN", ConfigKey: "ftps.allow_plain", Restart: true, SecurityOff: true,
+		fromConfig: func(c *config.Config) (any, bool) { return c.FTPS.AllowPlain, c.FTPS.AllowPlain },
+		toConfig:   func(c *config.Config, v any) { c.FTPS.AllowPlain = v.(bool) },
+	}, dbsetting.BoolSpec{Key: "ftps.allow_plain", Default: false}),
 
 	// ── Apps (Plugins) ─────────────────────────────────────────────────
 	appMB("apps.max_input_mb", "FILEX_APP_PLUGIN_MAX_INPUT_MB", "app_plugin_max_input_mb", 256, 16384,
@@ -510,6 +529,8 @@ type Item struct {
 	// waiting (the stored value is not the one this process started with).
 	Restart        bool `json:"restart"`
 	RestartPending bool `json:"restart_pending"`
+	// SecurityOff: see Setting.SecurityOff.
+	SecurityOff bool `json:"security_off,omitempty"`
 }
 
 // Items reads the settings of one group ("" = every group), as in force.
@@ -525,7 +546,7 @@ func Items(ctx context.Context, g dbsetting.Getter, group string) []Item {
 		restart := s.Restart && liveFor(s.Key) == nil
 		it := Item{
 			Key: s.Key, Group: s.Group, Kind: s.Kind, Value: v, Default: s.Default(),
-			Unit: s.Unit, Env: s.EnvVar, Restart: restart,
+			Unit: s.Unit, Env: s.EnvVar, Restart: restart, SecurityOff: s.SecurityOff,
 		}
 		if s.intSpec != nil {
 			min, max := s.intSpec.Min, s.intSpec.Max

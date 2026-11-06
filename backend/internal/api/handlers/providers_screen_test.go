@@ -205,12 +205,21 @@ func TestAIAdmin_TenantTools(t *testing.T) {
 
 	// A realm is never changed: the tool has no field for it, and the handler
 	// would refuse one anyway (realm_immutable, providers_realm_test.go).
-	isErr, sc, text = mcpToolCall(t, srv.URL, tok, "admin_tenants_update", map[string]any{"id": id, "name": "Acme Inc", "enabled": false})
+	isErr, sc, text = mcpToolCall(t, srv.URL, tok, "admin_tenants_update", map[string]any{"id": id, "name": "Acme Inc"})
 	require.False(t, isErr, text)
 	updated := toolResult(t, sc)
 	assert.Equal(t, "Acme Inc", updated["name"])
-	assert.Equal(t, false, updated["enabled"])
+	assert.Equal(t, true, updated["enabled"])
 	assert.Equal(t, "acme", updated["realm"])
+	// Suspending is a person's, signed in to the panel (the owner's decision,
+	// 2026-11-06): the tool is refused session_required and nothing changes
+	// (account_off_doors_test.go has every door).
+	_, _, text = mcpToolCall(t, srv.URL, tok, "admin_tenants_update", map[string]any{"id": id, "name": "Acme Held", "enabled": false})
+	assert.Contains(t, text, "session_required")
+	held, err := store.GetProvider(ctx, id)
+	require.NoError(t, err)
+	assert.True(t, held.Enabled, "a key suspended a tenant")
+	assert.Equal(t, "Acme Inc", held.Name, "a refused update wrote a field")
 
 	st, err := store.CreateStorage(ctx, &model.Storage{
 		Name: "acme-files", Driver: "local", MountPath: "/acme", ConfigJSON: json.RawMessage(`{"root":"/tmp/acme"}`),

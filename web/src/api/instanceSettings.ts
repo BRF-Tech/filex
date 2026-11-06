@@ -7,7 +7,7 @@
  */
 import { api } from '@/api/client';
 
-export type InstanceSettingGroup = 'general' | 'protection' | 'apps' | 'notifications' | 'webhooks';
+export type InstanceSettingGroup = 'general' | 'protection' | 'apps' | 'notifications' | 'webhooks' | 'connections';
 
 export interface InstanceSettingItem {
   key: string;
@@ -25,6 +25,9 @@ export interface InstanceSettingItem {
   restart: boolean;
   /** A change is waiting for that start. */
   restart_pending: boolean;
+  /** On, this takes a protection away: the row warns under it, with its own
+   *  `risk` text (SecurityOffNote). */
+  security_off?: boolean;
 }
 
 export const InstanceSettingsApi = {

@@ -80,17 +80,22 @@ var serverWorkOps = map[string]bool{
 // answers. nil in production: the system resolver.
 var testResolver *net.Resolver
 
-// policy is one storage's retry and timeout settings.
-type policy struct{ stall.Policy }
+// policy is one storage's retry and timeout settings, and whether its
+// connection checks the store's certificate (storage.ApplyTLSVerify).
+type policy struct {
+	stall.Policy
+	skipTLSVerify bool
+}
 
 // policyFrom reads the settings from a storage's config (stall.Settings says
 // how a missing or out-of-bounds value is read).
 func policyFrom(cfg map[string]any) policy {
-	return policy{stall.Settings{
+	skip, _ := cfg["insecure_skip_tls_verify"].(bool)
+	return policy{Policy: stall.Settings{
 		AttemptTimeout: cfg["attempt_timeout_s"],
 		MaxAttempts:    cfg["max_attempts"],
 		TotalTimeout:   cfg["total_timeout_s"],
-	}.Policy(defaults)}
+	}.Policy(defaults), skipTLSVerify: skip}
 }
 
 func defaultPolicy() policy { return policyFrom(nil) }
@@ -117,7 +122,7 @@ func (p policy) httpClient() aws.HTTPClient {
 		}).
 		WithTransportOptions(func(tr *http.Transport) {
 			tr.TLSHandshakeTimeout = p.AttemptTimeout
-			tr.TLSClientConfig = storage.ApplyTLSVerify(tr.TLSClientConfig)
+			tr.TLSClientConfig = storage.ApplyTLSVerify(tr.TLSClientConfig, p.skipTLSVerify)
 			tr.DialContext = stall.GuardWrites(tr.DialContext, p.SendStall())
 		}).
 		Freeze()

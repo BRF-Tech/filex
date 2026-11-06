@@ -256,8 +256,11 @@ administrator's own admin-scoped one - gets `403 {"error":"session_required",
 and the `admin_*` MCP tools alike):
 
 - creating an administrator, promoting an account to administrator, changing
-  an administrator's role, and setting or resetting an administrator's
-  password;
+  an administrator's role, setting or resetting an administrator's password,
+  and switching an administrator's account on or off (the token's own account
+  included);
+- suspending or resuming a tenant, and deleting one together with its accounts
+  ([MULTI-TENANCY.md → Tenant lifecycle](MULTI-TENANCY.md#11-tenant-lifecycle));
 - allowing an admin-area permission (`admin.*`) - as a person's exception, in
   a custom role, or in a built-in role
   ([PERMISSIONS.md](PERMISSIONS.md#handing-out-administration-takes-a-session));
@@ -440,7 +443,7 @@ decides whether the surfaces that belong to one identity are drawn at all.
 | GET | `/api/admin/grants` | Global overview - the **Folder access** page: every grant enriched with `storage_name`, `user_email` and `user_name` (the person as every screen names them). Admin, or a delegated administrator holding `admin.grants`. |
 | DELETE | `/api/admin/grants/{id}` | Admin override revoke (admin or `admin.grants`). |
 | DELETE | `/api/admin/grants/groups/{id}` | The same for a group's grant ([GROUPS.md](GROUPS.md#folder-access)). A group's grants are numbered apart from people's, so the rows of `GET /api/admin/grants` carry `kind: "user" \| "group"` and each kind is revoked by its own route. |
-| POST | `/api/admin/settings/smtp-test` | Admin only. `{to?}` → `{ok, error?, sent?}`. Verifies the SMTP config (auth handshake) and, with `to`, sends a real test mail. SMTP config lives in the `smtp.*` settings keys (`host/port/tls/from/username/password`). |
+| POST | `/api/admin/settings/smtp-test` | Admin only. `{to?}` → `{ok, error?, sent?}`. Verifies the SMTP config (auth handshake) and, with `to`, sends a real test mail. A new `smtp.host`, or `smtp.tls` changed from `tls`/`starttls` to `none` or to empty, saved without `smtp.password` (or with `***`) is refused with **400** `SECRET_NEEDED`, so the test never sends the saved password to a new host or over a connection less protected than the one it was saved for. SMTP config lives in the `smtp.*` settings keys (`host/port/tls/from/username/password`). |
 
 `storages.rbac_enabled` is set via the normal storage create/update payloads
 (`POST/PATCH /api/admin/storages`, field `rbac_enabled`).

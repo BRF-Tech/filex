@@ -424,7 +424,7 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	}
 	// A file request whose creator may no longer make one closes
 	// (link_creator.go): the same answer as an unknown token.
-	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh) {
+	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh, h.Tenants.MultiTenant) {
 		h.refuse(w, r, http.StatusNotFound, map[string]any{"error": "not_found"})
 		return
 	}
@@ -799,7 +799,7 @@ func (h *Drop) resolveKind(w http.ResponseWriter, r *http.Request, tok string) (
 		h.renderDropError(w, r, http.StatusGone, "drop_expired")
 		return nil, false
 	}
-	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh) {
+	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh, h.Tenants.MultiTenant) {
 		h.renderDropError(w, r, http.StatusNotFound, "drop_notfound")
 		return nil, false
 	}

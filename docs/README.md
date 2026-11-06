@@ -22,7 +22,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   lives (Files & storage, People, Settings, Maintenance & records), who is offered which
   page, the keyboard, screen readers and the phone's drawer; and the panel's
   [search](ADMIN-PANEL.md#search) (pages, settings, people, API keys, apps, storages, shares, files,
-  the `file:` / `user:` … prefixes, recent searches)
+  the `file:` / `user:` … prefixes, recent searches), and the warning under
+  [every setting that turns a protection off](ADMIN-PANEL.md#settings-that-turn-a-protection-off) (0.59)
 - [Databases](DATABASES.md) - SQLite, PostgreSQL, MySQL/MariaDB: which to pick,
   what each needs, and what "supported" is checked to mean
 - [Releases](RELEASES.md) - every release with a plain-English summary
@@ -40,6 +41,10 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   local · S3 / S3-compatible · SFTP · WebDAV · FTP · SMB/CIFS - including
   [symlinks inside a local storage](STORAGE.md#symlinks) and the
   *Follow symlinks that leave this folder* option
+- [Private and self-signed certificates](STORAGE.md#private-and-self-signed-certificates) -
+  trust the CA and keep the check on, or turn it off for one storage or
+  replication target (0.59); turning it on for a saved connection needs the
+  password typed again
 - [Moving files between storages](STORAGE.md#moving-files-between-storages) - what
   copy, cut and drag mean when the two ends are different storages
 - [Ordering storages](STORAGE.md#ordering-storages) - the order the navigation
@@ -138,7 +143,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 ## Reaching filex without a browser
 
 - [Protocols](PROTOCOLS.md) - the map: which protocols filex connects *to*, which
-  it can be *reached as*, and the credential each one takes
+  it can be *reached as*, and the credential each one takes; FTPS refuses
+  [plain FTP](PROTOCOLS.md#plain-ftp) until an administrator allows it (0.59)
 - [WebDAV](WEBDAV.md) - mapping a drive from Windows / macOS / Linux
 - [`filex mount`](PROTOCOLS.md#filex-mount) - a remote server over ordinary
   HTTPS: a folder on Linux, a drive letter on Windows; ⚠ not a sync, and not
@@ -152,7 +158,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   [`filex encrypt`](CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)
   and [`filex vault`](CLI.md#filex-vault---a-vault-on-a-server)
   from the command line, a refusal printed as the server's own sentence; a saved session goes only to the address it was saved
-  with ([connecting](CLI.md#connecting)); and
+  with ([connecting](CLI.md#connecting)), and so does
+  [the switch for a self-signed certificate](CLI.md#a-server-with-a-self-signed-certificate) (0.59); and
   [`filex plugin-validator`](CLI.md#filex-plugin-validator---an-app-stores-conformance-runner),
   the conformance runner an app store runs storage plugin builds through (0.55)
 

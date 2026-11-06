@@ -51,6 +51,12 @@ type Share struct {
 	// ownership/authorization stay on CreatedBy.
 	CreatedVia string    `json:"created_via,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
+	// TenantID is the tenant the link's storage was in when the link was
+	// made (migration 00135, stamped by CreateShare; 0 for none). The link is
+	// served only while that tenant still has the storage (db.ShareStands,
+	// asked by GetShareByToken): a link does not follow its storage into
+	// another tenant. Never set by a caller.
+	TenantID int64 `json:"-"`
 
 	// Drop-link fields (Kind == ShareKindDrop). Empty/zero for a normal
 	// download share.

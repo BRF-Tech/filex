@@ -22,6 +22,7 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { Account } from './accounts.js';
 import { portableMode } from './portable.js';
+import { engineTlsEnv } from './tls-trust.js';
 import {
   absorbStderr,
   absorbStdout,
@@ -203,10 +204,14 @@ export async function confirmHeld(id: string): Promise<string> {
  *  every other held item stays, held, and the answer says why (task #259).
  *  The engine asks the server, so it runs with the pair's account, and speaks
  *  `lang`. Returns its event stream (sync-policy.ts discardOutcome reads it). */
-export async function discardHeld(id: string, acc: { serverUrl: string; token: string }, lang: string): Promise<string> {
+export async function discardHeld(
+  id: string,
+  acc: { serverUrl: string; token: string; insecureSkipTLSVerify?: boolean },
+  lang: string,
+): Promise<string> {
   const args = ['sync', 'discard', id, '--json'];
   if (lang) args.push('--lang', lang);
-  return run(args, { FILEX_URL: acc.serverUrl, FILEX_TOKEN: acc.token });
+  return run(args, { FILEX_URL: acc.serverUrl, FILEX_TOKEN: acc.token, ...engineTlsEnv(acc) });
 }
 
 export interface SupervisorHooks {
@@ -361,7 +366,7 @@ export class SyncSupervisor {
       // --limit-down / --limit-up / --window only when Settings asks for them.
       watchArgs(acc.id, this.watchPrefs(), WATCH_INTERVAL),
       {
-        env: engineEnv({ FILEX_URL: acc.serverUrl, FILEX_TOKEN: token }),
+        env: engineEnv({ FILEX_URL: acc.serverUrl, FILEX_TOKEN: token, ...engineTlsEnv(acc) }),
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       },

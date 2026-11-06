@@ -11,15 +11,18 @@
 // printers, EDI counterparties, and lab equipment whose firmware was finished
 // a decade ago.
 //
-// # The one non-negotiable
+// # TLS, unless the operator says otherwise
 //
-// ⚠⚠ TLS IS MANDATORY. Plain FTP sends the password in the clear and then
-// sends the file in the clear after it. filex is a file server people keep
-// their own things in; offering a protocol that publishes their credentials to
-// anything on the path would be a defect no configuration flag makes
-// acceptable. This server speaks FTPS (explicit TLS, `AUTH TLS`) and refuses
-// everything else — a client that will not negotiate TLS is refused before it
-// can send a password, not after.
+// ⚠⚠ TLS IS MANDATORY BY DEFAULT. Plain FTP sends the password in the clear and
+// then sends the file in the clear after it. This server speaks FTPS (explicit
+// TLS, `AUTH TLS`) and refuses everything else — a client that will not
+// negotiate TLS is refused before it can send a password, not after.
+//
+// The operator can permit a connection without TLS (Config.AllowPlain): the
+// scan-to-FTP firmware that cannot do TLS exists, and the owner's call of
+// 2026-11-06 was that a server may allow it. Off changes nothing. On, the
+// clients that cannot do TLS get in; one that does use it stays held to it on
+// both channels, and the setting says what it costs (security_off).
 //
 // # The part that fails as a hang rather than an error
 //
@@ -97,6 +100,8 @@ type Config struct {
 	CertDir  string
 	// Banner is the greeting. Some equipment logs it, nothing parses it.
 	Banner string
+	// AllowPlain permits a connection without TLS (see the package comment).
+	AllowPlain bool
 	// IdleTimeout in seconds. FTP holds a control connection open between
 	// commands, so an unbounded one is a socket leak with a login attached.
 	IdleTimeout int
@@ -182,6 +187,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	s.tls = tlsCfg
 	s.ftp = ftpserver.NewFtpServer(&driver{srv: s})
+	if cfg.AllowPlain {
+		slog.Warn("ftps: plain FTP is allowed (ftps.allow_plain): a client that does not ask for TLS sends its password and its files in the clear")
+	}
 	return s, nil
 }
 

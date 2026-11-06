@@ -310,3 +310,44 @@ func TestDrifts_NotWhenTheyAgreeNothingIsStoredOrNothingIsSet(t *testing.T) {
 	assert.Empty(t, Drifts(ctx, memStore{"cache.max_gb": "50", "sync.default_interval_minutes": "45"}, &plain),
 		"the configuration says nothing: a value saved on the page is no drift")
 }
+
+// ── ftps.allow_plain: the server's permission to go without TLS (#298) ──
+
+func TestBoot_PlainFTPIsOffUnlessSaidAndTheRowWins(t *testing.T) {
+	st := memStore{}
+	cfg := config.Default()
+	Boot(context.Background(), st, &cfg)
+	assert.False(t, cfg.FTPS.AllowPlain)
+	_, stored := st["ftps.allow_plain"]
+	assert.False(t, stored, "a default is not pinned in a row")
+
+	cfg = config.Default()
+	cfg.FTPS.AllowPlain = true
+	Boot(context.Background(), st, &cfg)
+	assert.Equal(t, "true", st["ftps.allow_plain"], "the variable gives the first value")
+	assert.True(t, cfg.FTPS.AllowPlain)
+
+	st["ftps.allow_plain"] = "false"
+	cfg = config.Default()
+	cfg.FTPS.AllowPlain = true
+	Boot(context.Background(), st, &cfg)
+	assert.False(t, cfg.FTPS.AllowPlain, "the administrator turned it off: the variable is inert")
+}
+
+func TestItems_ASettingThatTurnsSecurityOffSaysSo(t *testing.T) {
+	cfg := config.Default()
+	st := memStore{}
+	Boot(context.Background(), st, &cfg)
+
+	var row *Item
+	for _, it := range Items(context.Background(), st, string(GroupConnections)) {
+		if it.Key == "ftps.allow_plain" {
+			it := it
+			row = &it
+		}
+	}
+	require.NotNil(t, row)
+	assert.True(t, row.SecurityOff)
+	assert.Equal(t, "FILEX_FTPS_ALLOW_PLAIN", row.Env)
+	assert.True(t, row.Restart)
+}

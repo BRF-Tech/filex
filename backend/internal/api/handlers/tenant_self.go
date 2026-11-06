@@ -431,6 +431,9 @@ func (h *TenantSelf) TestProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg, err := authsetup.DraftConfig(cur, tenantConfig(cur.Name, draft), opts.Box, opts)
 	if err != nil {
+		if refuseSecretNeeded(w, r, err) {
+			return
+		}
 		cfg = map[string]any{}
 	}
 	authsetup.TenantGuard(p.AllowInsecureAuth)(cfg)

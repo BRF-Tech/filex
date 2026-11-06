@@ -28,6 +28,12 @@ A socket opened with an API token itself (rather than a ticket) is confined
 the same way, by the token's `root:` and a trusted proxy's `X-Filex-Root`; up
 to v0.50.0 it was not.
 
+A socket lasts only while its account may act. A ticket whose account was
+switched off, or whose tenant was suspended, after it was minted is refused
+with `403`, and a socket already open is closed within about half a minute
+with close code `1008` and the reason `account_disabled` or `tenant_suspended`;
+opening it again is refused the same way.
+
 ### Client → server
 
 ```json

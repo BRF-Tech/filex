@@ -138,6 +138,7 @@ func syncCmd() *cobra.Command {
 	}
 	c.PersistentFlags().StringVar(&opts.url, "url", "", "filex server URL (default: $FILEX_URL or ~/.filex/cli.yaml)")
 	c.PersistentFlags().StringVar(&opts.token, "token", "", "API or session token (default: $FILEX_TOKEN, else the session ~/.filex/cli.yaml saved for this server URL)")
+	opts.tls.persistentFlagOn(c)
 	var lang string
 	c.PersistentFlags().StringVar(&lang, "lang", "", "language of the messages in --json output, e.g. tr (default: $FILEX_LANG, else the account's language on the server, else English; a language a language pack on the server adds works too)")
 

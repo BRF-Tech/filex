@@ -84,6 +84,7 @@ bundled CLI also mounts a real drive letter (`filex mount Z:`, needs the free
 | `src/keychain.ts` | Whether that store may be written at all, and what the sign-in window advises when not. No Electron import |
 | `src/channel.ts` | Who installed this copy (Microsoft Store, snap, Flatpak, AUR, or a direct download) and everything that follows from it: who updates it, a snap's real home and engine state, the Linux desktop entry. No Electron import |
 | `src/browser-auth.ts` | Browser sign-in (PKCE) + deep-link/manual code exchange |
+| `src/tls-trust.ts` | An account's *Skip certificate verification* switch, for a server with a self-signed certificate: which hosts Chromium's stack accepts (`setCertificateVerifyProc`), the variable the sync engine gets, and when a switch turned off waits for a restart (Chromium keeps its first answer per host). Per host, not per port. No Electron import |
 | `src/sync.ts` | Supervises one `filex sync run --watch` per account; pairs, trash, status |
 | `src/openwith.ts` | "Open with filex", the parts that can lose a document: argv classification, local path → synced twin, scratch naming, the atomic write-back, the sweeps. No Electron import - that is what makes it testable |
 | `src/openwith-io.ts` | The six server calls that round trip does (list, stat, mkdir, upload, download, delete), and the two reads that say what a server opens (`readServerApps`) |
@@ -579,7 +580,9 @@ and hands each device the highest version it can run.
 
 `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`. The window
 only ever loads `app://`; external links open in the OS browser; the preloads
-expose the narrowest surface that works. Tokens live in the OS keychain.
+expose the narrowest surface that works. Tokens live in the OS keychain. A
+server's certificate is checked unless the person turned the check off for that
+account, under a warning (`src/tls-trust.ts`); nothing turns it off for them.
 
 ## Signing
 

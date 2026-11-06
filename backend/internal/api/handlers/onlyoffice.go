@@ -546,7 +546,10 @@ func (h *OnlyOffice) Fetch(w http.ResponseWriter, r *http.Request) {
 		h.fetchForPurpose(w, r, id, exp, p)
 		return
 	}
-	if err := h.Service.VerifyFetchSignatureCtx(r.Context(), id, exp, q.Get("sig")); err != nil {
+	// The tenant stamp (absent: 0) is signed with the rest: a URL cannot be
+	// stripped of it.
+	tenant, _ := strconv.ParseInt(q.Get("ten"), 10, 64)
+	if err := h.Service.VerifyFetchSignatureIn(r.Context(), id, exp, tenant, q.Get("sig")); err != nil {
 		// Expiry and a wrong secret are the two shapes: a link the editor held
 		// on to for too long, or a JWT secret changed under a running editor.
 		code := onlyoffice.FetchSignatureBad
@@ -566,6 +569,15 @@ func (h *OnlyOffice) Fetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rc.Close()
+	// The document is served while the tenant its storage was in when the
+	// editor was opened still has the storage (db.StampStands): the URL lives
+	// an hour, and the platform operator may move the storage meanwhile.
+	// Answered like a document that is not there.
+	if !db.StampStands(r.Context(), h.Store, tenant, node.StorageID) {
+		h.fetchFailed(id, node.StorageID, http.StatusNotFound, onlyoffice.FetchNotFound, "the document's storage is no longer its tenant's", nil, true)
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
 	h.serveToDocumentServer(r.Context(), w, node, src)
 	// Served: what the editor's "Download failed" diagnosis reads as "the
 	// document server got the document; the failure is after this".

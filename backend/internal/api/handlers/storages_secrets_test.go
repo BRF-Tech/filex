@@ -61,7 +61,10 @@ type secretFixture struct {
 	store  interface {
 		GetStorage(ctx context.Context, id int64) (*model.Storage, error)
 		CreateStorage(ctx context.Context, st *model.Storage) (*model.Storage, error)
+		GetUserByEmail(ctx context.Context, email string) (*model.User, error)
+		UpdateUserLocale(ctx context.Context, id int64, locale, tz string) error
 	}
+	email string
 }
 
 func newSecretFixture(t *testing.T) *secretFixture {
@@ -69,7 +72,7 @@ func newSecretFixture(t *testing.T) *secretFixture {
 	srv, client, store := testutil.NewTestServer(t)
 	email, pw := testutil.SeedAdmin(t, store)
 	testutil.LoginAs(t, srv, client, email, pw)
-	return &secretFixture{srv: srv.URL, client: client, store: store}
+	return &secretFixture{srv: srv.URL, client: client, store: store, email: email}
 }
 
 func (f *secretFixture) do(t *testing.T, method, path string, body any) (int, string) {
@@ -161,6 +164,89 @@ func TestStorages_TheMaskSentBackKeepsTheSecretWhereItWasSaved(t *testing.T) {
 	code, _ = f.do(t, http.MethodPatch, path, map[string]any{"config": moved})
 	require.Equal(t, http.StatusOK, code)
 	assert.Equal(t, "new-pw", f.storedPassword(t, st.ID))
+}
+
+// The four ways a save can meet the certificate switch, on the API a form, an
+// admin key and an MCP agent all reach.
+func TestStorages_TurningTheCheckOffNeedsThePasswordTypedAgain(t *testing.T) {
+	f := newSecretFixture(t)
+	st := f.sftpStorage(t, "kutu", "sftp")
+	path := "/api/admin/storages/" + strconv.FormatInt(st.ID, 10)
+	config := func(password string, skip any) map[string]any {
+		c := map[string]any{"host": "files.example.com", "port": 22, "user": "u", "password": password, "root": "/srv/files"}
+		if skip != nil {
+			c[storage.SkipTLSVerifyKey] = skip
+		}
+		return c
+	}
+	switchOf := func() any {
+		row, err := f.store.GetStorage(context.Background(), st.ID)
+		require.NoError(t, err)
+		cfg := map[string]any{}
+		require.NoError(t, json.Unmarshal(row.ConfigJSON, &cfg))
+		return cfg[storage.SkipTLSVerifyKey]
+	}
+
+	// Off to on, the password masked: refused, in words that say why, and
+	// nothing changes.
+	code, body := f.do(t, http.MethodPatch, path, map[string]any{"config": config("***", true)})
+	assert.Equal(t, http.StatusBadRequest, code, "a saved password would have gone to a server nobody checks")
+	assert.Contains(t, body, "SECRET_NEEDED")
+	assert.Contains(t, body, `"field":"password"`)
+	assert.Contains(t, body, "certificate check")
+	assert.Nil(t, switchOf(), "the refused save turned the check off")
+	assert.Equal(t, storagePassword, f.storedPassword(t, st.ID))
+
+	// Off to on, the password typed: it goes.
+	code, body = f.do(t, http.MethodPatch, path, map[string]any{"config": config("typed-again", true)})
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Equal(t, true, switchOf())
+	assert.Equal(t, "typed-again", f.storedPassword(t, st.ID))
+
+	// On and staying on, another field edited: nothing asked.
+	still := config("***", true)
+	still["root"] = "/srv/other"
+	code, body = f.do(t, http.MethodPatch, path, map[string]any{"config": still})
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Equal(t, "typed-again", f.storedPassword(t, st.ID))
+
+	// On to off: nothing asked.
+	code, body = f.do(t, http.MethodPatch, path, map[string]any{"config": config("***", false)})
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Equal(t, false, switchOf())
+	assert.Equal(t, "typed-again", f.storedPassword(t, st.ID))
+}
+
+func TestStorages_TheRefusalIsInTheReadersLanguage(t *testing.T) {
+	f := newSecretFixture(t)
+	st := f.sftpStorage(t, "dil", "sftp")
+	// The reader is the account: its language comes before Accept-Language.
+	me, err := f.store.GetUserByEmail(context.Background(), f.email)
+	require.NoError(t, err)
+	require.NoError(t, f.store.UpdateUserLocale(context.Background(), me.ID, "tr", "UTC"))
+
+	code, body := f.do(t, http.MethodPatch, "/api/admin/storages/"+strconv.FormatInt(st.ID, 10), map[string]any{"config": map[string]any{
+		"host": "files.example.com", "port": 22, "user": "u", "password": "***", "root": "/srv/files", storage.SkipTLSVerifyKey: true,
+	}})
+
+	require.Equal(t, http.StatusBadRequest, code, body)
+	assert.Contains(t, body, "Sertifika denetimini kapatmak için password alanını yeniden yazın")
+}
+
+// Test connection would have sent the password all the same, and saved nothing.
+func TestStorageTest_TurningTheCheckOffDoesNotSendTheSavedPassword(t *testing.T) {
+	f := newSecretFixture(t)
+	st := f.sftpStorage(t, "denetim", "secretprobe-test")
+
+	code, body := f.do(t, http.MethodPost, "/api/admin/storages/test", map[string]any{
+		"id": st.ID, "driver": "secretprobe-test",
+		"config": map[string]any{"host": "files.example.com", "user": "u", "password": "***", "root": "/srv/files", storage.SkipTLSVerifyKey: true},
+	})
+
+	assert.Equal(t, http.StatusBadRequest, code, body)
+	assert.Contains(t, body, "SECRET_NEEDED")
+	_, reached := probeSeen.Load("files.example.com")
+	assert.False(t, reached, "the probe was opened with the saved password and the check off")
 }
 
 func TestStorageTest_AKeptPasswordIsTheSavedOneAndStaysAtItsAddress(t *testing.T) {

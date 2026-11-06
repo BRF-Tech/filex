@@ -16,9 +16,11 @@ import { useI18n } from 'vue-i18n';
 
 import { useStorageDriversStore } from '@/stores/storageDrivers';
 import type { StorageDriver, StorageField } from '@/api/types';
+import type { SecretNeeded } from '@/lib/secretNeeded';
 import Input from './ui/Input.vue';
 import Textarea from './ui/Textarea.vue';
 import Select from './ui/Select.vue';
+import SecurityOffNote from './ui/SecurityOffNote.vue';
 import Toggle from './ui/Toggle.vue';
 
 interface Props {
@@ -31,6 +33,9 @@ interface Props {
    * backend/pkg/pluginkit/wire). With this set the driver store is not asked.
    */
   fields?: StorageField[];
+  /** The server asked for a saved credential to be typed again (lib/secretNeeded):
+   *  said under that field until it is. */
+  secretNeeded?: SecretNeeded | null;
 }
 
 const props = defineProps<Props>();
@@ -48,8 +53,15 @@ onMounted(() => {
 const showAdvanced = ref(false);
 
 const fields = computed(() => props.fields ?? drivers.fields(props.driver));
-const basicFields = computed(() => fields.value.filter((f) => !f.advanced));
-const advancedFields = computed(() => fields.value.filter((f) => f.advanced));
+/** A field that means something only with a switch on (`requires`) is offered
+ *  only then: the certificate switch on FTP, which is FTPS's alone. */
+function offered(f: StorageField): boolean {
+  if (!f.requires) return true;
+  const on = fields.value.find((o) => o.key === f.requires);
+  return on ? bool(on) : props.modelValue?.[f.requires] === true;
+}
+const basicFields = computed(() => fields.value.filter((f) => !f.advanced && offered(f)));
+const advancedFields = computed(() => fields.value.filter((f) => f.advanced && offered(f)));
 
 /** Translation first, driver's English fallback second. A driver added
  *  after this release ships labels the catalogue has never heard of; they
@@ -61,6 +73,15 @@ function label(f: StorageField): string {
 function help(f: StorageField): string | undefined {
   if (f.help_i18n_key && te(f.help_i18n_key)) return t(f.help_i18n_key);
   return f.help || undefined;
+}
+
+/** What the setting exposes, for the warning under it (SecurityOffNote), or
+ *  nothing while it stands in no danger: a switch that IS the protection warns
+ *  while it is off, one that takes a protection away at all times. */
+function risk(f: StorageField): string | undefined {
+  const off = f.security_off;
+  if (!off || (off.when_off && bool(f))) return undefined;
+  return off.risk_i18n_key && te(off.risk_i18n_key) ? t(off.risk_i18n_key) : off.risk;
 }
 
 function optionLabel(o: { label: string; i18n_key?: string }): string {
@@ -123,6 +144,11 @@ function isKept(f: StorageField): boolean {
   return value(f) === SECRET_MASK;
 }
 
+/** What the server said about this field, while it still holds the mask. */
+function needed(f: StorageField): string | null {
+  return props.secretNeeded?.field === f.key && isKept(f) ? props.secretNeeded.message : null;
+}
+
 function text(f: StorageField): string {
   return isKept(f) ? '' : str(f);
 }
@@ -151,13 +177,15 @@ function setText(f: StorageField, v: unknown) {
     </p>
 
     <template v-for="f in basicFields" :key="f.key">
-      <Toggle
-        v-if="f.type === 'bool'"
-        :model-value="bool(f)"
-        :label="label(f)"
-        :description="help(f)"
-        @update:model-value="(v) => set(f.key, v)"
-      />
+      <div v-if="f.type === 'bool'" class="space-y-1">
+        <Toggle
+          :model-value="bool(f)"
+          :label="label(f)"
+          :description="help(f)"
+          @update:model-value="(v) => set(f.key, v)"
+        />
+        <SecurityOffNote v-if="risk(f)" :risk="risk(f)!" />
+      </div>
       <Select
         v-else-if="f.type === 'select'"
         :model-value="str(f)"
@@ -176,6 +204,7 @@ function setText(f: StorageField, v: unknown) {
         :required="f.required && !isKept(f)"
         :monospace="f.monospace"
         :rows="4"
+        :error="needed(f)"
         @update:model-value="(v) => setText(f, v)"
       />
       <Input
@@ -201,6 +230,7 @@ function setText(f: StorageField, v: unknown) {
         :type="f.type === 'password' ? 'password' : 'text'"
         :autocomplete="f.secret ? 'new-password' : 'off'"
         :data-secret-kept="isKept(f) ? 'true' : undefined"
+        :error="needed(f)"
         @update:model-value="(v) => setText(f, v)"
       />
     </template>
@@ -215,13 +245,15 @@ function setText(f: StorageField, v: unknown) {
       </button>
       <div v-if="showAdvanced" class="mt-3 space-y-3">
         <template v-for="f in advancedFields" :key="f.key">
-          <Toggle
-            v-if="f.type === 'bool'"
-            :model-value="bool(f)"
-            :label="label(f)"
-            :description="help(f)"
-            @update:model-value="(v) => set(f.key, v)"
-          />
+          <div v-if="f.type === 'bool'" class="space-y-1">
+            <Toggle
+              :model-value="bool(f)"
+              :label="label(f)"
+              :description="help(f)"
+              @update:model-value="(v) => set(f.key, v)"
+            />
+            <SecurityOffNote v-if="risk(f)" :risk="risk(f)!" />
+          </div>
           <Input
             v-else-if="f.type === 'int'"
             :model-value="num(f)"

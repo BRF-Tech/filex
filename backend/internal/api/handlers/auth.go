@@ -245,13 +245,10 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	if reason := auth.LoginBlockReason(r.Context(), h.Store, h.MultiTenant, user); reason != "" {
 		// Maintenance mode: multi-tenant is off but tenants exist — only the
 		// supertenant may sign in; or the account's tenant is suspended. See
-		// docs/MULTI-TENANCY.md.
+		// docs/MULTI-TENANCY.md. The same answer a suspended tenant's session
+		// and keys get (auth.RefuseBlockedAccount).
 		_ = h.Store.DeleteSession(r.Context(), token)
-		writeJSON(w, http.StatusForbidden, map[string]any{
-			"error":       "sign-in is temporarily limited to the platform operator",
-			"maintenance": true,
-			"reason":      reason,
-		})
+		auth.RefuseTenantLocked(w, reason)
 		return
 	}
 	if user.TOTPEnabled {

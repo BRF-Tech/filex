@@ -1243,7 +1243,7 @@ say where each switch is saved:
   this device's, and another device keeps its own. The part is drawn only
   where the device has one of them.
 
-![User settings, Notifications in Turkish, dark: Hesabım, with the in-app bell's switch and the events it tells about](https://filex.sh/shots/usersettings/notifications-tr-dark-1440.6807fae616f5.png)
+![User settings, Notifications in Turkish, dark: Hesabım, with the in-app bell's switch and the events it tells about](https://filex.sh/shots/usersettings/notifications-tr-dark-1440.09e2dac8a16f.png)
 
 `GET`/`PATCH /api/notifications/settings` stores one preference row per user:
 

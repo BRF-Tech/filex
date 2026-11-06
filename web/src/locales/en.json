@@ -393,7 +393,8 @@
       "s3TotalTimeout": "Give up after (seconds)",
       "attemptTimeout": "Attempt timeout (seconds)",
       "maxAttempts": "Attempts per request",
-      "totalTimeout": "Give up after (seconds)"
+      "totalTimeout": "Give up after (seconds)",
+      "insecureSkipTlsVerify": "Skip certificate verification (insecure)"
     },
     "fieldHelp": {
       "path": "Directory on the server. It is created if missing; filex never mounts /.",
@@ -424,7 +425,8 @@
       "attemptTimeout": "How long one attempt may wait for a sign of life from the server: connecting, logging in, the answer to each request, and each next piece of a transfer. A transfer that keeps moving is never cut, however long it takes; an upload the server stops taking is cut after 60 seconds, or after this if it is longer.",
       "webdavAttemptTimeout": "How long one attempt may wait for a sign of life from the server: connecting, logging in, the answer to each request, and each next piece of a transfer. A transfer that keeps moving is never cut, however long it takes; an upload the server stops taking is cut after 60 seconds, or after this if it is longer. Copies, moves and deletes wait up to 10 minutes for the answer, because the server answers them only when the work is done.",
       "maxAttempts": "How many times a request is tried in all when the failure can pass: the connection is refused or drops, no answer comes in time, the server answers that it is unavailable (5xx). 1 turns retrying off. A refusal (a wrong password, a missing folder, a certificate that does not verify) is never retried, and neither is an upload that has started sending.",
-      "totalTimeout": "No new attempt starts unless it could finish within this many seconds of the first, so a server that is down is reported within this time. A transfer that is under way is not cut. A request that timed out is tried again only when this is at least twice the attempt timeout."
+      "totalTimeout": "No new attempt starts unless it could finish within this many seconds of the first, so a server that is down is reported within this time. A transfer that is under way is not cut. A request that timed out is tried again only when this is at least twice the attempt timeout.",
+      "insecureSkipTlsVerify": "Accepts any certificate from this server: for a self-signed or private certificate that cannot be trusted any other way."
     },
     "lazyFill": {
       "background": "Click first, fill in the background",
@@ -521,6 +523,12 @@
       "enableEarlier": "Assignments made before it was turned off apply again: {names}.",
       "enableConfirm": "Turn on",
       "enabledOk": "Per-item access is on."
+    },
+    "fieldRisk": {
+      "insecureSkipTlsVerify": "Anybody who can get between filex and this server can pose as it: read and change every file that crosses, and take this connection's credentials. Trusting the certificate keeps the check on: see Storage in the documentation.",
+      "insecureSkipHostKey": "Anybody who can get between filex and this host can pose as it: read and change every file that crosses, and take this connection's password.",
+      "plainFtp": "Without FTPS the password and every file cross the network unencrypted: anybody on the way can read and change them.",
+      "followSymlinks": "A link can lead anywhere on this machine: whoever may use this storage reaches, changes and deletes what it points at, however far outside this folder that is."
     }
   },
   "users": {
@@ -684,6 +692,10 @@
       "webhooks": {
         "title": "The default webhook's language",
         "desc": "The language the default webhook is told in. A target of its own has its own language, below."
+      },
+      "connections": {
+        "title": "Connections without encryption",
+        "desc": "Whether the protocols filex serves itself may go without TLS. Only FTPS has a switch: the web app, WebDAV and S3 take their encryption from what stands in front of filex, SFTP always encrypts and NFS never does."
       }
     },
     "items": {
@@ -752,6 +764,11 @@
         "label": "Language of the default webhook",
         "hint": "The language the default webhook's messages are written in.",
         "none": "The server's default language"
+      },
+      "ftps_allow_plain": {
+        "label": "Allow plain FTP on the FTPS endpoint",
+        "hint": "For a scanner or other device that cannot do TLS. Off, a client that does not ask for TLS is refused before it can send a password. A client that does ask stays on TLS on both channels either way.",
+        "risk": "A client without TLS sends its password and its files in the clear: anybody on the network between it and this server can read and change them, and sign in with that password. Give such a device an API key of its own, never a person's password."
       }
     }
   },
@@ -813,7 +830,8 @@
       "testTo": "Send test email to",
       "send": "Send",
       "enterEmail": "Enter a valid email address.",
-      "encryptionNone": "None (plain text)"
+      "encryptionNone": "None (plain text)",
+      "encryptionNoneRisk": "Every message crosses the network unencrypted: anybody on the way can read it, and the links in it. The mail account's password goes this way only to a server on this machine; to any other, filex does not send it and the sign-in fails."
     }
   },
   "external": {
@@ -967,8 +985,8 @@
       "max_concurrent": "A whole number from 1 to 64; more at once are asked to try again.",
       "email_domain": "With corp.example, the account alex signs in as alex{'@'}corp.example. Empty: the address this installation chose for operating-system accounts. Choose it before the first sign-in.",
       "ca_pem": "The private CA the directory's certificate is signed by, pasted as it is. Empty: the system's trusted roots.",
-      "show_refusal_reason": "Off by default. On, a person whose password was right but who still may not sign in here (no account is opened at a first sign-in, or they are in no allowed group) is told why. The sign-in form then also tells anybody who is guessing that a password is right - a password that may open other services that use the same accounts.",
-      "trust_email": "Off by default. Off, an address the provider does not mark verified (email_verified) opens no existing account that is not yet bound to an SSO identity, and a new account for it is opened switched off until an administrator approves it. Turn it on only for a provider whose addresses all belong to the people who hold them: anybody who can set an address there can then sign in to the account with that address.",
+      "show_refusal_reason": "Off by default. On, a person whose password was right but who still may not sign in here (no account is opened at a first sign-in, or they are in no allowed group) is told why.",
+      "trust_email": "Off by default. Off, an address the provider does not mark verified (email_verified) opens no existing account that is not yet bound to an SSO identity, and a new account for it is opened switched off until an administrator approves it.",
       "user_filter": "Finds the person signing in. Every %s is the name they typed.",
       "group_attr": "The attribute on a person that lists their groups. Active Directory and lldap: memberOf.",
       "group_filter": "Only when people don’t carry their groups: finds them by a search instead. %s is the person’s DN, %u the name they signed in with - e.g. (member=%s).",
@@ -1111,7 +1129,11 @@
     "lockoutConfirm": "This takes away a tenant's last way in. Go on?",
     "review": "Every sign-in provider is now bound to the tenants it serves. The upgrade bound every provider to every tenant that existed, so nothing changed for anyone: review the bindings below and remove the tenants a provider should not serve.",
     "reviewDone": "Reviewed",
-    "noneOfKind": "None of this kind yet. Add a provider makes one."
+    "noneOfKind": "None of this kind yet. Add a provider makes one.",
+    "fieldRisks": {
+      "show_refusal_reason": "The sign-in form then also tells anybody who is guessing that a password is right - a password that may open other services that use the same accounts.",
+      "trust_email": "Turn it on only for a provider whose addresses all belong to the people who hold them: anybody who can set an address there can then sign in to the account with that address."
+    }
   },
   "grants": {
     "title": "Folder access",
@@ -2265,7 +2287,8 @@
       "hintSeconds": "In seconds ({human}). Between {min} and {max}; default {default}.",
       "errRange": "Enter a whole number between {min} and {max}.",
       "errOrder": "The longest lock cannot be shorter than the first lock.",
-      "saved": "Sign-in limits saved"
+      "saved": "Sign-in limits saved",
+      "enabledRisk": "With the limit off, anybody can try passwords as fast as this server answers."
     },
     "allowlist": {
       "title": "Allowed addresses",
@@ -4088,7 +4111,8 @@
       "certificate_wrong_name": "The certificate is not for this domain.",
       "certificate_expired": "The certificate has expired.",
       "certificate_needs_secret_key": "A private key is stored sealed, and this installation has no FILEX_SECRET_KEY."
-    }
+    },
+    "insecureRisk": "A tenant's provider can then reach machines on this server's internal network, and an LDAP bind password can cross the network unencrypted."
   },
   "tenancy": {
     "title": "Multi-tenant mode",
@@ -4437,5 +4461,8 @@
       "missing_input_secret": "The provider received no secret key.",
       "other": "The setup cannot verify checks ({code}); the local check answers meanwhile."
     }
+  },
+  "securityOff": {
+    "note": "This is not safe and not recommended. Apply it only if you know what you are doing."
   }
 }

@@ -1864,6 +1864,18 @@ browser. filex acts on a callback only when all of this holds:
   old. The Document Server signs its callbacks with an `exp` (five minutes by
   default), but none is required: a token without one is not a forgery, and
   refusing it would lose the save.
+- **An editor may still change the document (0.59).** A save is written over
+  the document only while one of the editors the callback names (`users`,
+  those filex handed an editing session) may still change it: their account
+  may still sign in (switched on, its tenant not suspended), their tenant
+  still has the storage, and `files.modify` holds there. An editor left open
+  while the person's account or access went, or while the platform operator
+  moved the storage to another tenant, is answered `{"error": 1}`,
+  nothing is written, and the editors are told to download their edit from
+  ONLYOFFICE's File menu. The editor's fetch URL is held the same way: it
+  names the tenant the storage was in when the editor was opened (`ten`,
+  signed with the rest) and answers `404` once that tenant no longer has the
+  storage.
 
 A Document Server that hands out its saved documents on another address - its
 cache on an external object store served from that store's own address, or a

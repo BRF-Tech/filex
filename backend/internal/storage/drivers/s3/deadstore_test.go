@@ -778,15 +778,15 @@ func TestPolicyFrom(t *testing.T) {
 		want policy
 	}{
 		{"json numbers", map[string]any{"max_attempts": float64(3), "attempt_timeout_s": float64(4), "total_timeout_s": float64(30)},
-			policy{stall.Policy{MaxAttempts: 3, AttemptTimeout: 4 * time.Second, TotalTimeout: 30 * time.Second}}},
+			policy{Policy: stall.Policy{MaxAttempts: 3, AttemptTimeout: 4 * time.Second, TotalTimeout: 30 * time.Second}}},
 		{"form strings", map[string]any{"max_attempts": "2", "attempt_timeout_s": " 5 ", "total_timeout_s": "12"},
-			policy{stall.Policy{MaxAttempts: 2, AttemptTimeout: 5 * time.Second, TotalTimeout: 12 * time.Second}}},
+			policy{Policy: stall.Policy{MaxAttempts: 2, AttemptTimeout: 5 * time.Second, TotalTimeout: 12 * time.Second}}},
 		{"empty, zero and junk mean the default", map[string]any{"max_attempts": "", "attempt_timeout_s": 0, "total_timeout_s": "soon"},
 			def},
 		{"negative means the default", map[string]any{"max_attempts": -1, "attempt_timeout_s": -5, "total_timeout_s": -1},
 			def},
 		{"past the bound is brought down", map[string]any{"max_attempts": 99, "attempt_timeout_s": 100000, "total_timeout_s": 100000},
-			policy{stall.Policy{MaxAttempts: stall.MaxAttemptsLimit, AttemptTimeout: stall.AttemptTimeoutLimitS * time.Second, TotalTimeout: stall.TotalTimeoutLimitS * time.Second}}},
+			policy{Policy: stall.Policy{MaxAttempts: stall.MaxAttemptsLimit, AttemptTimeout: stall.AttemptTimeoutLimitS * time.Second, TotalTimeout: stall.TotalTimeoutLimitS * time.Second}}},
 	}
 	for _, c := range cases {
 		if got := policyFrom(c.cfg); got != c.want {

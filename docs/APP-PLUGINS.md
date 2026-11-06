@@ -1314,7 +1314,7 @@ replaces the key; **Disconnect** forgets it and tells the store to forget it
 too. A store the screen shows but this filex is not connected to still takes
 requests; they wait until it is connected.
 
-![Trusted stores with the store connected, its key's fingerprint, and the Store screen settings under it](https://filex.sh/shots/store/store-connected-1440.affad0272af0.png)
+![Trusted stores with the store connected, its key's fingerprint, and the Store screen settings under it](https://filex.sh/shots/store/store-connected-1440.4887504756d9.png)
 
 ## Install requests
 
@@ -1392,9 +1392,9 @@ when that install ends ([The store screen](#the-store-screen)). **Reject**
 works as for any request, and the person reads the reason on their *My
 requests*.
 
-![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.fcacbe96d2fc.png)
+![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.fca2e69524cc.png)
 
-![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.465282a578b4.png)
+![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.7bb6e7116b7a.png)
 
 ### Leaving one
 
@@ -1585,7 +1585,7 @@ files to keep.
   audit trail saved - by anybody who may edit the document, not only the
   requester.
 
-  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.537429f5f44b.png)
+  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.a235075dab8b.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* - and,

@@ -31,7 +31,7 @@ func TestOIDCTrust_APageOIDCsSettingIsOffUntilSavedAndAudited(t *testing.T) {
 	require.NotNil(t, sso)
 	fields, err := json.Marshal(sso["fields"])
 	require.NoError(t, err)
-	assert.Contains(t, string(fields), `{"default":"false","key":"trust_email","kind":"bool"}`)
+	assert.Contains(t, string(fields), `{"default":"false","key":"trust_email","kind":"bool","security_off":true}`)
 	assert.NotEqual(t, true, sso["config_redacted"].(map[string]any)["trust_email"], "off for a provider made on 0.50")
 	assert.Nil(t, sso["set_by_upgrade"])
 

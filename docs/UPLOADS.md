@@ -144,6 +144,11 @@ DELETE /api/files/upload/{id}         → 200 {ok:true}   (abort + delete stagin
 
 All of it is under the authenticated `/api/files` group, so the session/API-token
 rules, the tenant scope and root confinement apply exactly as everywhere else.
+An upload id is not a capability: every call after `begin` asks again whether
+it is the caller's upload, whether the caller's tenant still has the storage
+(an upload whose storage was moved to another tenant answers
+`404 upload not found`, as one that does not exist), the destination's level
+and locks, and the token's root.
 
 Responses carry both `chunk_size` and `chunkSize` (and `op_id`/`opId`,
 `node_id`/`nodeId`). The repo's JSON is snake_case; the camelCase duplicates are

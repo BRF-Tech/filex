@@ -416,6 +416,11 @@ async function seed() {
   // ⚠ Not a bare `backfillThumbs()`: the syncs above are still running. See the
   // block comment on backfillUntilThumbs.
   await backfillUntilThumbs(adminToken, 'My files://', 2);
+  // ⚠ And Documents: its scan.png is the picture on that folder's cover. The
+  // wait above only asks the root, so a sync that reached Documents after the
+  // last backfill left scan.png without one and the cover drew type tiles -
+  // 0.59.0's first set, eight pictures, with nothing in the product changed.
+  await backfillUntilThumbs(adminToken, 'My files://Documents', 1);
 
   const userToken = await login(USER.email, USER.password);
 

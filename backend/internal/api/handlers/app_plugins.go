@@ -790,6 +790,12 @@ func (h *AppPlugins) enqueue(w http.ResponseWriter, r *http.Request, c *checked,
 		actorID = &id
 	}
 	params = applyJobOutput(params, c.output)
+	// The chosen folder by the id of the storage it was checked on, not by
+	// the name in its `dir`: the job waits in the queue, and the name may be
+	// another storage's by the time it runs (wasmplugin outputFolder).
+	if c.dest != nil && c.dest.storage != nil {
+		wasmplugin.SetOutputFolderStorage(params, c.dest.storage.ID)
+	}
 	// A `root:` token's job is held to its root when it runs, on the ops
 	// worker with no request behind it: the root travels on the row
 	// (wasmplugin.JobRoot), like the output choice above.
@@ -1052,6 +1058,26 @@ func (h *AppPlugins) Catalogue(ctx context.Context, storageID int64, rel string)
 	return catalogueOnDemand(ctx, h.Store, h.StorageResolver, h.syncer(), storageID, rel)
 }
 
+// errJobTenant refuses a job's result on a storage the tenant of the person
+// it runs for no longer has (actorReaches).
+var errJobTenant = errors.New("the storage is no longer in the tenant of the person this job runs for")
+
+// actorReaches asks, when a job's result is written, whether the person the
+// job runs for still reaches the storage it is written to (db.AccountReaches):
+// the job was judged at the submit, and waits in the queue for as long as it
+// waits, while the platform operator may move the storage to another tenant.
+// A job with no person behind it (an app's own scheduled run) is not asked.
+func (h *AppPlugins) actorReaches(ctx context.Context, actor *int64, storageID int64) bool {
+	if actor == nil || *actor <= 0 {
+		return true
+	}
+	u, err := h.Store.GetUser(ctx, *actor)
+	if err != nil || u == nil {
+		return false
+	}
+	return db.AccountReaches(ctx, h.Store, u, storageID)
+}
+
 // CommitSibling writes a new file into dir, picking a free name, and runs
 // the shared post-write bookkeeping.
 func (h *AppPlugins) CommitSibling(ctx context.Context, storageID int64, dir, name string, r io.Reader, size int64, actor *int64) (string, error) {
@@ -1066,6 +1092,9 @@ func (h *AppPlugins) CommitSibling(ctx context.Context, storageID int64, dir, na
 	st, err := h.Store.GetStorage(ctx, storageID)
 	if err != nil || st == nil {
 		return "", errors.New("storage row missing")
+	}
+	if !h.actorReaches(ctx, actor, st.ID) {
+		return "", errJobTenant
 	}
 	// Checked at submit; checked again here, because a job runs later and an
 	// administrator may have made the storage read-only in between.
@@ -1127,6 +1156,9 @@ func (h *AppPlugins) CommitVersion(ctx context.Context, storageID int64, rel str
 	st, err := h.Store.GetStorage(ctx, storageID)
 	if err != nil || st == nil {
 		return errors.New("storage row missing")
+	}
+	if !h.actorReaches(ctx, actor, st.ID) {
+		return errJobTenant
 	}
 	rel = strings.Trim(rel, "/")
 	// ⚠⚠ The signing app writes the signed document over the file it froze —

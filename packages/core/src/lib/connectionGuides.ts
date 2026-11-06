@@ -69,6 +69,8 @@ export interface GuideContext {
   ftpsHost?: string;
   ftpsPort?: number;
   ftpsEnabled?: boolean;
+  /** The operator permits plain FTP here: a client without TLS is not refused. */
+  ftpsAllowPlain?: boolean;
   /** The passive data-port range, which the client's firewall must allow. */
   ftpsPasvMin?: number;
   ftpsPasvMax?: number;
@@ -809,7 +811,11 @@ export const buildFtpsGuide: GuideBuilder = (ctx, t) => {
   const facts: GuideFact[] = [
     { label: t('conn.guide.ftps.fact.host'), value: host, hint: t('conn.guide.ftps.fact.hostHint') },
     { label: t('conn.guide.ftps.fact.port'), value: String(port), hint: t('conn.guide.ftps.fact.portHint') },
-    { label: t('conn.guide.ftps.fact.mode'), value: t('conn.guide.ftps.fact.modeValue'), hint: t('conn.guide.ftps.fact.modeHint') },
+    {
+      label: t('conn.guide.ftps.fact.mode'),
+      value: t(ctx.ftpsAllowPlain ? 'conn.guide.ftps.fact.modeValuePlain' : 'conn.guide.ftps.fact.modeValue'),
+      hint: t(ctx.ftpsAllowPlain ? 'conn.guide.ftps.fact.modeHintPlain' : 'conn.guide.ftps.fact.modeHint'),
+    },
     { label: t('conn.guide.fact.user'), value: user, hint: t('conn.guide.ftps.fact.userHint') },
     { label: t('conn.guide.fact.password'), value: secret, hint: t('conn.guide.ftps.fact.passwordHint'), placeholderOnly: true },
     { label: t('conn.guide.ftps.fact.pasv'), value: pasv, hint: t('conn.guide.ftps.fact.pasvHint') },
@@ -940,13 +946,13 @@ export const buildFtpsGuide: GuideBuilder = (ctx, t) => {
         // ⚠ The honest warning: plenty of scan-to-FTP firmware cannot do TLS
         // at all, and this endpoint will not talk to it. Saying so beats an
         // afternoon spent debugging a device that was never going to connect.
-        { kind: 'warn', text: t('conn.guide.ftps.printer.noTLS') },
+        { kind: 'warn', text: t(ctx.ftpsAllowPlain ? 'conn.guide.ftps.printer.plainAllowed' : 'conn.guide.ftps.printer.noTLS') },
       ],
     },
   ];
 
   const notes: GuideBlock[] = [
-    { kind: 'warn', text: t('conn.guide.ftps.note.tls') },
+    { kind: 'warn', text: t(ctx.ftpsAllowPlain ? 'conn.guide.ftps.note.tlsPlain' : 'conn.guide.ftps.note.tls') },
     { kind: 'note', text: t('conn.guide.ftps.note.passive') },
     { kind: 'note', text: t('conn.guide.ftps.note.storages') },
     { kind: 'note', text: t('conn.guide.ftps.note.trash') },
@@ -962,7 +968,7 @@ export const buildFtpsGuide: GuideBuilder = (ctx, t) => {
   return {
     id: 'ftps',
     name: 'FTPS',
-    summary: t('conn.guide.ftps.summary'),
+    summary: t(ctx.ftpsAllowPlain ? 'conn.guide.ftps.summaryPlain' : 'conn.guide.ftps.summary'),
     facts,
     clients,
     notes,

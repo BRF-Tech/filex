@@ -121,6 +121,13 @@ address (`host`, `endpoint`, `url`, …) or its driver and the credential has to
 be typed again - the save answers **400** `SECRET_NEEDED` naming the field.
 Otherwise anybody who may edit a storage but not read its password could
 point it at a server of their own and have filex send the password there.
+Weakening the connection's protection asks the same, for the same reason:
+turning [the certificate check](#private-and-self-signed-certificates) off,
+turning **Skip host key check** (`insecure_skip_host_key`) on or changing the
+pinned `host_key` or the `known_hosts` file of an SFTP storage, and turning
+`tls` off on an FTP storage. The other way round (a check turned back on, TLS
+turned on), or another field edited while the protection stays as it was, asks
+for nothing.
 
 ⚠ **Renaming a storage changes its address on every file protocol.** The name
 is the first path segment:
@@ -408,7 +415,12 @@ curl -s https://files.example.com/api/admin/storage-drivers \
 
 `root: true` marks the field the [root-path guard](#path-validation--errors)
 checks. `aliases` lists older spellings of a key that the driver still reads,
-so configs written before a rename keep working. `scan_fields` lists the
+so configs written before a rename keep working. `requires` names the switch a
+field means something only with, and the form offers it only then.
+`security_off` marks a setting that takes a protection away: `risk` and
+`risk_i18n_key` are what it exposes, drawn under the control with the one warning
+every such setting has, and `when_off` is for a switch that is the protection
+itself. `scan_fields` lists the
 settings every storage has whatever its driver - today `scan_exclude`
 ([Scan exclusions](#scan-exclusions)). They live in the same `config` object,
 and the storage form draws them beside the driver's fields; the
@@ -691,6 +703,7 @@ Storage / Ceph RGW**, and other S3-compatible stores.
 | `access_key` | no | - | Static key. If omitted, the AWS default credential chain is used (env/IRSA/instance role). |
 | `secret_key` | no | - | Static secret (with `access_key`). |
 | `disable_presign` | no | **`true`** (since v0.42.2) | Uploads and the downloads behind public share links stream through filex, so the bucket `endpoint` never has to be reachable from a browser. Set `false` only when it is (AWS, a public MinIO) and you want the browser to talk to the bucket directly via presigned URLs - faster for very large files; the store must accept SDK-signed URLs. ⚠ A storage saved before v0.42.2 without this key now streams; set `false` explicitly to get the old redirect back. |
+| `insecure_skip_tls_verify` | no | `false` | Accept any certificate from this server. **Insecure**: read [Private and self-signed certificates](#private-and-self-signed-certificates). |
 | `attempt_timeout_s` | no | `10` (1-600) | How long **one attempt** may wait for a sign of life from the store: connecting (the DNS lookup included), the TLS handshake, the answer after the request is sent, and each next piece of the answer. **Never a limit on a transfer that keeps moving.** An upload the store stops taking is cut after 60 s (or this, if longer): the system hands a blocked upload to the network in bursts, so a slow store looks stopped for a second or two at a time. Copies, renames and the completion of a multipart upload wait up to 10 minutes for the answer (the store answers them only when the work is done); an upload's answer wait is lengthened by up to 16 s for the bytes still in the sockets' buffers. See [When the store is down](#when-the-store-is-down). |
 | `max_attempts` | no | `6` (1-20) | Attempts per request, the first included, when the failure can pass: a network error, a timeout, a `5xx`, throttling. `1` turns retrying off. A refusal - `403`, a missing bucket, a host name that does not resolve, a certificate that does not verify - is never retried. |
 | `total_timeout_s` | no | `15` (1-3600) | No new attempt starts unless it could finish within this many seconds of the first, so a store that is down is reported within this time. A transfer under way is not cut. A request that **timed out** is tried again only when this is at least twice `attempt_timeout_s`. |
@@ -1025,6 +1038,7 @@ Tested against **Nextcloud, ownCloud, Apache mod_dav, nginx-dav, SabreDAV**.
 | `url` | **yes** | - | WebDAV base URL. |
 | `user` | **yes** | - | Basic-auth user. Alias: `username`. |
 | `password` | no | - | Basic-auth password. |
+| `insecure_skip_tls_verify` | no | `false` | Accept any certificate from this server. **Insecure**: read [Private and self-signed certificates](#private-and-self-signed-certificates). |
 | `root` | **yes** | `""` | Sub-folder under the base URL - the mount point. Aliases: `base_path`, `remote_path`. |
 | `attempt_timeout_s` | no | `30` (1-600) | How long **one attempt** may wait for a sign of life from the server: connecting, the TLS handshake, the answer after the request is sent, and each next piece of the answer. **Never a limit on a transfer that keeps moving**; an upload the server stops taking is cut after 60 s (or this, if longer). `COPY`, `MOVE` (every rename) and `DELETE` wait up to 10 minutes for the answer, because the server answers them only when the whole tree is done. Longer than S3's 10 s: a `PROPFIND` of a large folder on Nextcloud can take well over 10 s to start answering. See [When the store is down](#when-the-store-is-down). |
 | `max_attempts` | no | `3` (1-20) | Attempts per request, the first included. A request that never reached the server (refused, no answer to the connect) is always tried again; one that reached it only when it changes nothing (`PROPFIND`, `GET`) or when the server answered `502`, `503` or `504`. An upload is never sent twice: its body is a stream. |
@@ -1053,6 +1067,7 @@ HTTP/2 would cut every other request sharing it.
 | `port` | no | `21` | Integer. |
 | `root` | **yes** | `/` | Base directory. Must be a sub-folder - the root guard rejects `/`. Aliases: `base_path`, `remote_path`. |
 | `tls` | no | `false` | Explicit FTPS (AUTH TLS). |
+| `insecure_skip_tls_verify` | no | `false` | With `tls`: accept any certificate from this server. **Insecure**: read [Private and self-signed certificates](#private-and-self-signed-certificates). |
 | `passive` | no | `true` | PASV mode; set `false` to disable. |
 | `attempt_timeout_s` | no | `15` (1-600) | How long **one attempt** may wait for the server: connecting, the greeting and the login, the answer to each command, and each next piece of a download. **Never a limit on a transfer that keeps moving**; an upload the server stops taking is cut after 60 s (or this, if longer), and the answer to an upload waits up to 16 s more for the bytes still in the sockets' buffers. See [When the store is down](#when-the-store-is-down). |
 | `max_attempts` | no | `3` (1-20) | A connection that could not be made (refused, silent, the server busy with `421`) is tried again, and so is a listing, a stat, a download or a mkdir whose session broke. An upload, a rename or a delete that reached the server is not sent again. A wrong password (`530`) is never retried. |
@@ -1092,13 +1107,32 @@ services:
 
 The certificate has to name the host your storage connects to.
 
-**2 - turn the check off.** `FILEX_STORAGE_TLS_SKIP_VERIFY=true` (since v0.58.2)
-accepts any certificate on every S3, WebDAV and FTPS storage of the install. It
-is read when filex starts, and the log says so with a warning.
+**2 - turn the check off for this connection.** Every `s3`, `webdav` and `ftp`
+(with `tls`) storage has a switch of its own: **Advanced settings → Skip
+certificate verification (insecure)**, `insecure_skip_tls_verify: true` in its
+configuration. It applies as soon as the storage is saved, and on a saved storage
+turning it on needs the password or key typed again: a saved credential does not go
+to a server that is no longer checked. Turning it off again, or editing anything
+else while it is on, asks for nothing. One storage's answer
+is not the next one's: a self-signed NAS and an S3 bucket can stand side by side
+with the bucket's certificate still checked. A
+[replication target](REPLICATION.md#1-create-a-replication-target) is a
+connection of its own, with a switch of its own.
 
-> ⚠ **Insecure.** Anybody who can sit between filex and that server can read and
-> change every file that crosses, and take a WebDAV or FTPS password. Keep it for
+> ⚠ **Not safe, and not recommended.** Anybody who can sit between filex and that
+> server can pose as it: read and change every file that crosses, and take the
+> connection's credentials. Apply it only if you know what you are doing, and on
 > a network you trust.
+
+**`FILEX_STORAGE_TLS_SKIP_VERIFY` is a one-time seed.** It (or
+`storage_tls.skip_verify` in `config.yaml`) was one switch for every storage in
+0.58.2. On the first start of a version with the switch per connection it writes
+the switch on to every S3, WebDAV and FTPS storage and every such replication
+target that exists, so nobody loses a storage across the upgrade; plain FTP, which
+has no certificate, is left alone. The log names what it changed. After that start
+the variable is not read again, whatever it says: remove it, and change a
+connection on its own page. On a fresh install it also reaches the storage
+`FILEX_DEFAULT_STORAGE_*` creates on that start.
 
 With `disable_presign: false` on an S3 storage the browser connects to the bucket
 itself, and neither way reaches it: the browser has to trust that certificate on

@@ -71,6 +71,7 @@ macOS is not supported - use ` + "`filex sync`" + ` or the desktop app there.
 	// own login would be a second place for a token to go stale.
 	f.StringVar(&o.client.url, "url", "", "filex server URL (default: $FILEX_URL or ~/.filex/cli.yaml)")
 	f.StringVar(&o.client.token, "token", "", "API or session token (default: $FILEX_TOKEN, else the session ~/.filex/cli.yaml saved for this server URL)")
+	o.client.tls.flagOn(cmd)
 	f.StringVar(&o.remote, "remote", "", "what to mount: empty for every storage, `docs://` for one, `docs://sub/dir` for a subtree")
 	f.BoolVar(&o.readOnly, "read-only", false, "refuse every write through this mount")
 	f.Int64Var(&o.blockSize, "block-size", 4<<20, "read granularity in bytes")

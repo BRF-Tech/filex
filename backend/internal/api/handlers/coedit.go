@@ -55,6 +55,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/coedit"
+	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/realtime"
@@ -841,6 +842,11 @@ func (h *CoEdit) Socket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	// Minted up to a minute ago by a signed-in member; the account may have
+	// been switched off, or its tenant suspended, since (GHSA-58wc-42xh-89v8).
+	if auth.RefuseBlockedAccount(w, r, h.Apps.Store, u) {
+		return
+	}
 	baseCtx = auth.WithUser(baseCtx, u)
 	if h.WS != nil && h.WS.MultiTenant {
 		baseCtx = tenant.WithScope(baseCtx, auth.ScopeForUser(baseCtx, h.Apps.Store, u))
@@ -1022,8 +1028,16 @@ func (h *CoEdit) Socket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// stillAllowed reads the person's rights on the session's file again: read,
+// stillAllowed reads the person's rights on the session's file again: their
+// account may still sign in, their tenant still reaches the storage, read,
 // and change when the member may write.
+//
+// ⚠ The tenant is read from the rows, not from the socket's scope: that scope
+// was taken when the socket opened and a session lasts as long as its page
+// pings. Before 0.59 a member stayed in the session - reading its edits and
+// adding to them - after the platform operator moved the storage to another
+// tenant, whose people then joined the same session. The storage by its id
+// too: the name it had when the session began may be another storage's now.
 func (h *CoEdit) stillAllowed(ctx context.Context, t coeditTicket) bool {
 	s, err := h.Relay.Session(ctx, t.SID)
 	if err != nil {
@@ -1033,7 +1047,14 @@ func (h *CoEdit) stillAllowed(ctx context.Context, t coeditTicket) bool {
 	if err != nil || st == nil || !st.Enabled {
 		return false
 	}
-	if !aclAllowName(ctx, h.Apps.ACL, h.Apps.Store, st.Name, s.Path, acl.LevelViewer) {
+	// The member's account may still sign in (ticketMinter, the answer the
+	// tickets and the links give: switched off, its tenant suspended) and its
+	// tenant still reaches the storage.
+	u, _, why := ticketMinter(ctx, h.Apps.Store, h.WS != nil && h.WS.MultiTenant, t.UserID, 0)
+	if why != "" || !db.AccountReaches(ctx, h.Apps.Store, u, st.ID) {
+		return false
+	}
+	if !aclAllowID(ctx, h.Apps.ACL, h.Apps.Store, st.ID, s.Path, acl.LevelViewer) {
 		return false
 	}
 	if t.CanEdit && (st.ReadOnly || !aclCanID(ctx, h.Apps.ACL, h.Apps.Store, s.StorageID, s.Path, perm.FilesModify).ok) {

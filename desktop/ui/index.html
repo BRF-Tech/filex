@@ -82,6 +82,10 @@
         color: var(--fe-text, CanvasText);
         margin: 14px 0 6px;
       }
+      details.adv { margin-top: 12px; font-size: var(--fe-text-sm, 12.5px); }
+      details.adv summary { cursor: pointer; color: var(--fe-text-muted, GrayText); }
+      label.check { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; font-weight: 500; }
+      p.security-off { margin: 6px 0 0; color: var(--fe-warning, CanvasText); }
       input[type=text] {
         width: 100%;
         height: var(--fe-h-md, 34px);
@@ -221,6 +225,19 @@
           snap && state.keychainCommand ? `<p>${esc(T('keychain.snap-connect.run'))}</p><code>${esc(state.keychainCommand)}</code>` : ''}</div>`;
       }
 
+      // The connection's certificate switch (src/tls-trust.ts): folded away, and
+      // with its warning under it before anybody ticks it.
+      function tlsOption() {
+        const w = (state && state.tlsWords) || {};
+        return `
+          <details class="adv">
+            <summary>${esc(w.advanced)}</summary>
+            <label class="check"><input id="insecure" type="checkbox" /> ${esc(w.label)}</label>
+            <p class="muted">${esc(w.help)}</p>
+            <p class="security-off"><strong>${esc(w.note)}</strong> ${esc(w.risk)}</p>
+          </details>`;
+      }
+
       function connectView() {
         const blocked = !!(state && state.keychainAdvice);
         return `
@@ -229,6 +246,7 @@
           ${keychainNotice()}
           <label for="server">${esc(T('connect.label'))}</label>
           <input id="server" type="text" placeholder="https://app.filex.com" autofocus />
+          ${tlsOption()}
           <div class="row" style="margin-top:16px">
             <button id="go" ${blocked ? 'disabled' : ''}>${esc(T('connect.go'))}</button>
           </div>
@@ -308,7 +326,9 @@
             const err = root.querySelector('#err');
             err.textContent = '';
             try {
-              await window.filexShell.beginAuth(root.querySelector('#server').value);
+              await window.filexShell.beginAuth(root.querySelector('#server').value, {
+                insecureSkipTLSVerify: root.querySelector('#insecure').checked,
+              });
               render();
             } catch (e) {
               err.textContent = String(e && e.message ? e.message : e);

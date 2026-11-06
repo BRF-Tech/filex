@@ -392,10 +392,13 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	// An administrator's credential is handed out in a session only
 	// (session_gate.go): promoting an account to administrator, changing an
-	// administrator's role, setting an administrator's password. Asked before
-	// anything is written. An unchanged role is not a role change.
+	// administrator's role, setting an administrator's password, switching an
+	// administrator's account on or off. Asked before anything is written. An
+	// unchanged role is not a role change, and an unchanged `enabled` is not a
+	// switch.
 	if target != nil {
 		roleChange := req.Role != nil && *req.Role != target.Role
+		switched := req.Enabled != nil && *req.Enabled != target.Enabled
 		switch {
 		case roleChange && *req.Role == model.RoleAdmin:
 			if !adminCredentialBySession(w, r, "Promoting an account to administrator") {
@@ -413,6 +416,17 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 			// Unbound, the account is matched by its address at the next SSO
 			// sign-in: who may open an administrator's account changes.
 			if !adminCredentialBySession(w, r, "Removing an administrator's SSO bind") {
+				return
+			}
+		case switched && target.IsAdmin():
+			// ⚠ Off and on alike, the caller's own account included. A key
+			// that could switch an administrator off could lock the people who
+			// would revoke it out of the panel; one that could switch an
+			// administrator back on would undo the containment a person chose
+			// (GHSA-58wc-42xh-89v8: a disabled administrator's own admin key
+			// re-enabled its account). An ordinary account stays a key's to
+			// switch.
+			if !adminCredentialBySession(w, r, "Switching an administrator's account on or off") {
 				return
 			}
 		}

@@ -40,6 +40,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 )
@@ -145,47 +147,51 @@ func (s *Service) sessionEditors(key string, users []string) []int64 {
 // mayCreate reports whether the person may create the file at rel on the
 // document's storage now (see the header).
 func (s *Service) mayCreate(ctx context.Context, node *model.Node, uid int64, rel string) bool {
+	return s.mayDo(ctx, node, uid, rel, perm.FilesCreate)
+}
+
+// mayDo reports whether the person may do p at rel on the document's storage
+// now: their account is there and may still sign in (auth.LoginAllowed: on,
+// its tenant not suspended - the rule a ticket's redeem and a public link
+// follow too), their tenant still reaches the storage (db.AccountReaches: a
+// person of a tenant reaches only its storages, a person of the platform's
+// own tenant or of a single-tenant install every storage), and their
+// permissions resolve to p there.
+func (s *Service) mayDo(ctx context.Context, node *model.Node, uid int64, rel string, p perm.Perm) bool {
 	if s.Store == nil {
 		return false
 	}
 	u, err := s.Store.GetUser(ctx, uid)
-	if err != nil || u == nil || !u.Enabled {
+	if err != nil || u == nil || !auth.LoginAllowed(ctx, s.Store, s.multiTenant, u) {
 		return false
 	}
 	st, err := s.Store.GetStorage(ctx, node.StorageID)
 	if err != nil || st == nil {
 		return false
 	}
-	// The tenant boundary: a person of a tenant reaches only its storages; a
-	// person of the platform's own tenant (or of a single-tenant install)
-	// reaches every storage.
-	if u.ProviderID != nil && *u.ProviderID > 0 {
-		p, err := s.Store.GetProvider(ctx, *u.ProviderID)
-		if err != nil || p == nil {
-			return false
-		}
-		if !p.IsSupertenant {
-			ids, err := s.Store.ListProviderStorageIDs(ctx, p.ID)
-			if err != nil {
-				return false
-			}
-			found := false
-			for _, id := range ids {
-				if id == st.ID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return false
-			}
-		}
+	if !db.AccountReaches(ctx, s.Store, u, st.ID) {
+		return false
 	}
 	set, err := s.aclResolver().LoadSet(ctx, u, st)
 	if err != nil || set == nil {
 		return false
 	}
-	return set.Can(rel, perm.FilesCreate)
+	return set.Can(rel, p)
+}
+
+// anEditorMayChange reports whether one of the save's editors (sessionEditors)
+// may still change the document itself, asked at the save: the callback acts
+// for them, and nothing else stands behind it. Before 0.59 a save over the
+// document asked nobody, so an editor left open while the platform operator
+// moved the storage to another tenant - or while the person's access was
+// taken away - went on writing into it.
+func (s *Service) anEditorMayChange(ctx context.Context, node *model.Node, editors []int64) bool {
+	for _, uid := range editors {
+		if s.mayDo(ctx, node, uid, node.Path, perm.FilesModify) {
+			return true
+		}
+	}
+	return false
 }
 
 // keyOf is the document key a callback names.

@@ -6,10 +6,24 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// EnvInsecureSkipTLSVerify says for one run what --insecure-skip-tls-verify
+// says: the desktop app starts its sync engine with it for an account that has
+// the switch on, next to FILEX_URL and FILEX_TOKEN, because the switch is that
+// connection's and an environment is per process.
+const EnvInsecureSkipTLSVerify = "FILEX_INSECURE_SKIP_TLS_VERIFY"
+
+// InsecureNotice is what the CLI says wherever the check is turned off: the
+// same fixed sentence as under every such setting on the admin panel
+// (`securityOff.note`), then what this one exposes.
+const InsecureNotice = "This is not safe and not recommended. Apply it only if you know what you are doing. " +
+	"The server's certificate is not checked, so anybody who can get between you and the server can pose as it: " +
+	"read and change what crosses, and take your session."
 
 // FileConfig is the on-disk shape of ~/.filex/cli.yaml. It carries a
 // bearer token, so SaveFileConfig always writes it owner-only (0600).
@@ -21,6 +35,11 @@ type FileConfig struct {
 	// login at that address (Resolve). Omitted when empty, so a file without
 	// one reads the same to an older CLI.
 	Realm string `yaml:"realm,omitempty"`
+	// InsecureSkipTLSVerify reaches URL without checking its certificate: a
+	// filex server with a self-signed or private one. Like the token it belongs
+	// to URL and goes nowhere else (Resolve). Omitted when off, so a file
+	// without it reads the same to an older CLI.
+	InsecureSkipTLSVerify bool `yaml:"insecure_skip_tls_verify,omitempty"`
 }
 
 // DefaultConfigPath returns the CLI config location: $FILEX_CLI_CONFIG
@@ -81,6 +100,9 @@ type Conn struct {
 	// because it belongs to another address (this one): the caller says so
 	// instead of a bare "no token".
 	SavedURL string
+	// InsecureSkipTLSVerify: this connection does not check the server's
+	// certificate (FileConfig.InsecureSkipTLSVerify).
+	InsecureSkipTLSVerify bool
 }
 
 // Resolve merges connection settings by precedence:
@@ -92,6 +114,11 @@ type Conn struct {
 // gets neither the saved token nor the saved realm (sameServer). Sending it
 // there would hand one server's session to another. A token given on purpose
 // (--token, FILEX_TOKEN) goes to whichever address it is given with.
+//
+// ⚠ The same holds for the certificate switch: what one address was allowed
+// says nothing about another, so a --url to a second server checks its
+// certificate unless this run says otherwise (EnvInsecureSkipTLSVerify, or the
+// flag, which the caller applies over this).
 //
 // getenv is injected so tests don't have to mutate the process env.
 func Resolve(flagURL, flagToken, cfgPath string, getenv func(string) string) (Conn, error) {
@@ -115,6 +142,12 @@ func Resolve(flagURL, flagToken, cfgPath string, getenv func(string) string) (Co
 	}
 	if realm := strings.TrimSpace(cfg.Realm); realm != "" && home {
 		conn.Realm = realm
+	}
+	conn.InsecureSkipTLSVerify = home && cfg.InsecureSkipTLSVerify
+	if v := strings.TrimSpace(getenv(EnvInsecureSkipTLSVerify)); v != "" {
+		// A value that reads as nothing keeps the check on.
+		skip, _ := strconv.ParseBool(v)
+		conn.InsecureSkipTLSVerify = skip
 	}
 	return conn, nil
 }

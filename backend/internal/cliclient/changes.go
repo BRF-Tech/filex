@@ -210,7 +210,7 @@ func (s *ChangeStream) session(ctx context.Context, onLive func()) error {
 	}
 	dialCtx, cancelDial := context.WithTimeout(ctx, 20*time.Second)
 	conn, _, err := websocket.Dial(dialCtx, s.Client.webSocketURL()+"?ticket="+ticket, &websocket.DialOptions{
-		HTTPClient: wsHTTPClient(),
+		HTTPClient: wsHTTPClient(s.Client.skipTLSVerify),
 	})
 	cancelDial()
 	if err != nil {
@@ -375,9 +375,10 @@ func (c *Client) webSocketURL() string {
 // newHTTPClient), and a WebSocket upgrade cannot happen on an HTTP/2
 // connection. Against a TLS server that offers h2, reusing it would fail
 // every handshake and leave the engine on polling for no visible reason.
-func wsHTTPClient() *http.Client {
+func wsHTTPClient(skipTLSVerify bool) *http.Client {
 	return &http.Client{Transport: &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		Proxy:           http.ProxyFromEnvironment,
+		TLSClientConfig: transportTLS(skipTLSVerify),
 		DialContext: (&net.Dialer{
 			Timeout:   15 * time.Second,
 			KeepAlive: 30 * time.Second,

@@ -553,12 +553,15 @@ func (r *Registry) runJob(ctx context.Context, job *model.AppPluginJob, live fun
 	_ = json.Unmarshal([]byte(job.ParamsJSON), &params)
 	root, rooted := JobRoot(params)
 	delete(params, rootParamKey)
+	var outDirStorage int64
 	if ov := OutputOverride(params); ov != nil {
 		// The surface's choice for this one job (JobRequest.Output); the
-		// handler validated it at submit and put it under __output.
+		// handler validated it at submit and put it under __output, with
+		// the id of the storage a chosen folder was checked on.
 		eff := *action
 		eff.Output = *ov
 		action = &eff
+		outDirStorage = OutputFolderStorage(params)
 		delete(params, outputOverrideKey)
 	}
 
@@ -701,7 +704,7 @@ func (r *Registry) runJob(ctx context.Context, job *model.AppPluginJob, live fun
 			if action.Output.Mode == "folder" {
 				// The folder the person chose (checked at submit; the sink
 				// judges the written file again with writegate).
-				dest, dir, ferr := r.outputFolder(ctx, action.Output.Dir)
+				dest, dir, ferr := r.outputFolder(ctx, action.Output.Dir, outDirStorage)
 				if ferr != nil {
 					err = ferr
 					break
@@ -787,12 +790,27 @@ func OutputOverride(params map[string]any) *wire.Output {
 // outputFolder resolves a chosen folder (`docs://reports`) to its storage and
 // storage-relative path. A storage that is gone or now read-only refuses the
 // write: the submit checked it, but a job runs later.
-func (r *Registry) outputFolder(ctx context.Context, qualified string) (*model.Storage, string, error) {
+//
+// ⚠⚠ storageID is the storage the submit checked the folder on
+// (OutputFolderStorage), and when it is set the storage is that one, whatever
+// its name is by now: the adapter in qualified is only how it read at the
+// submit. Resolved by NAME (before 0.59), a job that waited in the queue while
+// the platform operator deleted the storage and created another of the same
+// name - for another tenant, even - wrote its result into the new one, and a
+// storage renamed in the meantime failed the job. Only a row queued before
+// 0.59 carries no id, and is resolved by the name it carries.
+func (r *Registry) outputFolder(ctx context.Context, qualified string, storageID int64) (*model.Storage, string, error) {
 	adapter, rel, ok := strings.Cut(strings.TrimSpace(qualified), "://")
 	if !ok || adapter == "" {
 		return nil, "", fmt.Errorf("the chosen folder %q is not adapter-qualified", qualified)
 	}
-	st, err := r.opts.Store.GetStorageByName(ctx, adapter)
+	var st *model.Storage
+	var err error
+	if storageID > 0 {
+		st, err = r.opts.Store.GetStorage(ctx, storageID)
+	} else {
+		st, err = r.opts.Store.GetStorageByName(ctx, adapter)
+	}
 	if err != nil || st == nil {
 		return nil, "", fmt.Errorf("the chosen folder's storage %q is gone", adapter)
 	}
@@ -905,6 +923,41 @@ func SetOutputOverride(params map[string]any, o *wire.Output) {
 		v["dir"] = o.Dir
 	}
 	params[outputOverrideKey] = v
+}
+
+// outputDirStorageKey is where, inside the override, the host pins a chosen
+// folder to the storage it was checked on (outputFolder says why). Not part
+// of wire.Output: it is the host's, never an app's or a surface's, and it
+// rides under __output, which StripHostParams drops from whatever a caller
+// sends.
+const outputDirStorageKey = "dir_storage_id"
+
+// SetOutputFolderStorage pins the override's chosen folder (mode "folder") to
+// storage storageID. Call it after SetOutputOverride; without an override it
+// does nothing.
+func SetOutputFolderStorage(params map[string]any, storageID int64) {
+	if v, ok := params[outputOverrideKey].(map[string]any); ok && storageID > 0 {
+		v[outputDirStorageKey] = storageID
+	}
+}
+
+// OutputFolderStorage reads back the storage a chosen folder is pinned to, 0
+// when there is none (no folder, or a row queued before 0.59).
+func OutputFolderStorage(params map[string]any) int64 {
+	v, ok := params[outputOverrideKey].(map[string]any)
+	if !ok {
+		return 0
+	}
+	switch n := v[outputDirStorageKey].(type) {
+	case float64:
+		return int64(n)
+	case int64:
+		return n
+	case json.Number:
+		id, _ := n.Int64()
+		return id
+	}
+	return 0
 }
 
 // ValidOutputMode is the closed set an Output.Mode may take. `folder` is a

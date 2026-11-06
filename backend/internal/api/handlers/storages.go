@@ -69,6 +69,32 @@ func validateLazySettings(st *model.Storage) error {
 	return storage.ValidateLazyConfig(cfg)
 }
 
+// refuseSecretNeeded answers a save or a test that would send a kept
+// credential somewhere new, or somewhere unchecked (storage.SecretMoved,
+// storage.KeepSecrets): 400 SECRET_NEEDED naming the field, with the sentence
+// in the reader's language. false: err is not that, and nothing was written.
+// One answer for the storages, the replication targets, the SMTP settings, the
+// identity providers and a tenant's OIDC.
+func refuseSecretNeeded(w http.ResponseWriter, r *http.Request, err error) bool {
+	var secret *storage.SecretAddressError
+	if !errors.As(err, &secret) {
+		return false
+	}
+	key := "server.storage.secret_address_changed"
+	switch {
+	case secret.CheckOff && (secret.Protection == "" || secret.Protection == storage.SkipTLSVerifyKey):
+		key = "server.storage.secret_check_off"
+	case secret.CheckOff:
+		key = "server.storage.secret_protection_off"
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{
+		"error":   "SECRET_NEEDED",
+		"field":   secret.Field,
+		"message": srvtext.Text(langOf(r), key, srvtext.Vars{"field": secret.Field, "setting": secret.Protection}),
+	})
+	return true
+}
+
 // refuseStorageConfig answers a storage configuration the handler will not
 // save: a machine code in `error` and, for the refusals a person can act on,
 // the sentence in `message` — in the reader's language, from the server
@@ -76,16 +102,8 @@ func validateLazySettings(st *model.Storage) error {
 // keeps the plain `error` it always had.
 func refuseStorageConfig(w http.ResponseWriter, r *http.Request, err error) {
 	var bad *scanrule.InvalidError
-	var secret *storage.SecretAddressError
 	switch {
-	case errors.As(err, &secret):
-		// A credential sent back masked while the address (or the driver)
-		// changed: filex will not send a saved password somewhere new.
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error":   "SECRET_NEEDED",
-			"field":   secret.Field,
-			"message": srvtext.Text(langOf(r), "server.storage.secret_address_changed", srvtext.Vars{"field": secret.Field}),
-		})
+	case refuseSecretNeeded(w, r, err):
 	case errors.Is(err, storage.ErrRootPathForbidden):
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error":   "ROOT_PATH_FORBIDDEN",

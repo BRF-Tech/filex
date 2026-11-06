@@ -11,6 +11,7 @@
 // failure is invisible to us and looks like a filex bug.
 import { describe, it, expect } from 'vitest';
 import {
+  buildFtpsGuide,
   buildGuide,
   buildWebdavGuide,
   guideProtocols,
@@ -114,6 +115,36 @@ describe('buildWebdavGuide', () => {
     // A placeholder, never `undefined` in the middle of a command line.
     expect(g.facts[1].value).toBe('conn.guide.userPlaceholder');
     expect(codeOf(g, 'windows')).not.toContain('undefined');
+  });
+});
+
+// What FTPS says about TLS follows the server (#298): a guide that says plain
+// FTP is refused on a server that allows it, or the other way round, is a lie
+// about somebody's password.
+describe('buildFtpsGuide', () => {
+  const said = (g: ReturnType<typeof buildFtpsGuide>) =>
+    JSON.stringify([g.summary, g.facts, g.notes, g.clients.map((c) => c.blocks)]);
+
+  it('says TLS is required on a server that requires it', () => {
+    const text = said(buildFtpsGuide(ctx, t));
+
+    expect(text).toContain('conn.guide.ftps.note.tls"');
+    expect(text).toContain('conn.guide.ftps.fact.modeValue"');
+    expect(text).toContain('conn.guide.ftps.printer.noTLS');
+    expect(text).not.toContain('Plain');
+    expect(text).not.toContain('plainAllowed');
+  });
+
+  it('says plain FTP is allowed on a server that allows it', () => {
+    const text = said(buildFtpsGuide({ ...ctx, ftpsAllowPlain: true }, t));
+
+    expect(text).toContain('conn.guide.ftps.note.tlsPlain');
+    expect(text).toContain('conn.guide.ftps.fact.modeValuePlain');
+    expect(text).toContain('conn.guide.ftps.fact.modeHintPlain');
+    expect(text).toContain('conn.guide.ftps.summaryPlain');
+    expect(text).toContain('conn.guide.ftps.printer.plainAllowed');
+    expect(text).not.toContain('conn.guide.ftps.printer.noTLS');
+    expect(text).not.toContain('conn.guide.ftps.note.tls"');
   });
 });
 

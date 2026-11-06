@@ -2115,16 +2115,23 @@ func (s *Store) DeleteFileGrant(ctx context.Context, id int64) error {
 // ⚠ COALESCE on every nullable text column: 00046 adds state_json/files_json
 // as NULLABLE (MySQL cannot default a TEXT column), and scanning NULL into a
 // Go string fails inside the driver rather than anywhere that could explain it.
-const shareCols = `id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, COALESCE(created_via,''), created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings, plugin_id, COALESCE(page_id,''), COALESCE(subject,''), COALESCE(state_json,''), COALESCE(files_json,''), pin_fails, locked_until, COALESCE(pin_enc,''), visit_count, COALESCE(purpose_json,''), COALESCE(app_root,'')`
+const shareCols = `id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, COALESCE(created_via,''), created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings, plugin_id, COALESCE(page_id,''), COALESCE(subject,''), COALESCE(state_json,''), COALESCE(files_json,''), pin_fails, locked_until, COALESCE(pin_enc,''), visit_count, COALESCE(purpose_json,''), COALESCE(app_root,''), COALESCE(tenant_id,0)`
 
 func (s *Store) CreateShare(ctx context.Context, sh *model.Share) (*model.Share, error) {
-	res, err := s.conn(ctx).ExecContext(ctx,
-		`INSERT INTO shares (node_id, token, pin_hash, pin_enc, expires_at, max_downloads, created_by, created_via, kind, max_uploads, drop_settings, plugin_id, page_id, subject, state_json, files_json, purpose_json, app_root) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		sh.NodeID, sh.Token, sh.PinHash, sh.PinEnc, sh.ExpiresAt, sh.MaxDownloads, sh.CreatedBy, sh.CreatedVia, shareKind(sh.Kind), sh.MaxUploads, sh.DropSettings,
-		sh.PluginID, sh.PageID, sh.Subject, sh.StateJSON, sh.FilesJSON, sh.PurposeJSON, sh.AppRoot)
+	// The tenant the link's storage is in now (db.ShareStamp): the link is
+	// served only while that tenant has the storage (GetShareByToken).
+	tenant, err := db.ShareStamp(ctx, s, sh.NodeID)
 	if err != nil {
 		return nil, err
 	}
+	res, err := s.conn(ctx).ExecContext(ctx,
+		`INSERT INTO shares (node_id, token, pin_hash, pin_enc, expires_at, max_downloads, created_by, created_via, kind, max_uploads, drop_settings, plugin_id, page_id, subject, state_json, files_json, purpose_json, app_root, tenant_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sh.NodeID, sh.Token, sh.PinHash, sh.PinEnc, sh.ExpiresAt, sh.MaxDownloads, sh.CreatedBy, sh.CreatedVia, shareKind(sh.Kind), sh.MaxUploads, sh.DropSettings,
+		sh.PluginID, sh.PageID, sh.Subject, sh.StateJSON, sh.FilesJSON, sh.PurposeJSON, sh.AppRoot, tenant)
+	if err != nil {
+		return nil, err
+	}
+	sh.TenantID = tenant
 	id, _ := res.LastInsertId()
 	sh.ID = id
 	sh.CreatedAt = time.Now()
@@ -2133,9 +2140,21 @@ func (s *Store) CreateShare(ctx context.Context, sh *model.Share) (*model.Share,
 	return sh, nil
 }
 
+// GetShareByToken is the lookup behind every door a link is opened through.
+// A link whose tenant no longer has its storage (db.ShareStands: the platform
+// operator moved the storage to another tenant) is answered like a token that
+// does not exist; its row is kept, and it answers again once the storage is
+// back.
 func (s *Store) GetShareByToken(ctx context.Context, token string) (*model.Share, error) {
 	row := s.conn(ctx).QueryRowContext(ctx, `SELECT `+shareCols+` FROM shares WHERE token=?`, token)
-	return scanShare(row)
+	sh, err := scanShare(row)
+	if err != nil {
+		return nil, err
+	}
+	if !db.ShareStands(ctx, s, sh) {
+		return nil, sql.ErrNoRows
+	}
+	return sh, nil
 }
 
 func (s *Store) GetShareByID(ctx context.Context, id int64) (*model.Share, error) {
@@ -3203,7 +3222,7 @@ func scanUser(r rowScanner) (*model.User, error) {
 func scanShare(r rowScanner) (*model.Share, error) {
 	sh := &model.Share{}
 	if err := r.Scan(&sh.ID, &sh.NodeID, &sh.Token, &sh.PinHash, &sh.ExpiresAt, &sh.MaxDownloads, &sh.DownloadCount, &sh.CreatedBy, &sh.CreatedVia, &sh.CreatedAt, &sh.Kind, &sh.MaxUploads, &sh.UploadCount, &sh.DropSettings,
-		&sh.PluginID, &sh.PageID, &sh.Subject, &sh.StateJSON, &sh.FilesJSON, &sh.PinFails, &sh.LockedUntil, &sh.PinEnc, &sh.VisitCount, &sh.PurposeJSON, &sh.AppRoot); err != nil {
+		&sh.PluginID, &sh.PageID, &sh.Subject, &sh.StateJSON, &sh.FilesJSON, &sh.PinFails, &sh.LockedUntil, &sh.PinEnc, &sh.VisitCount, &sh.PurposeJSON, &sh.AppRoot, &sh.TenantID); err != nil {
 		return nil, err
 	}
 	sh.HasPin = sh.PinHash != ""

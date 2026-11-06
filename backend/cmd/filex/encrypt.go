@@ -51,6 +51,7 @@ type encryptOpts struct {
 	keepTrash       bool
 	quiet           bool
 	url, token      string
+	tls             tlsFlag
 }
 
 func encryptCmd() *cobra.Command {
@@ -114,6 +115,7 @@ func encryptCmd() *cobra.Command {
 	f.BoolVarP(&o.quiet, "quiet", "q", false, "print only warnings and the summary")
 	f.StringVar(&o.url, "url", "", "server folder only: filex server URL (default: $FILEX_URL or ~/.filex/cli.yaml)")
 	f.StringVar(&o.token, "token", "", "server folder only: API or session token (default: $FILEX_TOKEN, else the saved session)")
+	o.tls.flagOn(c)
 	return quiet(c)
 }
 
@@ -243,7 +245,7 @@ func readEscrowFlag(v string) (string, error) {
 // ── a folder on this machine ─────────────────────────────────────────────
 
 func runEncryptLocal(ctx context.Context, cmd *cobra.Command, o *encryptOpts, in string) error {
-	if o.keepVersions || o.keepTrash || o.url != "" || o.token != "" {
+	if o.keepVersions || o.keepTrash || o.url != "" || o.token != "" || o.tls.said {
 		return errors.New("--keep-versions, --keep-trash, --url and --token are for a folder on a server (adapter://path)")
 	}
 	escrow := ""
@@ -332,7 +334,7 @@ func runEncryptRemote(ctx context.Context, cmd *cobra.Command, o *encryptOpts, r
 	if o.out != "" || o.escrowKey != "" {
 		return errors.New("--output and --escrow-public-key are for a local folder; a server folder is encrypted where it is, with the server's own escrow key when it has one")
 	}
-	api, err := (&clientOpts{url: o.url, token: o.token}).api(true)
+	api, err := (&clientOpts{url: o.url, token: o.token, tls: o.tls}).api(true)
 	if err != nil {
 		return err
 	}

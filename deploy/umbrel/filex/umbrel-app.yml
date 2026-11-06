@@ -2,12 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.58.2"
+version: "0.59.0"
 releaseNotes: |-
-  filex v0.58.2 - 2026-11-06
-  • S3, WebDAV and FTPS storages can reach a server with a private or self-signed certificate
-  • A file on a mount inside a local storage can be deleted
-  • A delete that fails says why.
+  filex v0.59.0 - 2026-11-06
+  • The certificate switch is each connection's own
+  • The CLI and the desktop app reach a filex server with a self-signed certificate.
+  • A server may permit plain FTP.
+  • A warning under every setting that turns a protection off.
+  • A saved password goes only to the address it was saved for, on every page that keeps one.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

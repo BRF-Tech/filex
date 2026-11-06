@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
@@ -15,7 +16,17 @@ import (
 // On failure with required=true, a 401 JSON error is written and the
 // downstream handler is NOT called. With required=false, the request
 // proceeds with no user attached (useful for public viewer endpoints).
+//
+// ⚠ Without a store it cannot read a tenant, so a suspended tenant's session
+// is held only by the chain MiddlewareWithToken builds, which every route
+// group in the router uses; a disabled account is refused either way.
 func Middleware(required bool) func(http.Handler) http.Handler {
+	return middlewareWith(required, nil)
+}
+
+// middlewareWith is Middleware with the store AccountBlock reads the
+// account's tenant from.
+func middlewareWith(required bool, store db.Store) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			drivers := Enabled()
@@ -43,17 +54,12 @@ func Middleware(required bool) func(http.Handler) http.Handler {
 				}
 			}
 
-			// A disabled account (migration 00022) is refused even when a driver
-			// happily resolved it. A session minted before the switch would
-			// otherwise keep working until it expired, which makes "disabled"
-			// mean "disabled tomorrow".
-			if user != nil && !user.Enabled {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusForbidden)
-				_ = json.NewEncoder(w).Encode(map[string]string{
-					"error":  "this account is disabled",
-					"reason": SSOReasonAccountDisabled,
-				})
+			// A disabled account (migration 00022), or one whose tenant is
+			// suspended, is refused even when a driver happily resolved it. A
+			// session minted before the switch would otherwise keep working until
+			// it expired, which makes "disabled" mean "disabled tomorrow". The
+			// api-token driver's owner is refused here too.
+			if RefuseBlockedAccount(w, r, store, user) {
 				return
 			}
 
@@ -94,6 +100,55 @@ func Middleware(required bool) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// RefuseBlockedAccount answers an account that may not act with the
+// credential it holds (AccountBlock) and reports whether it did:
+//
+//   - switched off (users.enabled = false, migration 00022): 403
+//     {"error":"this account is disabled","reason":"account_disabled"};
+//   - its tenant suspended: the sign-in's own answer to a suspended tenant
+//     (RefuseTenantLocked), reason `tenant_suspended`.
+//
+// ⭐ The one answer at every door a held credential opens: the session chain
+// (Middleware), both API-token middlewares (admitTokenOwner,
+// apitoken_middleware.go) and the sockets a ticket opens (handlers.WS.Handle,
+// handlers.CoEdit.Socket), so the status, the words and the code the sign-in
+// page translates are the same wherever the account is turned away. A door
+// that resolves an account from a credential its request carries asks this,
+// not its own copy. A nil store reads no tenant (a disabled account is still
+// refused).
+func RefuseBlockedAccount(w http.ResponseWriter, r *http.Request, store db.Store, u *model.User) bool {
+	switch AccountBlock(r.Context(), store, u) {
+	case SSOReasonAccountDisabled:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":  "this account is disabled",
+			"reason": SSOReasonAccountDisabled,
+		})
+		return true
+	case SSOReasonTenantSuspended:
+		RefuseTenantLocked(w, SSOReasonTenantSuspended)
+		return true
+	}
+	return false
+}
+
+// RefuseTenantLocked writes the answer to an account its tenant holds off - a
+// suspended tenant (`tenant_suspended`), maintenance mode at sign-in
+// (`maintenance`): 403 {"error":"sign-in is temporarily limited to the
+// platform operator","maintenance":true,"reason":…}. The sign-in form
+// (handlers.Auth.Login) and RefuseBlockedAccount write it, so a session, a key
+// and a sign-in of a suspended tenant read the same thing.
+func RefuseTenantLocked(w http.ResponseWriter, reason string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error":       "sign-in is temporarily limited to the platform operator",
+		"maintenance": true,
+		"reason":      reason,
+	})
 }
 
 // TokenAuthenticator is implemented by a Driver whose credential IS an API

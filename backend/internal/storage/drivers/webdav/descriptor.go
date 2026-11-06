@@ -57,6 +57,7 @@ func init() {
 				Root:        true,
 				Aliases:     []string{"base_path", "remote_path"},
 			},
+			storage.SkipTLSVerifyField(),
 		}, defaults.Fields(stall.ServerTexts(attemptText))...),
 	})
 }

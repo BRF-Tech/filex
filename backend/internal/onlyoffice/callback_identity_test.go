@@ -47,6 +47,7 @@ func (h *csvHarness) open(t *testing.T, uid int64) {
 	cfg, err := h.svc.BuildConfigForNode(context.Background(), h.node, u, "en", "edit")
 	require.NoError(t, err)
 	h.sessionKey = cfg.Config["document"].(map[string]any)["key"].(string)
+	h.opener = uid
 }
 
 // besideFiles are the files beside the document (everything but itself).
@@ -136,6 +137,8 @@ func TestBeside_TheBodyCannotNameAnotherEditor(t *testing.T) {
 
 func TestBeside_ATenantReachesOnlyItsOwnStorages(t *testing.T) {
 	h := newDocHarness(t, "rapor.doc", "application/msword", "THE OLD .DOC")
+	// A tenant's people sign in only in multi-tenant mode (auth.LoginAllowed).
+	h.svc.AttachMultiTenant(true)
 	ctx := context.Background()
 	acme, err := h.store.CreateProvider(ctx, &model.Provider{Slug: "acme", Name: "Acme", AuthType: model.AuthTypeLocal, Enabled: true})
 	require.NoError(t, err)

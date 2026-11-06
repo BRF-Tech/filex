@@ -645,6 +645,9 @@ func BuildRouter(d *Deps) http.Handler {
 	// both halves, so it is built here — before either mounts.
 	uploadTickets := handlers.NewUploadTicketStore()
 	tuh := handlers.NewTicketUpload(d.Store, d.StorageResolver, uploadTickets)
+	// The redeem asks the minter again with their tenant's scope as it is
+	// then: a storage moved to another tenant takes no write (upload_ticket.go).
+	tuh.AttachMultiTenant(d.Cfg.MultiTenant)
 	tuh.AttachACL(d.ACL)
 	tuh.AttachE2EPolicy(d.E2EPolicy)
 	tuh.AttachThumbs(d.Thumbs)
@@ -756,6 +759,15 @@ func BuildRouter(d *Deps) http.Handler {
 		d.Ops.SetLocks(func(ctx context.Context, storageID int64) writegate.Locks {
 			return aclR.Locks(ctx, storageID)
 		})
+		// …and the tenant question every op with an account behind it is
+		// asked when it starts: does that account still reach the op's
+		// storages (db.AccountReaches)? A storage the platform operator moved
+		// to another tenant while the op waited takes nothing from it.
+		reachStore := d.Store
+		d.Ops.SetTenantGuard(func(ctx context.Context, actorID, storageID int64) bool {
+			u, err := reachStore.GetUser(ctx, actorID)
+			return err == nil && u != nil && db.AccountReaches(ctx, reachStore, u, storageID)
+		})
 	}
 	ooh := handlers.NewOnlyOffice(d.OnlyOffice, d.Store, d.StorageResolver)
 	ooh.AttachACL(d.ACL)
@@ -787,6 +799,9 @@ func BuildRouter(d *Deps) http.Handler {
 		// attached to above (AttachVaults): a fresh acl.New knows no vault, and
 		// a save into a vault folder went through (#94).
 		d.OnlyOffice.AttachACL(d.ACL)
+		// …and the mode in force: a save is written only for an editor whose
+		// account may still sign in (onlyoffice mayDo).
+		d.OnlyOffice.AttachMultiTenant(d.Cfg.MultiTenant)
 	}
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	th.AttachACL(d.ACL)
@@ -3281,6 +3296,7 @@ func ftpsFacts(cfg config.Config, live func() string) handlers.FTPSFacts {
 		PasvMin:    cfg.FTPS.PassivePortMin,
 		PasvMax:    cfg.FTPS.PassivePortMax,
 		SelfSigned: cfg.FTPS.CertFile == "" || cfg.FTPS.KeyFile == "",
+		AllowPlain: cfg.FTPS.AllowPlain,
 	}
 	if cfg.FTPS.PublicHost != "" {
 		f.Host = cfg.FTPS.PublicHost

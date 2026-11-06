@@ -418,7 +418,7 @@ the form has no field):
 
 | The platform's page: the Realm field empty and free | A tenant's own address: the field filled in and read-only |
 |---|---|
-| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.e88130186663.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.9684d2e13dbc.png) |
+| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.b1ff259e52ea.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.e4218f0ec8be.png) |
 
 **The handoff to a tenant's own address.** The session cookie belongs to the
 host it was set on. A realm typed on the platform's page for a tenant that has
@@ -760,13 +760,29 @@ section 16.
 - **Update:** `PATCH /api/admin/providers/{id}` may send the tenant's own realm
   back (a client round-tripping the object); any other realm is
   `400 realm_immutable`, and a slug change leaves the realm as it was.
-- **Suspend:** disable login, keep data (billing/hold).
+- **Suspend:** disable login, keep data (billing/hold). What the tenant's
+  people already hold stops too: a session and an API key answer
+  `403 {"error":"sign-in is temporarily limited to the platform operator","maintenance":true,"reason":"tenant_suspended"}`,
+  the sign-in's own answer, on every route (`/api/ai` and MCP included); a
+  socket ticket no longer opens and an open live-updates socket is closed
+  within about half a minute (`1008`, `tenant_suspended`); their share links,
+  file requests and upload tickets answer like ones that do not exist
+  ([SHARING.md](SHARING.md#a-link-follows-its-creator)); the file protocols
+  refuse the sign-in and cut open connections. Resuming gives all of it back.
+  Suspending and resuming need an administrator signed in to the panel: an
+  API key gets `403 session_required` on `/api/admin/providers/{id}`,
+  `/api/ai/admin/providers/{id}` and `admin_tenants_update`, and nothing of
+  that request is written. A tenant's other fields stay a key's to change.
 - **Delete:** `DELETE /api/admin/providers/{id}` answers `409` (with
   `user_count`) while the tenant has users, unless `?force=1`, which deletes
   them too - each with what an account deletion takes along (sessions, tokens,
   the links it opened; [BACKEND.md](BACKEND.md#delete-apiadminusersid-)). The
   tenant's storage **links** are removed; the storages and their files are never
   touched, and the audit log is not deleted. The supertenant cannot be deleted.
+  Deleting a tenant together with its users needs an administrator signed in
+  to the panel: an API key's `?force=1` (also on `/api/ai/admin/providers/{id}`
+  and `admin_tenants_delete` with `force`) gets `403 session_required` and
+  nothing is deleted. A key still creates a tenant and deletes an empty one.
 
 ## 12. Per-tenant settings & branding
 
@@ -1059,6 +1075,57 @@ are never recorded twice.
 `auth.RequireAdmin` and an admin's ceiling is Owner. It is there so the day that
 route stops being admin-only it cannot silently become unauthorized the way its
 `/api/files` siblings were.
+
+### 16.8 A storage moved to another tenant: what was made on it before - CLOSED (0.59)
+
+The platform operator may unlink a storage from one tenant and link it to
+another, or delete a storage and create one of the same name for another
+tenant. What a member of the first tenant had made on it before - a
+credential-free URL, a session, a queued job - was judged when it was made
+and used later, with no request scope behind it, and before 0.59 nothing asked
+again. Measured on 0.58: an upload ticket's write landed in the other
+tenant's file (`200`), after a re-link and after a delete and same-name
+create; a download link kept serving the files and a file request kept
+taking uploads; a queued copy ran into the storage; an editor save was
+written over the document. A disabled account's ticket, and its links, went
+on working too.
+
+Every such door now asks again, at the moment it is used, in one shared place
+per question:
+
+| What | Bound to | Asked when it is used |
+|---|---|---|
+| Upload ticket (`/u/`) | the storage's **id** (not its name), the minter's tenant, the minter, the API token it was minted with | `ticketMinter` (the account may still sign in, the token still stands - the answer `/z/` links get too), the minter's tenant scope as it is now, the storage behind the id. Fails: spent, `404 ticket_not_found`, nothing written |
+| Resumable upload (`/api/files/upload/{id}`) | the storage id (it always was) | every chunk, status, commit and abort asks `ownsStorage` with the caller's tenant now: `404 upload not found` |
+| Public link, file request, app page (`/s/`, `/d/`, `/api/public/*`) | the tenant the storage was in when the link was made (`shares.tenant_id`, migration 00135) | every engine's `GetShareByToken` asks `db.ShareStands`: a link whose tenant no longer has the storage answers like a token that does not exist; its creator must still be able to sign in (`linkCreatorAllows`) |
+| Queued operation (copy, move, delete, rename, restore, archive, app action) | its storages by id (it always was) | when it starts, the account it runs for must still reach every storage it names (`db.AccountReaches`, wired into the queue as `SetTenantGuard`): fails with a reason, nothing written |
+| An app job's result | the chosen folder's storage by **id** (it was by name) | the person the job runs for must still reach the storage the result is written to |
+| ONLYOFFICE save | the document's node | written over the document only while one of the session's editors may still change it: account may still sign in (`auth.LoginAllowed`), tenant reaching the storage, `files.modify` there |
+| ONLYOFFICE fetch URL, signed thumbnail URL | the tenant the storage was in when the URL was signed (`ten`, inside the signature) | `db.StampStands`: `404` once that tenant no longer has the storage |
+| Editing-together membership | the session's storage id | every touch asks `ticketMinter` (the account may still sign in) and `db.AccountReaches` with the member's tenant now; a member whose account went off, or whose tenant lost the storage, leaves the session |
+
+Nothing is deleted. A link, a file request or a URL whose storage comes back
+to its tenant answers again; an operation or a ticket that was refused stays
+refused. A storage **renamed** in its own tenant keeps its id and everything
+bound to it (an upload ticket writes under the new name; before 0.59 a rename
+left it answering `503`).
+
+⚠ Only a **customer** tenant holds what was made on its storage. A link or URL
+made where the storage was in no tenant (as on every single-tenant install),
+or in the platform's own tenant, keeps answering when the storage is given to
+a customer: the platform's data handed to a tenant is the operator's own
+move, and holding it would close every link of an install the day its
+storages are first given to tenants. A storage shared by two tenants keeps a
+link while the tenant it was made in still has it.
+
+Tests (`internal/api/handlers` unless named): `upload_ticket_tenant_test.go`,
+`upload_ticket_pin_internal_test.go`, `upload_staged_tenant_test.go`,
+`app_job_output_storage_test.go`, `tenant_moved_doors_test.go` (links, file
+requests, a disabled account's links, a queued copy, a signed thumbnail, the
+editor's fetch URL), `tenant_moved_internal_test.go` (an app job's result,
+editing-together membership), `internal/onlyoffice/callback_tenant_test.go`,
+and `internal/db/drivers/conformance/share_tenant_test.go` on SQLite,
+PostgreSQL and MySQL. All but the controls are red on 0.58.
 
 ---
 

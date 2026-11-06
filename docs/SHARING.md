@@ -281,10 +281,23 @@ while the person who made it **still** holds the right to make it on the item -
 the editor level - and answers like a link that never existed (`404`) from
 the moment they do not: their role or an exception took the permission away,
 they were made a viewer, their grant on the folder was revoked, or they left
-the group whose grant or role gave it. Nothing is
+the group whose grant or role gave it. It pauses the same way while the
+creator's **account is switched off** (or their tenant suspended): the link
+answers `404` and a file request takes nothing, and switching the account
+back on brings the same address and PIN back. Nothing is
 deleted and nothing is revoked: give the right back and the link answers
 again, with the same address and PIN. Its creator - and an administrator -
 still sees it under **My shares** / **Shares** meanwhile, and can revoke it.
+
+**A link stays with its tenant.** On a multi-tenant install a link is made
+in the tenant its storage belongs to, and answers only while that tenant
+still has the storage. When the platform operator moves the storage to
+another tenant, the link - a download link, a file request, an app's page,
+with or without a recorded creator - answers `404` like one that does not
+exist, and moving the storage back brings it back. A link made on a storage
+that was in no tenant, or in the platform's own, keeps answering when the
+storage is given to a tenant
+([MULTI-TENANCY.md](MULTI-TENANCY.md#168-a-storage-moved-to-another-tenant-what-was-made-on-it-before---closed-059)).
 
 The download page, the link's metadata, a shared folder's browsing, the file
 request page and its uploads, and the public shell's `/api/public/*` all ask
@@ -304,7 +317,8 @@ Two kinds of link are left alone:
   document itself, below);
 - a link with **no recorded creator** - made before links recorded one, or
   whose creator was deleted before 0.49.0: there is nobody left to ask, so it
-  keeps answering until an administrator revokes it.
+  keeps answering until an administrator revokes it (or, on a multi-tenant
+  install, its storage leaves the tenant it was made in, above).
 
 A custom role can also shape the links its people make - a maximum lifetime
 and a required PIN ([PERMISSIONS.md → Custom roles](PERMISSIONS.md#custom-roles)).
@@ -482,9 +496,10 @@ the server's language - whoever the sheet reaches is nobody the server knows.
 ## Failure modes & troubleshooting
 
 - **Link shows a 404 page** - expired, past its download/upload cap, or
-  revoked - or its creator no longer holds the right to make it
+  revoked - or its creator no longer holds the right to make it, their
+  account is switched off, or its storage was moved to another tenant
   ([A link follows its creator](#a-link-follows-its-creator)); it answers
-  again when the right is given back.
+  again when the right, the account or the storage is back.
 - **An app's link says it is gone, although nobody revoked it** - the account
   that created it was switched off or deleted (re-enabling the account brings
   every one of its links back), or the app that answers it was stopped or

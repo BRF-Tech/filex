@@ -161,6 +161,11 @@ func (d *Driver) AuthenticateToken(r *http.Request) (*model.User, *model.APIToke
 	if err != nil || user == nil {
 		return nil, nil, auth.ErrUnauthorized
 	}
+	// A disabled owner (or a suspended tenant's) is returned, not refused:
+	// auth.Middleware answers it with the 403 every door gives such an account
+	// (auth.RefuseBlockedAccount), where an ErrUnauthorized here would read as
+	// "no credential" and 401.
+	//
 	// access.api / access.desktop (package perm): an account that may no
 	// longer use tokens is refused like a token that does not exist.
 	if !auth.TokenMayBeUsed(ctx, d.store, user, tok) {

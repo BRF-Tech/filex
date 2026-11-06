@@ -8,26 +8,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func skippingVerify(t *testing.T) {
-	t.Helper()
-	SetSkipTLSVerify(true)
-	t.Cleanup(func() { SetSkipTLSVerify(false) })
-}
-
 // Off is the default, and off must change nothing: an http.Transport treats a
 // nil TLSClientConfig and an empty one differently.
 func TestApplyTLSVerify_OffLeavesTheConfigurationAlone(t *testing.T) {
-	assert.Nil(t, ApplyTLSVerify(nil))
+	assert.Nil(t, ApplyTLSVerify(nil, false))
 	base := &tls.Config{ServerName: "s3.example.com"}
-	assert.Same(t, base, ApplyTLSVerify(base))
+	assert.Same(t, base, ApplyTLSVerify(base, false))
 	assert.False(t, base.InsecureSkipVerify)
 }
 
 func TestApplyTLSVerify_OnAcceptsAnyCertificateOnACopy(t *testing.T) {
-	skippingVerify(t)
 	base := &tls.Config{ServerName: "s3.example.com", MinVersion: tls.VersionTLS13}
 
-	got := ApplyTLSVerify(base)
+	got := ApplyTLSVerify(base, true)
 
 	require.NotSame(t, base, got)
 	assert.True(t, got.InsecureSkipVerify)
@@ -37,11 +30,24 @@ func TestApplyTLSVerify_OnAcceptsAnyCertificateOnACopy(t *testing.T) {
 }
 
 func TestApplyTLSVerify_OnWithoutABaseStaysOnModernTLS(t *testing.T) {
-	skippingVerify(t)
-
-	got := ApplyTLSVerify(nil)
+	got := ApplyTLSVerify(nil, true)
 
 	require.NotNil(t, got)
 	assert.True(t, got.InsecureSkipVerify)
 	assert.Equal(t, uint16(tls.VersionTLS12), got.MinVersion)
+}
+
+// The switch's own words are the form's: every driver that has it declares the
+// same field, and it says what it exposes.
+func TestSkipTLSVerifyField_CarriesTheWarning(t *testing.T) {
+	f := SkipTLSVerifyField()
+
+	assert.Equal(t, SkipTLSVerifyKey, f.Key)
+	assert.Equal(t, FieldBool, f.Type)
+	assert.True(t, f.Advanced)
+	assert.Equal(t, false, f.Default)
+	require.NotNil(t, f.SecurityOff)
+	assert.NotEmpty(t, f.SecurityOff.Risk)
+	assert.NotEmpty(t, f.SecurityOff.RiskI18nKey)
+	assert.False(t, f.SecurityOff.WhenOff, "it has to be read before the switch is turned on")
 }

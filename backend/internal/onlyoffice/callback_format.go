@@ -67,6 +67,7 @@ const (
 	refusedBadBytes     = "server.onlyoffice.refused_bad_bytes"
 	refusedNoCreate     = "server.onlyoffice.refused_no_create"
 	refusedNoEditor     = "server.onlyoffice.refused_no_editor"
+	refusedNoModify     = "server.onlyoffice.refused_no_modify"
 
 	// A CSV save (officesave.Refusal): a character the file's encoding cannot
 	// hold; bytes that are not text in an encoding filex can read for it.

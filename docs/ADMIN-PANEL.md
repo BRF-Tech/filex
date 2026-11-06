@@ -114,6 +114,30 @@ no section left: a delegated administrator holding only `admin.users` sees no
 Dashboard link, *Files & storage* with Files alone, *People* with Users and
 Groups, and neither *Settings* nor *Maintenance & records*.
 
+## Settings that turn a protection off
+
+Every setting that takes a protection away says so under its control, in the same
+words: it is not safe, it is not recommended, apply it only if you know what you
+are doing, and then what this one exposes. Most stand there at all times, because
+they have to be read before the switch is turned on. The ones marked *while off*
+are the protection itself, and warn while it is off.
+
+| Setting | Where |
+|---|---|
+| Skip certificate verification (S3, WebDAV, FTPS) | A storage's or a replication target's advanced settings |
+| Skip host-key verification (SFTP) | A storage's or a replication target's advanced settings |
+| Follow symlinks that leave this folder (local) | A storage's advanced settings |
+| FTPS (explicit AUTH TLS), *while off* | An FTP storage or replication target |
+| Allow plain FTP on the FTPS endpoint | Login security → Connections without encryption |
+| Limit wrong sign-in attempts, *while off* | Login security |
+| SMTP encryption *None (plain text)*, *while chosen* | Settings → General |
+| Trust this provider's email addresses | Identity providers (OIDC), and a tenant's page |
+| Say why a sign-in with the right password is refused | Identity providers (LDAP, PAM, Windows) |
+| Allow insecure and internal-network providers | A tenant's sign-in settings |
+
+The CLI's `--insecure-skip-tls-verify` and the desktop app's switch on an account
+say the same.
+
 ## Keyboard and screen readers
 
 The menu is a navigation landmark named *Admin menu*. Each panel button says

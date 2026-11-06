@@ -693,9 +693,20 @@ func (a *aiOps) Write(ctx context.Context, p string, data []byte) (*aiEntry, err
 // staging, so a failure there must NOT fall back to the synchronous write:
 // the reader is already drained and the file would land truncated.
 func (a *aiOps) WriteStream(ctx context.Context, p string, src io.Reader, size int64) (*aiEntry, error) {
+	return a.WriteStreamOn(ctx, 0, p, src, size)
+}
+
+// WriteStreamOn is WriteStream to a destination pinned to one storage by id
+// (an upload ticket): p's adapter is only how that storage reads now, and when
+// it resolves to any other storage the answer is errTicketStorageMoved, before
+// a byte of src is read. storageID 0 pins nothing.
+func (a *aiOps) WriteStreamOn(ctx context.Context, storageID int64, p string, src io.Reader, size int64) (*aiEntry, error) {
 	s, rel, err := a.resolveStorage(ctx, p)
 	if err != nil {
 		return nil, err
+	}
+	if storageID != 0 && s.ID != storageID {
+		return nil, errTicketStorageMoved
 	}
 	if rel == "" {
 		return nil, errors.New("path required")

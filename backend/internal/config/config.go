@@ -448,9 +448,10 @@ type SFTPConfig struct {
 
 // FTPSConfig controls the FTPS endpoint (internal/ftpsrv).
 //
-// ⚠⚠ There is no "plain FTP" switch and there will not be one. Plain FTP sends
-// the password in the clear and the file after it; a flag that turned TLS off
-// would be a flag that publishes a user's credentials to anything on the path.
+// ⚠⚠ Plain FTP sends the password in the clear and the file after it. It is off
+// unless an operator says otherwise (AllowPlain), which is the owner's call of
+// 2026-11-06: the scanner that cannot do TLS is real, the decision is the
+// operator's, and the switch says what it costs.
 type FTPSConfig struct {
 	// Enabled — FILEX_FTPS. OFF by default: this one opens a control port AND
 	// a range of data ports.
@@ -477,6 +478,11 @@ type FTPSConfig struct {
 	Banner string `yaml:"banner"`
 	// IdleTimeout in seconds; 0 uses the package default.
 	IdleTimeout int `yaml:"idle_timeout"`
+	// AllowPlain lets a client connect without TLS (FILEX_FTPS_ALLOW_PLAIN,
+	// default false). A seed: the stored setting ftps.allow_plain is what is in
+	// force (internal/instancesettings). A client that does use TLS stays held
+	// to it on both channels (ftpsrv.requirement).
+	AllowPlain bool `yaml:"allow_plain"`
 }
 
 // NFSConfig controls the NFSv3 endpoint (internal/nfssrv).
@@ -635,11 +641,15 @@ type QueueConfig struct {
 	Enabled bool `yaml:"enabled"`
 }
 
-// DriverTLS — how the storage drivers that speak TLS (S3, WebDAV, FTPS) judge
-// the server they connect to (storage.ApplyTLSVerify).
+// DriverTLS — what is left of the one certificate switch 0.58.2 had for every
+// storage. A connection has its own now (`insecure_skip_tls_verify`,
+// internal/storage/tlsverify.go).
 type DriverTLS struct {
-	// SkipVerify accepts any certificate. FILEX_STORAGE_TLS_SKIP_VERIFY,
-	// default false. Insecure: see internal/storage/tlsverify.go.
+	// SkipVerify is a one-time seed. FILEX_STORAGE_TLS_SKIP_VERIFY, default
+	// false. On the first start of a version with the switch per connection it
+	// writes the switch on to every storage and replication target that has
+	// one, and it is not read again (server/storage_tls_seed.go). After that
+	// start this field says only whether it was this one.
 	SkipVerify bool `yaml:"skip_verify"`
 }
 
@@ -1791,6 +1801,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_FTPS_KEY"); v != "" {
 		c.FTPS.KeyFile = strings.TrimSpace(v)
+	}
+	if b, ok := envBool("FILEX_FTPS_ALLOW_PLAIN"); ok {
+		c.FTPS.AllowPlain = b
 	}
 	if v := os.Getenv("FILEX_FTPS_BANNER"); v != "" {
 		c.FTPS.Banner = v

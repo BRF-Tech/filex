@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
 // Settings handles /api/admin/settings.
@@ -116,6 +118,53 @@ func (h *Settings) SMTPTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": false})
 }
 
+// smtpSecretMoved: the saved SMTP password goes only to the host it was saved
+// for, and encrypted when it was saved encrypted (storage.SecretMoved). writes
+// are the keys a request writes. The password is kept when the request does
+// not send it, or sends the mask; sent empty, it is cleared, and that keeps
+// nothing. Measured before the rule: a new host, or "none" on the same host,
+// saved without the password, then the SMTP test, sent the saved one there,
+// the second in the clear.
+func smtpSecretMoved(ctx context.Context, store db.Store, writes map[string]string) error {
+	host, hostSent := writes[mailer.KeyHost]
+	mode, modeSent := writes[mailer.KeyTLS]
+	if !hostSent && !modeSent {
+		return nil
+	}
+	if pw, sent := writes[mailer.KeyPass]; sent && pw != storage.SecretMask {
+		return nil
+	}
+	if saved, _ := store.GetSetting(ctx, mailer.KeyPass); saved == "" {
+		return nil
+	}
+	was, _ := store.GetSetting(ctx, mailer.KeyHost)
+	wasMode, _ := store.GetSetting(ctx, mailer.KeyTLS)
+	if !hostSent {
+		host = was
+	}
+	if !modeSent {
+		mode = wasMode
+	}
+	err := storage.SecretMoved([]string{mailer.KeyPass},
+		map[string]any{"host": host, "tls": smtpEncrypted(mode)},
+		map[string]any{"host": was, "tls": smtpEncrypted(wasMode)})
+	var moved *storage.SecretAddressError
+	if errors.As(err, &moved) && moved.Protection == "tls" {
+		moved.Protection = mailer.KeyTLS
+	}
+	return err
+}
+
+// smtpEncrypted: "tls" and "starttls" will not go on in the clear. "none" does
+// not encrypt, and "" (the mailer's default) goes on in the clear when the
+// server offers no STARTTLS, which whoever sits in the middle can arrange
+// (mailer smtpClient). So a save from either of the first two to either of
+// the last two weakens it.
+func smtpEncrypted(mode string) bool {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	return m == "tls" || m == "starttls"
+}
+
 // List returns all key/value pairs.
 func (h *Settings) List(w http.ResponseWriter, r *http.Request) {
 	m, err := h.Store.ListSettings(r.Context())
@@ -152,6 +201,11 @@ func (h *Settings) Set(w http.ResponseWriter, r *http.Request) {
 	}
 	// Multi-tenant mode has its own door (tenancy_admin.go).
 	if refuseTenancySetting(w, key) {
+		return
+	}
+	// One key at a time: a new host with a saved password is refused; send
+	// both together in a PATCH.
+	if refuseSecretNeeded(w, r, smtpSecretMoved(r.Context(), h.Store, map[string]string{key: req.Value})) {
 		return
 	}
 	/* wiring:e1 — branding keys: validate + tenant-scope + cache bust */
@@ -312,6 +366,17 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+	// The SMTP password goes only to the host it was saved for: refused here,
+	// with the rest of the batch, before anything is written.
+	writes := map[string]string{}
+	for k, v := range raw {
+		if k != "" && v != nil {
+			writes[k], _ = stringifyValue(v)
+		}
+	}
+	if refuseSecretNeeded(w, r, smtpSecretMoved(r.Context(), h.Store, writes)) {
+		return
 	}
 	/* e2e policy — written the way Set writes it (setE2EPolicy), and first,
 	   so a failure there stops the batch before anything else in it is

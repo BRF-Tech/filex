@@ -13,6 +13,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
@@ -110,6 +111,26 @@ func (h *Providers) setTrustEmail(r *http.Request, p *model.Provider, req *provi
 		auth.AddAuditDetail(r.Context(), "oidc_trust_email_after", *req.OIDCTrustEmail)
 	}
 	return nil
+}
+
+// tenantOIDCSecretMoved: a tenant's OIDC client secret, left blank as the
+// page sends it, goes only to the issuer it was saved for
+// (storage.SecretMoved). Measured before the rule: a save that changed the
+// issuer kept the secret, and the next sign-in sent it to the new issuer's
+// token endpoint.
+func tenantOIDCSecretMoved(p *model.Provider, req *providerReq) error {
+	if p.OIDCClientSecret == "" || (req.OIDCClientSecret != nil && *req.OIDCClientSecret != "") {
+		return nil
+	}
+	prev := map[string]any{"oidc_issuer": p.OIDCIssuer, "oidc_redirect_url": p.OIDCRedirectURL}
+	next := map[string]any{"oidc_issuer": p.OIDCIssuer, "oidc_redirect_url": p.OIDCRedirectURL}
+	if req.OIDCIssuer != nil {
+		next["oidc_issuer"] = strings.TrimSpace(*req.OIDCIssuer)
+	}
+	if req.OIDCRedirectURL != nil {
+		next["oidc_redirect_url"] = strings.TrimSpace(*req.OIDCRedirectURL)
+	}
+	return storage.SecretMoved([]string{"oidc_client_secret"}, next, prev)
 }
 
 func (req *providerReq) apply(p *model.Provider) {
@@ -290,6 +311,18 @@ func (h *Providers) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auth.SetAuditTarget(r.Context(), "", p.Slug)
+	// Suspending a tenant and resuming it are a person's (session_gate.go, the
+	// owner's decision of 2026-11-06), on every door: /api/admin/providers,
+	// /api/ai/admin/providers and admin_tenants_update. A suspension stops
+	// every session, key and socket of the tenant's people (auth.AccountBlock),
+	// so a key that could suspend could lock a whole customer out, and one that
+	// could resume could undo a hold a person chose. Asked before anything is
+	// written; an unchanged `enabled` is not a switch, and every other field
+	// stays a key's to change.
+	if req.Enabled != nil && *req.Enabled != p.Enabled &&
+		!sessionOnly(w, r, "Suspending or resuming a tenant needs an administrator signed in to the admin panel; an API key cannot do it.", nil) {
+		return
+	}
 	if p.IsSupertenant {
 		if req.IsSupertenant != nil && !*req.IsSupertenant {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot un-flag the supertenant - transfer it by setting is_supertenant on another provider"})
@@ -306,6 +339,9 @@ func (h *Providers) Update(w http.ResponseWriter, r *http.Request) {
 			"field":   "realm",
 			"message": "a tenant's realm is chosen when it is created and never changes: it is part of its accounts' addresses and of the user names its people saved in their clients",
 		})
+		return
+	}
+	if refuseSecretNeeded(w, r, tenantOIDCSecretMoved(p, &req)) {
 		return
 	}
 	req.apply(p)
@@ -454,6 +490,15 @@ func (h *Providers) Delete(w http.ResponseWriter, r *http.Request) {
 			"error":      "tenant still has users - pass ?force=1 to delete them too",
 			"user_count": len(users),
 		})
+		return
+	}
+	// Deleting a tenant WITH its people is a person's (session_gate.go, the
+	// owner's decision of 2026-11-06), like suspending it: it ends every
+	// account, session, key and link of a customer for good, so a key may
+	// create tenants and delete an empty one, never this. Asked before
+	// anything is deleted.
+	if len(users) > 0 &&
+		!sessionOnly(w, r, "Deleting a tenant together with its accounts needs an administrator signed in to the admin panel; an API key cannot do it.", nil) {
 		return
 	}
 	// Each account's own public links go with it (db.Store.DeleteUser); the

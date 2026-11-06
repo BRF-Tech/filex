@@ -518,6 +518,9 @@ func (h *AuthProviders) writable(w http.ResponseWriter, r *http.Request, name st
 func (h *AuthProviders) apply(w http.ResponseWriter, r *http.Request, ctx context.Context, t *providerTarget, body updateBody, ta *auth.TestAccount, created bool) {
 	opts := h.Live.Options()
 	next, changed, err := authsetup.Merge(t.cur, authsetup.Change{Enabled: body.Enabled, Values: body.Config}, opts.Box)
+	if refuseSecretNeeded(w, r, err) {
+		return
+	}
 	if errors.Is(err, authsetup.ErrSecretKeyRequired) {
 		writeProviderRefusal(w, r, http.StatusBadRequest, "secret_key_required", nil, "server.auth_provider.secret_key_required", nil)
 		return
@@ -1296,6 +1299,9 @@ func (h *AuthProviders) Test(w http.ResponseWriter, r *http.Request) {
 		}
 		var err error
 		if cfg, err = authsetup.DraftConfig(cur, draft, opts.Box, opts); err != nil {
+			if refuseSecretNeeded(w, r, err) {
+				return
+			}
 			cfg = map[string]any{}
 		}
 		if h.Store != nil {

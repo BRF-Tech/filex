@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-11-05",
+  "generatedAt": "2026-11-06",
   "releases": [
+    {
+      "tag": "v0.58.2",
+      "date": "2026-11-06T06:50:56Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.58.2",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Added\n\n- **S3, WebDAV and FTPS storages can reach a server with a private or\n  self-signed certificate**\n  ([GitHub #134](https://github.com/BRF-Tech/filex/issues/134), reported by\n  @kladiv). `FILEX_STORAGE_TLS_SKIP_VERIFY=true` turns the certificate check off\n  for those storages, and the log says so at startup. It is insecure:\n  [STORAGE.md](docs/STORAGE.md#private-and-self-signed-certificates) has what\n  that exposes, and the way that keeps the check on by trusting the certificate\n  with one read-only mount.\n\n### Fixed\n\n- **A file on a mount inside a local storage can be deleted**\n  ([GitHub #133](https://github.com/BRF-Tech/filex/issues/133), reported by\n  @juan11perez). The trash lives at the storage root, so deleting from an rclone\n  mount, an NFS share or a second disk under that root was a rename across\n  filesystems, which the operating system refuses. A move or a restore across\n  such a boundary failed the same way. The local driver now copies and then\n  deletes: the source is removed only once all of it has arrived, a link\n  travels as a link, and a file that lands in a folder while it is being moved\n  stays where it landed.\n  [STORAGE.md](docs/STORAGE.md#a-mount-inside-a-local-storage) has what that\n  costs on a cloud mount, and how to avoid it.\n- **A delete that fails says why.** A file on a local storage whose move into\n  the trash failed reported `open …: not a directory`, whatever the reason was,\n  because the fallback for object-store folders answered in its place.\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0582---2026-11-06)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.58.2",
+        "ghcr.io/brf-tech/filex:full-v0.58.2"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
     {
       "tag": "v0.58.1",
       "date": "2026-11-05T17:12:38Z",

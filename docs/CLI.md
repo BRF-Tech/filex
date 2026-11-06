@@ -110,6 +110,29 @@ stops before it sends anything, with
 Before 0.50 the saved token went to any `--url` or `FILEX_URL`: a mistyped or
 borrowed address received your session.
 
+### A server with a self-signed certificate
+
+The CLI checks the server's certificate, against the system's trusted roots. The
+way that keeps the check on is to trust that certificate on this computer. Where
+that is not an option, `--insecure-skip-tls-verify` reaches the server anyway:
+
+```bash
+filex client login --url https://nas.lan:8443 --insecure-skip-tls-verify
+```
+
+Given to `login`, it is saved in `cli.yaml` with the address, like the session,
+for `filex client`, `filex sync`, `filex mount` and the vault commands, and it
+goes to no other address: a `--url` that names another server checks that
+server's certificate. A login with `--insecure-skip-tls-verify=false` checks the
+certificate again, and saves the switch off once that passes.
+Any other command takes the flag for that run, and
+`FILEX_INSECURE_SKIP_TLS_VERIFY` says the same for a process, on or off, without
+a file: flag, then variable, then `cli.yaml`.
+
+> ⚠ **Not safe, and not recommended.** Anybody who can get between you and the
+> server can pose as it: read and change what crosses, and take your session.
+> Apply it only if you know what you are doing.
+
 The token may be a **session token** (minted by `login`) or a durable
 **API token** - an API key from the admin panel's API / MCP page or the explorer's
 **API keys** entry - the
@@ -128,7 +151,7 @@ that must not touch your real state - both ignored when empty:
 
 | Variable | Default | What it moves |
 |---|---|---|
-| `FILEX_CLI_CONFIG` | `~/.filex/cli.yaml` | The saved URL + token (and the [realm](#multi-tenant-servers-the-realm) it was signed in to) |
+| `FILEX_CLI_CONFIG` | `~/.filex/cli.yaml` | The saved URL + token (and the [realm](#multi-tenant-servers-the-realm) it was signed in to, and [the certificate switch](#a-server-with-a-self-signed-certificate)) |
 | `FILEX_SYNC_DIR` | `~/.filex/sync` | The [sync](SYNC.md) pairs and per-pair baselines |
 
 The [portable desktop app](DESKTOP.md#portable-windows) sets `FILEX_SYNC_DIR`

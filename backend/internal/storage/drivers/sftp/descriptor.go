@@ -119,6 +119,10 @@ func init() {
 				HelpI18nKey: "storages.fieldHelp.insecureSkipHostKey",
 				Default:     false,
 				Advanced:    true,
+				SecurityOff: &storage.SecurityOff{
+					Risk:        "Anybody who can get between filex and this host can pose as it: read and change every file that crosses, and take this connection's password.",
+					RiskI18nKey: "storages.fieldRisk.insecureSkipHostKey",
+				},
 			},
 			// How long a server that does not answer is waited for (issue
 			// #75, timeout.go): the same three settings, words and bounds as

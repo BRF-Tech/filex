@@ -2621,7 +2621,9 @@ catalogue, `server.storage.*`). The same on `PATCH`.
 ### `PATCH /api/admin/storages/:id` ![admin](https://img.shields.io/badge/-admin-red)
 Same body shape; partial updates allowed. A credential sent as `***` keeps the
 saved one - while the driver and the address (`host`, `endpoint`, `url`, …)
-stay what they were; otherwise it has to be typed again: **400**
+stay what they were and the save weakens no protection (`insecure_skip_tls_verify`
+or `insecure_skip_host_key` turned on, FTP `tls` turned off, another
+`host_key` or `known_hosts`); otherwise it has to be typed again: **400**
 `{"error": "SECRET_NEEDED", "field": "password", "message": "…"}` and nothing
 is saved. A plugin storage is **re-probed on
 every change** - the operator may have just pointed it at a different bucket,
@@ -3116,20 +3118,30 @@ carries `sso_unlinked` (whether there was a bind). On an administrator it needs
 a session, like setting an administrator's password.
 
 `enabled: false` cuts access without deleting anything: the account cannot
-log in (local, OIDC or `/dav`), existing sessions stop working, and every API
-token it minted is refused. Files, quota and grants are untouched. Disabling -
-like deleting or demoting - the **last admin** is refused with `409`.
+sign in (local, SSO or a file protocol), its sessions stop working at their
+next request, and every API token it minted is refused on every route -
+`/api/ai` and MCP, `/api/sharex`, `/api/files`, the admin routes - with the
+answer a session gets, `403 {"error":"this account is disabled","reason":"account_disabled"}`.
+A live-updates or editing-together socket ticket it took no longer opens, and
+a live-updates socket (`/api/ws`) it has open is closed within about half a
+minute, with close code `1008` and the reason `account_disabled`. Its share
+links, file requests and upload tickets answer like ones that do not exist
+([SHARING.md](SHARING.md#a-link-follows-its-creator)). Files, quota
+and grants are untouched, and switching the account back on makes its sessions,
+tokens and links work again. Disabling - like deleting or demoting - the
+**last admin** is refused with `409`.
 
 `provider_id` re-homes the user into another tenant. Restricted to an
 unscoped or supertenant caller (`403` otherwise).
 
 ⚠ Promoting an account to `admin`, changing an administrator's `role`,
-setting an administrator's `password` and removing an administrator's SSO bind
-need an administrator signed in to the panel: an API key gets `403
-session_required`. So does
+setting an administrator's `password`, removing an administrator's SSO bind
+and switching an administrator's account on or off (`enabled`, the key's own
+account included) need an administrator signed in to the panel: an API key
+gets `403 session_required`. So does
 `POST /api/admin/users/{id}/reset-password` on an administrator. The same
 holds on `/api/ai/admin` and the `admin_users_*` MCP tools; a role left as it
-was is not a role change.
+was is not a role change, and an `enabled` left as it was is not a switch.
 
 ### `GET|POST|PATCH /api/admin/users/{id}/quota` ![admin](https://img.shields.io/badge/-admin-red)
 Read or set one user's quota - see [Admin: quota](#admin-quota). `POST
@@ -3236,8 +3248,8 @@ Multi-tenant installs. A tenant is a provider row, managed at
 | `GET /api/admin/providers/{id}` | one tenant |
 | `GET /api/admin/providers/realm-suggestion?slug=` | the realm the tenant screen offers for a slug: marks dropped, the first free variant ([TENANT-ADMIN.md](TENANT-ADMIN.md#the-tenant-screen)) |
 | `POST /api/admin/providers` | create a tenant - the provider row only |
-| `PATCH /api/admin/providers/{id}` | edit one; `is_supertenant: true` moves the platform flag to it; `oidc_trust_email` is its own OIDC's "trust this provider's email addresses" ([SSO.md](SSO.md#trust-this-providers-email-addresses)), audited when it changes; the answer's `oidc_trust_email_by_upgrade` says the value is the one the upgrade to 0.50 set |
-| `DELETE /api/admin/providers/{id}` | `409` while it has users, unless `?force=1`, which deletes its users too. Storages are unlinked, never deleted |
+| `PATCH /api/admin/providers/{id}` | edit one; `is_supertenant: true` moves the platform flag to it; `oidc_trust_email` is its own OIDC's "trust this provider's email addresses" ([SSO.md](SSO.md#trust-this-providers-email-addresses)), audited when it changes; the answer's `oidc_trust_email_by_upgrade` says the value is the one the upgrade to 0.50 set. A new `oidc_issuer` with `oidc_client_secret` empty or absent: **400** `SECRET_NEEDED`, nothing saved (a new `oidc_redirect_url` asks for nothing: no secret goes there). Changing `enabled` - suspending or resuming the tenant - needs an administrator signed in to the panel: an API key gets `403 session_required` and nothing of the request is written ([MULTI-TENANCY.md](MULTI-TENANCY.md#11-tenant-lifecycle)) |
+| `DELETE /api/admin/providers/{id}` | `409` while it has users, unless `?force=1`, which deletes its users too and needs an administrator signed in to the panel (an API key: `403 session_required`, nothing deleted). Storages are unlinked, never deleted |
 | `POST /api/admin/providers/{id}/storages` · `DELETE …/storages/{storageID}` | link a storage (`{"storage_id": 4}`), unlink one |
 
 `realm` is read on create only - the slug when none is given. Refused:
@@ -3257,7 +3269,7 @@ admin-scoped key where its page says so.
 
 | Routes | What | Described in |
 |---|---|---|
-| `GET` · `POST /api/admin/auth-providers`, `PATCH` · `DELETE …/{name}`, `PUT …/{name}/tenants`, `POST …/{name}/test`, `GET` · `POST …/{name}/sync` | the sign-in providers: list, another instance of a driver, change, delete, the tenants that sign in through one, the test, an LDAP directory sync's state and starting one (`POST` 202, 409 while one runs; an administrator signed in to the panel, an API key is refused - [LDAP.md](LDAP.md#directory-sync)). An OIDC's `config.trust_email` ([SSO.md](SSO.md#trust-this-providers-email-addresses)); a provider's `set_by_upgrade` names the fields whose value the upgrade to 0.50 set | [TENANT-ADMIN.md](TENANT-ADMIN.md#sign-in-providers-bound-to-tenants), [OS-LOGIN.md](OS-LOGIN.md#api), [SSO.md](SSO.md), [LDAP.md](LDAP.md) |
+| `GET` · `POST /api/admin/auth-providers`, `PATCH` · `DELETE …/{name}`, `PUT …/{name}/tenants`, `POST …/{name}/test`, `GET` · `POST …/{name}/sync` | the sign-in providers: list, another instance of a driver, change, delete, the tenants that sign in through one, the test, (a save or a test with a new `url` or `issuer`, LDAP `start_tls` turned off on `ldap://`, or a new `ca_pem`/`ca_file`, and a stored secret left empty, `***` or absent: **400** `SECRET_NEEDED`, nothing sent; a new `redirect_url` asks for nothing), an LDAP directory sync's state and starting one (`POST` 202, 409 while one runs; an administrator signed in to the panel, an API key is refused - [LDAP.md](LDAP.md#directory-sync)). An OIDC's `config.trust_email` ([SSO.md](SSO.md#trust-this-providers-email-addresses)); a provider's `set_by_upgrade` names the fields whose value the upgrade to 0.50 set | [TENANT-ADMIN.md](TENANT-ADMIN.md#sign-in-providers-bound-to-tenants), [OS-LOGIN.md](OS-LOGIN.md#api), [SSO.md](SSO.md), [LDAP.md](LDAP.md) |
 | `GET /api/admin/tenant`, `POST /api/admin/tenant/auth-providers`, `PATCH` · `DELETE …/auth-providers/{name}`, `POST …/auth-providers/{name}/test`, `POST /api/admin/tenant/domains`, `POST …/domains/{id}/check`, `PUT` · `DELETE …/domains/{id}/certificate`, `DELETE …/domains/{id}`, `PUT /api/admin/tenant/insecure` | a tenant's own screen: its own OIDC and LDAP, its domains and certificates, the operator's insecure switch | [TENANT-ADMIN.md](TENANT-ADMIN.md#the-tenant-screen) |
 | `GET /api/tls/ask`, `GET /api/tls/certificate` | the reverse proxy's questions about the tenants' addresses (`FILEX_TLS_MODE=proxy`); the proxy itself only | [TENANT-ADMIN.md](TENANT-ADMIN.md#tls-an-installation-setting-plus-a-tenants-own-certificate) |
 | `GET /api/auth/methods?realm=` | public: how a sign-in for the address's tenant (or the realm named) may go - the password form, the recovery form, its SSO buttons | [TENANT-ADMIN.md](TENANT-ADMIN.md#the-sign-in-page-per-realm) |
@@ -3507,11 +3519,12 @@ every verb (`403 supertenant_only` for a tenant's administrator).
 
 ### `GET /api/admin/instance-settings?group=general` ![admin](https://img.shields.io/badge/-admin-red)
 `{"items": [...]}`, one per setting of the group (`general`, `protection`,
-`apps`, `notifications`, `webhooks`; none = every group): `key`, `group`,
+`apps`, `notifications`, `webhooks`, `connections`; none = every group): `key`, `group`,
 `kind` (`int` / `bool` / `language`), `value` (in force), `default`, `min` /
 `max` and `unit` for a number, `env` (the variable that gave the first value),
-`restart` (read at start) and `restart_pending` (a stored change this process
-does not run with yet).
+`restart` (read at start), `restart_pending` (a stored change this process
+does not run with yet) and `security_off` (on, the setting takes a protection
+away: [the page warns under it](ADMIN-PANEL.md#settings-that-turn-a-protection-off)).
 
 ### `PATCH /api/admin/instance-settings` ![admin](https://img.shields.io/badge/-admin-red)
 `{"<key>": <value>, ...}`. Every value is checked against its setting first; one

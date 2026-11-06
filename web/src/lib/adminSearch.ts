@@ -96,6 +96,7 @@ const INSTANCE_SETTING_PAGES: Record<string, { route: string; query?: Record<str
   },
   notifications: { route: 'notifications', keys: ['notify.enabled'] },
   webhooks: { route: 'webhooks', keys: ['notify.webhook_lang'] },
+  connections: { route: 'login-security', keys: ['ftps.allow_plain'] },
 };
 
 export const INSTANCE_SEARCH_SETTINGS: readonly AdminSearchSetting[] = Object.entries(INSTANCE_SETTING_PAGES).flatMap(

@@ -41,7 +41,9 @@ suggestions.
 
 Some URLs are credential-free **by design**, and each is bound to exactly what
 it names: a share link (`/s/…`) or file request (`/d/…`) to its item and its
-settings; an upload ticket (`/u/…`) to one destination and one write; a
+settings, while its creator's account stands and its storage stays in the
+tenant it was made in; an upload ticket (`/u/…`) to one destination on one storage and one
+write, re-checked against its minter's account and tenant when it is used; a
 download ticket (`/z/…`) to one archive or - for the web app's drag-out - one
 file, for at most a minute, and re-checked against its owner's current
 permissions and tenant when it is used; a sign-in handoff ticket (carried in
@@ -61,6 +63,17 @@ verified, sending a plugin's token or a storage's configuration anywhere but
 that plugin's own socket, loopback port or registered address, or handing one
 plugin's storages to another. A certificate filex issues for signing is for
 documents only; one that is usable for email (S/MIME), TLS or code is in scope.
+
+A saved secret - a storage's or a replication target's password or key, the
+SMTP password, an identity provider's bind password or client secret - goes
+only to the address it was saved for, over a connection at least as protected
+as the one it was saved for: a save or a test that would send the kept one to
+a new address, or after a certificate or host-key check was turned off, a CA
+or a pinned key was changed or encryption was taken away, needs it typed
+again. One that goes anyway is in scope. What a setting under the *not safe*
+warning exposes once an administrator turns it on
+([ADMIN-PANEL.md](docs/ADMIN-PANEL.md#settings-that-turn-a-protection-off))
+is not.
 
 A change sent through a signed-in person's browser from another origin is
 refused: any request but `GET`, `HEAD` and `OPTIONS`, and a WebSocket upgrade,

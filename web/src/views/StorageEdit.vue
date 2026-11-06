@@ -18,6 +18,7 @@ import { useStorageDelete } from '@/composables/useStorageDelete';
 import { useStorageDriversStore } from '@/stores/storageDrivers';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
+import { secretNeededOf, type SecretNeeded } from '@/lib/secretNeeded';
 import type { DriftReport, StorageRef, SyncMode, SyncRun } from '@/api/types';
 import { formatBytes, formatDate, formatDuration, formatNumber, formatRelative } from '@/lib/format';
 import { minutesFromSeconds, secondsFromMinutes } from '@/lib/syncInterval';
@@ -87,6 +88,8 @@ const deleting = del.busy;
 
 const testing = ref(false);
 const testResult = ref<{ ok: boolean; error?: string } | null>(null);
+/** The server asked for a saved credential again: said under its field. */
+const secretNeeded = ref<SecretNeeded | null>(null);
 
 const runs = ref<SyncRun[]>([]);
 const runsLoading = ref(false);
@@ -167,6 +170,7 @@ async function loadDrift() {
 
 async function save() {
   saving.value = true;
+  secretNeeded.value = null;
   try {
     const updated = await storages.update(id.value, {
       name: name.value.trim(),
@@ -182,6 +186,7 @@ async function save() {
     void refreshCatalogue();
     toast.success(t('storages.updatedOk'));
   } catch (e: unknown) {
+    secretNeeded.value = secretNeededOf(e, t('errors.generic'));
     toast.error(extractError(e, t('errors.generic')));
   } finally {
     saving.value = false;
@@ -217,6 +222,7 @@ async function confirmDelete() {
 async function test() {
   if (!item.value) return;
   testing.value = true;
+  secretNeeded.value = null;
   testResult.value = null;
   try {
     testResult.value = await StoragesApi.testConnection({
@@ -229,6 +235,7 @@ async function test() {
       read_only: readOnly.value,
     });
   } catch (e: unknown) {
+    secretNeeded.value = secretNeededOf(e, t('errors.generic'));
     testResult.value = { ok: false, error: extractError(e, t('errors.generic')) };
   } finally {
     testing.value = false;
@@ -428,6 +435,7 @@ onMounted(load);
       <StorageDriverFields
         v-model="config"
         :driver="item.driver"
+        :secret-needed="secretNeeded"
       />
       <template v-if="scanFields.length">
         <hr class="divider" />

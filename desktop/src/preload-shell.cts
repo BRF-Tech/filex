@@ -8,7 +8,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('filexShell', {
   getState: () => ipcRenderer.invoke('state:get'),
-  beginAuth: (serverUrl: string) => ipcRenderer.invoke('auth:begin', serverUrl),
+  beginAuth: (serverUrl: string, opts?: { insecureSkipTLSVerify?: boolean }) => ipcRenderer.invoke('auth:begin', serverUrl, opts),
   completeManual: (code: string) => ipcRenderer.invoke('auth:completeManual', code),
   cancelAuth: () => ipcRenderer.invoke('auth:cancel'),
   __testDeepLink: (url: string) => ipcRenderer.invoke('test:deepLink', url),

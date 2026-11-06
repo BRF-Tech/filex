@@ -393,7 +393,8 @@
       "s3TotalTimeout": "Vazgeçme süresi (saniye)",
       "attemptTimeout": "Deneme zaman aşımı (saniye)",
       "maxAttempts": "İstek başına deneme sayısı",
-      "totalTimeout": "Vazgeçme süresi (saniye)"
+      "totalTimeout": "Vazgeçme süresi (saniye)",
+      "insecureSkipTlsVerify": "Sertifika doğrulamasını atla (güvensiz)"
     },
     "fieldHelp": {
       "path": "Sunucudaki dizin. Yoksa oluşturulur; filex asla / dizinini mount etmez.",
@@ -424,7 +425,8 @@
       "attemptTimeout": "Tek bir denemenin sunucudan bir yaşam belirtisi için bekleyebileceği süre: bağlanma, oturum açma, her isteğin cevabı ve bir aktarımın her yeni parçası. İlerleyen bir aktarım, süresi ne olursa olsun hiçbir zaman kesilmez; sunucunun almayı bıraktığı bir yükleme 60 saniye sonra, bu değer daha uzunsa bu kadar sonra kesilir.",
       "webdavAttemptTimeout": "Tek bir denemenin sunucudan bir yaşam belirtisi için bekleyebileceği süre: bağlanma, oturum açma, her isteğin cevabı ve bir aktarımın her yeni parçası. İlerleyen bir aktarım, süresi ne olursa olsun hiçbir zaman kesilmez; sunucunun almayı bıraktığı bir yükleme 60 saniye sonra, bu değer daha uzunsa bu kadar sonra kesilir. Kopyalama, taşıma ve silme cevap için 10 dakikaya kadar bekler, çünkü sunucu bunları ancak iş bittiğinde cevaplar.",
       "maxAttempts": "Hata geçebilecek türdeyse bir isteğin toplamda kaç kez deneneceği: bağlantı reddedilir ya da kopar, cevap zamanında gelmez, sunucu şu an hizmet veremediğini söyler (5xx). 1 yeniden denemeyi kapatır. Bir ret (yanlış parola, bulunmayan bir klasör, doğrulanamayan bir sertifika) hiçbir zaman yeniden denenmez; gönderilmeye başlamış bir yükleme de yeniden denenmez.",
-      "totalTimeout": "İlk denemeden itibaren bu kadar saniye içinde bitemeyecek yeni bir deneme başlatılmaz; böylece çalışmayan bir sunucu bu süre içinde bildirilir. Sürmekte olan bir aktarım kesilmez. Zaman aşımına uğrayan bir istek ancak bu değer deneme zaman aşımının en az iki katıysa yeniden denenir."
+      "totalTimeout": "İlk denemeden itibaren bu kadar saniye içinde bitemeyecek yeni bir deneme başlatılmaz; böylece çalışmayan bir sunucu bu süre içinde bildirilir. Sürmekte olan bir aktarım kesilmez. Zaman aşımına uğrayan bir istek ancak bu değer deneme zaman aşımının en az iki katıysa yeniden denenir.",
+      "insecureSkipTlsVerify": "Bu sunucudan gelen her sertifikayı kabul eder: başka bir yolla güvenilemeyen, kendinden imzalı ya da özel bir sertifika için."
     },
     "lazyFill": {
       "background": "Önce tıklanan, arkada tamamlanan",
@@ -521,6 +523,12 @@
       "enableEarlier": "Kapatılmadan önce yapılan atamalar yeniden geçerli olur: {names}.",
       "enableConfirm": "Aç",
       "enabledOk": "Öğe bazlı erişim açık."
+    },
+    "fieldRisk": {
+      "insecureSkipTlsVerify": "filex ile bu sunucunun arasına girebilen herkes onun yerine geçebilir: geçen her dosyayı okuyup değiştirebilir ve bu bağlantının kimlik bilgilerini ele geçirebilir. Sertifikaya güvenmek denetimi açık tutar: belgelerde Depolama bölümüne bakın.",
+      "insecureSkipHostKey": "filex ile bu sunucunun arasına girebilen herkes onun yerine geçebilir: geçen her dosyayı okuyup değiştirebilir ve bu bağlantının parolasını ele geçirebilir.",
+      "plainFtp": "FTPS olmadan parola ve her dosya ağda şifresiz gider: yoldaki herkes okuyup değiştirebilir.",
+      "followSymlinks": "Bir bağlantı bu makinede herhangi bir yere gidebilir: bu depoyu kullanabilen herkes, bu klasörün ne kadar dışında olursa olsun bağlantının gösterdiği yere ulaşır, onu değiştirir ve siler."
     }
   },
   "users": {
@@ -684,6 +692,10 @@
       "webhooks": {
         "title": "Varsayılan webhook'un dili",
         "desc": "Varsayılan webhook'a gönderilen iletilerin dili. Kendi hedefi olan bir webhook'un dili aşağıda ayrıca seçilir."
+      },
+      "connections": {
+        "title": "Şifrelemesiz bağlantılar",
+        "desc": "filex'in kendi sunduğu protokollerin TLS olmadan çalışıp çalışamayacağı. Anahtarı yalnızca FTPS'in vardır: web uygulaması, WebDAV ve S3 şifrelemeyi filex'in önünde duran katmandan alır, SFTP her zaman şifreler, NFS ise hiç şifrelemez."
       }
     },
     "items": {
@@ -752,6 +764,11 @@
         "label": "Varsayılan webhook'un dili",
         "hint": "Varsayılan webhook'a giden iletilerin yazıldığı dil.",
         "none": "Sunucunun varsayılan dili"
+      },
+      "ftps_allow_plain": {
+        "label": "FTPS ucunda şifresiz FTP'ye izin ver",
+        "hint": "TLS yapamayan bir belge tarayıcısı, yazıcı ya da başka bir cihaz için. Kapalıyken TLS istemeyen istemci, parola gönderemeden reddedilir. TLS isteyen istemci her iki durumda da iki kanalda TLS'te kalır.",
+        "risk": "TLS kullanmayan istemci parolasını ve dosyalarını açık gönderir: onunla bu sunucu arasındaki ağda bulunan herkes bunları okuyup değiştirebilir ve o parolayla oturum açabilir. Böyle bir cihaza bir kişinin parolasını değil, kendine ait bir API anahtarı verin."
       }
     }
   },
@@ -813,7 +830,8 @@
       "testTo": "Test e-postası gönderilecek adres",
       "send": "Gönder",
       "enterEmail": "Geçerli bir e-posta adresi girin.",
-      "encryptionNone": "Yok (şifresiz)"
+      "encryptionNone": "Yok (şifresiz)",
+      "encryptionNoneRisk": "Her ileti ağda şifresiz gider: yoldaki herkes onu ve içindeki bağlantıları okuyabilir. Posta hesabının parolası bu yolla yalnız bu makinedeki bir sunucuya gider; başka bir sunucuya filex parolayı göndermez ve oturum açma başarısız olur."
     }
   },
   "external": {
@@ -967,8 +985,8 @@
       "max_concurrent": "1 ile 64 arasında bir tam sayı; aynı anda daha fazlası gelirse yeniden denemeleri istenir.",
       "email_domain": "Örneğin corp.example ise alex hesabı alex{'@'}corp.example olarak oturum açar. Boş: bu kurulumun işletim sistemi hesapları için seçtiği adres. İlk oturum açmadan önce seçin.",
       "ca_pem": "Dizinin sertifikasını imzalayan özel CA, olduğu gibi yapıştırılır. Boşsa sistemin güvendiği kökler.",
-      "show_refusal_reason": "Varsayılan olarak kapalı. Açıkken, parolası doğru olduğu hâlde burada oturum açamayan kişiye (ilk oturum açışta hesap açılmıyorsa ya da izinli bir grupta değilse) nedeni söylenir. O zaman oturum açma formu, tahmin yürüten birine de parolanın doğru olduğunu söyler; bu parola, aynı hesapları kullanan başka servisleri de açıyor olabilir.",
-      "trust_email": "Varsayılan olarak kapalı. Kapalıyken, sağlayıcının doğrulanmış olarak işaretlemediği bir adres, henüz bir SSO kimliğine bağlanmamış mevcut bir hesabı açmaz; bu adres için yeni hesap da bir yönetici onaylayana kadar devre dışı açılır. Yalnız adresleri gerçekten sahiplerine ait olan bir sağlayıcıda açın: orada bir adres belirleyebilen herkes, o adresteki hesapla oturum açabilir.",
+      "show_refusal_reason": "Varsayılan olarak kapalı. Açıkken, parolası doğru olduğu hâlde burada oturum açamayan kişiye (ilk oturum açışta hesap açılmıyorsa ya da izinli bir grupta değilse) nedeni söylenir.",
+      "trust_email": "Varsayılan olarak kapalı. Kapalıyken, sağlayıcının doğrulanmış olarak işaretlemediği bir adres, henüz bir SSO kimliğine bağlanmamış mevcut bir hesabı açmaz; bu adres için yeni hesap da bir yönetici onaylayana kadar devre dışı açılır.",
       "user_filter": "Oturum açan kişiyi bulur. Her %s, yazdığı addır.",
       "group_attr": "Kişinin gruplarını listeleyen nitelik. Active Directory ve lldap: memberOf.",
       "group_filter": "Yalnızca kişiler gruplarını taşımıyorsa: onları bir aramayla bulur. %s kişinin DN’i, %u oturum açtığı ad - ör. (member=%s).",
@@ -1111,7 +1129,11 @@
     "lockoutConfirm": "Bu, bir kiracının oturum açabildiği son yolu kaldırır. Devam edilsin mi?",
     "review": "Artık her oturum açma sağlayıcısı hizmet verdiği kiracılara bağlı. Yükseltme her sağlayıcıyı o an var olan her kiracıya bağladı, yani kimse için hiçbir şey değişmedi: aşağıdaki bağları gözden geçirin ve bir sağlayıcının hizmet vermemesi gereken kiracıları kaldırın.",
     "reviewDone": "Gözden geçirdim",
-    "noneOfKind": "Bu türden henüz yok. Sağlayıcı ekle ile bir tane oluşturun."
+    "noneOfKind": "Bu türden henüz yok. Sağlayıcı ekle ile bir tane oluşturun.",
+    "fieldRisks": {
+      "show_refusal_reason": "Oturum açma formu, tahmin yürüten birine de parolanın doğru olduğunu söyler; bu parola, aynı hesapları kullanan başka servisleri de açıyor olabilir.",
+      "trust_email": "Yalnız adresleri gerçekten sahiplerine ait olan bir sağlayıcıda açın: orada bir adres belirleyebilen herkes, o adresteki hesapla oturum açabilir."
+    }
   },
   "grants": {
     "title": "Klasör erişimi",
@@ -2265,7 +2287,8 @@
       "hintSeconds": "Saniye cinsinden ({human}). {min} ile {max} arasında; varsayılan {default}.",
       "errRange": "{min} ile {max} arasında bir tam sayı girin.",
       "errOrder": "En uzun kilit, ilk kilitten kısa olamaz.",
-      "saved": "Giriş sınırları kaydedildi"
+      "saved": "Giriş sınırları kaydedildi",
+      "enabledRisk": "Sınır kapalıyken herkes, bu sunucunun cevap verdiği hızda parola deneyebilir."
     },
     "allowlist": {
       "title": "İzinli adresler",
@@ -4088,7 +4111,8 @@
       "certificate_wrong_name": "Sertifika bu alan adı için değil.",
       "certificate_expired": "Sertifikanın süresi dolmuş.",
       "certificate_needs_secret_key": "Özel anahtar mühürlenerek saklanır ve bu kurulumda FILEX_SECRET_KEY yok."
-    }
+    },
+    "insecureRisk": "Kiracının sağlayıcısı bu sunucunun iç ağındaki makinelere ulaşabilir, LDAP bağlama parolası da ağda şifresiz gidebilir."
   },
   "tenancy": {
     "title": "Çok kiracılı mod",
@@ -4437,5 +4461,8 @@
       "missing_input_secret": "Sağlayıcıya gizli anahtar ulaşmadı.",
       "other": "Kurulum doğrulamaları denetleyemiyor ({code}); bu arada yerel doğrulama yanıtlıyor."
     }
+  },
+  "securityOff": {
+    "note": "Bu ayar güvenli değildir ve önerilmez. Ne yaptığınızı biliyorsanız uygulayın."
   }
 }

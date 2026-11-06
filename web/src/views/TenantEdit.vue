@@ -16,11 +16,13 @@ import { TenantsApi, tenantRefusal, type Tenant, type TenantInput } from '@/api/
 import { StoragesApi } from '@/api/storages';
 import type { StorageRef } from '@/api/types';
 import { extractError } from '@/api/client';
+import { secretNeededOf } from '@/lib/secretNeeded';
 import { useToastStore } from '@/stores/toast';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
 import Input from '@/components/ui/Input.vue';
+import SecurityOffNote from '@/components/ui/SecurityOffNote.vue';
 import Select from '@/components/ui/Select.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import Modal from '@/components/ui/Modal.vue';
@@ -126,7 +128,9 @@ async function save() {
     toast.success(t('tenants.savedOk'));
   } catch (e) {
     const r = tenantRefusal(e);
+    const needed = secretNeededOf(e, t('errors.generic'));
     if (r) errors.value = { [r.field]: t(`tenants.errors.${r.code}`) };
+    else if (needed) errors.value = { [needed.field]: needed.message };
     else toast.error(extractError(e, t('errors.generic')));
   } finally {
     saving.value = false;
@@ -280,6 +284,8 @@ async function confirmDelete() {
           autocomplete="new-password"
           :placeholder="tenant.oidc_client_secret_set ? t('tenants.secretSet') : undefined"
           :hint="tenant.oidc_client_secret_set ? t('tenants.secretSetHint') : undefined"
+          :error="!form.oidc_client_secret ? errors.oidc_client_secret || null : null"
+          data-testid="tenant-oidc-client-secret"
         />
         <Input
           v-model="form.oidc_redirect_url"
@@ -298,6 +304,7 @@ async function confirmDelete() {
           :description="trustHint"
           name="tenant-oidc-trust-email"
         />
+        <SecurityOffNote :risk="t('authProviders.fieldRisks.trust_email')" />
       </div>
 
       <div class="flex justify-between items-center gap-2">

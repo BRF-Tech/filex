@@ -448,6 +448,8 @@
     "server.storage.scan_exclude_everything": { "pattern": "the pattern (one line of the setting) as the administrator typed it" },
     "server.storage.scan_exclude_limit": { "max": "the most patterns one storage may have (200)", "length": "the most characters one pattern may have (512)" },
     "server.storage.secret_address_changed": { "field": "the setting's key as the driver names it (password, secret_key, private_key), shown as written" },
+    "server.storage.secret_check_off": { "field": "the setting's key as the driver names it (password, secret_key, private_key), shown as written" },
+    "server.storage.secret_protection_off": { "field": "the setting's key as the driver names it (password, bind_password, smtp.password), shown as written", "setting": "the key of the protection the change weakens (tls, start_tls, ca_pem, host_key, smtp.tls...), shown as written" },
     "server.auth_provider.legacy_elsewhere_title": { "account": "the login name the person signed in with, e.g. alex (the older account's email)", "account_tenant": "the short name (sub-domain) of the tenant the older account belongs to", "login_tenant": "the short name (sub-domain) of the tenant the sign-in was for" },
     "server.auth_provider.legacy_elsewhere_body": { "account": "the login name the person signed in with, e.g. alex (the older account's email)", "account_tenant": "the short name (sub-domain) of the tenant the older account belongs to", "login_tenant": "the short name (sub-domain) of the tenant the sign-in was for" },
     "server.onlyoffice.saved_beside_body": { "ext": "the extension of the file that was edited, without the dot, e.g. doc" },

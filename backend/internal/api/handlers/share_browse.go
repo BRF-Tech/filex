@@ -229,7 +229,7 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 
 	resolved, err := h.Store.GetShareByToken(r.Context(), strings.ToLower(tok))
 	if err != nil || resolved == nil || resolved.IsExpired(time.Now()) ||
-		!linkCreatorAllows(r.Context(), h.ACL, h.Store, resolved) {
+		!linkCreatorAllows(r.Context(), h.ACL, h.Store, resolved, h.Tenants.MultiTenant) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}

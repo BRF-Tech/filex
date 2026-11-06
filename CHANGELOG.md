@@ -7,6 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-11-06
+
+### Added
+
+- **The certificate switch is each connection's own**
+  ([GitHub #134](https://github.com/BRF-Tech/filex/issues/134), reported by
+  @kladiv). Every S3, WebDAV
+  and FTPS storage has **Skip certificate verification (insecure)** in its advanced
+  settings (`insecure_skip_tls_verify`), and a replication target has its own: a
+  self-signed NAS no longer takes the check away from the bucket beside it.
+  `FILEX_STORAGE_TLS_SKIP_VERIFY` becomes a one-time seed: the first start writes
+  the switch on to every such storage and target, says which in the log, and never
+  reads the variable again, so nobody loses a storage across the upgrade.
+  Turning the switch on for a saved connection needs its password or key typed
+  again: a saved credential does not go to a server that is no longer checked.
+  [STORAGE.md](docs/STORAGE.md#private-and-self-signed-certificates) has it.
+- **The CLI and the desktop app reach a filex server with a self-signed
+  certificate.** `filex client login --insecure-skip-tls-verify` saves the switch
+  with the address, for `filex sync`, `filex mount` and the vault commands too; it
+  goes to no other address ([CLI.md](docs/CLI.md#a-server-with-a-self-signed-certificate)).
+  The desktop app has the switch under **Advanced** at sign-in and on every account
+  in App settings, for the window and the sync engine
+  ([DESKTOP.md](docs/DESKTOP.md#signing-in)).
+- **A server may permit plain FTP.** **Allow plain FTP on the FTPS endpoint**
+  (`ftps.allow_plain`, first value from `FILEX_FTPS_ALLOW_PLAIN`), off by default,
+  for the scanner that cannot do TLS. A client that asks for TLS stays on it on both
+  channels, and the connection guide says what the server does
+  ([PROTOCOLS.md](docs/PROTOCOLS.md#ftps)).
+- **A warning under every setting that turns a protection off.** One sentence (not
+  safe, not recommended, apply it only if you know what you are doing) and what that
+  setting exposes, on the storage and replication forms, the provider forms, Login
+  security, SMTP and the tenant pages
+  ([ADMIN-PANEL.md](docs/ADMIN-PANEL.md#settings-that-turn-a-protection-off)).
+
+### Security
+
+- **A saved password goes only to the address it was saved for, on every page
+  that keeps one.** A new SMTP host, a new identity provider address (an LDAP
+  `url`, an OIDC `issuer`) or a new issuer on a tenant's OIDC needs the saved
+  password or client secret typed again; before, the SMTP test, a provider's save
+  or **Test now**, and a sign-in sent the saved one to the new address (measured).
+  The OIDC redirect address is not one of them: the browser comes back there with
+  the sign-in code and no secret goes to it, so changing it asks for nothing.
+- **A saved password does not go over a connection less protected than the one it
+  was saved for.** SMTP encryption changed to None, LDAP StartTLS turned off on an
+  `ldap://` address, a new LDAP CA (`ca_pem`, `ca_file`), the SFTP host-key check
+  turned off or another pinned key or `known_hosts` file, and FTP without TLS need
+  the saved password typed again, on the save and on every test (the SMTP test,
+  **Test now**, **Test connection**), for a tenant's own providers too. Before, each
+  sent the saved password over the weakened connection, the plain ones in the clear
+  (measured; SMTP without encryption already sent a password only to this machine).
+  Turning a protection back on, or editing another field, asks for nothing.
+- **What a tenant's member made on a storage stops when the storage moves to
+  another tenant**
+  ([GHSA-fxm3-597v-wpgj](https://github.com/BRF-Tech/filex/security/advisories/GHSA-fxm3-597v-wpgj)).
+  The credential-free `/u/` upload ticket resolved its storage by the name
+  saved at the mint, with no tenant scope and a copy of the minting account:
+  when the platform operator moved that storage to another tenant, or deleted
+  it and created one of the same name for another tenant, while the ticket
+  lived, its one write landed in the other tenant's file. A ticket now names
+  the storage by its id, in the minter's tenant, and the upload asks again as
+  the minter - account, the API token it was minted with, tenant, storage -
+  and answers like a used ticket when any of them no longer stands. The same
+  question is now asked by everything else that was made on a storage and
+  used later: a share link, a file request and an app's page stop answering
+  (`404`, as if they did not exist) while their storage is in another tenant,
+  and answer again when it is back; a queued operation, an app job's result,
+  an ONLYOFFICE save over the document, the editor's fetch URL, a signed
+  thumbnail and an editing-together membership are refused for a storage the
+  person's tenant no longer has; a resumable upload takes no chunk or commit
+  for it; an app job's chosen output folder is held to its storage by id. A
+  storage renamed in its own tenant keeps its tickets, which used to fail. A
+  link made on a storage that was in no tenant, or in the platform's own,
+  keeps answering when the storage is given to a tenant.
+  [MULTI-TENANCY.md](docs/MULTI-TENANCY.md#168-a-storage-moved-to-another-tenant-what-was-made-on-it-before---closed-059)
+  has what was measured and what each door asks. Reported by @mappygrid.
+- **Switching an account off stops what it holds, its API tokens on every
+  route first**
+  ([GHSA-58wc-42xh-89v8](https://github.com/BRF-Tech/filex/security/advisories/GHSA-58wc-42xh-89v8)).
+  The agent API and its MCP server (`/api/ai`) and the ShareX upload
+  (`/api/sharex`) checked a token with a copy of their own that never asked
+  whether the token's account was still on: a disabled account's token went
+  on reading and writing its files, running MCP tools and minting public links,
+  and an administrator's admin token kept the admin surface, from which it
+  could switch its own account back on. Every route a token opens now asks one
+  shared check and answers a disabled account as a session is answered,
+  `403` with `reason: account_disabled`. A live-updates or editing-together
+  socket ticket the account took before it was switched off no longer opens
+  either, and a live-updates socket it has open is closed within about half a
+  minute. Its share links, file requests and upload tickets answer like ones
+  that do not exist and take nothing - until now a link kept serving the files
+  and a file request kept writing into the account's folder - an ONLYOFFICE
+  editor it left open no longer saves over the document, and an
+  editing-together member leaves the session at its next touch. Switched back
+  on, the same tokens, links and PINs work again
+  ([SHARING.md](docs/SHARING.md#a-link-follows-its-creator)). Reported by
+  @mappygrid.
+- **Only a person signed in to the panel switches an administrator's account
+  on or off.** An admin-scoped API key, on `/api/admin`, `/api/ai/admin` or as
+  the `admin_users_update` MCP tool, now gets `403 session_required` for it,
+  as it already did for promoting an account or setting an administrator's
+  password - another administrator's account and the key's own alike.
+  Ordinary accounts are still a key's to switch.
+- **Suspending a tenant stops what its people already hold.** Suspension
+  refused a new sign-in only: a session that was open, and every API key the
+  tenant's people held, kept working on every route until it ran out or was
+  revoked. Both now answer as the sign-in does, `403` with
+  `reason: tenant_suspended`; a socket ticket no longer opens and an open
+  live-updates socket is closed, and its people's links, file requests, upload
+  tickets and open editors pause as a switched-off account's do. Resuming the
+  tenant gives all of it back.
+  Suspending and resuming a tenant now need an administrator signed in to the
+  panel: an API key gets `403 session_required` for them on
+  `/api/admin/providers`, `/api/ai/admin/providers` and `admin_tenants_update`,
+  and so does deleting a tenant together with its accounts (`?force=1`,
+  `admin_tenants_delete` with `force`).
+
 ## [0.58.2] - 2026-11-06
 
 ### Added

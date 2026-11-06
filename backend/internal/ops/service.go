@@ -215,6 +215,9 @@ type Service struct {
 	uploadCommitter UploadCommitter
 	pluginRunner    PluginRunner
 	decorator       func(ctx context.Context, rows []*Op)
+	// reaches answers whether the account an op runs for still reaches a
+	// storage (SetTenantGuard); nil asks nothing.
+	reaches func(ctx context.Context, actorID, storageID int64) bool
 
 	// cancels holds the cancel handle of every running op (Cancel).
 	cancels sync.Map
@@ -336,6 +339,34 @@ func (s *Service) SetSync(d DBSync) { s.dbsync = d }
 // against (see Targets).
 func (s *Service) SetLocks(fn func(ctx context.Context, storageID int64) writegate.Locks) {
 	s.locks = fn
+}
+
+// SetTenantGuard wires the question every op with an account behind it is
+// asked when it STARTS (tenantRefusal): does that account still reach the
+// op's storages? The router wires db.AccountReaches.
+//
+// ⚠⚠ An op is judged at the submit and run later - a queued copy waits behind
+// a scan, a row put back waits for its turn, a plugin action for a worker -
+// with no request and no tenant scope behind it. Before 0.59 nothing asked
+// again, so an op queued by a member of one tenant ran, and wrote, after the
+// platform operator had moved the storage to another tenant.
+func (s *Service) SetTenantGuard(fn func(ctx context.Context, actorID, storageID int64) bool) {
+	s.reaches = fn
+}
+
+// tenantRefusal is the op's refusal when the account it runs for no longer
+// reaches its storage or its destination storage, "" when it does (or when
+// nobody is asked: no guard wired, no account behind the op).
+func (s *Service) tenantRefusal(ctx context.Context, op *Op) string {
+	if s.reaches == nil || op == nil || op.ActorID == nil || *op.ActorID <= 0 {
+		return ""
+	}
+	for _, id := range []int64{op.StorageID, op.DestStorageID} {
+		if id != 0 && !s.reaches(ctx, *op.ActorID, id) {
+			return "the storage is no longer in the tenant of the account this operation runs for"
+		}
+	}
+	return ""
 }
 
 func (s *Service) lockView(ctx context.Context, storageID int64) writegate.Locks {
@@ -1149,6 +1180,11 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 			return
 		}
 		defer s.cancels.Delete(op.ID)
+		if why := s.tenantRefusal(ctx, op); why != "" {
+			s.dropCancelled(op.ID)
+			s.fail(ctx, op, why)
+			return
+		}
 		s.executeJob(ctx, op)
 		return
 	}
@@ -1178,6 +1214,10 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 	}
 	defer s.cancels.Delete(op.ID)
 
+	if why := s.tenantRefusal(parent, op); why != "" {
+		s.fail(parent, op, why)
+		return
+	}
 	if s.storageResolver == nil {
 		s.fail(parent, op, "no storage resolver")
 		return

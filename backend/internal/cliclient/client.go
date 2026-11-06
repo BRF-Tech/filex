@@ -2,6 +2,7 @@ package cliclient
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,6 +44,20 @@ type Client struct {
 	// OpPollInterval is how often WaitOp asks about a queued operation. 0
 	// means DefaultOpPollInterval.
 	OpPollInterval time.Duration
+
+	// skipTLSVerify is the connection's Conn.InsecureSkipTLSVerify, kept for
+	// the transports built after this one: the change stream's.
+	skipTLSVerify bool
+}
+
+// transportTLS is the TLS configuration of a transport of this connection: nil
+// with the check on, so the transport stays exactly what it was, and with it
+// off one that accepts any certificate (Conn.InsecureSkipTLSVerify).
+func transportTLS(skip bool) *tls.Config {
+	if !skip {
+		return nil
+	}
+	return &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true} //nolint:gosec // the person's explicit choice for this connection
 }
 
 // newHTTPClient is an http.Client that cannot hang forever on a half-dead
@@ -54,9 +69,10 @@ type Client struct {
 // a request that may only legitimately take long in its BODY (a big
 // transfer), never in dialing or waiting for headers. There is still no
 // whole-request timeout: bodies stream arbitrarily large files.
-func newHTTPClient() *http.Client {
+func newHTTPClient(skipTLSVerify bool) *http.Client {
 	tr := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		Proxy:           http.ProxyFromEnvironment,
+		TLSClientConfig: transportTLS(skipTLSVerify),
 		DialContext: (&net.Dialer{
 			Timeout:   15 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -80,9 +96,10 @@ func newHTTPClient() *http.Client {
 // caller's context (Ctrl-C in the CLI).
 func New(conn Conn) *Client {
 	c := &Client{
-		BaseURL: strings.TrimRight(conn.URL, "/"),
-		Token:   conn.Token,
-		HTTP:    newHTTPClient(),
+		BaseURL:       strings.TrimRight(conn.URL, "/"),
+		Token:         conn.Token,
+		HTTP:          newHTTPClient(conn.InsecureSkipTLSVerify),
+		skipTLSVerify: conn.InsecureSkipTLSVerify,
 	}
 	// A missing home directory is not a reason to refuse to upload; it only
 	// costs cross-restart resume, and the error would be reported at a point

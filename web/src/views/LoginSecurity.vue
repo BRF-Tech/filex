@@ -45,6 +45,7 @@ import { DEMO_MASKED_ADDRESS, formatDate, formatDuration, shownAddress } from '@
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import SecurityOffNote from '@/components/ui/SecurityOffNote.vue';
 import Select from '@/components/ui/Select.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
@@ -53,6 +54,7 @@ import Spinner from '@/components/ui/Spinner.vue';
 import AddressListEditor from '@/components/loginSecurity/AddressListEditor.vue';
 import AutoResolution from '@/components/loginSecurity/AutoResolution.vue';
 import UntrustedForwarders from '@/components/loginSecurity/UntrustedForwarders.vue';
+import InstanceSettingsCard from '@/components/settings/InstanceSettingsCard.vue';
 import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
@@ -621,6 +623,7 @@ onBeforeUnmount(() => clearInterval(timer));
           :label="t('loginSecurity.limit.enabled')"
           :description="t('loginSecurity.limit.enabledHint')"
         />
+        <SecurityOffNote v-if="!form.enabled" :risk="t('loginSecurity.limit.enabledRisk')" />
         <div class="grid gap-x-4 gap-y-3 sm:grid-cols-2">
           <Input
             v-for="f in NUMBER_FIELDS"
@@ -772,6 +775,10 @@ onBeforeUnmount(() => clearInterval(timer));
           </Button>
         </div>
       </form>
+
+      <!-- Whether FTPS may go without TLS: a password in the clear is this
+           page's business (task #298). -->
+      <InstanceSettingsCard group="connections" />
 
       <!-- Locks -->
       <section class="space-y-2" data-testid="login-locks">

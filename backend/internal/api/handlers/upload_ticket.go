@@ -19,11 +19,11 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
-	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/writegate"
 )
@@ -55,6 +55,20 @@ import (
 //   - it grants no read, no list, no delete — nothing but that one write
 //   - it is single-use (a successful write consumes it) and short-lived
 //   - the bytes are billed to and written as the MINTER, not the redeemer
+//   - the destination is the STORAGE, by the id that never moves, in the
+//     minter's tenant — not the name it was called by at the mint
+//
+// ⚠⚠ The redeem asks again, as the minter as they are NOW (ticketMinter,
+// asTicketMinter): the account must still be able to sign in, it must still
+// be in the tenant it minted from, that tenant must still have the storage,
+// and the storage behind the id must still be there. A ticket that fails one
+// of those is spent and answers like a used one, and nothing is written. Before
+// 0.59 the redeem resolved the NAME saved at the mint, with no tenant scope
+// and a copy of the account taken at the mint: a storage the platform operator
+// moved to another tenant (or deleted, then created again under the same name
+// for another tenant) while the ticket lived took the write into that tenant's
+// file, and a disabled account's ticket still wrote. A storage renamed in its
+// own tenant keeps its id, and its tickets with it.
 //
 // Tickets live in memory only. They are minutes-lived by design, so a restart
 // dropping them costs a re-mint (one MCP call) and buys us no schema change.
@@ -68,12 +82,31 @@ const (
 
 // uploadTicket is one minted, not-yet-redeemed upload authorization.
 type uploadTicket struct {
-	// Path is the canonical adapter://rel destination, already resolved
-	// against the minter's confinement root — the redeemer never supplies it.
+	// StorageID is the storage the destination was resolved on at the mint,
+	// and Rel the path inside it, already resolved against the minter's
+	// confinement root — the redeemer never supplies either. The storage's
+	// NAME is not kept: it is a label an operator may change or give to
+	// another storage, and the redeem reads the current one from the id.
+	StorageID int64
+	Rel       string
+	// Path is the adapter://rel destination as it read at the mint: the log
+	// line of a refused redeem.
 	Path string
-	// Owner is the minting user. The redeem writes AS this user so grants,
-	// quota and ownership match a normal upload; the redeemer stays anonymous.
-	Owner     *model.User
+	// OwnerID is the minting account. The redeem re-reads it (ticketMinter)
+	// and writes AS it, so grants, quota and ownership match a normal upload;
+	// the redeemer stays anonymous.
+	OwnerID int64
+	// TokenID is the API token the ticket was minted with (0: none). A ticket
+	// follows its token, as a /z/ link does: revoked, expired or no longer
+	// the owner's, and the ticket is no good; the write runs under the
+	// token's `root:` folder.
+	TokenID int64
+	// Scoped says the mint ran under a tenant scope (multi-tenant mode), and
+	// TenantID is that scope's tenant. The redeem runs under the minter's
+	// scope as it is then, and refuses when it names another tenant or no
+	// longer reaches StorageID.
+	Scoped    bool
+	TenantID  int64
 	MaxBytes  int64
 	ExpiresAt time.Time
 	// AllowPlaintext is the minter's allow_plaintext, carried to the redeem:
@@ -216,6 +249,12 @@ func (a *aiOps) CreateUploadTicket(ctx context.Context, req uploadTicketRequest)
 	if a.tickets == nil {
 		return nil, storage.ErrUnsupported
 	}
+	// A ticket writes as its minter, and the redeem re-reads that account:
+	// with no account there is nobody to write as.
+	owner := auth.UserFrom(ctx)
+	if owner == nil || owner.ID <= 0 {
+		return nil, errAIForbidden
+	}
 	s, rel, err := a.resolveStorage(ctx, req.Path)
 	if err != nil {
 		return nil, err
@@ -275,13 +314,22 @@ func (a *aiOps) CreateUploadTicket(ctx context.Context, req uploadTicketRequest)
 	}
 
 	dest := joinAdapterPath(s.Name, rel)
-	tok, err := a.tickets.mint(&uploadTicket{
+	t := &uploadTicket{
+		StorageID:      s.ID,
+		Rel:            rel,
 		Path:           dest,
-		Owner:          auth.UserFrom(ctx),
+		OwnerID:        owner.ID,
 		MaxBytes:       max,
 		ExpiresAt:      time.Now().Add(ttl),
 		AllowPlaintext: req.AllowPlaintext,
-	})
+	}
+	if scope, ok := tenant.FromContext(ctx); ok && scope != nil {
+		t.Scoped, t.TenantID = true, scope.ProviderID
+	}
+	if token := auth.TokenFrom(ctx); token != nil {
+		t.TokenID = token.ID
+	}
+	tok, err := a.tickets.mint(t)
 	if err != nil {
 		return nil, err
 	}
@@ -329,6 +377,10 @@ type TicketUpload struct {
 	ops     *aiOps
 	tickets *uploadTicketStore
 	limiter *ipLimiter
+	// multiTenant is the mode in force (AttachMultiTenant). A ticket minted
+	// under a tenant scope is redeemed under one whatever this says: the
+	// ticket's own record keeps the check on a handler built without it.
+	multiTenant bool
 }
 
 // NewTicketUpload builds the public redeem handler over the same ops core the
@@ -361,6 +413,63 @@ func (h *TicketUpload) AttachStaged(s *StagedUpload) { h.ops.staged = s }
 
 // AttachBody wires the byte-source resolver.
 func (h *TicketUpload) AttachBody(b *filebody.Resolver) { h.ops.attachBody(b) }
+
+// AttachMultiTenant tells the redeem the mode in force, so a ticket's minter
+// is asked again with the tenant scope their account has now.
+func (h *TicketUpload) AttachMultiTenant(on bool) { h.multiTenant = on }
+
+// ticketNotFoundHint is the answer to a ticket that is no good: unknown, used,
+// or one whose destination is no longer its minter's. One sentence for all of
+// them, so a refused ticket tells the redeemer nothing about why.
+const ticketNotFoundHint = "Unknown ticket, or it was already used (a ticket accepts exactly one upload). Mint a new one and upload to the new URL."
+
+// errTicketStorageMoved is a ticket destination whose storage, read by its
+// current name at the write, is not the storage the ticket was minted on.
+var errTicketStorageMoved = errors.New("upload ticket: the destination storage is not the one it was minted on")
+
+// asMinter is the context a ticket's write runs in, and the destination as it
+// reads now, asked of the minter as they are NOW: their account and the token
+// they minted with (ticketMinter: the account may still sign in, the token
+// still stands), their tenant's current scope (asTicketMinter) - the same
+// tenant the ticket was minted from, still reaching the storage - and the
+// storage itself, by the id the ticket names. reason is "" when all of it
+// stands, otherwise what fell, for the log: "account", "token", "tenant" or
+// "storage".
+func (h *TicketUpload) asMinter(ctx context.Context, t *uploadTicket) (context.Context, string, string) {
+	store := h.ops.store
+	scoped := h.multiTenant || t.Scoped
+	owner, token, reason := ticketMinter(ctx, store, scoped, t.OwnerID, t.TokenID)
+	if reason != "" {
+		return nil, "", reason
+	}
+	uctx := asTicketMinter(ctx, store, scoped, owner, token)
+	if scoped {
+		scope, _ := tenant.FromContext(uctx)
+		if scope == nil || scope.ProviderID != t.TenantID {
+			return nil, "", "tenant"
+		}
+		if !scope.CanAccessStorage(t.StorageID) {
+			return nil, "", "storage"
+		}
+	}
+	st, err := store.GetStorage(ctx, t.StorageID)
+	if err != nil || st == nil {
+		return nil, "", "storage"
+	}
+	return quotastore.WithOwner(uctx, owner.ID), joinAdapterPath(st.Name, t.Rel), ""
+}
+
+// refuseSpent spends a ticket that is no good and answers like a used one.
+func (h *TicketUpload) refuseSpent(w http.ResponseWriter, tok string, t *uploadTicket, reason string) {
+	h.tickets.consume(tok)
+	slog.Warn("upload ticket: refused at the redeem, nothing written",
+		slog.String("reason", reason),
+		slog.String("minted_for", t.Path),
+		slog.Int64("storage_id", t.StorageID),
+		slog.Int64("owner_id", t.OwnerID),
+	)
+	ticketRefusal(w, http.StatusNotFound, "ticket_not_found", ticketNotFoundHint, nil)
+}
 
 // ticketRefusal answers a refused redeem. Every reply carries a `hint` saying
 // what to DO, because the three refusals an agent actually hits need three
@@ -398,9 +507,18 @@ func (h *TicketUpload) Upload(w http.ResponseWriter, r *http.Request) {
 		default:
 			// Unknown and already-redeemed are the SAME answer: a consumed
 			// ticket must not be distinguishable from one that never existed.
-			ticketRefusal(w, http.StatusNotFound, "ticket_not_found",
-				"Unknown ticket, or it was already used (a ticket accepts exactly one upload). Mint a new one and upload to the new URL.", nil)
+			ticketRefusal(w, http.StatusNotFound, "ticket_not_found", ticketNotFoundHint, nil)
 		}
+		return
+	}
+
+	// Before a byte of the body is read: the minter as they are now, and the
+	// storage the ticket names. Run the write as the minter: their grants
+	// decide, their quota is billed, and the file lands owned by them. The
+	// uploader stays anonymous.
+	ctx, dest, reason := h.asMinter(r.Context(), t)
+	if reason != "" {
+		h.refuseSpent(w, tok, t, reason)
 		return
 	}
 
@@ -430,16 +548,13 @@ func (h *TicketUpload) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Run the write as the minter: their grants decide, their quota is billed,
-	// and the file lands owned by them. The uploader stays anonymous.
-	ctx := r.Context()
-	if t.Owner != nil {
-		ctx = auth.WithUser(ctx, t.Owner)
-		ctx = quotastore.WithOwner(ctx, t.Owner.ID)
-	}
 	ctx = withPlaintextConsent(ctx, t.AllowPlaintext)
 
-	entry, err := h.ops.WriteStream(ctx, t.Path, src, size)
+	entry, err := h.ops.WriteStreamOn(ctx, t.StorageID, dest, src, size)
+	if errors.Is(err, errTicketStorageMoved) {
+		h.refuseSpent(w, tok, t, "storage")
+		return
+	}
 	if err != nil {
 		h.tickets.release(tok)
 		// The rule's refusal is its own answer, not a storage outage — which
@@ -447,7 +562,7 @@ func (h *TicketUpload) Upload(w http.ResponseWriter, r *http.Request) {
 		if writeE2ERefusal(w, r, err) {
 			return
 		}
-		h.failWrite(w, err, t.Path, size)
+		h.failWrite(w, err, dest, size)
 		return
 	}
 	h.tickets.consume(tok)

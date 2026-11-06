@@ -25,21 +25,21 @@ set -euo pipefail
 
 dirs="${FILEX_GO_DIRS:-./...}"
 race=()
-par=()
-timeout=30m
+# The pretag builds both images beside this gate, with -race or without: the
+# run gets an hour, the targeted one as the whole one, and half the cores for
+# its packages. On v0.57.1's first round (load 60, -race) the handlers package
+# rang the 30-minute alarm 17 seconds into a test, and three timing tests
+# missed their bounds. On v0.58.2's first round (no -race, a storage patch)
+# the same package rang it beside a full image build, no test hung, and on the
+# next round it took 1754 of the 1800 seconds with both images from the cache.
+timeout=60m
+cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+par=(-p "$(( cores / 2 > 2 ? cores / 2 : 2 ))")
 if [ "${FILEX_GO_RACE:-}" = 1 ]; then
   export CGO_ENABLED=1
   cc="$(go env CC)"
   command -v "${cc%% *}" >/dev/null 2>&1 || { echo "-race needs a C compiler and there is none here (go env CC: ${cc:-unset}): install one (gcc), or run the patch as --profile patch" >&2; exit 1; }
   race=(-race)
-  # Under -race a package takes several times the CPU and memory, and the
-  # pretag builds both images beside this gate: the run gets an hour, the
-  # targeted one as the whole one, and half the cores for its packages. On
-  # v0.57.1's first round (load 60) the handlers package rang the 30-minute
-  # alarm 17 seconds into a test, and three timing tests missed their bounds.
-  timeout=60m
-  cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
-  par=(-p "$(( cores / 2 > 2 ? cores / 2 : 2 ))")
 fi
 
 whole() {

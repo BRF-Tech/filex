@@ -42,10 +42,22 @@ import (
 // ⚠ One function for every door that serves a link — /s/ (download, metadata,
 // folder browse), /d/ (drop page and upload) and /api/public/* — so a door
 // that forgets it is the only door that still serves a closed link.
-func linkCreatorAllows(ctx context.Context, resolver *acl.Resolver, store db.Store, sh *model.Share) bool {
+//
+// ⚠⚠ The creator must still be able to sign in (ticketMinter, the answer a
+// ticket's redeem gets too): a link of an account that was switched off, or
+// of a suspended tenant, pauses - it answers like one that is not there, and
+// its row, address and PIN come back with the account. Before 0.59 such a
+// link went on serving the bytes, and a file request took uploads into the
+// account's folder (the app links already stopped: linkCreator). A link
+// whose storage left the tenant it was made in never reaches here: its
+// lookup answers "not found" (db.ShareStands, GetShareByToken).
+func linkCreatorAllows(ctx context.Context, resolver *acl.Resolver, store db.Store, sh *model.Share, multiTenant bool) bool {
 	creator := ruledLinkCreator(ctx, resolver, store, sh)
 	if creator == nil {
 		return true
+	}
+	if _, _, why := ticketMinter(ctx, store, multiTenant, creator.ID, 0); why != "" {
+		return false
 	}
 	node, set, ask := linkCreatorSet(ctx, resolver, store, creator, sh.NodeID)
 	if !ask {

@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -153,16 +154,36 @@ func editorDocServerOf(t *testing.T, base string) *editorDocServer {
 // the document key filex gives the node (0.54: the callback acts only on a key
 // filex made for the document it names), with the fixture's document server
 // serving content.
-func editorSave(t *testing.T, base string, nodeID int64, content string) (int, string) {
+//
+// It names the session's editors in `users`, as Docs does in a status 2 save:
+// the given accounts, else an administrator made for it. A save over the
+// document is written only for an editor who may still change it (0.59,
+// onlyoffice anEditorMayChange).
+func editorSave(t *testing.T, base string, nodeID int64, content string, editors ...int64) (int, string) {
 	t.Helper()
 	ds := editorDocServerOf(t, base)
 	ds.mu.Lock()
 	ds.content = content
 	ds.mu.Unlock()
-	node, err := ds.store.GetNode(context.Background(), nodeID)
+	ctx := context.Background()
+	node, err := ds.store.GetNode(ctx, nodeID)
 	require.NoError(t, err)
-	key := ds.svc.DocumentKey(context.Background(), node)
-	claims := map[string]any{"key": key, "status": 2, "url": ds.srv.URL + "/saved.docx"}
+	if len(editors) == 0 {
+		const email = "oo-editor@test.local"
+		u, _ := ds.store.GetUserByEmail(ctx, email)
+		if u == nil {
+			u, err = ds.store.CreateUser(ctx, email, "x", model.RoleAdmin, "en", "UTC")
+			require.NoError(t, err)
+			require.NoError(t, ds.store.SetUserEnabled(ctx, u.ID, true))
+		}
+		editors = []int64{u.ID}
+	}
+	users := make([]any, len(editors))
+	for i, id := range editors {
+		users[i] = strconv.FormatInt(id, 10)
+	}
+	key := ds.svc.DocumentKey(ctx, node)
+	claims := map[string]any{"key": key, "status": 2, "url": ds.srv.URL + "/saved.docx", "users": users}
 	body := map[string]any{"token": ooSign(t, "onlyoffice-test-secret", claims)}
 	return fxPost(t, fmt.Sprintf("%s/api/files/onlyoffice/callback?node=%d", base, nodeID), "", body)
 }
@@ -208,7 +229,8 @@ func TestInternalDirs_EditorSavesOnlyTheWorkingCopy(t *testing.T) {
 	}
 
 	save := func(rel string) (int, string) {
-		return editorSave(t, srv.URL, nodeOf(rel).ID, "EDITED IN THE BROWSER")
+		// The administrator opened the editor sessions above: theirs is the save.
+		return editorSave(t, srv.URL, nodeOf(rel).ID, "EDITED IN THE BROWSER", adminID)
 	}
 	onDisk := func(rel string) string {
 		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))

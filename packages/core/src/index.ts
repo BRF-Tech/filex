@@ -1175,6 +1175,7 @@ export type {
   StorageDriverDescriptor,
   StorageField,
   StorageFieldOption,
+  StorageFieldSecurityOff,
   StorageFieldType,
   StorageRow,
   StorageTestResult,

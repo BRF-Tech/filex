@@ -541,7 +541,7 @@ func TestDrafts_TheDocumentEditorEditsTheOwnersDraft(t *testing.T) {
 		require.Equal(t, http.StatusOK, status, "grant: %s", body)
 		return u.ID, personToken(t, store, u.ID)
 	}
-	_, owner := grant("owner@oo.test")
+	ownerID, owner := grant("owner@oo.test")
 	_, other := grant("other@oo.test")
 
 	status, body := fxPost(t, srv.URL+"/api/files/drafts", owner,
@@ -572,7 +572,7 @@ func TestDrafts_TheDocumentEditorEditsTheOwnersDraft(t *testing.T) {
 		}
 	}
 
-	status, body = editorSave(t, srv.URL, n.ID, "PK typed into the draft")
+	status, body = editorSave(t, srv.URL, n.ID, "PK typed into the draft", ownerID)
 	require.Equal(t, http.StatusOK, status)
 	assert.Contains(t, body, `"error":0`, "the document server's save of a draft was refused: %s", body)
 	got, _ := onDisk(root, rel)
@@ -582,7 +582,7 @@ func TestDrafts_TheDocumentEditorEditsTheOwnersDraft(t *testing.T) {
 	// arriving after, goes into the saved document.
 	status, body = fxPost(t, srv.URL+"/api/files/drafts/"+d.Key+"/save", owner, map[string]any{})
 	require.Equal(t, http.StatusOK, status, body)
-	status, body = editorSave(t, srv.URL, n.ID, "PK the last save")
+	status, body = editorSave(t, srv.URL, n.ID, "PK the last save", ownerID)
 	require.Equal(t, http.StatusOK, status)
 	assert.Contains(t, body, `"error":0`, body)
 	got, _ = onDisk(root, "Documents/Plan.docx")

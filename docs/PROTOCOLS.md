@@ -8,7 +8,7 @@ be reached *as*:
 | Local disk | ✅ | - (it *is* the disk) |
 | S3 | ✅ | ✅ **on by default** (`FILEX_S3=0` to switch off) |
 | SFTP | ✅ | ✅ `FILEX_SFTP=1` - off by default |
-| FTP / FTPS | ✅ | ✅ `FILEX_FTPS=1` - off by default, explicit TLS only |
+| FTP / FTPS | ✅ | ✅ `FILEX_FTPS=1` - off by default, explicit TLS unless the server allows plain FTP |
 | WebDAV | ✅ | ✅ `/dav`, **on by default** |
 | NFSv3 | - (mount it on the host and use the local driver) | ✅ `FILEX_NFS=1` - off by default |
 | SMB / CIFS | ✅ | ❌ - see [Why no SMB server](#why-there-is-no-smb-server) |
@@ -123,8 +123,8 @@ one; when it carries none, the user name says it as **`realm/name`**:
   `Host` or TLS's SNI: the client never tells the server which name it dialled,
   so `sftp alex@files.acme.example` and `sftp alex@files.beta.example` arrive
   identically. Only the user name can carry the tenant. (FTPS can read SNI
-  because its control channel is TLS; plain FTP is never served - see
-  [FTPS](#ftps).)
+  because its control channel is TLS; a plain FTP client sends no name and writes
+  the realm like SFTP does - see [FTPS](#ftps).)
 - **A token or a registered SSH key needs no realm.** The credential belongs to
   one account, and the tenant is that account's: `alex` with acme's token or
   key signs in as acme's alex. A realm that *is* written must be the
@@ -314,9 +314,9 @@ both use it, while 2222 means "SSH in a container"), not a route.
 `FILEX_FTPS=1`. For the equipment that only ever learned FTP - scanners,
 multifunction printers, older cameras, industrial controllers.
 
-- **Explicit TLS is mandatory**, on the control channel *and* the data channel. There is
-  no switch to turn it off: plain FTP sends the password in the clear and the file after
-  it.
+- **Explicit TLS is mandatory**, on the control channel *and* the data channel, unless the
+  server [allows plain FTP](#plain-ftp): a client that does not ask for TLS is refused
+  before it can send a password.
 - **Passive mode only.** Active mode has the server dial the client, which does not
   survive NAT and turns the endpoint into something that makes outbound connections to an
   address the client chose.
@@ -339,6 +339,25 @@ renewal Caddy or certbot writes every couple of months is what the next FTPS
 client sees, with no restart. A renewal that lands half-written, or a key that
 does not match its certificate, keeps the previous pair serving and logs a
 warning once; a good pair written afterwards is picked up.
+
+### Plain FTP
+
+Scan-to-FTP firmware that cannot do TLS exists, so the
+server can permit it: **Admin → Login security → Connections without encryption → Allow
+plain FTP on the FTPS endpoint** (`ftps.allow_plain`, first value from
+`FILEX_FTPS_ALLOW_PLAIN`), off by default, applied at the next start. A client that asks for
+TLS stays on it on both channels either way, and the connection guide says what the server
+does.
+
+> ⚠ **Not safe, and not recommended.** A client without TLS sends its password and its files
+> in the clear: anybody on the network between it and this server can read and change them,
+> and sign in with that password. Apply it only if you know what you are doing: give such a
+> device an API key of its own, never a person's password, and keep it on a network you trust.
+
+FTPS is the one endpoint with a switch like this, because it is the one that holds TLS of its
+own to give up. The web app, WebDAV and S3 take their encryption from the reverse proxy in
+front (or `FILEX_TLS_MODE=acme`, where `FILEX_LISTEN` stays plain as it always was), SFTP is
+SSH and always encrypts, and NFS has none.
 
 ## NFSv3
 

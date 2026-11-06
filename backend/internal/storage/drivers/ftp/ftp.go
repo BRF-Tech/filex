@@ -41,7 +41,9 @@ type Driver struct {
 	password string
 	root     string
 	tls      bool // FTPS (explicit AUTH TLS)
-	passive  bool // PASV (default true)
+	// skipTLSVerify: the connection's own insecure_skip_tls_verify.
+	skipTLSVerify bool
+	passive       bool // PASV (default true)
 
 	// policy bounds how long a server that does not answer is waited for
 	// (timeout.go); what names the server in the error that says so.
@@ -60,8 +62,9 @@ type Driver struct {
 func (d *Driver) Name() string { return "ftp" }
 
 // Init configures the driver. Required: host, user, password, root.
-// Optional: port (default 21), tls (default false), passive (default true),
-// and the three timeout settings (timeout.go).
+// Optional: port (default 21), tls (default false), insecure_skip_tls_verify
+// (default false, only with tls), passive (default true), and the three
+// timeout settings (timeout.go).
 //
 // The config keys are declared in descriptor.go — keep the two in step,
 // there is a test that fails when they drift. Legacy spellings are read
@@ -84,6 +87,7 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 	if v, ok := cfg["tls"].(bool); ok {
 		d.tls = v
 	}
+	d.skipTLSVerify, _ = cfg["insecure_skip_tls_verify"].(bool)
 	// passive defaults to true unless explicitly set false.
 	d.passive = true
 	if v, ok := cfg["passive"].(bool); ok {

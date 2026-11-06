@@ -284,7 +284,7 @@ Todas las funciones del explorador, en detalle: [docs/FEATURES.md → The explor
 <tr>
 <td width="50%" valign="top">
 
-![La página de inicio de sesión con el tema del operador](https://filex.sh/shots/appearance/themed-signin-1440.0da9ad45502b.png)
+![La página de inicio de sesión con el tema del operador](https://filex.sh/shots/appearance/themed-signin-1440.ff6bb587c310.png)
 
 <sub>…y la página de inicio de sesión, antes de que nadie haya iniciado sesión</sub>
 
@@ -352,7 +352,7 @@ Todas las funciones de almacenamiento y protocolos, en detalle: [docs/FEATURES.m
 </td>
 <td width="50%" valign="top">
 
-![Claves de API](https://filex.sh/shots/sidenav/apikeys-minted-1440.cbad664dfed5.png)
+![Claves de API](https://filex.sh/shots/sidenav/apikeys-minted-1440.1870c90ae20a.png)
 
 <sub>Claves de API - cree las suyas, en el explorador o en una integración (la sesión o el token de una persona; una integración servida a través de un proxy con un único token compartido de tipo *app* no recibe esta entrada)</sub>
 
@@ -407,7 +407,7 @@ Todas las funciones de uso compartido y protección, en detalle: [docs/FEATURES.
 <tr>
 <td width="50%" valign="top">
 
-![Cuadro de diálogo Compartir](https://filex.sh/shots/share-modal.3c132b06cd19.png)
+![Cuadro de diálogo Compartir](https://filex.sh/shots/share-modal.c3b9326fa9fa.png)
 
 <sub>Uso compartido - PIN, caducidad, límite de descargas, `curl` de una línea</sub>
 
@@ -439,7 +439,7 @@ Todas las funciones de uso compartido y protección, en detalle: [docs/FEATURES.
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Enlaces compartidos, con el menú Acciones de una fila abierto](https://filex.sh/shots/signing/admin-table-actions-1440.679f7daec8a4.png)
+![Admin → Enlaces compartidos, con el menú Acciones de una fila abierto](https://filex.sh/shots/signing/admin-table-actions-1440.bc923c4374cf.png)
 
 <sub>Cada tabla de administración - un único menú **Acciones** fijado por fila, el mismo menú que abre el ⋮ del explorador</sub>
 
@@ -527,7 +527,7 @@ Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → Peop
 <tr>
 <td width="50%" valign="top">
 
-![El formulario de inicio de sesión de una cuenta bloqueada](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
+![El formulario de inicio de sesión de una cuenta bloqueada](https://filex.sh/shots/loginsecurity/login-locked-1440.1c2889094cd7.png)
 
 <sub>…y lo que dice el formulario de inicio de sesión de una cuenta bloqueada, con el tiempo restante del bloqueo en su botón</sub>
 
@@ -550,7 +550,7 @@ Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → Peop
 </td>
 <td width="50%" valign="top">
 
-![El formulario de inicio de sesión con la verificación sobre su botón](https://filex.sh/shots/botprotection/login-captcha-dark-1440.099dd770db5c.png)
+![El formulario de inicio de sesión con la verificación sobre su botón](https://filex.sh/shots/botprotection/login-captcha-dark-1440.91b31e625fe1.png)
 
 <sub>…y el formulario de inicio de sesión, con la verificación sobre su botón</sub>
 
@@ -559,7 +559,7 @@ Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → Peop
 <tr>
 <td width="50%" valign="top">
 
-![Página de inicio de la demo](https://filex.sh/shots/demo-landing.fba2be2d2961.png)
+![Página de inicio de la demo](https://filex.sh/shots/demo-landing.a79e6941c259.png)
 
 <sub>Página de inicio de la demo</sub>
 
@@ -794,7 +794,7 @@ la genera filex, y el enlace que recibe el socio es un enlace compartido corrien
 <tr>
 <td width="50%" valign="top">
 
-![El documento bloqueado, con su panel Firmas abierto](https://filex.sh/shots/signing/sign-status-1440.537429f5f44b.png)
+![El documento bloqueado, con su panel Firmas abierto](https://filex.sh/shots/signing/sign-status-1440.a235075dab8b.png)
 
 <sub>Mientras está en curso - el documento congelado para todos y, en sus detalles, quién ha firmado</sub>
 

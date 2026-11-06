@@ -286,7 +286,7 @@ Toutes les fonctionnalités de l’explorateur en détail : [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![La page de connexion portant le thème de l’opérateur](https://filex.sh/shots/appearance/themed-signin-1440.0da9ad45502b.png)
+![La page de connexion portant le thème de l’opérateur](https://filex.sh/shots/appearance/themed-signin-1440.ff6bb587c310.png)
 
 <sub>…et la page de connexion, avant que quiconque ne se soit connecté</sub>
 
@@ -355,7 +355,7 @@ Toutes les fonctionnalités de stockage et de protocoles en détail : [docs/FEA
 </td>
 <td width="50%" valign="top">
 
-![Clés d’API](https://filex.sh/shots/sidenav/apikeys-minted-1440.cbad664dfed5.png)
+![Clés d’API](https://filex.sh/shots/sidenav/apikeys-minted-1440.1870c90ae20a.png)
 
 <sub>Clés d’API - créez les vôtres, dans l’explorateur ou dans une intégration (la session ou la clé d’une personne ; une intégration relayée par un proxy avec une seule clé partagée de type *app* n’a pas cette entrée)</sub>
 
@@ -411,7 +411,7 @@ Toutes les fonctionnalités de partage et de protection en détail : [docs/FEAT
 <tr>
 <td width="50%" valign="top">
 
-![Boîte de dialogue de partage](https://filex.sh/shots/share-modal.3c132b06cd19.png)
+![Boîte de dialogue de partage](https://filex.sh/shots/share-modal.c3b9326fa9fa.png)
 
 <sub>Partage - PIN, expiration, limite de téléchargements, `curl` en une ligne</sub>
 
@@ -443,7 +443,7 @@ Toutes les fonctionnalités de partage et de protection en détail : [docs/FEAT
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/admin-table-actions-1440.679f7daec8a4.png)
+![Admin → Partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/admin-table-actions-1440.bc923c4374cf.png)
 
 <sub>Chaque tableau d’administration - un menu **Actions** épinglé par ligne, le même menu qu’ouvre le ⋮ de l’explorateur</sub>
 
@@ -532,7 +532,7 @@ Toutes les fonctionnalités pour les personnes et l’accès en détail : [docs
 <tr>
 <td width="50%" valign="top">
 
-![Le formulaire de connexion d’un compte verrouillé](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
+![Le formulaire de connexion d’un compte verrouillé](https://filex.sh/shots/loginsecurity/login-locked-1440.1c2889094cd7.png)
 
 <sub>…et ce que dit le formulaire de connexion d’un compte verrouillé, avec le compte à rebours du verrouillage sur son bouton</sub>
 
@@ -555,7 +555,7 @@ Toutes les fonctionnalités pour les personnes et l’accès en détail : [docs
 </td>
 <td width="50%" valign="top">
 
-![Le formulaire de connexion avec la vérification au-dessus de son bouton](https://filex.sh/shots/botprotection/login-captcha-dark-1440.099dd770db5c.png)
+![Le formulaire de connexion avec la vérification au-dessus de son bouton](https://filex.sh/shots/botprotection/login-captcha-dark-1440.91b31e625fe1.png)
 
 <sub>…et le formulaire de connexion, la vérification au-dessus de son bouton</sub>
 
@@ -564,7 +564,7 @@ Toutes les fonctionnalités pour les personnes et l’accès en détail : [docs
 <tr>
 <td width="50%" valign="top">
 
-![Page d’accueil de la démo](https://filex.sh/shots/demo-landing.fba2be2d2961.png)
+![Page d’accueil de la démo](https://filex.sh/shots/demo-landing.a79e6941c259.png)
 
 <sub>Page d’accueil de la démo</sub>
 
@@ -804,7 +804,7 @@ partage ordinaire.
 <tr>
 <td width="50%" valign="top">
 
-![Le document verrouillé, son panneau Signatures ouvert](https://filex.sh/shots/signing/sign-status-1440.537429f5f44b.png)
+![Le document verrouillé, son panneau Signatures ouvert](https://filex.sh/shots/signing/sign-status-1440.a235075dab8b.png)
 
 <sub>Tant que la demande est en cours - le document gelé pour tout le monde et, dans ses détails, qui a signé</sub>
 

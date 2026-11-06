@@ -57,6 +57,8 @@ import (
 type Service struct {
 	Store           db.Store
 	StorageResolver func(int64) (storage.Driver, error)
+	// multiTenant is the mode in force (AttachMultiTenant).
+	multiTenant bool
 
 	// DocumentServerURL / JWTSecret are the BOOT-TIME values (env/YAML). They
 	// are the fallback only: when Live is wired the running configuration is
@@ -173,6 +175,11 @@ type Service struct {
 // AttachACL wires the shared ACL resolver (see ACL). BuildRouter calls it with
 // the router's, the one every other door uses.
 func (s *Service) AttachACL(r *acl.Resolver) { s.ACL = r }
+
+// AttachMultiTenant tells the save gates the mode in force: whether an
+// editor's account may still sign in (auth.LoginAllowed, mayDo) depends on it
+// (maintenance mode). BuildRouter wires it.
+func (s *Service) AttachMultiTenant(on bool) { s.multiTenant = on }
 
 // aclResolver is the resolver the save gates ask: the attached one, else a
 // fresh one over the store (a Service built by hand).
@@ -383,7 +390,19 @@ func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user
 
 	exp := time.Now().Add(s.FetchTTL).Unix()
 	base := s.callbackBase(ctx)
-	fetchURL := s.signedFetchURLBase(base, node.ID, exp, secret)
+	// The tenant the document's storage is in, signed into the fetch URL: the
+	// fetch serves it only while that tenant still has the storage
+	// (db.StampStands), not for the hour the URL lives whatever the platform
+	// operator does with the storage meanwhile.
+	var tenant int64
+	if s.Store != nil {
+		t, err := db.StorageStamp(ctx, s.Store, node.StorageID)
+		if err != nil {
+			return nil, fmt.Errorf("onlyoffice: the document's tenant: %w", err)
+		}
+		tenant = t
+	}
+	fetchURL := s.signedFetchURLBase(base, node.ID, exp, tenant, secret)
 	callbackURL := fmt.Sprintf("%s/api/files/onlyoffice/callback?node=%d", base, node.ID)
 
 	userID := "anon"
@@ -471,14 +490,20 @@ func (s *Service) SignedFetchURL(nodeID, exp int64) string {
 }
 
 func (s *Service) signedFetchURL(nodeID, exp int64, secret string) string {
-	return s.signedFetchURLBase(s.callbackBase(context.Background()), nodeID, exp, secret)
+	return s.signedFetchURLBase(s.callbackBase(context.Background()), nodeID, exp, 0, secret)
 }
 
-func (s *Service) signedFetchURLBase(base string, nodeID, exp int64, secret string) string {
+// signedFetchURLBase builds the fetch URL. tenant is the stamp the fetch is
+// held to (db.StorageStamp), 0 for none; it is signed with the rest and
+// carried as `ten`.
+func (s *Service) signedFetchURLBase(base string, nodeID, exp, tenant int64, secret string) string {
 	v := url.Values{}
 	v.Set("n", strconv.FormatInt(nodeID, 10))
 	v.Set("exp", strconv.FormatInt(exp, 10))
-	v.Set("sig", fetchSignature(nodeID, exp, secret))
+	if tenant > 0 {
+		v.Set("ten", strconv.FormatInt(tenant, 10))
+	}
+	v.Set("sig", fetchSignatureIn(nodeID, exp, tenant, secret))
 	return base + "/api/files/onlyoffice/fetch?" + v.Encode()
 }
 
@@ -490,8 +515,16 @@ func (s *Service) VerifyFetchSignature(nodeID, exp int64, sig string) error {
 // VerifyFetchSignatureCtx is VerifyFetchSignature with the request context, so
 // the secret is the one in force now.
 func (s *Service) VerifyFetchSignatureCtx(ctx context.Context, nodeID, exp int64, sig string) error {
+	return s.VerifyFetchSignatureIn(ctx, nodeID, exp, 0, sig)
+}
+
+// VerifyFetchSignatureIn is VerifyFetchSignatureCtx for a URL that carries a
+// tenant stamp (`ten`, 0 when it carries none). The stamp is part of what is
+// signed; whether the tenant still has the storage is the caller's to ask
+// (db.StampStands), once it has the document's row.
+func (s *Service) VerifyFetchSignatureIn(ctx context.Context, nodeID, exp, tenant int64, sig string) error {
 	_, secret := s.settings(ctx)
-	return verifyFetch(nodeID, exp, sig, secret)
+	return verifyFetchIn(nodeID, exp, tenant, sig, secret)
 }
 
 // The two ways a fetch signature is refused. Callers tell them apart with
@@ -504,10 +537,14 @@ var (
 // verifyFetch is the one check a fetch signature gets, for a document and for
 // the reverse-path probe alike.
 func verifyFetch(nodeID, exp int64, sig, secret string) error {
+	return verifyFetchIn(nodeID, exp, 0, sig, secret)
+}
+
+func verifyFetchIn(nodeID, exp, tenant int64, sig, secret string) error {
 	if exp < time.Now().Unix() {
 		return ErrSignatureExpired
 	}
-	want := fetchSignature(nodeID, exp, secret)
+	want := fetchSignatureIn(nodeID, exp, tenant, secret)
 	if !hmac.Equal([]byte(want), []byte(sig)) {
 		return ErrBadSignature
 	}
@@ -515,8 +552,18 @@ func verifyFetch(nodeID, exp int64, sig, secret string) error {
 }
 
 func fetchSignature(nodeID, exp int64, secret string) string {
+	return fetchSignatureIn(nodeID, exp, 0, secret)
+}
+
+// fetchSignatureIn signs a fetch. A URL with no tenant stamp signs what it
+// always did ("n=<id>&exp=<exp>"), so a single-tenant install's URLs and the
+// reverse-path probe's are the same bytes as before.
+func fetchSignatureIn(nodeID, exp, tenant int64, secret string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = fmt.Fprintf(mac, "n=%d&exp=%d", nodeID, exp)
+	if tenant > 0 {
+		_, _ = fmt.Fprintf(mac, "&ten=%d", tenant)
+	}
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
@@ -757,6 +804,16 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 		return answer, nil
 	}
 
+	// ⚠⚠ The save is written over the document only while one of its editors
+	// may still change it: account on, tenant still reaching the storage,
+	// files.modify there (anEditorMayChange). The callback is signed by the
+	// document server, not by a person, and an editor can stay open for hours
+	// - long enough for the platform operator to move the storage to another
+	// tenant, or for the person's access to go. Before 0.59 nothing here asked.
+	if editors := s.sessionEditors(keyOf(p), p.Users); !s.anEditorMayChange(r.Context(), node, editors) {
+		s.refuseSave(r.Context(), node, editors, got, notWritten(refusedNoModify, nil))
+		return map[string]any{"error": 1, "message": "nobody in this session may change the document any more"}, nil
+	}
 	// Saving back onto a name that has since become a folder would leave `X`
 	// and `X/…` side by side on an object store (storage.ErrKindConflict).
 	if err := storage.EnsureFileTarget(r.Context(), drv, node.Path); err != nil {

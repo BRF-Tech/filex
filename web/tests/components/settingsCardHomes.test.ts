@@ -55,6 +55,7 @@ describe('one home per setting', () => {
       apps: 'views/Plugins.vue',
       notifications: 'views/Notifications.vue',
       webhooks: 'views/Webhooks.vue',
+      connections: 'views/LoginSecurity.vue',
     });
   });
 

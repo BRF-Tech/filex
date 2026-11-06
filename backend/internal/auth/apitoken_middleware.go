@@ -66,7 +66,9 @@ func TokenUserFrom(ctx context.Context) string {
 //
 // Unlike the generic Middleware chain it does NOT accept cookie sessions —
 // the AI/MCP namespace is token-only by design. Use RequireScope after it
-// to gate individual verbs.
+// to gate individual verbs. The token's owner is judged by admitTokenOwner,
+// as on the hybrid door: a disabled account, or one whose tenant is
+// suspended, is refused with 403.
 func APITokenMiddleware(store db.Store) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -86,22 +88,14 @@ func APITokenMiddleware(store db.Store) func(http.Handler) http.Handler {
 				return
 			}
 			user, err := store.GetUser(ctx, tok.UserID)
-			if err != nil {
+			if err != nil || user == nil {
 				writeAuthErr(w, http.StatusUnauthorized, "token user not found")
 				return
 			}
-			// access.api / access.desktop (package perm), as in the apitoken
-			// driver: a token its owner may no longer use is not a credential.
-			if !TokenMayBeUsed(ctx, store, user, tok) {
-				writeAuthErr(w, http.StatusUnauthorized, "this account may not use API tokens")
-				return
-			}
-			username, ok := tok.ResolveUsername(r.Header.Get(tokenUserHeaderName))
+			username, ok := admitTokenOwner(w, r, store, user, tok)
 			if !ok {
-				writeAuthErr(w, http.StatusForbidden, "unknown token username")
 				return
 			}
-			_ = store.TouchAPIToken(ctx, tok.ID)
 
 			ctx = WithUser(ctx, user)
 			ctx = WithToken(ctx, tok)
@@ -118,7 +112,9 @@ func APITokenMiddleware(store db.Store) func(http.Handler) http.Handler {
 // cookie/JWT session. An API-token bearer and a session JWT never collide:
 // the token's sha256 simply won't match a JWT, so we fall through cleanly.
 func MiddlewareWithToken(store db.Store, required bool) func(http.Handler) http.Handler {
-	userChain := Middleware(required)
+	// The session chain with the store, so a suspended tenant's session is
+	// refused as its keys are (AccountBlock reads the tenant).
+	userChain := middlewareWith(required, store)
 	return func(next http.Handler) http.Handler {
 		fallthroughHandler := userChain(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -127,30 +123,13 @@ func MiddlewareWithToken(store db.Store, required bool) func(http.Handler) http.
 				if tok, err := store.GetAPITokenByHash(ctx, hashAPIToken(raw)); err == nil && tok != nil {
 					if tok.ExpiresAt == nil || tok.ExpiresAt.After(time.Now()) {
 						if user, err := store.GetUser(ctx, tok.UserID); err == nil && user != nil {
-							// A token outlives its owner's account status, so the
-							// disabled check (migration 00022) belongs here too:
-							// otherwise disabling a user leaves every token they
-							// ever minted working.
-							if !user.Enabled {
-								writeAuthErr(w, http.StatusForbidden, "this account is disabled")
-								return
-							}
-							// access.api / access.desktop (package perm) — the third token
-							// door, with its own lookup.
-							if !TokenMayBeUsed(ctx, store, user, tok) {
-								writeAuthErr(w, http.StatusUnauthorized, "this account may not use API tokens")
-								return
-							}
-							// A username outside the token's allow-list is a hard
-							// error even on this hybrid chain — falling through to
-							// session auth would silently ignore the caller's
-							// intent.
-							username, ok := tok.ResolveUsername(r.Header.Get(tokenUserHeaderName))
+							// A token that matched is this request's credential:
+							// an owner it refuses is refused here, never handed
+							// to the session chain below.
+							username, ok := admitTokenOwner(w, r, store, user, tok)
 							if !ok {
-								writeAuthErr(w, http.StatusForbidden, "unknown token username")
 								return
 							}
-							_ = store.TouchAPIToken(ctx, tok.ID)
 							ctx = WithUser(ctx, user)
 							ctx = WithToken(ctx, tok)
 							ctx = WithTokenUser(ctx, username)
@@ -164,6 +143,50 @@ func MiddlewareWithToken(store db.Store, required bool) func(http.Handler) http.
 			fallthroughHandler.ServeHTTP(w, r)
 		})
 	}
+}
+
+// admitTokenOwner asks everything a door must know about the owner of a
+// valid, unexpired API token before the request may act as them, for both
+// token middlewares (APITokenMiddleware: /api/ai, MCP, /api/ai/admin and
+// /api/sharex; MiddlewareWithToken: /api/files, /api/admin, the thumbnails and
+// the sockets). On a refusal it has written the answer and reports false; on
+// success it returns the identity the request acts under.
+//
+//   - the account is on and its tenant is not suspended: RefuseBlockedAccount,
+//     the session chain's own answer (403 `account_disabled`, 403
+//     `tenant_suspended`);
+//   - it may use API tokens at all: access.api / access.desktop (package perm,
+//     TokenMayBeUsed), 401;
+//   - the X-Filex-Token-User it names is one the token allows, 403. Falling
+//     back to the default identity, or to the session chain on the hybrid door,
+//     would silently ignore what the caller asked for.
+//
+// ⚠⚠ One function on purpose. Each middleware used to carry its own copy of
+// these steps and the copies drifted: MiddlewareWithToken refused a disabled
+// owner, APITokenMiddleware never asked, so switching an account off left every
+// token it had minted working on /api/ai and /api/sharex - file reads and
+// writes, MCP, public links, and for an administrator's token the admin surface,
+// which can switch the account back on (GHSA-58wc-42xh-89v8). A rule a token's
+// owner must meet goes here, and holds at every door a token opens; the
+// api-token driver's owner is judged by Middleware (RefuseBlockedAccount).
+// A suspended tenant's keys kept working the same way: suspension was asked at
+// sign-in only.
+func admitTokenOwner(w http.ResponseWriter, r *http.Request, store db.Store, user *model.User, tok *model.APIToken) (string, bool) {
+	if RefuseBlockedAccount(w, r, store, user) {
+		return "", false
+	}
+	ctx := r.Context()
+	if !TokenMayBeUsed(ctx, store, user, tok) {
+		writeAuthErr(w, http.StatusUnauthorized, "this account may not use API tokens")
+		return "", false
+	}
+	username, ok := tok.ResolveUsername(r.Header.Get(tokenUserHeaderName))
+	if !ok {
+		writeAuthErr(w, http.StatusForbidden, "unknown token username")
+		return "", false
+	}
+	_ = store.TouchAPIToken(ctx, tok.ID)
+	return username, true
 }
 
 // AnnotateToken attaches a valid API token to the context and NOTHING else.

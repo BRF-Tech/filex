@@ -277,7 +277,7 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.0da9ad45502b.png)
+![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.ff6bb587c310.png)
 
 <sub>…and the sign-in page, before anybody has signed in</sub>
 
@@ -345,7 +345,7 @@ Every storage and protocol feature in full: [docs/FEATURES.md → Storage and pr
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.cbad664dfed5.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.1870c90ae20a.png)
 
 <sub>API keys - mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry)</sub>
 
@@ -399,7 +399,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Share modal](https://filex.sh/shots/share-modal.3c132b06cd19.png)
+![Share modal](https://filex.sh/shots/share-modal.c3b9326fa9fa.png)
 
 <sub>Sharing - PIN, expiry, download limit, one-line `curl`</sub>
 
@@ -431,7 +431,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.679f7daec8a4.png)
+![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.bc923c4374cf.png)
 
 <sub>Every admin table - one pinned **Actions** menu per row, the same menu the explorer's ⋮ opens</sub>
 
@@ -517,7 +517,7 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
+![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.1c2889094cd7.png)
 
 <sub>…and what a locked account's sign-in form says, counting the lock down on its button</sub>
 
@@ -540,7 +540,7 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 </td>
 <td width="50%" valign="top">
 
-![The sign-in form with the bot check above its button](https://filex.sh/shots/botprotection/login-captcha-dark-1440.099dd770db5c.png)
+![The sign-in form with the bot check above its button](https://filex.sh/shots/botprotection/login-captcha-dark-1440.91b31e625fe1.png)
 
 <sub>…and the sign-in form, the bot check above its button</sub>
 
@@ -549,7 +549,7 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <tr>
 <td width="50%" valign="top">
 
-![Demo landing](https://filex.sh/shots/demo-landing.fba2be2d2961.png)
+![Demo landing](https://filex.sh/shots/demo-landing.a79e6941c259.png)
 
 <sub>Demo landing</sub>
 
@@ -630,7 +630,11 @@ filex sync add ~/Documents/work docs://work   # the engine the desktop app uses
 filex sync run --watch 30s
 ```
 
-See [docs/CLI.md](docs/CLI.md) and [docs/SYNC.md](docs/SYNC.md).
+See [docs/CLI.md](docs/CLI.md) and [docs/SYNC.md](docs/SYNC.md). For a server with a
+self-signed certificate, `filex client login --insecure-skip-tls-verify` keeps the switch
+with that one address, and the desktop app has it under **Advanced** at sign-in: not safe,
+so trusting the certificate is the better way
+([A server with a self-signed certificate](docs/CLI.md#a-server-with-a-self-signed-certificate)).
 
 </details>
 
@@ -781,7 +785,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.537429f5f44b.png)
+![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.a235075dab8b.png)
 
 <sub>While it is out - the document frozen for everybody, who has signed in its details</sub>
 

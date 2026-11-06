@@ -35,6 +35,13 @@ const GRAPH = [
   `${M}/cmd/filex|${M}/internal/c ${M}/internal/b ${M}/internal/a|`,
 ].join('\n');
 
+// With -race or without, the run gets an hour and half the cores (#302: on
+// v0.58.2's first round the handlers package rang the 30-minute alarm without
+// -race beside both image builds). The core count is the host's, so -p is a
+// number, not a fixed one.
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const plainTest = (pkgs: string) => new RegExp(`^test -p \\d+ -timeout 60m ${esc(pkgs)}$`);
+
 const temps: string[] = [];
 afterEach(() => {
   for (const d of temps.splice(0)) fs.rmSync(d, { recursive: true, force: true });
@@ -113,7 +120,9 @@ describe.runIf(!!bash)("a patch's Go gate: the changed packages and their import
     const r = goTargeted('./internal/a');
     expect(r.status, r.out).toBe(0);
     const want = [`${M}/cmd/filex`, `${M}/internal/a`, `${M}/internal/b`, `${M}/internal/c`, `${M}/internal/d`].join(' ');
-    expect(r.calls).toEqual([`vet ${want}`, `test -timeout 30m ${want}`]);
+    expect(r.calls).toHaveLength(2);
+    expect(r.calls[0]).toBe(`vet ${want}`);
+    expect(r.calls[1]).toMatch(plainTest(want));
     expect(r.calls.join('\n')).not.toContain(`${M}/internal/e`);
     expect(r.calls.join('\n')).not.toContain(`${M}/internal/x`);
   });
@@ -122,7 +131,9 @@ describe.runIf(!!bash)("a patch's Go gate: the changed packages and their import
     const r = goTargeted('./internal/x ./internal/c');
     expect(r.status, r.out).toBe(0);
     const want = [`${M}/cmd/filex`, `${M}/internal/c`, `${M}/internal/d`, `${M}/internal/e`, `${M}/internal/x`].join(' ');
-    expect(r.calls).toEqual([`vet ${want}`, `test -timeout 30m ${want}`]);
+    expect(r.calls).toHaveLength(2);
+    expect(r.calls[0]).toBe(`vet ${want}`);
+    expect(r.calls[1]).toMatch(plainTest(want));
   });
 
   it('under -race runs a package CI splits by -run as CI does, its shards side by side, and the rest together', { timeout: TIMEOUT }, () => {
@@ -151,7 +162,9 @@ describe.runIf(!!bash)("a patch's Go gate: the changed packages and their import
     (_what, dirs) => {
       const r = goTargeted(dirs);
       expect(r.status, r.out).toBe(0);
-      expect(r.calls).toEqual(['vet ./...', 'test -timeout 30m ./...']);
+      expect(r.calls).toHaveLength(2);
+      expect(r.calls[0]).toBe('vet ./...');
+      expect(r.calls[1]).toMatch(plainTest('./...'));
     },
     TIMEOUT,
   );

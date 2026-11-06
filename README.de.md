@@ -285,7 +285,7 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 <tr>
 <td width="50%" valign="top">
 
-![Die Anmeldeseite trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-signin-1440.0da9ad45502b.png)
+![Die Anmeldeseite trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-signin-1440.ff6bb587c310.png)
 
 <sub>…und die Anmeldeseite, bevor sich irgendjemand angemeldet hat</sub>
 
@@ -354,7 +354,7 @@ Alle Funktionen zu Speicher und Protokollen im Detail: [docs/FEATURES.md → Sto
 </td>
 <td width="50%" valign="top">
 
-![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.cbad664dfed5.png)
+![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.1870c90ae20a.png)
 
 <sub>API-Schlüssel - erstellen Sie Ihre eigenen, im Explorer oder in einer Einbettung (Sitzung oder Schlüssel einer Person; eine Einbettung, die über einen Proxy mit einem gemeinsamen *App*-Schlüssel läuft, bekommt diesen Eintrag nicht)</sub>
 
@@ -410,7 +410,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.3c132b06cd19.png)
+![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.c3b9326fa9fa.png)
 
 <sub>Freigaben - PIN, Ablaufdatum, Download-Limit, `curl`-Einzeiler</sub>
 
@@ -442,7 +442,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.679f7daec8a4.png)
+![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.bc923c4374cf.png)
 
 <sub>Jede Tabelle im Adminbereich - ein angeheftetes Menü **Aktionen** pro Zeile, dasselbe Menü, das sich über das ⋮ des Explorers öffnet</sub>
 
@@ -531,7 +531,7 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <tr>
 <td width="50%" valign="top">
 
-![Das Anmeldeformular bei einem gesperrten Konto](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
+![Das Anmeldeformular bei einem gesperrten Konto](https://filex.sh/shots/loginsecurity/login-locked-1440.1c2889094cd7.png)
 
 <sub>…und was das Anmeldeformular eines gesperrten Kontos sagt, während es die Sperre auf seiner Schaltfläche herunterzählt</sub>
 
@@ -554,7 +554,7 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 </td>
 <td width="50%" valign="top">
 
-![Das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche](https://filex.sh/shots/botprotection/login-captcha-dark-1440.099dd770db5c.png)
+![Das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche](https://filex.sh/shots/botprotection/login-captcha-dark-1440.91b31e625fe1.png)
 
 <sub>…und das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche</sub>
 
@@ -563,7 +563,7 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <tr>
 <td width="50%" valign="top">
 
-![Startseite der Demo](https://filex.sh/shots/demo-landing.fba2be2d2961.png)
+![Startseite der Demo](https://filex.sh/shots/demo-landing.a79e6941c259.png)
 
 <sub>Startseite der Demo</sub>
 
@@ -796,7 +796,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 <tr>
 <td width="50%" valign="top">
 
-![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.537429f5f44b.png)
+![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.a235075dab8b.png)
 
 <sub>Solange es im Umlauf ist - das Dokument ist für alle eingefroren, in seinen Details steht, wer unterschrieben hat</sub>
 

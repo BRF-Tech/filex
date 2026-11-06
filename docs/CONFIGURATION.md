@@ -131,7 +131,7 @@ The tables below mark each such variable as a **seed**: the ClamAV family
 `FILEX_APPS_E2E_PLAINTEXT`, the `FILEX_THUMBS_SVG_*`, `FILEX_THUMBS_OFFICE_*`
 and `FILEX_THUMBS_FOLDER_PREVIEWS` thumbnail settings, the `FILEX_USAGE_*`
 family, `FILEX_SEARCH_CONTENT`, `FILEX_SEARCH_CONTENT_MAX`,
-`FILEX_SEARCH_MEMORY_PERCENT`, `FILEX_SEARCH_AUTO_REBUILD` and
+`FILEX_SEARCH_MEMORY_PERCENT`, `FILEX_SEARCH_AUTO_REBUILD`, `FILEX_FTPS_ALLOW_PLAIN` and
 `FILEX_SEARCH_EXTRACT_MEMORY_MB` (edited on
 **Admin → Settings → General**), and the server defaults edited on the admin
 panel: `FILEX_DEFAULT_LOCALE`, `FILEX_SYNC_INTERVAL`,
@@ -637,9 +637,9 @@ next). Nothing to switch on: it is on by default.
 | **What counts** | A wrong password, and a wrong second-factor code. Not: the form asking for the code, a right password on a disabled account, an API token (not a password). |
 | **What resets** | A success resets the *account's* counter - never the address's, so one valid login between guesses cannot launder a spray. A protocol's cached credential and an API token do not reset it either (a busy client would wipe the counter with every request). |
 
-![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.a664b97511f4.png)
+![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.42fced0d9ad1.png)
 
-![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.da8c332d7d73.png)
+![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.1c2889094cd7.png)
 
 **The IP allow-list** (`login.ip_allowlist`) is the way back in. An address on it is
 exempt from the per-address limit, and may sign in to **any** locked account (the
@@ -703,7 +703,7 @@ instance within a minute. A database read that fails keeps the last value known
 (the default when there is none). A `login.*` key written through the generic
 settings API reaches the running limit the same way.
 
-![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](https://filex.sh/shots/loginsecurity/login-security-page-1440.c5ef17eaa971.png)
+![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](https://filex.sh/shots/loginsecurity/login-security-page-1440.c9e0fb232fbd.png)
 
 | Key | Default | Range |
 |---|---|---|
@@ -772,7 +772,7 @@ so are configured in [Authentication](#authentication), not here.)
 | `FILEX_SMTP_HOST` | SMTP server host. |
 | `FILEX_SMTP_PORT` | SMTP server port. |
 | `FILEX_SMTP_USERNAME` | Auth username (optional). filex logs in with PLAIN or LOGIN, whichever the server takes. |
-| `FILEX_SMTP_PASSWORD` | Auth password (optional). |
+| `FILEX_SMTP_PASSWORD` | Auth password (optional). On **Admin → Settings → General** a saved password goes only to the host it was saved for: a new host, or the encryption (`FILEX_SMTP_TLS`) changed from `tls` or `starttls` to `none` or to empty (STARTTLS only if offered), needs it typed again (**400** `SECRET_NEEDED`), as a storage's credential does ([STORAGE.md](STORAGE.md#editing-a-storage-afterwards)). |
 | `FILEX_SMTP_FROM` | From address on outbound mail. |
 | `FILEX_SMTP_TLS` | `starttls` · `tls` · `none`. The mode does not depend on the port: `starttls` on port 25 works. With `none`, a username and password are sent only to this machine. |
 
@@ -884,7 +884,8 @@ a **listener** stay off until asked for.
 | `FILEX_SFTP_ADDR` | `:2022` | Listen address. 2022 by convention - sftpgo and `rclone serve sftp` use it, while 2222 reads as "SSH in a container". |
 | `FILEX_SFTP_HOST_KEY_DIR` | `<data>/ssh` | Where the server's host keys live. ⚠ **It must survive a rebuild**: regenerating host keys gives every user the "REMOTE HOST IDENTIFICATION HAS CHANGED" warning, which is indistinguishable from an attack. |
 | `FILEX_SFTP_BANNER` | - | Text shown before authentication. |
-| `FILEX_FTPS` | `0` | The FTPS endpoint. ⚠ Explicit TLS is **mandatory** on both channels and there is no switch to relax it: plain FTP sends the password in the clear and the file after it. |
+| `FILEX_FTPS` | `0` | The FTPS endpoint. ⚠ Explicit TLS is **mandatory** on both channels unless `FILEX_FTPS_ALLOW_PLAIN` says otherwise: plain FTP sends the password in the clear and the file after it. |
+| `FILEX_FTPS_ALLOW_PLAIN` | `false` | [**Seed**](#variables-that-seed-a-stored-setting) of `ftps.allow_plain` (**Admin → Login security → Connections without encryption**; applies at the next start). `true` lets a client that cannot do TLS connect. **Not safe, and not recommended**: read [FTPS](PROTOCOLS.md#ftps). |
 | `FILEX_FTPS_ADDR` | `:2121` | Control channel. Port 21 needs root. |
 | `FILEX_FTPS_PASV_MIN` / `_MAX` | `30000` / `30100` | The passive data-port range. ⚠⚠ **Open it on the firewall too** - a blocked range makes every transfer *hang* with no error on either side, which is the classic FTP failure and impossible to guess at from the client end. |
 | `FILEX_FTPS_PUBLIC_HOST` | - | The address to advertise for passive connections, when it differs from what the server sees (NAT, Docker). A host name or an IPv4 address; a name is resolved at startup, because the PASV reply itself can only carry a dotted quad. ⚠ IPv6 has no PASV representation at all - a v6-only deployment must rely on EPSV, which needs no address and so needs no setting. |
@@ -900,7 +901,7 @@ a **listener** stay off until asked for.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `FILEX_STORAGE_TLS_SKIP_VERIFY` | `false` | `true` accepts any certificate from the servers S3, WebDAV and FTPS storages connect to. **Insecure**: read [Private and self-signed certificates](STORAGE.md#private-and-self-signed-certificates) first, which also has the way that keeps the check on. Read at startup, with a warning in the log when it is on. YAML: `storage_tls.skip_verify`. |
+| `FILEX_STORAGE_TLS_SKIP_VERIFY` | `false` | A **one-time seed**, not a setting. On the first start of a version with the certificate switch per connection, `true` writes the switch on to every S3, WebDAV and FTPS storage and replication target, and the log names them. After that start it is not read again, and the log says so while it is still set. The switch itself is each connection's `insecure_skip_tls_verify`: read [Private and self-signed certificates](STORAGE.md#private-and-self-signed-certificates). |
 
 ---
 

@@ -24,8 +24,30 @@ var secretWords = []string{
 }
 
 // addressWords are the config keys that say WHERE a credential is sent. A
-// masked credential is only kept while they stay as they were (KeepSecrets).
-var addressWords = []string{"host", "hostname", "endpoint", "url", "uri", "server", "address"}
+// masked credential is only kept while they stay as they were (SecretMoved).
+// `issuer` is an OpenID provider's: its client secret goes to the token
+// endpoint the issuer names.
+var addressWords = []string{"host", "hostname", "endpoint", "url", "uri", "server", "address", "issuer"}
+
+// notWhereSecretsGo are the keys the address words catch that name no place a
+// saved credential, or anything got with one, is ever sent: changing one asks
+// for nothing. The one exemption list, for every caller of SecretMoved; each
+// entry says why, and a key goes here only when that holds for every
+// configuration the key appears in (TestNotWhereSecretsGo).
+//
+// Classified one by one on 2026-11-06 (the owner: "düzeltelim hatalı
+// kalmasın"), over every identity provider, SMTP and tenant-row key the words
+// catch. An OpenID client secret goes to the token endpoint the issuer's
+// discovery document names (auth/drivers/oidc: the code exchange, and the
+// Test's client-credentials check); the access token it buys goes to the
+// userinfo endpoint the same document names; jwks, authorize and end-session
+// come from it too and carry no secret. So `issuer` is an address; these are
+// not:
+var notWhereSecretsGo = map[string]string{
+	"redirect_url": "OpenID Connect: where the identity provider sends the browser back with the sign-in code. " +
+		"The code is not got with the client secret, and neither the secret nor the tokens it buys are sent here.",
+	"oidc_redirect_url": "The same, on a tenant's provider row (auth/drivers/multioidc).",
+}
 
 // ErrSecretAddressChanged is what KeepSecrets answers for a credential that
 // came back masked while the address it would be sent to changed (or the
@@ -33,9 +55,21 @@ var addressWords = []string{"host", "hostname", "endpoint", "url", "uri", "serve
 var ErrSecretAddressChanged = errors.New("storage: a saved credential is only sent where it was saved")
 
 // SecretAddressError names the credential that has to be typed again.
-type SecretAddressError struct{ Field string }
+type SecretAddressError struct {
+	Field string
+	// CheckOff: the address stands, and this save weakens a protection of the
+	// connection (protections): Protection names the setting.
+	CheckOff   bool
+	Protection string
+}
 
 func (e *SecretAddressError) Error() string {
+	switch {
+	case e.CheckOff && (e.Protection == "" || e.Protection == SkipTLSVerifyKey):
+		return fmt.Sprintf("the certificate check is being turned off: type %s again (a saved credential does not go to a server that is no longer checked)", e.Field)
+	case e.CheckOff:
+		return fmt.Sprintf("the connection's protection is being weakened (%s): type %s again (a saved credential does not go over a connection less protected than it was saved for, or one that trusts another server)", e.Protection, e.Field)
+	}
 	return fmt.Sprintf("the address changed: type %s again (a saved credential is only sent where it was saved)", e.Field)
 }
 
@@ -117,6 +151,13 @@ func MaskSecrets(driver string, raw json.RawMessage) json.RawMessage {
 //     Without this, anybody who may edit a storage but not read its password -
 //     an admin API key, an MCP agent - could point it at a server of their
 //     own and have filex send the password there.
+//   - ⚠ Nor while this save turns the connection's certificate check off (the
+//     owner's call, 2026-11-06). It is the same threat by another door: with the
+//     check off, whoever can answer in that server's place gets the password,
+//     and the address never changed. Turning the check back on, and editing
+//     anything else while it is off, asks for nothing. The 0.58.2 variable's
+//     move to the connections does not come through here
+//     (server/storage_tls_seed.go): nobody is editing anything then.
 func KeepSecrets(driver string, next json.RawMessage, prevDriver string, prev json.RawMessage) (json.RawMessage, error) {
 	cfg, ok := decodeConfig(next)
 	if !ok {
@@ -134,8 +175,11 @@ func KeepSecrets(driver string, next json.RawMessage, prevDriver string, prev js
 	sort.Strings(masked)
 	old, hadPrev := decodeConfig(prev)
 	if hadPrev {
-		if prevDriver != driver || addressChanged(cfg, old) {
+		if prevDriver != driver {
 			return nil, &SecretAddressError{Field: masked[0]}
+		}
+		if err := SecretMoved(masked, cfg, old); err != nil {
+			return nil, err
 		}
 	}
 	for _, k := range masked {
@@ -150,6 +194,98 @@ func KeepSecrets(driver string, next json.RawMessage, prevDriver string, prev js
 		return next, err
 	}
 	return out, nil
+}
+
+// SecretMoved is the rule every surface that keeps a saved credential follows:
+// the storages and replication targets (KeepSecrets), the SMTP settings, the
+// identity providers and a tenant's OIDC. A credential the save keeps from
+// what is stored, rather than one typed in it, goes only to the address it was
+// saved for, and over a connection at least as protected as when it was saved.
+// kept names those credentials (the first, in order, is the one the answer
+// names); next and prev are the configuration as it will be and as it is. A
+// change of an address key (addressWords, less notWhereSecretsGo), or a save
+// that weakens a protection (protections), answers a *SecretAddressError, and
+// the caller writes nothing.
+//
+// ⚠ Measured on the real server before the rule (2026-11-06): with the address
+// changed and the secret left blank, masked or not sent, the SMTP test, an
+// identity provider's Test and its save, and a sign-in through a tenant's OIDC
+// all sent the saved password or client secret to the new address.
+func SecretMoved(kept []string, next, prev map[string]any) error {
+	if len(kept) == 0 {
+		return nil
+	}
+	names := append([]string(nil), kept...)
+	sort.Strings(names)
+	if addressChanged(next, prev) {
+		return &SecretAddressError{Field: names[0]}
+	}
+	if key := protectionOff(next, prev); key != "" {
+		return &SecretAddressError{Field: names[0], CheckOff: true, Protection: key}
+	}
+	return nil
+}
+
+// protection is a setting that keeps a connection's credential from whoever
+// sits between filex and the server, and how a save weakens it.
+type protection struct {
+	key      string
+	weakened func(key string, next, prev map[string]any) bool
+}
+
+// protections: the owner's calls of 2026-11-06. Weakening one while a saved
+// credential is kept is the same threat as a new address: the credential goes
+// to a server filex can no longer tell from an impostor, or in the clear.
+// Turning one back on, or keeping it as it is, asks for nothing. Only a bool
+// turns a switch: that is what the drivers read.
+var protections = []protection{
+	// S3, WebDAV, FTPS: the certificate check (tlsverify.go).
+	{SkipTLSVerifyKey, switchedOn},
+	// SFTP: the host-key check.
+	{"insecure_skip_host_key", switchedOn},
+	// FTP: FTPS; the SMTP settings pass their encryption here as a bool.
+	{"tls", switchedOff},
+	// LDAP: StartTLS, where the address is a plain ldap:// one.
+	{"start_tls", startTLSOff},
+	// What a connection trusts: a new CA (LDAP), another pinned host key or
+	// another file of host keys (SFTP) is trust in another server. Taking
+	// one away counts too: SFTP then trusts on first use.
+	{"ca_pem", trustChanged},
+	{"ca_file", trustChanged},
+	{"host_key", trustChanged},
+	{"known_hosts", trustChanged},
+}
+
+// protectionOff names the protection a save weakens, or "".
+func protectionOff(next, prev map[string]any) string {
+	for _, p := range protections {
+		if p.weakened(p.key, next, prev) {
+			return p.key
+		}
+	}
+	return ""
+}
+
+func isOn(v any) bool { b, _ := v.(bool); return b }
+
+func switchedOn(k string, next, prev map[string]any) bool { return isOn(next[k]) && !isOn(prev[k]) }
+
+func switchedOff(k string, next, prev map[string]any) bool { return isOn(prev[k]) && !isOn(next[k]) }
+
+func startTLSOff(k string, next, prev map[string]any) bool {
+	url, _ := next["url"].(string)
+	return switchedOff(k, next, prev) && strings.HasPrefix(strings.ToLower(strings.TrimSpace(url)), "ldap://")
+}
+
+func trustChanged(k string, next, prev map[string]any) bool {
+	return textOf(next[k]) != textOf(prev[k])
+}
+
+func textOf(v any) string {
+	if v == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
 }
 
 // addressChanged reports whether any address key differs between two
@@ -172,6 +308,13 @@ func addressChanged(next, prev map[string]any) bool {
 }
 
 func isAddressKey(k string) bool {
+	if _, exempt := notWhereSecretsGo[k]; exempt {
+		return false
+	}
+	return caughtByAddressWords(k)
+}
+
+func caughtByAddressWords(k string) bool {
 	for _, w := range addressWords {
 		if k == w || strings.HasSuffix(k, "_"+w) {
 			return true

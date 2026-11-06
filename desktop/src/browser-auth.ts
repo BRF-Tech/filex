@@ -18,6 +18,9 @@ export interface PendingAuth {
    *  browser half itself instead of opening a real window on someone's
    *  desktop (see FILEX_NO_BROWSER). */
   authUrl: string;
+  /** This sign-in's answer to the certificate switch (src/tls-trust.ts): it
+   *  counts from the start, and the account takes it when the sign-in ends. */
+  insecureSkipTLSVerify?: boolean;
 }
 
 function b64url(buf: Buffer): string {
@@ -58,7 +61,11 @@ export interface ExchangeResult {
   email: string;
 }
 
-/** Trades the one-time code from the deep link for the durable token. */
+/** Trades the one-time code from the deep link for the durable token.
+ *
+ * The server's certificate is judged where every request of this process is
+ * (src/tls-trust.ts): `pending.insecureSkipTLSVerify` counts from the moment the
+ * attempt starts, because this is the first request that needs it. */
 export async function exchangeCode(
   pending: PendingAuth,
   state: string,

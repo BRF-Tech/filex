@@ -181,7 +181,7 @@ func (d *Driver) dial(ctx context.Context) (*goftp.ServerConn, *stall.Conn, erro
 }
 
 func (d *Driver) tlsConfig() *tls.Config {
-	return storage.ApplyTLSVerify(&tls.Config{ServerName: d.host, RootCAs: testRootCAs})
+	return storage.ApplyTLSVerify(&tls.Config{ServerName: d.host, RootCAs: testRootCAs}, d.skipTLSVerify)
 }
 
 // testRootCAs lets a test trust its own FTPS stand-in. nil in production: the

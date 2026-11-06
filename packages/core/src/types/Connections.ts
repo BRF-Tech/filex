@@ -24,6 +24,15 @@ export interface StorageFieldOption {
   i18n_key?: string;
 }
 
+/** storage.SecurityOff on the server. */
+export interface StorageFieldSecurityOff {
+  /** What the setting exposes: the English fallback of `risk_i18n_key`. */
+  risk: string;
+  risk_i18n_key: string;
+  /** A switch that IS the protection: the warning stands while it is off. */
+  when_off?: boolean;
+}
+
 /** One config key of a storage driver, as declared by the driver itself. */
 export interface StorageField {
   key: string;
@@ -46,6 +55,12 @@ export interface StorageField {
   monospace?: boolean;
   multiline?: boolean;
   advanced?: boolean;
+  /** The switch this field means something only with: not offered while it is
+   *  off (`insecure_skip_tls_verify` on FTP needs `tls`). */
+  requires?: string;
+  /** A setting that takes a protection away: the form draws the one warning
+   *  under it (web's SecurityOffNote), with this setting's own risk. */
+  security_off?: StorageFieldSecurityOff;
   /**
    * Draw the choice as BUTTONS rather than a dropdown — every option on the
    * screen, readable without clicking (`components/ChoiceButtons`).

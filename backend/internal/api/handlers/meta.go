@@ -170,7 +170,7 @@ func (h *Meta) rows(ctx context.Context, nodes []*model.Node) []metaRow {
 		}
 		row := metaRow{Node: n, Kind: nodefilter.KindOf(n.Name, n.Mime, n.Type == model.NodeTypeDirectory)}
 		if n.Type == model.NodeTypeFile && thumbServable(n.Thumb) {
-			row.ThumbURL = thumbURL(h.ThumbSigner, n.ID, n.Thumb)
+			row.ThumbURL = thumbURL(h.ThumbSigner, n.ID, n.StorageID, n.Thumb)
 		} else if n.Type == model.NodeTypeFile {
 			row.ThumbNote = thumb.NoteOf(n.Thumb)
 		}

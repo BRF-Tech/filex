@@ -198,9 +198,10 @@ describe('a server patch', () => {
     // ${race[@]+...}: an empty array under set -u is "unbound" in bash 4.3 and older.
     expect(sh).toMatch(/go test \$\{race\[@\]\+"\$\{race\[@\]\}"\} \$\{par\[@\]\+"\$\{par\[@\]\}"\} -timeout "\$timeout" \$targets/);
     expect(sh).toMatch(/exec go test \$\{race\[@\]\+"\$\{race\[@\]\}"\} \$\{par\[@\]\+"\$\{par\[@\]\}"\} -timeout "\$timeout" \.\/\.\.\./);
-    // Under -race the targeted run gets the whole run's hour and half the cores
-    // (v0.57.1: the handlers package rang a 30-minute alarm beside the image builds).
-    expect(sh).toMatch(/race=\(-race\)[\s\S]*timeout=60m[\s\S]*par=\(-p /);
+    // With -race or without, the targeted run gets the whole run's hour and half
+    // the cores (v0.57.1 under -race, v0.58.2 without, #302: the handlers package
+    // rang a 30-minute alarm beside the image builds), set before the -race branch.
+    expect(sh).toMatch(/timeout=60m[\s\S]*par=\(-p [\s\S]*if \[ "\$\{FILEX_GO_RACE:-\}" = 1 \]; then[\s\S]*race=\(-race\)/);
     expect(sh).not.toMatch(/-timeout 30m \$targets/);
     expect(sh).toMatch(/-race needs a C compiler/);
     const p = plan({ repo: REPO, version: '9.9.9', tag: 'v9.9.9' });

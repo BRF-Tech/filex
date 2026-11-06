@@ -24,8 +24,10 @@ import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import Textarea from '@/components/ui/Textarea.vue';
+import SecurityOffNote from '@/components/ui/SecurityOffNote.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import ProviderFields from '@/components/ProviderFields.vue';
+import { secretNeededOf, type SecretNeeded } from '@/lib/secretNeeded';
 import ProviderChecks from '@/components/ProviderChecks.vue';
 
 const props = defineProps<{ tenantId?: number; operator?: boolean }>();
@@ -108,8 +110,12 @@ async function addProvider(driver: string) {
   }
 }
 
+/** Per provider: the secret the server asked for again (save or Test). */
+const secretsNeeded = reactive<Record<string, SecretNeeded | null>>({});
+
 async function save(p: AuthProvider, confirmFailedTest = false) {
   refusals[p.id] = undefined;
+  secretsNeeded[p.id] = null;
   busy.value = p.id;
   const d = draftOf(p);
   try {
@@ -133,6 +139,7 @@ async function save(p: AuthProvider, confirmFailedTest = false) {
       }
       refusals[p.id] = t('authProviders.testFail');
     } else {
+      secretsNeeded[p.id] = secretNeededOf(e, t('errors.generic'));
       refusals[p.id] = extractError(e, t('errors.generic'));
     }
   } finally {
@@ -143,9 +150,11 @@ async function save(p: AuthProvider, confirmFailedTest = false) {
 async function test(p: AuthProvider) {
   busy.value = `test-${p.id}`;
   results[p.id] = undefined;
+  secretsNeeded[p.id] = null;
   try {
     results[p.id] = await TenantSelfApi.testProvider(props.tenantId, p.id, configOf(p));
   } catch (e) {
+    secretsNeeded[p.id] = secretNeededOf(e, t('errors.generic'));
     toast.error(extractError(e, t('errors.generic')));
   } finally {
     busy.value = null;
@@ -299,14 +308,16 @@ async function saveCert() {
       <h2 class="flex items-center gap-2 text-base font-semibold"><KeyRound class="h-4 w-4" /> {{ t('tenantSelf.signinTitle') }}</h2>
       <p class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('tenantSelf.signinHint') }}</p>
 
-      <Toggle
-        v-if="operator"
-        :model-value="view.tenant.allow_insecure_auth"
-        :label="t('tenantSelf.insecure')"
-        :description="t('tenantSelf.insecureHint')"
-        name="tenant-self-insecure"
-        @update:model-value="setInsecure"
-      />
+      <div v-if="operator" class="space-y-1">
+        <Toggle
+          :model-value="view.tenant.allow_insecure_auth"
+          :label="t('tenantSelf.insecure')"
+          :description="t('tenantSelf.insecureHint')"
+          name="tenant-self-insecure"
+          @update:model-value="setInsecure"
+        />
+        <SecurityOffNote :risk="t('tenantSelf.insecureRisk')" />
+      </div>
       <p v-else-if="view.tenant.allow_insecure_auth" class="text-xs text-amber-700 dark:text-amber-300">{{ t('tenantSelf.insecureOn') }}</p>
       <p v-else class="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
         <ShieldCheck class="h-3.5 w-3.5" aria-hidden="true" /> {{ t('tenantSelf.guarded') }}
@@ -335,6 +346,7 @@ async function saveCert() {
             :values="draftOf(p).values"
             :secrets-set="p.secrets_set"
             :set-by-upgrade="p.set_by_upgrade"
+            :secret-needed="secretsNeeded[p.id]"
             :prefix="`tenant-${p.id}`"
             @update="(k: string, v: string | boolean) => (draftOf(p).values[k] = v)"
           />

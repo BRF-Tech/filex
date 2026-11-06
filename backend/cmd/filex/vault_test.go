@@ -419,7 +419,7 @@ func TestDecryptCmd_VaultCopyByGeneration(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, stdout, "Decrypted 3 file(s)")
 	_, _, err = runDecrypt(t, sec.Password+"\n", vaultFixtureDir, "-o", filepath.Join(t.TempDir(), "x"), "--url", "http://127.0.0.1:1", "--password-stdin")
-	require.ErrorContains(t, err, "--url and --token are for a vault on a server")
+	require.ErrorContains(t, err, "--url, --token and --insecure-skip-tls-verify are for a vault on a server")
 }
 
 // ─────────────────────────── filex vault mount ────────────────────────────

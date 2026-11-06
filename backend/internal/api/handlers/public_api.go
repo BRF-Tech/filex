@@ -1214,7 +1214,7 @@ func (h *PublicAPI) loadShare(w http.ResponseWriter, r *http.Request, wantKind s
 	}
 	// A link whose creator may no longer share answers like an unknown one
 	// (link_creator.go).
-	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh) {
+	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh, h.Drop != nil && h.Drop.Tenants.MultiTenant) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 		return nil, false
 	}

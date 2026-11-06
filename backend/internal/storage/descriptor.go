@@ -89,6 +89,31 @@ type Field struct {
 
 	// Aliases are legacy keys Init still reads for this field.
 	Aliases []string `json:"aliases,omitempty"`
+
+	// Requires names the switch this field means something only with: the
+	// form leaves it out while that switch is off, and a value stored here
+	// does nothing then. `insecure_skip_tls_verify` on FTP needs `tls`.
+	Requires string `json:"requires,omitempty"`
+
+	// SecurityOff marks a setting that takes a protection away: the form draws
+	// the one warning under it (SecurityOffNote.vue).
+	SecurityOff *SecurityOff `json:"security_off,omitempty"`
+}
+
+// SecurityOff is what a setting that turns a protection off says under its
+// control (the owner, 2026-11-06: not safe, not recommended, apply it only if
+// you know what you are doing, and what it exposes). The fixed sentence is the
+// surface's own, in its catalogue, so no two settings word it differently;
+// only the second half belongs to the setting.
+type SecurityOff struct {
+	// Risk is what this setting exposes: the English fallback of RiskI18nKey.
+	Risk        string `json:"risk"`
+	RiskI18nKey string `json:"risk_i18n_key"`
+	// WhenOff is for a switch that IS the protection (FTP's `tls`): the
+	// warning stands under it while it is off. Without it, under a switch that
+	// takes a protection away, the warning stands there at all times: it has
+	// to be read before the switch is turned on.
+	WhenOff bool `json:"when_off,omitempty"`
 }
 
 // Descriptor is a driver's complete, machine-readable config contract.

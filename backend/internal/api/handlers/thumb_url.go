@@ -44,9 +44,12 @@ func thumbServable(t *model.Thumbnail) bool {
 // old picture on screen for a day after a re-render; the explorer's own
 // thumbnail cache is keyed on it for the same reason. The signature does not
 // cover it: it names a version of a picture the caller may already see.
-func thumbURL(signer *thumb.Signer, id int64, t *model.Thumbnail) string {
+//
+// The stamp carries the tenant the node's storage is in (thumb.Signer.QueryFor):
+// the endpoint serves it only while that tenant still has the storage.
+func thumbURL(signer *thumb.Signer, id, storageID int64, t *model.Thumbnail) string {
 	u := "/api/files/thumb/" + strconv.FormatInt(id, 10)
-	q := signer.Query(id)
+	q := signer.QueryFor(id, storageID)
 	if t != nil && t.GeneratedAt != nil {
 		if q != "" {
 			q += "&"

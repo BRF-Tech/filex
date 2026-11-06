@@ -187,7 +187,7 @@ curl -X POST https://files.example.com/api/admin/replication-targets \
 |---|---|---|---|
 | `name` | string | - | Display name for the target. Required. |
 | `driver` | string | - | `local` · `s3` · `sftp` · `webdav` · `ftp` · `smb`. Required. |
-| `config` | object | `{}` | Per-adapter settings - see [STORAGE.md → Adapters](STORAGE.md#adapters). |
+| `config` | object | `{}` | Per-adapter settings - see [STORAGE.md → Adapters](STORAGE.md#adapters). A target with a self-signed certificate has its own `insecure_skip_tls_verify`, whatever the storage linked to it says ([Private and self-signed certificates](STORAGE.md#private-and-self-signed-certificates)). |
 | `mode` | string | `async` | Fan-out mode. `async` (default) fans writes out in the background. |
 | `enabled` | bool | `true` | A disabled target is not written to: its storages are served unwrapped. |
 
@@ -202,7 +202,10 @@ by name (`password`, `secret`, `token`, `private_key`, …). A `PATCH` that send
 shown; a new value replaces it. ⚠ Only while the driver and the address
 (`host`, `endpoint`, `url`, …) stay the same: a target pointed somewhere new
 needs its credentials typed again (**400** `SECRET_NEEDED`), so a saved
-password is never sent to a server of somebody's choosing. Storages follow
+password is never sent to a server of somebody's choosing. So does a save that
+weakens the connection's protection (`insecure_skip_tls_verify` or
+`insecure_skip_host_key` on, FTP `tls` off, another `host_key` or
+`known_hosts`). Storages follow
 the same rule ([STORAGE.md](STORAGE.md#editing-a-storage-afterwards)).
 
 > The target's `mode` (`async`/`sync`) is **not** the same thing as a per-path

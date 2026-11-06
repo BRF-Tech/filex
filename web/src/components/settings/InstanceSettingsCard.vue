@@ -31,6 +31,7 @@ import { useToastStore } from '@/stores/toast';
 import Badge from '@/components/ui/Badge.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import SecurityOffNote from '@/components/ui/SecurityOffNote.vue';
 import Select from '@/components/ui/Select.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 
@@ -48,7 +49,7 @@ const draft = reactive<Record<string, number | string>>({});
 /** The server's refusal, under the field it is about. */
 const fieldError = reactive<Record<string, string>>({});
 
-const label = (it: InstanceSettingItem, part: 'label' | 'hint') =>
+const label = (it: InstanceSettingItem, part: 'label' | 'hint' | 'risk') =>
   t(`instanceSettings.items.${instanceSettingSlug(it.key)}.${part}`);
 
 function apply(next: InstanceSettingItem[]) {
@@ -175,6 +176,7 @@ const anyRestart = computed(() => items.value.some((it) => it.restart));
           <p class="text-xs text-zinc-500 dark:text-zinc-400">{{ label(it, 'hint') }}</p>
           <p v-if="fieldError[it.key]" class="text-xs text-rose-600 dark:text-rose-400">{{ fieldError[it.key] }}</p>
         </template>
+        <SecurityOffNote v-if="it.security_off" :risk="label(it, 'risk')" />
         <p class="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
           <span v-if="it.env">{{ t('instanceSettings.fromEnv', { env: it.env }) }}</span>
           <Badge v-if="it.restart_pending" tone="amber" :data-testid="`instance-setting-pending-${it.key}`">

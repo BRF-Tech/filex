@@ -19,14 +19,59 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.58.1, 5 November 2026
-Mail now goes out through servers that take AUTH LOGIN and not AUTH PLAIN. filex logged in with PLAIN whatever the server offered, so such a server answered 504 and no mail left. It now reads what the server offers and logs in with PLAIN or LOGIN by itself, with nothing to configure. A wrong password is not tried twice, and the username and password still go only over an encrypted connection. Thanks to @kladiv for the report and the tests that pinned it down.
+::: tip Latest - v0.58.2, 6 November 2026
+A file on a mount inside a local storage can now be deleted. The trash lives at the storage root, so a delete from an rclone mount, an NFS share or a second disk under that root was a rename across filesystems, which the operating system refuses, and the error said "not a directory" about a file that was plainly there. A delete, a move or a restore across such a boundary now copies and then removes the source, only once all of it has arrived. On a cloud mount that means the bytes travel to the trash; adding the mount as a storage of its own keeps a delete there a rename. Thanks to @juan11perez for the report and the notes that pinned it down. S3, WebDAV and FTPS storages can also reach a server with a self-signed certificate now: FILEX_STORAGE_TLS_SKIP_VERIFY=true turns the check off, and the docs show the safer way that keeps it on. Thanks to @kladiv for asking.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.58.1
-docker pull ghcr.io/brf-tech/filex:full-v0.58.1
+docker pull ghcr.io/brf-tech/filex:slim-v0.58.2
+docker pull ghcr.io/brf-tech/filex:full-v0.58.2
 ```
+
+## v0.58.2
+
+<span class="filex-release-date">6 November 2026</span>
+
+A file on a mount inside a local storage can now be deleted. The trash lives at the storage root, so a delete from an rclone mount, an NFS share or a second disk under that root was a rename across filesystems, which the operating system refuses, and the error said "not a directory" about a file that was plainly there. A delete, a move or a restore across such a boundary now copies and then removes the source, only once all of it has arrived. On a cloud mount that means the bytes travel to the trash; adding the mount as a storage of its own keeps a delete there a rename. Thanks to @juan11perez for the report and the notes that pinned it down. S3, WebDAV and FTPS storages can also reach a server with a self-signed certificate now: FILEX_STORAGE_TLS_SKIP_VERIFY=true turns the check off, and the docs show the safer way that keeps it on. Thanks to @kladiv for asking.
+
+## What changed
+
+### Added
+
+- **S3, WebDAV and FTPS storages can reach a server with a private or
+  self-signed certificate**
+  ([GitHub #134](https://github.com/BRF-Tech/filex/issues/134), reported by
+  @kladiv). `FILEX_STORAGE_TLS_SKIP_VERIFY=true` turns the certificate check off
+  for those storages, and the log says so at startup. It is insecure:
+  [STORAGE.md](./STORAGE.md#private-and-self-signed-certificates) has what
+  that exposes, and the way that keeps the check on by trusting the certificate
+  with one read-only mount.
+
+### Fixed
+
+- **A file on a mount inside a local storage can be deleted**
+  ([GitHub #133](https://github.com/BRF-Tech/filex/issues/133), reported by
+  @juan11perez). The trash lives at the storage root, so deleting from an rclone
+  mount, an NFS share or a second disk under that root was a rename across
+  filesystems, which the operating system refuses. A move or a restore across
+  such a boundary failed the same way. The local driver now copies and then
+  deletes: the source is removed only once all of it has arrived, a link
+  travels as a link, and a file that lands in a folder while it is being moved
+  stays where it landed.
+  [STORAGE.md](./STORAGE.md#a-mount-inside-a-local-storage) has what that
+  costs on a cloud mount, and how to avoid it.
+- **A delete that fails says why.** A file on a local storage whose move into
+  the trash failed reported `open …: not a directory`, whatever the reason was,
+  because the fallback for object-store folders answered in its place.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0582---2026-11-06)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.58.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.58.2`
 
 ## v0.58.1
 
@@ -2231,224 +2276,13 @@ entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.51.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.51.0`
 
-## v0.50.0
-
-<span class="filex-release-date">3 October 2026</span>
-
-Office documents open, convert and get their thumbnails through the connected ONLYOFFICE Document Server: LibreOffice is gone from every image and from filex, and the Test on the ONLYOFFICE card now downloads the way a document does. Groups, contributed by @manjotsc (#78): named sets of people with folder access and a role, kept in step with the groups a sign-in carries. People can sign in with the server's own Windows or Linux (PAM) accounts, wrong passwords are counted per account, and FILEX_TRUSTED_PROXIES names the proxies whose forwarded address is believed. Multi-tenant installs gain tenant realms, sign-in providers bound to tenants and self-service for a tenant's own domain; an OIDC sign-in finds its account by its SSO identity inside its own tenant, and a tenant's administrator can no longer change the built-in roles, found and fixed by @berkbasarir (#77). Also: SVG, HEIC, text, archive and folder thumbnails, Default apps per file type, e-Signature for PDFs only, and Chromium's sandbox required by every Linux desktop package. Read the upgrade notes first: LDAP accounts, realms, provider bindings and SSO trust change on upgrade.
-
-## What changed
-
-> ⚠ **Desktop app on Linux: Chromium's sandbox is no longer optional**
-> (Security). On Ubuntu 23.10 and later (24.04 LTS included) an
-> AppImage needs a one-time AppArmor profile before it opens, and says so when
-> it is missing - including an AppImage added to the menu by AppImageLauncher,
-> Gear Lever or appimaged, whose entry used to turn the sandbox off. The Snap
-> asks snapd for the sandbox: until the Snap Store connects that by itself
-> (it reviews the permission by hand, so the new revision can wait for the
-> review before it reaches stable), run
-> `sudo snap connect filex-app:browser-sandbox` once; the app says so too. The
-> `.deb` and the `.rpm` need nothing
-> ([DESKTOP.md](./DESKTOP.md#appimage-on-recent-ubuntu)).
->
-> ⚠ **LDAP: an entry with no e-mail attribute is `name@local` now**
-> (Changed). An account an older filex opened under the bare name
-> (`alex`) is adopted at that person's next sign-in - web or file protocol -
-> and becomes `alex@local` (`alex@<realm>.local` in a tenant's realm on a
-> multi-tenant install): the same account, its files, shares, permissions,
-> role and quota unchanged, with an audit row `auth.account_adopted`. A local
-> password on it is kept; an account bound to SSO is signed in to as it is,
-> not renamed. Nobody is refused and nothing is left to do by hand. Set
-> `FILEX_OS_LOGIN_EMAIL_TOKEN` **before** upgrading if `local` is not the
-> token you want - it cannot be changed later. On a multi-tenant install only
-> an account in the sign-in's own tenant is adopted: one in another tenant is
-> left alone and the platform operator is told once
-> (`ldap_legacy_account_elsewhere`), so re-home the directory accounts an older
-> build left in the supertenant before upgrading. A file-protocol sign-in says
-> which tenant it is for by its address or by `realm/name`; one that names
-> nothing is the platform's own and adopts nothing (or pin `provider`)
-> ([LDAP.md](./LDAP.md#accounts-an-older-filex-opened-under-the-bare-name)).
->
-> ⚠ **Multi-tenant: on the platform's address an empty realm is the platform's
-> own tenant** (Added, tenant realms). A tenant's people who used to
-> sign in there with their e-mail alone type their tenant's **realm** in the new
-> Realm field - or sign in on their tenant's own address, where the field is
-> filled in for them. Over SFTP (and FTPS with no SNI, and WebDAV on the
-> platform's address) they write `realm/name`.
-> Existing tenants' realms are their slugs; an API token or an SSH key needs no
-> realm. Single-tenant installs are unaffected.
->
-> ⚠ **Multi-tenant on SQLite or PostgreSQL: two tenants whose slugs differ only
-> in case stop the upgrade.** Migration 00073 gives every tenant the realm
-> `LOWER(slug)` under a unique index, so `Acme` and `acme` cannot both have
-> one: the migration fails and the server does not start until one of them is
-> renamed (MySQL's default collation never let such a pair exist). Look
-> before upgrading, and change one slug while still on 0.49:
-> `SELECT LOWER(slug), COUNT(*) FROM providers GROUP BY LOWER(slug) > HAVING COUNT(*) > 1;`. The realm is copied once and never changes after
-> that
-> ([MULTI-TENANCY.md → Realms](./MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for)).
->
-> ⚠ **Multi-tenant: sign-in providers are bound to tenants now**
-> (Added, tenant self-service). The upgrade binds **every** provider
-> that exists (OIDC, LDAP, the proxy header, Windows, Linux PAM, environment
-> and page alike) to **every** tenant that exists, which is what happened
-> before: one directory served every tenant. **Review the bindings** on Admin →
-> Identity providers (the page says so until you have) and remove the tenants
-> a provider should not serve. A provider added after the upgrade serves the
-> platform's own tenant only, and a tenant created after it has no shared
-> provider until one is bound. `FILEX_LDAP_PROVIDER` / `FILEX_HEADER_PROVIDER`
-> keep working and count as a binding to the pinned tenant. A tenant's own
-> OIDC on its provider row is unchanged. Single-tenant installs read no
-> bindings ([TENANT-ADMIN.md](./TENANT-ADMIN.md#moving-existing-installs-over-nothing-breaks-on-upgrade)).
->
-> ⚠ **SSO: which account a sign-in opens** (Security). An OIDC
-> sign-in finds its account inside the tenant it is for only, by the SSO
-> identity the account is bound to (`iss` + `sub`), and by the email address
-> only while the account is bound to none - and then only when the provider
-> says `email_verified: true` or its addresses are trusted. On upgrade:
-> - **Every OIDC provider that exists keeps its old behaviour**: its new
->   setting **Trust this provider's email addresses** comes on, and its card
->   says the upgrade set it. Switch it off on a provider that sends
->   `email_verified`. A provider added after the upgrade starts with it off.
->   The environment's OIDC follows `FILEX_OIDC_TRUST_EMAIL`; unset, it trusts
->   when the database had accounts that came through SSO (decided once, at
->   the first start of 0.50), and not on a fresh install.
-> - With trust off, an unverified address opens no existing account that is
->   bound to no identity yet (`email_unverified`), and a new account for it is
->   opened **switched off** (`account_pending`): switching it on in Admin →
->   Users approves it.
-> - An account is bound to the identity it first signs in with. **Changing
->   the identity provider, or its issuer address (a renamed Keycloak realm),
->   refuses its accounts** (`identity_mismatch`) until each account's SSO
->   bind is removed (Admin → Users → Remove SSO bind, `sso_unlink`).
-> - Multi-tenant: an SSO callback that comes back without its flow cookie is
->   refused (`expired`); a sign-in in flight during the upgrade starts again.
->   A tenant's account signing in through OIDC in maintenance mode gets the
->   generic answer now, not `maintenance`.
-> ([SSO.md](./SSO.md#which-account-an-sso-sign-in-opens))
->
-> ⚠ **A forwarded client address is believed only from a trusted proxy now**
-> (Changed, `FILEX_TRUSTED_PROXIES`). Up to 0.49 every
-> `X-Forwarded-For` was believed, whoever wrote it. The default is `auto`,
-> worked out from where filex runs: this machine (loopback) and, in a
-> container on a network of its own (Docker, Podman, a Kubernetes pod), the
-> other containers on that network - never the network's gateway, never
-> filex's own address, never the LAN, never a macvlan or ipvlan network. A
-> proxy container next to filex, and a proxy on the same machine as a plain
-> install, need nothing. **A proxy on the host in front of filex's container**
-> (nginx reaching a port published on `127.0.0.1` arrives from the Docker
-> gateway), **a proxy on another machine**, an ingress controller on another
-> Kubernetes node, a proxy that reaches filex over `100.64.0.0/10` (Tailscale,
-> Cloudflare WARP) and a CDN in front of your proxy must be listed, keeping
-> the word - `FILEX_TRUSTED_PROXIES=auto, 172.18.0.1`. Until they are, every
-> visitor resolves to the proxy's address: the access log, the audit log, the
-> file-request limit and the new sign-in limit all see that one address, and
-> one visitor's wrong passwords lock out everybody who arrives through it.
-> **Admin → Sign-in security** names such a proxy - a peer that sends
-> forwarded addresses without being trusted - and adds it in one click; the
-> log names it too. Helm: list the cluster's pod network
-> (`trustedProxies: "auto, 10.244.0.0/16"`). Clients on a LAN that reach
-> filex with no proxy in front need nothing set
-> ([CONFIGURATION.md → Trusted proxies](./CONFIGURATION.md#trusted-proxies)).
->
-> ⚠ **Apps and storage plugins are downloaded from public addresses only**
-> (Security). An app installed from an address or a repository,
-> an install request, the update check and a storage plugin from a URL or a
-> source now refuse an address on this machine, on the private network or of
-> the cloud metadata service - judged after DNS and on every redirect - and a
-> redirect from `https://` to plain `http://`. An administrator who installed
-> from an internal server is refused now: upload the files instead (an app
-> installed that way earlier says *Could not check* at the update check).
-> `FILEX_PLUGIN_LOOPBACK_SOURCES=1` opens this machine, and nothing else, for
-> development and tests - never on a server
-> ([CONFIGURATION.md](./CONFIGURATION.md#storage-plugins)).
->
-> ⚠ **Storage plugins** (Security): a plugin keeps the driver
-> name it was first accepted with - another plugin may not take it, even while
-> the first is off; a remote plugin that answers with a redirect is refused
-> (register the address it points to); and a share download goes straight to a
-> plugin's presigned address only when that address is `https://`.
->
-> ⚠ **The bundled S3 server is Versity S3 Gateway, not MinIO** (Changed).
-> `minio/minio` is no longer published, so a Compose stack or Helm release that
-> bundled MinIO copies its bucket across once: the `versitygw` Compose profile
-> and `versitygw.enabled` in Helm replace `minio`, and MinIO's own data format
-> is not readable by the new server. Nothing is deleted for you: Compose keeps
-> the `minio-data` volume, and the chart refuses to render while
-> `minio.enabled` is `true`, with the commands that keep the old volume and
-> MinIO serving while you copy
-> ([STORAGE.md → Moving off the bundled MinIO](./STORAGE.md#moving-off-the-bundled-minio)).
->
-> ⚠ **LibreOffice is gone: office conversions and thumbnails need a connected
-> ONLYOFFICE** (Changed, Removed). The full image
-> drops LibreOffice and its Java runtime (about 420 MB less to download and
-> 1.1 GB less on disk: 642 → 225 MB compressed), and filex no longer runs a
-> LibreOffice installed next to the bare binary either. Office documents are
-> the ONLYOFFICE Document Server's you connect under **External services**:
-> their thumbnails, and the apps' office engine - the Convert app's Word,
-> Excel, PowerPoint and OpenDocument conversions, PDF/A included. With
-> ONLYOFFICE connected there is nothing to do: the engine uses the editor's
-> address, secret and callback address and turns on without a restart, and
-> the thumbnails LibreOffice drew before are kept and drawn again by
-> ONLYOFFICE, one document at a time, as they are listed (or all at once with
-> a *Fix* repair). Without it, office documents show their type icon instead
-> of a thumbnail and the Thumbnail repair tab says "ONLYOFFICE is not
-> configured", the converter's office targets are greyed for an administrator
-> with "connect it under External services", and a job that asks anyway says
-> so - nothing fails silently; documents still open in the read-only preview
-> and **+ New** still makes them. An app that asks for `engines:libreoffice`
-> keeps working: it is the same engine as `engines:office`, and the same
-> grant. ONLYOFFICE does not make HTML from a spreadsheet or one CSV per
-> sheet, as LibreOffice did
-> ([ONLYOFFICE.md](./ONLYOFFICE.md#office-conversions-for-apps-the-office-engine),
-> [thumbnails.md → Office through OnlyOffice](./thumbnails.md#office-through-onlyoffice)).
->
-> ⚠ **A page on another origin that changes things with filex's session cookie
-> needs that origin in `FILEX_CORS_ALLOWED_ORIGINS`** (Security).
-> The default `*` does not grant it, and a page on a sibling subdomain is
-> another origin too. An embed with a bearer token, a host that proxies with a
-> key (the recommended pattern), the desktop app, the installed web app, a
-> dashboard that frames filex, share and drop links, upload tickets, WebDAV and
-> S3 clients, and scripts are unaffected. A refused change answers
-> `403 cross_origin_refused`.
->
-> Also on upgrade:
-> - The operating-system providers (`windows`, `pam`) are switched on from
->   **Admin → Identity providers** only, after their test. Written into
->   `FILEX_AUTH_DRIVERS` or `auth.drivers`, either is refused at start with a
->   warning, and the other providers start as usual.
-> - A link into docs.filex.sh at a heading that held a long dash has a new
->   fragment (`#token-kinds--user-vs-app` is `#token-kinds---user-vs-app`);
->   the old one opens the top of the right page (Changed).
-> - The CLI's saved session (`~/.filex/cli.yaml`) is used only at the address
->   it was saved with: a script that reaches the same server by another name
->   or an IP signs in there once, or passes `FILEX_TOKEN` (Security).
-> - An agent (REST `/api/ai`, MCP) or a ShareX setup that writes into an
->   end-to-end encrypted folder is refused now (`409 E2E_PLAINTEXT_REFUSED`):
->   pass `allow_plaintext` where storing plaintext there is meant
->   (Security).
-> - Read Security if you handed out folder-confined API tokens
->   (one could change sharing grants outside its folder, on any install) or
->   ran 0.49.0 multi-tenant (a tenant's administrator could rewrite the
->   built-in roles), and if you run OIDC (an identity provider could sign a
->   person in to another account, another tenant's on a multi-tenant install).
-
-**This release has more to it than fits on one page.** The rest of the
-entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0500---2026-10-02).
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.50.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.50.0`
-
 ## Earlier releases
 
-The 130 releases before v0.50.0, in brief. Full notes are on GitHub.
+The 131 releases before v0.51.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.50.0](https://github.com/BRF-Tech/filex/releases/tag/v0.50.0) | 3 October 2026 | Office documents open, convert and get their thumbnails through the connected ONLYOFFICE Document Server: LibreOffice is gone from every image and from filex, and the Test on the ONLYOFFICE card now downloads the way a document… |
 | [v0.49.0](https://github.com/BRF-Tech/filex/releases/tag/v0.49.0) | 29 September 2026 | Roles and per-person permissions, contributed by @manjotsc (#75): 28 named permissions, one role per person built from them, per-person exceptions on top, and refusals that name the permission and the role in the reader's… |
 | [v0.48.1](https://github.com/BRF-Tech/filex/releases/tag/v0.48.1) | 28 September 2026 | Apps can bring an interface of their own - HTML and JavaScript filex serves from the approved package into a sandboxed frame, opened as the viewer of a file type, as a kind of file in New document, or handing you a file to keep -… |
 | [v0.47.0](https://github.com/BRF-Tech/filex/releases/tag/v0.47.0) | 26 September 2026 | filex runs under a sub-path behind a reverse proxy (a FILEX_PUBLIC_URL with a path works across the web app, WebDAV, S3, the desktop app, the CLI and Helm), apps keep themselves up to date within the filex version range they… |
@@ -2582,4 +2416,4 @@ The 130 releases before v0.50.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-11-05 from 150 published releases.</small>
+<small>Last refreshed 2026-11-06 from 151 published releases.</small>

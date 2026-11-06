@@ -10,6 +10,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/secretbox"
+	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
 // Managed lists the providers the admin page can configure, in the order
@@ -67,6 +68,10 @@ type Field struct {
 	Required bool      `json:"required,omitempty"`
 	// Default is what an absent value means, said so the page can show it.
 	Default string `json:"default,omitempty"`
+	// SecurityOff: on, this takes a protection away. The form draws the one
+	// warning under it (SecurityOffNote.vue), with the field's own
+	// `authProviders.fieldRisks.<key>`.
+	SecurityOff bool `json:"security_off,omitempty"`
 }
 
 // Schema is every field the page may store per provider. A key outside it is
@@ -90,7 +95,7 @@ var Schema = map[string][]Field{
 		// `email_verified: true` signs in to no existing account that is not
 		// yet bound to the person's SSO identity, and opens a new account
 		// switched off (docs/SSO.md, "Which account an SSO sign-in opens").
-		{Key: "trust_email", Kind: FieldBool, Default: "false"},
+		{Key: "trust_email", Kind: FieldBool, Default: "false", SecurityOff: true},
 	},
 	"ldap": {
 		{Key: "url", Kind: FieldText, Required: true},
@@ -132,7 +137,7 @@ var Schema = map[string][]Field{
 		// Tell a person whose password was right why the first-login rule
 		// refused them (auth.RefusedAfterPassword). OFF by default: the form
 		// would then confirm a directory password to anybody guessing.
-		{Key: "show_refusal_reason", Kind: FieldBool, Default: "false"},
+		{Key: "show_refusal_reason", Kind: FieldBool, Default: "false", SecurityOff: true},
 	},
 	// The Linux PAM sign-in (auth/drivers/pam): filex runs the command set here
 	// — by default `sudo -n /usr/bin/pamtester filex <user> authenticate
@@ -156,7 +161,7 @@ var Schema = map[string][]Field{
 		{Key: "auto_create", Kind: FieldBool, Default: "false"},
 		{Key: "allowed_groups", Kind: FieldText},
 		// As for ldap: tell a refusal after a right password; off by default.
-		{Key: "show_refusal_reason", Kind: FieldBool, Default: "false"},
+		{Key: "show_refusal_reason", Kind: FieldBool, Default: "false", SecurityOff: true},
 	},
 	"proxy-header": {
 		{Key: "trusted_proxies", Kind: FieldText, Required: true},
@@ -189,7 +194,7 @@ var Schema = map[string][]Field{
 		{Key: "protocol_login", Kind: FieldBool, Default: "true"},
 		// As for ldap: tell a refusal after a right password (the first-login
 		// rule, a system account the SID names); off by default.
-		{Key: "show_refusal_reason", Kind: FieldBool, Default: "false"},
+		{Key: "show_refusal_reason", Kind: FieldBool, Default: "false", SecurityOff: true},
 	},
 }
 
@@ -281,7 +286,8 @@ func truthy(v string) bool {
 var ErrSecretKeyRequired = errors.New("a client secret or bind password is stored sealed, and that needs FILEX_SECRET_KEY")
 
 // Change is what a save asks for. Values holds the fields sent; a secret sent
-// as "" or "***" keeps the stored one (the page never has it to send back).
+// as "" or "***" keeps the stored one (the page never has it to send back),
+// while the provider's address stays what it was (storage.SecretMoved).
 type Change struct {
 	Enabled *bool
 	Values  map[string]any
@@ -336,8 +342,43 @@ func Merge(cur *Stored, ch Change, box *secretbox.Box) (*Stored, []string, error
 	if ch.Enabled != nil {
 		next.Enabled = *ch.Enabled
 	}
+	// ⚠ Before anything is saved or probed: the save tests the provider on
+	// exactly what it is about to store, so a kept secret at a new address
+	// would be sent there by the save itself (storage.SecretMoved).
+	if err := secretMoved(cur, next.Values); err != nil {
+		return nil, nil, err
+	}
 	sort.Strings(changed)
 	return next, changed, nil
+}
+
+// secretMoved asks storage.SecretMoved about a provider's next values: a
+// secret stored and not typed again in this change is kept, and goes only to
+// the address it was saved for (url, issuer, …), over a connection as
+// protected as then (start_tls, ca_pem, ca_file). A
+// *storage.SecretAddressError names the field to type again.
+func secretMoved(cur *Stored, next map[string]string) error {
+	var kept []string
+	for k, v := range cur.Values {
+		if f, ok := FieldOf(cur.Name, k); ok && f.Kind == FieldSecret && v != "" && next[k] == v {
+			kept = append(kept, k)
+		}
+	}
+	return storage.SecretMoved(kept, ruleMap(cur.Name, next), ruleMap(cur.Name, cur.Values))
+}
+
+// ruleMap is a provider's values as the rule reads them: a switch as the bool
+// it means (start_tls), everything else as stored.
+func ruleMap(name string, m map[string]string) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if f, ok := FieldOf(name, k); ok && f.Kind == FieldBool {
+			out[k] = truthy(v)
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // secretMask is what a list shows for a stored secret; sent back, it means
@@ -487,6 +528,10 @@ func DraftConfig(s *Stored, draft map[string]any, box *secretbox.Box, opts Optio
 		// A typed secret goes in as it is: Open passes an unsealed value
 		// through unchanged, so the driver sees exactly what was typed.
 		tmp.Values[k] = v
+	}
+	// The test connects with what it is given: a kept secret goes nowhere new.
+	if err := secretMoved(s, tmp.Values); err != nil {
+		return nil, err
 	}
 	cfg, _, err := DriverConfig(tmp, box, opts)
 	return cfg, err

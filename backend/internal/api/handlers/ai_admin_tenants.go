@@ -30,7 +30,7 @@ type tenantFieldsIn struct {
 	OIDCRedirectURL  *string `json:"oidc_redirect_url,omitempty" jsonschema:"empty = https://<host>/api/auth/oidc/callback"`
 	RoleClaim        *string `json:"role_claim,omitempty"`
 	AdminGroup       *string `json:"admin_group,omitempty"`
-	Enabled          *bool   `json:"enabled,omitempty" jsonschema:"false suspends the tenant: nobody of it can sign in, nothing is deleted"`
+	Enabled          *bool   `json:"enabled,omitempty" jsonschema:"false suspends the tenant (its people's sign-ins, sessions, keys and sockets stop; nothing is deleted), true resumes it. Changing it needs an administrator signed in to the panel: a key is refused session_required"`
 	OIDCTrustEmail   *bool   `json:"oidc_trust_email,omitempty" jsonschema:"trust every email address the tenant's own OIDC sends as verified, email_verified or not (default off). Off, an address it does not mark verified signs in to no account not yet bound to the person's SSO identity, and opens a new account switched off"`
 }
 
@@ -67,7 +67,7 @@ type tenantUpdateIn struct {
 
 type tenantDeleteIn struct {
 	ID    int64 `json:"id" jsonschema:"the tenant's numeric id"`
-	Force bool  `json:"force,omitempty" jsonschema:"also delete the tenant's accounts (their public links close with them); storages and files are never deleted, only unlinked"`
+	Force bool  `json:"force,omitempty" jsonschema:"also delete the tenant's accounts (their public links close with them); storages and files are never deleted, only unlinked. With accounts to delete it needs an administrator signed in to the panel: a key is refused session_required"`
 }
 
 type tenantStorageIn struct {
@@ -115,15 +115,17 @@ func registerTenantTools(r *adminReg, a *AIAdmin) {
 			return reqSpec{handler: a.tenants.Create, method: http.MethodPost, path: base, body: b}
 		})
 	regAdminTool(r, "admin_tenants_update", "Change a tenant by id: only the fields sent change. The realm is not a field - it never "+
-		"changes. enabled:false suspends the tenant (nobody of it signs in, nothing is deleted); the platform's own tenant "+
-		"cannot be suspended."+tenantModel,
+		"changes. Suspending (enabled:false) and resuming (enabled:true on a suspended tenant) need an administrator signed in "+
+		"to the admin panel: a key gets session_required and nothing of the call is changed. "+
+		"The platform's own tenant cannot be suspended."+tenantModel,
 		func(in tenantUpdateIn) reqSpec {
 			return reqSpec{handler: a.tenants.Update, method: http.MethodPatch, path: base + "/" + itoa(in.ID),
 				urlParams: idParam(in.ID), body: in.body()}
 		})
 	regAdminTool(r, "admin_tenants_delete", "Delete a tenant by id. A tenant that still has accounts is refused unless force is "+
-		"true, which deletes the accounts too. Its storages are unlinked, never deleted, and their files are untouched. The "+
-		"platform's own tenant cannot be deleted."+tenantModel,
+		"true, which deletes the accounts too - and that needs an administrator signed in to the admin panel: a key gets "+
+		"session_required and nothing is deleted. An empty tenant is deleted with a key. Its storages are unlinked, never "+
+		"deleted, and their files are untouched. The platform's own tenant cannot be deleted."+tenantModel,
 		func(in tenantDeleteIn) reqSpec {
 			var q url.Values
 			if in.Force {

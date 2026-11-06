@@ -7,6 +7,14 @@ import (
 
 func intp(v int) *int { return &v }
 
+// skipTLSVerifyField: on FTP the certificate switch means something only over
+// FTPS, so the form offers it only then.
+func skipTLSVerifyField() storage.Field {
+	f := storage.SkipTLSVerifyField()
+	f.Requires = "tls"
+	return f
+}
+
 // Config contract for the ftp driver — every key Init reads, declared once
 // so the admin form, the replication-target dialog, the CLI and
 // storage.ValidateNonRootPath all agree. See storage/descriptor.go.
@@ -75,7 +83,13 @@ func init() {
 				Default:     false,
 				Help:        "Plain FTP sends credentials in the clear - turn this on whenever the server supports it.",
 				HelpI18nKey: "storages.fieldHelp.tls",
+				SecurityOff: &storage.SecurityOff{
+					Risk:        "Without FTPS the password and every file cross the network unencrypted: anybody on the way can read and change them.",
+					RiskI18nKey: "storages.fieldRisk.plainFtp",
+					WhenOff:     true,
+				},
 			},
+			skipTLSVerifyField(),
 			{
 				Key:         "passive",
 				Type:        storage.FieldBool,

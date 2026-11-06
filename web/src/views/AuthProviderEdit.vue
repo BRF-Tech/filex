@@ -41,6 +41,7 @@ import type {
 import { useToastStore } from '@/stores/toast';
 import { useTenancy } from '@/composables/useTenancy';
 import { extractError } from '@/api/client';
+import { secretNeededOf, type SecretNeeded } from '@/lib/secretNeeded';
 
 import Button from '@/components/ui/Button.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
@@ -259,8 +260,12 @@ function draftConfig(p: AuthProvider): Record<string, unknown> {
   return config;
 }
 
+/** Per provider: the secret the server asked for again (save or Test). */
+const secretsNeeded = reactive<Record<string, SecretNeeded | null>>({});
+
 async function save(p: AuthProvider, confirmFailedTest = false) {
   refusals[p.id] = undefined;
+  secretsNeeded[p.id] = null;
   const d = ensureDraft(p);
   // Only a save that leaves the provider ON runs its test with the account; a
   // save that switches it off needs none, and is not sent one.
@@ -298,6 +303,7 @@ async function save(p: AuthProvider, confirmFailedTest = false) {
     }
     await load();
   } catch (e: unknown) {
+    secretsNeeded[p.id] = secretNeededOf(e, t('errors.generic'));
     refusals[p.id] = extractError(e, t('errors.generic'));
   } finally {
     forgetPassword(p);
@@ -314,9 +320,11 @@ async function confirmEnable() {
 async function test(p: AuthProvider) {
   testingId.value = p.id;
   results[p.id] = undefined;
+  secretsNeeded[p.id] = null;
   try {
     results[p.id] = await AuthProvidersApi.test(p.id, p.managed ? draftConfig(p) : {}, accountToSend(p));
   } catch (e: unknown) {
+    secretsNeeded[p.id] = secretNeededOf(e, t('errors.generic'));
     toast.error(extractError(e, t('errors.generic')));
   } finally {
     forgetPassword(p);
@@ -571,6 +579,7 @@ onMounted(load);
               :values="ensureDraft(p).values"
               :secrets-set="p.secrets_set"
               :set-by-upgrade="p.set_by_upgrade"
+              :secret-needed="secretsNeeded[p.id]"
               :prefix="p.id"
               @update="(k: string, v: string | boolean) => (ensureDraft(p).values[k] = v)"
             />

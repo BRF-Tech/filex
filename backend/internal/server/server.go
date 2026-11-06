@@ -185,12 +185,6 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		return nil, fmt.Errorf("server: mkdir datadir: %w", err)
 	}
 
-	// Before the first storage opens: a driver reads this as it connects.
-	storage.SetSkipTLSVerify(cfg.StorageTLS.SkipVerify)
-	if cfg.StorageTLS.SkipVerify {
-		slog.Warn("storage: FILEX_STORAGE_TLS_SKIP_VERIFY is on - the certificates of S3, WebDAV and FTPS storages are not checked")
-	}
-
 	dbDrv, err := db.Get(cfg.DB.Driver)
 	if err != nil {
 		return nil, err
@@ -238,6 +232,10 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// start that has none, and the row's value is written into cfg here,
 	// before the first consumer below is built from it.
 	instancesettings.Boot(ctx, store, &cfg)
+	// Before the first storage opens: a driver reads its certificate switch as
+	// it connects. From here on cfg says whether this is the start the 0.58.2
+	// variable counted on, which the storage seeded at the end of New asks.
+	cfg.StorageTLS.SkipVerify = seedStorageTLS(ctx, store, cfg.StorageTLS.SkipVerify)
 	// Off on an install that has tenants is maintenance mode: only the
 	// platform's own tenant signs in, and a tenant's open session or API key
 	// stops working too (auth.MaintenanceLockout, mounted by the router).
@@ -1678,6 +1676,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// pointing curl at the port).
 	if cfg.FTPS.Enabled {
 		ftpsSrv, err := ftpsrv.New(ftpsrv.Config{
+			AllowPlain:     cfg.FTPS.AllowPlain,
 			Enabled:        true,
 			Addr:           cfg.FTPS.Addr,
 			PublicHost:     cfg.FTPS.PublicHost,

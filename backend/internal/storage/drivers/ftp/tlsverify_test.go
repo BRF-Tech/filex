@@ -13,16 +13,20 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
-func selfSignedFTPS(t *testing.T) *Driver {
+func selfSignedFTPS(t *testing.T, extra map[string]any) *Driver {
 	t.Helper()
 	cert, _ := selfSigned(t)
 	s := newFakeFTP(t)
 	s.tlsConf = &tls.Config{Certificates: []tls.Certificate{cert}}
-	return ftpDriver(t, s.addr(), map[string]any{"tls": true})
+	cfg := map[string]any{"tls": true}
+	for k, v := range extra {
+		cfg[k] = v
+	}
+	return ftpDriver(t, s.addr(), cfg)
 }
 
 func TestSelfSignedFTPS_RefusedUnlessTheOperatorSaysOtherwise(t *testing.T) {
-	d := selfSignedFTPS(t)
+	d := selfSignedFTPS(t, nil)
 
 	if err := d.Write(context.Background(), "/x.bin", bytes.NewReader([]byte("x")), 1); err == nil {
 		t.Fatal("an FTPS server nothing trusts was accepted with the check on")
@@ -30,11 +34,23 @@ func TestSelfSignedFTPS_RefusedUnlessTheOperatorSaysOtherwise(t *testing.T) {
 }
 
 func TestSelfSignedFTPS_AcceptedWithTheCheckOff(t *testing.T) {
-	storage.SetSkipTLSVerify(true)
-	t.Cleanup(func() { storage.SetSkipTLSVerify(false) })
-	d := selfSignedFTPS(t)
+	d := selfSignedFTPS(t, map[string]any{storage.SkipTLSVerifyKey: true})
 
 	if err := d.Write(context.Background(), "/x.bin", bytes.NewReader([]byte("x")), 1); err != nil {
 		t.Fatalf("FTPS upload with the check off: %v", err)
+	}
+}
+
+// The data connection is a TLS connection of its own: the switch has to reach
+// it as well as the control connection, and the next storage must not hear it.
+func TestSelfSignedFTPS_TheSwitchIsTheStoragesOwn(t *testing.T) {
+	on := selfSignedFTPS(t, map[string]any{storage.SkipTLSVerifyKey: true})
+	off := selfSignedFTPS(t, nil)
+
+	if err := on.Write(context.Background(), "/x.bin", bytes.NewReader([]byte("x")), 1); err != nil {
+		t.Fatalf("the storage with the check off: %v", err)
+	}
+	if err := off.Write(context.Background(), "/x.bin", bytes.NewReader([]byte("x")), 1); err == nil {
+		t.Fatal("the storage with the check on took the other one's answer")
 	}
 }

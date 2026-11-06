@@ -7,9 +7,11 @@ import { useSettingsStore } from '@/stores/settings';
 import { useToastStore } from '@/stores/toast';
 import { useAuthStore } from '@/stores/auth';
 import { api, extractError } from '@/api/client';
+import { secretNeededOf, type SecretNeeded } from '@/lib/secretNeeded';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import SecurityOffNote from '@/components/ui/SecurityOffNote.vue';
 import Select from '@/components/ui/Select.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import ThumbLimitsCard from '@/components/tools/ThumbLimitsCard.vue';
@@ -57,7 +59,10 @@ watchEffect(() => {
   smtp.from = (d['smtp.from'] as string) ?? '';
   smtp.username = (d['smtp.username'] as string) ?? '';
 });
+/** The server asked for the password again: the host changed (lib/secretNeeded). */
+const smtpSecretNeeded = ref<SecretNeeded | null>(null);
 async function saveSmtp() {
+  smtpSecretNeeded.value = null;
   const patch: Record<string, unknown> = {
     'smtp.host': smtp.host,
     'smtp.port': smtp.port,
@@ -71,6 +76,7 @@ async function saveSmtp() {
     smtp.password = '';
     toast.success(t('settings.savedOk'));
   } catch (e: unknown) {
+    smtpSecretNeeded.value = secretNeededOf(e, t('errors.generic'));
     toast.error(extractError(e, t('errors.generic')));
   }
 }
@@ -183,12 +189,15 @@ onMounted(() => settings.fetch());
         <Input :model-value="smtp.port" :label="t('settings.smtp.port')" placeholder="587" monospace @update:model-value="(v) => (smtp.port = v as string)" />
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Select :model-value="smtp.tls" :options="tlsOptions" :label="t('settings.smtp.tls')" @update:model-value="(v) => (smtp.tls = v as string)" />
+        <div class="space-y-1">
+          <Select :model-value="smtp.tls" :options="tlsOptions" :label="t('settings.smtp.tls')" @update:model-value="(v) => (smtp.tls = v as string)" />
+          <SecurityOffNote v-if="smtp.tls === 'none'" :risk="t('settings.smtp.encryptionNoneRisk')" />
+        </div>
         <Input :model-value="smtp.from" :label="t('settings.smtp.from')" placeholder="noreply@example.com" monospace @update:model-value="(v) => (smtp.from = v as string)" />
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Input :model-value="smtp.username" :label="t('settings.smtp.username')" :hint="t('settings.smtp.usernameHelp')" monospace @update:model-value="(v) => (smtp.username = v as string)" />
-        <Input :model-value="smtp.password" type="password" :label="t('settings.smtp.password')" :placeholder="smtpPwSet ? t('settings.smtp.passwordSaved') : ''" :hint="t('settings.smtp.passwordHelp')" @update:model-value="(v) => (smtp.password = v as string)" />
+        <Input :model-value="smtp.password" type="password" :label="t('settings.smtp.password')" :placeholder="smtpPwSet ? t('settings.smtp.passwordSaved') : ''" :hint="t('settings.smtp.passwordHelp')" :error="smtpSecretNeeded && !smtp.password ? smtpSecretNeeded.message : null" data-testid="smtp-password" @update:model-value="(v) => (smtp.password = v as string)" />
       </div>
       <div class="space-y-2 pt-2">
         <div v-if="smtpTestAsking" class="flex flex-wrap items-end gap-2 rounded-md border border-zinc-200 dark:border-zinc-700 p-3">

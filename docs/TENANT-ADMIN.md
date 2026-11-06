@@ -173,7 +173,12 @@ database, the first time it runs (the mark `auth.instances.upgraded`):
    `oidc_client_id`, ...) stays where it is and is read as that tenant's own
    SSO (choice `tenant` on its sign-in page): nothing is copied, no secret
    moves, and `PATCH /api/admin/providers/{id}` changes it as before. A tenant
-   may have more of its own besides (instances with `origin = tenant`).
+   may have more of its own besides (instances with `origin = tenant`). On
+   either, a client secret or bind password left empty is kept only while the
+   address it goes to (`oidc_issuer`, `url`, …) stays what it was and the
+   connection stays as protected (StartTLS, CA); a new one needs it typed
+   again ([SSO.md](SSO.md#managing-providers-on-the-identity-providers-page)).
+   The redirect address (`oidc_redirect_url`) is not one: no secret goes there.
 4. **Bindings: every instance that exists at the upgrade is bound to the
    platform's tenant and to every tenant that exists at that moment**
    (`source = upgrade`). That is what happens today: one LDAP serves every

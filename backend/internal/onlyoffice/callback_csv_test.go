@@ -16,6 +16,7 @@ package onlyoffice
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,6 +66,11 @@ type csvHarness struct {
 	// bodyUsers, when set, is what the callback's BODY says `users` is,
 	// whatever its signed token says.
 	bodyUsers []string
+	// opener is who the last open handed the session; editor is the account
+	// a save names when the test names nobody (defaultEditors).
+	opener, editor int64
+	// sqlDB is the test database's handle (account7).
+	sqlDB *sql.DB
 
 	mu        sync.Mutex
 	saved     []byte
@@ -84,8 +90,8 @@ func newDocHarness(t *testing.T, name, mime, original string) *csvHarness {
 	h := &csvHarness{root: t.TempDir()}
 	require.NoError(t, os.WriteFile(filepath.Join(h.root, name), []byte(original), 0o644))
 
-	_, store := dbtest.NewTestDB(t)
-	h.store = store
+	sqlDB, store := dbtest.NewTestDB(t)
+	h.store, h.sqlDB = store, sqlDB
 	st, err := store.CreateStorage(context.Background(), &model.Storage{
 		Name: "Local", Driver: "local", MountPath: "/local", Enabled: true,
 		ConfigJSON: []byte(fmt.Sprintf(`{"path":%q}`, filepath.ToSlash(h.root))),
@@ -175,9 +181,15 @@ func (h *csvHarness) callback(t *testing.T, status int, saved, filetype string, 
 	if filetype != "" {
 		payload["filetype"] = filetype
 	}
-	if len(users) > 0 {
-		payload["users"] = users
+	if len(users) == 0 {
+		users = h.defaultEditors(t)
 	}
+	for _, u := range users {
+		if u == "7" {
+			h.account7(t)
+		}
+	}
+	payload["users"] = users
 	tok, err := signHS256(payload, "shh")
 	require.NoError(t, err)
 	body := map[string]any{"token": tok}
@@ -193,6 +205,42 @@ func (h *csvHarness) callback(t *testing.T, status int, saved, filetype string, 
 	resp, err := h.svc.HandleCallback(req, h.node.ID)
 	require.NoError(t, err)
 	return resp
+}
+
+// defaultEditors is who a save names when the test names nobody: Docs always
+// names the session's editors in a status 2 or 6 callback, and a save over
+// the document is written only for one who may still change it (0.59,
+// anEditorMayChange). The session's opener when there is one, else an
+// account made for it.
+func (h *csvHarness) defaultEditors(t *testing.T) []string {
+	t.Helper()
+	if h.opener > 0 {
+		return idStrings(h.opener)
+	}
+	if h.editor == 0 {
+		h.editor = h.user(t, "editor@example.com", model.RoleUser)
+	}
+	return idStrings(h.editor)
+}
+
+// account7 makes "7", the id these tests have always named as the session's
+// editor (a CSV test is about the bytes, not about who), a real account that
+// may change the document: a save over the document is written only for one
+// (0.59, anEditorMayChange). The test database hands out ids from 1, so the
+// account is made and given id 7 when no account has it yet.
+func (h *csvHarness) account7(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	if u, err := h.store.GetUser(ctx, 7); err == nil && u != nil {
+		return
+	}
+	u, err := h.store.CreateUser(ctx, "editor7@example.com", "x", model.RoleUser, "en", "UTC")
+	require.NoError(t, err)
+	require.NoError(t, h.store.SetUserEnabled(ctx, u.ID, true))
+	if u.ID != 7 {
+		_, err = h.sqlDB.ExecContext(ctx, `UPDATE users SET id = 7 WHERE id = ?`, u.ID)
+		require.NoError(t, err)
+	}
 }
 
 func (h *csvHarness) disk(t *testing.T) string {

@@ -979,7 +979,7 @@ func (h *Share) HandleMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 	// A link whose creator may no longer share answers like one that is not
 	// there (link_creator.go).
-	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh) {
+	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh, h.Tenants.MultiTenant) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
@@ -1044,7 +1044,7 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A link whose creator may no longer share closes (link_creator.go).
-	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh) {
+	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh, h.Tenants.MultiTenant) {
 		h.renderErrorPage(w, r, http.StatusNotFound, "notfound")
 		return
 	}

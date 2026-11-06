@@ -96,7 +96,20 @@ func (h *Thumb) Serve(w http.ResponseWriter, r *http.Request) {
 // the refusal itself and reports whether the caller may see the bytes.
 func (h *Thumb) authorize(w http.ResponseWriter, r *http.Request, id int64) bool {
 	q := r.URL.Query()
-	if h.Signer.Verify(id, q.Get("exp"), q.Get("sig")) {
+	if h.Signer.VerifyIn(id, q.Get("exp"), q.Get("ten"), q.Get("sig")) {
+		// A stamp names the tenant the node's storage was in when the listing
+		// signed it, and holds only while that tenant still has the storage
+		// (db.StampStands): a storage moved to another tenant stops answering
+		// the URLs its old tenant's people were handed. Answered like a miss.
+		tenant, _ := strconv.ParseInt(q.Get("ten"), 10, 64)
+		if tenant <= 0 {
+			return true
+		}
+		n, err := h.Store.GetNode(r.Context(), id)
+		if err != nil || n == nil || !db.StampStands(r.Context(), h.Store, tenant, n.StorageID) {
+			http.Error(w, "not ready", http.StatusNotFound)
+			return false
+		}
 		return true
 	}
 

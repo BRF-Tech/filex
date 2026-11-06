@@ -13,6 +13,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { createI18n } from 'vue-i18n';
 
 import StorageDriverFields from '@/components/StorageDriverFields.vue';
+import { secretNeededOf } from '@/lib/secretNeeded';
 import { useStorageDriversStore } from '@/stores/storageDrivers';
 import type { StorageDriverDescriptor } from '@/api/types';
 import en from '@/locales/en.json';
@@ -46,6 +47,47 @@ async function mountFields(modelValue: Record<string, unknown>, locale = 'en') {
 function passwordInput(w: Awaited<ReturnType<typeof mountFields>>) {
   return w.get('input[type="password"]');
 }
+
+// The server's refusal (400 SECRET_NEEDED): the check is being turned off, or the
+// address changed, and the saved password has to be typed again.
+describe('a credential the server asks for again', () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  const said = { field: 'password', message: 'Turning the certificate check off needs password typed again.' };
+
+  it('is said under the field, in the server\'s words', async () => {
+    const w = await mountFields({ host: 'h', password: '***' });
+    await w.setProps({ secretNeeded: said });
+
+    expect(w.get('[data-testid="field-error"]').text()).toBe(said.message);
+  });
+
+  it('goes away once it is typed', async () => {
+    const w = await mountFields({ host: 'h', password: '***' });
+    await w.setProps({ secretNeeded: said });
+    await w.setProps({ modelValue: { host: 'h', password: 'typed' } });
+
+    expect(w.find('[data-testid="field-error"]').exists()).toBe(false);
+  });
+
+  it('stands under no other field', async () => {
+    const w = await mountFields({ host: 'h', password: '***' });
+    await w.setProps({ secretNeeded: { ...said, field: 'secret_key' } });
+
+    expect(w.find('[data-testid="field-error"]').exists()).toBe(false);
+  });
+
+  it('is read from the refusal and from nothing else', () => {
+    const refusal = {
+      isAxiosError: true,
+      response: { status: 400, data: { error: 'SECRET_NEEDED', field: 'password', message: 'Sertifika denetimini kapatmak için password alanını yeniden yazın.' } },
+    };
+
+    expect(secretNeededOf(refusal, 'x')).toEqual({ field: 'password', message: refusal.response.data.message });
+    expect(secretNeededOf({ isAxiosError: true, response: { status: 400, data: { error: 'OTHER', field: 'password' } } }, 'x')).toBeNull();
+    expect(secretNeededOf(new Error('down'), 'x')).toBeNull();
+  });
+});
 
 describe('a saved credential on the storage form', () => {
   beforeEach(() => setActivePinia(createPinia()));

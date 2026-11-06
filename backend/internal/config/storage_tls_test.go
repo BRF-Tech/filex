@@ -23,3 +23,25 @@ func TestStorageTLSSkipVerifyIsOffUnlessAskedFor(t *testing.T) {
 		}
 	}
 }
+
+func TestFTPSAllowPlainIsOffUnlessAskedFor(t *testing.T) {
+	for _, tc := range []struct {
+		env  string
+		want bool
+	}{
+		{"", false},
+		{"false", false},
+		{"0", false},
+		{"true", true},
+		{"1", true},
+	} {
+		t.Setenv("FILEX_FTPS_ALLOW_PLAIN", tc.env)
+		c, err := Load("")
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if c.FTPS.AllowPlain != tc.want {
+			t.Errorf("%q: AllowPlain = %v, want %v", tc.env, c.FTPS.AllowPlain, tc.want)
+		}
+	}
+}

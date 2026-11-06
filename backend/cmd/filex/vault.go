@@ -55,6 +55,7 @@ func vaultCmd() *cobra.Command {
 // vaultFlags are what every vault command takes.
 type vaultFlags struct {
 	url, token string
+	tls        tlsFlag
 	recovery   bool
 	fromStdin  bool
 }
@@ -63,6 +64,7 @@ func (f *vaultFlags) register(c *cobra.Command) {
 	fl := c.Flags()
 	fl.StringVar(&f.url, "url", "", "filex server URL (default: $FILEX_URL or ~/.filex/cli.yaml)")
 	fl.StringVar(&f.token, "token", "", "API or session token (default: $FILEX_TOKEN, else the saved session)")
+	f.tls.flagOn(c)
 	fl.BoolVar(&f.recovery, "recovery-key", false, "unlock with the recovery key instead of the password")
 	fl.BoolVar(&f.fromStdin, "password-stdin", false, "read the password (or recovery key) as one line from stdin")
 }
@@ -267,7 +269,7 @@ type vaultSession struct {
 }
 
 func openVaultSession(ctx context.Context, cmd *cobra.Command, f *vaultFlags, remote, client string) (*vaultSession, error) {
-	api, err := (&clientOpts{url: f.url, token: f.token}).api(true)
+	api, err := (&clientOpts{url: f.url, token: f.token, tls: f.tls}).api(true)
 	if err != nil {
 		return nil, err
 	}

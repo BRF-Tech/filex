@@ -109,8 +109,8 @@ error, not a login that fails hours later with a TLS message.
 | `bind_password` | no | - | Password for `bind_dn`. |
 | `user_filter` | no | `(mail=%s)` | LDAP filter. **Every** `%s` is substituted with the escaped, lower-cased identifier, so a filter may use it more than once. For AD, `(userPrincipalName=%s)` or `(sAMAccountName=%s)` are common. |
 | `email_attr` | no | `mail` | Attribute read back as the account's canonical email. |
-| `start_tls` | no | `false` | Upgrade a plain `ldap://` connection via StartTLS. Ignored for `ldaps://`. |
-| `ca_file` | no | - | PEM bundle holding a private/internal CA, **appended** to the system trust store. Applies to `ldaps://` and StartTLS alike. Validated at boot. |
+| `start_tls` | no | `false` | Upgrade a plain `ldap://` connection via StartTLS. Ignored for `ldaps://`. On the Identity providers page, turning it off on an `ldap://` address while a bind password is saved needs the password typed again: it does not go over a plain connection it was not saved for. |
+| `ca_file` | no | - | PEM bundle holding a private/internal CA, **appended** to the system trust store. Applies to `ldaps://` and StartTLS alike. Validated at boot. On the Identity providers page a new or changed `ca_file` (or `ca_pem`) needs a saved bind password typed again: whoever names the CA decides which server is trusted. |
 | `protocol_login` | no | `true` | Let directory accounts sign in over WebDAV, SFTP and FTPS with their directory password. S3 and NFS never receive a password - they use the access keys and exports the account mints in the web app. See [the protocols section](#directory-accounts-on-the-file-protocols). |
 | `auto_create` | no | `true` | Open an account at a person's first sign-in. See [the first sign-in rule](#the-first-sign-in-rule-who-gets-an-account). |
 | `allowed_groups` | no | - | Comma list: only members of one of these directory groups get an account on the first sign-in. |
@@ -881,7 +881,8 @@ that already exist there and creates nothing.
 A tenant's administrator can add the tenant's **own** LDAP (Admin → My
 tenant): it must use `ldaps://` or StartTLS and reach a public address, with
 its CA pasted as PEM (`ca_pem`), unless the platform operator allowed that
-tenant internal and insecure providers.
+tenant internal and insecure providers. A new or changed `ca_pem`, or StartTLS
+turned off, needs a saved bind password typed again, as a new `url` does.
 
 ⚠ Homing happens at **creation only**. An account that already belongs to a
 tenant is never moved by where it logged in - a login on another tenant's host

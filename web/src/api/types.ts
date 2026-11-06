@@ -566,6 +566,9 @@ export interface AuthProviderField {
   kind: 'text' | 'secret' | 'bool' | 'multiline';
   required?: boolean;
   default?: string;
+  /** On, this takes a protection away: the form warns under it, with
+   *  `authProviders.fieldRisks.<key>` (SecurityOffNote). */
+  security_off?: boolean;
 }
 
 /** A tenant as the provider bindings list it. */

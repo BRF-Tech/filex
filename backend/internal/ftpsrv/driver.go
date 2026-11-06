@@ -53,10 +53,9 @@ func (d *driver) GetSettings() (*ftpserver.Settings, error) {
 			End:   c.PassivePortMax,
 		},
 		IdleTimeout: c.IdleTimeout,
-		// ⚠⚠ Mandatory, not preferred. Plain FTP sends the password in the
-		// clear and the file after it; a flag that let an operator turn this
-		// off would be a flag that publishes their users' credentials.
-		TLSRequired: ftpserver.MandatoryEncryption,
+		// ⚠⚠ Mandatory unless the operator permitted otherwise. Plain FTP sends
+		// the password in the clear and the file after it.
+		TLSRequired: d.requirement(),
 		// ⚠ Active mode has the SERVER dial the client, which does not survive
 		// NAT, is blocked by every sane firewall, and turns the endpoint into
 		// something that makes outbound connections to an address the client
@@ -71,6 +70,25 @@ func (d *driver) GetSettings() (*ftpserver.Settings, error) {
 		DisableASCIIConversion: true,
 		DefaultTransferType:    ftpserver.TransferTypeBinary,
 	}, nil
+}
+
+// requirement is what a client that has not said anything yet is held to.
+func (d *driver) requirement() ftpserver.TLSRequirement {
+	if d.srv.cfg.AllowPlain {
+		return ftpserver.ClearOrEncrypted
+	}
+	return ftpserver.MandatoryEncryption
+}
+
+// requirementOf is what a signed-in client is held to on its data connections.
+// ⚠ A client that signed in over TLS is held to it even where plain FTP is
+// allowed: AllowPlain is for the device that cannot do TLS, not a way for one
+// that can to send the file in the clear after an encrypted sign-in.
+func (d *driver) requirementOf(cc ftpserver.ClientContext) ftpserver.TLSRequirement {
+	if cc.HasTLSForControl() {
+		return ftpserver.MandatoryEncryption
+	}
+	return d.requirement()
 }
 
 func bannerOr(s string) string {
@@ -107,8 +125,8 @@ func (d *driver) ClientDisconnected(cc ftpserver.ClientContext) {
 func (d *driver) AuthUser(cc ftpserver.ClientContext, user, pass string) (ftpserver.ClientDriver, error) {
 	// Belt and braces over the library's own TLSRequired: if a future change to
 	// the settings ever let a cleartext session through, it would still not get
-	// a password past this point.
-	if !cc.HasTLSForControl() {
+	// a password past this point, unless the operator permitted exactly that.
+	if !cc.HasTLSForControl() && !d.srv.cfg.AllowPlain {
 		slog.Warn("ftps: refused a cleartext login attempt",
 			slog.String("remote", cc.RemoteAddr().String()))
 		return nil, errAuth
@@ -141,7 +159,7 @@ func (d *driver) AuthUser(cc ftpserver.ClientContext, user, pass string) (ftpser
 	// Data connections must be encrypted too. Without this a client can log in
 	// over TLS and then transfer the file itself in the clear, which is the
 	// FTPS misconfiguration people actually ship.
-	if err := cc.SetTLSRequirement(ftpserver.MandatoryEncryption); err != nil {
+	if err := cc.SetTLSRequirement(d.requirementOf(cc)); err != nil {
 		return nil, err
 	}
 
@@ -195,7 +213,7 @@ func (d *driver) GetTLSConfig() (*tls.Config, error) { return d.srv.tls, nil }
 // checks at USER time — so a client that never issued AUTH TLS is refused
 // before it can send a password rather than after.
 func (d *driver) PreAuthUser(cc ftpserver.ClientContext, _ string) error {
-	return cc.SetTLSRequirement(ftpserver.MandatoryEncryption)
+	return cc.SetTLSRequirement(d.requirement())
 }
 
 // principalOf is a small helper for the tests.

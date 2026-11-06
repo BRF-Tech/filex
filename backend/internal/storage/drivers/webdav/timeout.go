@@ -76,7 +76,7 @@ func (d *Driver) transport() *http.Transport {
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           stall.GuardWrites(dialer.DialContext, d.policy.SendStall()),
 		TLSHandshakeTimeout:   d.policy.AttemptTimeout,
-		TLSClientConfig:       storage.ApplyTLSVerify(nil),
+		TLSClientConfig:       storage.ApplyTLSVerify(nil, d.skipTLSVerify),
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		ExpectContinueTimeout: time.Second,

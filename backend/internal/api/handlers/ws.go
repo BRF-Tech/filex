@@ -9,6 +9,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -225,11 +226,12 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 	// clients that can't send a cookie or Authorization header) OR the session
 	// cookie (native same-origin panel).
 	var (
-		userID   int64
-		name     string
-		avatar   string
-		ticketed bool
-		ticket   realtime.Ticket
+		userID     int64
+		name       string
+		avatar     string
+		ticketed   bool
+		ticket     realtime.Ticket
+		ticketUser *model.User
 	)
 	if tok := r.URL.Query().Get("ticket"); tok != "" && h.Tickets != nil {
 		t, ok := h.Tickets.Consume(tok)
@@ -239,6 +241,16 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 		}
 		ticketed, ticket = true, t
 		userID, name, avatar = t.UserID, t.Name, t.Avatar
+		// The ticket was minted by a signed-in caller up to a minute ago; the
+		// account may have been switched off, or its tenant suspended, since,
+		// and a ticket is a credential like the session it came from
+		// (GHSA-58wc-42xh-89v8).
+		if u, err := h.Store.GetUser(r.Context(), t.UserID); err == nil && u != nil {
+			if auth.RefuseBlockedAccount(w, r, h.Store, u) {
+				return
+			}
+			ticketUser = u
+		}
 	} else {
 		user := auth.UserFrom(r.Context())
 		if user == nil {
@@ -286,7 +298,7 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 	// reads auth.UserFrom) would see no user and forbid everything. Load the
 	// ticket's user into the context so subscribes are authorized as that user.
 	if ticketed {
-		if u, err := h.Store.GetUser(baseCtx, ticket.UserID); err == nil && u != nil {
+		if u := ticketUser; u != nil {
 			baseCtx = auth.WithUser(baseCtx, u)
 			// …and the TENANT the same user belongs to. Restoring only the user
 			// closed the RBAC half of the identity and left the tenancy half
@@ -331,6 +343,9 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 	defer h.Hub.Unsubscribe(client)
 
 	go h.writePump(connCtx, cancel, conn, client)
+	// The socket outlives the request that opened it: its account is asked
+	// again while it stays open, whichever door opened it.
+	go h.holdAccount(connCtx, cancel, conn, userID)
 
 	for {
 		typ, data, err := conn.Read(connCtx)
@@ -343,6 +358,52 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 		h.handleClientMessage(baseCtx, client, data)
 	}
 	cancel()
+}
+
+// wsRecheckEvery (nanoseconds) is how often an open realtime socket asks again
+// whether its account may still act: the upper bound on how long the socket of
+// an account that was switched off, or whose tenant was suspended, stays open.
+// The protocols' live sessions are asked as often
+// (protocolauth.DefaultRevalidate). Atomic so a test can shorten it while an
+// earlier test's socket is still winding down.
+var wsRecheckEvery atomic.Int64
+
+func init() { wsRecheckEvery.Store(int64(30 * time.Second)) }
+
+// holdAccount closes the socket once its account may no longer act
+// (auth.AccountBlock: switched off, or its tenant suspended), with close code
+// 1008 and the reason code the sign-in page knows (`account_disabled`,
+// `tenant_suspended`). Opening it again is refused at the door (the session
+// chain, the token middleware, the ticket's RefuseBlockedAccount).
+//
+// ⚠ An account and its credentials were refused at every door, but a socket
+// opened before the switch went on carrying the account's change frames and
+// presence until it dropped by itself. A read that fails is not a verdict: the
+// socket stays and the next tick asks again.
+func (h *WS) holdAccount(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, userID int64) {
+	if h.Store == nil || userID <= 0 {
+		return
+	}
+	t := time.NewTicker(time.Duration(wsRecheckEvery.Load()))
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		u, err := h.Store.GetUser(ctx, userID)
+		if err != nil || u == nil {
+			continue
+		}
+		if why := auth.AccountBlock(ctx, h.Store, u); why != "" {
+			slog.Info("realtime socket closed: its account may no longer act",
+				slog.Int64("user_id", userID), slog.String("reason", why))
+			_ = conn.Close(websocket.StatusPolicyViolation, why)
+			cancel()
+			return
+		}
+	}
 }
 
 // writePump drains the client's outbound queue to the socket. It exits (and

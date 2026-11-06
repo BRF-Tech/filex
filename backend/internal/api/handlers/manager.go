@@ -1928,7 +1928,7 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 			// Stamped with a short-lived signature (thumbURL): this listing is
 			// the only place that knows the caller was allowed to see the node,
 			// and an <img> cannot carry that decision in a header.
-			entry["thumb_url"] = thumbURL(signer, n.ID, n.Thumb)
+			entry["thumb_url"] = thumbURL(signer, n.ID, n.StorageID, n.Thumb)
 		} else if !isDir {
 			// No picture, and the reason is the file's own (damaged,
 			// encrypted, too large): the explorer marks the file with it

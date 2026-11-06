@@ -38,6 +38,8 @@ type Driver struct {
 	// (timeout.go); what names the server in the error that says so.
 	policy stall.Policy
 	what   string
+	// skipTLSVerify: the connection's own insecure_skip_tls_verify.
+	skipTLSVerify bool
 }
 
 // Name implements storage.Driver.
@@ -78,6 +80,7 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 		MaxAttempts:    cfg["max_attempts"],
 		TotalTimeout:   cfg["total_timeout_s"],
 	}.Policy(defaults)
+	d.skipTLSVerify, _ = cfg["insecure_skip_tls_verify"].(bool)
 	d.client = &http.Client{Transport: d.transport()}
 	d.what = "webdav server " + (&url.URL{Scheme: u.Scheme, Host: u.Host}).String()
 	return nil

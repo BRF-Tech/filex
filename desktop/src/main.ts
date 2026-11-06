@@ -220,7 +220,8 @@ import {
 import { SleepGuard, quietMomentForUpdate, syncBusy } from './power.js';
 import { CANCELLED, DownloadTally, downloadEnding } from './download-guard.js';
 import { anyError } from './syncstatus.js';
-import { isServerApiUrl, serverUrl } from './server-url.js';
+import { isServerApiUrl, normalizeServerUrl, serverUrl } from './server-url.js';
+import { CERT_ACCEPT, CertAnswers, TLS_WORDS, certVerdict, hostOf, skippedHosts } from './tls-trust.js';
 import { accountLocaleOf, pinToAdopt, prefsWithLocale, uiLocaleFor } from './account-locale.js';
 import { PORTABLE_DATA_DIRNAME, portableMode } from './portable.js';
 
@@ -385,6 +386,25 @@ function registerAppProtocol(): void {
     return new Response('not found', { status: 404 });
   });
 }
+
+// ─────────────────────────── certificates ───────────────────────────
+
+/**
+ * Asked for every certificate Chromium's stack meets: `net.fetch`, `net.request`,
+ * the renderers, the downloads. A host a saved connection or the sign-in under
+ * way says not to check is accepted; everything else keeps the answer Chromium
+ * came to (src/tls-trust.ts).
+ */
+function installCertificateCheck(): void {
+  session.defaultSession.setCertificateVerifyProc((request, answer) => {
+    const verdict = certVerdict(request.hostname, skippedHosts(state, pendingAuth));
+    certAnswers.note(request.hostname, request.errorCode, verdict === CERT_ACCEPT);
+    answer(verdict);
+  });
+}
+
+/** What Chromium was told, and keeps saying until this process ends. */
+const certAnswers = new CertAnswers();
 
 // ─────────────────────────── credentials on the wire ───────────────────────────
 
@@ -1066,7 +1086,12 @@ async function completeAuth(state_: string, code: string): Promise<void> {
   // the user able to try again rather than sending them back to the start.
   pendingAuth = null;
   signInFailure = null;
-  const { account, existed } = signIn(state, { serverUrl: attempt.serverUrl, email, token });
+  const { account, existed } = signIn(state, {
+    serverUrl: attempt.serverUrl,
+    email,
+    token,
+    ...(attempt.insecureSkipTLSVerify ? { insecureSkipTLSVerify: true } : {}),
+  });
   saveState(state);
   accountsChanged();
   // ⚠ Signing in again to an account this computer already has keeps its id,
@@ -1716,6 +1741,13 @@ function publicState() {
     // The language the window draws (the account's, else the system's), so
     // the window does not re-derive it and disagree with the tray.
     effectiveLocale: effectiveLocale(),
+    // Chromium keeps its answer for the life of the process (src/tls-trust.ts):
+    // Settings says so while it is not what the switches say.
+    tlsRestartNeeded: certAnswers.stale(skippedHosts(state, null)).length > 0,
+    // The certificate switch's words, one table for both pages.
+    tlsWords: Object.fromEntries(
+      Object.keys(TLS_WORDS).map((k) => [k, bilingual(TLS_WORDS, k, effectiveLocale())]),
+    ),
     // What the OS actually did with the request, not what we asked for. Login
     // items are refused often enough (policy, sandboxing, a user unticking it
     // elsewhere) that reporting our own intent back would be a lie.
@@ -4733,13 +4765,18 @@ function wireIpc(): void {
     return publicState();
   });
 
-  ipcMain.handle('auth:begin', (_e, serverUrl: string) => {
+  ipcMain.handle('auth:begin', (_e, serverUrl: string, opts?: { insecureSkipTLSVerify?: boolean }) => {
     // ⚠ Refused before the browser opens: a sign-in whose token could not be
     // stored is a round trip through the browser that ends in an error. The
     // window already says why (publicState().keychain); this is the guard.
     const k = keychain();
     if (k !== 'ok') throw keychainRefusal(k);
-    pendingAuth = beginBrowserAuth(serverUrl);
+    // ⚠ Before the browser opens: the exchange at the end of this sign-in would
+    // meet the refusal Chromium keeps, and the one-time code would be spent.
+    if (opts?.insecureSkipTLSVerify && certAnswers.refused(hostOf(normalizeServerUrl(serverUrl)) ?? '')) {
+      throw new Error(bilingual(TLS_WORDS, 'restartFirst', effectiveLocale()));
+    }
+    pendingAuth = { ...beginBrowserAuth(serverUrl), insecureSkipTLSVerify: opts?.insecureSkipTLSVerify === true };
     signInFailure = null;
     // The URL is always handed back: the waiting screen shows it so a user
     // whose browser did not open (none installed, portable browser with no OS
@@ -4863,9 +4900,30 @@ function wireIpc(): void {
   ipcMain.handle('auth:reconnect', (_e, id: string) => {
     const acc = state.accounts.find((a) => a.id === id);
     if (!acc) throw new Error('unknown account');
-    pendingAuth = beginBrowserAuth(acc.serverUrl);
+    pendingAuth = { ...beginBrowserAuth(acc.serverUrl), insecureSkipTLSVerify: acc.insecureSkipTLSVerify === true };
     openShell('/reconnect', 'filex - Reconnect');
     return publicState();
+  });
+
+  // Settings → an account's certificate switch. The watchers start again with
+  // what the account says now; this process's own requests follow at the next
+  // start when Chromium has already answered for the host (src/tls-trust.ts),
+  // which publicState says.
+  ipcMain.handle('account:setSkipTLSVerify', async (_e, id: string, skip: boolean) => {
+    const acc = state.accounts.find((a) => a.id === id);
+    if (!acc) throw new Error('unknown account');
+    if (skip === true) acc.insecureSkipTLSVerify = true;
+    else delete acc.insecureSkipTLSVerify;
+    saveState(state);
+    await restartWatchers();
+    return publicState();
+  });
+
+  // Settings → "Restart now", the one thing that empties Chromium's answers.
+  ipcMain.handle('app:restart', () => {
+    quitting = true;
+    app.relaunch();
+    app.quit();
   });
 
   // Host-owned open: a file opens in its OWN frameless document window. The
@@ -6001,6 +6059,7 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     registerAppProtocol();
+    installCertificateCheck();
     state = loadState();
     {
       // Said once, at start: the sign-in window explains it to the user, and

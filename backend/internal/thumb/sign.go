@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/brf-tech/filex/backend/internal/db"
 )
 
 // ── Signed thumbnail URLs ───────────────────────────────────────────────────
@@ -72,14 +74,37 @@ type Signer struct {
 
 	mu  sync.Mutex
 	key []byte
+
+	// stamps reads the tenant a storage is in (db.StorageStamp), when the
+	// store can: a URL carries it, and is served only while that tenant
+	// still has the storage (db.StampStands, asked by the endpoint). nil: no
+	// URL carries a tenant (a signer over a settings-only store, in a test).
+	stamps   db.StampReader
+	stampsMu sync.Mutex
+	stampAt  map[int64]stampEntry
 }
+
+// stampEntry is one storage's tenant as a listing read it, for stampTTL: a
+// listing signs every row of a folder, and the tenant of the folder's
+// storage is one question, not one per row. A storage moved in the meantime
+// is caught where it matters, at the fetch, which reads the rows fresh.
+type stampEntry struct {
+	tenant int64
+	at     time.Time
+}
+
+const stampTTL = 30 * time.Second
 
 // NewSigner returns a signer over store. ttl <= 0 means DefaultURLTTL.
 func NewSigner(store SignStore, ttl time.Duration) *Signer {
 	if ttl <= 0 {
 		ttl = DefaultURLTTL
 	}
-	return &Signer{store: store, ttl: ttl}
+	s := &Signer{store: store, ttl: ttl, stampAt: map[int64]stampEntry{}}
+	if st, ok := store.(db.StampReader); ok {
+		s.stamps = st
+	}
+	return s
 }
 
 // TTL reports the configured lifetime of a stamped URL.
@@ -102,6 +127,32 @@ func (s *Signer) TTL() time.Duration {
 // re-download every thumbnail. Quantizing makes the URL stable within a
 // window at the cost of up to one bucket of extra lifetime.
 func (s *Signer) Query(id int64) string {
+	return s.query(id, 0)
+}
+
+// QueryFor is Query for a node on storageID: the stamp also carries the
+// tenant the storage is in (`ten`, signed with the rest), and the endpoint
+// serves it only while that tenant still has the storage. A storage the
+// platform operator moved to another tenant stops answering its old URLs at
+// once, not when they expire a day later. When the tenant cannot be read no
+// signature is minted (the caller's URL degrades to authenticated fetching,
+// as for a signer with no key).
+//
+// The tenant is read with a background context and a short timeout, for the
+// reason currentKey says: a listing's cancelled request must not leave its
+// thumbnails unsigned.
+func (s *Signer) QueryFor(id, storageID int64) string {
+	if s == nil {
+		return ""
+	}
+	tenant, ok := s.stampOf(storageID)
+	if !ok {
+		return ""
+	}
+	return s.query(id, tenant)
+}
+
+func (s *Signer) query(id, tenant int64) string {
 	if s == nil {
 		return ""
 	}
@@ -110,7 +161,37 @@ func (s *Signer) Query(id int64) string {
 		return ""
 	}
 	exp := s.expiryFor(time.Now())
-	return "exp=" + strconv.FormatInt(exp, 10) + "&sig=" + sign(key, id, exp)
+	q := "exp=" + strconv.FormatInt(exp, 10)
+	if tenant > 0 {
+		q += "&ten=" + strconv.FormatInt(tenant, 10)
+	}
+	return q + "&sig=" + sign(key, id, exp, tenant)
+}
+
+// stampOf is storageID's tenant (db.StorageStamp), cached for stampTTL.
+func (s *Signer) stampOf(storageID int64) (int64, bool) {
+	if s.stamps == nil || storageID <= 0 {
+		return 0, true
+	}
+	s.stampsMu.Lock()
+	e, hit := s.stampAt[storageID]
+	s.stampsMu.Unlock()
+	if hit && time.Since(e.at) < stampTTL {
+		return e.tenant, true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	tenant, err := db.StorageStamp(ctx, s.stamps, storageID)
+	if err != nil {
+		return 0, false
+	}
+	s.stampsMu.Lock()
+	if len(s.stampAt) > 4096 {
+		s.stampAt = map[int64]stampEntry{}
+	}
+	s.stampAt[storageID] = stampEntry{tenant: tenant, at: time.Now()}
+	s.stampsMu.Unlock()
+	return tenant, true
 }
 
 // Verify reports whether (exp, sig) is a live signature for node id.
@@ -120,8 +201,24 @@ func (s *Signer) Query(id int64) string {
 // may have changed it since this process cached it, and a stale cache would
 // otherwise reject signatures the deployment is currently minting.
 func (s *Signer) Verify(id int64, exp, sig string) bool {
+	return s.VerifyIn(id, exp, "", sig)
+}
+
+// VerifyIn is Verify for a stamp that may carry a tenant (`ten`, "" for
+// none): the tenant is part of what is signed. Whether that tenant still has
+// the node's storage is the endpoint's to ask (db.StampStands); it has the
+// node.
+func (s *Signer) VerifyIn(id int64, exp, ten, sig string) bool {
 	if s == nil || sig == "" || exp == "" {
 		return false
+	}
+	var tenant int64
+	if ten != "" {
+		t, err := strconv.ParseInt(ten, 10, 64)
+		if err != nil || t <= 0 {
+			return false
+		}
+		tenant = t
 	}
 	expUnix, err := strconv.ParseInt(exp, 10, 64)
 	if err != nil {
@@ -130,11 +227,11 @@ func (s *Signer) Verify(id int64, exp, sig string) bool {
 	if time.Now().Unix() > expUnix {
 		return false
 	}
-	if key := s.currentKey(); len(key) > 0 && hmac.Equal([]byte(sign(key, id, expUnix)), []byte(sig)) {
+	if key := s.currentKey(); len(key) > 0 && hmac.Equal([]byte(sign(key, id, expUnix, tenant)), []byte(sig)) {
 		return true
 	}
 	key := s.reloadKey()
-	return len(key) > 0 && hmac.Equal([]byte(sign(key, id, expUnix)), []byte(sig))
+	return len(key) > 0 && hmac.Equal([]byte(sign(key, id, expUnix, tenant)), []byte(sig))
 }
 
 // expiryFor is Query's quantizer. See the note on Query.
@@ -152,9 +249,16 @@ func (s *Signer) expiryFor(now time.Time) int64 {
 // sign is the HMAC itself. The node id and the expiry are joined by a
 // character that cannot occur in either, so no two (id, exp) pairs can produce
 // the same signing input.
-func sign(key []byte, id, exp int64) string {
+//
+// A stamp with a tenant appends it the same way; one without signs what it
+// always did, so a single-tenant install's URLs are the same bytes as before.
+func sign(key []byte, id, exp, tenant int64) string {
 	mac := hmac.New(sha256.New, key)
-	_, _ = mac.Write([]byte(strconv.FormatInt(id, 10) + "." + strconv.FormatInt(exp, 10)))
+	msg := strconv.FormatInt(id, 10) + "." + strconv.FormatInt(exp, 10)
+	if tenant > 0 {
+		msg += "." + strconv.FormatInt(tenant, 10)
+	}
+	_, _ = mac.Write([]byte(msg))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 

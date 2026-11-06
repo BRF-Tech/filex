@@ -607,7 +607,17 @@ What the page does:
   sealed with `FILEX_SECRET_KEY` - the same sealing the app settings use - and
   never sent back to the browser: the box says *set - type a new one to
   replace it*. Without `FILEX_SECRET_KEY` a secret cannot be stored at all (the
-  page says so), and none is ever logged.
+  page says so), and none is ever logged. A secret left empty is kept only
+  while the address it is sent to (an LDAP `url`, an OIDC `issuer`) stays what
+  it was, and while the connection stays as protected as it was: LDAP
+  **StartTLS** (`start_tls`) not turned off on an `ldap://` address, and no
+  new or changed CA (`ca_pem`, `ca_file`). A save or a **Test now** that
+  changes one of them asks for the secret again under its box (**400**
+  `SECRET_NEEDED`), and nothing is sent. The OIDC `redirect_url` is not such
+  an address: the browser comes back there with the sign-in code, and neither
+  the client secret nor a token it buys goes to it, so changing it asks for
+  nothing. Turning StartTLS back on, or editing another field, asks for
+  nothing either.
 - **Every change is audited** (`auth_provider.update`): who, which provider,
   on/off before and after, the *names* of the fields that changed, and - when
   a failing test was confirmed - which steps failed. Never a value.

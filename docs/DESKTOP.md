@@ -318,6 +318,29 @@ for the same server. Clicking the tray or Dock icon, or starting the app again
 while it waits, keeps that screen too. **Cancel** is the one way back to the
 server address.
 
+**A server with a self-signed certificate.** The app checks the server's
+certificate against the system's store, so the way that keeps the check on is to
+trust that certificate on this computer. Where that is not an option, open
+**Advanced** under the address and tick **Skip certificate verification
+(insecure)** before you start: your browser asks about the same certificate on its
+own. It belongs to that account, and *App settings → Accounts* has the same switch
+on every account.
+
+> ⚠ **Not safe, and not recommended.** Anybody who can get between this computer
+> and the server can pose as it: read and change what crosses, and take your
+> session. Apply it only if you know what you are doing.
+
+- The sync engine follows the switch at once. The window keeps the answer it
+  already gave for that server until filex restarts, in both directions, and
+  Settings says so and offers **Restart now**. A certificate let through stays
+  let through until then.
+- If a sign-in was refused for the certificate, ticking the box needs that restart
+  too: the app says so before it opens the browser.
+- It holds for the host, not the address: a second filex on another port of the
+  same machine goes unchecked too.
+- It does not reach *Mount as a drive*: that is the operating system's own WebDAV
+  client, which judges the certificate itself ([below](#mounting-the-server-as-a-drive)).
+
 Add more accounts with **+** on the left rail; switch between them by clicking.
 
 **Signing in again** to the same server as the same person (with **+**) replaces
@@ -1148,9 +1171,11 @@ claim one a reboot may have dropped.
 | Linux | `gio mount` (GVfs) | Where GVfs mounts it, listed by your file manager | Not yet |
 
 ⚠ It needs HTTPS. Windows refuses to send the credential to a WebDAV drive over
-plain `http://`, and elsewhere it would travel in the clear. Very large files
-are better synced than opened through the Windows drive. For mounting by hand,
-[WebDAV](WEBDAV.md) has the same addresses.
+plain `http://`, and elsewhere it would travel in the clear. The system's client
+checks the certificate itself, and the account's certificate switch does not reach
+it: a self-signed server has to be trusted on the computer for a drive. Very large
+files are better synced than opened through the Windows drive. For mounting by
+hand, [WebDAV](WEBDAV.md) has the same addresses.
 
 ## Running in the background
 

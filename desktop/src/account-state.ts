@@ -42,6 +42,11 @@ export interface Account {
    * before the server answers.
    */
   locale?: string;
+  /**
+   * This connection does not check the server's certificate: a filex server
+   * with a self-signed or private one (src/tls-trust.ts). Absent = checked.
+   */
+  insecureSkipTLSVerify?: boolean;
 }
 
 export interface DesktopState {
@@ -140,6 +145,9 @@ export function upsertAccount(state: DesktopState, acc: Omit<Account, 'id' | 'ad
     // A new token is a new sign-in: whatever the server said about the old
     // one no longer applies.
     delete existing.signedOut;
+    // The same for the certificate switch: this sign-in's answer stands.
+    if (acc.insecureSkipTLSVerify) existing.insecureSkipTLSVerify = true;
+    else delete existing.insecureSkipTLSVerify;
     state.activeId = existing.id;
     return existing;
   }

@@ -34,6 +34,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -96,6 +97,43 @@ type mtFix struct {
 	// MultiTenant is the mode the fixture was built in. Off, every account is
 	// homed in the platform provider (see newMTFix).
 	MultiTenant bool
+
+	drivers *mtDrivers
+}
+
+// mtDrivers is the fixture's storage resolver: one local driver per storage id.
+type mtDrivers struct {
+	mu sync.Mutex
+	m  map[int64]storage.Driver
+}
+
+func (d *mtDrivers) resolve(id int64) (storage.Driver, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if drv, ok := d.m[id]; ok {
+		return drv, nil
+	}
+	return nil, fmt.Errorf("unknown storage id %d", id)
+}
+
+// mountStorage creates a local storage named name on a fresh root, as the
+// platform operator would, and makes the running instance resolve it. It is
+// linked to no tenant; the caller links it.
+func (f *mtFix) mountStorage(t *testing.T, name string) (*model.Storage, string) {
+	t.Helper()
+	ctx := context.Background()
+	root := t.TempDir()
+	drv := &local.Driver{}
+	require.NoError(t, drv.Init(ctx, map[string]any{"root": root}))
+	st, err := f.Store.CreateStorage(ctx, &model.Storage{
+		Name: name, Driver: "local", MountPath: "/" + name, Enabled: true,
+		ConfigJSON: json.RawMessage(`{"root":"` + strings.ReplaceAll(root, `\`, `\\`) + `"}`),
+	})
+	require.NoError(t, err)
+	f.drivers.mu.Lock()
+	f.drivers.m[st.ID] = drv
+	f.drivers.mu.Unlock()
+	return st, root
 }
 
 const mtUserPass = "VictimPass!1"
@@ -137,17 +175,10 @@ func newMTFix(t *testing.T, multiTenant bool, opts ...func(*notify.Config)) *mtF
 	stA, stB := mkStorage("alpha", rootA), mkStorage("bravo", rootB)
 	stA2 := mkStorage("alpha-arsiv", rootA2)
 
-	resolver := func(id int64) (storage.Driver, error) {
-		switch id {
-		case stA.ID:
-			return drvA, nil
-		case stA2.ID:
-			return drvA2, nil
-		case stB.ID:
-			return drvB, nil
-		}
-		return nil, fmt.Errorf("unknown storage id %d", id)
-	}
+	// A map rather than a switch so a storage the platform operator creates
+	// in the middle of a test (mountStorage) resolves too.
+	drivers := &mtDrivers{m: map[int64]storage.Driver{stA.ID: drvA, stA2.ID: drvA2, stB.ID: drvB}}
+	resolver := drivers.resolve
 
 	provA, adminAEmail, adminAPass := seedTenant(t, store, "alpha", "admin@alpha.test", false)
 	provB, _, _ := seedTenant(t, store, "bravo", "admin@bravo.test", false)
@@ -227,6 +258,7 @@ func newMTFix(t *testing.T, multiTenant bool, opts ...func(*notify.Config)) *mtF
 		StA2: stA2, RootA2: rootA2,
 		UserA: userA, UserB: userB,
 		MultiTenant: multiTenant,
+		drivers:     drivers,
 	}
 	// A tenant's people sign in with their realm (the slug by default) — on
 	// the platform's page an empty realm is the platform's own tenant. A

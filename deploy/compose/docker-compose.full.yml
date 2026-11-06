@@ -143,6 +143,9 @@ services:
       # with no error on either side.
       FILEX_SFTP: ${FILEX_SFTP:-0}
       FILEX_FTPS: ${FILEX_FTPS:-0}
+      # FTPS refuses plain FTP until Admin -> Login security -> Connections
+      # without encryption allows it (first value: FILEX_FTPS_ALLOW_PLAIN=true).
+      # Not safe: the password and the files then cross the network in the clear.
       FILEX_FTPS_PUBLIC_HOST: ${FILEX_DOMAIN}
       # Optional: hand FTPS the real certificate Caddy already renews for
       # FILEX_DOMAIN instead of the generated self-signed one. The files are

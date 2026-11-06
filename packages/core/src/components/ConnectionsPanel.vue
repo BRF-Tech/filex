@@ -131,7 +131,7 @@ const sftp = ref<{
   login: string;
   enabled: boolean;
   hasKey: boolean;
-  ftps?: { enabled: boolean; host: string; port: number; pasv_min: number; pasv_max: number; self_signed: boolean };
+  ftps?: { enabled: boolean; host: string; port: number; pasv_min: number; pasv_max: number; self_signed: boolean; allow_plain?: boolean };
 } | null>(null);
 
 const guide = computed<ProtocolGuide | null>(() =>
@@ -154,6 +154,7 @@ const guide = computed<ProtocolGuide | null>(() =>
       ftpsHost: sftp.value?.ftps?.host || undefined,
       ftpsPort: sftp.value?.ftps?.port,
       ftpsEnabled: sftp.value?.ftps?.enabled,
+      ftpsAllowPlain: sftp.value?.ftps?.allow_plain,
       ftpsPasvMin: sftp.value?.ftps?.pasv_min,
       ftpsPasvMax: sftp.value?.ftps?.pasv_max,
       ftpsSelfSigned: sftp.value?.ftps?.self_signed,

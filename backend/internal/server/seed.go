@@ -233,6 +233,12 @@ func seedDefaultStorage(ctx context.Context, store db.Store, cfg config.Config) 
 		slog.Warn("seed storage: marshal config", slog.String("err", err.Error()))
 		return
 	}
+	// The start that read FILEX_STORAGE_TLS_SKIP_VERIFY (seedStorageTLS).
+	if cfg.StorageTLS.SkipVerify {
+		if next, changed, err := withSkipTLSVerify(s.Driver, cfgJSON); err == nil && changed {
+			cfgJSON = next
+		}
+	}
 
 	name := s.Name
 	if name == "" {
