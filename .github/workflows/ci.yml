@@ -617,12 +617,25 @@ jobs:
           touch backend/internal/wasmplugin/testdata/echo/echo.wasm
       - name: The apps the suite installs
         run: node scripts/ci/browser-prep.mjs apps "$RUNNER_TEMP/apps"
+      # The package files apt fetched for this engine's system libraries last
+      # time, per engine and lockfile (task #306): ci-browsers.sh hands them
+      # to apt, which then fetches only what is newer. Azure's Ubuntu mirror
+      # served westus2 at 40-60 kB/s through two releases (v0.58.2, v0.59.0)
+      # and a part that fetched them there never finished in its 10 minutes.
+      - name: Cache the browsers' system packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/filex-ci-debs
+          key: ci-debs-${{ runner.os }}-${{ matrix.engine }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ci-debs-${{ runner.os }}-${{ matrix.engine }}-
       - name: The browser, with its system libraries
         # The runner's apt-get update hung here for 44 minutes once (run
         # 37661356185) and the part was cancelled at the job's 45-minute
-        # limit: a hang ends after 10, and the part is re-run.
+        # limit: a hang ends after 10, and the part is re-run. Inside them
+        # ci-browsers.sh gives Azure's mirror one try and the next mirror
+        # another.
         timeout-minutes: 10
-        run: pnpm --dir e2e exec playwright install --with-deps "$E2E_BROWSERS"
+        run: bash .github/workflows/scripts/ci-browsers.sh "$HOME/.cache/filex-ci-debs" "$E2E_BROWSERS"
       - name: Latin fonts for the layout checks
         run: node scripts/ci/browser-prep.mjs fonts "$RUNNER_TEMP/fc"
       - name: The part
@@ -683,9 +696,15 @@ jobs:
         run: node scripts/ci/browser-prep.mjs apps "$RUNNER_TEMP/apps"
       - name: A Document Server, and its way back to filex
         run: bash .github/workflows/scripts/ci-docserver.sh "$E2E_PORT" 18080
+      - name: Cache the browsers' system packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/filex-ci-debs
+          key: ci-debs-${{ runner.os }}-${{ matrix.engine }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ci-debs-${{ runner.os }}-${{ matrix.engine }}-
       - name: The browser, with its system libraries
         timeout-minutes: 10
-        run: pnpm --dir e2e exec playwright install --with-deps "$E2E_BROWSERS"
+        run: bash .github/workflows/scripts/ci-browsers.sh "$HOME/.cache/filex-ci-debs" "$E2E_BROWSERS"
       - name: Latin fonts for the layout checks
         run: node scripts/ci/browser-prep.mjs fonts "$RUNNER_TEMP/fc"
       - name: The specs whose path differs with a Document Server
@@ -757,9 +776,16 @@ jobs:
       - name: An S3 gateway for the multi-storage spec
         if: matrix.kind == 's3'
         run: bash .github/workflows/scripts/ci-s3.sh
+      # Every engine at once: a key of its own (a cache key holds no comma).
+      - name: Cache the browsers' system packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/filex-ci-debs
+          key: ci-debs-${{ runner.os }}-every-engine-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ci-debs-${{ runner.os }}-every-engine-
       - name: The browsers, with their system libraries
         timeout-minutes: 10
-        run: pnpm --dir e2e exec playwright install --with-deps ${E2E_BROWSERS//,/ }
+        run: bash .github/workflows/scripts/ci-browsers.sh "$HOME/.cache/filex-ci-debs" ${E2E_BROWSERS//,/ }
       - name: Latin fonts for the layout checks
         run: node scripts/ci/browser-prep.mjs fonts "$RUNNER_TEMP/fc"
       - name: The line
