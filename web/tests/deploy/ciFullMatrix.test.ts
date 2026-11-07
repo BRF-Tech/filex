@@ -302,9 +302,14 @@ describe('ci.yml: the full matrix', () => {
       '  log "fetch $p"',
       'done',
     ]);
+    // ⚠ Not BASH_ENV (nor sh's ENV): CircleCI's "pnpm, as package.json pins
+    // it" writes `export PATH=$HOME/.local/bin:$PATH` there, every bash that
+    // starts sources it, and the real pnpm went in front of the stand-in -
+    // its error landed in $plan and the script ended 1 with nothing said
+    // (CircleCI job 120, on 0b86a344).
     const pathKey = Object.keys(process.env).find((k) => /^path$/i.test(k)) ?? 'PATH';
     const baseEnv: NodeJS.ProcessEnv = {};
-    for (const [k, v] of Object.entries(process.env)) if (!/^path$/i.test(k)) baseEnv[k] = v;
+    for (const [k, v] of Object.entries(process.env)) if (!/^(path|bash_env|env)$/i.test(k)) baseEnv[k] = v;
     const files = (d: string) => (fs.existsSync(d) ? fs.readdirSync(d).sort() : []);
     const run = (engines: string[], opts: { slow?: string; limits?: string; dry?: string; keep?: string[] } = {}) => {
       for (const d of [archives, debs]) fs.rmSync(d, { recursive: true, force: true });
