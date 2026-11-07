@@ -319,6 +319,11 @@ const WORKFLOW_GUARDS = [
   // #181: the browser parts' preparation is the script CircleCI calls too
   // (packaging/ci/ci-browser-prep.patch).
   'every browser part is prepared by the script CircleCI calls too, and runs e2e/run.mjs',
+  // #306: the browsers' system packages are kept between runs, and apt tries
+  // the mirror after Azure's when Azure's is slow
+  // (packaging/ci/ci-browsers-apt.patch).
+  'every browser install starts from the package files its engine fetched last time, kept per engine and lockfile',
+  "ci-browsers.sh installs from the last run's package files, gives Azure's mirror one try and the next mirror another, and keeps the files",
   // #174: a tag run promotes what the dry run of its commit built
   // (web/tests/deploy/releasePromote.test.ts).
   "a tag run publishes only after ci.yml's full matrix passed on its commit",

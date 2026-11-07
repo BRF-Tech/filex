@@ -1252,9 +1252,10 @@ export function transientGithubError(text) {
  * setup and service containers, the checkout, a toolchain, a cache or an
  * artifact moved (and their clean-up steps), and the browser install through
  * apt (`playwright install --with-deps`: at 0.55.0's gate it reached the
- * 10-minute limit on apt, at 0.53.0 it hung 44 minutes, lesson #1274). None of
- * them runs a line of this repository's code or tests. A step not on this
- * list is the code's, whatever it failed on.
+ * 10-minute limit on apt, at 0.53.0 it hung 44 minutes, lesson #1274; since
+ * #306 the public workflows' ci-browsers.sh, after the cache step that keeps
+ * its package files). None of them runs a line of this repository's code or
+ * tests. A step not on this list is the code's, whatever it failed on.
  */
 export const INFRA_STEPS = [
   /^Set up job$/,
@@ -1263,6 +1264,7 @@ export const INFRA_STEPS = [
   /^(?:Post )?Run (?:actions\/(?:checkout|setup-node|setup-go|setup-python|cache|download-artifact|upload-artifact)|pnpm\/action-setup|docker\/(?:setup-buildx-action|setup-qemu-action))@/,
   /^The browsers?, with (?:its|their) system libraries$/,
   /^Cache the Cypress binary$/,
+  /^(?:Post )?Cache the browsers' system packages$/,
 ];
 
 /**

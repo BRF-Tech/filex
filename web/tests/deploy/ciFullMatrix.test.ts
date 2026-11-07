@@ -209,11 +209,13 @@ describe('ci.yml: the full matrix', () => {
   // 44 minutes in `playwright install --with-deps` (apt-get update) and were
   // cancelled at the job's 45-minute limit; the run took 69.7 minutes. Each
   // browser install has a limit of its own, so a hang ends early and the part
-  // is re-run.
+  // is re-run. Since task #306 the install is ci-browsers.sh (below).
   it.runIf(!!DIR)('every browser install step has a time limit of its own, well under the job\'s', () => {
-    const lines = ciCode().split('\n');
-    const installs = lines.flatMap((l, i) => (/\brun: pnpm --dir e2e exec playwright install --with-deps\b/.test(l) ? [i] : []));
+    const code = ciCode();
+    const lines = code.split('\n');
+    const installs = lines.flatMap((l, i) => (/\brun: bash \.github\/workflows\/scripts\/ci-browsers\.sh "\$HOME\/\.cache\/filex-ci-debs" /.test(l) ? [i] : []));
     expect(installs.length, 'the browser installs (Playwright, with a Document Server, the extra lines)').toBeGreaterThanOrEqual(3);
+    expect(code, 'every install goes through ci-browsers.sh').not.toMatch(/playwright install --with-deps/);
     for (const at of installs) {
       let start = at;
       while (start > 0 && !/^\s+- name:/.test(lines[start])) start--;
@@ -223,6 +225,163 @@ describe('ci.yml: the full matrix', () => {
       expect(Number(limit![1]), lines[start].trim()).toBeLessThanOrEqual(15);
     }
   });
+
+  // v0.58.1, v0.58.2 and v0.59.0 (runs 42066697121, 42167295823, 42290540824;
+  // task #306): apt-get update read the index in a second, then the packages
+  // came from Azure's Ubuntu mirror at 40-60 kB/s, and Firefox's 49 MB and
+  // WebKit's 114 MB never arrived inside the step's 10 minutes. All six red
+  // parts ran in westus2, and a re-run that landed there again was red again.
+  // So the package files of each engine are kept between runs, and the step
+  // names stay the ones the release gate re-runs (checks.mjs, INFRA_STEPS).
+  it.runIf(!!DIR)('every browser install starts from the package files its engine fetched last time, kept per engine and lockfile', () => {
+    const ci = ciCode();
+    for (const key of ['playwright', 'playwright-ds', 'playwright-extra']) {
+      const b = job(ci, key);
+      const cacheAt = b.indexOf("- name: Cache the browsers' system packages");
+      const installAt = b.search(/- name: The browsers?, with (?:its|their) system libraries\n/);
+      expect(cacheAt, `${key} keeps the package files`).toBeGreaterThan(0);
+      expect(installAt, `${key} installs after it, under the name the gate knows`).toBeGreaterThan(cacheAt);
+      const cache = b.slice(cacheAt, installAt);
+      expect(cache, key).toContain('uses: actions/cache@v4');
+      expect(cache, key).toContain('path: ~/.cache/filex-ci-debs');
+      const cacheKey = /\n\s+key: (.+)\n/.exec(cache)?.[1].trim() ?? '';
+      const restore = /\n\s+restore-keys: (.+)/.exec(cache)?.[1].trim() ?? '';
+      expect(cacheKey, key).toMatch(/^ci-debs-\$\{\{ runner\.os \}\}-.+-\$\{\{ hashFiles\('pnpm-lock\.yaml'\) \}\}$/);
+      expect(restore.endsWith('-') && cacheKey.startsWith(restore), `${key}: a new lockfile starts from the files of the old one`).toBe(true);
+      expect(cacheKey, `${key}: a cache key holds no comma, and e2e_engines is a list`).not.toContain('e2e_engines');
+    }
+  });
+
+  it.runIf(!!DIR && !!bash)("ci-browsers.sh installs from the last run's package files, gives Azure's mirror one try and the next mirror another, and keeps the files", () => {
+    const script = path.join(DIR!, 'scripts', 'ci-browsers.sh');
+    expect(fs.existsSync(script), 'ci-browsers.sh').toBe(true);
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-browsers-'));
+    const shims = path.join(tmp, 'bin');
+    const archives = path.join(tmp, 'archives');
+    const mirrors = path.join(tmp, 'apt-mirrors.txt');
+    const log = path.join(tmp, 'log');
+    const debs = path.join(tmp, 'debs');
+    const MIRRORS = 'http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://archive.ubuntu.com/ubuntu/\tpriority:2\nhttps://security.ubuntu.com/ubuntu/\tpriority:3\n';
+    const DRY = 'sudo -- sh -c "apt-get update&& apt-get install -y --no-install-recommends libfoo libbar fonts-baz"';
+    // Stand-ins: sudo runs the command (and says which limit a try had),
+    // pnpm answers the dry run with DRY, and apt-get "fetches" a package by
+    // writing <name>_1.0_all.deb - or hangs while FAKE_SLOW says its mirror
+    // is slow - and installs only from files it already has.
+    const write = (name: string, body: string[]) => fs.writeFileSync(path.join(shims, name), `${body.join('\n')}\n`, { mode: 0o755 });
+    fs.mkdirSync(shims);
+    write('sudo', ['#!/bin/sh', 'if [ "$1" = timeout ]; then echo "sudo timeout $3" >> "$FAKE_LOG"; fi', 'exec "$@"']);
+    write('pnpm', [
+      '#!/usr/bin/env bash',
+      'set -eu',
+      'case "$*" in',
+      '  "--dir e2e exec playwright install-deps --dry-run "*) printf "%s\\n" "$FAKE_DRY" ;;',
+      '  *) echo "pnpm $*" >> "$FAKE_LOG" ;;',
+      'esac',
+    ]);
+    write('apt-get', [
+      '#!/usr/bin/env bash',
+      'set -eu',
+      'log() { echo "$*" >> "$FAKE_LOG"; }',
+      'slow() { case "$FAKE_SLOW" in all) return 0 ;; azure) grep -q azure "$CI_APT_MIRRORS" ;; *) return 1 ;; esac; }',
+      'case " $* " in',
+      '  *" update "*) log update; exit 0 ;;',
+      '  *" autoclean "*) log autoclean; rm -f "$CI_APT_ARCHIVES"/*_0.9_all.deb; exit 0 ;;',
+      'esac',
+      'dl=0',
+      'case " $* " in *" --download-only "*) dl=1 ;; esac',
+      'for p in "$@"; do',
+      '  case "$p" in -*|install) continue ;; esac',
+      '  f="$CI_APT_ARCHIVES/$p"_1.0_all.deb',
+      '  if [ -f "$f" ]; then',
+      '    if [ "$dl" = 0 ]; then log "install $p"; fi',
+      '    continue',
+      '  fi',
+      '  if [ "$dl" = 0 ]; then log "network $p"; exit 100; fi',
+      '  if slow; then log "slow $p"; exec sleep 30; fi',
+      '  echo "$p" > "$f"',
+      '  log "fetch $p"',
+      'done',
+    ]);
+    const pathKey = Object.keys(process.env).find((k) => /^path$/i.test(k)) ?? 'PATH';
+    const baseEnv: NodeJS.ProcessEnv = {};
+    for (const [k, v] of Object.entries(process.env)) if (!/^path$/i.test(k)) baseEnv[k] = v;
+    const files = (d: string) => (fs.existsSync(d) ? fs.readdirSync(d).sort() : []);
+    const run = (engines: string[], opts: { slow?: string; limits?: string; dry?: string; keep?: string[] } = {}) => {
+      for (const d of [archives, debs]) fs.rmSync(d, { recursive: true, force: true });
+      fs.mkdirSync(archives);
+      fs.writeFileSync(mirrors, MIRRORS);
+      fs.writeFileSync(log, '');
+      if (opts.keep) {
+        fs.mkdirSync(debs);
+        for (const f of opts.keep) fs.writeFileSync(path.join(debs, f), f);
+      }
+      const r = spawnSync(bash!, [slash(script), slash(debs), ...engines], {
+        cwd: tmp,
+        encoding: 'utf8',
+        timeout: 90_000,
+        env: {
+          ...baseEnv,
+          PATH: `${shims}${path.delimiter}${process.env[pathKey] ?? ''}`,
+          CI_APT_ARCHIVES: slash(archives),
+          CI_APT_MIRRORS: slash(mirrors),
+          CI_APT_LIMITS: opts.limits ?? '20 20',
+          FAKE_LOG: slash(log),
+          FAKE_SLOW: opts.slow ?? '',
+          FAKE_DRY: opts.dry ?? DRY,
+        },
+      });
+      const said = `${r.stdout}\n${r.stderr}`;
+      return { status: r.status, said, log: fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean), kept: files(debs), mirrors: fs.readFileSync(mirrors, 'utf8') };
+    };
+    const ALL = ['fonts-baz_1.0_all.deb', 'libbar_1.0_all.deb', 'libfoo_1.0_all.deb'];
+    const installed = ['install libfoo', 'install libbar', 'install fonts-baz'];
+    try {
+      // Nothing kept yet, a fast mirror: one try, the files kept.
+      let r = run(['firefox']);
+      expect(r.status, r.said).toBe(0);
+      expect(r.log, r.said).toEqual(['sudo timeout 20', 'update', 'fetch libfoo', 'fetch libbar', 'fetch fonts-baz', ...installed, 'pnpm --dir e2e exec playwright install firefox', 'autoclean']);
+      expect(r.kept).toEqual(ALL);
+      expect(r.mirrors).toBe(MIRRORS);
+
+      // The files of the last run, and one apt no longer offers: nothing is
+      // fetched though every mirror hangs, and the stale file is not kept.
+      r = run(['firefox'], { slow: 'all', keep: [...ALL, 'libold_0.9_all.deb'] });
+      expect(r.status, r.said).toBe(0);
+      expect(r.said).toContain('package files from the last run: 4');
+      expect(r.log.filter((l) => /^(fetch|slow|network) /.test(l)), r.said).toEqual([]);
+      expect(r.log).toEqual(expect.arrayContaining([...installed, 'pnpm --dir e2e exec playwright install firefox']));
+      expect(r.kept).toEqual(ALL);
+
+      // Azure's mirror hangs: its try ends at its limit, the next mirror
+      // fetches, and the run is green with a warning.
+      r = run(['webkit'], { slow: 'azure', limits: '1 20' });
+      expect(r.status, r.said).toBe(0);
+      expect(r.said).toContain("::warning::apt did not fetch the system libraries in 1s; trying the mirrors after Azure's");
+      expect(r.log.slice(0, 6), r.said).toEqual(['sudo timeout 1', 'update', 'slow libfoo', 'sudo timeout 20', 'update', 'fetch libfoo']);
+      expect(r.log).toEqual(expect.arrayContaining([...installed, 'pnpm --dir e2e exec playwright install webkit']));
+      expect(r.mirrors).toBe('https://archive.ubuntu.com/ubuntu/\tpriority:2\nhttps://security.ubuntu.com/ubuntu/\tpriority:3\n');
+      expect(r.kept).toEqual(ALL);
+
+      // Every mirror hangs: red after the second try, nothing installed.
+      r = run(['webkit'], { slow: 'all', limits: '1 1' });
+      expect(r.status, r.said).toBe(1);
+      expect(r.said).toContain('::error::apt did not fetch the system libraries from any mirror');
+      expect(r.log.filter((l) => /^(install|pnpm) /.test(l)), r.said).toEqual([]);
+
+      // A dry run it cannot read: Playwright's own install, with a warning.
+      r = run(['chromium', 'firefox'], { dry: 'nothing to read' });
+      expect(r.status, r.said).toBe(0);
+      expect(r.said).toContain("::warning::no package list in 'playwright install-deps --dry-run'");
+      expect(r.log).toEqual(['pnpm --dir e2e exec playwright install --with-deps chromium firefox']);
+
+      // A wrong call says how to call it.
+      const wrong = spawnSync(bash!, [slash(script), slash(debs)], { encoding: 'utf8' });
+      expect(wrong.status).toBe(2);
+      expect(wrong.stderr).toContain('usage: bash .github/workflows/scripts/ci-browsers.sh <package dir> <engine>...');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }, 180_000);
 
   // v0.53.0's first full matrix (run 37596680800, lesson #1236): GitHub runs
   // a `run:` block as `bash -e`, and `set -uo pipefail` left -e on. A green

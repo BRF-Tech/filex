@@ -19,14 +19,146 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.58.2, 6 November 2026
-A file on a mount inside a local storage can now be deleted. The trash lives at the storage root, so a delete from an rclone mount, an NFS share or a second disk under that root was a rename across filesystems, which the operating system refuses, and the error said "not a directory" about a file that was plainly there. A delete, a move or a restore across such a boundary now copies and then removes the source, only once all of it has arrived. On a cloud mount that means the bytes travel to the trash; adding the mount as a storage of its own keeps a delete there a rename. Thanks to @juan11perez for the report and the notes that pinned it down. S3, WebDAV and FTPS storages can also reach a server with a self-signed certificate now: FILEX_STORAGE_TLS_SKIP_VERIFY=true turns the check off, and the docs show the safer way that keeps it on. Thanks to @kladiv for asking.
+::: tip Latest - v0.59.0, 6 November 2026
+The certificate check is now each connection's own: every S3, WebDAV and FTPS storage and every replication target has its own Skip certificate verification switch in its advanced settings, so a NAS with a self-signed certificate no longer takes the check away from the bucket beside it (GitHub #134, thanks to @kladiv). The 0.58.2 variable FILEX_STORAGE_TLS_SKIP_VERIFY writes the switch on to the storages and targets that exist at the first start and is not read again, so nothing stops connecting across the upgrade. The CLI (filex client login --insecure-skip-tls-verify, kept with that one address) and the desktop app (Advanced at sign-in, or the account in App settings) reach a filex server with a self-signed certificate too. The FTPS endpoint can permit plain FTP for a scanner that cannot do TLS, off by default, on Login security, and every setting that turns a protection off now carries the same warning under it. A saved password, key or client secret is no longer sent to a new address or over a weaker connection: a new SMTP host, identity provider address or storage endpoint, or a certificate check, host-key check or encryption turned off, needs it typed again. Security fixes, both reported by @mappygrid: switching an account off now stops its API tokens on every route, its open sockets and its links, and suspending a tenant stops what its people already hold and takes a person signed in, not an API key (GHSA-58wc-42xh-89v8); and what a tenant's people made on a storage - an upload ticket, a link, a queued job, an editor's save - stops when the platform operator moves that storage to another tenant (GHSA-fxm3-597v-wpgj). Upgrading is recommended.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.58.2
-docker pull ghcr.io/brf-tech/filex:full-v0.58.2
+docker pull ghcr.io/brf-tech/filex:slim-v0.59.0
+docker pull ghcr.io/brf-tech/filex:full-v0.59.0
 ```
+
+## v0.59.0
+
+<span class="filex-release-date">6 November 2026</span>
+
+The certificate check is now each connection's own: every S3, WebDAV and FTPS storage and every replication target has its own Skip certificate verification switch in its advanced settings, so a NAS with a self-signed certificate no longer takes the check away from the bucket beside it (GitHub #134, thanks to @kladiv). The 0.58.2 variable FILEX_STORAGE_TLS_SKIP_VERIFY writes the switch on to the storages and targets that exist at the first start and is not read again, so nothing stops connecting across the upgrade. The CLI (filex client login --insecure-skip-tls-verify, kept with that one address) and the desktop app (Advanced at sign-in, or the account in App settings) reach a filex server with a self-signed certificate too. The FTPS endpoint can permit plain FTP for a scanner that cannot do TLS, off by default, on Login security, and every setting that turns a protection off now carries the same warning under it. A saved password, key or client secret is no longer sent to a new address or over a weaker connection: a new SMTP host, identity provider address or storage endpoint, or a certificate check, host-key check or encryption turned off, needs it typed again. Security fixes, both reported by @mappygrid: switching an account off now stops its API tokens on every route, its open sockets and its links, and suspending a tenant stops what its people already hold and takes a person signed in, not an API key (GHSA-58wc-42xh-89v8); and what a tenant's people made on a storage - an upload ticket, a link, a queued job, an editor's save - stops when the platform operator moves that storage to another tenant (GHSA-fxm3-597v-wpgj). Upgrading is recommended.
+
+## What changed
+
+### Added
+
+- **The certificate switch is each connection's own**
+  ([GitHub #134](https://github.com/BRF-Tech/filex/issues/134), reported by
+  @kladiv). Every S3, WebDAV
+  and FTPS storage has **Skip certificate verification (insecure)** in its advanced
+  settings (`insecure_skip_tls_verify`), and a replication target has its own: a
+  self-signed NAS no longer takes the check away from the bucket beside it.
+  `FILEX_STORAGE_TLS_SKIP_VERIFY` becomes a one-time seed: the first start writes
+  the switch on to every such storage and target, says which in the log, and never
+  reads the variable again, so nobody loses a storage across the upgrade.
+  Turning the switch on for a saved connection needs its password or key typed
+  again: a saved credential does not go to a server that is no longer checked.
+  [STORAGE.md](./STORAGE.md#private-and-self-signed-certificates) has it.
+- **The CLI and the desktop app reach a filex server with a self-signed
+  certificate.** `filex client login --insecure-skip-tls-verify` saves the switch
+  with the address, for `filex sync`, `filex mount` and the vault commands too; it
+  goes to no other address ([CLI.md](./CLI.md#a-server-with-a-self-signed-certificate)).
+  The desktop app has the switch under **Advanced** at sign-in and on every account
+  in App settings, for the window and the sync engine
+  ([DESKTOP.md](./DESKTOP.md#signing-in)).
+- **A server may permit plain FTP.** **Allow plain FTP on the FTPS endpoint**
+  (`ftps.allow_plain`, first value from `FILEX_FTPS_ALLOW_PLAIN`), off by default,
+  for the scanner that cannot do TLS. A client that asks for TLS stays on it on both
+  channels, and the connection guide says what the server does
+  ([PROTOCOLS.md](./PROTOCOLS.md#ftps)).
+- **A warning under every setting that turns a protection off.** One sentence (not
+  safe, not recommended, apply it only if you know what you are doing) and what that
+  setting exposes, on the storage and replication forms, the provider forms, Login
+  security, SMTP and the tenant pages
+  ([ADMIN-PANEL.md](./ADMIN-PANEL.md#settings-that-turn-a-protection-off)).
+
+### Security
+
+- **A saved password goes only to the address it was saved for, on every page
+  that keeps one.** A new SMTP host, a new identity provider address (an LDAP
+  `url`, an OIDC `issuer`) or a new issuer on a tenant's OIDC needs the saved
+  password or client secret typed again; before, the SMTP test, a provider's save
+  or **Test now**, and a sign-in sent the saved one to the new address (measured).
+  The OIDC redirect address is not one of them: the browser comes back there with
+  the sign-in code and no secret goes to it, so changing it asks for nothing.
+- **A saved password does not go over a connection less protected than the one it
+  was saved for.** SMTP encryption changed to None, LDAP StartTLS turned off on an
+  `ldap://` address, a new LDAP CA (`ca_pem`, `ca_file`), the SFTP host-key check
+  turned off or another pinned key or `known_hosts` file, and FTP without TLS need
+  the saved password typed again, on the save and on every test (the SMTP test,
+  **Test now**, **Test connection**), for a tenant's own providers too. Before, each
+  sent the saved password over the weakened connection, the plain ones in the clear
+  (measured; SMTP without encryption already sent a password only to this machine).
+  Turning a protection back on, or editing another field, asks for nothing.
+- **What a tenant's member made on a storage stops when the storage moves to
+  another tenant**
+  ([GHSA-fxm3-597v-wpgj](https://github.com/BRF-Tech/filex/security/advisories/GHSA-fxm3-597v-wpgj)).
+  The credential-free `/u/` upload ticket resolved its storage by the name
+  saved at the mint, with no tenant scope and a copy of the minting account:
+  when the platform operator moved that storage to another tenant, or deleted
+  it and created one of the same name for another tenant, while the ticket
+  lived, its one write landed in the other tenant's file. A ticket now names
+  the storage by its id, in the minter's tenant, and the upload asks again as
+  the minter - account, the API token it was minted with, tenant, storage -
+  and answers like a used ticket when any of them no longer stands. The same
+  question is now asked by everything else that was made on a storage and
+  used later: a share link, a file request and an app's page stop answering
+  (`404`, as if they did not exist) while their storage is in another tenant,
+  and answer again when it is back; a queued operation, an app job's result,
+  an ONLYOFFICE save over the document, the editor's fetch URL, a signed
+  thumbnail and an editing-together membership are refused for a storage the
+  person's tenant no longer has; a resumable upload takes no chunk or commit
+  for it; an app job's chosen output folder is held to its storage by id. A
+  storage renamed in its own tenant keeps its tickets, which used to fail. A
+  link made on a storage that was in no tenant, or in the platform's own,
+  keeps answering when the storage is given to a tenant.
+  [MULTI-TENANCY.md](./MULTI-TENANCY.md#168-a-storage-moved-to-another-tenant-what-was-made-on-it-before---closed-059)
+  has what was measured and what each door asks. Reported by @mappygrid.
+- **Switching an account off stops what it holds, its API tokens on every
+  route first**
+  ([GHSA-58wc-42xh-89v8](https://github.com/BRF-Tech/filex/security/advisories/GHSA-58wc-42xh-89v8)).
+  The agent API and its MCP server (`/api/ai`) and the ShareX upload
+  (`/api/sharex`) checked a token with a copy of their own that never asked
+  whether the token's account was still on: a disabled account's token went
+  on reading and writing its files, running MCP tools and minting public links,
+  and an administrator's admin token kept the admin surface, from which it
+  could switch its own account back on. Every route a token opens now asks one
+  shared check and answers a disabled account as a session is answered,
+  `403` with `reason: account_disabled`. A live-updates or editing-together
+  socket ticket the account took before it was switched off no longer opens
+  either, and a live-updates socket it has open is closed within about half a
+  minute. Its share links, file requests and upload tickets answer like ones
+  that do not exist and take nothing - until now a link kept serving the files
+  and a file request kept writing into the account's folder - an ONLYOFFICE
+  editor it left open no longer saves over the document, and an
+  editing-together member leaves the session at its next touch. Switched back
+  on, the same tokens, links and PINs work again
+  ([SHARING.md](./SHARING.md#a-link-follows-its-creator)). Reported by
+  @mappygrid.
+- **Only a person signed in to the panel switches an administrator's account
+  on or off.** An admin-scoped API key, on `/api/admin`, `/api/ai/admin` or as
+  the `admin_users_update` MCP tool, now gets `403 session_required` for it,
+  as it already did for promoting an account or setting an administrator's
+  password - another administrator's account and the key's own alike.
+  Ordinary accounts are still a key's to switch.
+- **Suspending a tenant stops what its people already hold.** Suspension
+  refused a new sign-in only: a session that was open, and every API key the
+  tenant's people held, kept working on every route until it ran out or was
+  revoked. Both now answer as the sign-in does, `403` with
+  `reason: tenant_suspended`; a socket ticket no longer opens and an open
+  live-updates socket is closed, and its people's links, file requests, upload
+  tickets and open editors pause as a switched-off account's do. Resuming the
+  tenant gives all of it back.
+  Suspending and resuming a tenant now need an administrator signed in to the
+  panel: an API key gets `403 session_required` for them on
+  `/api/admin/providers`, `/api/ai/admin/providers` and `admin_tenants_update`,
+  and so does deleting a tenant together with its accounts (`?force=1`,
+  `admin_tenants_delete` with `force`).
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0590---2026-11-06)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.59.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.59.0`
 
 ## v0.58.2
 
@@ -2109,179 +2241,13 @@ entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.52.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.52.0`
 
-## v0.51.0
-
-<span class="filex-release-date">4 October 2026</span>
-
-Who may encrypt is now an organisation's decision, contributed by @berkbasarir (#83): the tenant policy (Off, Administrators only, Permitted, or Approval), a new files.encrypt permission and, on multi-tenant installs, a ceiling the platform operator sets per tenant must all say yes. Under Approval people ask with a reason and an administrator approves once, on the new Admin > Encryption page. With ONLYOFFICE configured a .csv opens in its spreadsheet editor and keeps its own delimiter, byte order mark and line ends when it is saved (#81), and an office file in an older format is saved beside the document with the right extension instead of getting newer-format bytes under its old name. The admin panel's navigation is a mega menu: three panels of grouped pages, each two clicks away at the address it always had (#82). An upgrade changes nobody's access: roles and exceptions that could create files can also encrypt. Security: a folder-confined API token is now held to its folder however a request is sent; upgrade if you rely on root: scopes.
-
-## What changed
-
-### Added
-
-- **Who may encrypt is an organisation's decision** ([E2E-ENCRYPTION.md → Who may encrypt](./E2E-ENCRYPTION.md#who-may-encrypt)).
-  Three layers must all say yes before anybody starts encrypting:
-  - the platform operator's **tenant ceiling** (`e2e_allowed`, Admin → Encryption → Tenants; multi-tenant installs only);
-  - the **tenant policy** - Off (administrators included), Administrators only, Permitted (the default: today's behaviour), or **Approval**;
-  - the new permission **`files.encrypt`** - per role, per person, per folder. The built-in User role and the Standard and Upload-only presets hold it (a drop-box account could encrypt before, and still can); a Viewer never does.
-  - Under **Approval**, **Request encryption…** leaves a request with a reason; the tenant's administrators approve or reject it under Admin → Encryption. An approval is for that person, is used **once**, and lasts **7 days**, and it opens only its own kind, in the folder it was asked for and never in one below: a folder **encrypted where it is**, **one new encrypted folder** directly inside a folder (never spent on a folder that already holds something), or **one new encrypted file** in a folder (a single file's approval is its folder's). The explorer asks for the kind it would use and is answered from the same approvals the create doors spend, so it offers what the server accepts. A request must name a folder or a file that is there (`404 path_missing`), and one person has at most **20** waiting (`429 too_many_pending`). A request nobody answers lapses after 7 days too; an hourly sweep closes both, and answering one that lapsed, or one that was answered already, is `409 not_pending`.
-  - "Encrypting" is creating a key file where there is none, or a new `.fxe` - and landing on one of those names by a rename or a move (the explorer and the queue, the agent API, WebDAV, SFTP, FTPS and NFS ask it like a create at the destination), unless it only carries what is encrypted already: a folder of any name, a `.fxe` that stays a `.fxe`, or a key file that stays its own folder's. A `.fxe` given the key file's name, or a key file moved into another folder, is asked. A **copy** of what is encrypted makes a second one and is asked like a create where it lands, whatever its name: a `.fxe` or a key file copied anywhere, and a folder that holds either anywhere below it (asked once, as a new encrypted folder) - the explorer's paste and Copy to, the queue, the agent API's and MCP's `file_copy`, and WebDAV `COPY`. A move or a rename of the same item stays free. A queued rename, move or copy that was free because its item was a folder fails when it runs if a file has taken the folder's place. "Creates" means there is no file at the path: overwriting a key file or a `.fxe` that is there stays free - a password change cannot be told from new key material, so the policy cannot stop the re-keying of what is encrypted already (an honest limit, in the docs) - and a folder with the name does not count as the file. Opening, adding to, re-keying and decrypting what is already encrypted stay free, and so do restores from the trash or a version and the document server's save.
-  - Asked on every door: the web and desktop apps, uploads (single and chunked), the text editor, New document and a draft's save, the agent API (upload, move, MCP `file_write` and `file_move`, ShareX, upload tickets, and 0.50's `file_copy`, `archive_create`, `archive_extract` and `app_run`), file requests, archives (a refused member is skipped), apps, WebDAV, SFTP, FTPS, NFS and S3 (over HTTP a refusal is `403 e2e_not_allowed` with a `reason`; an MCP tool answers an error result naming it; the protocols refuse in their own words). On the agent surface an encrypted folder's key file is refused before the rule, `403 RESERVED_NAME` - a folder's too: that surface never writes one. A file request is judged for the link's creator and never spends the creator's approval: under Approval its key file or `.fxe` is refused. When a store failure leaves the rule undecided - a lookup behind the rule, or the storage row, the app's account or the file request's creator a door looks up to ask it - the door fails the write as its own server failure, not as a refusal: the web app's routes and the agent REST API `500`, an MCP tool an error result, an upload ticket and a file request `503 storage_unavailable`, an archive skips the member, WebDAV `500`, S3 `InternalError`, SFTP `SSH_FX_FAILURE`, FTPS `550` saying so, NFS `ACCES` for a create. The rule's own log line, one for each write it could not decide, names the storage, the person and the error, never the path or a member's name; an app job that fails this way is also reported by the queue, which names the output.
-  - The new **Admin → Encryption** page holds the policy, the requests and - for the platform operator - every tenant's ceiling. On a multi-tenant install the platform operator sees every tenant's requests there and answers only the platform's own; another tenant's is that tenant's administrators' decision (its row says so, and the API answers `403 not_decidable`). The explorer asks ahead (`POST /api/files/e2e/allowed`, up to 1000 paths, each with the kind it would use; the answer carries the refusing layer in `reasons`) and offers **Create encrypted folder…** and **Encrypt with E2EE…** - or, under Approval, **Request encryption…** - only where it would be allowed; capabilities carry `e2e_policy` for signed-in callers. `filex encrypt` asks the same question before it asks for a password, and says why not in words.
-  - **New notifications and audit rows.** `e2e.request_created` (to whoever decides it: a tenant's administrators, as one broadcast the platform operator's bell does not take; the platform's own request to the supertenant's administrators; webhooks get every tenant's, once each) and `e2e.request_decided` (the person who asked); their two switches in a person's notification settings are offered only where they can reach that person - under Approval with the tenant's ceiling on - and greyed elsewhere, also for an administrator whose own tenant is under another policy. Audit: `e2e_request.create|approve|reject|expire|use` - the `use` row names the approval and, in `encrypted`, the folder that was actually encrypted - `e2e_policy.update` and `e2e_tenant.update`.
-  - **Changing who may encrypt is a signed-in administrator's:** an API key gets `403 session_required` on `/api/admin/e2e`, on a tenant's ceiling, on the decision of a request, and on the `e2e.policy` setting through `/api/admin/settings`, `/api/ai/admin/settings` and the MCP settings tools (a session's write there is audited as `e2e_policy.update`, like the page's own). A tenant's policy and the operator's ceiling are written one column at a time, so neither save can undo the other; saving the value already stored writes nothing; the ceiling answers `409 single_tenant` on a single-tenant install.
-  - Migration `00080` adds `providers.e2e_allowed`, `providers.e2e_policy` and the `e2e_requests` table. A single-tenant install keeps its policy in the `e2e.policy` setting; when it turns multi-tenant mode on, the first start copies that setting to the platform's own tenant once (logged and audited), so an install that had switched encryption off does not find it on again.
-  - Contributed by Berk Başarır ([#83](https://github.com/BRF-Tech/filex/pull/83)). The copy rule, the separate approval kinds, the operator's role, the request limits, the policy's carry into multi-tenant mode and the CLI's question were added on top of it before the release.
-- **A `.csv` opens in ONLYOFFICE** ([ONLYOFFICE.md → CSV files](./ONLYOFFICE.md#csv-files), [GitHub #81](https://github.com/BRF-Tech/filex/issues/81)).
-  With ONLYOFFICE configured, a CSV opens in its spreadsheet editor and is edited there; without it, in filex's read-only table, as before. It is the product's default, not a setting each install makes, and only `.csv`.
-  - **A choice like any other.** ONLYOFFICE is an open handler of `.csv` (`onlyoffice`): *Open with* lists it beside filex's table, **Choose an app…** and *Always use this app* keep it on the account (`PUT /api/me/open-with/csv`), and Admin → Plugins → Default apps lists `.csv` with ONLYOFFICE first while it is configured (`PUT /api/admin/file-types/csv`). Switched off, a `.csv` opens in the table without an error and a choice or rule that names ONLYOFFICE is kept for when it is back; an administrator sees *Open with ONLYOFFICE* greyed with where to set it up.
-  - **Opened without the "Choose CSV options" question.** filex reads the file's first 64 KiB and passes its delimiter (comma, semicolon, tab or `|`) and UTF-8 to the editor. A file that is not UTF-8 gets ONLYOFFICE's question, rather than a guess.
-  - **Saved as the same kind of CSV.** ONLYOFFICE writes an edited CSV comma-separated with a UTF-8 byte order mark whatever it was (measured on Docs 9.4); filex puts the file's own delimiter, byte order mark (or none) and line ends back before it writes it. A document server set to `assemblyFormatAsOrigin: false` saves it as XLSX: filex converts that back to CSV through the document server and never writes XLSX bytes under a `.csv` name. Anything else is not written: the file stays as it was, the log says why, the people who edited it get a bell notice in their language (`file.upload_failed`) and the audit log a row (`file.office_save_refused`).
-  - **What CSV cannot keep is said before it is lost:** a line under the viewer's bar, in the person's language, while a CSV is open for editing (only the active sheet's values; not formatting, formulas or other sheets).
-
-### Changed
-
-- **The admin panel's navigation is a mega menu** ([ADMIN-PANEL.md](./ADMIN-PANEL.md),
-  [#82](https://github.com/BRF-Tech/filex/issues/82)). The long sidebar is gone:
-  the top bar holds the **Dashboard** link and three panels - **Files & storage**,
-  **People & security** and **System** - each laid out in sections (Files, Apps,
-  Storage; People & access, Security; Plugins & integrations, Customization,
-  Maintenance & records), with a short line under every page. Every page is two
-  clicks away and keeps its address, so links and bookmarks still work, and who
-  is offered which page is unchanged. A panel opens on a click or a key, never on
-  hover; with the keyboard, ↓ enters a panel, ↑ / ↓ / Home / End move inside it,
-  ← / → move along the bar and Esc goes back to the button; a screen reader hears
-  a named landmark, which panel each button opens and whether it is open, lists
-  labelled by their headings and the current page. Below 1024 pixels a **Menu**
-  button opens a drawer with the same pages as a headed list, every section open.
-  The menu is one component in the core package (`MegaMenu`); the grouping is one
-  list in the admin app (`web/src/lib/adminNav.ts`).
-- The trail under the bar names the menu section between the dashboard and the
-  page (*Dashboard › People & access › Users*), as words rather than a link.
-- **Auth providers** is called **Identity providers** in English, as the guides
-  already called it (the Turkish was already *Kimlik sağlayıcılar*), and the
-  menu's **Search** is **Search index**, the page's own title.
-- **An upgrade still changes nobody's access:** on first start, every saved role
-  (the built-in User role, and each custom role and its folder parts) that holds
-  `files.create` also gets `files.encrypt`, and so does every person whose own
-  exceptions allow `files.create` - creating a key file or a `.fxe` needed only
-  `files.create` before. A rename, a move or a copy onto one of those names now
-  needs `files.encrypt` beside its own permission, so a role that may rename or
-  move but not create cannot give a file such a name any more. The catalogue a server has seen is kept in the
-  `permissions.catalogue` setting, so a permission added later is merged once and
-  never again; the setting only ever grows, so a version started after a later
-  one does not make the later one's permissions new again.
-- ⚠ **Rolling back to a version without `files.encrypt`** (0.50 or older): the
-  older Roles and People pages cannot save a custom role's list or a person's
-  exceptions the upgrade gave `files.encrypt` to (`400`, an unknown permission)
-  until the server is upgraded again. Two saves go through without a word and
-  leave `files.encrypt` out: the built-in User role (the older page does not
-  show the permission and writes the list back without it) and a custom role's
-  folder part when the role's own list does not hold `files.encrypt`; applying
-  a preset to a custom role on the older page does the same. Upgrading again
-  does not give it back to those, nor where an administrator took it away in
-  between: it was merged once, at the first upgrade. After upgrading again,
-  check that the User role and those folder parts still allow encrypting
-  ([PERMISSIONS.md](./PERMISSIONS.md)). The release after 0.51.0 points them
-  out on Admin → Roles, with one click to give `files.encrypt` back or to
-  dismiss it as on purpose.
-- A refused encryption in the explorer is said in words (the server's reason)
-  instead of "could not create the encrypted folder", and a folder made before
-  its key file was refused is listed at once.
-- ⚠ **File request links whose creator is not on record** - the creator was
-  deleted before 0.49.0, so the link names nobody - keep taking ordinary files
-  but no longer take an encrypted folder's key file or a `.fxe`: a file request
-  is judged for its creator, and there is nobody to judge. Make a new link if
-  such a drop is needed.
-- ⚠ **MySQL: migration `00080` makes two columns byte-exact.** The new
-  `e2e_requests.path` is `utf8mb4_0900_bin` (the collation `00041` chose for
-  names and paths), so an approval for `Muhasebe` is not one for `muhasebe`. And
-  `settings.setting_key`, which `00001` made case- and accent-insensitive, is
-  altered to the same collation, so that no spelling of a setting key reaches
-  another key's row: the settings API guards `e2e.policy` (a session, one of the
-  four values, an audit row) by comparing the key exactly, and on MySQL
-  `E2E.POLICY` or `e2é.policy` would have passed that guard and still read and
-  written the `e2e.policy` row. The `ALTER TABLE` rebuilds `settings`, a small
-  table, and cannot fail on existing data (keys that were unique ignoring case
-  and accent are unique byte for byte). filex's own keys are lower-case and
-  are read in the spelling they were written in; only something that leaned on
-  MySQL matching a key by its case or accent (a hand-written row, a script)
-  stops matching. **Rolling back** restores the old collation and stops with
-  error 1062 if two keys that differ only by case or accent were written after
-  the upgrade; rename or remove one of each first. SQLite and PostgreSQL
-  already compared keys exactly.
-
-- **The repository no longer describes a maintainer's machine.** The README
-  and the API reference show the first-run admin password as `<printed once>`
-  instead of an example that looked real, the end-to-end tests look for the
-  local language packs in a sibling checkout (`../filex-lang-es`) instead of
-  at a fixed drive path, comments no longer name the project's own machines,
-  and a unit test refuses a drive-letter path in any file the export publishes.
-- **The release's macOS jobs run on `macos-15`.** GitHub retires its macOS 14
-  images on 2026-11-02. The runner stays pinned, never `macos-latest`: its
-  architecture is the package's (arm64).
-
-### Fixed
-
-- **A choice made just before the tab closes is no longer lost.** Preferences are sent 400 ms after the last change, and anything still waiting when the page was hidden or closed never left the browser - most visibly an app interface's `state.set`, which the next open read back as the older value. The waiting document is now sent at once on `pagehide` and when the page turns hidden, with `keepalive`, from the same shared code on every surface.
-- **An office file in an older format no longer gets newer-format bytes under its old name** ([ONLYOFFICE.md → A save in another format](./ONLYOFFICE.md#a-save-in-another-format)).
-  ONLYOFFICE writes no Word 97, Excel 97 or PowerPoint 97 file: an edited `.doc` comes back as DOCX and a `.xls` as XLSX (measured on Docs 9.4 with its defaults), and filex wrote those bytes over the old file. Now the old file is not touched: the edit is saved beside it under the format's extension (`rapor.doc` stays, `rapor.docx` is the edit; `rapor (2).docx` when that name is taken), the people who edited it are told in their language, and the audit log writes `file.office_saved_beside`. The new file is created only for an editor of that session who may create it in that folder (their account, their tenant, `files.create` on the new name); when nobody may, nothing is written and they are told to download the edit from ONLYOFFICE before closing. A save that is not one of the document formats, or not the package it says it is, is not written at all (`file.office_save_refused`).
-- The admin panel's menu button on a phone was announced as "Dashboard"; it is
-  **Menu** now, and says whether the drawer is open. While closed, the drawer is
-  out of the tab order (its links could be reached with Tab off screen).
-- The trail on a file's versions page read *Dashboard › admin-files › Versions*;
-  the middle step is *File history*, the menu's name for the page.
-- The Audit page names `e2e.folder_cleanup`, `e2e.fxe_header_rewritten` and
-  `e2e.key_file_rewritten` - written since 0.48.0 - in every language; they
-  showed as their raw ids.
-- **An app's interface can save a new file.** `file.saveAs` (`fx.saveAs` in
-  the SDK) answered `unavailable` everywhere since app interfaces arrived in
-  0.48.1: no screen that draws an interface gave it the folder dialog the
-  documentation promised. Now filex asks in its own folder dialog - the one
-  *Move to…* uses, titled with the app's name and the file's, opened in the
-  file's folder - in the viewer and in an app's dialog, page and details
-  section alike, in the web app, the desktop app and an embed
-  ([APP-PLUGINS-API.md](./APP-PLUGINS-API.md#the-interface-bridge)).
-
-- **Every Go test runs from the backend module alone (#141).** A thumbnail
-  test read its clip from `e2e/fixtures`, outside the module the release tool
-  copies, and the public export's Go gate failed on it with "no such file". The
-  test makes its clip with ffmpeg now, and a web test fails when a Go test
-  reaches for a file outside `backend/`.
-
-- **The release's export no longer stops on build output it does not
-  publish.** Its check for a private name, a server address or a credential
-  read every file in the public checkout, ignored ones included, and at 0.50
-  stopped half-way on the previous release's UI left in `backend/embed/web`.
-  It now reads only the files the export publishes, and empties the two embed
-  directories the release fills with its own UI.
-
-- **The release's browser suite installs the echo test app it just built.** On
-  Windows the `go: echo.wasm fixture` gate built the module only in its WSL
-  mirror, so the checkout's copy, the one Playwright installs, could predate
-  the change a spec tested (the v0.50.0 release check lost an hour to it). The
-  gate now builds in the Go module and writes the result back into the
-  checkout, and the specs that install the app fail on a module older than its
-  sources, naming `bash scripts/build-wasm-fixture.sh`, instead of running it.
-
-- **The folder dialog's first breadcrumb shows its whole focus ring.** The breadcrumb line scrolls sideways, and a scroller clips its children on both axes, so the browser's default outside ring lost its left, top and bottom edge when the first crumb was focused (all three engines). The ring is now drawn inside the crumb, like the list rows'.
-
-**This release has more to it than fits on one page.** The rest of the
-entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0510---2026-10-04).
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.51.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.51.0`
-
 ## Earlier releases
 
-The 131 releases before v0.51.0, in brief. Full notes are on GitHub.
+The 132 releases before v0.52.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.51.0](https://github.com/BRF-Tech/filex/releases/tag/v0.51.0) | 4 October 2026 | Who may encrypt is now an organisation's decision, contributed by @berkbasarir (#83): the tenant policy (Off, Administrators only, Permitted, or Approval), a new files.encrypt permission and, on multi-tenant installs, a ceiling… |
 | [v0.50.0](https://github.com/BRF-Tech/filex/releases/tag/v0.50.0) | 3 October 2026 | Office documents open, convert and get their thumbnails through the connected ONLYOFFICE Document Server: LibreOffice is gone from every image and from filex, and the Test on the ONLYOFFICE card now downloads the way a document… |
 | [v0.49.0](https://github.com/BRF-Tech/filex/releases/tag/v0.49.0) | 29 September 2026 | Roles and per-person permissions, contributed by @manjotsc (#75): 28 named permissions, one role per person built from them, per-person exceptions on top, and refusals that name the permission and the role in the reader's… |
 | [v0.48.1](https://github.com/BRF-Tech/filex/releases/tag/v0.48.1) | 28 September 2026 | Apps can bring an interface of their own - HTML and JavaScript filex serves from the approved package into a sandboxed frame, opened as the viewer of a file type, as a kind of file in New document, or handing you a file to keep -… |
@@ -2416,4 +2382,4 @@ The 131 releases before v0.51.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-11-06 from 151 published releases.</small>
+<small>Last refreshed 2026-11-06 from 152 published releases.</small>

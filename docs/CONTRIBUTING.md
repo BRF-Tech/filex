@@ -3670,6 +3670,23 @@ ones not yet published apply on top of one another in this order:
     reads a process's `Path` once: read twice, an exiting copy answered the
     first read and not the second, and the arm64 check stopped on "You cannot
     call a method on a null-valued expression" after the update had worked.
+14. `ci-browsers-apt.patch` (#306, after 0.59.0), on top of 13 - already on
+    the public `main`: pushed without a tag, with the export that brings its
+    guards. Every browser part of `ci.yml` installs through
+    `.github/workflows/scripts/ci-browsers.sh` (new) instead of
+    `playwright install --with-deps`, after a step "Cache the browsers'
+    system packages" (`actions/cache`, `~/.cache/filex-ci-debs`, a key per
+    engine and lockfile, the older lockfile's files as the fallback). The
+    script hands those package files to apt, asks Playwright for its package
+    list (`install-deps --dry-run`), fetches what is missing in two tries of
+    their own (150 and 270 seconds, Azure's mirror first, then the mirrors
+    after it in `/etc/apt/apt-mirrors.txt`), installs, has Playwright fetch
+    the browser, and keeps the files for the next run. v0.58.1, v0.58.2 and
+    v0.59.0 each had parts red at the step's 10 minutes: Azure's mirror sent
+    the packages to westus2 at 40-60 kB/s, and a re-run there was red again.
+    The step names stay the ones the gate re-runs (`checks.mjs`,
+    `INFRA_STEPS`, which knows the cache step too); `ciFullMatrix.test.ts`
+    runs the script with stand-ins for sudo, apt-get and pnpm.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and

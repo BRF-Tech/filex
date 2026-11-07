@@ -619,6 +619,8 @@ describe('which red parts the gate re-runs', () => {
     // 37952392755 attempt 1: two Playwright parts, red installing the browser.
     expect(infraFailure([browser])).toBe(true);
     expect(infraFailure(['The browsers, with their system libraries'])).toBe(true);
+    // #306: the step that keeps the browsers' package files between runs.
+    expect(infraFailure(["Cache the browsers' system packages", 'Post Cache the browsers\' system packages'])).toBe(true);
     for (const s of ['Set up job', 'Initialize containers', 'Run actions/checkout@v4', 'Run pnpm/action-setup@v4', 'Run actions/download-artifact@v4', 'Post Run actions/setup-go@v5', 'Run docker/setup-buildx-action@v3']) {
       expect(infraFailure([s]), s).toBe(true);
     }
