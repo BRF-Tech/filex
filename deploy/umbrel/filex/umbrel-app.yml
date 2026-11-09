@@ -2,14 +2,10 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.59.0"
+version: "0.59.1"
 releaseNotes: |-
-  filex v0.59.0 - 2026-11-06
-  • The certificate switch is each connection's own
-  • The CLI and the desktop app reach a filex server with a self-signed certificate.
-  • A server may permit plain FTP.
-  • A warning under every setting that turns a protection off.
-  • A saved password goes only to the address it was saved for, on every page that keeps one.
+  filex v0.59.1 - 2026-11-09
+  • "Review update" no longer waits for the whole app to download.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

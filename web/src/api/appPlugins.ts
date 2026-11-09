@@ -480,6 +480,15 @@ export interface AppPluginDryRun {
   wasm_bytes?: number;
   signed?: boolean;
   /**
+   * The review was read from the source's manifest alone (a review from a
+   * repository or an address, never an upload): the module, the interface
+   * and the office engine are named by the sha256 it pins, their sizes and
+   * the interface's file count are not known yet (`ui.files` 0, no
+   * `upgrade.ui_files`). The approval downloads them and holds them to the
+   * pins (wasmplugin/fetch.go, "A REVIEW READS THE MANIFEST").
+   */
+  from_manifest?: boolean;
+  /**
    * An app of the same name is already installed — said at the REVIEW, where
    * the plan can still change to "upgrade it". Absent on an upgrade's own dry
    * run and when the name is free.
@@ -807,8 +816,10 @@ export const INSTALL_TIMEOUT_MS = 180_000;
  * themselves, so it waits as long as an install: the Office editor 0.4.0 is
  * a 126 MB ui.zip and a 14 MB engine.zip, and under the client's 30 s
  * default a link slower than about 40 Mbit/s cut the review off mid-upload
- * ("timeout of 30000ms exceeded"). A review from a source compiles and
- * sends nothing and keeps the default.
+ * ("timeout of 30000ms exceeded"). A review from a source sends nothing and
+ * reads only the source's filex-app.json (from_manifest), so it keeps the
+ * default. ⚠ It used to download the whole app for the review, and the
+ * Office editor's "Review update" answered 504 (2026-11-09).
  */
 function dryRunConfig(body: FormData | Record<string, unknown>) {
   return body instanceof FormData

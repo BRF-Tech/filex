@@ -712,6 +712,11 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
               <dd class="break-all sm:col-span-2">{{ manifest.homepage }}</dd>
             </template>
           </dl>
+          <!-- A review from a source reads its filex-app.json alone; the
+               files are downloaded and held to these hashes on approval. -->
+          <p v-if="review.from_manifest" class="mt-2 text-xs text-zinc-600 dark:text-zinc-400" data-testid="app-plugin-from-manifest">
+            {{ t('appPlugins.wizard.fromManifest') }}
+          </p>
         </div>
 
         <!-- An upgrade says the jump, and how the grant changes: what is
@@ -782,10 +787,13 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
           <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
             <dt class="text-zinc-500">{{ t('appPlugins.wizard.uiGroup.sha256') }}</dt>
             <dd class="break-all font-mono sm:col-span-2" data-testid="app-plugin-ui-sha256">{{ review.ui.sha256 }}</dd>
-            <dt class="text-zinc-500">{{ t('appPlugins.wizard.uiGroup.files') }}</dt>
-            <dd class="sm:col-span-2">{{ review.ui.files }}</dd>
-            <dt class="text-zinc-500">{{ t('appPlugins.wizard.uiGroup.size') }}</dt>
-            <dd class="sm:col-span-2">{{ sizeOf(review.ui.bytes) }} ({{ sizeOf(review.ui.unpacked) }})</dd>
+            <!-- Unknown before the bundle is downloaded (a review read from the manifest). -->
+            <template v-if="!review.from_manifest">
+              <dt class="text-zinc-500">{{ t('appPlugins.wizard.uiGroup.files') }}</dt>
+              <dd class="sm:col-span-2" data-testid="app-plugin-ui-files">{{ review.ui.files }}</dd>
+              <dt class="text-zinc-500">{{ t('appPlugins.wizard.uiGroup.size') }}</dt>
+              <dd class="sm:col-span-2">{{ sizeOf(review.ui.bytes) }} ({{ sizeOf(review.ui.unpacked) }})</dd>
+            </template>
           </dl>
           <p v-if="review.engine === false" class="text-xs text-zinc-600 dark:text-zinc-400" data-testid="app-plugin-ui-no-engine">
             {{ t('appPlugins.wizard.uiGroup.noEngine') }}

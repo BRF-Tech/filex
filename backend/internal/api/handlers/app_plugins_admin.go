@@ -434,8 +434,16 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 		writeError(w, r, http.StatusBadRequest, "bad_json", nil)
 		return nil, false
 	}
+	// ⚠⚠ A dry run (the review) reads the source's manifest ALONE: the
+	// module, the interface bundle and the office engine are named by the
+	// sha256 it pins and downloaded by the approval, which holds them to it.
+	// Downloading them for the review answered the Office editor's "Review
+	// update" with a 504 (wasmplugin/fetch.go, "A REVIEW READS THE MANIFEST").
+	req.GitHubInput.Review, req.URLInput.Review = dry, dry
 	var in *wasmplugin.InstallInput
 	switch {
+	case req.FromSource && upgradeID > 0 && dry:
+		in, err = h.Registry.ReviewUpdate(r.Context(), upgradeID)
 	case req.FromSource && upgradeID > 0:
 		in, err = h.Registry.FetchUpdate(r.Context(), upgradeID)
 	case req.FromSource:

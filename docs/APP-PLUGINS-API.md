@@ -607,12 +607,24 @@ is refused `413 too_large` rather than truncated.
 `module_*` / `ui_*` are the SHA-256 of the module and of the interface bundle
 before and after (absent where there is none); `ui_files` compares the two
 bundles file by file (by CRC-32 and size), each list cut at 200 names with
-the counts whole; `filex_*` are the ranges as the review reads them; `notes`
+the counts whole (an upload's review only: see `from_manifest` below); `filex_*` are the ranges as the review reads them; `notes`
 are the source's release notes (the `Review update` path), the release's
 Markdown as text: the panel draws it through the explorer preview's Markdown
 pipeline and the document sanitizer (`markdownToSafeHtml`), never as markup of
 its own; a picture in them from another server waits behind a placeholder until
 the administrator loads it. The exact bytes: `testdata/wire/app-plugin-upgrade-review.json`.
+
+⚠ **A review from a source reads the manifest alone** (`github_repo`,
+`manifest_url`, `{"from_source": true}`, a store link's review, a plugin
+request; not an upload, which carries its files). The answer then has
+`"from_manifest": true`: `wasm_sha256`, `ui.sha256` and `upgrade.module_to` /
+`ui_to` are the SHA-256 the manifest pins, `wasm_bytes`, `ui.files`,
+`ui.bytes`, `ui.unpacked` and a mirrored address's `bytes` are `0`, and there
+is no `upgrade.ui_files`: the files are not downloaded for the review. The
+install or upgrade that follows downloads them and refuses any that does not
+hash to its pin (`sha256_mismatch`). Before, the review downloaded the whole
+app, and the Office editor's (a 126 MB `ui.zip` and a 14 MB `engine.zip`)
+answered 504 from a proxy.
 
 **File types (0.50).** An install's dry run also answers `file_types` when
 the app opens or draws kinds of file: one row per kind and capability,

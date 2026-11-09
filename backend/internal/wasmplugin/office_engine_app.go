@@ -260,14 +260,19 @@ func (r *Registry) checkInstalledEngine(p *Installed) error {
 }
 
 // fetchEngine downloads the engine a manifest names (resolve turns its url
-// into an address, as for the interface bundle). Nil when it brings none.
-func (r *Registry) fetchEngine(ctx context.Context, m *Manifest, resolve func(string) string) (io.Reader, error) {
+// into an address, as for the interface bundle). Nil when it brings none;
+// nil too for a review (the manifest's checks made, nothing downloaded:
+// fetch.go, "A REVIEW READS THE MANIFEST").
+func (r *Registry) fetchEngine(ctx context.Context, m *Manifest, resolve func(string) string, review bool) (io.Reader, error) {
 	spec := officeEngineOf(m)
 	if spec == nil {
 		return nil, nil
 	}
 	if strings.TrimSpace(spec.URL) == "" {
 		return nil, installErr(ErrCodeManifestInvalid, "the manifest has no engines.office.url; an install from a repository or an address needs the office engine's address")
+	}
+	if review {
+		return nil, nil
 	}
 	u := resolve(strings.TrimSpace(spec.URL))
 	b, err := r.fetch(ctx, u, MaxOfficeEngineBytes)

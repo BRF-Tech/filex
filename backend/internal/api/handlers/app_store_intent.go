@@ -331,9 +331,12 @@ func viewOfIntent(in *appstore.Intent) intentView {
 // signed - the same download a GitHub install makes, at an address a moved
 // tag cannot change - and says what it serves. The tag must still serve the
 // same manifest there (it pins the module and the interface by hash), or the
-// link is refused: the release is no longer what the store approved.
-func (h *AppStore) fetchForIntent(ctx context.Context, in *appstore.Intent) (*wasmplugin.InstallInput, *appstore.Source, error) {
-	input, err := h.Admin.Registry.FetchGitHub(ctx, wasmplugin.GitHubInput{Repo: in.Repo, Ref: in.Ref, Commit: in.Commit})
+// link is refused: the release is no longer what the store approved. With
+// review (the link's review), the manifest alone: the files are named by its
+// pins, which the store's are compared with, and downloaded by the install
+// (wasmplugin/fetch.go, "A REVIEW READS THE MANIFEST").
+func (h *AppStore) fetchForIntent(ctx context.Context, in *appstore.Intent, review bool) (*wasmplugin.InstallInput, *appstore.Source, error) {
+	input, err := h.Admin.Registry.FetchGitHub(ctx, wasmplugin.GitHubInput{Repo: in.Repo, Ref: in.Ref, Commit: in.Commit, Review: review})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -505,7 +508,7 @@ func (h *AppStore) Intent(w http.ResponseWriter, r *http.Request) {
 		h.storageIntent(w, r, origin, req.Token, in)
 		return
 	}
-	input, src, err := h.fetchForIntent(r.Context(), in)
+	input, src, err := h.fetchForIntent(r.Context(), in, true)
 	if err != nil {
 		h.failInstall(w, r, err)
 		return
@@ -532,8 +535,9 @@ func (h *AppStore) Intent(w http.ResponseWriter, r *http.Request) {
 		h.failInstall(w, r, err)
 		return
 	}
-	// The bytes the dry run hashed, against the link (the manifest's hash was
-	// compared above; this is the module filex actually downloaded).
+	// The module the dry run names, against the link (the manifest's hash was
+	// compared above). The review reads the manifest alone, so this is its
+	// pin; the install holds the downloaded bytes to that same pin.
 	if in.WasmSHA256 != "" && dry.WasmSHA256 != "" && dry.WasmSHA256 != in.WasmSHA256 {
 		storeFail(w, r, &appstore.Error{Code: appstore.CodePinMismatch, Message: "the module downloaded is not the one the store approved",
 			Detail: map[string]any{"kind": appKindOf(in), "mismatches": []appstore.Mismatch{{Field: "wasm_sha256", Link: in.WasmSHA256, Source: dry.WasmSHA256}}}})
@@ -611,7 +615,7 @@ func (h *AppStore) Install(w http.ResponseWriter, r *http.Request) {
 			h.Svc.PutBack(p)
 		}
 	}()
-	input, src, err := h.fetchForIntent(ctx, in)
+	input, src, err := h.fetchForIntent(ctx, in, false)
 	if err != nil {
 		h.failInstall(w, r, err)
 		return

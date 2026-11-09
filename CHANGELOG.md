@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.59.1] - 2026-11-09
+
+### Fixed
+
+- **"Review update" no longer waits for the whole app to download.** The
+  permission review of an app from a repository or an address (an install, an
+  update, a store link, a plugin request) downloaded the module, the interface
+  bundle and the office engine before it answered. For the Office editor that
+  is 140 MB from GitHub, and the review answered 504 from a reverse proxy or
+  came minutes later. The review now reads the source's `filex-app.json` alone,
+  for every version an app has published: the permissions, and the SHA-256 the
+  manifest pins for each file. **Install** and **Upgrade** download the files
+  and refuse any that does not match what was reviewed (`from_manifest` in the
+  dry run's answer: [APP-PLUGINS-API.md](docs/APP-PLUGINS-API.md)).
+
 ## [0.59.0] - 2026-11-06
 
 ### Added

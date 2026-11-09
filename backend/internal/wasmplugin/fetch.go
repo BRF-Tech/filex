@@ -37,6 +37,10 @@ type GitHubInput struct {
 	// may have moved since the store approved it. `{tag}` in an address still
 	// stands for Ref (a release asset is the tag's).
 	Commit string `json:"-"`
+	// Review reads the manifest alone, for a review (a dry run): see
+	// InstallInput.ReviewOnly. Never the API's: the handler sets it for a
+	// dry run.
+	Review bool `json:"-"`
 }
 
 var gitCommitRe = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
@@ -53,6 +57,35 @@ type URLInput struct {
 	ManifestURL string `json:"manifest_url"`
 	SHA256      string `json:"sha256"`
 	Signature   string `json:"signature"`
+	// Review reads the manifest alone, for a review (GitHubInput.Review).
+	Review bool `json:"-"`
+}
+
+// ⚠⚠ A REVIEW READS THE MANIFEST, NOTHING ELSE (2026-11-09). The review of
+// an install or an upgrade from a source - the wizard's dry run, a store
+// link's review, a plugin request - used to download everything the install
+// downloads: the module, the interface bundle, the office engine and every
+// mirrored file. For the Office editor that is a 126 MB ui.zip and a 14 MB
+// engine.zip, read from GitHub while the administrator's request waited: the
+// "Review update" screen answered 504 from the proxy, or after minutes, and
+// the approval then downloaded all of it again.
+//
+// Everything the review shows is in filex-app.json, for every version an app
+// ever published: the permissions, the interface's policy exceptions and
+// external addresses, the engine it asks for, the filex range, and the sha256
+// that PINS each file (the module's wasm.sha256, ui.bundle.sha256,
+// engines.office.sha256 - a download without them is refused here, before
+// anything else). So with Review the fetchers make the checks the manifest
+// alone answers and download nothing more; the review names each file by its
+// pin (DryRunAnswer.FromManifest). The approval fetches without Review and
+// holds every byte to those same pins, exactly as before: what an
+// administrator approved by hash is what installs, or nothing does.
+
+// reviewInput is the InstallInput a review-only fetch answers: the manifest,
+// and - when the install would download a module - the module's pin.
+func reviewInput(in *InstallInput, module bool) *InstallInput {
+	in.ReviewOnly, in.ReviewModule = true, module
+	return in
 }
 
 // FetchGitHub resolves a repository + ref into an InstallInput (manifest and
@@ -96,24 +129,32 @@ func (r *Registry) FetchGitHub(ctx context.Context, in GitHubInput) (*InstallInp
 		return &InstallInput{Manifest: manifest, Source: "github", SourceURL: "https://github.com/" + repo + "@" + tag}, nil
 	}
 	fromRepo := func(u string) string { return r.repoFile(repo, tag, usedRef, u) }
-	ui, err := r.fetchUIBundle(ctx, m, fromRepo)
+	ui, err := r.fetchUIBundle(ctx, m, fromRepo, in.Review)
 	if err != nil {
 		return nil, err
 	}
-	engine, err := r.fetchEngine(ctx, m, fromRepo)
+	engine, err := r.fetchEngine(ctx, m, fromRepo, in.Review)
 	if err != nil {
 		return nil, err
 	}
 	if (m.Wasm == nil || strings.TrimSpace(m.Wasm.URL) == "") && m.UI != nil && !m.NeedsModule() {
 		// An app that is only an interface (and the office engine it may
 		// bring): the bundle is the whole download.
-		return &InstallInput{Manifest: manifest, UI: ui, Engine: engine, Source: "github", SourceURL: "https://github.com/" + repo + "@" + tag}, nil
+		got := &InstallInput{Manifest: manifest, UI: ui, Engine: engine, Source: "github", SourceURL: "https://github.com/" + repo + "@" + tag}
+		if in.Review {
+			return reviewInput(got, false), nil
+		}
+		return got, nil
 	}
 	if m.Wasm == nil || strings.TrimSpace(m.Wasm.URL) == "" {
 		return nil, installErr(ErrCodeManifestInvalid, "the manifest has no wasm.url; a repository install needs a prebuilt module address")
 	}
 	if strings.TrimSpace(m.Wasm.SHA256) == "" {
 		return nil, installErr(ErrCodeSHA256Required, "the manifest has no wasm.sha256; a downloaded module must be pinned by hash")
+	}
+	if in.Review {
+		return reviewInput(&InstallInput{Manifest: manifest, SHA256: m.Wasm.SHA256,
+			Source: "github", SourceURL: "https://github.com/" + repo + "@" + tag}, true), nil
 	}
 	wasmURL := fromRepo(m.Wasm.URL)
 	wasm, err := r.fetch(ctx, wasmURL, r.opts.MaxWasmBytes)
@@ -144,8 +185,9 @@ func (r *Registry) repoFile(repo, tag, at, u string) string {
 // fetchUIBundle downloads the interface bundle a manifest names — `resolve`
 // turns its `url` into an address (a repository's ref, a manifest's own
 // address) — pinned by ui.bundle.sha256, which a download must have. Nil when
-// the manifest has no interface.
-func (r *Registry) fetchUIBundle(ctx context.Context, m *Manifest, resolve func(string) string) (io.Reader, error) {
+// the manifest has no interface; nil too for a review (the manifest's checks
+// made, nothing downloaded).
+func (r *Registry) fetchUIBundle(ctx context.Context, m *Manifest, resolve func(string) string, review bool) (io.Reader, error) {
 	if m.UI == nil {
 		return nil, nil
 	}
@@ -154,6 +196,9 @@ func (r *Registry) fetchUIBundle(ctx context.Context, m *Manifest, resolve func(
 	}
 	if m.UI.Bundle.SHA256 == "" {
 		return nil, installErr(ErrCodeSHA256Required, "the manifest has no ui.bundle.sha256; a downloaded interface must be pinned by hash")
+	}
+	if review {
+		return nil, nil
 	}
 	u := resolve(strings.TrimSpace(m.UI.Bundle.URL))
 	b, err := r.fetch(ctx, u, r.maxUIBytes())
@@ -231,18 +276,22 @@ func (r *Registry) FetchURL(ctx context.Context, in URLInput) (*InstallInput, er
 		}
 		return base.ResolveReference(rel).String()
 	}
-	ui, err := r.fetchUIBundle(ctx, m, fromManifest)
+	ui, err := r.fetchUIBundle(ctx, m, fromManifest, in.Review)
 	if err != nil {
 		return nil, err
 	}
-	engine, err := r.fetchEngine(ctx, m, fromManifest)
+	engine, err := r.fetchEngine(ctx, m, fromManifest, in.Review)
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(in.URL) == "" && m.UI != nil && !m.NeedsModule() {
 		// Only an interface: `sha256`, when given, pins the manifest.
-		return &InstallInput{Manifest: manifest, UI: ui, Engine: engine, SHA256: strings.TrimSpace(in.SHA256), Signature: in.Signature,
-			Source: "url", SourceURL: in.ManifestURL, ManifestURL: in.ManifestURL, Pinned: strings.TrimSpace(in.SHA256) != ""}, nil
+		got := &InstallInput{Manifest: manifest, UI: ui, Engine: engine, SHA256: strings.TrimSpace(in.SHA256), Signature: in.Signature,
+			Source: "url", SourceURL: in.ManifestURL, ManifestURL: in.ManifestURL, Pinned: strings.TrimSpace(in.SHA256) != ""}
+		if in.Review {
+			return reviewInput(got, false), nil
+		}
+		return got, nil
 	}
 	if strings.TrimSpace(in.URL) == "" {
 		return nil, &InstallError{Code: ErrCodeFetch, Reason: FetchReasonMissingURL,
@@ -254,6 +303,10 @@ func (r *Registry) FetchURL(ctx context.Context, in URLInput) (*InstallInput, er
 	}
 	if sum == "" {
 		return nil, installErr(ErrCodeSHA256Required, "a downloaded module must be pinned by sha256 (in the request or in the manifest)")
+	}
+	if in.Review {
+		return reviewInput(&InstallInput{Manifest: manifest, SHA256: sum, Signature: in.Signature,
+			Source: "url", SourceURL: in.URL, ManifestURL: in.ManifestURL, Pinned: strings.TrimSpace(in.SHA256) != ""}, true), nil
 	}
 	wasm, err := r.fetch(ctx, in.URL, r.opts.MaxWasmBytes)
 	if err != nil {

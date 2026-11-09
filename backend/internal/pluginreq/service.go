@@ -395,13 +395,19 @@ func appSource(src *Source, upgrade bool) (string, error) {
 }
 
 // fetchApp reads an app's source into an install input (nothing installed).
-func (s *Service) fetchApp(ctx context.Context, kind string, src Source, upgradeID int64) (*wasmplugin.InstallInput, error) {
+// With review (the request's review), the manifest alone: the files are
+// frozen by the sha256 it pins and downloaded by the approval
+// (wasmplugin/fetch.go, "A REVIEW READS THE MANIFEST").
+func (s *Service) fetchApp(ctx context.Context, kind string, src Source, upgradeID int64, review bool) (*wasmplugin.InstallInput, error) {
 	switch kind {
 	case SourceGitHub:
-		return s.o.Apps.FetchGitHub(ctx, wasmplugin.GitHubInput{Repo: src.GitHubRepo, Ref: src.Ref})
+		return s.o.Apps.FetchGitHub(ctx, wasmplugin.GitHubInput{Repo: src.GitHubRepo, Ref: src.Ref, Review: review})
 	case SourceURL:
-		return s.o.Apps.FetchURL(ctx, wasmplugin.URLInput{URL: src.URL, ManifestURL: src.ManifestURL, SHA256: src.SHA256, Signature: src.Signature})
+		return s.o.Apps.FetchURL(ctx, wasmplugin.URLInput{URL: src.URL, ManifestURL: src.ManifestURL, SHA256: src.SHA256, Signature: src.Signature, Review: review})
 	case SourceFromSource:
+		if review {
+			return s.o.Apps.ReviewUpdate(ctx, upgradeID)
+		}
 		return s.o.Apps.FetchUpdate(ctx, upgradeID)
 	}
 	return nil, refuseSaid(http.StatusBadRequest, "bad_request", "source_unknown", nil, "unknown source")
@@ -446,7 +452,7 @@ func (s *Service) planApp(in CreateInput) (*plan, error) {
 // answered.
 func (s *Service) resolveApp(ctx context.Context, p *plan) (*model.PluginRequest, error) {
 	upgrade := p.app != nil
-	fetched, err := s.fetchApp(ctx, p.kind, p.src, p.pluginID)
+	fetched, err := s.fetchApp(ctx, p.kind, p.src, p.pluginID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -816,7 +822,7 @@ func (s *Service) approveApp(ctx context.Context, r *model.PluginRequest, who Ac
 			return nil, fmt.Sprintf("the app is at %s now, not the %s this request would replace", p.Row.Version, r.FromVersion), nil
 		}
 	}
-	in, err := s.fetchApp(ctx, r.SourceKind, SourceOf(r), upgradeID)
+	in, err := s.fetchApp(ctx, r.SourceKind, SourceOf(r), upgradeID, false)
 	if err != nil {
 		var ie *wasmplugin.InstallError
 		if errors.As(err, &ie) && (ie.Code == wasmplugin.ErrCodeUpToDate || ie.Code == wasmplugin.ErrCodeIncompatible || ie.Code == wasmplugin.ErrCodeNotFound) {

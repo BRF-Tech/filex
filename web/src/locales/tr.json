@@ -2885,6 +2885,7 @@
       "removedPermissions": "Artık istemediği izinler: {permissions}",
       "addsModule": "Bu sürüm bir modül getiriyor: şimdiye dek hiçbir kodun çalışmadığı yerde kod çalışacak.",
       "samePermissions": "Kurulu sürümle aynı izinleri istiyor.",
+      "fromManifest": "Uygulamanın manifestinden okundu. Dosyaları manifestin sabitlediği SHA-256 ile anılır; onayladığınızda filex onları indirir ve eşleşmeyen hiçbir şeyi kurmaz.",
       "newPermission": "Yeni",
       "enginesMissing": "Bu sunucuda {engines} yok. Uygulama kurulur, ama bunlarla yaptığı işler bu motorlar kurulup filex yeniden başlatılana kadar çalışmaz.",
       "officeMissing": "Ofis belgelerini bir ofis motoru dönüştürür ve bu sunucuda çalışan yok. Uygulama kurulur; ofis belgeleriyle yaptığı işler, bir yönetici Ofis düzenleyici uygulamasını kurduğunda (Uygulamalar) ya da Dış servisler sayfasından {name} bağladığında çalışır. Yeniden başlatma gerekmez.",

@@ -687,6 +687,13 @@ func (s *stagedUI) info(m *Manifest) *UIInfo {
 	if s == nil {
 		return uiInfoOf(m, nil, nil)
 	}
+	if s.pinned {
+		// Read from the manifest: the hash it pins; the file count and the
+		// sizes are known once the approval downloads the bundle.
+		info := uiInfoOf(m, nil, nil)
+		info.SHA256 = s.idx.sum
+		return info
+	}
 	sizes := map[string]int64{}
 	for _, mf := range s.mirrors {
 		sizes[mf.ext.SHA256] = int64(len(mf.bytes))

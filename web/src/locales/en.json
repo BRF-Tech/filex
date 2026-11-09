@@ -2885,6 +2885,7 @@
       "removedPermissions": "Permissions it no longer asks for: {permissions}",
       "addsModule": "This version brings a module: code will run where until now nothing did.",
       "samePermissions": "It asks for the same permissions as the installed version.",
+      "fromManifest": "Read from the app's manifest. Its files are named by the SHA-256 the manifest pins; when you approve, filex downloads them and installs nothing that does not match.",
       "newPermission": "New",
       "enginesMissing": "This server does not have {engines}. The app installs, but what it does with them will not work until they are installed and filex is restarted.",
       "officeMissing": "Office documents are converted by an office engine, and none runs on this server. The app installs; what it does with office documents works once an administrator installs the Office editor app (Apps) or connects {name} under External services - no restart needed.",

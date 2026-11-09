@@ -104,8 +104,12 @@ opens this machine (and nothing else) to the downloads -
    `master`) and puts that branch name where the manifest's download address
    says `{tag}`, and a release asset does not live under a branch name - the
    download fails with `fetch_failed`.
-3. **Review permissions.** filex has already fetched the module and checked
-   its SHA-256 at this point; nothing is installed yet.
+3. **Review permissions.** filex has read the repository's `filex-app.json`
+   at this point, and nothing else: the permissions, and the SHA-256 it pins
+   for the module, the interface bundle and the office engine. Nothing is
+   downloaded or installed yet, so the review is quick whatever the app's
+   size. **Install** downloads the files and refuses any whose SHA-256 is not
+   the one you reviewed.
 4. Read the review (below), tick **I understand what this app can do and want
    to install it**, press **Install**.
 5. The wizard ends on *"The app is installed and running."* The app's rows are
@@ -352,10 +356,13 @@ the administrator who approved a version decides the next one.
 A row with a newer version says **Update available** - or **Needs approval**
 when it asks for a new permission, or when a language pack now brings a
 module (code that runs where nothing did). **Actions → Review update** opens
-the review of that version, fetched from the app's own source, and says what
+the review of that version, read from the `filex-app.json` of the app's own
+source (nothing else is downloaded for it, so even the Office editor's
+140 MB of files do not keep the review waiting), and says what
 it changes: the version jump; the permissions it adds (marked **New**) and
-drops; the module and the interface by their SHA-256 before and after (and
-whether a module arrives where there was none), with the interface files
+drops; the module and the interface by their SHA-256 before and after (the
+new ones as its manifest pins them; and whether a module arrives where there
+was none); when you upgrade from uploaded files, the interface files
 added, removed and changed in a list you can open; the filex range and the
 signature when they change; and the source's **release notes** - a GitHub
 release's body, drawn as Markdown through the explorer's preview pipeline

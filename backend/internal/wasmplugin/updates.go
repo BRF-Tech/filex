@@ -490,10 +490,11 @@ func (r *Registry) githubReleases(ctx context.Context, repo string, current upda
 // ── Applying one ───────────────────────────────────────────────────────
 
 // fetchUpdate reads c through the install path — the manifest AND the
-// module, pinned and verified like any install.
-func (r *Registry) fetchUpdate(ctx context.Context, src updateSource, c *candidate) (*InstallInput, error) {
+// module, pinned and verified like any install; with review, the manifest
+// alone (fetch.go, "A REVIEW READS THE MANIFEST").
+func (r *Registry) fetchUpdate(ctx context.Context, src updateSource, c *candidate, review bool) (*InstallInput, error) {
 	if src.Kind == model.AppPluginSourceGitHub {
-		in, err := r.FetchGitHub(ctx, GitHubInput{Repo: src.Repo, Ref: c.ref})
+		in, err := r.FetchGitHub(ctx, GitHubInput{Repo: src.Repo, Ref: c.ref, Review: review})
 		if in != nil {
 			in.Notes = c.notes
 		}
@@ -510,15 +511,30 @@ func (r *Registry) fetchUpdate(ctx context.Context, src updateSource, c *candida
 			}
 		}
 	}
-	return r.FetchURL(ctx, URLInput{URL: module, ManifestURL: src.ManifestURL})
+	in, err := r.FetchURL(ctx, URLInput{URL: module, ManifestURL: src.ManifestURL, Review: review})
+	if in != nil {
+		in.Notes = c.notes
+	}
+	return in, err
 }
 
 // FetchUpdate reads the newer version an app's source has — the one the
-// update check announced — for an administrator's review and upgrade
-// ("Review update" on the Apps list). The same search the check makes, so
-// what is reviewed is what was announced; the decision is the
-// administrator's.
+// update check announced — for an administrator's upgrade ("Review update"
+// → approve on the Apps list). The same search the check makes, so what is
+// approved is what was announced; the decision is the administrator's.
 func (r *Registry) FetchUpdate(ctx context.Context, id int64) (*InstallInput, error) {
+	return r.fetchNewer(ctx, id, false)
+}
+
+// ReviewUpdate is FetchUpdate for the review ("Review update"): the same
+// search, and of the version it finds the manifest alone - nothing that
+// takes longer than reading filex-app.json (fetch.go, "A REVIEW READS THE
+// MANIFEST"). The answer is a dry run's input only.
+func (r *Registry) ReviewUpdate(ctx context.Context, id int64) (*InstallInput, error) {
+	return r.fetchNewer(ctx, id, true)
+}
+
+func (r *Registry) fetchNewer(ctx context.Context, id int64, review bool) (*InstallInput, error) {
 	p, ok := r.ByID(id)
 	if !ok {
 		return nil, installErr(ErrCodeNotFound, "no such plugin")
@@ -541,7 +557,7 @@ func (r *Registry) FetchUpdate(ctx context.Context, id int64) (*InstallInput, er
 		}
 		return nil, installErr(ErrCodeUpToDate, "the source has nothing newer than "+p.Row.Version)
 	}
-	return r.fetchUpdate(ctx, src, found)
+	return r.fetchUpdate(ctx, src, found, review)
 }
 
 // ── One check ──────────────────────────────────────────────────────────

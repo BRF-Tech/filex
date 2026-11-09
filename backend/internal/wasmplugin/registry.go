@@ -1145,6 +1145,14 @@ type InstallInput struct {
 	// Notes are the source's release notes for this version, as plain text,
 	// for the review (a GitHub release's body).
 	Notes string
+	// ReviewOnly: nothing but the manifest was downloaded (GitHubInput.Review,
+	// URLInput.Review, ReviewUpdate) - its pins stand for the module, the
+	// interface bundle and the office engine. Only a dry run takes it; an
+	// install or an upgrade refuses it (fetch.go, "A REVIEW READS THE
+	// MANIFEST"). ReviewModule: the install would download a module, pinned
+	// by SHA256.
+	ReviewOnly   bool
+	ReviewModule bool
 	// Placements are the administrator's choices at the review's File types
 	// group: where the new app goes for each kind it opens or draws
 	// (internal/assoc). The registry does not read them; the HTTP layer
@@ -1200,6 +1208,13 @@ type DryRunAnswer struct {
 	// with who handles it now and where the app lands by default - the
 	// review's File types group (internal/assoc, filled by the HTTP layer).
 	FileTypes []assoc.InstallKind `json:"file_types,omitempty"`
+	// FromManifest: the review was read from the manifest alone (a source's
+	// review: fetch.go, "A REVIEW READS THE MANIFEST"). The module, the
+	// interface and the office engine are named by the sha256 the manifest
+	// pins; their sizes, the interface's file count and an upgrade's file
+	// list are not known yet. The approval downloads them and holds every
+	// byte to those pins.
+	FromManifest bool `json:"from_manifest,omitempty"`
 }
 
 // DryRunUpgrade is the jump an upgrade makes. Added are the permissions the
@@ -1270,13 +1285,19 @@ func upgradeReview(u *DryRunUpgrade, p *Installed, st *staged, notes string) {
 	if p.HasModule() {
 		u.ModuleFrom = p.Row.SHA256
 	}
-	if st.wasm != nil {
+	if st.hasModule() {
 		u.ModuleTo = st.sum
 	}
 	u.UIFrom, u.UITo = p.Row.UISHA256, st.uiSum()
 	u.SignedFrom, u.SignedTo = p.Row.Signed, st.signd
 	u.FilexFrom, u.FilexTo = rangeText(p.Manifest), rangeText(st.m)
 	u.Notes = notes
+	if st.ui != nil && st.ui.pinned {
+		// Read from the manifest alone: the new bundle's files are not known,
+		// only its hash (UITo). Compared against nothing, every installed file
+		// would read as removed.
+		return
+	}
 	var before, after map[string]uiEntry
 	if b := p.UI(); b != nil {
 		before = b.idx.files
@@ -1364,12 +1385,13 @@ func (r *Registry) dryRun(ctx context.Context, st *staged, lang string, upgradin
 		ans.Upgrade = upgradeOf(upgrading, st.m)
 		upgradeReview(ans.Upgrade, upgrading, st, notes)
 	}
-	if st.wasm == nil {
+	if !st.hasModule() {
 		ans.ManifestSHA256 = st.sum
 	} else {
 		ans.WasmSHA256, ans.WasmBytes = st.sum, int64(len(st.wasm))
 	}
-	ans.Engine = st.wasm != nil
+	ans.Engine = st.hasModule()
+	ans.FromManifest = st.fromManifest
 	if st.m.UI != nil {
 		ans.UI = st.ui.info(st.m)
 	}
@@ -1403,9 +1425,18 @@ type staged struct {
 	// ui is the checked interface bundle and its mirrored files; nil when the
 	// manifest has no `ui` block.
 	ui *stagedUI
-	// engine is the checked office engine; nil when the manifest brings none.
+	// engine is the checked office engine; nil when the manifest brings none
+	// (and for a review read from the manifest alone).
 	engine *stagedEngine
+	// fromManifest: a review read from the manifest alone (ReviewOnly).
+	// pinnedModule: it has a module, known by its pin (sum), not its bytes.
+	fromManifest bool
+	pinnedModule bool
 }
+
+// hasModule: the staged app brings a module - its bytes, or (a review read
+// from the manifest) its pin.
+func (s *staged) hasModule() bool { return s.wasm != nil || s.pinnedModule }
 
 // stage validates the manifest, the module bytes and the interface bundle,
 // without touching disk or the database.
@@ -1423,6 +1454,11 @@ func (r *Registry) stage(ctx context.Context, in *InstallInput) (*staged, error)
 	if _, err := compatRange(m); err != nil {
 		return nil, installErr(ErrCodeManifestInvalid, err.Error())
 	}
+	if in.ReviewOnly && !in.DryRun {
+		// A programming error, never a person's: the files were not
+		// downloaded, so there is nothing to install (fetch.go).
+		return nil, errors.New("app-plugins: a review read from the manifest alone cannot be installed - fetch the files")
+	}
 	if m.IsLanguagePack() {
 		if in.UI != nil {
 			return nil, installErr(ErrCodeManifestInvalid, "an interface bundle was supplied, but this manifest is a language pack and has no ui block")
@@ -1434,6 +1470,8 @@ func (r *Registry) stage(ctx context.Context, in *InstallInput) (*staged, error)
 	}
 	var ui *stagedUI
 	switch {
+	case m.UI != nil && in.ReviewOnly:
+		ui = pinnedUI(m)
 	case m.UI != nil:
 		if ui, err = r.stageUI(ctx, m, in); err != nil {
 			return nil, err
@@ -1443,12 +1481,29 @@ func (r *Registry) stage(ctx context.Context, in *InstallInput) (*staged, error)
 	}
 	var engine *stagedEngine
 	switch {
+	case officeEngineOf(m) != nil && in.ReviewOnly:
+		// Pinned by engines.office.sha256 (ParseManifest requires it);
+		// downloaded and checked at the approval.
 	case officeEngineOf(m) != nil:
 		if engine, err = r.stageEngine(m, in, ui); err != nil {
 			return nil, err
 		}
 	case in.Engine != nil:
 		return nil, installErr(ErrCodeManifestInvalid, "an office engine was supplied, but the manifest has no engines.office block")
+	}
+	if in.Wasm == nil && in.ReviewModule {
+		// A review read from the manifest: the module is its pin. The pin is
+		// held to the signature the same way the module's hash would be - the
+		// approval then holds the downloaded bytes to the pin.
+		sum := strings.ToLower(strings.TrimSpace(in.SHA256))
+		if !sha256Re.MatchString(sum) {
+			return nil, installErr(ErrCodeManifestInvalid, "the module's sha256 must be 64 hex digits")
+		}
+		sum, signd, err := r.checkSum("module", sum, "", in.Signature)
+		if err != nil {
+			return nil, err
+		}
+		return &staged{m: m, sum: sum, signd: signd, ui: ui, fromManifest: true, pinnedModule: true}, nil
 	}
 	if in.Wasm == nil {
 		if m.UI != nil && !m.NeedsModule() {
@@ -1459,7 +1514,7 @@ func (r *Registry) stage(ctx context.Context, in *InstallInput) (*staged, error)
 			if err != nil {
 				return nil, err
 			}
-			return &staged{m: m, sum: sum, signd: signd, ui: ui, engine: engine}, nil
+			return &staged{m: m, sum: sum, signd: signd, ui: ui, engine: engine, fromManifest: in.ReviewOnly}, nil
 		}
 		why := "an app with actions, screens, public pages, settings or permissions needs its WebAssembly module (only a manifest that adds languages, or one that is only an interface, installs without one)"
 		if m.UI != nil {
@@ -1492,7 +1547,13 @@ func (r *Registry) stage(ctx context.Context, in *InstallInput) (*staged, error)
 // instance only runs signed apps" means the same thing for every kind.
 func (r *Registry) checkIntegrity(what string, payload []byte, pin, signature string) (string, bool, error) {
 	h := sha256.Sum256(payload)
-	sum := hex.EncodeToString(h[:])
+	return r.checkSum(what, hex.EncodeToString(h[:]), pin, signature)
+}
+
+// checkSum is checkIntegrity for a payload known by its sha256 (sum): the
+// pin, then the signature over it. A review read from the manifest alone
+// checks the module's pin here; the install hashes the bytes (checkIntegrity).
+func (r *Registry) checkSum(what, sum, pin, signature string) (string, bool, error) {
 	if want := strings.ToLower(strings.TrimSpace(pin)); want != "" && want != sum {
 		return "", false, installErr(ErrCodeSHA256Mismatch, what+" sha256 "+sum[:12]+"… does not match the expected "+want[:min(12, len(want))]+"…")
 	}

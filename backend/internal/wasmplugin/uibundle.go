@@ -234,6 +234,17 @@ type stagedUI struct {
 	zip     []byte
 	idx     *uiIndex
 	mirrors []stagedMirror
+	// pinned: a review read from the manifest alone - no bytes, no files,
+	// only the bundle's pin (idx.sum). Never written (stage refuses a
+	// review-only input outside a dry run).
+	pinned bool
+}
+
+// pinnedUI is the interface of a review read from the manifest alone: the
+// bundle known by the sha256 the manifest pins (fetchUIBundle refuses a
+// download without one).
+func pinnedUI(m *Manifest) *stagedUI {
+	return &stagedUI{idx: &uiIndex{sum: strings.ToLower(strings.TrimSpace(m.UI.Bundle.SHA256))}, pinned: true}
 }
 
 type stagedMirror struct {

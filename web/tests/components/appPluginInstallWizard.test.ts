@@ -521,6 +521,30 @@ describe('AppPluginInstallWizard — an app with its own interface', () => {
     w.unmount();
   });
 
+  // ⚠⚠ A review from a source reads only filex-app.json (2026-11-09: the
+  // Office editor's "Review update" downloaded 140 MB for the review and
+  // answered 504). The bundle is named by the hash the manifest pins; its
+  // file count and size are not known yet, so they are not drawn as 0.
+  it('a review read from the manifest says so, names the bundle by its pin and draws no file count or size', async () => {
+    const d = { ...withUI(), from_manifest: true };
+    d.ui = { ...d.ui, files: 0, bytes: 0, unpacked: 0 };
+    dryRunAnswer = d;
+    const w = mountWizard();
+    await reachReview(w);
+    expect(w.find('[data-testid="app-plugin-from-manifest"]').text()).toBe(en.appPlugins.wizard.fromManifest);
+    expect(w.find('[data-testid="app-plugin-ui-sha256"]').text()).toBe('ab'.repeat(32));
+    expect(w.find('[data-testid="app-plugin-ui-files"]').exists()).toBe(false);
+    expect(w.find('[data-testid="app-plugin-ui-group"]').text()).not.toContain(en.appPlugins.wizard.uiGroup.size);
+    w.unmount();
+
+    dryRunAnswer = withUI();
+    const up = mountWizard('tr');
+    await reachReview(up);
+    expect(up.find('[data-testid="app-plugin-from-manifest"]').exists(), 'an upload carries its files').toBe(false);
+    expect(up.find('[data-testid="app-plugin-ui-files"]').text()).toBe('4');
+    up.unmount();
+  });
+
   it('says it in Turkish on a Turkish screen, and the honest note is there with no address at all', async () => {
     const d = withUI();
     d.ui.external = [];
