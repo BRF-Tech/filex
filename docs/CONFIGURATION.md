@@ -637,9 +637,9 @@ next). Nothing to switch on: it is on by default.
 | **What counts** | A wrong password, and a wrong second-factor code. Not: the form asking for the code, a right password on a disabled account, an API token (not a password). |
 | **What resets** | A success resets the *account's* counter - never the address's, so one valid login between guesses cannot launder a spray. A protocol's cached credential and an API token do not reset it either (a busy client would wipe the counter with every request). |
 
-![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.42fced0d9ad1.png)
+![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.fefb2e1c3fa9.png)
 
-![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.1c2889094cd7.png)
+![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.c115aaa2f273.png)
 
 **The IP allow-list** (`login.ip_allowlist`) is the way back in. An address on it is
 exempt from the per-address limit, and may sign in to **any** locked account (the
@@ -923,6 +923,9 @@ Drivers that live outside the binary - see [PLUGINS.md](PLUGINS.md).
 | `FILEX_APPS_E2E_PLAINTEXT` | `true` | **Seed** of `apps.e2e_plaintext` (0.56): an app granted `files:e2e-plaintext` may edit a file of an unlocked end-to-end encrypted folder - the person's browser decrypts it for the app's frame and encrypts the save; the server carries only ciphertext ([E2E-ENCRYPTION.md → Editing in an app](E2E-ENCRYPTION.md#editing-in-an-app)). `false` turns it off for every app: no app is offered such a file and both of the app's doors refuse it. Seeded once, like the other stored settings; afterwards `PUT /api/admin/settings/apps.e2e_plaintext` with `{"value": "false"}` (the instance's administrator). Read at every request. |
 | `FILEX_APP_UI_ORIGIN` | - | Serves apps' own interfaces from an [origin of their own](APP-PLUGINS.md#an-origin-of-their-own), e.g. `https://apps.example-usercontent.com` (a scheme and a host; another registrable domain than filex's). The proxy sends that host to filex too; filex answers only the interface route there and refuses it on its own host. With it and no `FILEX_ONLYOFFICE_FRAME_ORIGIN`, the ONLYOFFICE editor's frame is served there too ([ONLYOFFICE.md → The editor in a frame of its own](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)). Empty (the default): interfaces are served from filex's origin, opaque by sandbox. A value that is not an origin, or filex's own, stops the server. YAML: `app_ui_origin`. |
 | `FILEX_APP_PLUGIN_MAX_UI_MB` | `128` | [**Seed**](#variables-that-seed-a-stored-setting) of `apps.max_ui_mb` (1-1024; applies at the next start): largest [interface package](APP-PLUGINS.md#an-apps-own-interface) (the app's `ui` zip) an install accepts; the files inside it are capped too (512 MiB unpacked, 20 000 files, 64 MiB per file). Up to 0.56 the variable was read at every start; now it is read at the first start only and the stored value wins: change it on the page, or apply a changed variable with `filex settings reseed apps.max_ui_mb`. |
+| `FILEX_APP_DATA_DSN` | - | A PostgreSQL database of the apps' own for the data an app keeps ([APP-PLUGINS.md → An app's own data](APP-PLUGINS.md#an-apps-own-data)): every replica reads the same one. Unset, each app's data is a file under `<data-dir>/app-plugins/data/`, which is this node's alone - set it before running more than one replica ([DEPLOYMENT.md → Scaling](DEPLOYMENT.md#scaling--high-availability)). Naming filex's own database (`FILEX_DB_DSN`) is refused. Read at start. |
+| `FILEX_APP_DATA_MAX_MB` | `256` | The most one app's own data may take (its keys and values); past it the app's writes are refused. Read at start. |
+| `FILEX_APP_ROUTE_POOL` | half the CPUs | How many warm instances answer one app's public addresses (a link shortener's) and its shortener calls at once, 1 to 16: the most of the machine a flood of visits can take. Read at start. |
 | `FILEX_OFFICE_ENGINE_MAX_MB` | `2048` | The most memory one module of the [office engine an app brings](ONLYOFFICE.md#the-office-engine-without-a-document-server) may use, in MiB (`512` to `4096`, x2t's own maximum; out of range is clamped): a conversion or a thumbnail that reaches it ends as *too large*. The engine's process may hold about twice that before filex ends it (watched on Linux and Windows). A plain variable, not a stored setting: read whenever an engine process starts, so a change applies to the next one (idle processes end after 3 minutes; a restart applies it at once). YAML: `office_engine_max_mb`. |
 | `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every installed app's source (its GitHub repository or address) for a newer version the running filex can run, and **tells the administrators** - it installs nothing: every newer version waits for an administrator's approval ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)). The same switch covers the storage plugins' [update sources](PLUGINS.md#updates-from-a-source). `0` = no request leaves the server for it - what an air-gapped install wants; **Check for updates** on the Apps tab still asks when pressed. A demo never checks. The time of the last check is stored, so a restart neither skips a day nor checks at every boot. YAML: `app_plugin_update_check`. |
 | `FILEX_APP_STORE_URLS` | - | Comma-separated app store **origins** (`https://store.example`, no path) trusted by configuration: their install links and license answers are accepted without an administrator approving the store first, signed with the keys in `FILEX_APP_STORE_KEYS` and no others. Set, it is an **allow list** ([below](#app-stores-allow-list)). Unset, a store is trusted only by an administrator who compared its key fingerprints on its first install link ([APP-PLUGINS.md → Trusted stores](APP-PLUGINS.md#trusted-stores)). A configured store has no remove button in the panel. YAML: `app_store_urls`. |
@@ -1438,7 +1441,8 @@ These pass, with no setting:
   tenant's host (the sign-in handoff).
 - **A request with a key**: `Authorization: Bearer …` or `X-Filex-Token`. The
   desktop app, an embed with `auth: { kind: 'bearer' }`, an embed whose host
-  proxies with a key, ShareX, MCP clients and the CLI all send one; a browser
+  proxies with a key, MCP clients and the CLI all send one (an
+  [uploader's](UPLOADERS.md) key is sent the same way, to its one door); a browser
   cannot put either header on a request to another origin unless the CORS
   answer allows it.
 - **Links that carry their own credential**: share and file-request links
@@ -1667,12 +1671,20 @@ answers the sign-in page before anybody is signed in.
 
 | Setting | What it does |
 |---|---|
-| `branding.name` | The name shown instead of "filex": the sign-in page, the tab title, the public share pages and the [installed app](#the-installed-app-pwa). |
+| `branding.name` | The name shown instead of "filex": the sign-in page, the tab title, the public share pages, the mails and the [installed app](#the-installed-app-pwa). |
 | `branding.logo_url` | A `data:image/…` URI (up to 256 KB), an `http(s)` URL or a site-relative path. |
 | `branding.accent` | `#rgb` / `#rrggbb`; the accent colour, and the installed app's title bar. |
-| `branding.footer_text` | A line at the foot of the public pages. |
-| `branding.hide_powered_by` | `true` hides the "Shared with filex" line. |
+| `branding.footer_text` | A line at the foot of the public pages and the mails. |
+| `branding.hide_powered_by` | `true` hides the "Shared with filex" line (on the pages and in the mails). |
 | `branding.sso_label` | The SSO button's text on the sign-in page. |
+
+**The mails and the public pages** wear these values through their
+templates: the accent colours the buttons, the logo heads the page and the
+mail, the footer text closes both. To change more than the theme - the HTML
+and CSS of a mail or a page, a text on a link's page - edit its template under
+*Admin → Settings → Templates* ([TEMPLATES.md](TEMPLATES.md)). ⚠ A mail client
+shows a logo given as a `data:` URI only sometimes (several webmails block
+them); for the mails, give the logo as an `https` address.
 
 ### The installed app (PWA)
 

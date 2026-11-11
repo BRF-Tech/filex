@@ -1132,7 +1132,7 @@ free, a `.fxe` that stays a `.fxe` or a key file within its own folder, is in
 no doubt and runs after a restart, or on another instance, as it would have
 before.
 
-On the agent surface - the REST API, MCP, ShareX, upload tickets and the doors
+On the agent surface - the REST API, MCP, uploaders, upload tickets and the doors
 0.50 opened - an encrypted folder's key file is refused before the rule is
 asked: `403 RESERVED_NAME` (an MCP tool's error result says it), for a folder
 as for a file. That surface holds no key and never writes one. A `.fxe` is the
@@ -1241,7 +1241,7 @@ kept), and the tenant's administrators answer under Admin → Encryption.
 Every door asks the same question: the web and desktop apps (uploads, single
 and chunked; the text editor; New document and a draft's save; rename; the
 queue's copy and move), the agent API (upload, move, MCP `file_write` and
-`file_move`, ShareX, upload tickets, and the doors 0.50 opened: `file_copy`,
+`file_move`, uploaders, upload tickets, and the doors 0.50 opened: `file_copy`,
 `archive_create`, `archive_extract`, and `app_run` through the app's output),
 file requests, archives (extraction skips a refused member; creating an
 archive, or adding to one, under such a name is refused), apps (an interface's
@@ -1673,10 +1673,10 @@ read content is **off or limited** inside an encrypted folder:
 | **Share links / file requests** | **Off** - the whole **Share** entry is hidden, inside the folder and on the folder's own row in its parent (since v0.50), and so is the details panel's **Create link**, because a recipient would download ciphertext with no way to decrypt it and a file request would store a visitor's upload in the folder unencrypted. The server refuses such a link on every door with `409 E2E_ENCRYPTED` - the explorer's Share, `POST /api/ai/share` and the MCP `file_share` tool, and a file request through the MCP `file_request_create` tool (until v0.50 the API minted it anyway). Note this also hides per-item permissions for that folder |
 | **Password change** | **Works** - **Encryption settings… → Change password…**, with the current password or the recovery key. A folder with its own key rewrites only its key file; a folder from before v0.31 re-wraps every file's key, resumably. See [Changing the password](#changing-the-password) |
 | **Desktop "keep local" / folder sync pinning** | **Off** - not offered for encrypted folders or their contents |
-| **Reads over DAV / CLI / ShareX** | Return the raw ciphertext (magic and all). Those surfaces have no key and cannot decrypt |
+| **Reads over DAV / CLI** | Return the raw ciphertext (magic and all). Those surfaces have no key and cannot decrypt |
 | **The AI surface (REST `/api/ai` + MCP)** | Says what it sees and refuses what it cannot do: every row of `file_list` / `file_info` / `file_search` carries `encrypted: true` and `e2e_root`, the key file is never listed, `file_read` and `/api/ai/download` answer `409 E2E_ENCRYPTED` instead of ciphertext, and the key file is never written, moved or deleted from there (`403 RESERVED_NAME`). See [MCP.md](MCP.md#encrypted-folders-and-fxe) |
 | **Writes over DAV / CLI** ⚠ | **Not encrypted.** See [below](#ways-plaintext-still-reaches-the-server) |
-| **Writes over the AI surface and ShareX** | **Refused** with `409 E2E_PLAINTEXT_REFUSED` (since v0.50): `file_write`, `/api/ai/upload`, upload tickets, the zip `file_zip` writes and the files `file_unzip` extracts, and the same for `archive_create` and `archive_extract`. An agent that means it passes `allow_plaintext` and the bytes are stored unencrypted; ShareX has no such flag |
+| **Writes over the AI surface and uploaders** | **Refused** with `409 E2E_PLAINTEXT_REFUSED` (since v0.50): `file_write`, `/api/ai/upload`, upload tickets, the zip `file_zip` writes and the files `file_unzip` extracts, and the same for `archive_create` and `archive_extract`. An agent that means it passes `allow_plaintext` and the bytes are stored unencrypted; an [uploader](UPLOADERS.md) (and the deprecated ShareX endpoint) has no such flag |
 | **Versioning** | **Works** - versions store ciphertext; a restored version decrypts with the same folder password |
 | **Trash / restore** | **Works** - the bytes are untouched |
 | **ClamAV** | Scans ciphertext, so it finds nothing. Harmless, but do not mistake a clean scan for a scanned file |
@@ -1902,7 +1902,7 @@ anyone with server access. In a level-2 folder the explorer at least notices
 the name: it is shown as written, and **Encryption settings → Fix N names**
 renames it. Its content stays plaintext.
 
-✅ **The AI surface (REST `/api/ai`, the MCP tools) and ShareX refuse it**
+✅ **The AI surface (REST `/api/ai`, the MCP tools) and uploaders refuse it**
 (since v0.50): a write into an encrypted folder answers `409
 E2E_PLAINTEXT_REFUSED` - `file_write`, `/api/ai/upload`, an upload ticket (at
 mint and again at redeem), the archive `file_zip` writes and the files
@@ -1938,7 +1938,7 @@ and carries its key file, so `filex decrypt` can open it.
 **Rule: put files into an encrypted folder only by uploading them through the
 filex web UI, with the folder unlocked.** WebDAV and the CLI *write* surfaces
 are still unguarded (see [Not implemented](#not-implemented)); the AI surface
-and ShareX refuse unless told `allow_plaintext`.
+refuses unless told `allow_plaintext`, and an uploader always refuses.
 
 One mitigation is already in place, and it is only a mitigation: a plaintext
 file that lands in an encrypted folder by one of these routes is **still not
@@ -1965,7 +1965,7 @@ The exceptions - the things that still reach the server as plaintext - are
 the encrypted folder's **own name** (it is not inside itself), and anything a
 surface that does not encrypt writes (above). Server-side features that
 *invent* a name - the `-copy` of a colliding paste, a desktop-sync conflict
-copy, a file-request drop folder, a ShareX upload, an archive extraction, a
+copy, a file-request drop folder, an uploader's upload, an archive extraction, a
 new document - would produce a name nobody can decrypt: the first is refused
 inside a folder with encrypted names, the web UI does not offer the others
 there, and a desktop-sync conflict copy of a ciphertext name is simply an
@@ -2026,11 +2026,11 @@ entry with a readable (and meaningless) name, shown as such.
 
 | | |
 |---|---|
-| ![Creating an encrypted folder](https://filex.sh/shots/e2e-recovery/create-encrypted-folder.fbf82bbd84ff.png) | ![The recovery key, shown once](https://filex.sh/shots/e2e-recovery/recovery-key-shown-once.1521d9ab814c.png) |
+| ![Creating an encrypted folder](https://filex.sh/shots/e2e-recovery/create-encrypted-folder.fbf82bbd84ff.png) | ![The recovery key, shown once](https://filex.sh/shots/e2e-recovery/recovery-key-shown-once.7c94e307d6b4.png) |
 | Creating the folder. The escrow notice appears only when the installation has escrow on. | The recovery key, shown once. The dialog will not close until you tick that you saved it. |
 | ![The lock screen](https://filex.sh/shots/e2e-recovery/locked-folder.8d3a6296a745.png) | ![Unlocking with a recovery key](https://filex.sh/shots/e2e-recovery/unlock-with-recovery-key.4a3d7fc91fdb.png) |
 | A wrong password, and the way out underneath it. | The recovery-key dialog. The **Escrow key** tab appears only when both the installation and the folder have escrow. |
-| ![The escrow tab](https://filex.sh/shots/e2e-recovery/unlock-with-escrow-key.fa6b5a061f47.png) | ![The offer to a pre-v0.31 folder](https://filex.sh/shots/e2e-recovery/legacy-folder-upgrade-offer.de286c978ce9.png) |
+| ![The escrow tab](https://filex.sh/shots/e2e-recovery/unlock-with-escrow-key.495280036dfa.png) | ![The offer to a pre-v0.31 folder](https://filex.sh/shots/e2e-recovery/legacy-folder-upgrade-offer.de286c978ce9.png) |
 | Escrow says up front that the owner will be told. | A folder from before v0.31, just opened by password: the offer is visible, and it discloses the escrow consequence. |
 
 Retake them with
@@ -2301,7 +2301,7 @@ limitation you can hit today:
   names are encrypted too and in a vault ([In a vault](#in-a-vault)) - but
   not a `.fxe`, and editing together there is not built yet.
 - **A server-side guard against plaintext writes over DAV / CLI.** Copy and
-  move are guarded, and so (since v0.50) are the AI surface and ShareX; a
+  move are guarded, and so (since v0.50) are the AI surface and uploaders; a
   direct *write* over WebDAV or the CLI is not - see [Ways plaintext still
   reaches the server](#ways-plaintext-still-reaches-the-server).
 - **Re-encrypting on move.** filex refuses a transfer across an encryption

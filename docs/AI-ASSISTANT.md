@@ -22,7 +22,7 @@ It is **off** until an administrator turns it on.
 4. **Turn the assistant on** and save. The explorer's toolbar now shows the
    spark button to everybody whose role allows it ([Who may use it](#who-may-use-it)).
 
-![Admin → Settings → AI assistant: the provider, the address, the model, the test's answer and the limits](https://filex.sh/shots/assistant/settings-1440.eb22a9b77576.png)
+![Admin → Settings → AI assistant: the provider, the address, the model, the test's answer and the limits](https://filex.sh/shots/assistant/settings-1440.6425f85770dd.png)
 
 The API key is stored encrypted with the installation's `FILEX_SECRET_KEY`
 and is never shown again - the page says only whether one is stored. A server

@@ -21,11 +21,17 @@
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../../types/ExplorerConfig';
-import type { PublicRequestInfo, PublicShareInfo } from '../../types/Public';
+import type { PublicRequestInfo, PublicShareInfo, PublicSlots } from '../../types/Public';
 import { useLocale } from '../../composables/useLocale';
 import { usePublicBranding } from '../../composables/usePublicBranding';
 import { useSystemDark } from '../../composables/useSystemDark';
-import { usePublicRequest, usePublicShare } from '../../composables/usePublicLink';
+import {
+  fetchPublicSlots,
+  requestRoot,
+  shareRoot,
+  usePublicRequest,
+  usePublicShare,
+} from '../../composables/usePublicLink';
 import { useCaptcha, useCaptchaConfig } from '../../composables/useCaptcha';
 import { loadPublicText, providePublicText, publicSentence } from '../../composables/usePublicText';
 import { hasLocale, normalizeLocaleCode } from '../../lib/uiLocales';
@@ -120,7 +126,15 @@ function said(key: string, vars: Record<string, string | number> = {}): string {
 /** Where this page's API lives — see the `base` prop. */
 const apiRoot = props.base ?? appBase();
 
-const brand = usePublicBranding({ base: apiRoot });
+/* Ç3: the link's tenant's name, logo and colours, at whatever address the
+   link is opened (the server answers the address's for a dead token, so the
+   "not available" card says nothing about whose link it was). */
+const brand = usePublicBranding({
+  base: apiRoot,
+  linkPath: props.token
+    ? `${props.kind === 'request' ? '/api/public/d/' : '/api/public/s/'}${encodeURIComponent(props.token)}`
+    : undefined,
+});
 
 /* ⚠ The system's answer as a LIVE ref (#57): read inside the computed below
    it was read once, and an open page kept the mode it was opened in. */
@@ -237,6 +251,30 @@ const badge = computed<'file' | 'folder' | ''>(() => {
   return 'file';
 });
 
+/**
+ * The administrator's text slots (internal/templates slot.share.*,
+ * slot.file_request.*), asked once the link is open and again when the
+ * visitor picks another language. ⚠ Not for an app's page: its words are the
+ * app's. A link that is not live has none (the server answers as for any dead
+ * token), so the "not available" card stays the same for every token.
+ */
+const slots = ref<PublicSlots | null>(null);
+let slotsAsked = '';
+watch(
+  () => [link.status.value, locale.value] as const,
+  ([status, lang]) => {
+    if (status !== 'ready' || !props.token || shareInfo.value?.kind === 'app') return;
+    const key = `${lang}`;
+    if (slotsAsked === key) return;
+    slotsAsked = key;
+    const url = share ? shareRoot(apiRoot, props.token) : requestRoot(apiRoot, props.token);
+    void fetchPublicSlots(url, String(lang)).then((s) => {
+      if (slotsAsked === key) slots.value = s;
+    });
+  },
+  { immediate: true },
+);
+
 /** Walking into a folder is a reload of the same link at another path. */
 function navigate(path: string): void {
   void link.load(path ? `?path=${encodeURIComponent(path)}` : '');
@@ -332,6 +370,7 @@ onMounted(() => {
     :lock-message="link.lockMessage.value"
     :failure="link.failure.value"
     :pin-captcha="pinCaptcha"
+    :slots="slots"
     @pin="(p: string) => link.submitPin(p)"
     @retry="() => link.load()"
     @update:locale="chooseLocale"

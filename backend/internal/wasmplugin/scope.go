@@ -126,6 +126,15 @@ type Scope struct {
 	// was handed, its settings and assets, and a granted http host - every
 	// other host function refuses it (thumbHostFns).
 	thumb bool
+	// route marks a visit to one of the app's public routes (routes.go): it
+	// reads and counts the app's data, asks whether a link is live and reads
+	// its settings - every other host function refuses it (routeHostFns).
+	route bool
+	// tenant is the tenant of the call's `tenant` data scope (data.go): the
+	// actor's, or the visited address's. tenantSet is false until somebody
+	// decided it; a scope nobody decided is the platform's.
+	tenant    int64
+	tenantSet bool
 	// sent are the hosts a thumbnail call reached, for its audit row.
 	sent []string
 	// root is the confinement of the API token the call was made with

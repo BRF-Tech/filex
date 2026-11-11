@@ -1,0 +1,7 @@
+<p>{{ 'mail.greeting' | t }}</p>
+<p>{{ 'mail.account.intro' | t }}</p>
+<div class="facts"><p>{{ 'mail.account.sign_in' | t: url: link.url }}<br>
+{{ 'mail.account.email' | t: email: account.email }}<br>
+<strong>{{ 'mail.account.password' | t: password: account.password }}</strong></p></div>
+<p data-text="skip"><a class="btn" href="{{ link.url }}">{{ 'mail.account.button' | t }}</a></p>
+<p class="note">{{ 'mail.account.change' | t }}</p>

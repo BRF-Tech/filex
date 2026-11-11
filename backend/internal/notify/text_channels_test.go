@@ -199,8 +199,12 @@ func TestText_ADigestSaysTheSameOnEveryChannel(t *testing.T) {
 	mails := box.all()
 	require.Len(t, mails, 1)
 	require.Equal(t, bell[0].Title, mails[0].subject)
+	// What the template is given (the mailbox keeps that, digest_test.go):
+	// each of the bell's lines as a line of its own. That the mail draws them
+	// so - one line each in the HTML and in the plain-text part - is
+	// internal/templates' TestDigestMailSaysEachLineOnItsOwnLine.
 	for _, line := range strings.Split(bell[0].Body, "; ") {
-		require.Contains(t, mails[0].body, "\n"+line, "the email says each of the bell's lines on its own line")
+		require.Contains(t, strings.Split(mails[0].body, "\n"), line, "the email says each of the bell's lines on its own line")
 	}
 }
 

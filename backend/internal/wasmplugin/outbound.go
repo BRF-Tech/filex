@@ -39,9 +39,23 @@ type notifySink interface {
 	Send(ctx context.Context, e notify.Event) (int64, error)
 }
 
-// mailSink is what mail_send needs; *mailer.Service satisfies it.
+// mailSink is what mail_send needs: the server sends an app's mail through
+// the mail.app template (internal/templates), which frames what the app
+// wrote and names the app (server.go appMailer).
 type mailSink interface {
-	Send(ctx context.Context, to, subject, body string) error
+	SendAppMail(ctx context.Context, m AppMail) error
+}
+
+// AppMail is one mail an app sends: what it wrote, and the app's name in the
+// mail's language (filex's own sentence under it, "Sent by the {app} app on
+// filex", is the template's).
+type AppMail struct {
+	To, Subject, Body string
+	// App is the app's label in Lang.
+	App string
+	// Lang is the mail's language: the one the app states (MailSendIn), else
+	// the language the call runs in, else the instance default.
+	Lang string
 }
 
 // SetNotify wires the notification service (nil → notify_send unavailable).
@@ -491,8 +505,9 @@ func hfMailSend(ctx context.Context, s *Scope, in json.RawMessage) (any, error) 
 	// action run from the screen — the requester's), else the instance
 	// default. The app's name is its label in that language.
 	lang := srvtext.Pick(req.Lang, s.locale)
-	body := req.Body + "\n\n-- \n" + srvtext.Text(lang, "server.mail.app_footer", srvtext.Vars{"app": s.plugin.Manifest.Label.Get(lang)})
-	if err := s.reg.mailer.Send(mailer.WithLanguage(ctx, lang), addr.Address, subject, body); err != nil {
+	if err := s.reg.mailer.SendAppMail(ctx, AppMail{
+		To: addr.Address, Subject: subject, Body: req.Body, App: s.plugin.Manifest.Label.Get(lang), Lang: lang,
+	}); err != nil {
 		if errors.Is(err, mailer.ErrNotConfigured) || errors.Is(err, mailer.ErrNotVerified) {
 			return nil, hostErr(wire.ErrUnavailable, "mail is not configured on this instance")
 		}

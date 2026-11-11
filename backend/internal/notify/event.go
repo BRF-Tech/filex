@@ -493,8 +493,31 @@ type Mail struct {
 	Link string `json:"link,omitempty"`
 }
 
-// MailFunc sends one email (Config.Mail): the server's mailer, in lang.
-type MailFunc func(ctx context.Context, lang, to, subject, body string) error
+// MailFunc sends one email (Config.Mail) about c, in lang: the server's
+// mailer, through the mail.notification / mail.digest templates
+// (internal/templates). What the mail says is the bell's words (say.go); the
+// template is its frame.
+type MailFunc func(ctx context.Context, lang, to string, c MailContent) error
+
+// MailContent is what an email about a notification carries.
+type MailContent struct {
+	// Digest: the email of a digest window (mail.digest), else of one
+	// notification (mail.notification).
+	Digest bool
+	// Event is the notification's kind (EventDropReceived…); "" for a digest.
+	Event string
+	// Title is the bell's title, the mail's subject.
+	Title string
+	// Lines are the bell's lines.
+	Lines []string
+	// Link is where the person acts on it ("" for none).
+	Link string
+	// Minutes is a digest's window.
+	Minutes int
+	// TenantID is the addressee's tenant (their account's), whose templates
+	// and branding the mail uses; 0 = the install.
+	TenantID int64
+}
 
 // WebhookStatus enumerates the lifecycle of a single webhook attempt
 // chain. Persisted to notifications.webhook_status and surfaced in the

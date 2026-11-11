@@ -10,7 +10,7 @@ Fast, self-hosted file manager - a single Go binary with a modern web UI.
 - **Protection**: optional virus scanning of every file written - point filex at a ClamAV container and infected files are quarantined into the trash.
 - **Access**: role-based access control, per-item permissions, groups that hold folder access and a role for everyone in them, end-to-end encrypted folders with a policy for who may create them (an administrator's approval when you want one), TOTP 2FA, a sign-in attempt limit on the web form, WebDAV, FTPS and SFTP (a lock doubles up to 15 minutes; an IP allow-list is the way back in), optional SSO (OIDC / LDAP / proxy header).
 - **Apps**: sandboxed add-ons installed through a review of every permission they ask for - e-Signature, Convert, an office editor that edits Word, Excel and PowerPoint in the browser (with no document server), filextext and draw.io ship alongside; an app you allow can edit a file of an encrypted folder, decrypted in your browser.
-- **Integrations**: draw.io editing, an optional ONLYOFFICE Document Server, embeddable `<filex-explorer>` web component, AI/MCP API for agents, ShareX upload target, a desktop app with live two-way folder sync (an edit on either side arrives in about a second), and outbound webhooks.
+- **Integrations**: draw.io editing, an optional ONLYOFFICE Document Server, embeddable `<filex-explorer>` web component, AI/MCP API for agents, uploaders for ShareX and other screenshot tools, a desktop app with live two-way folder sync (an edit on either side arrives in about a second), and outbound webhooks.
 
 ## First login
 

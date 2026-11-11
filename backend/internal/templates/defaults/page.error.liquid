@@ -1,0 +1,9 @@
+<style>
+.code { display: inline-block; margin-bottom: 14px; padding: 3px 10px; border: 1px solid var(--px-line); border-radius: 999px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; color: var(--px-muted); font-variant-numeric: tabular-nums; }
+</style>
+<div class="card">
+<div class="icon-badge err"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.2 2.6 17.9a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4.5"/><path d="M12 17.4h.01"/></svg></div>
+<div class="code">{{ error.code }}</div>
+<h1>{{ error.title }}</h1>
+<p class="sub" style="margin-bottom:0">{{ error.body }}</p>
+</div>

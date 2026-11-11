@@ -24,7 +24,7 @@
  */
 import { ref, type Ref } from 'vue';
 import type { PluginRunResult, PluginSurface, PluginViewEventBody } from '../types/Plugins';
-import type { PublicFailure, PublicRequestInfo, PublicShareInfo } from '../types/Public';
+import type { PublicFailure, PublicRequestInfo, PublicShareInfo, PublicSlots } from '../types/Public';
 import { usePluginSurface, type PluginSurfaceStore } from './usePluginSurface';
 import { foreignText } from '../lib/direction';
 import { checkDropFiles, type DropRefusal } from '../lib/dropLimits';
@@ -98,6 +98,34 @@ export function requestRoot(base: string | undefined, token: string): PublicRoot
  */
 export function pageRoot(base: string | undefined, token: string): PublicRoot {
   return root(base, '/api/p/', token);
+}
+
+/**
+ * A live link's text slots (handlers/public_slots.go), in `locale`. Nothing
+ * here throws: a slot that cannot be had is the page's own words.
+ */
+export async function fetchPublicSlots(
+  url: PublicRoot,
+  locale: string,
+  fetchImpl?: typeof fetch,
+): Promise<PublicSlots> {
+  const empty: PublicSlots = { title: '', intro: '', footer: '' };
+  try {
+    const res = await (fetchImpl ?? fetch)(url('/slots'), {
+      headers: { Accept: 'application/json', 'Accept-Language': locale },
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+    if (!res.ok) return empty;
+    const b = (await res.json()) as Partial<PublicSlots> | null;
+    return {
+      title: typeof b?.title === 'string' ? b.title : '',
+      intro: typeof b?.intro === 'string' ? b.intro : '',
+      footer: typeof b?.footer === 'string' ? b.footer : '',
+    };
+  } catch {
+    return empty;
+  }
 }
 
 export interface PublicLinkOptions {

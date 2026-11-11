@@ -135,10 +135,10 @@ the caller).
 |---|---|---|
 | **Ceiling** | staged upload `begin` | `413` `{"code":"QUOTA_EXCEEDED"}` |
 | **Ceiling** | explorer upload (`?action=upload`), *New document* | `413` `{"code":"QUOTA_EXCEEDED"}` (`FILE_TOO_LARGE` for the per-file limit) |
-| **Ceiling** | agent API `POST /api/ai/upload`, MCP `file_write`, ShareX `POST /api/sharex/upload` | `413` with `code` `QUOTA_EXCEEDED` / `FILE_TOO_LARGE` (since 0.54.0; before, only the per-file limit was asked here) |
+| **Ceiling** | agent API `POST /api/ai/upload`, MCP `file_write`, an uploader's `POST /api/uploads` (and the deprecated `/api/sharex/upload`) | `413` with `code` `QUOTA_EXCEEDED` / `FILE_TOO_LARGE` (since 0.54.0; before, only the per-file limit was asked here) |
 | **Ceiling** | upload ticket `PUT`/`POST /u/{ticket}` (billed to the minter) | `507` `{"error":"quota_exceeded"}` · `413` `{"error":"file_too_large"}` (since 0.54.0) |
 | **Ceiling** | text editor `POST /api/files/save-text` | `413` `QUOTA_EXCEEDED` / `FILE_TOO_LARGE` (since 0.54.0). An edit adds only what it grows the file by, so an account exactly at its ceiling can still save an edit that does not grow it |
-| **Ceiling** | staged ingest - the large-file path of the agent API, ShareX, upload tickets and the drop link | that surface's answer; this user's open staged uploads count, as at `begin` (since 0.54.0) |
+| **Ceiling** | staged ingest - the large-file path of the agent API, uploaders, upload tickets and the drop link | that surface's answer; this user's open staged uploads count, as at `begin` (since 0.54.0) |
 | **Ceiling** | public drop link | `507` `quota_exceeded` · `413` `file_too_large` |
 | **Ceiling** | WebDAV `PUT` | `507 Insufficient Storage` |
 | **Ceiling** | S3 gateway `PutObject`, `CompleteMultipartUpload` | `413` `EntityTooLarge`. A chunked body is held to its declared `x-amz-decoded-content-length`, and one that is longer or shorter is `400` `IncompleteBody` (since 0.54.0) |
@@ -162,7 +162,7 @@ All of it lives in **one** place: `internal/quotastore`, a `db.Store` decorator
 over `CreateNode`, `UpdateNodeMeta` and `HardDeleteNode` (the three that move
 bytes) plus `MoveNode`, `RestoreNode` and `RestoreNodeAt` (which move no bytes
 and only record who acted). Every write surface - browser upload, staged upload,
-staged ingest, WebDAV `PUT`, the public drop, ShareX, the AI/REST API,
+staged ingest, WebDAV `PUT`, the public drop, uploaders, the AI/REST API,
 save-text, archive extract, copy - reaches it through the store, so none of them
 carries quota code and a write path added next month is counted on the day it is
 written.

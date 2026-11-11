@@ -1145,6 +1145,7 @@ func (r *Registry) ViewEvent(ctx context.Context, plugin, view string, storageID
 		a := r.wireActor(ctx, p, actor, actorIPFrom(ctx))
 		in.Context.Actor = &a
 	}
+	in.Context.Routes = r.callRoutes(ctx, p, actor)
 	inb, _ := json.Marshal(in)
 	outb, err := c.Call(WithScope(ctx, scope), "view_event", inb, 0)
 	if err != nil {

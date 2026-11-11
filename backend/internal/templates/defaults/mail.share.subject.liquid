@@ -1,0 +1,5 @@
+{%- if item.kind == "folder" -%}
+{{ 'mail.share.subject_folder' | t: name: item.name }}
+{%- else -%}
+{{ 'mail.share.subject_file' | t: name: item.name }}
+{%- endif -%}

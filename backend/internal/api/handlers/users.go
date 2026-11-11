@@ -6,6 +6,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/identity"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/templates"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"net/http"
 	"strconv"
@@ -33,8 +34,10 @@ type Users struct {
 	// Mailer and Tenants send a new account its invitation (send_invite):
 	// the address to sign in at and a first password. No mailer, or a send
 	// that fails: the password comes back once for the administrator.
-	Mailer  *mailer.Service
-	Tenants tenanturl.Resolver
+	Mailer *mailer.Service
+	// Templates renders the invitation (mail.account); nil = filex's own.
+	Templates *templates.Renderer
+	Tenants   tenanturl.Resolver
 	// DirectoryFor names the LDAP directory that owns an address among the
 	// ones that sign people in to a tenant (0: the platform's own;
 	// authsetup.Live.DirectoryFor); nil on a harness with none.
@@ -330,8 +333,9 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 		// (grants.go): where to sign in, the address, a first password.
 		// The new account's own language (translated at the last stop).
 		lang := srvtext.Pick(u.Locale)
-		subject, body := accountCreatedText(lang, h.Tenants.FromRequest(r)+"/admin/", u.Email, invitePw)
-		emailed := h.Mailer != nil && h.Mailer.Send(mailer.WithLanguage(r.Context(), lang), u.Email, subject, body) == nil
+		emailed := h.Mailer != nil && sendTemplateMail(r.Context(), orDefaultTemplates(h.Templates), h.Mailer, u.Email,
+			templates.Target{TenantID: userTenant(u), Lang: lang}, "mail.account",
+			accountMailData(h.Tenants.FromRequest(r)+"/admin/", u.Email, invitePw)) == nil
 		out.Invite = &userInvite{Emailed: emailed}
 		if !emailed {
 			out.Invite.TempPassword = invitePw // shown once, for the administrator to pass on

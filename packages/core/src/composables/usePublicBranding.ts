@@ -31,6 +31,14 @@ export interface PublicBrandingOptions {
   /** API origin; empty = same origin. */
   base?: string;
   fetchImpl?: typeof fetch;
+  /**
+   * The link this page belongs to, as its API path (`/api/public/s/<token>`,
+   * `/api/public/d/<token>`). Its identity is asked first: a link's page
+   * wears the branding of the tenant the link was made in, at whatever
+   * address it is opened (Ç3), and the server answers the address's own
+   * for a token that names no live link. Unset: the address's.
+   */
+  linkPath?: string;
 }
 
 const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -148,7 +156,12 @@ export function usePublicBranding(opts: PublicBrandingOptions = {}) {
     const doFetch = opts.fetchImpl ?? (typeof fetch === 'function' ? fetch : null);
     if (!doFetch) return null;
     const origin = apiRootOr(opts.base);
-    for (const path of ['/api/public/branding', '/api/branding']) {
+    // ⚠ The link's answer, then the address's: a server older than the link
+    // route answers 404 there, and the page still wears the address's
+    // branding rather than none.
+    const paths = ['/api/public/branding', '/api/branding'];
+    if (opts.linkPath) paths.unshift(`${opts.linkPath.replace(/\/+$/, '')}/branding`);
+    for (const path of paths) {
       try {
         const res = await doFetch(`${origin}${path}`, {
           method: 'GET',

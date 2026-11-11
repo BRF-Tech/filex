@@ -1,0 +1,14 @@
+<style>
+.pin-input { width: 100%; padding: 13px 12px; font-size: 1.45rem; letter-spacing: 0.35em; text-align: center; border: 1.5px solid var(--px-line); border-radius: 10px; background: transparent; color: inherit; font-family: inherit; }
+.pin-input:focus { outline: none; border-color: var(--px-accent); box-shadow: 0 0 0 3px var(--px-accent-soft); }
+</style>
+<form class="card" method="post" action="{{ form.action }}">
+<div class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/><path d="M12 14.5v2"/></svg></div>
+<h1>{{ 'public.pin_heading' | t }}</h1>
+<p class="sub">{{ 'public.pin_sub' | t }}</p>
+<input class="pin-input" type="password" name="pin" inputmode="numeric" autocomplete="one-time-code" aria-label="{{ 'public.pin_aria' | t }}" autofocus required>
+{%- if form.error != blank %}
+<div class="error" role="alert">{{ form.error }}</div>
+{%- endif %}
+<button class="btn" type="submit">{{ 'public.pin_submit' | t }}</button>
+</form>

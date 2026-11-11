@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
-	"html/template"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -198,12 +197,12 @@ func TestHostileNames_ExtractSkipsNamesNoDoorMayCreate(t *testing.T) {
 	}
 }
 
-// hnaTemplateText is s as html/template writes it into a page's text.
+// hnaTemplateText is s as the page templates (internal/templates) write it
+// into a page's text: the Liquid output escaper and the sanitizer's text
+// (html.EscapeString) escape the same five characters the same way.
 func hnaTemplateText(t *testing.T, s string) string {
 	t.Helper()
-	var b strings.Builder
-	require.NoError(t, template.Must(template.New("").Parse(`{{.}}`)).Execute(&b, s))
-	return b.String()
+	return html.EscapeString(s)
 }
 
 var hnaFileLink = regexp.MustCompile(`href="(/s/[^"/]+/f/[^"]+)"`)

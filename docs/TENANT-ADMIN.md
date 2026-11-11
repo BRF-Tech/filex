@@ -502,6 +502,11 @@ exactly that section on every tenant's page (one component,
 `TenantSelfService`), plus the insecure switch. Own domains are one more table
 (`admin.tenant.domains`).
 
+A tenant's administrator also edits their tenant's mail and page templates
+(**Admin → Settings → Templates**): what they save reaches their tenant's
+mails and the pages of their tenant's links, never another tenant's
+([TEMPLATES.md](TEMPLATES.md)).
+
 A tenant's administrator is offered, in the admin menu, only the pages that
 work on their tenant: the pages about the instance - Protection, Plugins,
 External services, the Queue and the rest whose API refuses them - are left

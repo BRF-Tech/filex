@@ -435,6 +435,18 @@ const sh = (script: string, ...args: string[]) =>
   spawnSync(BASH ?? 'bash', ['-c', script, 'test', ...args], { encoding: 'utf8', env: { ...process.env, MSYS_NO_PATHCONV: '1' } });
 const COMMON = posixPath(path.join(REMOTE, 'common.sh'));
 
+/** Why the sqlite3 here cannot stand in for the server's; '' when it can. */
+function sqliteUnusable(): string {
+  if (!BASH) return 'no bash to run the server scripts in';
+  const where = sh('command -v sqlite3').stdout.trim();
+  if (!where) return 'sqlite3 is not installed (the server scripts read the instance database with it)';
+  const d = posixPath(tmp());
+  const r = sh('sqlite3 "$1/probe.sqlite" "CREATE TABLE t (x INTEGER);" && sqlite3 -readonly "$1/probe.sqlite" "SELECT 41 + 1;"', d);
+  if (r.status === 0 && r.stdout.trim() === '42') return '';
+  const said = (r.stderr || r.stdout).trim().split(/\r?\n/)[0] ?? '';
+  return `the sqlite3 on PATH (${where}) cannot open a database at a POSIX path and read it with -readonly, as the server scripts do (${said}); put a sqlite3 that takes bash's paths (MSYS2's) first on PATH, or run this test on Linux`;
+}
+
 describe.skipIf(!BASH)('the server scripts', () => {
   it('parse, every one of them', () => {
     for (const f of fs.readdirSync(REMOTE).filter((n) => n.endsWith('.sh'))) {
@@ -541,8 +553,21 @@ describe.skipIf(!BASH)('the server scripts', () => {
   // the gate checks the list the instance goes by - the saved one when it
   // holds one - or a gateway added to compose alone would pass a deploy whose
   // filex trusts none of it.
-  const sqlite = BASH ? sh('sqlite3 -version').status === 0 : false;
-  it.skipIf(!sqlite)('read the trusted-proxy list an instance goes by: the saved one, else the variable', () => {
+  //
+  // ⚠ The test needs a sqlite3 that does what common.sh asks of the server's:
+  // open a database at the POSIX path bash hands it, and read it with
+  // -readonly. `sqlite3 -version` alone said yes on a PC whose PATH held
+  // Touch Portal's adb sqlite3.exe (3.22, a Windows build: "/c/Users/..." is
+  // no path to it, and it knows no -readonly), so the test ran there and was
+  // red for a reason no change had caused (2026-10-27 #290, 2026-11-11 #317).
+  // That sqlite3 is a missing prerequisite, not a failure: the test is
+  // skipped and says which sqlite3 it found and what that one cannot do.
+  const sqliteMissing = sqliteUnusable();
+  it('read the trusted-proxy list an instance goes by: the saved one, else the variable', (ctx) => {
+    if (sqliteMissing) {
+      console.warn(`skipped: ${sqliteMissing}`);
+      ctx.skip();
+    }
     const d = tmp();
     const db = posixPath(path.join(d, 'instance.sqlite'));
     const make = sh('sqlite3 "$1" "CREATE TABLE settings (setting_key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);"', db);

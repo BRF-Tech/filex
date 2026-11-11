@@ -60,15 +60,18 @@ func TestMailFooter_SpeaksTheMailsLanguage(t *testing.T) {
 	withSpanishPack(t)
 	base := map[string]string{"to": "ana@example.test", "subject": "Firma", "body": "Hola"}
 
+	// The sentence itself is the mail.app template's (internal/templates
+	// renders it in AppMail.Lang); what the app's call decides is the
+	// language and the app's name in it.
 	s := mailScope(&fakeMailer{}, "tr")
-	assert.Contains(t, sendMail(t, s, base), "Bu e-postayı filex üzerindeki İmzalar uygulaması gönderdi.",
+	assert.Equal(t, "ana@example.test|Firma|Hola|İmzalar|tr", sendMail(t, s, base),
 		"no lang stated: the language the call runs in, and the app's label in it")
 
 	withLang := map[string]string{"to": "ana@example.test", "subject": "Firma", "body": "Hola", "lang": "es"}
-	assert.Contains(t, sendMail(t, mailScope(&fakeMailer{}, "tr"), withLang), "Enviado por la aplicación Signatures de filex.",
+	assert.Equal(t, "ana@example.test|Firma|Hola|Signatures|es", sendMail(t, mailScope(&fakeMailer{}, "tr"), withLang),
 		"the app's stated language wins over the call's")
 
-	assert.Contains(t, sendMail(t, mailScope(&fakeMailer{}, ""), base), "Sent by the Signatures app on filex.",
+	assert.Equal(t, "ana@example.test|Firma|Hola|Signatures|en", sendMail(t, mailScope(&fakeMailer{}, ""), base),
 		"a scheduled wake-up has no language: the instance default, then English")
 }
 

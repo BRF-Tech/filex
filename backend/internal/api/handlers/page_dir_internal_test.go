@@ -2,13 +2,13 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"html/template"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/templates"
 )
 
 // TestServerPages_DirFollowsLang: every page the server renders itself — the
@@ -22,37 +22,29 @@ import (
 // read Arabic words laid out left to right, and those logical properties
 // resolved to the wrong edge.
 func TestServerPages_DirFollowsLang(t *testing.T) {
-	pages := map[string]*template.Template{
-		"oidc bounce":   oidcBounceTmpl,
-		"cache wait":    cacheWaitTemplate,
-		"drop uploader": dropUploaderTemplate,
-		"zip wait":      zipWaitTemplate,
-		"pin form":      pinFormTemplate,
-		"unlocked":      unlockedTemplate,
-		"error page":    errorPageTemplate,
-		"app page":      appPageTemplate,
-	}
 	for _, c := range []struct{ lang, dir string }{{"ar", "rtl"}, {"he", "rtl"}, {"fa", "rtl"}, {"en", "ltr"}, {"tr", "ltr"}, {"es", "ltr"}} {
-		for name, tmpl := range pages {
-			var buf bytes.Buffer
-			data := map[string]any{"Lang": c.lang, "Dir": pageDir(c.lang), "T": map[string]string{}}
-			if name == "oidc bounce" {
-				// This one is executed with map[string]string.
-				if err := tmpl.Execute(&buf, map[string]string{"Lang": c.lang, "Dir": pageDir(c.lang)}); err != nil {
-					t.Fatalf("%s: %v", name, err)
-				}
-			} else {
-				_ = tmpl.Execute(&buf, data) // a page may stop at a field the fixture lacks; the <html> tag is first
-			}
-			want := `<html lang="` + c.lang + `" dir="` + c.dir + `">`
-			if !bytes.Contains(buf.Bytes(), []byte(want)) {
-				t.Errorf("%s in %s: want %s, got %.120q", name, c.lang, want, buf.String())
-			}
+		var buf bytes.Buffer
+		if err := oidcBounceTmpl.Execute(&buf, map[string]string{"Lang": c.lang, "Dir": pageDir(c.lang)}); err != nil {
+			t.Fatalf("oidc bounce: %v", err)
 		}
-		rec := httptest.NewRecorder()
-		_ = share.RenderFolderPage(rec, share.FolderPageData{Lang: c.lang, T: map[string]string{}})
-		if want := `<html lang="` + c.lang + `" dir="` + c.dir + `">`; !bytes.Contains(rec.Body.Bytes(), []byte(want)) {
-			t.Errorf("shared folder page in %s: want %s, got %.120q", c.lang, want, rec.Body.String())
+		want := `<html lang="` + c.lang + `" dir="` + c.dir + `">`
+		if !bytes.Contains(buf.Bytes(), []byte(want)) {
+			t.Errorf("oidc bounce in %s: want %s, got %.120q", c.lang, want, buf.String())
+		}
+		// Every page template filex ships (internal/templates), the folder
+		// page and the uploader among them.
+		r := &templates.Renderer{}
+		for _, d := range templates.Defs {
+			if d.Kind != templates.KindPage && d.Kind != templates.KindShell {
+				continue
+			}
+			out, err := r.Page(context.Background(), templates.Target{Lang: c.lang}, d.Key, d.Sample())
+			if err != nil {
+				t.Fatalf("%s: %v", d.Key, err)
+			}
+			if !strings.Contains(out, want) {
+				t.Errorf("%s in %s: want %s, got %.160q", d.Key, c.lang, want, out)
+			}
 		}
 	}
 }

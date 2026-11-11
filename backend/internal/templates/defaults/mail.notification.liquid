@@ -1,0 +1,8 @@
+<h1>{{ notice.title }}</h1>
+{%- for line in notice.lines %}
+<p>{{ line }}</p>
+{%- endfor %}
+{%- if link.url != blank %}
+<p><a class="btn" href="{{ link.url }}" data-text="href">{{ 'mail.open' | t }}</a></p>
+<p class="link" data-text="skip">{{ link.url | link_to: link.url }}</p>
+{%- endif %}

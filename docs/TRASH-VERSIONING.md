@@ -502,7 +502,7 @@ pre-write guard, which snapshots what is about to be lost:
 | Ticketed upload | `PUT`/`POST /u/{ticket}` |
 | AI / REST write | `POST /api/ai/upload` |
 | MCP `file_write`, `file_zip`, `file_unzip` | `/api/ai/mcp` |
-| ShareX | `POST /api/sharex/upload` |
+| Uploader ([UPLOADERS.md](UPLOADERS.md)) | `POST /api/uploads` (and the deprecated `POST /api/sharex/upload`) |
 | Archive extract / add | `POST /api/files/archive/extract`, `/add`; MCP `archive_extract` and `POST /api/ai/archive/extract` |
 | Text / code editor save | `POST /api/files/save-text` |
 | OnlyOffice save-back | `POST /api/files/onlyoffice/callback` |

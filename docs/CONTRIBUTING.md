@@ -1074,6 +1074,14 @@ answer now.
 - Public symbols documented (`// FuncName does X`).
 - Error wrapping with `fmt.Errorf("...: %w", err)`.
 - No global state outside of `cmd/filex`.
+- **One patched dependency.** `backend/third_party/extism-go-sdk` is extism
+  go-sdk v1.7.1 with one change (an app instance keeps the functions it calls
+  instead of building them again on every call); `go.mod` replaces the module
+  with it, and the Docker builds copy it before `go mod download`. Its
+  [FILEX.md](../backend/third_party/extism-go-sdk/FILEX.md) says what the
+  patch does, why, and how to upgrade extism. Upgrading means re-applying its
+  `filex.patch`: `internal/wasmplugin/pool_reuse_test.go` goes red if it is
+  lost.
 
 ### TypeScript / Vue
 
@@ -4343,7 +4351,10 @@ so; run it again after the cut. `--date`, `--onto`, `--out`, `--stdout`.
 
 Merges the train's branches onto the release branch one after another, each on
 top of the one before, each with `--no-ff` and its own message file, and checks
-each merge before the next one starts. The queue is the first ```` ```queue ````
+each merge before the release branch moves to it. The merge is made and checked
+in the queue's own worktree, `.claude/worktrees/merge-queue` inside the
+repository (detached; made on the first run, reused after), and the release
+branch fast-forwards to a merge only once every check on it is green. The queue is the first ```` ```queue ````
 block of the note (or a plain file): a branch per line and, optionally, its
 message file; without one it is `msg/<branch, "/" as "-">.txt` beside the queue.
 A message is English and the merge commit's whole message, kept as written.
@@ -4357,28 +4368,49 @@ For every line, in order:
 
 1. a branch whose tip is already in the release branch is skipped - so running
    the queue again after a stop carries on where it stopped;
-2. `git merge --no-ff --no-commit` with rerere on, so a conflict resolved once
-   (in a rehearsal, or by hand) resolves itself the next time;
+2. the queue's worktree is put at the release branch's tip and
+   `git merge --no-ff --no-commit` runs there with rerere on, so a conflict
+   resolved once (in a rehearsal, or by hand) resolves itself the next time;
 3. a conflict in `CHANGELOG.md` is merged by Keep a Changelog section
    (`scripts/train/changelog-merge.mjs`: every entry of both sides, ours first,
    an edited entry in its place, the heading once; an entry both sides changed
-   is a person's call); a conflict in any other file aborts the merge, leaves
-   the tree as it was, and the queue stops (exit 3) with the commands to merge
-   that branch by hand;
+   is a person's call); a conflict in any other file aborts the merge, the
+   release branch stays where it was, and the queue stops (exit 3) with the
+   commands to resolve that branch once in its worktree - the next run starts
+   the branch over, the recorded resolution replays, and the checks run on it;
 4. `[Unreleased]` is left with one heading per kind even when git saw no
    conflict (a clean merge of five branches left three `### Changed` at 0.48);
-5. the commit, with the line's message;
-6. the checks: `[Unreleased]` well formed, `go build ./... && go vet ./...` on
-   the module (through `scripts/lib/go-build.mjs`, so the maintainer's WSL works
-   too; `--no-go` skips it), and every `--check '<command>'`. A red check stops
-   the queue with the merge made: the queue never undoes a merge. Fix it on top
-   and run the queue again, or take it back with the `git reset` it prints.
+5. the commit, with the line's message, in the worktree;
+6. the checks, in the worktree: `[Unreleased]` well formed,
+   `go build ./... && go vet ./...` on the module (through
+   `scripts/lib/go-build.mjs`, so the maintainer's WSL works too; `--no-go`
+   skips it), and - when there are `--check` commands - the workspace
+   packages: `pnpm install --frozen-lockfile` when the lockfile changed, then a
+   build of every workspace package another project depends on (`web` imports
+   `@brftech/filex-core` from `packages/core/dist`, core imports
+   `@brftech/filex-app-ui` the same way), dependencies first. A package whose
+   dist the queue built itself from exactly this source, and that is still the
+   file it left, is proved fresh and not built again; anything else is built.
+   Then every `--check '<command>'` (only once the packages are green);
+   `--no-packages` skips the packages, `--pnpm` names another pnpm;
+7. green: the release branch fast-forwards to that merge. Red: the release
+   branch does not move, the red merge stays in the worktree to look at, and
+   the queue stops (exit 1). Fix the branch and run the queue again.
 
 It never switches branches (the release branch must be the one checked out) and
 does not start on a tree with changes, a merge in progress, a branch that does
-not exist or a missing message. To rehearse a train, run it in a scratch
-worktree of a throwaway branch made from `main` (`--repo`, `--onto`): the rerere
-cache is shared, so what is resolved there replays on the real run.
+not exist or a missing message. A directory at `.claude/worktrees/merge-queue`
+that is not this repository's worktree is refused, never removed. To rehearse
+a train, run it from a scratch worktree of a throwaway branch made from `main`
+(`--repo`, `--onto`): the rerere cache is shared, so what is resolved there
+replays on the real run.
+
+> ⚠ Why the queue merges in a worktree of its own (task #329): until
+> 2026-11-11 it committed each merge on the checked-out release branch and
+> checked it afterwards. A red check left the red merge on `main` (an agent's
+> `git reset --hard` is refused, so the fix went in as a second merge), and a
+> web check that day read the checkout's `packages/core/dist`, built from an
+> older core, and was red for a change that was right.
 
 `node scripts/train/changelog-merge.mjs` is the CHANGELOG part on its own:
 `--git` during a conflicted merge (it reads the three versions git holds),

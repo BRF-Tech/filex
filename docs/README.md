@@ -103,7 +103,11 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   own certificate authority), [converting files](APP-PLUGINS.md#converting-files),
   [default apps](APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)
   (which app opens a kind of file and which draws its thumbnail, Open with and
-  "Always use this app"), what guards an app's public links, limits,
+  "Always use this app"), [setting an app up](APP-PLUGINS.md#setting-an-app-up)
+  (0.60: its wizard, the addresses it answers on, Reconfigure,
+  [an app's own data](APP-PLUGINS.md#an-apps-own-data)),
+  [short links](APP-PLUGINS.md#short-links) through an app holding the
+  link-shortener role, what guards an app's public links, limits,
   troubleshooting
 - [Writing an app plugin](PLUGIN-KIT.md) - the manifest (and the
   [user permissions](PLUGIN-KIT.md#user-permissions-what-an-administrator-hands-out)
@@ -267,6 +271,15 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Folder sync](SYNC.md) - how a folder on your PC is kept in step with the server;
   [the engine's event stream](SYNC.md#the-event-stream---json) a program (the desktop
   app) reads instead of its lines, and [`filex sync window`](SYNC.md#filex-sync-window)
+- [Uploaders](UPLOADERS.md) - a key for one program - ShareX (a one-file
+  `.sxcu` made for you), curl, a phone shortcut, a script - that puts files into
+  one folder and answers each with a public or private link and a deletion
+  link whose opening never deletes; the key opens nothing else (0.60)
+- [Mail and page templates](TEMPLATES.md) - every mail and every page a link
+  opens as a Liquid template the administrator (or a tenant's administrator)
+  rewrites, with a live preview and a test mail; the public link page's frame,
+  its text slots and the class names its CSS can rely on; the sandbox, the
+  sanitizer and the Content-Security-Policy behind them (0.60)
 - [Uploads](UPLOADS.md) - the staged, resumable upload path: chunked, works on
   every driver, survives a dropped connection
 - [File names](FILE-NAMES.md) - the names filex refuses (and the one rule every
@@ -358,7 +371,6 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Tenant self-service](TENANT-ADMIN.md) - the Tenants screen, sign-in providers
   bound to tenants, a tenant's own OIDC and LDAP, platform subdomains, own
   domains proven by a CNAME and their certificates
-- [ShareX](SHAREX.md) - the screenshot-upload endpoint and its custom uploader
 
 ## Deployment
 

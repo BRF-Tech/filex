@@ -111,7 +111,9 @@ func newShellBrander(src *handlers.BrandingSource, base string) *shellBrander {
 	if src == nil {
 		return nil
 	}
-	return &shellBrander{resolve: src.ForRequest, base: base, icons: newBrandIconCache()}
+	// ForShell: the address's branding, except on a public link page, which
+	// wears its link's tenant's (Ç3; handlers.withShellPage).
+	return &shellBrander{resolve: src.ForShell, base: base, icons: newBrandIconCache()}
 }
 
 // shellBrand is the part of the branding the app shell carries.

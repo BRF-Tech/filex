@@ -27,7 +27,7 @@ everywhere and works on **every** driver, including `local`, `sftp`, `ftp`,
 | CLI (`filex client upload`, `filex client upload -r`) | `?action=upload` | staged, chunked | a dropped connection **and a process restart** |
 | `filex sync` / the desktop app's folder sync | same code as the CLI - `cliclient.uploadFile` | | |
 | Public drop links (`/d/{token}`) | synchronous write | staged ingest | - (one request; staging removes the *wait*, not the retry) |
-| ShareX (`/api/sharex/upload`) | synchronous write | staged ingest | - |
+| Uploaders (`POST /api/uploads`, [UPLOADERS.md](UPLOADERS.md); the deprecated `/api/sharex/upload` the same) | synchronous write | staged ingest | - |
 | AI / REST (`/api/ai/upload`, MCP `file_write`) | synchronous write | staged ingest | - |
 | Upload tickets (`/u/{ticket}`, MCP `file_upload_ticket`) | synchronous write | staged ingest | - (one request, single-use ticket) |
 

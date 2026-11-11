@@ -135,6 +135,7 @@ export default defineConfig({
           { text: 'Quotas', link: '/QUOTAS' },
           { text: 'Search', link: '/SEARCH' },
           { text: 'Sharing & file requests', link: '/SHARING' },
+          { text: 'Mail & page templates', link: '/TEMPLATES' },
           { text: 'Thumbnails', link: '/thumbnails' },
           { text: 'Protection & Antivirus', link: '/PROTECTION' },
           { text: 'Trash & Versioning', link: '/TRASH-VERSIONING' },
@@ -163,7 +164,7 @@ export default defineConfig({
           { text: 'AI assistant', link: '/AI-ASSISTANT' },
           { text: 'Office editing', link: '/ONLYOFFICE' },
           { text: 'The Office editor app', link: '/OFFICE-EDITOR' },
-          { text: 'ShareX', link: '/SHAREX' },
+          { text: 'Uploaders (ShareX, curl, Shortcuts)', link: '/UPLOADERS' },
           { text: 'SSO (OIDC)', link: '/SSO' },
           { text: 'LDAP', link: '/LDAP' },
           { text: 'OS accounts', link: '/OS-LOGIN' },
@@ -204,12 +205,21 @@ export default defineConfig({
     // fails the build if any in-page link stops landing.
     anchor: { slugify: githubSlug },
     config(md) {
-      // Repo-relative links in the docs (../deploy/…, ../demo, sharex/*.sxcu)
+      // Repo-relative links in the docs (../deploy/…, ../demo)
       // point at repository files that are not part of the site. Rewrite them
       // to the GitHub repo at render time so they keep working — and so the
       // dead-link check stays fully enabled for everything else.
       const fallback = (tokens: any, idx: number, options: any, _env: any, self: any) =>
         self.renderToken(tokens, idx, options)
+      // ⚠ Inline code is code: `{{ item.name }}` in TEMPLATES.md is Liquid,
+      // and without v-pre Vue reads it as an interpolation of its own - an
+      // empty cell, or a build that fails on `{{ 'x' | t: name: y }}`. Fenced
+      // blocks are v-pre already.
+      const codeInline = md.renderer.rules.code_inline || fallback
+      md.renderer.rules.code_inline = (tokens, idx, options, env, self) => {
+        tokens[idx].attrSet('v-pre', '')
+        return codeInline(tokens, idx, options, env, self)
+      }
       const prev = md.renderer.rules.link_open || fallback
       md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
         const token = tokens[idx]
@@ -225,8 +235,6 @@ export default defineConfig({
           let target: string | null = null
           if (/^(\.\.\/)+/.test(href)) {
             target = href.replace(/^(\.\.\/)+/, '')
-          } else if (/^(\.\/)?sharex(\/|$)/.test(href)) {
-            target = 'docs/' + href.replace(/^\.\//, '')
           }
           if (target) {
             const last = target.replace(/\/$/, '').split('/').pop() || ''

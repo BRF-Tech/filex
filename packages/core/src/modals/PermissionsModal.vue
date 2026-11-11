@@ -49,6 +49,7 @@ import { fileIconTile } from '../lib/fileIcons';
 import { gateOnService } from '../lib/serviceGate';
 import { ALL_SHARING, type SharingHeld } from '../lib/sharingHeld';
 import { isStorageRootPath, sharingAtTarget } from '../lib/storageRoot';
+import { displayLink, linkTokenOf } from '../lib/shortLink';
 import ChoiceSelect, { type SelectOption } from '../components/ChoiceSelect.vue';
 import { availableLocales } from '../lib/uiLocales';
 import ChoiceButtons, { type ChoiceOption } from '../components/ChoiceButtons.vue';
@@ -101,6 +102,12 @@ const props = defineProps<{
    * something the server refuses. Absent = all three: the server decides.
    */
   sharing?: SharingHeld;
+  /**
+   * "Get short link" (filex 0.60, `capabilities.short_links.available`): an
+   * app holding the link-shortener role runs and this person may use it.
+   * `true` only when the server SAID so; absent = not offered.
+   */
+  shortLinks?: boolean;
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -861,6 +868,51 @@ function validUntil(r: { expiresAt?: string | null } | null): string {
 const primaryLink = computed(() => shareResult.value?.url ?? downloadShares.value[0]?.url ?? '');
 const linkOn = computed(() => !!primaryLink.value);
 
+// ── short addresses (filex 0.60) ──
+// ⚠ One answer per link, kept by its TOKEN: the link the header shows can be
+// the one just minted or one that was already there (the listing names it by
+// its id; its token is its address's last segment, lib/shortLink).
+const shortOffered = computed(() => props.shortLinks === true && mayShare.value.links);
+const shortUrls = ref<Record<string, string>>({});
+const shortAsked = new Set<string>();
+const shortBusy = ref('');
+const shortErr = ref('');
+const primaryToken = computed(() => shareResult.value?.token ?? linkTokenOf(downloadShares.value[0]?.url));
+/** The short address of the header's link, "" while it has none. */
+const primaryShort = computed(() => shortUrls.value[primaryToken.value] ?? '');
+/** What the header row shows and copies: the short address once there is one. */
+const primaryShown = computed(() => primaryShort.value || primaryLink.value);
+const dropShort = computed(() => (dropResult.value ? shortUrls.value[dropResult.value.token] ?? '' : ''));
+
+/** Read the short address a link already has, once per link. A failure here
+ *  is not the person's problem: the button is still offered. */
+async function readShort(token: string) {
+  if (!shortOffered.value || !token || shortAsked.has(token)) return;
+  shortAsked.add(token);
+  try {
+    const url = await props.api.shortLinkOf(token);
+    if (url) shortUrls.value = { ...shortUrls.value, [token]: url };
+  } catch {
+    /* the button asks again, and says why when it fails */
+  }
+}
+
+/** "Get short link": the app's answer becomes the link the row shows. */
+async function getShort(token: string) {
+  if (!token || shortBusy.value) return;
+  shortBusy.value = token;
+  shortErr.value = '';
+  try {
+    const url = await props.api.shortenLink(token);
+    if (url) shortUrls.value = { ...shortUrls.value, [token]: url };
+  } catch (e) {
+    shortErr.value = serverWords(e, localeCode.value);
+  } finally {
+    shortBusy.value = '';
+  }
+}
+watch(primaryToken, (tok) => void readShort(tok), { immediate: true });
+
 /**
  * The links the header does NOT already show. ⚠ The header's link used to be
  * listed again right under it, with a second Copy button — one link, two
@@ -976,12 +1028,35 @@ async function nativeShare(body: SheetWords | null) {
 
           <template v-if="linkOn">
             <div class="fe-share__linkrow">
-              <a :href="primaryLink" target="_blank" rel="noopener" class="fe-share__url" :title="primaryLink">{{ primaryLink }}</a>
-              <button type="button" class="fe-share__copy" data-testid="share-copy" @click="copy(primaryLink, 'new')">
+              <!-- ⚠ Shown decoded (an emoji reads as one), copied as the
+                   server spelled it (lib/shortLink). -->
+              <a :href="primaryShown" target="_blank" rel="noopener" class="fe-share__url" :title="displayLink(primaryShown)" data-testid="share-link">{{ displayLink(primaryShown) }}</a>
+              <button type="button" class="fe-share__copy" data-testid="share-copy" @click="copy(primaryShown, 'new')">
                 <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
                 <span>{{ copied === 'new' ? t('access.copied') : t('access.copy') }}</span>
               </button>
+              <button
+                v-if="shortOffered && !primaryShort && primaryToken"
+                type="button"
+                class="fe-share__copy"
+                data-testid="share-short-get"
+                :disabled="shortBusy === primaryToken"
+                @click="getShort(primaryToken)"
+              >
+                <span aria-hidden="true" v-html="actionIconSvg('link')"></span>
+                <span>{{ shortBusy === primaryToken ? t('access.ui.short_link_busy') : t('access.ui.short_link_get') }}</span>
+              </button>
             </div>
+            <!-- The full link stays one copy away once the short one leads. -->
+            <div v-if="primaryShort" class="fe-share__pinrow" data-testid="share-full-link">
+              <span class="fe-share__pinlabel">{{ t('access.ui.full_link') }}</span>
+              <span class="fe-share__url" :title="primaryLink">{{ primaryLink }}</span>
+              <button type="button" class="fe-share__copy" data-testid="share-full-copy" @click="copy(primaryLink, 'full')">
+                <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+                <span>{{ copied === 'full' ? t('access.copied') : t('access.copy') }}</span>
+              </button>
+            </div>
+            <div v-if="shortErr && !dropResult" class="fe-share__warn" data-testid="share-short-error">{{ shortErr }}</div>
             <p v-if="linkDetail" class="fe-share__detail" data-testid="share-valid-until">{{ linkDetail }}</p>
             <div v-if="shareResult?.pin" class="fe-share__pinrow">
               <span class="fe-share__pinlabel">PIN</span>
@@ -1368,12 +1443,32 @@ async function nativeShare(body: SheetWords | null) {
 
               <template v-if="dropResult">
                 <div class="fe-share__linkrow">
-                  <a :href="dropResult.url" target="_blank" rel="noopener" class="fe-share__url" :title="dropResult.url">{{ dropResult.url }}</a>
-                  <button type="button" class="fe-share__copy" data-testid="drop-copy" @click="copy(dropResult.url, 'drop')">
+                  <a :href="dropShort || dropResult.url" target="_blank" rel="noopener" class="fe-share__url" :title="displayLink(dropShort || dropResult.url)" data-testid="drop-link">{{ displayLink(dropShort || dropResult.url) }}</a>
+                  <button type="button" class="fe-share__copy" data-testid="drop-copy" @click="copy(dropShort || dropResult.url, 'drop')">
                     <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
                     <span>{{ copied === 'drop' ? t('access.copied') : t('access.copy') }}</span>
                   </button>
+                  <button
+                    v-if="shortOffered && !dropShort"
+                    type="button"
+                    class="fe-share__copy"
+                    data-testid="drop-short-get"
+                    :disabled="shortBusy === dropResult.token"
+                    @click="getShort(dropResult.token)"
+                  >
+                    <span aria-hidden="true" v-html="actionIconSvg('link')"></span>
+                    <span>{{ shortBusy === dropResult.token ? t('access.ui.short_link_busy') : t('access.ui.short_link_get') }}</span>
+                  </button>
                 </div>
+                <div v-if="dropShort" class="fe-share__pinrow" data-testid="drop-full-link">
+                  <span class="fe-share__pinlabel">{{ t('access.ui.full_link') }}</span>
+                  <span class="fe-share__url" :title="dropResult.url">{{ dropResult.url }}</span>
+                  <button type="button" class="fe-share__copy" data-testid="drop-full-copy" @click="copy(dropResult.url, 'dropfull')">
+                    <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+                    <span>{{ copied === 'dropfull' ? t('access.copied') : t('access.copy') }}</span>
+                  </button>
+                </div>
+                <div v-if="shortErr && dropResult" class="fe-share__warn" data-testid="drop-short-error">{{ shortErr }}</div>
                 <p class="fe-share__detail">
                   {{ validUntil(dropResult) }}
                   <span v-if="dropResult.clamped">{{ t('access.ui.server_limit_applied') }}</span>

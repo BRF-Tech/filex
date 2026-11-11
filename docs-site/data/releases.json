@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-11-06",
+  "generatedAt": "2026-11-09",
   "releases": [
+    {
+      "tag": "v0.59.1",
+      "date": "2026-11-09T10:24:13Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.59.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Fixed\n\n- **\"Review update\" no longer waits for the whole app to download.** The\n  permission review of an app from a repository or an address (an install, an\n  update, a store link, a plugin request) downloaded the module, the interface\n  bundle and the office engine before it answered. For the Office editor that\n  is 140 MB from GitHub, and the review answered 504 from a reverse proxy or\n  came minutes later. The review now reads the source's `filex-app.json` alone,\n  for every version an app has published: the permissions, and the SHA-256 the\n  manifest pins for each file. **Install** and **Upgrade** download the files\n  and refuse any that does not match what was reviewed (`from_manifest` in the\n  dry run's answer: [APP-PLUGINS-API.md](docs/APP-PLUGINS-API.md)).\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0591---2026-11-09)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.59.1",
+        "ghcr.io/brf-tech/filex:full-v0.59.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
     {
       "tag": "v0.59.0",
       "date": "2026-11-06T22:19:29Z",

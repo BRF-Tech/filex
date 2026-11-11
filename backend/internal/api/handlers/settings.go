@@ -16,12 +16,15 @@ import (
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/templates"
 )
 
 // Settings handles /api/admin/settings.
 type Settings struct {
 	Store  db.Store
 	Mailer *mailer.Service
+	// Templates renders the test mail (mail.smtp_test); nil = filex's own.
+	Templates *templates.Renderer
 	// Branding is invalidated on branding.* writes so public pages pick the
 	// new identity up immediately (wiring:e1). Nil-safe.
 	Branding *BrandingSource
@@ -106,9 +109,8 @@ func (h *Settings) SMTPTest(w http.ResponseWriter, r *http.Request) {
 		// The acting admin's language — a language pack's included — and the
 		// mail is tagged with it (Content-Language).
 		lang := requestLang(r)
-		r = r.WithContext(mailer.WithLanguage(r.Context(), lang))
-		subject, body := smtpTestMailText(lang)
-		if err := h.Mailer.Send(r.Context(), to, subject, body); err != nil {
+		if err := sendTemplateMail(r.Context(), pageTemplates(h.Templates, h.Branding), h.Mailer, to,
+			templates.Target{Lang: lang}, "mail.smtp_test", map[string]any{}); err != nil {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "stage": "send", "reason": mailer.Reason(err), "error": err.Error()})
 			return
 		}

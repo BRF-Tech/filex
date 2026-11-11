@@ -1,0 +1,166 @@
+--- a/extism.go
++++ b/extism.go
+@@ -129,6 +129,44 @@
+ 	guestRuntime         guestRuntime
+ 	Adapter              *observe.AdapterBase
+ 	traceCtx             *observe.TraceCtx
++
++	// filex patch (FILEX.md): the functions this instance calls, kept
++	// across calls. wazero's ExportedFunction builds a new function - with a
++	// new call stack - every time it is asked; a Plugin is used by one
++	// caller at a time, so the maps need no lock.
++	exportFns map[string]api.Function
++	kernelFns map[string]api.Function
++}
++
++// exportFn is the main module's export name, built once per instance (nil
++// when there is none, which is not kept).
++func (p *Plugin) exportFn(name string) api.Function {
++	if f, ok := p.exportFns[name]; ok {
++		return f
++	}
++	f := p.mainModule.ExportedFunction(name)
++	if f != nil {
++		if p.exportFns == nil {
++			p.exportFns = map[string]api.Function{}
++		}
++		p.exportFns[name] = f
++	}
++	return f
++}
++
++// kernelFn is the extism kernel's function name, built once per instance.
++func (p *Plugin) kernelFn(name string) api.Function {
++	if f, ok := p.kernelFns[name]; ok {
++		return f
++	}
++	f := p.extism.ExportedFunction(name)
++	if f != nil {
++		if p.kernelFns == nil {
++			p.kernelFns = map[string]api.Function{}
++		}
++		p.kernelFns[name] = f
++	}
++	return f
+ }
+ 
+ func logStd(level LogLevel, message string) {
+@@ -369,18 +407,18 @@
+ 
+ // SetInputWithContext sets the input data for the plugin to be used in the next WebAssembly function call.
+ func (p *Plugin) SetInputWithContext(ctx context.Context, data []byte) (uint64, error) {
+-	_, err := p.extism.ExportedFunction("reset").Call(ctx)
++	_, err := p.kernelFn("reset").Call(ctx)
+ 	if err != nil {
+ 		fmt.Println(err)
+ 		return 0, errors.New("reset")
+ 	}
+ 
+-	ptr, err := p.extism.ExportedFunction("alloc").Call(ctx, uint64(len(data)))
++	ptr, err := p.kernelFn("alloc").Call(ctx, uint64(len(data)))
+ 	if err != nil {
+ 		return 0, err
+ 	}
+ 	p.Memory().Write(uint32(ptr[0]), data)
+-	p.extism.ExportedFunction("input_set").Call(ctx, ptr[0], uint64(len(data)))
++	p.kernelFn("input_set").Call(ctx, ptr[0], uint64(len(data)))
+ 	return ptr[0], nil
+ }
+ 
+@@ -391,12 +429,12 @@
+ 
+ // GetOutputWithContext retrieves the output data from the last WebAssembly function call.
+ func (p *Plugin) GetOutputWithContext(ctx context.Context) ([]byte, error) {
+-	outputOffs, err := p.extism.ExportedFunction("output_offset").Call(ctx)
++	outputOffs, err := p.kernelFn("output_offset").Call(ctx)
+ 	if err != nil {
+ 		return []byte{}, err
+ 	}
+ 
+-	outputLen, err := p.extism.ExportedFunction("output_length").Call(ctx)
++	outputLen, err := p.kernelFn("output_length").Call(ctx)
+ 	if err != nil {
+ 		return []byte{}, err
+ 	}
+@@ -421,7 +459,7 @@
+ 
+ // GetErrorWithContext retrieves the error message from the last WebAssembly function call.
+ func (p *Plugin) GetErrorWithContext(ctx context.Context) string {
+-	errOffs, err := p.extism.ExportedFunction("error_get").Call(ctx)
++	errOffs, err := p.kernelFn("error_get").Call(ctx)
+ 	if err != nil {
+ 		return ""
+ 	}
+@@ -430,7 +468,7 @@
+ 		return ""
+ 	}
+ 
+-	errLen, err := p.extism.ExportedFunction("length").Call(ctx, errOffs[0])
++	errLen, err := p.kernelFn("length").Call(ctx, errOffs[0])
+ 	if err != nil {
+ 		return ""
+ 	}
+@@ -441,7 +479,7 @@
+ 
+ // FunctionExists returns true when the named function is present in the plugin's main Module
+ func (p *Plugin) FunctionExists(name string) bool {
+-	return p.mainModule.ExportedFunction(name) != nil
++	return p.exportFn(name) != nil
+ }
+ 
+ // Call a function by name with the given input, returning the output
+@@ -471,7 +509,7 @@
+ 
+ 	ctx = context.WithValue(ctx, InputOffsetKey("inputOffset"), intputOffset)
+ 
+-	var f = p.mainModule.ExportedFunction(name)
++	var f = p.exportFn(name)
+ 
+ 	if f == nil {
+ 		return 1, []byte{}, fmt.Errorf("unknown function: %s", name)
+--- a/host.go
++++ b/host.go
+@@ -129,7 +129,7 @@
+ 
+ // Alloc a new memory block of the given length, returning its offset
+ func (p *CurrentPlugin) AllocWithContext(ctx context.Context, n uint64) (uint64, error) {
+-	out, err := p.plugin.extism.ExportedFunction("alloc").Call(ctx, uint64(n))
++	out, err := p.plugin.kernelFn("alloc").Call(ctx, uint64(n))
+ 	if err != nil {
+ 		return 0, err
+ 	} else if len(out) != 1 {
+@@ -146,7 +146,7 @@
+ 
+ // Free the memory block specified by the given offset
+ func (p *CurrentPlugin) FreeWithContext(ctx context.Context, offset uint64) error {
+-	_, err := p.plugin.extism.ExportedFunction("free").Call(ctx, uint64(offset))
++	_, err := p.plugin.kernelFn("free").Call(ctx, uint64(offset))
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -161,7 +161,7 @@
+ 
+ // Length returns the number of bytes allocated at the specified offset
+ func (p *CurrentPlugin) LengthWithContext(ctx context.Context, offs uint64) (uint64, error) {
+-	out, err := p.plugin.extism.ExportedFunction("length").Call(ctx, uint64(offs))
++	out, err := p.plugin.kernelFn("length").Call(ctx, uint64(offs))
+ 	if err != nil {
+ 		return 0, err
+ 	} else if len(out) != 1 {
+@@ -262,7 +262,15 @@
+ 					panic("Invalid context, `extism` key not found")
+ 				}
+ 
+-				f := extism.ExportedFunction(name)
++				// filex patch (FILEX.md): every guest memory access comes
++				// through here, a byte or eight at a time; the calling
++				// instance keeps the kernel function it reaches.
++				var f api.Function
++				if p, ok := ctx.Value(PluginCtxKey("plugin")).(*Plugin); ok && p != nil && p.extism == extism {
++					f = p.kernelFn(name)
++				} else {
++					f = extism.ExportedFunction(name)
++				}
+ 				if f == nil {
+ 					panic(fmt.Errorf("function %q not found in extism:host", name))
+ 				}

@@ -66,11 +66,13 @@ import (
 	"github.com/brf-tech/filex/backend/internal/sftpsrv"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
+	"github.com/brf-tech/filex/backend/internal/shortlink"
 	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
+	"github.com/brf-tech/filex/backend/internal/templates"
 	"github.com/brf-tech/filex/backend/internal/tenancy"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/tenantdomain"
@@ -123,7 +125,10 @@ type Server struct {
 	thumbRefresh *thumb.Refresher
 	resolver     func(int64) (storage.Driver, error)
 	mailer       *mailer.Service
-	zipWarmer    *sharezip.Warmer
+	// templates renders every mail and public page (internal/templates):
+	// filex's own templates, or the ones an administrator replaced.
+	templates *templates.Renderer
+	zipWarmer *sharezip.Warmer
 	// sftp is the SFTP endpoint, nil when FILEX_SFTP is off. It owns a TCP
 	// listener of its own rather than a route on the HTTP server.
 	sftp *sftpsrv.Server
@@ -652,7 +657,15 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		appPluginsReason = "app plugins need an amd64 or arm64 host (no wasm compiler for " + goruntime.GOARCH + ")"
 	default:
 		wasmplugin.HostVersion = version.String()
+		// The apps' own data (internal/appdata): never filex's database.
+		appData, derr := openAppData(ctx, &cfg)
+		if derr != nil {
+			slog.Warn("app-data: unavailable; apps that keep data answer unavailable", slog.Any("err", derr))
+		}
 		appPlugins, err = wasmplugin.New(wasmplugin.Options{
+			Data:        appData,
+			MultiTenant: cfg.MultiTenant,
+			RoutePool:   cfg.AppRoutePool,
 			// The tenant-scoped wrapper: inert without a scope on the context
 			// (plugin rows are instance-wide), and the directory chokepoint
 			// once a job or request carries one (users_lookup).
@@ -1075,12 +1088,20 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			// The emails an event asks for (a file request's owner) and the
 			// digest's. The mailer is made further down; it is read when a mail
 			// goes, not now.
-			Mail: func(ctx context.Context, lang, to, subject, body string) error {
+			Mail: func(ctx context.Context, lang, to string, c notify.MailContent) error {
 				m := srvObj.mailer
 				if m == nil {
 					return mailer.ErrNotConfigured
 				}
-				return m.Send(mailer.WithLanguage(ctx, lang), to, subject, body)
+				key, data := "mail.notification", map[string]any{
+					"notice": map[string]any{"event": c.Event, "title": c.Title, "lines": stringsAny(c.Lines)},
+					"link":   map[string]any{"url": c.Link},
+				}
+				if c.Digest {
+					key = "mail.digest"
+					data["digest"] = map[string]any{"minutes": c.Minutes}
+				}
+				return templates.Send(ctx, srvObj.templates, m, to, templates.Target{TenantID: c.TenantID, Lang: lang}, key, data)
 			},
 		})
 		// An operating-system sign-in provider (windows) the administrator
@@ -1285,6 +1306,12 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 
 	// Mailer for invite/share notices — verified periodically in Start().
 	srvObj.mailer = mailer.New(store)
+	// The mail and public-page templates (internal/templates). The raw store:
+	// a template row names its tenant itself, and the renderer only ever reads
+	// the rows of the tenant a render is for and the install's. The branding
+	// it renders in is wired with the HTTP layer (api routes.go), where the
+	// branding source lives.
+	srvObj.templates = &templates.Renderer{Store: store, MultiTenant: cfg.MultiTenant}
 	if pluginMgr != nil {
 		// A binary storage plugin that names a source is checked daily and
 		// the administrators hear of a newer version once (plugin/updates.go);
@@ -1312,7 +1339,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	}
 	if appPlugins != nil {
 		appPlugins.SetNotify(srvObj.notify)
-		appPlugins.SetMailer(srvObj.mailer)
+		appPlugins.SetMailer(appMailer{templates: srvObj.templates, mailer: srvObj.mailer})
 		appPlugins.SetPublicURL(cfg.PublicURL)
 		appPlugins.StartSweeper(ctx)
 		// Last, because a due item needs the queue, the notifier and the
@@ -1475,6 +1502,9 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		srvObj.domains.ACME = &tenantdomain.ACMEStatus{}
 	}
 	deps := &api.Deps{
+		// The apps' route addresses, shared with filex's own TLS (ACME's
+		// host policy reads shortlink.Live).
+		Routes:                   shortlink.Live(),
 		Domains:                  srvObj.domains,
 		Cfg:                      cfg,
 		Store:                    scopedStore,
@@ -1514,6 +1544,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Directory:                dirDrv,
 		AuthLive:                 authLive,
 		Mailer:                   srvObj.mailer,
+		Templates:                srvObj.templates,
 		ZipCache:                 zipCache,
 		FileCache:                fileCache,
 		AVScan:                   avEnqueue,          /* koru:k2 av */

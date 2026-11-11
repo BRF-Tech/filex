@@ -90,7 +90,7 @@ A write decides create vs modify **per file**: replacing a file that is there is
 
 | Key | Allows |
 |---|---|
-| `share.links` | Public download links (web, agent API, the invite fallback) - and keeping the ones already made open ([below](#public-links-follow-their-creator)) |
+| `share.links` | Public download links (web, agent API, the invite fallback, an [uploader](UPLOADERS.md) set to public links) - and keeping the ones already made open ([below](#public-links-follow-their-creator)) |
 | `share.upload_links` | Upload-only "drop" links (file requests) - and keeping them open |
 | `share.users` | Sharing with another account or a group (the per-item permissions panel, invites) |
 | `comments.write` | Posting comments. An API key also needs its own `comments:rw` ([RBAC.md](RBAC.md#permissions-with-a-level-comments)) |
@@ -107,7 +107,7 @@ A write decides create vs modify **per file**: replacing a file that is there is
 | `access.ftp` | FTPS |
 | `access.s3` | S3 - creating keys and signing with them |
 | `access.nfs` | NFS - creating exports and mounting them |
-| `access.api` | Creating API keys **and using any API key** |
+| `access.api` | Creating API keys and [uploaders](UPLOADERS.md) **and using any API key or uploader key** |
 | `access.desktop` | Desktop sign-in, and using the key a desktop pairing made |
 
 ### Own account
@@ -434,6 +434,7 @@ The server enforces everything; the web app only hides what would be refused.
 |---|---|---|
 | Web app / REST | session or API key (`access.api` / `access.desktop` for keys) | per route and per file - `perm_route_table_test.go` fails the build on any state-changing route that is not classified |
 | Agent API `/api/ai` | `ai.use` (+ the key's `access.api`) | the same file permissions |
+| Upload door `/api/uploads` | an [uploader](UPLOADERS.md)'s key, its owner's `access.api` | create in the uploader's folder only (+ `share.links` for a public link), asked before the bytes land |
 | AI assistant `/api/files/assistant` | `ai.assistant` (a person: a session or their own key, never an app's) | the same file permissions, each tool as that person |
 | WebDAV | `access.webdav`, every request | GET = download; PUT = create/modify; MKCOL = create; DELETE = delete (+purge without trash); MOVE = rename and/or move; COPY = create at the destination. PROPFIND stays on the grant |
 | SFTP | `access.sftp` | read = download; write = create/modify; mkdir = create; rename = rename and/or move (+modify when it replaces); remove = delete (+purge without trash) |

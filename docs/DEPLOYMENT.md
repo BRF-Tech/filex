@@ -424,6 +424,12 @@ on local disk under `FILEX_DATA_DIR`:
   connection to connection. Put the protocol listeners on one node, or hand
   every replica the same key material.
 
+⚠ One more thing under `FILEX_DATA_DIR` is **not** rebuildable and not
+shared: the data an app keeps of its own (`app-plugins/data/`, a link
+shortener's links). Behind several replicas set `FILEX_APP_DATA_DSN` to a
+PostgreSQL database of the apps' own, so every replica reads the same
+([APP-PLUGINS.md → An app's own data](APP-PLUGINS.md#an-apps-own-data)).
+
 The first three are **rebuildable** (see [Backup & restore](#backup--restore)), so for a
 multi-replica deployment you have two honest options:
 

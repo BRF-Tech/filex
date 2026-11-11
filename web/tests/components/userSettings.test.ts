@@ -199,15 +199,16 @@ describe('UserSettingsModal', () => {
     const w = mountModal();
     await w.vm.$nextTick();
 
-    for (const key of ['profile', 'preferences', 'notifications', 'security', 'ai']) {
+    for (const key of ['profile', 'preferences', 'notifications', 'security', 'uploaders', 'ai']) {
       expect(
         w.find(`[data-testid="user-settings-tab-${key}"]`).exists(),
         `rail entry ${key} missing for a non-admin`,
       ).toBe(true);
     }
     const rail = w.findAll('[data-testid^="user-settings-tab-"]').map((b) => b.text());
-    expect(rail.length).toBe(5);
-    expect(rail.slice(0, 4)).toEqual(['Profile', 'Preferences', 'Notifications', 'Security']);
+    // 0.60: Uploaders - every account's own keys, open to a non-admin too.
+    expect(rail.length).toBe(6);
+    expect(rail.slice(0, 5)).toEqual(['Profile', 'Preferences', 'Notifications', 'Security', 'Uploaders']);
   });
 
   // The assistant's pane (task #269) says the state the SERVER gives - it was

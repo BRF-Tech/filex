@@ -167,6 +167,7 @@ async function router(at = '/dashboard'): Promise<Router> {
       { path: '/settings', name: 'settings', component: Blank },
       { path: '/tenancy', name: 'tenancy', component: Blank },
       { path: '/branding', name: 'branding', component: Blank },
+      { path: '/templates', name: 'templates', component: Blank },
       // tema:v1 — the Appearance screen. ⚠ This stub must carry EVERY
       // route the real menu links to: vue-router throws on an unknown
       // name while resolving a <RouterLink>, so one missing entry fails

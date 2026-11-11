@@ -1,0 +1,14 @@
+<style>
+.track { height: 10px; border-radius: 999px; background: var(--px-line); overflow: hidden; }
+.bar { height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, var(--px-accent), var(--px-accent-hover)); transition: width 0.4s ease; }
+.pct { margin-top: 10px; font-size: 0.95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.hint { margin: 16px 0 0; font-size: 0.8rem; color: var(--px-muted); }
+@media (prefers-reduced-motion: reduce) { .bar { transition: none; } }
+</style>
+<div class="card">
+<h1>{{ 'public.cache_heading' | t }}</h1>
+<p class="sub">{{ 'public.cache_sub' | t: name: file.name }}</p>
+<div class="track" aria-hidden="true"><div id="bar" class="bar"></div></div>
+<div class="pct"><span id="pct">%{{ file.percent }}</span></div>
+<p class="hint">{{ 'public.cache_hint' | t }}</p>
+</div>

@@ -139,6 +139,18 @@ export interface PublicEntry {
 }
 
 /** `GET /api/public/s/{token}`. */
+/**
+ * A link page's text slots (`GET /api/public/s|d/{token}/slots`): what an
+ * administrator wrote for the card's title, its introduction and its footer
+ * (internal/templates slot.*), as HTML the server rendered and sanitized. An
+ * empty one is the page's own words.
+ */
+export interface PublicSlots {
+  title: string;
+  intro: string;
+  footer: string;
+}
+
 export interface PublicShareInfo extends PublicLinkBase {
   kind: PublicShareKind;
   /** Visits left before the link stops answering; null = uncounted. */

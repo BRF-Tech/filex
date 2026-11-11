@@ -1,16 +1,23 @@
 // Package mailer sends transactional email (share/invite notices) over an
-// operator-configured SMTP server. The config lives in the settings table
+// operator-configured SMTP server. What a mail says is internal/templates'
+// (the HTML and plain-text parts an administrator can edit); this package
+// only puts the parts into one message and delivers it. The config lives in the settings table
 // (smtp.*) and is validated by a periodic job (server.Start runs Verify every
 // 5 minutes). Send is a no-op error (ErrNotVerified) until a verification
 // succeeds, so the invite flow can fall back to showing the link on-screen.
 package mailer
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"mime"
+	"mime/quotedprintable"
 	"net"
+	"net/mail"
 	"net/smtp"
 	"strings"
 	"sync"
@@ -128,9 +135,24 @@ func (s *Service) Ready(ctx context.Context) bool {
 	return s.Load(ctx).configured()
 }
 
+// Message is one mail's content: its subject, its plain-text part and, when
+// it has one, its HTML part (internal/templates renders all three).
+type Message struct {
+	Subject string
+	Text    string
+	HTML    string
+}
+
 // Send delivers a plain-text UTF-8 email. Returns ErrNotVerified when the
 // config hasn't passed verification (callers fall back to on-screen link).
 func (s *Service) Send(ctx context.Context, to, subject, body string) error {
+	return s.SendMessage(ctx, to, Message{Subject: subject, Text: body})
+}
+
+// SendMessage delivers m: multipart/alternative (the plain text, then the
+// HTML - a program shows the last part it can) when m has HTML, plain text
+// otherwise. Errors as Send.
+func (s *Service) SendMessage(ctx context.Context, to string, m Message) error {
 	if !s.Verified() {
 		return ErrNotVerified
 	}
@@ -138,7 +160,7 @@ func (s *Service) Send(ctx context.Context, to, subject, body string) error {
 	if !cfg.configured() {
 		return ErrNotConfigured
 	}
-	return sendMail(cfg, to, buildMessage(cfg.From, to, subject, body, languageFrom(ctx)))
+	return sendMail(cfg, to, composeMessage(cfg.From, to, m, languageFrom(ctx), time.Now()))
 }
 
 type langKey struct{}
@@ -264,6 +286,79 @@ func buildMessage(from, to, subject, body, lang string) []byte {
 	b.WriteString("\r\n")
 	b.WriteString(body)
 	return []byte(b.String())
+}
+
+// composeMessage is the message Send and SendMessage deliver: the headers of
+// buildMessage plus Date and Message-ID (a message without them is what spam
+// filters score), and the body as one quoted-printable part or two.
+//
+// ⚠ Quoted-printable, not 8bit: an HTML part is a few long lines, and SMTP
+// refuses (or a relay folds, breaking a tag) a line over 998 bytes. QP keeps
+// every line short and every byte the template wrote.
+//
+// ⚠ A right-to-left mail needs nothing here: its HTML carries dir from the
+// template (internal/templates, `dir`), and a plain-text part has no
+// direction to carry (each paragraph is laid out by its own letters).
+func composeMessage(from, to string, m Message, lang string, now time.Time) []byte {
+	var b bytes.Buffer
+	b.WriteString("From: " + from + "\r\n")
+	b.WriteString("To: " + to + "\r\n")
+	b.WriteString("Subject: " + headerText(m.Subject) + "\r\n")
+	b.WriteString("Date: " + now.UTC().Format(time.RFC1123Z) + "\r\n")
+	b.WriteString("Message-ID: " + messageID(from) + "\r\n")
+	b.WriteString("MIME-Version: 1.0\r\n")
+	if l := headerLang(lang); l != "" {
+		b.WriteString("Content-Language: " + l + "\r\n")
+	}
+	text := crlf(m.Text)
+	if strings.TrimSpace(m.HTML) == "" {
+		b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+		b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+		writeQP(&b, text)
+		return b.Bytes()
+	}
+	boundary := "filex-" + randomHex(12)
+	b.WriteString(`Content-Type: multipart/alternative; boundary="` + boundary + `"` + "\r\n\r\n")
+	b.WriteString("--" + boundary + "\r\n")
+	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+	writeQP(&b, text)
+	b.WriteString("\r\n--" + boundary + "\r\n")
+	b.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+	writeQP(&b, crlf(m.HTML))
+	b.WriteString("\r\n--" + boundary + "--\r\n")
+	return b.Bytes()
+}
+
+// crlf is s with every line ending a CR LF, as a message body has them.
+func crlf(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
+}
+
+func writeQP(b *bytes.Buffer, s string) {
+	w := quotedprintable.NewWriter(b)
+	_, _ = w.Write([]byte(s))
+	_ = w.Close()
+}
+
+func randomHex(n int) string {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return strings.Repeat("0", 2*n)
+	}
+	return hex.EncodeToString(buf)
+}
+
+// messageID is a Message-ID at the sender's domain (the From address's).
+func messageID(from string) string {
+	domain := "filex.local"
+	if a, err := mail.ParseAddress(from); err == nil {
+		if i := strings.LastIndexByte(a.Address, '@'); i >= 0 && i < len(a.Address)-1 {
+			domain = a.Address[i+1:]
+		}
+	}
+	return "<" + randomHex(16) + "@" + strings.Trim(domain, "<>") + ">"
 }
 
 // headerText makes a subject safe to be a header value.

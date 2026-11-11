@@ -3,8 +3,7 @@ package share
 import (
 	"encoding/json"
 	"errors"
-	"html/template" /* wiring:d2 */
-	"mime"          /* wiring:d2 */
+	"mime" /* wiring:d2 */
 	"net/http"
 	"path" /* wiring:d2 */
 	"strconv"
@@ -12,9 +11,7 @@ import (
 	"time"    /* wiring:d2 */
 
 	"github.com/brf-tech/filex/backend/internal/db"
-	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/storage"
-	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 
 	"github.com/brf-tech/filex/backend/internal/httpx"
 )
@@ -226,153 +223,7 @@ func MimeForName(name string) string {
 	return "application/octet-stream"
 }
 
-// FolderPageEntry is a display-ready row/tile for the template.
-type FolderPageEntry struct {
-	Name      string
-	Href      string // open target (dir → ?dir=…, file → f/…)
-	ThumbSrc  string // non-empty → gallery tile renders an <img>
-	Kind      FolderEntryKind
-	SizeLabel string
-	DateLabel string
-}
-
-// Shown is the entry's name as the page shows it: every bidi control made
-// visible (leafname.Visible), so `invoice` + U+202E + `fdp.exe` cannot read
-// as `invoiceexe.pdf` to a visitor (task #238). Href keeps the real name.
-func (e FolderPageEntry) Shown() string { return leafname.Visible(e.Name) }
-
-// Shown is the shared folder's name as the page shows it (leafname.Visible).
-func (d FolderPageData) Shown() string { return leafname.Visible(d.Name) }
-
-// FolderPageData feeds the folder browse template. Style and Footer are
-// injected by the handler (single-source public page chrome).
-type FolderPageData struct {
-	Style  template.HTML
-	Footer template.HTML
-	// Brand is the optional branding header (logo + display name) rendered
-	// above the card — injected by the handler like Style/Footer, empty when
-	// the instance has no branding configured. /* wiring:e1 */
-	Brand    template.HTML
-	Name     string // shared folder display name
-	SubPath  string // rel subdir being browsed ("" = share root)
-	UpHref   string // one-level-up href ("" hides the button)
-	ZipHref  string // "download all" target
-	Gallery  bool
-	DirCount int
-	FileCnt  int
-	Entries  []FolderPageEntry
-	// Lang / T carry the resolved language and its string table. The handler
-	// owns locale resolution (it is the one that can see the request); this
-	// package only renders what it is given, so the folder page can never end
-	// up in a different language from the PIN gate in front of it.
-	Lang string
-	T    map[string]string
-	// CountsLabel is pre-formatted by the handler: "3 klasör · 12 dosya" and
-	// "3 folders · 12 files" do not share a word order, so a template that
-	// glued numbers to nouns could only ever be right in one language.
-	CountsLabel string
-}
-
-// Dir is the page's `dir`, derived from Lang by the one list (wire.IsRTL):
-// a right-to-left language lays the folder page out right to left.
-func (d FolderPageData) Dir() string {
-	if wire.IsRTL(d.Lang) {
-		return "rtl"
-	}
-	return "ltr"
-}
-
-// RenderFolderPage writes the browse page HTML.
-func RenderFolderPage(w http.ResponseWriter, d FolderPageData) error {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	return folderPageTemplate.Execute(w, d)
-}
-
-// Inline line-style icons (currentColor), matching the public-page set.
-const (
-	folderPageIconFolder = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7z"/></svg>`
-	folderPageIconFile   = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3.5h7l4 4V20a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 20V5A1.5 1.5 0 0 1 7.5 3.5z"/><path d="M13.5 3.5V8H18"/></svg>`
-	folderPageIconImage  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4.5 17.5 10 12l4 4 2.5-2.5 3 3"/></svg>`
-	folderPageIconPlay   = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.5 6.2v11.6a1 1 0 0 0 1.52.86l9.2-5.8a1 1 0 0 0 0-1.72l-9.2-5.8a1 1 0 0 0-1.52.86z"/></svg>`
-)
-
-// folderPageTemplate is the dependency-free browse page for a shared
-// folder. Turkish copy, matching the zip-wait/unlocked pages.
-var folderPageTemplate = template.Must(template.New("sharefolder").Parse(`<!doctype html>
-<html lang="{{.Lang}}" dir="{{.Dir}}"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.Shown}} - {{.T.folder_title_suffix}}</title>
-{{.Style}}
-<style>
-.card--folder { width: 880px; max-width: 100%; text-align: start; padding: 26px 24px; }
-.fhead { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
-.fhead .icon-badge { margin: 0; width: 46px; height: 46px; flex: none; }
-.fhead .icon-badge svg { width: 24px; height: 24px; }
-.fhead h1 { margin: 0; font-size: 1.15rem; overflow-wrap: anywhere; }
-.fsub { margin: 0 0 16px; padding-inline-start: 58px; color: var(--px-muted); font-size: 0.84rem; overflow-wrap: anywhere; }
-.factions { display: flex; gap: 8px; margin: 0 0 18px; flex-wrap: wrap; }
-.fbtn { display: inline-block; padding: 9px 16px; border-radius: 10px; font-size: 0.9rem; font-weight: 600; text-decoration: none; text-align: center; background: var(--px-accent); color: #fff; transition: background 0.15s ease; }
-.fbtn:hover { background: var(--px-accent-hover); }
-.fbtn--ghost { background: transparent; color: var(--px-accent); border: 1px solid var(--px-line); }
-.fbtn--ghost:hover { background: var(--px-accent-soft); }
-.flist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--px-line); border-radius: 12px; overflow: hidden; }
-.flist li + li { border-top: 1px solid var(--px-line); }
-.flist a { display: flex; align-items: center; gap: 10px; padding: 10px 14px; color: inherit; text-decoration: none; font-size: 0.9rem; }
-.flist a:hover { background: var(--px-accent-soft); }
-.flist .ficon { width: 20px; height: 20px; flex: none; color: var(--px-muted); }
-.flist .ficon svg { width: 100%; height: 100%; }
-.flist .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.flist .fmeta { color: var(--px-muted); font-size: 0.78rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.ggrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
-.gtile { position: relative; display: block; border-radius: 12px; overflow: hidden; border: 1px solid var(--px-line); background: var(--px-bg2); aspect-ratio: 1 / 1; text-decoration: none; color: inherit; }
-.gtile:hover { border-color: var(--px-accent); }
-.gtile img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.gtile .gicon { position: absolute; inset: 0; display: grid; place-items: center; color: var(--px-muted); }
-.gtile .gicon svg { width: 44px; height: 44px; }
-.gtile .gname { position: absolute; inset-inline: 0; bottom: 0; padding: 22px 10px 8px; font-size: 0.78rem; color: #fff; background: linear-gradient(transparent, rgba(0, 0, 0, 0.66)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gtile .gbadge { position: absolute; top: 8px; inset-inline-end: 8px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); color: #fff; }
-.gtile .gbadge svg { width: 15px; height: 15px; }
-.fempty { padding: 34px 16px; text-align: center; color: var(--px-muted); border: 1px dashed var(--px-line); border-radius: 12px; font-size: 0.9rem; }
-@media (max-width: 560px) { .fsub { padding-inline-start: 0; } .ggrid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
-</style>
-</head><body>
-<main class="wrap">
-{{.Brand}}
-<div class="card card--folder">
-<div class="fhead">
-<div class="icon-badge">` + folderPageIconFolder + `</div>
-<h1>{{.Shown}}</h1>
-</div>
-<p class="fsub">{{.CountsLabel}}{{if .SubPath}} - {{.SubPath}}{{end}}</p>
-<div class="factions">
-{{if .UpHref}}<a class="fbtn fbtn--ghost" href="{{.UpHref}}">{{.T.folder_up}}</a>{{end}}
-<a class="fbtn" href="{{.ZipHref}}">{{.T.folder_zip}}</a>
-</div>
-{{if not .Entries}}
-<div class="fempty">{{.T.folder_empty}}</div>
-{{else if .Gallery}}
-<div class="ggrid">
-{{range .Entries}}<a class="gtile" href="{{.Href}}"{{if ne .Kind "dir"}} target="_blank" rel="noopener"{{end}} title="{{.Shown}}{{if .SizeLabel}} - {{.SizeLabel}}{{end}}">
-{{if .ThumbSrc}}<img src="{{.ThumbSrc}}" alt="{{.Shown}}" loading="lazy">{{else if eq .Kind "dir"}}<span class="gicon">` + folderPageIconFolder + `</span>{{else if eq .Kind "video"}}<span class="gicon">` + folderPageIconFile + `</span>{{else if eq .Kind "image"}}<span class="gicon">` + folderPageIconImage + `</span>{{else}}<span class="gicon">` + folderPageIconFile + `</span>{{end}}
-{{if eq .Kind "video"}}<span class="gbadge">` + folderPageIconPlay + `</span>{{end}}
-<span class="gname">{{.Shown}}</span>
-</a>
-{{end}}</div>
-{{else}}
-<ul class="flist">
-{{range .Entries}}<li><a href="{{.Href}}"{{if ne .Kind "dir"}} target="_blank" rel="noopener"{{end}}>
-<span class="ficon">{{if eq .Kind "dir"}}` + folderPageIconFolder + `{{else if eq .Kind "image"}}` + folderPageIconImage + `{{else}}` + folderPageIconFile + `{{end}}</span>
-<span class="fname" title="{{.Shown}}">{{.Shown}}</span>
-{{if .SizeLabel}}<span class="fmeta">{{.SizeLabel}}</span>{{end}}
-{{if .DateLabel}}<span class="fmeta">{{.DateLabel}}</span>{{end}}
-</a></li>
-{{end}}</ul>
-{{end}}
-</div>
-{{.Footer}}
-</main>
-</body></html>`))
+// The browse page itself is a template (internal/templates page.folder,
+// rendered by handlers/share_browse.go): an administrator can change it.
 
 /* ===== /wiring:d2 ===== */

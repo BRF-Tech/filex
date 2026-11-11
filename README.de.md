@@ -285,7 +285,7 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 <tr>
 <td width="50%" valign="top">
 
-![Die Anmeldeseite trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-signin-1440.ff6bb587c310.png)
+![Die Anmeldeseite trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-signin-1440.3d21210a54da.png)
 
 <sub>…und die Anmeldeseite, bevor sich irgendjemand angemeldet hat</sub>
 
@@ -354,7 +354,7 @@ Alle Funktionen zu Speicher und Protokollen im Detail: [docs/FEATURES.md → Sto
 </td>
 <td width="50%" valign="top">
 
-![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.1870c90ae20a.png)
+![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.890f4cd92081.png)
 
 <sub>API-Schlüssel - erstellen Sie Ihre eigenen, im Explorer oder in einer Einbettung (Sitzung oder Schlüssel einer Person; eine Einbettung, die über einen Proxy mit einem gemeinsamen *App*-Schlüssel läuft, bekommt diesen Eintrag nicht)</sub>
 
@@ -386,9 +386,10 @@ Alle Funktionen zu Speicher und Protokollen im Detail: [docs/FEATURES.md → Sto
 
 **Teilen Sie mit einem Link, den Sie begrenzen und widerrufen können. Machen Sie ein versehentliches Löschen oder Überschreiben rückgängig.**
 
-- Öffentliche Links mit PIN, Ablaufdatum und Download-Limit sowie Dateianforderungen für das,
-  was hereinkommen soll. **Meine Freigaben** listet jeden Link auf, den Sie erstellt haben,
-  zum Kopieren oder Widerrufen.
+- Öffentliche Links mit PIN, Ablaufdatum und Download-Limit, Dateianforderungen für das, was
+  hereinkommen soll, und **Uploader**: ein Schlüssel für ShareX, curl oder ein Skript, der
+  Dateien in einen Ordner legt und jede mit einem Link beantwortet. **Meine Freigaben** listet
+  jeden Link auf, den Sie erstellt haben, zum Kopieren oder Widerrufen.
 - Teilen Sie einen Ordner mit einer Person oder einer Gruppe, und er erscheint bei ihnen unter
   **Mit mir geteilt**. Dafür muss beim Speicher die **Zugriffskontrolle pro Element (RBAC)**
   eingeschaltet sein, was sie standardmäßig nicht ist.
@@ -410,7 +411,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.c3b9326fa9fa.png)
+![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.b32887acb9ed.png)
 
 <sub>Freigaben - PIN, Ablaufdatum, Download-Limit, `curl`-Einzeiler</sub>
 
@@ -442,7 +443,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.bc923c4374cf.png)
+![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.c28cec3a103e.png)
 
 <sub>Jede Tabelle im Adminbereich - ein angeheftetes Menü **Aktionen** pro Zeile, dasselbe Menü, das sich über das ⋮ des Explorers öffnet</sub>
 
@@ -531,7 +532,7 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <tr>
 <td width="50%" valign="top">
 
-![Das Anmeldeformular bei einem gesperrten Konto](https://filex.sh/shots/loginsecurity/login-locked-1440.1c2889094cd7.png)
+![Das Anmeldeformular bei einem gesperrten Konto](https://filex.sh/shots/loginsecurity/login-locked-1440.c115aaa2f273.png)
 
 <sub>…und was das Anmeldeformular eines gesperrten Kontos sagt, während es die Sperre auf seiner Schaltfläche herunterzählt</sub>
 
@@ -554,7 +555,7 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 </td>
 <td width="50%" valign="top">
 
-![Das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche](https://filex.sh/shots/botprotection/login-captcha-dark-1440.91b31e625fe1.png)
+![Das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche](https://filex.sh/shots/botprotection/login-captcha-dark-1440.5cf41f05dd02.png)
 
 <sub>…und das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche</sub>
 
@@ -563,14 +564,14 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <tr>
 <td width="50%" valign="top">
 
-![Startseite der Demo](https://filex.sh/shots/demo-landing.a79e6941c259.png)
+![Startseite der Demo](https://filex.sh/shots/demo-landing.4a147bc884c8.png)
 
 <sub>Startseite der Demo</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Der Bereich „Einstellungen“ des Adminmenüs, geöffnet über der Seite Admin → Einstellungen → Allgemein](https://filex.sh/shots/megamenu/settings-panel-1440.42b03e9a539f.png)
+![Der Bereich „Einstellungen“ des Adminmenüs, geöffnet über der Seite Admin → Einstellungen → Allgemein](https://filex.sh/shots/megamenu/settings-panel-1440.e51582dc1f4f.png)
 
 <sub>Das Adminmenü - alle Seiten in vier Bereichen, **Dateien & Speicher**, **Personen**, **Einstellungen** (Allgemein, Sicherheit & Daten, Dateiverarbeitung & Integrationen) und **Wartung & Protokolle**, mit einer kurzen Zeile unter jeder Seite; ein Smartphone bekommt dieselben Seiten in einer ausfahrbaren Leiste ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
 
@@ -746,6 +747,14 @@ von filex bringt ihre Änderungen in eine Reihenfolge, ohne sie zu lesen, und we
 darf, sieht live zu - und eine Datei eines **verschlüsselten Ordners** öffnen, die Ihr Browser
 für sie entschlüsselt und vor dem Speichern wieder verschlüsselt.
 
+Eine App kann außerdem verlangen, vor dem ersten Lauf einmal eingerichtet zu werden - ihre
+eigenen Fragen, die Adressen, unter denen sie antwortet, wer sie benutzen darf -, einen kleinen
+eigenen Datenspeicher neben der Datenbank von filex führen und eigene öffentliche Adressen
+beantworten. Eine App mit der Rolle **Link-Kürzer** macht Links kurz: **Kurzlink holen** im
+Freigabedialog, bei Dateianforderungen, in Meine Freigaben und bei jedem Upload eines Uploaders
+([docs/APP-PLUGINS.md → Short links](docs/APP-PLUGINS.md#short-links),
+[für App-Autoren](docs/APP-PLUGINS-API.md#public-routes-060)).
+
 Auch ein Sprachpaket ist eine App: Spanisch, Deutsch und Französisch gibt es als Beispiele.
 
 In wenigen Minuten eine installieren: [docs/APP-PLUGINS.md → Install one](docs/APP-PLUGINS.md#install-one). Alle Funktionen der Apps im Detail: [docs/FEATURES.md → Apps](docs/FEATURES.md#apps).
@@ -796,7 +805,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 <tr>
 <td width="50%" valign="top">
 
-![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.a235075dab8b.png)
+![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.527c9244531a.png)
 
 <sub>Solange es im Umlauf ist - das Dokument ist für alle eingefroren, in seinen Details steht, wer unterschrieben hat</sub>
 
@@ -883,7 +892,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 </td>
 <td width="50%" valign="top">
 
-![Die Installationsprüfung, geöffnet über den Link eines Stores](https://filex.sh/shots/store/store-review-1440.36cf3bbc2a50.png)
+![Die Installationsprüfung, geöffnet über den Link eines Stores](https://filex.sh/shots/store/store-review-1440.3f717d71fb42.png)
 
 <sub>Installation aus einem Store - dieselbe Prüfung, markiert mit **Aus dem Store …**; der Lizenzschlüssel der kostenpflichtigen App ist nur an seinen ersten Zeichen zu sehen ([Installation aus einem Store](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 
@@ -1032,7 +1041,7 @@ gibt jeder Funktion einen Eintrag mit ihren Grenzen und ihrer Anleitung.
 | **Ohne Browser** | Derselbe Baum, bereitgestellt als S3, SFTP, FTPS, NFSv3 und WebDAV - ein Verschieben oder Löschen dort ist neben einem Speicher-Scan so sicher wie eines in der Weboberfläche -, dazu `filex mount` über HTTPS ([Protokolle](docs/PROTOCOLS.md)) |
 | **Anmeldung** | OIDC, LDAP / Active Directory, Windows- und Linux-Konten, die Begrenzung der Anmeldeversuche und eine Bot-Prüfung bei der Anmeldung und den öffentlichen Formularen - Turnstile oder reCAPTCHA, mit einem lokalen Proof of Work, wenn der Anbieter nicht erreichbar ist ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [Betriebssystemkonten](docs/OS-LOGIN.md), [Bot-Schutz](docs/BOT-PROTECTION.md)) |
 | **Personen und Zugriff** | Rollen und Berechtigungen pro Person, Gruppen, Zugriff pro Ordner und native Mandantenfähigkeit ([Berechtigungen](docs/PERMISSIONS.md), [Gruppen](docs/GROUPS.md), [Mandantenfähigkeit](docs/MULTI-TENANCY.md)) |
-| **Freigaben** | Öffentliche Links mit PIN, Ablaufdatum und Download-Limit, Dateianforderungen und Einladungen zur Freigabe per E-Mail ([Freigaben](docs/SHARING.md)) |
+| **Freigaben** | Öffentliche Links mit PIN, Ablaufdatum und Download-Limit, Dateianforderungen und Einladungen zur Freigabe per E-Mail ([Freigaben](docs/SHARING.md)); Screenshot-Werkzeuge und Skripte, die hochladen und einen Link zurückbekommen ([Uploader](docs/UPLOADERS.md)); jede E-Mail und jede öffentliche Seite als bearbeitbare Vorlage ([Vorlagen](docs/TEMPLATES.md)) |
 | **Schutz** | Papierkorb und Versionsverlauf, optionaler ClamAV-Scan, Ende-zu-Ende-verschlüsselte Ordner, Replikation auf einen zweiten Speicher (mit einer ersten Kopie dessen, was schon da ist) und ein Audit-Protokoll ([Papierkorb & Versionierung](docs/TRASH-VERSIONING.md), [Schutz](docs/PROTECTION.md), [E2E-Verschlüsselung](docs/E2E-ENCRYPTION.md), [Replikation](docs/REPLICATION.md), [Audit-Protokoll](docs/BACKEND.md#admin-audit-log)) |
 | **Vorschauen und Editoren** | Bilder, Video, Audio, PDF, Markdown, Code (Monaco), Office-Dokumente in der Office-Editor-App oder über ONLYOFFICE, draw.io-Diagramme, Mermaid-Diagramme, gezeichnet und als Text bearbeitet, 3D-Modelle und Archive in ZIP, 7z und TAR ([ONLYOFFICE](docs/ONLYOFFICE.md), [Archive](docs/ARCHIVES.md)) |
 | **Suche und Vorschaubilder** | Eingebettete Volltextsuche, die Berechtigungen beachtet, und Vorschaubilder für Bilder, Video, PDF, Ordner und Office-Dokumente - die der Office-Dokumente zeichnet auf dem Server die Engine der Office-Editor-App oder ein angebundenes ONLYOFFICE ([Suche](docs/SEARCH.md), [Vorschaubilder](docs/thumbnails.md)) |

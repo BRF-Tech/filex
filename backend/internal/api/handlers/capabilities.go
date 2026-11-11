@@ -46,6 +46,10 @@ type Capabilities struct {
 	// (`new_documents`). Told to a signed-in person only: which apps an
 	// instance runs is not a property of the build. Nil = none.
 	AppDocs func() []newdoc.Type
+	// ShortLinks answers whether this caller is offered "Get short link"
+	// (short_links.go): a shortener app runs and the caller holds its
+	// permission. Told to a signed-in person only. Nil = never.
+	ShortLinks func(r *http.Request) bool
 	/* wiring:e2 */
 	// E2EEscrow is the installation escrow PUBLIC key, or nil when escrow is
 	// off. It is published deliberately: the browser needs it to wrap a new
@@ -346,6 +350,9 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 		types = append(types, h.AppDocs()...)
 	}
 	merged["newdoc_types"] = types
+	if h.ShortLinks != nil && auth.UserFrom(r.Context()) != nil {
+		merged["short_links"] = map[string]any{"available": h.ShortLinks(r)}
+	}
 	// What the dialog says when a family of those types is held back (#217),
 	// in the reader's language: the CLIENT decides which family is missing
 	// (only it knows whether it can reach the document server, and whether an

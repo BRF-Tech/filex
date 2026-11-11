@@ -284,7 +284,7 @@ Todas las funciones del explorador, en detalle: [docs/FEATURES.md → The explor
 <tr>
 <td width="50%" valign="top">
 
-![La página de inicio de sesión con el tema del operador](https://filex.sh/shots/appearance/themed-signin-1440.ff6bb587c310.png)
+![La página de inicio de sesión con el tema del operador](https://filex.sh/shots/appearance/themed-signin-1440.3d21210a54da.png)
 
 <sub>…y la página de inicio de sesión, antes de que nadie haya iniciado sesión</sub>
 
@@ -352,7 +352,7 @@ Todas las funciones de almacenamiento y protocolos, en detalle: [docs/FEATURES.m
 </td>
 <td width="50%" valign="top">
 
-![Claves de API](https://filex.sh/shots/sidenav/apikeys-minted-1440.1870c90ae20a.png)
+![Claves de API](https://filex.sh/shots/sidenav/apikeys-minted-1440.890f4cd92081.png)
 
 <sub>Claves de API - cree las suyas, en el explorador o en una integración (la sesión o el token de una persona; una integración servida a través de un proxy con un único token compartido de tipo *app* no recibe esta entrada)</sub>
 
@@ -384,8 +384,10 @@ Todas las funciones de almacenamiento y protocolos, en detalle: [docs/FEATURES.m
 
 **Comparta con un enlace que puede limitar y revocar. Deshaga una eliminación o una sobrescritura equivocadas.**
 
-- Enlaces públicos con PIN, caducidad y límite de descargas, y solicitudes de archivos para lo que
-  tiene que llegar. **Mis enlaces** lista cada enlace que usted creó, para copiarlo o revocarlo.
+- Enlaces públicos con PIN, caducidad y límite de descargas, solicitudes de archivos para lo que
+  tiene que llegar y **cargadores**: una clave para ShareX, curl o un script que deja archivos en
+  una carpeta y responde a cada uno con un enlace. **Mis enlaces** lista cada enlace que usted
+  creó, para copiarlo o revocarlo.
 - Comparta una carpeta con una persona o un grupo y aparece en su **Compartido conmigo**. El
   almacenamiento necesita activado el **Control de acceso por elemento (RBAC)**, que no lo está de
   forma predeterminada.
@@ -407,7 +409,7 @@ Todas las funciones de uso compartido y protección, en detalle: [docs/FEATURES.
 <tr>
 <td width="50%" valign="top">
 
-![Cuadro de diálogo Compartir](https://filex.sh/shots/share-modal.c3b9326fa9fa.png)
+![Cuadro de diálogo Compartir](https://filex.sh/shots/share-modal.b32887acb9ed.png)
 
 <sub>Uso compartido - PIN, caducidad, límite de descargas, `curl` de una línea</sub>
 
@@ -439,7 +441,7 @@ Todas las funciones de uso compartido y protección, en detalle: [docs/FEATURES.
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Enlaces compartidos, con el menú Acciones de una fila abierto](https://filex.sh/shots/signing/admin-table-actions-1440.bc923c4374cf.png)
+![Admin → Enlaces compartidos, con el menú Acciones de una fila abierto](https://filex.sh/shots/signing/admin-table-actions-1440.c28cec3a103e.png)
 
 <sub>Cada tabla de administración - un único menú **Acciones** fijado por fila, el mismo menú que abre el ⋮ del explorador</sub>
 
@@ -527,7 +529,7 @@ Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → Peop
 <tr>
 <td width="50%" valign="top">
 
-![El formulario de inicio de sesión de una cuenta bloqueada](https://filex.sh/shots/loginsecurity/login-locked-1440.1c2889094cd7.png)
+![El formulario de inicio de sesión de una cuenta bloqueada](https://filex.sh/shots/loginsecurity/login-locked-1440.c115aaa2f273.png)
 
 <sub>…y lo que dice el formulario de inicio de sesión de una cuenta bloqueada, con el tiempo restante del bloqueo en su botón</sub>
 
@@ -550,7 +552,7 @@ Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → Peop
 </td>
 <td width="50%" valign="top">
 
-![El formulario de inicio de sesión con la verificación sobre su botón](https://filex.sh/shots/botprotection/login-captcha-dark-1440.91b31e625fe1.png)
+![El formulario de inicio de sesión con la verificación sobre su botón](https://filex.sh/shots/botprotection/login-captcha-dark-1440.5cf41f05dd02.png)
 
 <sub>…y el formulario de inicio de sesión, con la verificación sobre su botón</sub>
 
@@ -559,14 +561,14 @@ Todas las funciones de personas y acceso, en detalle: [docs/FEATURES.md → Peop
 <tr>
 <td width="50%" valign="top">
 
-![Página de inicio de la demo](https://filex.sh/shots/demo-landing.a79e6941c259.png)
+![Página de inicio de la demo](https://filex.sh/shots/demo-landing.4a147bc884c8.png)
 
 <sub>Página de inicio de la demo</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![El panel Ajustes del menú de administración, abierto encima de Admin → Ajustes → General](https://filex.sh/shots/megamenu/settings-panel-1440.42b03e9a539f.png)
+![El panel Ajustes del menú de administración, abierto encima de Admin → Ajustes → General](https://filex.sh/shots/megamenu/settings-panel-1440.e51582dc1f4f.png)
 
 <sub>El menú de administración - todas las páginas en cuatro paneles, **Archivos y almacenamiento**, **Personas**, **Ajustes** (General, Seguridad y datos, Procesamiento de archivos e integraciones) y **Mantenimiento y registros**, con una línea breve debajo de cada una; un teléfono recibe las mismas páginas en un panel deslizante ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
 
@@ -744,6 +746,15 @@ filex pone sus cambios en un solo orden sin leerlos, y quien solo puede leer lo 
 puede abrir un archivo de una **carpeta cifrada**, que su navegador descifra para ella y vuelve a
 cifrar antes de guardarlo.
 
+Una aplicación también puede pedir que se la configure una vez antes de ejecutarse - sus
+propias preguntas, las direcciones en las que responde, quién puede usarla -, guardar un pequeño
+almacén de datos propio junto a la base de datos de filex y responder en direcciones públicas
+propias. Una aplicación con el rol de **acortador de enlaces** acorta los enlaces: **Obtener
+enlace corto** en el diálogo de compartir, en las solicitudes de archivos, en Mis enlaces y en
+cada subida de un cargador
+([docs/APP-PLUGINS.md → Short links](docs/APP-PLUGINS.md#short-links),
+[para autores de aplicaciones](docs/APP-PLUGINS-API.md#public-routes-060)).
+
 Un paquete de idioma también es una aplicación: el español, el alemán y el francés se distribuyen
 como ejemplos.
 
@@ -794,7 +805,7 @@ la genera filex, y el enlace que recibe el socio es un enlace compartido corrien
 <tr>
 <td width="50%" valign="top">
 
-![El documento bloqueado, con su panel Firmas abierto](https://filex.sh/shots/signing/sign-status-1440.a235075dab8b.png)
+![El documento bloqueado, con su panel Firmas abierto](https://filex.sh/shots/signing/sign-status-1440.527c9244531a.png)
 
 <sub>Mientras está en curso - el documento congelado para todos y, en sus detalles, quién ha firmado</sub>
 
@@ -881,7 +892,7 @@ la genera filex, y el enlace que recibe el socio es un enlace compartido corrien
 </td>
 <td width="50%" valign="top">
 
-![La revisión de instalación abierta desde el enlace de una tienda](https://filex.sh/shots/store/store-review-1440.36cf3bbc2a50.png)
+![La revisión de instalación abierta desde el enlace de una tienda](https://filex.sh/shots/store/store-review-1440.3f717d71fb42.png)
 
 <sub>Instalar desde una tienda - la misma revisión, marcada **De la tienda**, con la clave de licencia de la aplicación de pago mostrada por sus primeros caracteres ([Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 
@@ -1031,7 +1042,7 @@ Empiece por [Instalación](docs/INSTALLATION.md), [Configuración](docs/CONFIGUR
 | **Sin navegador** | El mismo árbol servido como S3, SFTP, FTPS, NFSv3 y WebDAV - un movimiento o una eliminación allí es tan seguro junto a un escaneo del almacenamiento como uno en la interfaz web - más `filex mount` por HTTPS ([Protocolos](docs/PROTOCOLS.md)) |
 | **Inicio de sesión** | OIDC, LDAP / Active Directory, cuentas de Windows y Linux, límites de intentos de inicio de sesión y una verificación contra bots en el inicio de sesión y los formularios públicos - Turnstile o reCAPTCHA, con una prueba de trabajo local cuando el proveedor no responde ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [Cuentas del sistema operativo](docs/OS-LOGIN.md), [Protección contra bots](docs/BOT-PROTECTION.md)) |
 | **Personas y acceso** | Roles y permisos por persona, grupos, acceso por carpeta y multiinquilino nativo ([Permisos](docs/PERMISSIONS.md), [Grupos](docs/GROUPS.md), [Multiinquilino](docs/MULTI-TENANCY.md)) |
-| **Uso compartido** | Enlaces públicos con PIN, caducidad y límite de descargas, solicitudes de archivos e invitaciones para compartir por correo electrónico ([Uso compartido](docs/SHARING.md)) |
+| **Uso compartido** | Enlaces públicos con PIN, caducidad y límite de descargas, solicitudes de archivos e invitaciones para compartir por correo electrónico ([Uso compartido](docs/SHARING.md)); herramientas de captura y scripts que suben un archivo y reciben un enlace ([Cargadores](docs/UPLOADERS.md)); cada correo y cada página pública como plantilla editable ([Plantillas](docs/TEMPLATES.md)) |
 | **Protección** | Papelera e historial de versiones, análisis opcional con ClamAV, carpetas cifradas de extremo a extremo, replicación a un segundo almacenamiento (con una copia inicial de lo que ya hay) y un registro de auditoría ([Papelera y versiones](docs/TRASH-VERSIONING.md), [Protección](docs/PROTECTION.md), [Cifrado E2E](docs/E2E-ENCRYPTION.md), [Replicación](docs/REPLICATION.md), [Registro de auditoría](docs/BACKEND.md#admin-audit-log)) |
 | **Visores y editores** | Imágenes, video, audio, PDF, Markdown, código (Monaco), documentos de Office en la aplicación de editor ofimático o mediante ONLYOFFICE, diagramas de draw.io, diagramas de Mermaid dibujados y editados como texto, modelos 3D, y archivos comprimidos en ZIP, 7z y TAR ([ONLYOFFICE](docs/ONLYOFFICE.md), [Archivos comprimidos](docs/ARCHIVES.md)) |
 | **Búsqueda y miniaturas** | Búsqueda de texto completo integrada que respeta los permisos, y miniaturas para imágenes, video, PDF, carpetas y documentos de Office - las de Office las dibuja en el servidor el motor de la app de editor de Office o un ONLYOFFICE conectado ([Búsqueda](docs/SEARCH.md), [Miniaturas](docs/thumbnails.md)) |

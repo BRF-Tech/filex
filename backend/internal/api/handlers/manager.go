@@ -37,11 +37,15 @@ import (
 	"github.com/brf-tech/filex/backend/internal/thumb"
 
 	"github.com/brf-tech/filex/backend/internal/httpx"
+	"github.com/brf-tech/filex/backend/internal/templates"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
 
 // Manager handles read-only browsing endpoints under /api/files/manager.
 type Manager struct {
+	// Templates renders the "preparing your download" page (page.cache_wait);
+	// nil = filex's own template.
+	Templates       *templates.Renderer
 	Store           db.Store
 	StorageResolver func(int64) (storage.Driver, error)
 	// Index is consulted by `vfSearch` BEFORE falling back to SQL LIKE.
@@ -705,7 +709,7 @@ func (h *Manager) streamBody(w http.ResponseWriter, r *http.Request, s *model.St
 	}
 	if asAttachment && !mode.linked && r.Header.Get("Range") == "" && (wantsHTML(r) || acceptsPrepare(r)) {
 		if prep := src.Prepare(r.Context(), stat); prep != nil && !prep.Ready {
-			writeCachePreparing(w, r, path.Base(rel), prep)
+			writeCachePreparing(w, r, h.Templates, path.Base(rel), prep)
 			return
 		}
 	}

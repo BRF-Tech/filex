@@ -51,6 +51,11 @@ var notConfinedByTheMiddleware = map[string]string{
 	// RequireAdminToken, and both refuse a `root:` token outright
 	// (auth.TokenMayAdminister), so no confined caller ever reaches it.
 	"Replica.SetLinkFolder.body.folder": "a folder name on a replication target (admin-only, a root: token is refused before it), not a path in a storage",
+	// POST/PATCH /api/auth/uploaders (0.60): the folder an uploader writes
+	// into. The route is not under confine.Middleware; the handler resolves
+	// storage + folder through aiOps.resolveStorage, which enforces a `root:`
+	// key's root itself (uploaders.go settle), before the folder is made.
+	"uploaderRequest.folder": "an uploader's folder, confined in the handler by aiOps.resolveStorage (uploaders.go settle), on a route the middleware does not wrap",
 }
 
 // decodedBody is one request body a handler decodes: its type (or the

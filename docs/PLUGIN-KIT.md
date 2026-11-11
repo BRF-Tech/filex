@@ -345,8 +345,10 @@ if in.Context.Actor.Can("request") { // the id, not app.sign.request
 `Can` is false on a nil actor and on a filex that does not say, so an
 unknown answer leaves the hint out. It is a courtesy, not a gate - the door
 still decides, so never skip a check of your own because `Can` said yes.
-`plugintest` runs as an administrator and holds every permission you declare;
-set `h.Actor.Permissions` to test a screen for somebody who holds fewer.
+`plugintest` runs as an administrator (`Actor.Role` `"admin"`, as filex
+sends it; everybody else is `"user"`) and holds every permission you
+declare; set `h.Actor.Permissions` to test a screen for somebody who holds
+fewer.
 
 ## The exports
 
@@ -1218,12 +1220,14 @@ whose placeholders differ from the English is **not used** - the recipient
 gets the English line with the link or the PIN in it, rather than your line
 without it. Run the validator and it will not come to that.
 
-Emails are plain text, one key per line or paragraph (a mail is assembled
-from the facts it has - a PIN or none, a size or none), so every key is a
-whole sentence. A subject is one line. filex labels each mail with its
-language (`Content-Language`) and encodes a non-ASCII subject for the mail
-system; a right-to-left language needs nothing more - plain text carries no
-direction, and mail clients lay each paragraph out by its own letters.
+A mail is its template's HTML with a plain-text part
+([TEMPLATES.md](TEMPLATES.md)), and the template puts one key per line or
+paragraph (a mail is assembled from the facts it has - a PIN or none, a size
+or none), so every key is a whole sentence. A key is text, not markup: the
+template escapes it. A subject is one line. filex labels each mail with its
+language (`Content-Language`), sets the HTML's `dir` from it and encodes a
+non-ASCII subject for the mail system; a right-to-left language needs nothing
+more.
 
 The public pages escape your text; the one piece of markup is the footer's
 `{filex}`, which becomes the link to filex.sh - keep it exactly once.
@@ -1558,6 +1562,101 @@ module, so the module's describe is what vouches for the interface: a module
 that declares no interface, or another one, is refused there. Anywhere, a
 module that describes a different interface than its manifest is refused.
 Build the interface first, pin its hash, then build the module.
+
+## A setup wizard, your own data, public routes (filex 0.60)
+
+Three things an app can ask for that go together - a link shortener uses all
+three - each usable on its own. Declare them with `"filex": ">=0.60.0"`. The
+wire contract is [APP-PLUGINS-API.md → Setting an app up](APP-PLUGINS-API.md#setting-an-app-up-060).
+
+### Asking once, before you run: `setup`
+
+```json
+"setup": { "view": "setup", "reset": { "warning": { "en": "Every short link stops working.", "tr": "…" } } },
+"views": [ { "id": "setup", "placement": "setup", "label": { "en": "Set up" } } ]
+```
+
+Your app installs into **Needs setup** and nothing of it runs until an
+administrator finishes the wizard. Your `setup` view is its first step: an
+ordinary surface (`Views["setup"]`), answered for the administrator, that
+may keep what it was told with `DataPut(wire.DataApp, …)`; answer
+`done: true` when your part is finished. filex adds its own steps (your
+routes' addresses, who holds your permissions). **Reconfigure** erases
+everything you keep and runs the wizard again, so a decision the rest of the
+app depends on (how codes are made) belongs here, not in `settings`. Your
+optional `Reset` is told first.
+
+### Your own data: `data`
+
+```go
+rev, err := pluginkit.DataPut(wire.DataTenant, "c/"+key, record, pluginkit.DataPutOptions{IfAbsent: true})
+if pluginkit.IsBusy(err) { /* somebody holds that key: draw another */ }
+v, rev, found, err := pluginkit.DataGet(wire.DataTenant, "c/"+key)
+items, next, err := pluginkit.DataList(wire.DataTenant, "u/"+owner+"/", "", 100)
+n, err := pluginkit.DataIncr(wire.DataTenant, "n/"+key, 1)
+```
+
+A key-value store of yours, kept outside filex's database and erased with
+you. Keys are printable ASCII in byte order (build indexes from key
+patterns; hex-encode a person's text), values UTF-8 up to 64 KiB.
+`wire.DataTenant` is the call's tenant - filex decides it, you cannot name
+another - and `wire.DataApp` is every tenant's.
+
+### Answering addresses: `routes`
+
+```json
+"permissions": ["public_routes", "data"],
+"routes": [ { "id": "go", "label": { "en": "Short links" }, "default_prefix": "l" } ]
+```
+
+```go
+pluginkit.Run(&pluginkit.Plugin{
+    Route: func(in *wire.RouteInput) (*wire.RouteOutput, error) {
+        code, ok := shortcode.DecodeSegment(in.Path)
+        // ... look it up; count only when in.Countable
+        return &wire.RouteOutput{Redirect: target}, nil // or Page, or Miss: true
+    },
+})
+```
+
+The administrator gives each route its address in the wizard. A visit may
+read and count your data and ask `LinkLive`, nothing else. Answer **`Miss`**
+for every address that leads nowhere, whatever the reason: filex draws one
+page for all of them and holds a guesser back, so do not explain a miss.
+⚠ `Route` and `Shorten` run on **warm instances**: your globals survive
+from one call to the next, and the call before was somebody else's.
+
+### The link-shortener role, and `shortcode`
+
+```json
+"permissions": ["link_shortener", "public_routes", "data"],
+"link_shortener": { "route": "go", "requires": "use" }
+```
+
+`Shorten` is handed one of filex's links (`in.Target`, with `Link` naming
+it across calls) and the route's bases; answer an address on one of them,
+the same one again for the same link, and with `in.Existing` only an
+address it already has. `pkg/pluginkit/shortcode` is the kit for the codes:
+the alphabets a setup offers (digits, letters and digits, URL-safe, emoji, a
+custom set), case folding (`İ`, `I`, `ı` and `i` are one letter when case
+does not matter), the one canonical form a code is stored and looked up by
+(`Canonical`, `Key`), `crypto/rand` generation, and `Bits` / `GuessDays` /
+`MinBits` (45) for the setup screen. Test with
+`plugintest.Harness.Route` / `Shorten` / `Reset`; the fake host keeps your
+data with filex's rules (`Host.Tenant` plays another tenant), and
+`Harness.Routes` is what every screen is handed as `Context.Routes`.
+
+**A complete example**: [`backend/examples/app-shortlinks`](../backend/examples/app-shortlinks/main.go)
+is the smallest app that holds the link-shortener role - a setup step that
+keeps its answer in the app's data, `shorten`, `route` with its `+` preview,
+and the host taken as a parameter so `plugintest.NewFor` can test it:
+
+```bash
+cd backend
+go test ./examples/app-shortlinks/
+GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o shortlinks.wasm ./examples/app-shortlinks
+# Admin → Plugins → Apps → Install an app → Upload files: shortlinks.wasm + examples/app-shortlinks/filex-app.json
+```
 
 ## Testing with plugintest
 

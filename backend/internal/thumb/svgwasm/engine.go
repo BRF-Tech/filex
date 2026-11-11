@@ -38,12 +38,13 @@ import (
 	"time"
 
 	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
 	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/gobolditalic"
 	"golang.org/x/image/font/gofont/goitalic"
 	"golang.org/x/image/font/gofont/gomono"
 	"golang.org/x/image/font/gofont/goregular"
+
+	"github.com/brf-tech/filex/backend/internal/wasmguest"
 )
 
 //go:embed engine.wasm.gz
@@ -150,29 +151,29 @@ func Render(ctx context.Context, svg []byte, maxW, maxH int) (image.Image, error
 		return nil, fmt.Errorf("svg engine: %w", err)
 	}
 	defer mod.Close(context.WithoutCancel(ctx))
-	g := guest{ctx: ctx, mod: mod}
+	g := wasmguest.Guest{Ctx: ctx, Mod: mod}
 	for _, f := range fonts {
-		p := g.put(f)
-		g.call("fx_add_font", p, uint64(len(f)))
+		p := g.Put("fx_alloc", f)
+		g.Call("fx_add_font", p, uint64(len(f)))
 	}
 	fam := []byte(generic)
-	g.call("fx_set_families", g.put(fam), uint64(len(fam)))
-	src := g.put(svg)
-	rc := g.call("fx_render", src, uint64(len(svg)), uint64(maxW), uint64(maxH))
-	if g.err != nil {
+	g.Call("fx_set_families", g.Put("fx_alloc", fam), uint64(len(fam)))
+	src := g.Put("fx_alloc", svg)
+	rc := g.Call("fx_render", src, uint64(len(svg)), uint64(maxW), uint64(maxH))
+	if g.Err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("svg: %w", ctx.Err())
 		}
-		return nil, fmt.Errorf("svg engine: %w", g.err)
+		return nil, fmt.Errorf("svg engine: %w", g.Err)
 	}
 	if rc != 0 {
-		msg := g.read(g.call("fx_err_ptr"), g.call("fx_err_len"))
+		msg := g.Read(g.Call("fx_err_ptr"), g.Call("fx_err_len"))
 		return nil, fmt.Errorf("svg: %s", string(msg))
 	}
-	w, h := int(g.call("fx_out_w")), int(g.call("fx_out_h"))
-	pix := g.read(g.call("fx_out_ptr"), g.call("fx_out_len"))
-	if g.err != nil {
-		return nil, fmt.Errorf("svg engine: %w", g.err)
+	w, h := int(g.Call("fx_out_w")), int(g.Call("fx_out_h"))
+	pix := g.Read(g.Call("fx_out_ptr"), g.Call("fx_out_len"))
+	if g.Err != nil {
+		return nil, fmt.Errorf("svg engine: %w", g.Err)
 	}
 	if w <= 0 || h <= 0 || w > maxW || h > maxH || len(pix) != w*h*4 {
 		return nil, fmt.Errorf("svg engine: unexpected output %dx%d (%d bytes)", w, h, len(pix))
@@ -180,54 +181,4 @@ func Render(ctx context.Context, svg []byte, maxW, maxH int) (image.Image, error
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	copy(img.Pix, pix)
 	return img, nil
-}
-
-// guest calls into one instance; the first error sticks and every call after
-// it is a no-op, so Render reads as a straight line.
-type guest struct {
-	ctx context.Context
-	mod api.Module
-	err error
-}
-
-func (g *guest) call(name string, args ...uint64) uint64 {
-	if g.err != nil {
-		return 0
-	}
-	f := g.mod.ExportedFunction(name)
-	if f == nil {
-		g.err = fmt.Errorf("the engine has no %s", name)
-		return 0
-	}
-	res, err := f.Call(g.ctx, args...)
-	if err != nil {
-		g.err = err
-		return 0
-	}
-	if len(res) == 0 {
-		return 0
-	}
-	return res[0]
-}
-
-func (g *guest) put(b []byte) uint64 {
-	p := g.call("fx_alloc", uint64(len(b)))
-	if g.err == nil && !g.mod.Memory().Write(uint32(p), b) {
-		g.err = errors.New("the engine's memory is too small")
-	}
-	return p
-}
-
-func (g *guest) read(p, n uint64) []byte {
-	if g.err != nil {
-		return nil
-	}
-	b, ok := g.mod.Memory().Read(uint32(p), uint32(n))
-	if !ok {
-		g.err = errors.New("the engine answered outside its memory")
-		return nil
-	}
-	out := make([]byte, len(b))
-	copy(out, b)
-	return out
 }

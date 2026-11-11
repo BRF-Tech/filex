@@ -53,7 +53,7 @@
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { AssistantMe } from '../lib/assistant';
-import { Bell, ShieldCheck, SlidersHorizontal, Sparkles, User as UserIcon, X } from 'lucide-vue-next';
+import { Bell, ShieldCheck, SlidersHorizontal, Sparkles, UploadCloud, User as UserIcon, X } from 'lucide-vue-next';
 import ChoiceButtons, { type ChoiceOption } from './ChoiceButtons.vue';
 import ChoiceSelect, { type SelectOption } from './ChoiceSelect.vue';
 import { ONLYOFFICE_VIEWER, openHandlersFor, type OpenHandler } from '../lib/appViewer';
@@ -67,6 +67,7 @@ import ProductVersion from './ProductVersion.vue';
 import ThemePalette from './ThemePalette.vue';
 import TimeZonePicker from './TimeZonePicker.vue';
 import ShortcutSettings from './ShortcutSettings.vue';
+import UploadersPanel from './UploadersPanel.vue';
 import { formatInstant, localeTag, useLocale } from '../composables/useLocale';
 import { useSystemDark } from '../composables/useSystemDark';
 import { DEFAULT_BRAND_NAME } from '../composables/usePublicBranding';
@@ -117,7 +118,7 @@ const props = defineProps<{
   /** Everything this dialog cannot know by itself (lib/userSettingsHost). */
   host: UserSettingsHost;
   /** The pane to open on (the admin Notifications page opens `notifications`). */
-  initialSection?: 'profile' | 'preferences' | 'notifications' | 'security' | 'ai';
+  initialSection?: 'profile' | 'preferences' | 'notifications' | 'security' | 'uploaders' | 'ai';
 }>();
 const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>();
 
@@ -127,7 +128,7 @@ const { t, formatSize } = useLocale(() => props.host.locale);
  *  nobody set one (#219). The install row and the push rows say it. */
 const appName = computed(() => props.host.brandName?.trim() || DEFAULT_BRAND_NAME);
 
-type Section = 'profile' | 'preferences' | 'notifications' | 'security' | 'ai';
+type Section = 'profile' | 'preferences' | 'notifications' | 'security' | 'uploaders' | 'ai';
 
 const section = ref<Section>(props.initialSection ?? 'profile');
 /**
@@ -142,6 +143,9 @@ const sections: { key: Section; icon: typeof UserIcon }[] = [
   { key: 'preferences', icon: SlidersHorizontal },
   { key: 'notifications', icon: Bell },
   { key: 'security', icon: ShieldCheck },
+  // 0.60 - the person's uploaders (UploadersPanel): drawn where the host
+  // gives their endpoints, which every front door does.
+  ...(props.host.api.uploaders ? [{ key: 'uploaders' as Section, icon: UploadCloud }] : []),
   { key: 'ai', icon: Sparkles },
 ];
 
@@ -2197,6 +2201,14 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
           <!-- The state as the server says it, who reads what the person
                writes, how long it is kept, their one choice, and their
                history - gone with one confirmed click. -->
+          <section
+            v-else-if="section === 'uploaders'"
+            class="fx-us__pane"
+            data-testid="user-settings-uploaders"
+          >
+            <UploadersPanel :host="host" />
+          </section>
+
           <section v-else class="fx-us__pane" data-testid="user-settings-ai">
             <p class="fx-us__ai-state" data-testid="user-settings-ai-state">{{ t(assistantStateKey) }}</p>
             <div v-if="assistantProvider" class="fx-us__field">

@@ -90,7 +90,7 @@ test.describe.serial('share mail — the server writes it from the link', () => 
     expect(out.pin_withheld).toBe(true);
     expect(out.message).toContain('The PIN is not in the email');
 
-    const { h, body } = await waitMail(sink, before + 1);
+    const { h, body, html } = await waitMail(sink, before + 1);
     expect(h.Subject).toBe(`${FILE} has been shared with you`);
     expect(body).toContain(`Download it here:\n${link.url}`);
     expect(body).toContain(`File: ${FILE}`);
@@ -98,6 +98,14 @@ test.describe.serial('share mail — the server writes it from the link', () => 
     const rest = body.split(link.token).join('');
     for (const never of ['phish.example', '0000', String(link.password_pin), '365', 'Folder:']) {
       expect(rest, never).not.toContain(never);
+    }
+    // The HTML part says the same and holds back the same (its stylesheet has
+    // colours, so '0000' is not a question for it).
+    expect(html).toContain(`File: ${FILE}`);
+    expect(html).toContain(`href="${link.url}"`);
+    const restHtml = html.split(link.token).join('');
+    for (const never of ['phish.example', String(link.password_pin), 'Folder:']) {
+      expect(restHtml, never).not.toContain(never);
     }
   });
 

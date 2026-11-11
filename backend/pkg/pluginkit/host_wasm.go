@@ -130,3 +130,30 @@ func hostSignInfo(b []byte) []byte        { return call(hostSignInfoRaw, b) }
 func hostCertIssue(b []byte) []byte       { return call(hostCertIssueRaw, b) }
 func hostSign(b []byte) []byte            { return call(hostSignRaw, b) }
 func hostKeyDestroy(b []byte) []byte      { return call(hostKeyDestroyRaw, b) }
+
+// The app's own data, and whether one of filex's links is still open (0.60).
+
+//go:wasmimport extism:host/user data_get
+func hostDataGetRaw(ptr uint64) uint64
+
+//go:wasmimport extism:host/user data_put
+func hostDataPutRaw(ptr uint64) uint64
+
+//go:wasmimport extism:host/user data_delete
+func hostDataDeleteRaw(ptr uint64) uint64
+
+//go:wasmimport extism:host/user data_list
+func hostDataListRaw(ptr uint64) uint64
+
+//go:wasmimport extism:host/user data_incr
+func hostDataIncrRaw(ptr uint64) uint64
+
+//go:wasmimport extism:host/user link_live
+func hostLinkLiveRaw(ptr uint64) uint64
+
+func hostDataGet(b []byte) []byte    { return call(hostDataGetRaw, b) }
+func hostDataPut(b []byte) []byte    { return call(hostDataPutRaw, b) }
+func hostDataDelete(b []byte) []byte { return call(hostDataDeleteRaw, b) }
+func hostDataList(b []byte) []byte   { return call(hostDataListRaw, b) }
+func hostDataIncr(b []byte) []byte   { return call(hostDataIncrRaw, b) }
+func hostLinkLive(b []byte) []byte   { return call(hostLinkLiveRaw, b) }

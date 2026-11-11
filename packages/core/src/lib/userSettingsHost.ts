@@ -29,6 +29,7 @@ import type { PluginActionsResponse } from '../types/Plugins';
 import type { WebPushController } from './webPush';
 import type { AccountCheckAnswer, AccountCheckQuery } from './accountRules';
 import type { AssistantCapability, AssistantMe, AssistantPrefs } from './assistant';
+import type { UploaderMade, UploaderRequest, UploaderSaved, UploadersList } from '../types/Uploaders';
 
 /** The signed-in person, as the dialog reads and writes it. */
 export interface SettingsUser {
@@ -143,6 +144,17 @@ export interface UserSettingsApi {
   setAssistantPrefs?(prefs: AssistantPrefs): Promise<AssistantPrefs>;
   /** `DELETE /api/files/assistant/conversations`: every conversation, gone. */
   clearAssistantHistory?(): Promise<void>;
+  /**
+   * Uploaders (0.60) - `/api/auth/uploaders`: the person's upload
+   * destinations, each a key for one program (UploadersPanel). Absent: the
+   * Uploaders tab is not drawn.
+   */
+  uploaders?(): Promise<UploadersList>;
+  createUploader?(req: UploaderRequest): Promise<UploaderMade>;
+  updateUploader?(id: number, req: UploaderRequest): Promise<UploaderSaved>;
+  /** A new key; the old one stops working at once. */
+  rotateUploaderKey?(id: number): Promise<UploaderMade>;
+  deleteUploader?(id: number): Promise<void>;
 }
 
 export type SettingsThemeMode = 'light' | 'auto' | 'dark';
@@ -292,6 +304,13 @@ export function userSettingsApi(
     setAssistantPrefs: (prefs) => jsonFetch<AssistantPrefs>(`${root}/api/files/assistant/prefs`, json('PUT', prefs)),
     clearAssistantHistory: async () => {
       await jsonFetch(`${root}/api/files/assistant/conversations`, json('DELETE'));
+    },
+    uploaders: () => jsonFetch<UploadersList>(`${root}/api/auth/uploaders`),
+    createUploader: (req) => jsonFetch<UploaderMade>(`${root}/api/auth/uploaders`, json('POST', req)),
+    updateUploader: (id, req) => jsonFetch<UploaderSaved>(`${root}/api/auth/uploaders/${id}`, json('PATCH', req)),
+    rotateUploaderKey: (id) => jsonFetch<UploaderMade>(`${root}/api/auth/uploaders/${id}/key`, json('POST')),
+    deleteUploader: async (id) => {
+      await jsonFetch(`${root}/api/auth/uploaders/${id}`, json('DELETE'));
     },
   };
 }

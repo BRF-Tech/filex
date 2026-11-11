@@ -36,13 +36,19 @@ import (
 const (
 	OriginManager = "manager" // browser SPA / manager + chunked upload
 	OriginAI      = "ai"      // /api/ai REST + MCP tools (write, zip, unzip)
-	OriginShareX  = "sharex"  // ShareX capture upload
-	OriginDAV     = "dav"     // WebDAV surface
-	OriginOps     = "ops"     // async ops worker (copy/move/delete)
-	OriginS3      = "s3"      // S3-compatible endpoint (internal/s3api)
-	OriginSFTP    = "sftp"    // SFTP endpoint (internal/sftpsrv)
-	OriginFTP     = "ftp"     // FTPS endpoint (internal/ftpsrv)
-	OriginNFS     = "nfs"     // NFSv3 endpoint (internal/nfssrv)
+	// OriginUploader is an uploader's write (POST /api/uploads, 0.60): the
+	// product names the door, not one of the programs that use it.
+	OriginUploader = "uploader"
+	// OriginShareX is the deprecated POST /api/sharex/upload. It keeps its
+	// value until that endpoint is removed, so a webhook consumer reading
+	// the old path sees no change.
+	OriginShareX = "sharex"
+	OriginDAV    = "dav"  // WebDAV surface
+	OriginOps    = "ops"  // async ops worker (copy/move/delete)
+	OriginS3     = "s3"   // S3-compatible endpoint (internal/s3api)
+	OriginSFTP   = "sftp" // SFTP endpoint (internal/sftpsrv)
+	OriginFTP    = "ftp"  // FTPS endpoint (internal/ftpsrv)
+	OriginNFS    = "nfs"  // NFSv3 endpoint (internal/nfssrv)
 	// OriginOnlyOffice is the document server writing an edited office
 	// document back through the save callback (internal/onlyoffice). It is a
 	// surface of its own and not "manager": the bytes are assembled and

@@ -260,7 +260,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![套用了运维人员主题的登录页](https://filex.sh/shots/appearance/themed-signin-1440.ff6bb587c310.png)
+![套用了运维人员主题的登录页](https://filex.sh/shots/appearance/themed-signin-1440.3d21210a54da.png)
 
 <sub>…登录页也是，这时还没有任何人登录</sub>
 
@@ -322,7 +322,7 @@ docker run -p 5212:5212 \
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.1870c90ae20a.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.890f4cd92081.png)
 
 <sub>API keys（API 密钥）：在资源管理器或嵌入端里签发你自己的密钥（凭某个人的会话或令牌；用一个共享的*应用*令牌做代理的嵌入端没有这个条目）</sub>
 
@@ -354,7 +354,7 @@ docker run -p 5212:5212 \
 
 **用一个可以设限、可以撤销的链接共享。删错了、覆盖错了，都能找回来。**
 
-- 带 PIN、过期时间和下载次数上限的公开链接，以及用来接收文件的文件请求。**My shares**（我的共享）列出你创建的每个链接，可以复制，也可以撤销。
+- 带 PIN、过期时间和下载次数上限的公开链接，用来接收文件的文件请求，以及 **Uploaders**（上传器）：给 ShareX、curl 或脚本用的一把密钥，把文件放进一个文件夹，并为每个文件返回一个链接。**My shares**（我的共享）列出你创建的每个链接，可以复制，也可以撤销。
 - 把一个文件夹与某个人或某个群组共享，它就出现在对方的 **Shared with me**（与我共享）下。存储需要开启 **Per-item access control (RBAC)**（按项目访问控制），这一项默认是关闭的。
 - 删除后在保留期限内可以恢复，写入会保留快照，两者都存放在你已经挂载的存储里。
 - 端到端加密文件夹：在浏览器中加密，服务器从不接收密钥。你允许的应用可以在你的浏览器里编辑这样的文件：浏览器为应用解密文件，并把应用保存的内容重新加密。可选对每个写入的文件进行 ClamAV 扫描。
@@ -370,7 +370,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![共享对话框](https://filex.sh/shots/share-modal.c3b9326fa9fa.png)
+![共享对话框](https://filex.sh/shots/share-modal.b32887acb9ed.png)
 
 <sub>共享：PIN、过期时间、下载次数上限、单行 `curl` 命令</sub>
 
@@ -402,7 +402,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.bc923c4374cf.png)
+![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.c28cec3a103e.png)
 
 <sub>管理面板里的每张表格：每行一个固定的 **Actions**（操作）菜单，与资源管理器的 ⋮ 打开的是同一个菜单</sub>
 
@@ -482,7 +482,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![账户被锁定时的登录表单](https://filex.sh/shots/loginsecurity/login-locked-1440.1c2889094cd7.png)
+![账户被锁定时的登录表单](https://filex.sh/shots/loginsecurity/login-locked-1440.c115aaa2f273.png)
 
 <sub>…以及账户被锁定时登录表单显示的内容，锁定的倒计时就在按钮上</sub>
 
@@ -505,7 +505,7 @@ docker run -p 5212:5212 \
 </td>
 <td width="50%" valign="top">
 
-![按钮上方带机器人校验的登录表单](https://filex.sh/shots/botprotection/login-captcha-dark-1440.91b31e625fe1.png)
+![按钮上方带机器人校验的登录表单](https://filex.sh/shots/botprotection/login-captcha-dark-1440.5cf41f05dd02.png)
 
 <sub>……以及登录表单，按钮上方是机器人校验</sub>
 
@@ -514,14 +514,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![演示首页](https://filex.sh/shots/demo-landing.a79e6941c259.png)
+![演示首页](https://filex.sh/shots/demo-landing.4a147bc884c8.png)
 
 <sub>演示首页</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![管理菜单的 Settings 面板已打开，覆盖在 Admin → Settings → General 之上](https://filex.sh/shots/megamenu/settings-panel-1440.42b03e9a539f.png)
+![管理菜单的 Settings 面板已打开，覆盖在 Admin → Settings → General 之上](https://filex.sh/shots/megamenu/settings-panel-1440.e51582dc1f4f.png)
 
 <sub>管理菜单：所有页面分在 **Files & storage**（文件与存储）、**People**（人员）、**Settings**（设置：General、Security & data、File processing & integrations）和 **Maintenance & records**（维护与记录）四个菜单面板里，每个页面下面都有一行简短说明；在手机上，同一批页面放在抽屉里（[docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md)）</sub>
 
@@ -661,6 +661,8 @@ import { FileManager } from '@brftech/filex-react';
 
 你允许的应用可以和其他人**一起**编辑一个文件：filex 的中继在不读取内容的情况下把大家的修改排成同一个顺序，只能阅读的人可以实时旁观；应用也可以打开**加密文件夹**中的文件，由你的浏览器为它解密，并在保存前重新加密。
 
+应用还可以要求在运行前先设置一次 - 它自己的问题、它响应的地址、谁可以使用它 - 在 filex 的数据库之外保存一个属于自己的小型数据存储，并响应属于自己的公开地址。拥有**短链接**角色的应用会把链接变短：共享对话框、文件请求、My shares 以及上传器的每次上传中都有 **Get short link**（[docs/APP-PLUGINS.md → Short links](docs/APP-PLUGINS.md#short-links)，[面向应用作者](docs/APP-PLUGINS-API.md#public-routes-060)）。
+
 语言包也是一种应用：西班牙语、德语和法语作为示例提供。
 
 几分钟就能装好一个：[docs/APP-PLUGINS.md → Install one](docs/APP-PLUGINS.md#install-one)。应用的全部功能：[docs/FEATURES.md → Apps](docs/FEATURES.md#apps)。
@@ -708,7 +710,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 <tr>
 <td width="50%" valign="top">
 
-![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.a235075dab8b.png)
+![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.527c9244531a.png)
 
 <sub>等待签署期间：文档对每个人都是冻结的，谁已签署，在文档的详细信息里可以看到</sub>
 
@@ -795,7 +797,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 </td>
 <td width="50%" valign="top">
 
-![从商店链接打开的安装审核](https://filex.sh/shots/store/store-review-1440.36cf3bbc2a50.png)
+![从商店链接打开的安装审核](https://filex.sh/shots/store/store-review-1440.3f717d71fb42.png)
 
 <sub>从商店安装：同样的审核，标为 **From store**（来自商店），付费应用的许可证密钥只显示开头几个字符（[Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store)）</sub>
 
@@ -900,7 +902,7 @@ filex 可以运行在独立的主机的根路径上，也可以运行在共用�
 | **不用浏览器** | 同一棵文件树以 S3、SFTP、FTPS、NFSv3 和 WebDAV 的形式提供访问（在那里移动或删除，与存储扫描并行时和在 Web 界面里一样安全），另有基于 HTTPS 的 `filex mount`（[协议](docs/PROTOCOLS.md)） |
 | **登录** | OIDC、LDAP / Active Directory、Windows 和 Linux 账户、登录尝试次数限制，以及登录和公开表单上的机器人校验 - Turnstile 或 reCAPTCHA，服务商不可达时改用本地工作量证明（[SSO](docs/SSO.md)、[LDAP](docs/LDAP.md)、[操作系统账户](docs/OS-LOGIN.md)、[机器人防护](docs/BOT-PROTECTION.md)） |
 | **人员与访问** | 角色和按人设置的权限、群组、按文件夹的访问权限，以及原生多租户（[权限](docs/PERMISSIONS.md)、[群组](docs/GROUPS.md)、[多租户](docs/MULTI-TENANCY.md)） |
-| **共享** | 带 PIN、过期时间和下载次数上限的公开链接，文件请求，以及通过电子邮件发送的共享邀请（[共享](docs/SHARING.md)） |
+| **共享** | 带 PIN、过期时间和下载次数上限的公开链接，文件请求，以及通过电子邮件发送的共享邀请（[共享](docs/SHARING.md)）；上传文件并拿回链接的截图工具和脚本（[Uploaders](docs/UPLOADERS.md)）；每封邮件和每个公开页面都是可编辑的模板（[模板](docs/TEMPLATES.md)） |
 | **防护** | 回收站和版本历史、可选的 ClamAV 扫描、端到端加密文件夹、复制到第二个存储（已有的文件会先做一次初始复制），以及审计日志（[回收站与版本管理](docs/TRASH-VERSIONING.md)、[防护](docs/PROTECTION.md)、[端到端加密](docs/E2E-ENCRYPTION.md)、[复制](docs/REPLICATION.md)、[审计日志](docs/BACKEND.md#admin-audit-log)） |
 | **查看器与编辑器** | 图片、视频、音频、PDF、Markdown、代码（Monaco）、在办公编辑器应用中或通过 ONLYOFFICE 处理的 Office 文档、draw.io 图表、可绘制也可作为文本编辑的 Mermaid 图表、3D 模型，以及 ZIP、7z 和 TAR 压缩包（[ONLYOFFICE](docs/ONLYOFFICE.md)、[压缩包](docs/ARCHIVES.md)） |
 | **搜索与缩略图** | 遵循权限的内嵌全文搜索，以及图片、视频、PDF、文件夹和 Office 文档的缩略图；Office 文档的缩略图由服务器上的 Office 编辑器应用引擎或已连接的 ONLYOFFICE 绘制（[搜索](docs/SEARCH.md)、[缩略图](docs/thumbnails.md)） |

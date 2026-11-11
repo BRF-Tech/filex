@@ -277,7 +277,7 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.ff6bb587c310.png)
+![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.3d21210a54da.png)
 
 <sub>…and the sign-in page, before anybody has signed in</sub>
 
@@ -345,7 +345,7 @@ Every storage and protocol feature in full: [docs/FEATURES.md → Storage and pr
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.1870c90ae20a.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.890f4cd92081.png)
 
 <sub>API keys - mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry)</sub>
 
@@ -377,8 +377,9 @@ Every storage and protocol feature in full: [docs/FEATURES.md → Storage and pr
 
 **Share with a link you can limit and revoke. Take back a wrong delete or a wrong overwrite.**
 
-- Public links with a PIN, an expiry and a download limit, and file requests for what should
-  come in. **My shares** lists every link you created, to copy or to revoke.
+- Public links with a PIN, an expiry and a download limit, file requests for what should come
+  in, and **uploaders**: a key for ShareX, curl or a script that drops files into one folder
+  and answers each with a link. **My shares** lists every link you created, to copy or revoke.
 - Share a folder with a person or a group and it appears under their **Shared with me**, or
   give them a whole storage from its **Access** section, on every protocol at once. The
   storage needs **Per-item access control (RBAC)** switched on, which it is not by default.
@@ -393,13 +394,13 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <p align="center"><img src="https://filex.sh/shots/public-share.0e3ba07f7c88.png" alt="A public share link, as its recipient sees it" width="860"></p>
 
 <details>
-<summary><b>Screenshots of sharing and protection</b> - the Share dialog, what the recipient sees, My shares, who may encrypt</summary>
+<summary><b>Screenshots of sharing and protection</b> - the Share dialog, what the recipient sees, My shares, who may encrypt, uploaders, mail and page templates</summary>
 
 <table>
 <tr>
 <td width="50%" valign="top">
 
-![Share modal](https://filex.sh/shots/share-modal.c3b9326fa9fa.png)
+![Share modal](https://filex.sh/shots/share-modal.b32887acb9ed.png)
 
 <sub>Sharing - PIN, expiry, download limit, one-line `curl`</sub>
 
@@ -431,7 +432,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.bc923c4374cf.png)
+![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.c28cec3a103e.png)
 
 <sub>Every admin table - one pinned **Actions** menu per row, the same menu the explorer's ⋮ opens</sub>
 
@@ -450,6 +451,22 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 ![The request for an encrypted folder, with its reason](https://filex.sh/shots/encryption/request-new-folder.e74894fba30f.png)
 
 <sub>…and the person's side: the request the New folder dialog opens - one new encrypted folder, asked of an administrator with a reason</sub>
+
+</td>
+<td width="50%" valign="top">
+
+![An uploader's key, shown once, with Download ShareX settings and the curl line](https://filex.sh/shots/uploaders/uploaders-key-dark-1440.9732aa72f56c.png)
+
+<sub>Uploaders - a key for ShareX, curl or a script, shown once: ShareX's settings file is made for you, and every upload answers with a public or a private link and a deletion link ([docs/UPLOADERS.md](docs/UPLOADERS.md))</sub>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![Admin, Settings, Templates: the share mail's source in the code editor and the preview the server rendered](https://filex.sh/shots/templates/templates-editor-dark-1440.381c86aa34ed.png)
+
+<sub>Templates - every mail filex sends and every page a link opens is HTML and CSS you can rewrite, with a live preview and a test mail; a tenant's administrator rewrites their own tenant's, and an edited template runs in a sandbox and carries no script ([docs/TEMPLATES.md](docs/TEMPLATES.md))</sub>
 
 </td>
 </tr>
@@ -517,7 +534,7 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.1c2889094cd7.png)
+![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.c115aaa2f273.png)
 
 <sub>…and what a locked account's sign-in form says, counting the lock down on its button</sub>
 
@@ -540,7 +557,7 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 </td>
 <td width="50%" valign="top">
 
-![The sign-in form with the bot check above its button](https://filex.sh/shots/botprotection/login-captcha-dark-1440.91b31e625fe1.png)
+![The sign-in form with the bot check above its button](https://filex.sh/shots/botprotection/login-captcha-dark-1440.5cf41f05dd02.png)
 
 <sub>…and the sign-in form, the bot check above its button</sub>
 
@@ -549,14 +566,14 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <tr>
 <td width="50%" valign="top">
 
-![Demo landing](https://filex.sh/shots/demo-landing.a79e6941c259.png)
+![Demo landing](https://filex.sh/shots/demo-landing.4a147bc884c8.png)
 
 <sub>Demo landing</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![The Settings panel of the admin menu, open over Admin → Settings → General](https://filex.sh/shots/megamenu/settings-panel-1440.42b03e9a539f.png)
+![The Settings panel of the admin menu, open over Admin → Settings → General](https://filex.sh/shots/megamenu/settings-panel-1440.e51582dc1f4f.png)
 
 <sub>The admin menu - every page in four panels, **Files & storage**, **People**, **Settings** (General, Security & data, File processing & integrations) and **Maintenance & records**, with a short line under each; a phone gets the same pages in a drawer ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
 
@@ -736,6 +753,13 @@ changes in one order without reading them, and someone who may only read watches
 can open a file of an **encrypted folder**, which your browser decrypts for it and encrypts
 again before it is saved.
 
+An app can also ask to be set up once before it runs - its own questions, the addresses it
+answers on, who may use it - keep a small store of data of its own beside filex's database,
+and answer public addresses of its own. An app holding the **link-shortener** role makes
+links short: **Get short link** in the share dialog, on file requests, in My shares and on
+every upload of an uploader ([docs/APP-PLUGINS.md → Short links](docs/APP-PLUGINS.md#short-links),
+[for app authors](docs/APP-PLUGINS-API.md#public-routes-060)).
+
 A language pack is an app too: Spanish, German and French ship as examples.
 
 Install one in a few minutes: [docs/APP-PLUGINS.md → Install one](docs/APP-PLUGINS.md#install-one). Every app feature in full: [docs/FEATURES.md → Apps](docs/FEATURES.md#apps).
@@ -743,7 +767,7 @@ Install one in a few minutes: [docs/APP-PLUGINS.md → Install one](docs/APP-PLU
 <p align="center"><img src="https://filex.sh/shots/signing/sign-place-1440.696a10b65be8.png" alt="Placing the boxes on the document" width="860"></p>
 
 <details>
-<summary><b>Screenshots of apps</b> - a signature request from start to finish, installing an app, the converter, an app with its own interface, editing together, an encrypted folder's file in an app, a language pack, Default apps, installing from a store</summary>
+<summary><b>Screenshots of apps</b> - a signature request from start to finish, installing an app, the converter, an app with its own interface, editing together, an encrypted folder's file in an app, a language pack, Default apps, installing from a store, setting an app up, short links</summary>
 
 Dana asks a colleague on the same filex and a partner outside it to sign an
 agreement. The app is [e-Signature](https://github.com/BRF-Tech/filex-sign); every
@@ -785,7 +809,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.a235075dab8b.png)
+![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.527c9244531a.png)
 
 <sub>While it is out - the document frozen for everybody, who has signed in its details</sub>
 
@@ -872,7 +896,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 </td>
 <td width="50%" valign="top">
 
-![The install review opened from a store's link](https://filex.sh/shots/store/store-review-1440.36cf3bbc2a50.png)
+![The install review opened from a store's link](https://filex.sh/shots/store/store-review-1440.3f717d71fb42.png)
 
 <sub>Installing from a store - the same review, marked **From store**, the paid app's license key shown by its first characters ([Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 
@@ -891,6 +915,22 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 ![A paid app held, the band on an admin page](https://filex.sh/shots/store/store-license-held-1440.6fd145640e0f.png)
 
 <sub>A license the store revoked - the app held, *Unlicensed*, nothing removed, and a band on every admin page ([Paid apps](docs/APP-PLUGINS.md#paid-apps))</sub>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![Setting an app up: the addresses it answers on, one under this filex's own address and a host of its own](https://filex.sh/shots/shortlinks/setup-addresses-1440.39c565a62d2a.png)
+
+<sub>Setting an app up - an app that answers addresses of its own runs nothing until its wizard is finished: its own questions, where it answers, who may use it ([Setting an app up](docs/APP-PLUGINS.md#setting-an-app-up))</sub>
+
+</td>
+<td width="50%" valign="top">
+
+![The share dialog after Get short link: the short address leads, the full link one copy away](https://filex.sh/shots/shortlinks/share-short-dark-1440.f4c4dfa2e137.png)
+
+<sub>Short links - an app holding the link-shortener role puts **Get short link** in the share dialog, file requests, My shares and uploaders ([Short links](docs/APP-PLUGINS.md#short-links))</sub>
 
 </td>
 </tr>
@@ -1028,14 +1068,14 @@ entry with its limits and its guide.
 | **Without a browser** | The same tree served as S3, SFTP, FTPS, NFSv3 and WebDAV - a move or delete there is as safe beside a storage scan as one in the web UI - plus `filex mount` over HTTPS ([Protocols](docs/PROTOCOLS.md)) |
 | **Sign-in** | OIDC, LDAP / Active Directory, Windows and Linux accounts, sign-in attempt limits, and a bot check on the sign-in and the public forms - Turnstile or reCAPTCHA, with a local proof of work when the provider is down ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [OS accounts](docs/OS-LOGIN.md), [Bot protection](docs/BOT-PROTECTION.md)) |
 | **People and access** | Roles and per-person permissions, groups, per-folder access and native multi-tenancy ([Permissions](docs/PERMISSIONS.md), [Groups](docs/GROUPS.md), [Multi-tenancy](docs/MULTI-TENANCY.md)) |
-| **Sharing** | Public links with a PIN, an expiry and a download limit, file requests and share invites by email ([Sharing](docs/SHARING.md)) |
+| **Sharing** | Public links with a PIN, an expiry and a download limit, file requests and share invites by email ([Sharing](docs/SHARING.md)); screenshot tools and scripts that upload and get a link back ([Uploaders](docs/UPLOADERS.md)); short links through an app ([Short links](docs/APP-PLUGINS.md#short-links)); every mail and public page an editable template ([Templates](docs/TEMPLATES.md)) |
 | **Protection** | Trash and version history, optional ClamAV scanning, end-to-end encrypted folders, replication to a second storage (with an initial copy of what is already there) and an audit log ([Trash & versioning](docs/TRASH-VERSIONING.md), [Protection](docs/PROTECTION.md), [E2E encryption](docs/E2E-ENCRYPTION.md), [Replication](docs/REPLICATION.md), [Audit log](docs/BACKEND.md#admin-audit-log)) |
 | **Viewers and editors** | Images, video, audio, PDF, Markdown, code (Monaco), Office documents in the office editor app or through ONLYOFFICE, draw.io diagrams, Mermaid diagrams drawn and edited as text, 3D models, and archives in ZIP, 7z and TAR ([ONLYOFFICE](docs/ONLYOFFICE.md), [Archives](docs/ARCHIVES.md)) |
 | **Search and thumbnails** | Embedded full-text search that respects permissions, and thumbnails for images, video, PDF, folders and Office documents - drawn on the server by the office editor app's engine or a connected ONLYOFFICE ([Search](docs/SEARCH.md), [Thumbnails](docs/thumbnails.md)) |
 | **Real-time** | Presence and live file updates over WebSocket, and editing a file together in an app, through filex's relay ([Realtime](docs/REALTIME.md), [Editing together](docs/APP-PLUGINS-API.md#editing-together-coedit-056)) |
 | **Clients** | A desktop app with folder sync, a web app a phone installs under your instance's name and logo, a CLI, Vue / React / web component embeds, a REST API and an MCP server ([Desktop](docs/DESKTOP.md), [Sync](docs/SYNC.md), [CLI](docs/CLI.md), [Integration](docs/INTEGRATION.md), [MCP](docs/MCP.md)) |
 | **AI assistant** | An assistant in the explorer, off until you set it up, against Anthropic, OpenAI or an OpenAI-compatible server, or a local Ollama; it works as the person who asks, with Undo for changes, approval cards for what cannot be undone, and never sends an encrypted folder to a model ([AI assistant](docs/AI-ASSISTANT.md)) |
-| **Apps and languages** | Sandboxed apps (e-Signature, Convert, the office editor, filextext, draw.io) that print through filex, edit a file together through its relay and open a file of an encrypted folder only when you allow it, decrypted in your browser; language packs and a right-to-left layout ([Apps](docs/APP-PLUGINS.md), [Editing in an app](docs/E2E-ENCRYPTION.md#editing-in-an-app), [RTL](docs/RTL.md)) |
+| **Apps and languages** | Sandboxed apps (e-Signature, Convert, the office editor, filextext, draw.io) that print through filex, edit a file together through its relay and open a file of an encrypted folder only when you allow it, decrypted in your browser; an app set up once in a wizard, with data and public addresses of its own; language packs and a right-to-left layout ([Apps](docs/APP-PLUGINS.md), [Setting an app up](docs/APP-PLUGINS.md#setting-an-app-up), [Editing in an app](docs/E2E-ENCRYPTION.md#editing-in-an-app), [RTL](docs/RTL.md)) |
 | **Running it** | One binary or one container; SQLite, PostgreSQL or MySQL; an admin panel with one search for every page, setting and record; webhooks, an in-app bell and Web Push to phones and browsers, with an optional digest; a usage and cost view (Backblaze B2 today); update checks, with patch releases that install themselves once you allow it ([Databases](docs/DATABASES.md), [Admin panel](docs/ADMIN-PANEL.md), [Notifications](docs/NOTIFICATIONS.md), [Usage](docs/USAGE.md), [Updates](docs/UPDATES.md)) |
 
 Every feature as its own entry - how it behaves, its limits and the page that documents it:

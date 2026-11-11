@@ -179,6 +179,18 @@ type Config struct {
 	// brings for its own interface (docs/APP-PLUGINS-API.md → An app's own
 	// interface).
 	AppPluginMaxUIMB int `yaml:"app_plugin_max_ui_mb"`
+	// AppDataDSN is a PostgreSQL database of the apps' OWN for their data
+	// (FILEX_APP_DATA_DSN, internal/appdata): every replica of a filex reads
+	// the same. Empty keeps each app's data in a file of its own under
+	// <data-dir>/app-plugins/data - this node's alone. Never filex's own
+	// database: naming it is refused.
+	AppDataDSN string `yaml:"app_data_dsn"`
+	// AppDataMaxMB caps one app's data (FILEX_APP_DATA_MAX_MB, default 256).
+	AppDataMaxMB int `yaml:"app_data_max_mb"`
+	// AppRoutePool is how many warm instances of one app answer its public
+	// route at once (FILEX_APP_ROUTE_POOL, default half the CPUs, 1 to 16):
+	// the most of the machine a flood of visits can take (routes.go).
+	AppRoutePool int `yaml:"app_route_pool"`
 	// OfficeEngineMaxMB caps the memory of every instance of the office
 	// engine an app brings (FILEX_OFFICE_ENGINE_MAX_MB, default 2048, 512 to
 	// 4096 - x2t's own maximum); the engine's process may hold about twice
@@ -1423,6 +1435,9 @@ func applyEnv(c *Config) {
 		appPluginsSpoken = true
 		c.AppPluginsDisabled = v == "1" || strings.EqualFold(v, "true")
 	}
+	if v := os.Getenv("FILEX_APP_DATA_DSN"); v != "" {
+		c.AppDataDSN = strings.TrimSpace(v)
+	}
 	if v := os.Getenv("FILEX_APP_PLUGIN_UPDATE_CHECK"); v != "" {
 		c.AppPluginUpdateCheck = v == "1" || strings.EqualFold(v, "true")
 	}
@@ -1434,6 +1449,8 @@ func applyEnv(c *Config) {
 		{"FILEX_APP_PLUGIN_MAX_OUTPUT_MB", &c.AppPluginMaxOutputMB},
 		{"FILEX_APP_PLUGIN_MAX_WASM_MB", &c.AppPluginMaxWasmMB},
 		{"FILEX_APP_PLUGIN_MAX_UI_MB", &c.AppPluginMaxUIMB},
+		{"FILEX_APP_DATA_MAX_MB", &c.AppDataMaxMB},
+		{"FILEX_APP_ROUTE_POOL", &c.AppRoutePool},
 		{"FILEX_OFFICE_ENGINE_MAX_MB", &c.OfficeEngineMaxMB},
 		{"FILEX_PLUGIN_REQUEST_TTL_DAYS", &c.PluginRequestTTLDays},
 	} {

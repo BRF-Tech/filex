@@ -96,6 +96,10 @@ export const SCOPE_EXCLUSIONS = [
     match: (rel) => /(^|\/)(testdata|node_modules|dist|embed)\//.test(rel),
     why: 'fixtures, build output, vendored trees',
   },
+  {
+    match: (rel) => /(^|\/)third_party\//.test(rel),
+    why: "an upstream module's own code, copied to carry a patch (backend/third_party/*/FILEX.md)",
+  },
 ];
 
 const CODE_EXT = new Set(['.ts', '.tsx', '.cts', '.mts', '.vue', '.go']);

@@ -34,6 +34,9 @@ const PREVIEW_SINKS: Record<string, string[]> = {
  */
 const SERVER_MARKUP: Record<string, string[]> = {
   'components/UserSettingsDialog.vue': ['totpQr'],
+  // The administrator's texts (internal/templates slot.*): sanitized by the
+  // server, and again here under the `slot` kind.
+  'components/public/PublicShell.vue': ['slotTitle', 'slotIntro', 'slotFooter'],
 };
 
 /**
@@ -78,7 +81,7 @@ function callsOf(src: string, name: string): string[] {
 /** The ones that draw under the `document` or the `diagram` policy (no kind = `document`). */
 function documentCalls(src: string): string[] {
   return [
-    ...callsOf(src, 'sanitizeHtml').filter((c) => !/,\s*'(code|math|assistant)'/.test(c)),
+    ...callsOf(src, 'sanitizeHtml').filter((c) => !/,\s*'(code|math|assistant|slot)'/.test(c)),
     ...callsOf(src, 'markdownToSafeHtml').filter((c) => !/,\s*'assistant'/.test(c)),
   ];
 }

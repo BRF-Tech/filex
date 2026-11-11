@@ -15,7 +15,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,6 +71,17 @@ func withSpanish(t *testing.T) {
 // mailParts splits a received message into its headers (decoded) and body.
 func mailParts(t *testing.T, raw string) (map[string]string, string) {
 	t.Helper()
+	h, body, html := mailAllParts(t, raw)
+	h["X-Html"] = html
+	return h, body
+}
+
+// mailAllParts is a received message as a mail program reads it: its headers
+// (decoded), its plain-text part and its HTML part (both decoded from
+// quoted-printable), with the line ends as LF.
+func mailAllParts(t *testing.T, raw string) (map[string]string, string, string) {
+	t.Helper()
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
 	head, body, ok := strings.Cut(raw, "\n\n")
 	require.True(t, ok, "a message has headers and a body:\n%s", raw)
 	h := map[string]string{}
@@ -78,7 +92,36 @@ func mailParts(t *testing.T, raw string) (map[string]string, string) {
 		require.NoError(t, err)
 		h[k] = d
 	}
-	return h, body
+	unqp := func(s string) string {
+		b, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(s)))
+		require.NoError(t, err)
+		return strings.ReplaceAll(string(b), "\r\n", "\n")
+	}
+	mt, params, err := mime.ParseMediaType(h["Content-Type"])
+	require.NoError(t, err)
+	if !strings.HasPrefix(mt, "multipart/") {
+		if strings.EqualFold(h["Content-Transfer-Encoding"], "quoted-printable") {
+			body = unqp(body)
+		}
+		return h, body, ""
+	}
+	mr := multipart.NewReader(strings.NewReader(strings.ReplaceAll(body, "\n", "\r\n")), params["boundary"])
+	var text, html string
+	for {
+		p, err := mr.NextPart()
+		if err != nil {
+			break
+		}
+		// multipart.Part decodes quoted-printable itself.
+		b, _ := io.ReadAll(p)
+		s := strings.ReplaceAll(string(b), "\r\n", "\n")
+		if strings.HasPrefix(p.Header.Get("Content-Type"), "text/html") {
+			html = s
+		} else {
+			text = s
+		}
+	}
+	return h, text, html
 }
 
 // shareMailOn mails a link to informe.txt in locale and answers the mail's

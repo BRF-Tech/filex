@@ -22,6 +22,11 @@
   with its own components. Placement `modal` (opened by an action), `page` (a
   full page in a new tab), `inspector` (a section in the details panel), `home`
   (a row under "Apps": the explorer's navigation panel, and the admin menu).
+- **Public route** (0.60): an address family an app answers for visitors
+  with no account, at the hosts and prefixes the administrator gives it in
+  the app's setup ([Public routes](#public-routes-060)).
+- **Setup** (0.60): an app with a `setup` block or routes is set up by an
+  administrator before it runs ([Setting an app up](#setting-an-app-up-060)).
 - **Public page**: a screen an outside participant reaches without an account.
   Since v3 it is a **real share**, at `/s/<token>`: the plugin declares the page
   in its manifest and opens the link with `share_create`, and the token, PIN,
@@ -1442,7 +1447,9 @@ the app's own download, below), `file_create/file_write`
 (files:write), `job_progress`, `settings_get` (settings),
 `state_get/state_set/state_list` (state; jobs only for set),
 `engine_available/engine_run` (`engines:<name>`;
-jobs only). Every failure is in band: `{"error": {"code", "message"}}` with
+jobs only), `data_get/data_put/data_delete/data_list/data_incr` (data, 0.60:
+[An app's own data](#an-apps-own-data-060)), `link_live` (link_shortener,
+0.60: [The link-shortener role](#the-link-shortener-role-060)). Every failure is in band: `{"error": {"code", "message"}}` with
 codes `permission_denied | not_found | too_large | timeout | unavailable |
 invalid | busy | internal`. Engine arguments are bare tokens: anything with a
 path separator, `..`, `@list` or a `file:`/`http:`-style scheme is refused
@@ -1555,7 +1562,7 @@ file-less target naming any other view is refused. · `mail_send {to, subject, b
 plain text ≤ 64 KiB, 60 per hour per plugin, filex appends "Sent by the `<app>`
 app on filex" in `lang` - the language the app wrote the mail in, when the
 server speaks it - else in the language the call runs in, and labels the mail
-with it; unavailable until SMTP
+with it; framed like every mail filex sends, by the `mail.app` template; unavailable until SMTP
 is configured and verified) ·
 `http_request {method, url, headers, body_b64, timeout_s}` → `{status, headers,
 body_b64}` (host must match an `http:<host|*.domain>` grant - a host name, an IP
@@ -2022,6 +2029,216 @@ which carries `plugin_name` and `page_id` on every row so the Shares table can
 show a plugin/page column without a lookup per row. An app that is not
 installed answers an empty page rather than a 404, so a panel polling one app
 keeps working through an uninstall.
+
+## Setting an app up (0.60)
+
+An app whose manifest has a `setup` block, or `routes`, is installed into
+the state **`setup`**: loaded, running nothing. No action, screen,
+interface call, wake-up, page, thumbnail, route or role of it is reached
+until an administrator finishes its wizard. `setup` overlays `running` the
+way `unlicensed` does, so every door that asks "is the app running" says no.
+
+```json
+"setup": {
+  "view": "setup",
+  "reset": { "warning": { "en": "Every short link stops working.", "tr": "…" } }
+},
+"views": [ { "id": "setup", "placement": "setup", "label": { "en": "Set up" } } ]
+```
+
+- **`setup.view`** is the app's own step: a view with placement **`setup`**,
+  drawn by filex, for an administrator. Its surface answers `done: true`
+  when the app's part is finished. The view may keep what it was told in the
+  app's own data (`data_put`). A setup view sends nobody anywhere and queues
+  no work (`open` and `job` are dropped), declares no `requires`, and no
+  action names it. Leave `view` out when filex's steps are all there is.
+- **`setup.reset.warning`** is said, in every language the app declares,
+  before Reconfigure and removal erase the app's data.
+- **The wizard** is the app's step, then filex's own: the addresses of each
+  route (below), then who holds each of the app's `user_permissions`
+  (the same role and person decisions Admin → Roles writes).
+- **The record** is filex's (`app_plugin_setup`, migration 00138): the
+  routes' addresses and whether the steps are done, by app name. Nothing of
+  the app's data is in it.
+
+| Route (platform operator) | |
+|---|---|
+| `GET /api/admin/app-plugins/{id}/setup` | `{state, needed, done, app_step: {view, done} \| null, routes: [{id, label, default_prefix, bases: [{id, host, prefix, tenant_id, enabled, default, url}]}], permissions: [{id, key, label, description, default}], data: {uses, driver, node_local}, warning, own_hosts}`; `own_hosts` is the host filex itself answers on, the one a host of the app's own is pointed at in DNS |
+| `GET …/setup/view` · `POST …/setup/view` | the app's step: `{event, action_id, state, data}` → `{surface, app_done}` |
+| `POST …/setup/routes/{route}/bases` | `{host, prefix, tenant_id, default}` → `201 {base}`, or `400 {error, field, message}` |
+| `PATCH …/setup/bases/{base}` | `{enabled?, default?}`: a base is switched off or made the default, never edited |
+| `DELETE …/setup/bases/{base}` | while the setup is not finished; after it, `409 setup_done` |
+| `POST …/setup/complete` | `409 setup_app_step` until the app's step said done, `409 setup_no_base` until each route has a base that is on |
+| `GET …/erase` | `{counts: {data_keys, data_bytes, state_rows, locks, links}, warning, confirm}` |
+| `POST …/reconfigure` | `{confirm: "<app name>"}`: erases (below) and puts the app back into `setup`; `400 confirm_mismatch` |
+| `DELETE /api/admin/app-plugins/{id}` | an app that keeps anything answers `409 {error: "confirm_required", counts, confirm}` until `{confirm}` (body or `?confirm=`) names it |
+
+**What Reconfigure and removal erase:** the app's own data (all scopes),
+its per-file state, its locks, the work it scheduled, and the links it
+opened (revoked). The app's optional `reset` export is told first
+(`{removing, settings}`), to undo anything it did outside filex; the data
+goes whatever it answers. Settings and overrides are the administrator's
+and stay. Reconfigure keeps the routes' addresses for the wizard to start
+from, unfinished. Both are audited (`app_plugin.reconfigure`,
+`app_plugin.remove`, with the counts).
+
+## Public routes (0.60)
+
+An app may answer visitors with no account at addresses the administrator
+gives it: a link shortener's `l.example.com/<code>`.
+
+```json
+"permissions": ["public_routes", "data"],
+"routes": [ { "id": "go", "label": { "en": "Short links" }, "default_prefix": "l" } ]
+```
+
+- **An address (a base)** is a host and a path prefix, given in the setup
+  wizard: **this filex's own address** with a prefix (`files.example.com/l`,
+  on every tenant's own address too), or **a host of its own** with an
+  optional prefix (`l.example.com`, `go.example.com/x`). A base is never
+  edited (a printed address must keep meaning what it meant): it is added,
+  switched off, or removed before the setup is finished.
+- **What filex refuses:** on its own address a prefix that is empty or whose
+  first segment is a path filex itself uses (`s`, `d`, `api`, `admin`,
+  `drive`... `short_link_prefix_reserved`); a host filex answers on (its own
+  address, a tenant's, the apps' interface origin, the S3 host:
+  `route_host_is_filex`); a host another app answers on
+  (`route_host_taken`); an address already given (`route_base_taken`). A
+  prefix is one to three segments of `a-z 0-9 -`.
+- **A host of its own answers its route and `/healthz`, nothing else**:
+  no sign-in page, no API, no share. `/api/tls/ask` (and filex's own ACME)
+  certify it. On a multi-tenant instance it belongs to one tenant.
+- **A visit** is handed to the module's `route` export:
+
+```go
+type RouteInput struct {
+    Route     string    // the route's id
+    Base      RouteBase // {id, url}: the base as the visitor reached it
+    Path      string    // what follows the base, still percent-encoded, no leading slash
+    Query     string    // at most 1 KiB
+    Method    string    // GET or HEAD
+    Countable bool      // a person opening it: GET, not a prefetch, not a previewer or a crawler,
+                        // not the same client again within a minute
+    Locale    string
+    Settings  map[string]string
+}
+type RouteOutput struct { // exactly one of the three
+    Redirect string     // absolute http(s), no user name or password, at most 2048 bytes
+    Page     *RoutePage // {title, text, link, link_label}: filex draws it, no HTML of the app's
+    Miss     bool
+}
+```
+
+- **What filex holds around every visit**, whichever app answers:
+  - a redirect is `302` with `Cache-Control: no-store`, `Referrer-Policy:
+    no-referrer`, `X-Robots-Tag: noindex, nofollow` and no cookie; a
+    redirect that breaks the rule above is not made (`503`);
+  - a page is filex's own template (`Content-Security-Policy: default-src
+    'none'`, no script);
+  - **every miss is one page**, `404`, the same bytes whatever the reason -
+    never existed, deleted, ended, switched off, the app not answering the
+    route now - so a guesser learns nothing from it;
+  - **guessing is slow**: a client (an IPv4 address, an IPv6 /64) that was
+    answered 20 misses in 10 minutes is held back for 30 minutes, 100 in a
+    day for 24 hours; held back, every address it asks for is `429`, a
+    link that exists included, without the app being asked. One client
+    reaches a route at most 120 times a minute. Past 2000 misses an hour
+    from everybody together the server log says so. The counts are per
+    process;
+  - a busy app is `503` with `Retry-After`, never a hang (the pool, below).
+- **The call** may read and count the app's data (`data_get`, `data_list`,
+  `data_incr`), ask `link_live` and read its settings. Every other host
+  function answers `permission_denied`. A visit's `data_incr` is added up
+  and written about once a second.
+- **Warm instances.** `route` and `shorten` run on instances kept started,
+  at most `FILEX_APP_ROUTE_POOL` at once (default half the CPUs, 1 to 16):
+  about 0.2 ms a call instead of the 10 ms and 15 MB of a fresh instance.
+  At most twice that many calls wait, each for 50 ms (a visit) or 2 s (a
+  shortener call), then the answer is busy. A call has 1 s (a visit) or
+  5 s; one that runs past it, crashes or runs out of memory takes its
+  instance with it, and an instance is retired after 10 000 calls. When
+  half of the last 20 calls failed the app is left alone for 30 s and every
+  call is answered busy at once. ⚠ A warm instance keeps its globals from
+  one call to the next: never keep one visit's facts in a global.
+- **Screens are told the bases.** A view's `context.routes` is
+  `{route id: [{id, url, default}]}` for the person's tenant, so the app's
+  own page can make an address of its own.
+
+## An app's own data (0.60)
+
+A key-value store that belongs to the app (permission `data`): filex keeps
+it beside itself, never in its own tables, and erases it when the app is
+removed or set up again. The app reaches it only through these calls; it
+cannot name a table or run a query.
+
+| Host function | |
+|---|---|
+| `data_get {scope, key}` | `{value, rev, found}` |
+| `data_put {scope, key, value, if_absent?, if_rev?}` | `{rev}`; a condition that does not hold is `busy` (claim a code nobody else has with `if_absent`) |
+| `data_delete {scope, key, if_rev?}` | `{deleted}` |
+| `data_list {scope, prefix, after, limit}` | `{items: [{key, value, rev}], next}`: in byte order, at most 500, `next` "" on the last page |
+| `data_incr {scope, key, by}` | `{value}`: a counter key, written by `data_incr` only |
+
+- **Scopes.** `tenant` (the default) is the call's tenant, which filex
+  decides: the person's on a call made for a person, the visited address's
+  on a visit (a host of its own: its tenant). `app` is every tenant's (the
+  app's configuration). An app cannot read or write another tenant's keys.
+  On a single-tenant instance every call is in the platform's scope.
+- **Limits.** A key is 1-512 bytes of printable ASCII (no space): every
+  store orders it byte for byte, so encode a person's text before it goes
+  into a key. A value is UTF-8, at most 64 KiB. An app's whole store is at
+  most `FILEX_APP_DATA_MAX_MB` (256): past it a write is `too_large`.
+- **Where it lives.** A SQLite file per app under
+  `<data dir>/app-plugins/data/` by default: a point read is single-digit
+  microseconds, but the file is **this node's** (behind several replicas
+  each keeps its own). `FILEX_APP_DATA_DSN` names a PostgreSQL database of
+  the apps' own instead, which every replica shares; filex's own database is
+  refused there. The setup wizard says `node_local` beside an app that
+  keeps data, and the server's start says it when filex runs on PostgreSQL
+  or MySQL without the DSN.
+
+## The link-shortener role (0.60)
+
+```json
+"permissions": ["link_shortener", "public_routes", "data"],
+"link_shortener": { "route": "go", "requires": "use" }
+```
+
+filex offers **Get short link** beside its own links - a share, a file
+request (the share dialog, My shares), an upload's answer - to a person who
+holds the app's `requires` permission (whoever may make the link, without
+one). One app holds the role at a time: installing or switching on a second
+is refused (`shortener_taken`). The module's `shorten` export answers:
+
+```go
+type ShortenInput struct {
+    Target   ShortenTarget // {kind: share|file_request|upload, url, link, name}
+    Existing bool          // only the address the link already has, or "": make nothing
+    Bases    []RouteBase   // the route's bases for the person's tenant
+    Actor    *Actor
+    Locale   string
+    Settings map[string]string
+}
+type ShortenOutput struct { URL string; Error Text } // the URL lies on one of Bases
+```
+
+- `link` names a public link across calls (its token), so the app answers
+  the same address for it again and asks **`link_live {link}`** → `{live}`
+  whether it is still open (not revoked, not run out, its creator's account
+  on, in the call's tenant). A short address whose link ended should answer
+  a miss.
+- **A mailed link carries its short address.** The share mail and the OS
+  share sheet ask `shorten` with `existing: true` and use the answer when
+  there is one.
+
+| Route (signed in) | |
+|---|---|
+| `GET /api/files/capabilities` | `short_links: {available}`: a shortener runs and the caller holds its permission |
+| `GET /api/files/short-links?share=<token>` | `{url}`: the address the link has, `""` for none |
+| `POST /api/files/short-links {share}` | `{url}`; `403 permission_denied`, `404`, `409 no_shortener`, `503 app_busy`, `422 shorten_refused {message}` |
+
+The link must be one the caller may mail: its creator or an administrator,
+still working, and what making it took on its item today.
 
 ## Surface component catalogue (v1)
 `text`, `form` (fields = storage.Field), `steps`, `list`, `progress`,
@@ -4011,8 +4228,10 @@ served at `/s/` and `/d/`, and it talks to `/api/public/*`. Where a rule says
    the node invalid with those words, like any other node.
 9. **The public shell boots with no session call at all**: no
    `/api/auth/me`, no `/api/capabilities`, no login redirect. It asks
-   `GET /api/public/branding` and `GET /api/public/s|d/{token}`, and nothing
-   else; a token that is not one renders "this link is not available".
+   `GET /api/public/s|d/{token}/branding` (the link's tenant's identity;
+   `/api/public/branding` when the server has no such route),
+   `GET /api/public/s|d/{token}` and its `/slots`, and nothing else; a token
+   that is not one renders "this link is not available".
 
 ## Frontend needs (v2 - added by the UI side; the backend implements)
 

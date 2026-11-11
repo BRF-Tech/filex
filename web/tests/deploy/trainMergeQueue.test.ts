@@ -11,6 +11,13 @@
 // the one command the main session approves for the whole queue - and the
 // order, the refusal and the resume are what a unit test cannot show.
 //
+// ⚠⚠ And since #329 (2026-11-11): the merge is made and checked in the
+// queue's own worktree, and the release branch moves only to a green merge.
+// That day a red check left its merge on main twice - once a real red (#314),
+// once a web check reading the checkout's packages/core/dist, built from an
+// older core (#321). "A red check does not move main" and "a stale dist is
+// not what the checks read" below were red against the queue before it.
+//
 // Nothing here touches the network or the user's git configuration
 // (GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM), and the queue is told about an
 // empty settings file, so it notifies nobody.
@@ -24,7 +31,18 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { goShellArgv } from '../../../scripts/lib/go-build.mjs';
 import { parseBody, splitUnreleased, unreleasedProblems } from '../../../scripts/train/changelog-merge.mjs';
 import { chainVerdict, isEmbargoed, needsAChain } from '../../../scripts/lib/embargo.mjs';
-import { embargoProblem, goCheckScript, msgName, parseArgs, parseQueue, splitConflicts } from '../../../scripts/train/merge-queue.mjs';
+import {
+  CANDIDATE_REL,
+  embargoProblem,
+  goCheckScript,
+  msgName,
+  parseArgs,
+  parseQueue,
+  samePath,
+  splitConflicts,
+  workspaceLibraries,
+  workspaceProjects,
+} from '../../../scripts/train/merge-queue.mjs';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
 const QUEUE = path.join(REPO, 'scripts', 'train', 'merge-queue.mjs');
@@ -68,7 +86,30 @@ describe('the queue file', () => {
   it('wants a queue, and takes repeatable checks', () => {
     expect(() => parseArgs([])).toThrow(/--queue/);
     const o = parseArgs(['--queue', 'q.md', '--check', 'a', '--check', 'b', '--no-go', '--onto', 'int/053']);
-    expect(o).toMatchObject({ queue: 'q.md', checks: ['a', 'b'], go: false, onto: 'int/053' });
+    expect(o).toMatchObject({ queue: 'q.md', checks: ['a', 'b'], go: false, onto: 'int/053', packages: true, pnpm: 'pnpm' });
+    expect(parseArgs(['--queue', 'q.md', '--no-packages', '--pnpm', 'corepack pnpm'])).toMatchObject({ packages: false, pnpm: 'corepack pnpm' });
+  });
+});
+
+describe('the workspace packages a check imports', () => {
+  it('are the ones another project of this workspace depends on, dependencies first', () => {
+    expect(workspaceProjects(REPO)).toEqual(expect.arrayContaining(['packages/core', 'packages/app-ui', 'web']));
+    const libs = workspaceLibraries(REPO).map((l: { dir: string }) => l.dir);
+    // web imports @brftech/filex-core from its built main, and core imports
+    // @brftech/filex-app-ui the same way: both are built before a check.
+    expect(libs).toContain('packages/core');
+    expect(libs.indexOf('packages/app-ui')).toBeGreaterThanOrEqual(0);
+    expect(libs.indexOf('packages/app-ui')).toBeLessThan(libs.indexOf('packages/core'));
+    // Nothing in the workspace imports the React wrapper: not built.
+    expect(libs).not.toContain('packages/react');
+  });
+
+  it('lives in a worktree of its own inside the repository, which the repository ignores', () => {
+    expect(CANDIDATE_REL.split(path.sep).join('/')).toBe('.claude/worktrees/merge-queue');
+    const ignore = spawnSync('git', ['-C', REPO, 'check-ignore', '-q', '.claude/worktrees/merge-queue/'], { encoding: 'utf8' });
+    expect(ignore.status).toBe(0);
+    expect(samePath('/a/b/', '/a/b')).toBe(true);
+    expect(samePath('/a/b', '/a/c')).toBe(false);
   });
 });
 
@@ -176,7 +217,7 @@ function makeFixture() {
   write(queue, '# Release\n\n```queue\nfeat/one\nfeat/two    # CHANGELOG conflicts with feat/one\nfeat/three  # src/a.txt conflicts with feat/one\n```\n');
   const runQueue = (...extra: string[]) =>
     spawnSync(process.execPath, [QUEUE, '--queue', queue, '--repo', repo, '--no-go', ...extra], { cwd: root, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  return { root, repo, env, git, runQueue };
+  return { root, repo, env, git, runQueue, cand: path.join(repo, CANDIDATE_REL) };
 }
 
 describe('the merge queue on a real history', () => {
@@ -221,22 +262,37 @@ describe('the merge queue on a real history', () => {
       ]);
       expect(unreleasedProblems(text)).toEqual([]);
 
-      // The third merge was aborted: nothing half-done is left behind.
+      // The third merge was aborted: nothing half-done is left behind, in
+      // the checkout or in the queue's worktree.
       expect(f.git('status', '--porcelain')).toBe('');
       expect(spawnSync('git', ['-C', f.repo, 'rev-parse', '-q', '--verify', 'MERGE_HEAD'], { env: f.env }).status).not.toBe(0);
+      expect(spawnSync('git', ['-C', f.cand, 'rev-parse', '-q', '--verify', 'MERGE_HEAD'], { env: f.env }).status).not.toBe(0);
       expect(fs.readFileSync(path.join(f.repo, 'src/a.txt'), 'utf8')).toBe('ONE\ntwo\nthree\n');
 
-      // A person merges the third by hand; the queue carries on and finds
-      // nothing left to do.
-      spawnSync('git', ['-C', f.repo, '-c', 'rerere.enabled=true', 'merge', '--no-ff', '--no-commit', 'feat/three'], { env: f.env });
-      write(path.join(f.repo, 'src/a.txt'), 'ONE (uno)\ntwo\nthree\n');
-      f.git('add', 'src/a.txt');
-      f.git('-c', 'rerere.enabled=true', 'commit', '--cleanup=whitespace', '-F', path.join(f.root, 'msg', 'feat-three.txt'));
+      // A person resolves the third once, where the queue says - in its
+      // worktree, with rerere on. That moves nothing: main is where it was.
+      expect(first.stdout).toContain(`git -C ${f.cand.split(path.sep).join('/')}`);
+      const inCand = (...args: string[]) => sh(f.env, 'git', ['-C', f.cand, ...args]);
+      spawnSync('git', ['-C', f.cand, '-c', 'rerere.enabled=true', 'merge', '--no-ff', '--no-commit', 'feat/three'], { env: f.env });
+      write(path.join(f.cand, 'src/a.txt'), 'ONE (uno)\ntwo\nthree\n');
+      inCand('add', 'src/a.txt');
+      inCand('-c', 'rerere.enabled=true', 'commit', '--cleanup=whitespace', '-F', path.join(f.root, 'msg', 'feat-three.txt'));
+      expect(f.git('log', '-1', '--format=%s')).toBe('Merge feat/two: the second branch.');
 
-      const second = f.runQueue();
+      // The next run starts the third over from main, the resolution
+      // replays, the checks run on it, and only then main moves.
+      const second = f.runQueue('--check', 'grep -q "ONE (uno)" src/a.txt');
       expect(second.status, second.stdout + second.stderr).toBe(0);
-      expect(second.stdout.match(/already in/g)).toHaveLength(3);
-      expect(second.stdout).toContain('every branch is in main');
+      expect(second.stdout.match(/already in/g)).toHaveLength(2);
+      expect(f.git('log', '--first-parent', '--format=%s', '-1')).toBe('Merge feat/three: the third branch.');
+      expect(fs.readFileSync(path.join(f.repo, 'src/a.txt'), 'utf8')).toBe('ONE (uno)\ntwo\nthree\n');
+      expect(f.git('status', '--porcelain')).toBe('');
+
+      // And a run after that finds nothing left to do.
+      const third = f.runQueue();
+      expect(third.status, third.stdout + third.stderr).toBe(0);
+      expect(third.stdout.match(/already in/g)).toHaveLength(3);
+      expect(third.stdout).toContain('every branch is in main');
     },
     TIMEOUT,
   );
@@ -255,14 +311,168 @@ describe('the merge queue on a real history', () => {
   );
 
   it(
-    'stops on a red check with the merge made, and says how to take it back',
+    'a red check does not move main: the red merge stays in the queue\'s worktree',
     () => {
       const f = makeFixture();
       const r = f.runQueue('--check', 'test -f does-not-exist');
-      expect(r.status).toBe(1);
-      expect(r.stdout).toContain('a check is red');
-      expect(r.stdout).toContain('reset --hard');
-      expect(f.git('log', '-1', '--format=%s')).toBe('Merge feat/one: the first branch.');
+      expect(r.status, r.stdout + r.stderr).toBe(1);
+      expect(r.stdout).toContain('is red');
+      expect(r.stdout).toContain('main did not move');
+      expect(r.stdout).not.toContain('reset --hard');
+      // main, its working tree and its history are as they were.
+      expect(f.git('rev-list', '--count', 'HEAD')).toBe('1');
+      expect(f.git('log', '-1', '--format=%s')).toBe('start');
+      expect(f.git('status', '--porcelain')).toBe('');
+      expect(fs.readFileSync(path.join(f.repo, 'src/a.txt'), 'utf8')).toBe('one\ntwo\nthree\n');
+      // The merge that was checked is there to look at.
+      expect(sh(f.env, 'git', ['-C', f.cand, 'log', '-1', '--format=%s'])).toBe('Merge feat/one: the first branch.');
+
+      // Run again with the check green: the worktree is put back at main's
+      // tip, and the merges land one by one.
+      const again = f.runQueue('--check', 'test -f src/a.txt');
+      expect(again.status, again.stdout + again.stderr).toBe(3);
+      expect(f.git('log', '--first-parent', '--format=%s', '-2')).toBe('Merge feat/two: the second branch.\nMerge feat/one: the first branch.');
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'does not use, or delete, a directory in its place that is not its worktree',
+    () => {
+      const f = makeFixture();
+      write(path.join(f.cand, 'somebody.txt'), 'mine\n');
+      const r = f.runQueue();
+      expect(r.status, r.stdout + r.stderr).toBe(1);
+      expect(r.stdout).toContain("is not this repository's worktree");
+      expect(fs.readFileSync(path.join(f.cand, 'somebody.txt'), 'utf8')).toBe('mine\n');
+      expect(f.git('rev-list', '--count', 'HEAD')).toBe('1');
+    },
+    TIMEOUT,
+  );
+});
+
+// ── a check reads the workspace packages built from the merge ───────────────
+//
+// web imports @brftech/filex-core from packages/core/dist. On 2026-11-11 the
+// queue's web check ran in the checkout, whose dist was built from an older
+// core, and was red for a merge that was right (#321). The fixture: a
+// workspace whose `web` depends on `lib`, a checkout holding a dist built
+// from lib's OLD source, a branch changing that source, and a check that
+// reads the dist. pnpm is a stand-in (--pnpm) that records what it was asked.
+
+function makeWorkspaceFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-queue-ws-'));
+  roots.push(root);
+  const env = isolatedEnv(root);
+  const repo = path.join(root, 'repo');
+  fs.mkdirSync(repo);
+  const git = (...args: string[]) => sh(env, 'git', ['-C', repo, ...args]);
+  git('init', '-q');
+  write(path.join(repo, '.gitignore'), 'node_modules/\ndist/\n');
+  write(path.join(repo, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n  - "web"\n');
+  write(path.join(repo, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n");
+  write(path.join(repo, 'package.json'), '{ "name": "ws", "private": true }\n');
+  write(path.join(repo, 'packages/lib/package.json'), JSON.stringify({ name: 'lib', main: 'dist/lib.js', scripts: { build: 'node build.mjs' } }, null, 2));
+  write(
+    path.join(repo, 'packages/lib/build.mjs'),
+    "import fs from 'node:fs';\nconst v = fs.readFileSync('src/value.txt', 'utf8').trim();\nfs.mkdirSync('dist', { recursive: true });\nfs.writeFileSync('dist/lib.js', `export default ${JSON.stringify(v)};\\n`);\n",
+  );
+  write(path.join(repo, 'packages/lib/src/value.txt'), 'old\n');
+  // A package nobody imports: never built (its build would fail).
+  write(path.join(repo, 'packages/solo/package.json'), JSON.stringify({ name: 'solo', main: 'dist/solo.js', scripts: { build: 'node -e "process.exit(7)"' } }, null, 2));
+  write(path.join(repo, 'web/package.json'), JSON.stringify({ name: 'web', private: true, dependencies: { lib: 'workspace:*' } }, null, 2));
+  git('add', '-A');
+  git('commit', '-q', '-m', 'start');
+  // The checkout's dist, built from the old source - what the maintainer's checkout held.
+  write(path.join(repo, 'packages/lib/dist/lib.js'), 'export default "old";\n');
+
+  const branch = (name: string, file: string, text: string | null) => {
+    git('checkout', '-q', '-b', name, 'main');
+    if (text === null) git('rm', '-q', file);
+    else {
+      write(path.join(repo, file), text);
+      git('add', '-A');
+    }
+    git('commit', '-q', '-m', name);
+    git('checkout', '-q', 'main');
+    write(path.join(root, 'msg', msgName(name)), `Merge ${name}.\n`);
+  };
+  branch('feat/lib', 'packages/lib/src/value.txt', 'new\n');
+  branch('feat/docs', 'README.md', 'docs\n');
+  branch('feat/more', 'NOTES.md', 'more\n');
+  branch('feat/broken', 'packages/lib/src/value.txt', null);
+
+  const calls = path.join(root, 'pnpm-calls.log');
+  const fake = path.join(root, 'fake-pnpm.mjs');
+  write(
+    fake,
+    [
+      "import { execSync } from 'node:child_process';",
+      "import fs from 'node:fs';",
+      "import path from 'node:path';",
+      'const args = process.argv.slice(2);',
+      `const log = (l) => fs.appendFileSync(${JSON.stringify(calls)}, l + '\\n');`,
+      "if (args[0] === 'install') { log('install'); fs.mkdirSync('node_modules', { recursive: true }); process.exit(0); }",
+      "const f = args.indexOf('--filter');",
+      "const dir = args[f + 1].replace(/^\\.\\//, '');",
+      "log('build ' + dir);",
+      "const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));",
+      "try { execSync(pkg.scripts.build, { cwd: dir, stdio: 'inherit' }); } catch (e) { process.exit(e.status || 1); }",
+      '',
+    ].join('\n'),
+  );
+  const q = (s: string) => `'${s.split(path.sep).join('/')}'`;
+  const pnpm = `${q(process.execPath)} ${q(fake)}`;
+  const check = `grep -q '"new"' packages/lib/dist/lib.js`;
+  const runQueue = (branches: string[], ...extra: string[]) => {
+    write(path.join(root, 'RELEASE.md'), `\`\`\`queue\n${branches.join('\n')}\n\`\`\`\n`);
+    return spawnSync(process.execPath, [QUEUE, '--queue', path.join(root, 'RELEASE.md'), '--repo', repo, '--no-go', '--pnpm', pnpm, '--check', check, ...extra], {
+      cwd: root,
+      env,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  };
+  const called = () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n') : []);
+  return { root, repo, env, git, runQueue, called, cand: path.join(repo, CANDIDATE_REL) };
+}
+
+describe('a check reads the workspace packages built from the merge', () => {
+  it(
+    'a stale dist is not what the checks read: the merge\'s own source is built, once, and proved after',
+    () => {
+      const f = makeWorkspaceFixture();
+      const r = f.runQueue(['feat/lib', 'feat/docs']);
+      expect(r.status, r.stdout + r.stderr).toBe(0);
+      // Installed once, lib built once - from feat/lib's source - and proved
+      // for feat/docs; solo, which nothing imports, never built.
+      expect(f.called()).toEqual(['install', 'build packages/lib']);
+      expect(r.stdout).toContain('packages/lib already built from this source');
+      expect(f.git('log', '--first-parent', '--format=%s', '-2')).toBe('Merge feat/docs.\nMerge feat/lib.');
+      // The checkout's own dist is not the queue's: untouched.
+      expect(fs.readFileSync(path.join(f.repo, 'packages/lib/dist/lib.js'), 'utf8')).toBe('export default "old";\n');
+
+      // A dist that is not the file the queue built is not trusted.
+      write(path.join(f.cand, 'packages/lib/dist/lib.js'), 'export default "tampered";\n');
+      const more = f.runQueue(['feat/more']);
+      expect(more.status, more.stdout + more.stderr).toBe(0);
+      expect(f.called()).toEqual(['install', 'build packages/lib', 'build packages/lib']);
+      expect(more.stdout).toContain('built packages/lib');
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'a build that fails is red, the checks do not run, and main does not move',
+    () => {
+      const f = makeWorkspaceFixture();
+      const before = f.git('rev-parse', 'HEAD');
+      const r = f.runQueue(['feat/broken']);
+      expect(r.status, r.stdout + r.stderr).toBe(1);
+      expect(r.stdout).toContain('packages/lib: its build failed');
+      expect(r.stdout).toMatch(/not run: it needs "workspace packages/);
+      expect(f.git('rev-parse', 'HEAD')).toBe(before);
+      expect(r.stdout).toContain('main did not move');
     },
     TIMEOUT,
   );

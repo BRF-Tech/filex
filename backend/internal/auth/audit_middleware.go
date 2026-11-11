@@ -420,6 +420,18 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 		return "totp.verify", "profile", ""
 	case method == http.MethodPost && p == "/api/auth/totp/disable":
 		return "totp.disable", "profile", ""
+	// A person's uploaders (handlers/uploaders.go): a credential made, changed,
+	// given a new key, taken away. The upload door and the deletion link write
+	// their own rows (uploader.upload, uploader.file_delete): neither has a
+	// session for this middleware to read.
+	case method == http.MethodPost && p == "/api/auth/uploaders":
+		return "uploader.create", "uploader", ""
+	case method == http.MethodPost && strings.HasPrefix(p, "/api/auth/uploaders/") && strings.HasSuffix(p, "/key"):
+		return "uploader.key_rotate", "uploader", id
+	case method == http.MethodPatch && strings.HasPrefix(p, "/api/auth/uploaders/"):
+		return "uploader.update", "uploader", id
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/auth/uploaders/"):
+		return "uploader.delete", "uploader", id
 
 	// ── shares ──
 	case method == http.MethodPost && p == "/api/files/share":
@@ -463,6 +475,14 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 		return "login.unlocked", "login", ""
 	case (method == http.MethodPatch || method == http.MethodPut) && strings.TrimSuffix(p, "/") == "/api/admin/login-security":
 		return "login_security.update", "login_security", ""
+
+	// ── mail and page templates (internal/templates) ──
+	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/templates/"):
+		return "template.update", "template", ""
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/templates/"):
+		return "template.reset", "template", ""
+	case method == http.MethodPost && strings.HasPrefix(p, "/api/admin/templates/") && strings.HasSuffix(p, "/test"):
+		return "template.test", "template", ""
 
 	// ── settings / external / auth providers ──
 	case method == http.MethodPatch && p == "/api/admin/settings":

@@ -8,6 +8,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/secretbox"
+	"github.com/brf-tech/filex/backend/internal/shortlink"
 	"github.com/brf-tech/filex/backend/internal/tenantdomain"
 )
 
@@ -34,6 +35,16 @@ type TLSHooks struct {
 	// PublicURL is the platform's own address (FILEX_PUBLIC_URL), always
 	// certified.
 	PublicURL string
+	// ShortLinks are the short-link addresses; nil = shortlink.Live().
+	ShortLinks *shortlink.Snapshot
+}
+
+func (h *TLSHooks) shortHost(name string) bool {
+	s := h.ShortLinks
+	if s == nil {
+		s = shortlink.Live()
+	}
+	return s.Load().Serves(name)
 }
 
 func (h *TLSHooks) platformHost(name string) bool {
@@ -48,7 +59,9 @@ func (h *TLSHooks) Ask(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if h.platformHost(name) || tenantdomain.Serves(r.Context(), h.Store, name) {
+	// A short-link host of its own is certified like a tenant's address: it
+	// answers its short links and nothing else (internal/shortlink HostSplit).
+	if h.platformHost(name) || h.shortHost(name) || tenantdomain.Serves(r.Context(), h.Store, name) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
 		return

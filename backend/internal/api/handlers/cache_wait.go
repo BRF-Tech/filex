@@ -34,11 +34,13 @@ package handlers
    stream from the driver when it is not. */
 
 import (
-	"html/template"
+	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/leafname"
+	"github.com/brf-tech/filex/backend/internal/templates"
 )
 
 // wantsHTML reports whether this request is a browser navigation rather than a
@@ -76,9 +78,9 @@ func acceptsPrepare(r *http.Request) bool {
 
 // writeCachePreparing answers a request for a file whose local copy is still
 // being prepared. Only for callers that can use it: see vfStream.
-func writeCachePreparing(w http.ResponseWriter, r *http.Request, name string, prep *filebody.Prep) {
+func writeCachePreparing(w http.ResponseWriter, r *http.Request, rend *templates.Renderer, name string, prep *filebody.Prep) {
 	if wantsHTML(r) {
-		renderCacheWaitPage(w, r, name, prep)
+		renderCacheWaitPage(w, r, rend, name, prep)
 		return
 	}
 	w.Header().Set("Retry-After", "2")
@@ -111,58 +113,28 @@ func writeCacheStatus(w http.ResponseWriter, prep *filebody.Prep) {
 	})
 }
 
-// renderCacheWaitPage is the browser half: a dependency-free progress page
-// that polls &cache=status and reloads into the download when it is ready.
-func renderCacheWaitPage(w http.ResponseWriter, r *http.Request, name string, prep *filebody.Prep) {
+// renderCacheWaitPage is the browser half (page.cache_wait): a
+// dependency-free progress page that polls &cache=status and reloads into the
+// download when it is ready. It is a signed-in person's page, so it wears
+// their tenant's template.
+func renderCacheWaitPage(w http.ResponseWriter, r *http.Request, rend *templates.Renderer, name string, prep *filebody.Prep) {
 	lang := publicLocale(r, "")
 	t := publicT(lang)
-
 	// The poll URL is this request's URL with cache=status added, so the path,
 	// the adapter prefix and every other parameter survive verbatim.
 	q := r.URL.Query()
 	q.Set("cache", "status")
-	pollURL := r.URL.Path + "?" + q.Encode()
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	poll, _ := json.Marshal(r.URL.Path + "?" + q.Encode())
 	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusAccepted)
-	_ = cacheWaitTemplate.Execute(w, map[string]any{
-		"Lang":    lang,
-		"Dir":     pageDir(lang),
-		"T":       t,
-		"Name":    name,
-		"Sub":     publicFill(t, "cache_sub", map[string]string{"name": name}),
-		"Poll":    pollURL,
-		"Percent": prep.Percent,
-	})
+	writePublicPage(w, r, rend, templates.Target{TenantID: mailTenant(r.Context(), nil), Host: r.Host, Lang: lang},
+		"page.cache_wait", http.StatusAccepted, t["cache_title"], map[string]any{
+			"file": map[string]any{"name": leafname.Visible(name), "percent": prep.Percent},
+		}, &pageScript{Script: strings.Replace(cacheWaitScript, "__POLL__", string(poll), 1)})
 }
 
-var cacheWaitTemplate = template.Must(template.New("cachewait").Parse(`<!doctype html>
-<html lang="{{.Lang}}" dir="{{.Dir}}"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.T.cache_title}}</title>
-` + publicPageStyle + `
-<style>
-.track { height: 10px; border-radius: 999px; background: var(--px-line); overflow: hidden; }
-.bar { height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, var(--px-accent), var(--px-accent-hover)); transition: width 0.4s ease; }
-.pct { margin-top: 10px; font-size: 0.95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
-.hint { margin: 16px 0 0; font-size: 0.8rem; color: var(--px-muted); }
-@media (prefers-reduced-motion: reduce) { .bar { transition: none; } }
-</style>
-</head><body>
-<main class="wrap">
-<div class="card">
-<h1>{{.T.cache_heading}}</h1>
-<p class="sub">{{.Sub}}</p>
-<div class="track" aria-hidden="true"><div id="bar" class="bar"></div></div>
-<div class="pct"><span id="pct">%{{.Percent}}</span></div>
-<p class="hint">{{.T.cache_hint}}</p>
-</div>
-</main>
-<script>
-(function(){
-  var poll = "{{.Poll}}";
+// cacheWaitScript is page.cache_wait's own script (its hooks: #bar, #pct).
+const cacheWaitScript = `(function(){
+  var poll = __POLL__;
   var bar = document.getElementById('bar');
   var pct = document.getElementById('pct');
   function tick(){
@@ -179,5 +151,4 @@ var cacheWaitTemplate = template.Must(template.New("cachewait").Parse(`<!doctype
   }
   setTimeout(tick, 800);
 })();
-</script>
-</body></html>`))
+`

@@ -56,6 +56,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/templates"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 	"slices"
@@ -63,6 +64,8 @@ import (
 
 // PublicAPI serves /api/public/*.
 type PublicAPI struct {
+	// Templates renders the pages (internal/templates); nil = filex's own.
+	Templates *templates.Renderer
 	// ACL, when wired, closes a link whose creator may no longer make it
 	// (link_creator.go). Nil in tests built by hand: every link answers.
 	ACL     *acl.Resolver
@@ -170,7 +173,55 @@ const BrandingSettingTheme = "branding.theme"
 // — it is fetched by every public page and changes when an administrator says
 // so, not per visitor.
 func (h *PublicAPI) Branding(w http.ResponseWriter, r *http.Request) {
+	out := h.brandingOf(r, h.Brand.ForRequest(r))
+	// ⚠ `locale` is resolved from the VISITOR's Accept-Language, so one URL
+	// has more than one body and a shared cache has to be told. Added, not
+	// set: the CORS middleware has already put `Origin` there.
+	w.Header().Add("Vary", "Accept-Language")
+	// ⚠ Revalidated, not held for a minute: the offered languages are on
+	// this answer, and a pack installed a moment ago has to be on the next
+	// page load (public_cache.go).
+	writePublicJSON(w, r, out)
+}
+
+// ShareBranding answers a share link page's identity.
+//
+//	GET /api/public/s/{token}/branding
+func (h *PublicAPI) ShareBranding(w http.ResponseWriter, r *http.Request) {
+	h.linkBranding(w, r, false)
+}
+
+// DropBranding answers a file request page's identity.
+//
+//	GET /api/public/d/{token}/branding
+func (h *PublicAPI) DropBranding(w http.ResponseWriter, r *http.Request) {
+	h.linkBranding(w, r, true)
+}
+
+// linkBranding is the identity a link's page wears: the branding of the
+// tenant the link was made in, at whatever address it is opened (Ç3, the
+// same rule as the link's templates and its server-drawn pages). A token
+// that names no live link - unknown, expired, of the other kind, closed with
+// its creator's right to share - answers exactly what /api/public/branding
+// answers at this address: the "not available" page then looks the same for
+// every token and does not say whose link it was.
+func (h *PublicAPI) linkBranding(w http.ResponseWriter, r *http.Request, drop bool) {
 	cfg := h.Brand.ForRequest(r)
+	multi := h.Drop != nil && h.Drop.Tenants.MultiTenant
+	if sh := liveLink(r.Context(), h.Store, h.ACL, multi, pathParam(r, "token"), drop); sh != nil {
+		id := sh.TenantID
+		cfg = h.Brand.ForProvider(r.Context(), &id)
+	}
+	// ⚠ Not kept by a shared cache (no-store, writeJSON): the answer is the
+	// link's, and it changes the moment the link dies. `public` is the
+	// instance's identity's alone (TestWritePublicJSON_OnlyTheFourIdentityAnswers).
+	h.headers(w)
+	writeJSON(w, http.StatusOK, h.brandingOf(r, cfg))
+}
+
+// brandingOf is the public identity cfg describes, with the instance's
+// appearance default and languages.
+func (h *PublicAPI) brandingOf(r *http.Request, cfg BrandingConfig) PublicBranding {
 	out := PublicBranding{
 		Name:          cfg.Name,
 		LogoURL:       cfg.LogoURL,
@@ -200,14 +251,7 @@ func (h *PublicAPI) Branding(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// ⚠ `locale` above is resolved from the VISITOR's Accept-Language, so one
-	// URL has more than one body and a shared cache has to be told. Added, not
-	// set: the CORS middleware has already put `Origin` there.
-	w.Header().Add("Vary", "Accept-Language")
-	// ⚠ Revalidated, not held for a minute: the offered languages are on
-	// this answer, and a pack installed a moment ago has to be on the next
-	// page load (public_cache.go).
-	writePublicJSON(w, r, out)
+	return out
 }
 
 // PublicUILocale is GET /api/public/ui-locales/{code}: the strings of one

@@ -79,6 +79,11 @@ type Harness struct {
 	// (Actor.Permissions), as filex decides it; clear Permissions (or set
 	// the ids a test needs) to draw a screen for somebody who holds fewer.
 	Actor wire.Actor
+	// Routes are the addresses of the app's public routes, by route id, as
+	// filex hands them to every screen (CallContext.Routes, 0.60.0): set
+	// them to draw a screen that makes an address of its own. Nil = an app
+	// with no routes, or one not set up yet.
+	Routes map[string][]wire.RouteBase
 
 	selection []wire.FileRef
 	jobs      int
@@ -101,7 +106,7 @@ func New(p *pluginkit.Plugin) *Harness {
 // defaultActor is the administrator a harness runs as: filex gives an
 // administrator every app permission, so they hold all of m's.
 func defaultActor(m wire.Manifest) wire.Actor {
-	a := wire.Actor{ID: 1, Email: "admin@local", Name: "Admin", Role: "owner"}
+	a := wire.Actor{ID: 1, Email: "admin@local", Name: "Admin", Role: "admin"}
 	for _, up := range m.UserPermissions {
 		a.Permissions = append(a.Permissions, up.ID)
 	}
@@ -270,6 +275,7 @@ func (h *Harness) Event(event string, files ...File) *wire.ViewEventInput {
 			Locale:   h.Locale,
 			Settings: h.Host.CallSettings(),
 			Engines:  h.Host.InstalledEngines(),
+			Routes:   h.Routes,
 		},
 	}
 }

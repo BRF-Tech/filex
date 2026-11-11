@@ -701,6 +701,11 @@ func init() {
 		// `thumbnails` block (thumbnails_test.go). What it does follows the
 		// file's name; see thumbnail() below.
 		Thumbnail: thumbnail,
+		// Public routes, the shortener role, reset and the setup step
+		// (routes.go beside this file, filex 0.60).
+		Route:   route,
+		Shorten: shorten,
+		Reset:   reset,
 		UI: map[string]pluginkit.UICallFunc{
 			// echo: what the call carried — the view, the method, the params
 			// and the files the interface was opened with, read through their
@@ -744,6 +749,7 @@ func init() {
 			},
 		},
 		Views: map[string]pluginkit.ViewFunc{
+			"setup": setupView,
 			"stall": func(*wire.ViewEventInput) (*wire.Surface, error) {
 				for {
 					time.Sleep(50 * time.Millisecond)

@@ -82,6 +82,29 @@ export function getHighlight(): unknown | null {
 }
 
 /**
+ * The options every filex Monaco editor is created with - the file preview's
+ * (PreviewModal) and the CodeEditor component's - so a code box looks and
+ * behaves the same wherever it appears: line numbers, no minimap, 13 px,
+ * the layout following its box, the light or dark theme the host paints.
+ * `extra` adds what one surface needs (a glyph margin for error marks).
+ */
+export function monacoEditorOptions(
+  o: { value: string; language: string; readOnly: boolean; dark: boolean },
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    value: o.value,
+    language: o.language,
+    readOnly: o.readOnly,
+    theme: o.dark ? 'vs-dark' : 'vs',
+    automaticLayout: true,
+    minimap: { enabled: false },
+    fontSize: 13,
+    ...extra,
+  };
+}
+
+/**
  * Composable wrapper — components that want reactive "is Monaco ready
  * yet?" semantics can read the resolved promise. The implementation is
  * intentionally tiny: components don't need anything fancier than

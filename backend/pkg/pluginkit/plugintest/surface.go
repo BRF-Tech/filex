@@ -124,6 +124,7 @@ var Permissions = map[string]bool{
 	"files:read": true, "files:write": true, "files:lock": true, "sign": true,
 	"mail:send": true, "notify:send": true, "users:lookup": true,
 	"settings": true, "state": true, "public_pages": true, "schedule": true,
+	"data": true, "public_routes": true, "link_shortener": true,
 }
 
 // KnownEngines are the engines a plugin may ask for. `office` is the office

@@ -1,17 +1,15 @@
 package share
 
 /* wiring:d2 — tests for the public folder-share browse page: entry
-   classification, the ≥60% gallery rule, and the HTML template's two
-   layouts (gallery grid vs plain list). */
+   classification and the ≥60% gallery rule. The page's two layouts
+   (gallery grid vs plain list) are the page.folder template's
+   (internal/templates templates_test.go). */
 
 import (
-	"html/template"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestClassifyEntry(t *testing.T) {
@@ -47,77 +45,6 @@ func TestGalleryEligible(t *testing.T) {
 
 	// All-visual folder → gallery.
 	assert.True(t, GalleryEligible(f(EntryImage)))
-}
-
-func TestRenderFolderPage_GalleryAndList(t *testing.T) {
-	// The strings now come from the handler (which is the layer that can see
-	// the request and therefore the visitor's language); this package only
-	// renders what it is handed.
-	base := FolderPageData{
-		Style:       template.HTML("<style>/*px*/</style>"),
-		Footer:      template.HTML(`<footer class="brand">filex ile paylaşıldı</footer>`),
-		Name:        "Tatil Fotoğrafları",
-		ZipHref:     "/s/tok?zip=1",
-		DirCount:    1,
-		FileCnt:     2,
-		Lang:        "tr",
-		CountsLabel: "1 klasör · 2 dosya",
-		T: map[string]string{
-			"folder_title_suffix": "paylaşılan klasör",
-			"folder_up":           "← Üst klasör",
-			"folder_zip":          "Tümünü indir (ZIP)",
-			"folder_empty":        "Bu klasör boş.",
-		},
-		Entries: []FolderPageEntry{
-			{Name: "alt", Kind: EntryDir, Href: "/s/tok?dir=alt"},
-			{Name: "a.jpg", Kind: EntryImage, Href: "/s/tok/f/a.jpg", ThumbSrc: "/s/tok/f/a.jpg?thumb=1", SizeLabel: "1.0 KB", DateLabel: "01.01.2026 10:00"},
-			{Name: "clip.mp4", Kind: EntryVideo, Href: "/s/tok/f/clip.mp4", SizeLabel: "2.0 MB"},
-		},
-	}
-
-	// Gallery layout: tile grid + <img> for the thumb-backed image, play
-	// badge for the video, and the shared footer intact.
-	g := base
-	g.Gallery = true
-	rec := httptest.NewRecorder()
-	require.NoError(t, RenderFolderPage(rec, g))
-	body := rec.Body.String()
-	assert.Contains(t, rec.Header().Get("Content-Type"), "text/html")
-	assert.Contains(t, body, `class="ggrid"`)
-	assert.NotContains(t, body, `class="flist"`)
-	assert.Contains(t, body, `<img src="/s/tok/f/a.jpg?thumb=1"`)
-	assert.Contains(t, body, `class="gbadge"`)
-	assert.Contains(t, body, "Tatil Fotoğrafları")
-	assert.Contains(t, body, "filex ile paylaşıldı")
-	assert.Contains(t, body, `href="/s/tok?zip=1"`)
-	assert.Contains(t, body, "1 klasör · 2 dosya")
-
-	// List layout: rows, no tile grid, size/date labels visible.
-	l := base
-	l.Gallery = false
-	rec = httptest.NewRecorder()
-	require.NoError(t, RenderFolderPage(rec, l))
-	body = rec.Body.String()
-	assert.Contains(t, body, `class="flist"`)
-	assert.NotContains(t, body, `class="ggrid"`)
-	assert.Contains(t, body, "1.0 KB")
-	assert.Contains(t, body, "01.01.2026 10:00")
-	assert.Contains(t, body, "filex ile paylaşıldı")
-}
-
-func TestRenderFolderPage_EscapesNames(t *testing.T) {
-	d := FolderPageData{
-		Name:    `<script>alert(1)</script>`,
-		ZipHref: "/s/tok?zip=1",
-		Entries: []FolderPageEntry{
-			{Name: `<img onerror=x>`, Kind: EntryFile, Href: "/s/tok/f/x"},
-		},
-	}
-	rec := httptest.NewRecorder()
-	require.NoError(t, RenderFolderPage(rec, d))
-	body := rec.Body.String()
-	assert.NotContains(t, body, "<script>alert(1)</script>")
-	assert.NotContains(t, body, "<img onerror=x>")
 }
 
 func TestMimeForName(t *testing.T) {

@@ -38,6 +38,15 @@ link is opened by strangers on whatever browser they have - and anything that
 is not a browser navigating
 (`curl -O`, wget, a backup script) still gets the **bytes**, not a page.
 
+**Every one of these pages, and every mail a share sends, is a template** the
+administrator can rewrite (*Admin → Settings → Templates*,
+[TEMPLATES.md](TEMPLATES.md)): the PIN gate, "this link is not available", the
+waits, the pages without JavaScript, the frame of the public link page and a
+title, an introduction and a footer line on it. On a multi-tenant install a
+link's pages wear the templates and the branding of the tenant the link was
+made in, at whatever address it is opened; a "not available" page wears the
+address's, so it tells nobody whose link a token was.
+
 ⚠ **Not a share: download tickets.** Two other kinds of credential-free URL
 exist, and neither is a share: the one-off archive of a selection (`/z/…`, from
 **Download** on several rows) and the one-file link the web app puts on a file
@@ -323,6 +332,10 @@ Two kinds of link are left alone:
 A custom role can also shape the links its people make - a maximum lifetime
 and a required PIN ([PERMISSIONS.md → Custom roles](PERMISSIONS.md#custom-roles)).
 
+An [uploader](UPLOADERS.md) set to public links makes one of these for every
+upload, as its owner: the same ceiling, the same rules, listed in their **My
+shares** and revoked there or with the upload's deletion link.
+
 ---
 
 ## File requests (upload / file-drop)
@@ -493,6 +506,24 @@ the server's language - whoever the sheet reaches is nobody the server knows.
 
 ---
 
+## Short links
+
+When an app holding the link-shortener role is installed (and you hold its
+permission), the share dialog offers **Get short link** beside a link and
+beside a file request, and **My shares** offers it on each live link. The
+short address becomes the one to copy, shown readable (an emoji code shows
+as emoji) and copied in the form every chat and mail program keeps whole.
+The link itself stays a line below with its own Copy.
+
+- **A mail carries the short address.** Once a link has one, *Send* and the
+  device's share sheet put the short address in the message instead of the
+  long one; nothing else about the mail changes.
+- **A short address ends with its link.** Revoked, expired or out of
+  downloads, the link's short address answers the same "not available" page
+  as an address that never existed.
+- What the app keeps, how codes are made and where the addresses live are the
+  app's setup: [APP-PLUGINS.md → Short links](APP-PLUGINS.md#short-links).
+
 ## Failure modes & troubleshooting
 
 - **Link shows a 404 page** - expired, past its download/upload cap, or
@@ -560,4 +591,5 @@ the server's language - whoever the sheet reaches is nobody the server knows.
 
 - [RBAC.md](RBAC.md) - who can create shares / access items
 - [GROUPS.md](GROUPS.md) - sharing a folder with a group
+- [UPLOADERS.md](UPLOADERS.md) - a link for every file a screenshot tool or a script uploads
 - [CONFIGURATION.md](CONFIGURATION.md) · [STORAGE.md](STORAGE.md)

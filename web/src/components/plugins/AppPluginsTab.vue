@@ -41,6 +41,8 @@ import Toggle from '@/components/ui/Toggle.vue';
 import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import AppPluginInstallWizard from './AppPluginInstallWizard.vue';
+import AppSetupWizard from './AppSetupWizard.vue';
+import AppEraseDialog from './AppEraseDialog.vue';
 import AppStoresPanel from './AppStoresPanel.vue';
 import AppStoreViewPanel from './AppStoreViewPanel.vue';
 import AppPluginLanguages from './AppPluginLanguages.vue';
@@ -69,6 +71,12 @@ const upgradeOf = ref<AppPlugin | null>(null);
 /** "Review update": the app whose source's newer version the wizard reviews. */
 const updateOf = ref<AppPlugin | null>(null);
 const checking = ref(false);
+/** The app whose setup wizard is open (filex 0.60): one just installed in
+ *  the state `setup`, or a row's "Finish setup". */
+const setupOf = ref<AppPlugin | null>(null);
+/** The app the "Remove" question is about: its data is counted and its name
+ *  typed before anything goes (AppEraseDialog). */
+const eraseOf = ref<AppPlugin | null>(null);
 
 async function load() {
   loading.value = true;
@@ -106,11 +114,12 @@ function labelFor(p: AppPlugin): string {
 function stateTone(state: AppPluginState): 'emerald' | 'amber' | 'rose' | 'zinc' {
   if (state === 'running') return 'emerald';
   if (state === 'failed' || state === 'refused' || state === 'unlicensed') return 'rose';
+  if (state === 'setup') return 'amber';
   return 'zinc';
 }
 
 function stateLabel(state: AppPluginState): string {
-  const known = ['running', 'disabled', 'refused', 'failed', 'unlicensed'];
+  const known = ['running', 'disabled', 'refused', 'failed', 'unlicensed', 'setup'];
   return known.includes(state) ? t(`appPlugins.state.${state}`) : state;
 }
 
@@ -129,24 +138,34 @@ async function toggleEnabled(p: AppPlugin, enabled: boolean) {
   }
 }
 
-async function remove(p: AppPlugin) {
-  if (!window.confirm(t('appPlugins.deleteConfirm', { name: labelFor(p) }))) return;
-  busyId.value = p.id;
-  try {
-    await AppPluginsApi.remove(p.id);
-    toast.success(t('appPlugins.deleted', { name: labelFor(p) }));
-    await reload();
-  } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.deleteFailed')));
-  } finally {
-    busyId.value = null;
-  }
+/**
+ * "Remove": what goes with the app is counted and its name typed first
+ * (AppEraseDialog, the same question Reconfigure asks). ⚠ It used to be one
+ * window.confirm, which said nothing about the data an app keeps.
+ */
+function remove(p: AppPlugin) {
+  eraseOf.value = p;
+}
+
+function onRemoved() {
+  const p = eraseOf.value;
+  if (p) toast.success(t('appPlugins.deleted', { name: labelFor(p) }));
+  eraseOf.value = null;
+  void reload();
 }
 
 function onInstalled(p: AppPlugin) {
   toast.success(t('appPlugins.installed', { name: labelFor(p) }));
   wizardOpen.value = false;
   upgradeOf.value = null;
+  // An app that is set up before it runs opens its wizard at once.
+  if (p.state === 'setup') setupOf.value = p;
+  void reload();
+}
+
+function onSetupDone(p: AppPlugin) {
+  toast.success(t('appPlugins.setup.doneToast', { name: labelFor(p) }));
+  setupOf.value = null;
   void reload();
 }
 
@@ -306,6 +325,7 @@ function rowActions(row: AppPlugin): ContextAction[] {
       ]
     : [];
   return [
+    { key: 'setup', label: t('appPlugins.actions.setup'), icon: 'details', hidden: row.state !== 'setup' },
     { key: 'details', label: t('appPlugins.actions.details'), icon: 'details' },
     ...review,
     ...back,
@@ -322,7 +342,8 @@ function rowActions(row: AppPlugin): ContextAction[] {
 
 /** "Details" is the app's own PAGE (views/AppPluginPage.vue), not a dialog. */
 function onRowAction(key: string, row: AppPlugin) {
-  if (key === 'details') void router.push({ name: 'plugins.app', params: { name: row.name } });
+  if (key === 'setup') setupOf.value = row;
+  else if (key === 'details') void router.push({ name: 'plugins.app', params: { name: row.name } });
   else if (key === 'upgrade') upgradeOf.value = row;
   else if (key === 'update') updateOf.value = row;
   else if (key === 'rollback') void rollback(row);
@@ -580,6 +601,20 @@ function onRowAction(key: string, row: AppPlugin) {
       @update:model-value="(v: boolean) => { if (!v) { wizardOpen = false; upgradeOf = null; updateOf = null; } }"
       @installed="onInstalled"
       @upgraded="onUpgraded"
+    />
+
+    <AppSetupWizard
+      :model-value="!!setupOf"
+      :plugin="setupOf"
+      @update:model-value="(v: boolean) => { if (!v) { setupOf = null; void reload(); } }"
+      @done="onSetupDone"
+    />
+    <AppEraseDialog
+      :model-value="!!eraseOf"
+      :plugin="eraseOf"
+      mode="remove"
+      @update:model-value="(v: boolean) => { if (!v) eraseOf = null; }"
+      @done="onRemoved"
     />
   </section>
 </template>

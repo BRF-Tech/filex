@@ -129,6 +129,14 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.AppStoreSQL = &db.AppStoreSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	// The bot check's marks (00134); times are unix seconds.
 	s.CaptchaMarkSQL = &db.CaptchaMarkSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// An app's setup record (00138); times are unix seconds.
+	s.AppSetupSQL = &db.AppSetupSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// Uploaders and their deletion links (00136), the same way; times are
+	// unix seconds.
+	s.UploaderSQL = &db.UploaderSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// Templates an administrator replaced (00137), the same way; times are
+	// unix seconds.
+	s.TemplateSQL = &db.TemplateSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// The notification digest (00087), written once in internal/db.
 	s.DigestSQL = &db.DigestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	// Web Push (task #191), written once in internal/db.
@@ -177,6 +185,14 @@ type Store struct {
 	*db.AppStoreSQL
 	// The bot check's marks (internal/db captcha_marks_sql.go, 00134).
 	*db.CaptchaMarkSQL
+	// An app's setup record (internal/db app_setup_sql.go, migration 00138).
+	*db.AppSetupSQL
+	// Uploaders and their deletion links (internal/db uploaders_sql.go,
+	// migration 00136).
+	*db.UploaderSQL
+	// The templates an administrator replaced (internal/db templates_sql.go,
+	// migration 00137).
+	*db.TemplateSQL
 	// The sign-in attempt counters (internal/db login_throttle_sql.go).
 	*db.LoginThrottleSQL
 	// The office editing sessions (internal/db office_session_sql.go,

@@ -1,0 +1,17 @@
+<style>
+.track { height: 10px; border-radius: 999px; background: var(--px-line); overflow: hidden; }
+.bar { height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, var(--px-accent), var(--px-accent-hover)); transition: width 0.4s ease; }
+.pct { margin-top: 10px; font-size: 0.95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.hint { margin: 16px 0 0; font-size: 0.8rem; color: var(--px-muted); }
+.hint a { color: var(--px-accent); }
+@media (prefers-reduced-motion: reduce) { .bar { transition: none; } }
+</style>
+<div class="card">
+<div class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7z"/><path d="M12 10.5V16"/><path d="M9.5 13.5 12 16l2.5-2.5"/></svg></div>
+<h1>{{ 'public.zip_heading' | t }}</h1>
+<p class="sub">{{ 'public.zip_sub' | t: name: folder.name }}</p>
+<div class="track" aria-hidden="true"><div id="bar" class="bar"></div></div>
+<div class="pct"><span id="pct">%0</span></div>
+{%- assign zip_link = 'public.zip_link' | t | link_to: zip.url, 'dl' %}
+<p class="hint">{{ 'public.zip_hint' | t_html: link: zip_link }}</p>
+</div>

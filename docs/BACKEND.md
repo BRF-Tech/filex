@@ -1021,7 +1021,7 @@ either) - and is refused answers
 `403 {"error":"e2e_not_allowed","reason":"tenant_disabled|policy_off|admins_only|permission|approval_required","message":…}`
 (`message` is the reason in the reader's language; a file request's is the
 sentence it gives any file the link does not take). An MCP tool answers an
-error result naming the reason. The agent surface (`/api/ai`, MCP, ShareX,
+error result naming the reason. The agent surface (`/api/ai`, MCP, uploaders,
 upload tickets) refuses a key file's name before the rule, folder or file:
 `403 RESERVED_NAME`. A door that could not decide the rule - a lookup failed,
 the rule's or one it made to ask (the storage's row, the account a write is
@@ -1339,6 +1339,16 @@ the batch is written. The single-shot form takes, beside each `file[]` part,
 an optional `name[]` field with the file's exact name, in the same order: a
 browser writes `"`, CR and LF in a part's filename as `%22`, `%0D`, `%0A`, and
 filex never guesses which `%22` was meant.
+
+A program that is not a browser - a screenshot tool, a phone shortcut, a
+script - uploads with an **uploader**'s key: `POST /api/uploads` (multipart
+`file`, `Authorization: Bearer <key>`), answered with the file's link and a
+deletion link (`GET` / `POST /x/{token}`, credential-free; `GET` never
+deletes). The key is looked up by that one route and no other. The person's
+uploaders are `GET` · `POST /api/auth/uploaders`, `PATCH` · `DELETE …/{id}`
+and `POST …/{id}/key`; the deprecated `POST /api/sharex/upload` (an API key
+with `write`, until the next major release) answers as it always did. Bodies,
+answers and errors: [UPLOADERS.md](UPLOADERS.md).
 
 The presigned S3 multipart upload (`POST /api/files/upload/init`, `/finalize`
 and `/abort`) was **removed in 0.54.0**: no filex client spoke it any more. A
@@ -1727,6 +1737,20 @@ answer lifts is no lock at all. Answering the PIN mints an HttpOnly cookie
 expiry, 12 h) that carries no PIN and opens only that one link. Before v3 this
 lock existed only on app-plugin pages; a PIN on a `/s/` link could be walked
 through at the speed of HTTP.
+
+### `GET /api/public/s/{token}/branding`, `GET /api/public/d/{token}/branding` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+A link page's identity: the same answer as `GET /api/public/branding` below,
+for the tenant the link was made in, whatever address it is opened at - a
+link's page wears its tenant's name, logo and colours on a shared address too
+(the same rule as its templates: [TEMPLATES.md](TEMPLATES.md#who-edits-which-templates)).
+A token that names no live link - unknown, expired, withdrawn, of the other
+kind, or closed with its creator's right to share - answers exactly what
+`/api/public/branding` answers at that address, so the "not available" page
+says nothing about whose link it was. `Cache-Control: no-store`: the answer
+is the link's and changes when the link dies. The document served at
+`/s/{token}` and `/d/{token}` wears the same branding in its title, theme
+colour and icon.
 
 ### `GET /api/public/branding` ![public](https://img.shields.io/badge/-public-lightgrey)
 
@@ -3887,12 +3911,17 @@ dashboard's `recent_activity` rows as `user_name`, and permission grants as
 `share.delete` · `share.revoke` · `sharex.upload` · `storage.create` ·
 `storage.delete` · `storage.sync_trigger` · `storage.test` ·
 `storage.update` · `sync.action` · `totp.disable` · `totp.enroll` ·
-`totp.verify` · `trash.empty` · `user.create` · `user.delete` ·
+`totp.verify` · `trash.empty` · `uploader.create` · `uploader.delete` ·
+`uploader.key_rotate` · `uploader.update` · `user.create` · `user.delete` ·
 `user.password_reset` · `user.quota_recompute` · `user.quota_set` ·
 `user.update` · `version.delete` · `version.restore` · `login.unlocked` ·
 `login_security.update` - plus AI-admin calls, which carry the same names under
 an `ai.` prefix, except the sign-in families (`login.`, `login_security.`):
 those keep one name through every door, the door in the row's metadata.
+Two doors that have no session for the middleware to read write their own
+row: the upload door (`uploader.upload`, handlers/uploads.go) and the
+deletion link (`uploader.file_delete`, handlers/upload_delete.go), both as
+the uploader's owner ([UPLOADERS.md](UPLOADERS.md)).
 
 **One row per write, and the door in it.** A request is audited once however
 many audit middlewares it passes (`/api/ai/admin` writes were written twice

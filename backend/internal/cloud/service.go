@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/templates"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
@@ -61,7 +62,10 @@ type pendingVerify struct {
 type Service struct {
 	store  db.Store
 	mailer *mailer.Service // optional; nil or unverified → token logged + returned
-	plans  []Plan
+	// templates renders the verification mail (mail.cloud_verify); nil =
+	// filex's own template.
+	templates *templates.Renderer
+	plans     []Plan
 	// plansErr remembers a FILEX_CLOUD_PLANS parse failure (service keeps
 	// booting on DefaultPlans; /api/cloud/status surfaces the error).
 	plansErr string
@@ -70,6 +74,9 @@ type Service struct {
 	mu      sync.Mutex
 	pending map[string]pendingVerify // verify token → pending signup
 }
+
+// AttachTemplates wires the renderer the verification mail is made with.
+func (s *Service) AttachTemplates(r *templates.Renderer) { s.templates = r }
 
 // New builds the Service from the runtime config pieces. An invalid
 // FILEX_CLOUD_PLANS does not abort boot: the service falls back to
@@ -221,11 +228,12 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (*SignupResult,
 		slog.String("slug", p.Slug), slog.String("email", email), slog.String("token", token))
 	if s.mailer != nil && s.mailer.Verified() {
 		lang := srvtext.Pick(req.Locale)
-		body := srvtext.Text(lang, "server.mail.cloud_verify.ready", srvtext.Vars{"tenant": p.Slug}) + "\n\n" +
-			srvtext.Text(lang, "server.mail.cloud_verify.token", srvtext.Vars{"token": token}) + "\n\n" +
-			srvtext.Text(lang, "server.mail.cloud_verify.how", srvtext.Vars{"ttl": verifyTTL.String()}) + "\n"
-		subject := srvtext.Text(lang, "server.mail.cloud_verify.subject", nil)
-		if err := s.mailer.Send(mailer.WithLanguage(ctx, lang), email, subject, body); err == nil {
+		// The install's template and identity: the tenant does not exist
+		// for anybody yet.
+		if err := templates.Send(ctx, s.templates, s.mailer, email, templates.Target{Lang: lang}, "mail.cloud_verify", map[string]any{
+			"tenant": map[string]any{"slug": p.Slug},
+			"verify": map[string]any{"token": token, "ttl": verifyTTL.String()},
+		}); err == nil {
 			res.MailSent = true
 		}
 	}

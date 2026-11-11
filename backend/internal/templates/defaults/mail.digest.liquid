@@ -1,0 +1,9 @@
+<p>{{ 'mail.digest.intro' | t: minutes: digest.minutes }}</p>
+<div class="facts"><p>
+{%- for line in notice.lines %}{% unless forloop.first %}<br>{% endunless %}{{ line }}{% endfor -%}
+</p></div>
+{%- if link.url != blank %}
+<p><a class="btn" href="{{ link.url }}" data-text="href">{{ 'mail.open' | t }}</a></p>
+<p class="link" data-text="skip">{{ link.url | link_to: link.url }}</p>
+{%- endif %}
+<p class="note">{{ 'mail.digest.footer' | t }}</p>

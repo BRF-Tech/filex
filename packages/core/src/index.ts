@@ -337,6 +337,9 @@ export { normalizeOp } from './composables/usePendingOps';
 export type { PendingOpType, PendingOpOutput } from './composables/usePendingOps';
 /* M2 — the surface conversation (modal + inspector share it) and the value seeding. */
 export { usePluginSurface, SURFACE_CHANGE_DEBOUNCE_MS } from './composables/usePluginSurface';
+// Short links beside filex's own links (filex 0.60): a link's token from its
+// address, and an address as a person reads it (emoji decoded).
+export { displayLink as shortDisplayLink, linkTokenOf as shortLinkTokenOf } from './lib/shortLink';
 export type { PluginSurfaceStore, PluginSurfaceHost, PluginSurfaceEvents } from './composables/usePluginSurface';
 export { initialValues as surfaceInitialValues, storageFieldOf, looksLikeEmail } from './lib/surfaceValues';
 /* v3 §2 — the two rules the RENDERER keeps so no plugin can break them:
@@ -362,6 +365,8 @@ export type { StepFooter } from './lib/surfaceSteps';
  * dropdown in every surface, and available to a host that draws its own.
  * `segmented` draws it as one strip (two to four short answers inline). */
 export { default as ChoiceButtons } from './components/ChoiceButtons.vue';
+/* A box of source code: filex's Monaco editor with a line's error marked, a textarea without Monaco. */
+export { default as CodeEditor } from './components/CodeEditor.vue';
 export type { ChoiceOption } from './components/ChoiceButtons.vue';
 /* #160 — one answer from a longer list, without the browser's native
  * dropdown (filex draws none: web/tests/ui/noNativeSelect.test.ts). The admin
@@ -452,6 +457,7 @@ export type {
   PublicRequestInfo,
   PublicShareInfo,
   PublicShareKind,
+  PublicSlots,
 } from './types/Public';
 /* v3 §5 — the language list is not a constant: an app plugin may add one. */
 export {
@@ -891,6 +897,7 @@ export {
   ensureHighlight,
   getMonaco,
   getHighlight,
+  monacoEditorOptions,
 } from './composables/useMonacoLoader';
 
 // ——— Locale catalogue (consumers may merge their own keys) ———
@@ -1143,6 +1150,16 @@ export type { S3AccessKey, S3Connection, S3KeyCreated, S3KeyRequest } from './ty
 export type { SSHPublicKey, SSHConnection } from './types/SSHKeys';
 export type { NFSExport, NFSConnection, NFSExportCreated } from './types/NFSExports';
 export type { ApiToken, ApiTokenCreated, ApiTokenRequest } from './types/Tokens';
+export { default as UploadersPanel } from './components/UploadersPanel.vue';
+export type {
+  Uploader,
+  UploaderMade,
+  UploaderRequest,
+  UploaderSaved,
+  UploaderSetup,
+  UploaderVisibility,
+  UploadersList,
+} from './types/Uploaders';
 export { useConnections, connectionsBase, connectionsOrigin } from './composables/useConnections';
 export type { ConnectionsApi } from './composables/useConnections';
 export {

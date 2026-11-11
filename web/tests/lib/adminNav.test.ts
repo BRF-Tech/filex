@@ -103,6 +103,7 @@ describe('every admin page has one place in the menu', () => {
       settings: '/settings',
       tenancy: '/tenancy',
       branding: '/branding',
+      templates: '/templates',
       appearance: '/appearance',
       archives: '/archives',
       queue: '/queue',
@@ -135,7 +136,7 @@ describe('the owner’s grouping', () => {
       [
         'settings',
         [
-          ['general', ['settings', 'branding', 'appearance', 'tenancy', 'tenant-self']],
+          ['general', ['settings', 'branding', 'templates', 'appearance', 'tenancy', 'tenant-self']],
           ['security', ['auth-providers', 'login-security', 'bot-protection', 'encryption', 'protection']],
           ['integrations', ['archives', 'plugins', 'external', 'webhooks', 'notifications', 'api-mcp', 'ai-assistant']],
         ],
@@ -240,7 +241,7 @@ describe('who sees what - the router guard’s rule, per page', () => {
     expect(all).toContain('tenancy');
     expect(all).not.toContain('tenants');
     expect(all).not.toContain('tenant-self');
-    expect(all).toHaveLength(1 + 39 - 2); // dashboard link + 39 pages (the AI assistant's since #269, Bot protection since #294) - the two tenant pages
+    expect(all).toHaveLength(1 + 40 - 2); // dashboard link + 40 pages (the AI assistant's since #269, Bot protection since #294, Templates since #314) - the two tenant pages
   });
 
   it('Multi-tenant mode to whoever may configure the instance (#167), under Settings → General', () => {
@@ -292,7 +293,7 @@ describe('who sees what - the router guard’s rule, per page', () => {
       dashboard: ['(link)'],
       files: ['explore', 'admin-files', 'shares', 'trash', 'tagged', 'duplicates', 'storages', 'connections', 'sync'],
       people: ['users', 'groups', 'roles', 'grants'],
-      settings: ['branding', 'tenant-self', 'encryption', 'notifications', 'api-mcp'],
+      settings: ['branding', 'templates', 'tenant-self', 'encryption', 'notifications', 'api-mcp'],
       maintenance: ['tools', 'audit', 'about'],
     });
     expect(Object.keys(d)).toEqual(['dashboard', 'files', 'people', 'settings', 'maintenance']);

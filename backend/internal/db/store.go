@@ -399,6 +399,24 @@ type Store interface {
 	SetNFSExportDisabled(ctx context.Context, id int64, disabled bool) error
 	DeleteNFSExport(ctx context.Context, id, userID int64) error
 
+	// Uploaders (migration 00136) — a person's upload destinations, each with
+	// a key only POST /api/uploads looks up (GetUploaderByKey takes its
+	// sha256), and one deletion link per upload. Written once for every engine
+	// (UploaderSQL). Get* answer sql.ErrNoRows when there is no such row; the
+	// ok of Update/SetKey/Delete is "the account had such an uploader".
+	CreateUploader(ctx context.Context, u *model.Uploader) (*model.Uploader, error)
+	GetUploader(ctx context.Context, id int64) (*model.Uploader, error)
+	GetUploaderByKey(ctx context.Context, keyHash string) (*model.Uploader, error)
+	ListUploaders(ctx context.Context, userID int64) ([]*model.Uploader, error)
+	UpdateUploader(ctx context.Context, u *model.Uploader) (bool, error)
+	SetUploaderKey(ctx context.Context, id, userID int64, keyHash string) (bool, error)
+	TouchUploader(ctx context.Context, id int64) error
+	DeleteUploader(ctx context.Context, id, userID int64) (bool, error)
+	CreateUploadDeletion(ctx context.Context, d *model.UploadDeletion) error
+	GetUploadDeletion(ctx context.Context, tokenHash string) (*model.UploadDeletion, error)
+	// DeleteUploadDeletion: ok = this call spent the link.
+	DeleteUploadDeletion(ctx context.Context, id int64) (bool, error)
+
 	// Storage plugins (migration 00029) — the admin's registration of an
 	// out-of-process storage driver; see internal/plugin. Runtime state is
 	// NOT here (the manager re-derives it by starting the plugin).
@@ -1250,6 +1268,32 @@ type Store interface {
 	AddCaptchaMark(ctx context.Context, key string, expires, now int64) (bool, error)
 	PutCaptchaMark(ctx context.Context, key string, expires int64) error
 	PruneCaptchaMarks(ctx context.Context, now int64) (int64, error)
+
+	// An app's setup record (migration 00138, internal/wasmplugin setup.go):
+	// the addresses its routes were given and whether its wizard is done, an
+	// opaque JSON document by app name. Written once for every engine
+	// (AppSetupSQL). Never the app's own data (internal/appdata).
+	GetAppSetup(ctx context.Context, app string) (string, bool, error)
+	PutAppSetup(ctx context.Context, app, doc string) error
+	DeleteAppSetup(ctx context.Context, app string) error
+	ListAppSetups(ctx context.Context) (map[string]string, error)
+	// AppPluginKept / EraseAppPluginKept: an app's per-file state rows and
+	// locks, counted and erased (Reconfigure); the schedule goes with them.
+	AppPluginKept(ctx context.Context, pluginID int64) (stateRows, locks int64, err error)
+	EraseAppPluginKept(ctx context.Context, pluginID int64) error
+	// The templates an administrator replaced (migration 00137,
+	// internal/templates): one scope's at a time - tenant 0 is the install's,
+	// any other a tenant's provider id. Written once for every engine
+	// (TemplateSQL).
+	ListTemplates(ctx context.Context, tenantID int64) ([]*model.Template, error)
+	// GetTemplate answers (nil, nil) when the scope has not replaced key.
+	GetTemplate(ctx context.Context, tenantID int64, key string) (*model.Template, error)
+	// PutTemplate: ifRevision > 0 refuses (ErrTemplateChanged) a save over
+	// another revision than the one the editor opened.
+	PutTemplate(ctx context.Context, t *model.Template, ifRevision int64) (*model.Template, error)
+	DeleteTemplate(ctx context.Context, tenantID int64, key string) (bool, error)
+	DeleteTenantTemplates(ctx context.Context, tenantID int64) (int64, error)
+	NoteTemplateFailure(ctx context.Context, tenantID int64, key string, revision int64, msg string, at time.Time) error
 
 	// Sign-in attempt counters (migration 00072, internal/loginguard): how many
 	// wrong attempts an account identifier or an address has made, and until

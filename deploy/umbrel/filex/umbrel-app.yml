@@ -2,10 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.59.1"
+version: "0.60.0"
 releaseNotes: |-
-  filex v0.59.1 - 2026-11-09
-  • "Review update" no longer waits for the whole app to download.
+  filex v0.60.0 - 2026-11-11
+  • Short links, through an app.
+  • Setting an app up.
+  • For app authors:
+  • Uploaders: a key for one program that drops files into one folder and answers with a link.
+  • POST /api/uploads, the upload door.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

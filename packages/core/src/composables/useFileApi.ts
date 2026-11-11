@@ -361,6 +361,7 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     shareCreate: derive(config.shareCreate, '/api/files/share'),
     shareList: derive(config.shareList, '/api/files/share'),
     shareDelete: derive(config.shareDelete, '/api/files/share/{uuid}'),
+    shortLinks: derive(config.shortLinks, '/api/files/short-links'),
     limits: derive(config.limits, '/api/files/limits'),
     capabilities: derive(config.capabilities, '/api/files/capabilities'),
     pdfPreview: derive(config.pdfPreview, PDF_PREVIEW_ROUTE),
@@ -676,6 +677,31 @@ export function useFileApi(config: ExplorerConfig, options: FileApiOptions = {})
    */
   async function shareMail(body: { share: string; emails: string[]; locale?: string }): Promise<ShareMailResult> {
     return jsonFetch<ShareMailResult>(permissionsUrl('/share-mail'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  }
+  /**
+   * The short address a link already has (filex 0.60), "" for none. `share`
+   * is the link's token. Asked when the dialog shows a live link, so a short
+   * address got earlier is the one shown again.
+   */
+  async function shortLinkOf(share: string): Promise<string> {
+    if (!endpoints.shortLinks) return '';
+    const r = await jsonFetch<{ url?: string } | undefined>(endpoints.shortLinks + '?' + new URLSearchParams({ share }).toString());
+    return r?.url ?? '';
+  }
+  /**
+   * Ask the link-shortener app for a short address of one of this person's
+   * links. ⚠ The answer is the URL as the server built it (percent-encoded):
+   * that is what is copied and mailed; a screen shows it decoded
+   * (lib/shortLink displayLink).
+   */
+  async function shortenLink(share: string): Promise<string> {
+    if (!endpoints.shortLinks) throw new Error('shortLinks endpoint not configured');
+    const r = await jsonFetch<{ url?: string }>(endpoints.shortLinks, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ share }),
+    });
+    return r?.url ?? '';
   }
   /** The share mail's subject and body for a link, without sending it — what
    *  the OS share sheet is handed, so both say the same thing. */
@@ -2182,6 +2208,8 @@ export function useFileApi(config: ExplorerConfig, options: FileApiOptions = {})
     invitePermission,
     shareMail,
     shareMessage,
+    shortLinkOf,
+    shortenLink,
     // Internals (exposed for useUploadChunked + PreviewModal)
     endpoints,
     authHeaders,

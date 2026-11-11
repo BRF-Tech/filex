@@ -44,12 +44,13 @@ import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 import { copyText } from '@/lib/clipboard';
 import { fallbackShareUrl } from '@/lib/shareLink';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 
 import Badge from '@/components/ui/Badge.vue';
 import DateWithDistance from '@/components/DateWithDistance.vue';
 import Button from '@/components/ui/Button.vue';
 import Modal from '@/components/ui/Modal.vue';
-import { DataTable, pluginLabelOf as labelOf, type ContextAction, type DataColumn } from '@brftech/filex-core';
+import { DataTable, pluginLabelOf as labelOf, shortDisplayLink, type ContextAction, type DataColumn } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
 const toast = useToastStore();
@@ -61,6 +62,16 @@ const page = ref(1);
 const pageSize = 25;
 const confirmRevoke = ref<MyShareRow | null>(null);
 const busyId = ref<number | null>(null);
+
+/**
+ * "Get short link" (filex 0.60): offered when an app holding the
+ * link-shortener role runs and this person may use it - the server's word
+ * (`capabilities.short_links.available`), the same one the share dialog reads.
+ * The answer is shown with its own Copy, decoded for reading.
+ */
+const caps = useCapabilitiesStore();
+const shortOffered = computed(() => caps.data.short_links?.available === true);
+const shortShown = ref<{ row: MyShareRow; url: string } | null>(null);
 
 /**
  * An app's link, named for what it is and opening the app's page for it
@@ -177,6 +188,26 @@ async function copyPin(row: MyShareRow) {
   }
 }
 
+async function getShort(row: MyShareRow) {
+  const s = shareOf(row);
+  if (!s.id || !s.token) return;
+  busyId.value = s.id;
+  try {
+    const url = await MySharesApi.shorten(s.token);
+    if (url) shortShown.value = { row, url };
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.generic')));
+  } finally {
+    busyId.value = null;
+  }
+}
+
+async function copyShort() {
+  if (!shortShown.value) return;
+  if (await copyText(shortShown.value.url)) toast.success(t('myShares.linkCopied'));
+  else toast.error(t('myShares.copyFailed'));
+}
+
 async function revoke() {
   const row = confirmRevoke.value;
   const id = row ? shareOf(row).id : 0;
@@ -210,6 +241,15 @@ function rowActions(row: MyShareRow): ContextAction[] {
   return [
     { key: 'copy-link', label: t('myShares.copyLink'), icon: 'link', disabled: busy },
     {
+      key: 'short-link',
+      label: t('myShares.shortLink'),
+      icon: 'link',
+      // ⚠ An app's own page is the app's to hand out (a signing request), and
+      // a link that no longer opens has nothing to shorten.
+      hidden: !shortOffered.value || !isLive(row) || !!row.app || !!row.plugin_name,
+      disabled: busy,
+    },
+    {
       key: 'copy-pin',
       label: t('myShares.copyPin'),
       icon: 'copy',
@@ -229,6 +269,7 @@ function rowActions(row: MyShareRow): ContextAction[] {
 
 function onRowAction(key: string, row: MyShareRow) {
   if (key === 'copy-link') void copyLink(row);
+  else if (key === 'short-link') void getShort(row);
   else if (key === 'copy-pin') void copyPin(row);
   else if (key === 'revoke') confirmRevoke.value = row;
 }
@@ -436,6 +477,22 @@ onMounted(load);
         >
           {{ t('myShares.revokeDo') }}
         </Button>
+      </template>
+    </Modal>
+
+    <Modal
+      :model-value="shortShown !== null"
+      :title="t('myShares.shortLinkTitle')"
+      size="md"
+      @update:model-value="(v) => (v ? null : (shortShown = null))"
+    >
+      <div v-if="shortShown" class="space-y-2 text-sm" data-testid="my-share-short">
+        <p class="break-all font-mono" data-testid="my-share-short-url">{{ shortDisplayLink(shortShown.url) }}</p>
+        <p class="break-all text-xs text-zinc-500">{{ t('myShares.shortLinkFull') }} {{ linkOf(shortShown.row) }}</p>
+      </div>
+      <template #footer>
+        <Button variant="ghost" data-testid="my-share-short-dismiss" @click="shortShown = null">{{ t('common.dismiss') }}</Button>
+        <Button variant="primary" data-testid="my-share-short-copy" @click="copyShort">{{ t('myShares.copyLink') }}</Button>
       </template>
     </Modal>
   </section>

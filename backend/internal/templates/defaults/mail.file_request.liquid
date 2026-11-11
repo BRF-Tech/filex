@@ -1,0 +1,15 @@
+<p>{{ 'mail.greeting' | t }}</p>
+<p>{% if site.name != blank %}{{ 'mail.drop_invite.intro_site' | t: site: site.name }}{% else %}{{ 'mail.drop_invite.intro' | t }}{% endif %}</p>
+{%- assign types = limits.types | join: ", " %}
+<div class="facts"><p>{{ 'mail.label.folder' | t: name: folder.name }}<br>
+{{ 'mail.drop_invite.limit' | t: count: limits.max_files, mb: limits.max_file_mb }}<br>
+{% if limits.types.size > 0 %}{{ 'mail.drop_invite.types' | t: types: types }}{% else %}{{ 'mail.drop_invite.types_all' | t }}{% endif %}</p></div>
+<p>{{ 'mail.drop_invite.upload' | t }}<br>
+<a class="btn" href="{{ link.url }}" data-text="href">{{ 'mail.drop_invite.button' | t }}</a></p>
+<p class="link" data-text="skip">{{ link.url | link_to: link.url }}</p>
+{%- if link.pin != blank %}
+<p><strong>{{ 'mail.label.pin' | t: pin: link.pin }}</strong></p>
+{%- elsif link.pin_withheld %}
+<p class="note">{{ 'mail.label.pin_separately' | t }}</p>
+{%- endif %}
+<p class="note">{% if link.days_left > 0 %}{{ 'mail.valid_days' | t: count: link.days_left }}{% else %}{{ 'mail.no_expiry' | t }}{% endif %}</p>

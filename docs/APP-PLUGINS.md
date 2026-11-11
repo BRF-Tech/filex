@@ -188,7 +188,7 @@ license.
 4. **Install**, or close the dialog. Either way the store is told how the link
    ended (`installed` or `cancelled`), and the link is used up on this filex.
 
-![The install review opened from a store's link, marked From store](https://filex.sh/shots/store/store-review-1440.36cf3bbc2a50.png)
+![The install review opened from a store's link, marked From store](https://filex.sh/shots/store/store-review-1440.3f717d71fb42.png)
 
 The rest of the store side is reference, under [Stores in detail](#stores-in-detail):
 what filex checks before the review opens, what a store link is held to,
@@ -572,9 +572,11 @@ database - is [APP-PLUGINS-API.md → The scheduled wake-up](APP-PLUGINS-API.md#
   (`plugin.notice`, subscribable like any other event - see
   [NOTIFICATIONS.md](NOTIFICATIONS.md)) - the whole instance or one person,
   with a link that opens the file and the app's screen on it (a "please
-  sign" lands you in the signing screen). It may also send plain-text mail
-  through the server's SMTP - following each person's own notification
-  settings, at most 60 an hour, always signed off with the app's name.
+  sign" lands you in the signing screen). It may also send mail through the
+  server's SMTP - following each person's own notification settings, at most
+  60 an hour, always signed off with the app's name. The app writes plain
+  text; filex frames it in the `mail.app` template like every other mail, as
+  HTML with a plain-text part ([TEMPLATES.md](TEMPLATES.md)).
 
 ---
 
@@ -1321,7 +1323,7 @@ replaces the key; **Disconnect** forgets it and tells the store to forget it
 too. A store the screen shows but this filex is not connected to still takes
 requests; they wait until it is connected.
 
-![Trusted stores with the store connected, its key's fingerprint, and the Store screen settings under it](https://filex.sh/shots/store/store-connected-1440.4887504756d9.png)
+![Trusted stores with the store connected, its key's fingerprint, and the Store screen settings under it](https://filex.sh/shots/store/store-connected-1440.3cf3d17b2cc6.png)
 
 ## Install requests
 
@@ -1399,9 +1401,9 @@ when that install ends ([The store screen](#the-store-screen)). **Reject**
 works as for any request, and the person reads the reason on their *My
 requests*.
 
-![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.fca2e69524cc.png)
+![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.8f55858b1c80.png)
 
-![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.7bb6e7116b7a.png)
+![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.b89653b966c7.png)
 
 ### Leaving one
 
@@ -1592,7 +1594,7 @@ files to keep.
   audit trail saved - by anybody who may edit the document, not only the
   requester.
 
-  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.a235075dab8b.png)
+  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.527c9244531a.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* - and,
@@ -1875,6 +1877,112 @@ Dead links are swept, exposed copies and all, a week after they end. The
 routes, the states and every refusal are in
 [APP-PLUGINS-API.md → The visitor's routes](APP-PLUGINS-API.md#the-visitors-routes).
 
+## Setting an app up
+
+Some apps are set up once, by an administrator, before they run: an app that
+answers addresses of its own (a link shortener), or one that says it needs
+decisions first. Such an app is installed **Needs setup**: it is loaded and
+runs nothing - no menu row, screen, wake-up or address - until its wizard is
+finished. The wizard opens right after the install, and from **Finish setup**
+on the app's row and page.
+
+1. **The app's own step**, if it has one: its questions, drawn by filex (a
+   link shortener asks how its codes are made). **Next** waits until the app
+   says its part is done.
+2. **Addresses**, for an app with routes: where it answers. Either **this
+   filex's own address with a path** (`files.example.com/l`; on a
+   multi-tenant instance every tenant's own address too) or **a host of its
+   own**, with an optional path (`l.example.com`, `go.example.com/x`). A host
+   of its own answers that app's addresses and `/healthz`, and nothing else
+   of filex - no sign-in page, no API, no share. Point its DNS at filex and
+   have your proxy pass it through and certify it; with `FILEX_TLS_MODE=proxy`
+   Caddy's on-demand TLS gets a yes from `/api/tls/ask`, and with `acme`
+   filex certifies it itself. A path filex uses itself (`s`, `d`, `api`,
+   `admin`, `drive`...) is refused, and so is a host filex already answers on.
+   An address is never edited afterwards, because a printed link must keep
+   meaning what it meant: add another, or switch one off.
+3. **Who may use it**: each of the app's [permissions](#app-permissions), for
+   the built-in roles, custom roles, groups and people, written where
+   **Admin → Roles** writes them. A group decides through its role, so the
+   step names who else holds that role and suggests a person's own exception
+   when the role is shared.
+4. **Finish**. If the app keeps data of its own and this filex keeps it on
+   the node (below), the last step says so.
+
+![The setup wizard's first step: the app's own question, with the steps named above it](https://filex.sh/shots/shortlinks/setup-app-1440.d32272c4d252.png)
+
+![Addresses: one on this filex's own address under /l, and a host of its own being typed, with the DNS record it needs](https://filex.sh/shots/shortlinks/setup-addresses-1440.39c565a62d2a.png)
+
+![Who may use it: the app's permission for each role](https://filex.sh/shots/shortlinks/setup-people-1440.fb9f9377f911.png)
+
+Only the platform operator sets apps up, as with every other part of an app.
+
+### Reconfigure, and removing an app that keeps data
+
+**Reconfigure** on the app's page erases what the app keeps and opens the
+wizard again: its own data, its per-file records, its locks, the work it
+scheduled, and the links it opened. Its settings stay. The dialog counts
+what goes, says the app's own warning, and waits until you type the app's
+name. Removing an app that keeps anything asks the same way, and erases the
+same. Both are in the audit log with the counts.
+
+![Reconfigure: what erasing takes, counted, the app's own warning, and its name typed back](https://filex.sh/shots/shortlinks/reconfigure-1440.104ce0326db8.png)
+
+### An app's own data
+
+An app granted `data` keeps a small store of its own - a link shortener's
+links and counts. filex keeps it **beside itself, never in its own
+database**, and the app reaches it through filex alone, held to the tenant
+of the person (or the address) it answers for.
+
+- By default each app's store is a file under `<data-dir>/app-plugins/data/`.
+  That directory is per node ([DEPLOYMENT.md → Scaling](DEPLOYMENT.md#scaling--high-availability)):
+  behind several replicas each would keep its own links. **Running more than
+  one replica, set `FILEX_APP_DATA_DSN`** to a PostgreSQL database of the
+  apps' own - every replica reads the same. filex's own database is refused
+  there. The server's start says so when filex runs on PostgreSQL or MySQL
+  without it.
+- One app's store is at most `FILEX_APP_DATA_MAX_MB` (256 MB).
+
+## Short links
+
+An app can hold the **link-shortener role**: filex then offers **Get short
+link** beside its own links - a share and a file request in the share
+dialog, a row in **My shares** - to whoever holds the app's permission for
+it. The short address appears as the link to copy; a link mailed from the
+dialog, and the text handed to the device's share sheet, carry the short
+address; an [uploader](UPLOADERS.md#make-an-uploader) can answer each upload
+with it. One app holds the role at a time.
+
+![The share dialog after Get short link: the short address leads, the full link one copy away (dark theme)](https://filex.sh/shots/shortlinks/share-short-dark-1440.f4c4dfa2e137.png)
+
+[`backend/examples/app-shortlinks`](../backend/examples/app-shortlinks/main.go)
+is the smallest app that holds the role; the contract is
+[APP-PLUGINS-API.md → The link-shortener role](APP-PLUGINS-API.md#the-link-shortener-role-060).
+
+What filex holds around every short address, whichever app answers it:
+
+- **Nothing to guess.** A code is drawn by the app from its own alphabet
+  (the setup decides, and refuses a rule under 45 bits); filex holds every
+  visitor to it: 20 addresses that lead nowhere in 10 minutes keep a client
+  out for 30 minutes, 100 in a day for 24 hours, and a client held back is
+  answered *too many tries* on every address, a link that exists included.
+  One client reaches the addresses at most 120 times a minute.
+- **One page for every miss.** A link that never existed, one deleted, one
+  whose share ended or was revoked: the same page, so nobody learns which.
+- **A redirect only to a web address**, never cached, with no referrer and
+  no cookie. A preview page (a link followed by `+`) is drawn by filex.
+- **Clicks**: chat previewers, crawlers and prefetches are not counted, nor
+  the same visitor again within a minute.
+- **filex's own pages, not templates.** The miss page, "too many tries",
+  "unavailable" and the `+` preview are drawn by filex itself, with nothing
+  loaded from elsewhere (they work on a host of the app's own), and they are
+  not among the [templates](TEMPLATES.md) an administrator edits.
+- **Floods do not take filex down.** The app answers on a few instances kept
+  started (`FILEX_APP_ROUTE_POOL`, half the CPUs by default); what does not
+  fit is answered *busy* at once, an app that keeps failing is left alone
+  for 30 seconds, and the explorer and the API keep the rest of the machine.
+
 ## Limits, and what they protect
 
 | Limit | Default | Why |
@@ -1916,6 +2024,9 @@ admin surface refuses installs regardless.
 | `FILEX_APP_PLUGIN_MAX_OUTPUT_MB` | `512` | Per-file output ceiling for a job |
 | `FILEX_APP_PLUGIN_MAX_WASM_MB` | `64` | Largest module an install accepts |
 | `FILEX_APP_PLUGIN_MAX_UI_MB` | `128` | Largest interface bundle (zipped) an install accepts |
+| `FILEX_APP_DATA_DSN` | - | A PostgreSQL database of the apps' own for their data ([An app's own data](#an-apps-own-data)): every replica reads the same. Unset, each app's data is a file under `<data-dir>/app-plugins/data/`, this node's alone. filex's own database is refused |
+| `FILEX_APP_DATA_MAX_MB` | `256` | The most one app's own data may take |
+| `FILEX_APP_ROUTE_POOL` | half the CPUs | How many warm instances answer one app's public addresses at once (1 to 16): the most of the machine a flood of visits can take ([Short links](#short-links)) |
 | `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every app's source for a newer version and **tells the administrators** - it installs nothing ([Updates](#updates)). `0` = no request leaves the server for it; **Check for updates** still works. Off on a demo regardless |
 | `FILEX_PLUGIN_TRUSTED_KEYS` | - | Shared with storage plugins: set it and every module must carry a detached ed25519 signature over its sha256 |
 | `FILEX_PLUGIN_REQUEST_TTL_DAYS` | `14` | How long an [install request](#install-requests) waits for an administrator before it expires (both kinds of plugin). [Seeds](CONFIGURATION.md#variables-that-seed-a-stored-setting) the setting on **Admin → Settings → Plugins → Apps** |

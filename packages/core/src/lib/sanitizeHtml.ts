@@ -36,9 +36,14 @@ import DOMPurify, { type Config, type DOMPurify as Purifier } from 'dompurify';
  *  - `math`: a KaTeX rendering (HTML spans plus the MathML twin for screen
  *    readers);
  *  - `assistant`: the AI assistant's answer (#269) - the document policy, and
- *    nothing in it may make the browser fetch anything (assistantMarkup).
+ *    nothing in it may make the browser fetch anything (assistantMarkup);
+ *  - `slot`: an administrator's text on a public link page (the server's
+ *    templates, slot.*: rendered and sanitized there first) - the document
+ *    allow-list, and its pictures drawn: the administrator chose them, as
+ *    they chose the logo, so there is no reader to ask. A picture from
+ *    elsewhere still goes without a referrer.
  */
-export type SanitizeKind = 'document' | 'code' | 'diagram' | 'math' | 'assistant';
+export type SanitizeKind = 'document' | 'code' | 'diagram' | 'math' | 'assistant' | 'slot';
 
 /**
  * ⚠⚠ What a `document` drawing does with a picture from another server.
@@ -118,6 +123,12 @@ const POLICY: Record<SanitizeKind, Config> = {
     SANITIZE_NAMED_PROPS: true,
     // Parsed into an inert document and its pictures from elsewhere held
     // back there (documentMarkup, RemoteImages).
+    RETURN_DOM_FRAGMENT: true,
+  },
+  slot: {
+    ALLOWED_TAGS: DOCUMENT_TAGS,
+    ALLOWED_ATTR: DOCUMENT_ATTRS,
+    SANITIZE_NAMED_PROPS: true,
     RETURN_DOM_FRAGMENT: true,
   },
   assistant: {
@@ -600,6 +611,10 @@ export function sanitizeHtml(html: string, kind: SanitizeKind = 'document', opts
   };
   if (kind === 'assistant') {
     return assistantMarkup(p.sanitize(html, { ...cfg, RETURN_DOM_FRAGMENT: true }) as unknown as DocumentFragment);
+  }
+  if (kind === 'slot') {
+    const frag = p.sanitize(html, { ...cfg, RETURN_DOM_FRAGMENT: true }) as unknown as DocumentFragment;
+    return documentMarkup(frag, { load: () => true });
   }
   if (kind === 'document' || kind === 'diagram') {
     const frag = p.sanitize(html, { ...cfg, RETURN_DOM_FRAGMENT: true }) as unknown as DocumentFragment;

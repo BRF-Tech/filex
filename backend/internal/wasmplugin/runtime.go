@@ -115,6 +115,10 @@ type Compiled struct {
 	rt       *Runtime
 	cp       *extism.CompiledPlugin
 	logger   func(level, msg string)
+	// hotPool is the pool of warm instances of this module (pool.go), made
+	// on the first route or shortener call.
+	hotMu   sync.Mutex
+	hotPool *hotPool
 }
 
 // Compile validates the module against sha256 (lower-hex; "" skips the check)
@@ -164,6 +168,7 @@ func (c *Compiled) Close(ctx context.Context) error {
 	if c == nil || c.cp == nil {
 		return nil
 	}
+	c.closeHot()
 	return c.cp.Close(ctx)
 }
 

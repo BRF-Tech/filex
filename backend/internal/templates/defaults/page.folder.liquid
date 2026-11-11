@@ -1,0 +1,71 @@
+<style>
+.card--folder { width: 880px; max-width: 100%; text-align: start; padding: 26px 24px; }
+.fhead { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.fhead .icon-badge { margin: 0; width: 46px; height: 46px; flex: none; }
+.fhead .icon-badge svg { width: 24px; height: 24px; }
+.fhead h1 { margin: 0; font-size: 1.15rem; overflow-wrap: anywhere; }
+.fsub { margin: 0 0 16px; padding-inline-start: 58px; color: var(--px-muted); font-size: 0.84rem; overflow-wrap: anywhere; }
+.factions { display: flex; gap: 8px; margin: 0 0 18px; flex-wrap: wrap; }
+.fbtn { display: inline-block; padding: 9px 16px; border-radius: 10px; font-size: 0.9rem; font-weight: 600; text-decoration: none; text-align: center; background: var(--px-accent); color: #fff; transition: background 0.15s ease; }
+.fbtn:hover { background: var(--px-accent-hover); }
+.fbtn--ghost { background: transparent; color: var(--px-accent); border: 1px solid var(--px-line); }
+.fbtn--ghost:hover { background: var(--px-accent-soft); }
+.flist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--px-line); border-radius: 12px; overflow: hidden; }
+.flist li + li { border-top: 1px solid var(--px-line); }
+.flist a { display: flex; align-items: center; gap: 10px; padding: 10px 14px; color: inherit; text-decoration: none; font-size: 0.9rem; }
+.flist a:hover { background: var(--px-accent-soft); }
+.flist .ficon { width: 20px; height: 20px; flex: none; color: var(--px-muted); }
+.flist .ficon svg { width: 100%; height: 100%; }
+.flist .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flist .fmeta { color: var(--px-muted); font-size: 0.78rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ggrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.gtile { position: relative; display: block; border-radius: 12px; overflow: hidden; border: 1px solid var(--px-line); background: var(--px-bg2); aspect-ratio: 1 / 1; text-decoration: none; color: inherit; }
+.gtile:hover { border-color: var(--px-accent); }
+.gtile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gtile .gicon { position: absolute; inset: 0; display: grid; place-items: center; color: var(--px-muted); }
+.gtile .gicon svg { width: 44px; height: 44px; }
+.gtile .gname { position: absolute; inset-inline: 0; bottom: 0; padding: 22px 10px 8px; font-size: 0.78rem; color: #fff; background: linear-gradient(transparent, rgba(0, 0, 0, 0.66)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gtile .gbadge { position: absolute; top: 8px; inset-inline-end: 8px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); color: #fff; }
+.gtile .gbadge svg { width: 15px; height: 15px; }
+.fempty { padding: 34px 16px; text-align: center; color: var(--px-muted); border: 1px dashed var(--px-line); border-radius: 12px; font-size: 0.9rem; }
+@media (max-width: 560px) { .fsub { padding-inline-start: 0; } .ggrid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
+</style>
+<div class="card card--folder">
+<div class="fhead">
+<div class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7z"/></svg></div>
+<h1>{{ folder.name }}</h1>
+</div>
+<p class="fsub">{{ folder.counts }}{% if folder.path != blank %} - {{ folder.path }}{% endif %}</p>
+<div class="factions">
+{%- if folder.up_url != blank %}<a class="fbtn fbtn--ghost" href="{{ folder.up_url }}">{{ 'public.folder_up' | t }}</a>{% endif %}
+<a class="fbtn" href="{{ folder.zip_url }}">{{ 'public.folder_zip' | t }}</a>
+</div>
+{%- if entries.size == 0 %}
+<div class="fempty">{{ 'public.folder_empty' | t }}</div>
+{%- elsif folder.gallery %}
+<div class="ggrid">
+{%- for e in entries %}
+<a class="gtile" href="{{ e.url }}"{% if e.kind != "dir" %} target="_blank" rel="noopener"{% endif %} title="{{ e.name }}{% if e.size != blank %} - {{ e.size }}{% endif %}">
+{%- if e.thumb != blank %}<img src="{{ e.thumb }}" alt="{{ e.name }}" loading="lazy">
+{%- elsif e.kind == "dir" %}<span class="gicon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7z"/></svg></span>
+{%- elsif e.kind == "image" %}<span class="gicon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4.5 17.5 10 12l4 4 2.5-2.5 3 3"/></svg></span>
+{%- else %}<span class="gicon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3.5h7l4 4V20a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 20V5A1.5 1.5 0 0 1 7.5 3.5z"/><path d="M13.5 3.5V8H18"/></svg></span>
+{%- endif %}
+{%- if e.kind == "video" %}<span class="gbadge"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.5 6.2v11.6a1 1 0 0 0 1.52.86l9.2-5.8a1 1 0 0 0 0-1.72l-9.2-5.8a1 1 0 0 0-1.52.86z"/></svg></span>{% endif %}
+<span class="gname">{{ e.name }}</span>
+</a>
+{%- endfor %}
+</div>
+{%- else %}
+<ul class="flist">
+{%- for e in entries %}
+<li><a href="{{ e.url }}"{% if e.kind != "dir" %} target="_blank" rel="noopener"{% endif %}>
+<span class="ficon">{% if e.kind == "dir" %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7z"/></svg>{% elsif e.kind == "image" %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4.5 17.5 10 12l4 4 2.5-2.5 3 3"/></svg>{% else %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3.5h7l4 4V20a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 20V5A1.5 1.5 0 0 1 7.5 3.5z"/><path d="M13.5 3.5V8H18"/></svg>{% endif %}</span>
+<span class="fname" title="{{ e.name }}">{{ e.name }}</span>
+{%- if e.size != blank %}<span class="fmeta">{{ e.size }}</span>{% endif %}
+{%- if e.date != blank %}<span class="fmeta">{{ e.date }}</span>{% endif %}
+</a></li>
+{%- endfor %}
+</ul>
+{%- endif %}
+</div>

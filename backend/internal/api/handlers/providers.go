@@ -521,6 +521,14 @@ func (h *Providers) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// The tenant's mail and page templates go with it (internal/templates):
+	// nothing else reads them, and a row that outlived its tenant would be a
+	// template no administrator can see.
+	if p.ID > 0 && !p.IsSupertenant {
+		if n, err := h.Store.DeleteTenantTemplates(r.Context(), p.ID); err == nil && n > 0 {
+			auth.AddAuditDetail(r.Context(), "templates_removed", n)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted_users": len(users)})
 }
 

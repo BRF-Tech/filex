@@ -62,9 +62,16 @@ type mailbox struct {
 
 type sentMail struct{ lang, to, subject, body string }
 
-func (m *mailbox) send(_ context.Context, lang, to, subject, body string) error {
+// send keeps what the template would be given: the title as the subject, the
+// lines and the link as the text (the template's frame - a digest's window,
+// its footer - is internal/templates').
+func (m *mailbox) send(_ context.Context, lang, to string, c notify.MailContent) error {
+	body := strings.Join(c.Lines, "\n")
+	if c.Link != "" {
+		body += "\n\n" + c.Link
+	}
 	m.mu.Lock()
-	m.sent = append(m.sent, sentMail{lang, to, subject, body})
+	m.sent = append(m.sent, sentMail{lang, to, c.Title, body})
 	m.mu.Unlock()
 	return nil
 }

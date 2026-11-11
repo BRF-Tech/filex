@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/shortlink"
 	"github.com/brf-tech/filex/backend/internal/tenantdomain"
 )
 
@@ -78,7 +79,8 @@ func (s *Server) servesPlatform(ctx context.Context, name string) bool {
 			return true
 		}
 	}
-	return tenantdomain.Serves(ctx, s.store, name)
+	// A short-link host of its own too: it answers its links and nothing else.
+	return tenantdomain.Serves(ctx, s.store, name) || shortlink.Live().Load().Serves(name)
 }
 
 // acmeManager is the certificate manager of filex's own TLS: the host policy

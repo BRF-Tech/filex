@@ -7,6 +7,142 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-11-11
+
+### Added
+
+- **Short links, through an app.** An app can hold the link-shortener role:
+  the share dialog, file requests and My shares offer **Get short link**, the
+  short address is the one to copy, a mailed link carries it, and an
+  uploader can answer each upload with it (**Short link**). The app
+  keeps its links; filex answers each visit with a redirect, a page it draws,
+  or one "not available" page for every miss, holds a guesser back (20 misses
+  in 10 minutes, 100 a day) and keeps a flood off the rest of the server.
+  [APP-PLUGINS.md → Short links](docs/APP-PLUGINS.md#short-links).
+- **Setting an app up.** An app can ask to be set up once before it runs: it
+  installs as *Needs setup*, and its wizard (its own questions, the addresses
+  of its routes, who may use it) opens after the install. **Reconfigure**
+  erases what the app keeps and opens the wizard again; removing an app that
+  keeps data asks for its name typed back, then erases it.
+  [APP-PLUGINS.md → Setting an app up](docs/APP-PLUGINS.md#setting-an-app-up).
+- **For app authors:** public routes (`routes`, answered on warm instances),
+  an app's own data (`data_*`, never in filex's database; `FILEX_APP_DATA_DSN`
+  for a database shared by replicas), the `setup` block and placement, the
+  `link_shortener` role and `pkg/pluginkit/shortcode`.
+  [APP-PLUGINS-API.md → Public routes](docs/APP-PLUGINS-API.md#public-routes-060).
+- **Uploaders: a key for one program that drops files into one folder and
+  answers with a link.** **Account settings → Uploaders** (web app, admin panel,
+  desktop app) makes one: a name, a storage and folder, a **public** link (a
+  share link that opens in the browser) or a **private** one (the file in filex,
+  behind sign-in and the reader's permission), and a link life that the form
+  says the server's ceiling for (`share.max_ttl_days`). The key is shown once,
+  with **Download ShareX settings (.sxcu)** - one file ShareX lists under
+  images, text and files, built by the server with your address and the key -
+  and a `curl` line; curl, PowerShell, phone shortcuts and Flameshot use the
+  same request. **New key** replaces a lost one, **Delete** ends it
+  ([UPLOADERS.md](docs/UPLOADERS.md)).
+- **`POST /api/uploads`, the upload door.** Multipart `file`, the key as
+  `Authorization: Bearer`; answers `{url, deletion_url, thumbnail_url}`, or
+  `{error, code}` with `error` written for the person a tool shows it to. The
+  key is not an API key: no other route looks it up, the request names no
+  folder, and an upload is always a new name - a leaked tool config adds files
+  to one folder and does nothing else. Each upload is checked as its owner as
+  the account is now (`access.api`, `share.links` for a public link, the
+  folder's storage by its id and tenant) and written to the audit log
+  (`uploader.upload`). Managing uploaders over the API: `/api/auth/uploaders`.
+- **A deletion link for every upload, `/x/{token}`.** Opening it never deletes,
+  because link previews in chat apps fetch every URL: it shows a one-language
+  page with the file's name and a **Delete** button; the button moves that one file
+  to its owner's trash and revokes its public link. One use; it names the
+  file, not its path; it outlives the uploader that made it
+  (`uploader.file_delete` in the audit log).
+- **Mail and page templates: every mail filex sends and every page a link
+  opens is HTML and CSS you can rewrite.** **Admin → Settings → Templates**
+  lists them: the nine mails and the frame they share, the public pages and
+  theirs (the PIN gate, "this link is not available", the waits while a ZIP or
+  a download is prepared, the pages for a browser without JavaScript, a
+  deletion link's two pages), the public link
+  page's frame, and short texts on a share's or a file request's page (a
+  title, an introduction, a footer line). Each is written in
+  [Liquid](https://shopify.github.io/liquid/) in filex's code editor (the
+  file preview's Monaco: colours, line numbers, the line the engine refused
+  marked), with its variables listed, a live preview in every language the
+  server speaks and a test mail to your own address. The install's administrator edits the install's; on a
+  multi-tenant install a tenant's administrator edits their own tenant's;
+  **Back to the default** removes an edit. Colours, logo, name and footer
+  still come from Branding, and every template wears them. An edited template
+  runs in a WebAssembly sandbox with ceilings on time, memory and output,
+  includes nothing but filex's own pieces, and is sanitized: no script, event
+  handler or `javascript:` address reaches a mail or a page, and the public
+  pages carry a nonce-based Content-Security-Policy. A template that fails
+  when it is used is replaced by filex's own for that mail or page, and the
+  editor shows the error ([TEMPLATES.md](docs/TEMPLATES.md); API
+  `/api/admin/templates`).
+
+### Changed
+
+- **Apps answer with far less work per call.** filex's copy of the extism SDK
+  (`backend/third_party/extism-go-sdk`, one patch, its `FILEX.md` says what
+  and why) keeps the functions an app instance calls instead of building them
+  again on every call: a warm call of an app's public route allocates 5.7 KB
+  instead of 262 KB. Every app call (actions, screens, thumbnails, routes)
+  goes through it.
+- **Mails are HTML with a plain-text part.** Every mail - a share, a file
+  request, access given, a new account, a notification and the digest, the
+  SMTP test, the cloud sign-up code, an app's mail - is sent as
+  `multipart/alternative`: its template's HTML, in the branding's colours and
+  logo, and a plain-text part made from it (or written by the administrator).
+  Until now every mail was plain text. The sentences are the language packs'
+  as before.
+- **A link's pages wear the templates and branding of the tenant the link was
+  made in.** On a multi-tenant install a link's pages - the public link page
+  (its title, icon, logo, name and colours, asked from the new
+  `GET /api/public/{s,d}/{token}/branding`), and the server-drawn ones: its
+  PIN gate, a folder or an upload page without JavaScript, the ZIP wait, a
+  deletion link's pages - used the branding of the address they were opened
+  at; they now use the link's tenant's, at any address. A page that belongs
+  to no link, and every "this link is not available" page, still uses the
+  address's, so it says nothing about whose link a token was. A mail uses the
+  tenant of the link it carries, else the addressee's, else the sender's
+  ([TEMPLATES.md](docs/TEMPLATES.md#who-edits-which-templates)).
+- **Go dependencies.** Added `github.com/osteele/liquid` v1.9.2 (the template
+  language) and `github.com/andybalholm/cascadia` v1.3.5 (CSS selectors, to
+  move a mail's stylesheet into its elements). Moved with them:
+  `github.com/spf13/cobra` 1.8.1 → 1.10.2, `github.com/spf13/pflag` 1.0.5 →
+  1.0.10, `github.com/fatih/color` 1.17.0 → 1.18.0 and
+  `github.com/mattn/go-colorable` 0.1.13 → 0.1.14 - the CLI's command line
+  and colours. Its help and its errors read exactly as before; `filex
+  completion` now prints cobra 1.10's scripts, which complete the same
+  commands and flags (bash handles the active help itself, and the PowerShell
+  script also works in Constrained Language Mode). Install the completion
+  script again after updating if you saved it to a file.
+- **For the maintainers: the release train's merge queue checks a merge
+  before `main` moves to it.** `pnpm merge-queue` makes each merge in a
+  worktree of its own (`.claude/worktrees/merge-queue`), builds there the
+  workspace packages its `--check` commands import (`packages/core` and the
+  ones it imports, from that merge's own source, or proves their dist is
+  built from it), runs every check there, and fast-forwards `main` only to a
+  green merge. A red check used to stay on `main` as a merge commit, and a
+  web check read whatever `packages/core/dist` the checkout held
+  ([CONTRIBUTING.md → The merge queue](docs/CONTRIBUTING.md#the-merge-queue-pnpm-merge-queue---queue-file)).
+
+### Deprecated
+
+- **`POST /api/sharex/upload` is deprecated and is removed in the next major
+  release.** It keeps working exactly as before - an API key with `write`, the
+  `folder` field, the `{"url": …}` answer - and now also answers a
+  `Deprecation: true` header. Its file events and webhooks keep
+  `origin: "sharex"` until it is removed, so a webhook consumer reading the old
+  path sees no change; uploads through the new door carry `origin: "uploader"`.
+  Moving: make an uploader, import its `.sxcu`, delete the API key you made
+  for ShareX ([UPLOADERS.md](docs/UPLOADERS.md#moving-from-the-sharex-endpoint)).
+
+### Removed
+
+- **The hand-edited ShareX configs in `docs/sharex/`.** They needed the host
+  and an API key typed into three files; an uploader's settings file is made
+  for you with both in it. `docs/SHAREX.md` points to Uploaders.
+
 ## [0.59.1] - 2026-11-09
 
 ### Fixed

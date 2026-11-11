@@ -283,7 +283,7 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 <tr>
 <td width="50%" valign="top">
 
-![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.ff6bb587c310.png)
+![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.3d21210a54da.png)
 
 <sub>…oturum açma sayfası da, henüz kimse oturum açmadan</sub>
 
@@ -351,7 +351,7 @@ Depolama ve protokollerin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 </td>
 <td width="50%" valign="top">
 
-![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.1870c90ae20a.png)
+![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.890f4cd92081.png)
 
 <sub>API anahtarları - kendinizinkini oluşturun, gezginde ya da gömülü bir gezginde (bir kişinin oturumuyla ya da API anahtarıyla; tek bir ortak *uygulama* API anahtarıyla vekil sunucu üzerinden çalışan gömülü bir gezginde bu öğe yer almaz)</sub>
 
@@ -384,8 +384,9 @@ Depolama ve protokollerin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 **Sınırlayıp iptal edebileceğiniz bir bağlantıyla paylaşın. Yanlış bir silmeyi ya da yanlış bir üzerine yazmayı geri alın.**
 
 - PIN'li, son kullanma tarihli ve indirme limitli herkese açık bağlantılar, gelmesi
-  gerekenler için de dosya istekleri. **Paylaştıklarım**, oluşturduğunuz her bağlantıyı
-  kopyalamanız ya da iptal etmeniz için listeler.
+  gerekenler için dosya istekleri ve **yükleyiciler**: ShareX, curl ya da bir betik için,
+  dosyaları tek bir klasöre bırakıp her birine bir bağlantıyla yanıt veren bir anahtar.
+  **Paylaştıklarım**, oluşturduğunuz her bağlantıyı kopyalamanız ya da iptal etmeniz için listeler.
 - Bir klasörü bir kişiyle ya da bir grupla paylaşın, klasör onların **Benimle
   paylaşılanlar** görünümünde belirir. Bunun için deponun **Öğe bazlı erişim denetimi
   (RBAC)** ayarı açık olmalıdır; varsayılan olarak kapalıdır.
@@ -407,7 +408,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.c3b9326fa9fa.png)
+![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.b32887acb9ed.png)
 
 <sub>Paylaşım - PIN, son kullanma tarihi, indirme limiti, tek satırlık `curl`</sub>
 
@@ -439,7 +440,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.bc923c4374cf.png)
+![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.c28cec3a103e.png)
 
 <sub>Her yönetim tablosu - satır başına sabitlenmiş tek bir **Aksiyon** menüsü, gezgindeki ⋮ ile açılan menünün aynısı</sub>
 
@@ -527,7 +528,7 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <tr>
 <td width="50%" valign="top">
 
-![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.1c2889094cd7.png)
+![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.c115aaa2f273.png)
 
 <sub>…ve kilitli bir hesabın oturum açma formunun söylediği; düğmesinde kilidin kalan süresi geri sayar</sub>
 
@@ -550,7 +551,7 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 </td>
 <td width="50%" valign="top">
 
-![Düğmesinin üstünde bot doğrulamasıyla oturum açma formu](https://filex.sh/shots/botprotection/login-captcha-dark-1440.91b31e625fe1.png)
+![Düğmesinin üstünde bot doğrulamasıyla oturum açma formu](https://filex.sh/shots/botprotection/login-captcha-dark-1440.5cf41f05dd02.png)
 
 <sub>…ve düğmesinin üstünde bot doğrulamasıyla oturum açma formu</sub>
 
@@ -559,14 +560,14 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <tr>
 <td width="50%" valign="top">
 
-![Demo açılış sayfası](https://filex.sh/shots/demo-landing.a79e6941c259.png)
+![Demo açılış sayfası](https://filex.sh/shots/demo-landing.4a147bc884c8.png)
 
 <sub>Demo açılış sayfası</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Yönetim menüsünün Ayarlar paneli, Yönetim → Ayarlar → Genel sayfasının üzerinde açık](https://filex.sh/shots/megamenu/settings-panel-1440.42b03e9a539f.png)
+![Yönetim menüsünün Ayarlar paneli, Yönetim → Ayarlar → Genel sayfasının üzerinde açık](https://filex.sh/shots/megamenu/settings-panel-1440.e51582dc1f4f.png)
 
 <sub>Yönetim menüsü - bütün sayfalar dört panelde, **Dosyalar ve depolama**, **Kişiler**, **Ayarlar** (Genel, Güvenlik ve veri, Dosya işleme ve entegrasyonlar) ve **Bakım ve kayıtlar**, her sayfanın altında kısa bir satırla; telefonda aynı sayfalar bir çekmecede yer alır ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md))</sub>
 
@@ -741,6 +742,14 @@ kişilerin değişikliklerini okumadan tek bir sıraya koyup aktarır, yalnız o
 canlı izler - ve **şifreli bir klasördeki** bir dosyayı açabilir; tarayıcınız dosyayı
 uygulama için çözer ve kaydedilmeden önce yeniden şifreler.
 
+Bir uygulama çalışmadan önce bir kez kurulmayı da isteyebilir - kendi soruları, yanıt
+verdiği adresler, kimin kullanabileceği - filex'in veritabanının yanında kendine ait küçük bir
+veri deposu tutabilir ve kendine ait herkese açık adreslere yanıt verebilir. **Bağlantı
+kısaltıcı** rolünü taşıyan bir uygulama bağlantıları kısaltır: paylaşım penceresinde, dosya
+isteklerinde, Paylaştıklarım'da ve bir yükleyicinin her yüklemesinde **Kısa bağlantı al**
+([docs/APP-PLUGINS.md → Short links](docs/APP-PLUGINS.md#short-links),
+[uygulama yazarları için](docs/APP-PLUGINS-API.md#public-routes-060)).
+
 Dil paketi de bir uygulamadır: İspanyolca, Almanca ve Fransızca örnek olarak gelir.
 
 Birkaç dakikada bir uygulama kurun: [docs/APP-PLUGINS.md → Install one](docs/APP-PLUGINS.md#install-one). Uygulamaların tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → Apps](docs/FEATURES.md#apps).
@@ -790,7 +799,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 <tr>
 <td width="50%" valign="top">
 
-![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.a235075dab8b.png)
+![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.527c9244531a.png)
 
 <sub>Belge imzadayken - herkes için dondurulmuş, kimin imzaladığı ayrıntılarında</sub>
 
@@ -877,7 +886,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 </td>
 <td width="50%" valign="top">
 
-![Bir mağazanın bağlantısıyla açılan kurulum incelemesi](https://filex.sh/shots/store/store-review-1440.36cf3bbc2a50.png)
+![Bir mağazanın bağlantısıyla açılan kurulum incelemesi](https://filex.sh/shots/store/store-review-1440.3f717d71fb42.png)
 
 <sub>Mağazadan kurmak - aynı inceleme, *… mağazasından* diye işaretli; ücretli uygulamanın lisans anahtarı yalnızca ilk karakterleriyle görünür ([Mağazadan kurmak](docs/APP-PLUGINS.md#installing-from-a-store))</sub>
 
@@ -1024,7 +1033,7 @@ ayırır.
 | **Tarayıcı olmadan** | S3, SFTP, FTPS, NFSv3 ve WebDAV olarak sunulan aynı ağaç - orada yapılan bir taşıma ya da silme, bir depo taramasının yanında web arayüzündeki kadar güvenlidir - ayrıca HTTPS üzerinden `filex mount` ([Protokoller](docs/PROTOCOLS.md)) |
 | **Oturum açma** | OIDC, LDAP / Active Directory, Windows ve Linux hesapları, giriş denemesi sınırları ve oturum açma ile herkese açık formlarda bot doğrulaması - Turnstile ya da reCAPTCHA, sağlayıcıya ulaşılamazsa yerel iş ispatı ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [İşletim sistemi hesapları](docs/OS-LOGIN.md), [Bot koruması](docs/BOT-PROTECTION.md)) |
 | **Kişiler ve erişim** | Roller ve kişiye özel izinler, gruplar, klasör bazlı erişim ve yerleşik çok kiracılılık ([İzinler](docs/PERMISSIONS.md), [Gruplar](docs/GROUPS.md), [Çok kiracılılık](docs/MULTI-TENANCY.md)) |
-| **Paylaşım** | PIN'li, son kullanma tarihli ve indirme limitli herkese açık bağlantılar, dosya istekleri ve e-postayla paylaşım davetleri ([Paylaşım](docs/SHARING.md)) |
+| **Paylaşım** | PIN'li, son kullanma tarihli ve indirme limitli herkese açık bağlantılar, dosya istekleri ve e-postayla paylaşım davetleri ([Paylaşım](docs/SHARING.md)); yükleyip bağlantı alan ekran görüntüsü araçları ve betikler ([Yükleyiciler](docs/UPLOADERS.md)); her e-posta ve herkese açık sayfa düzenlenebilir bir şablon ([Şablonlar](docs/TEMPLATES.md)) |
 | **Koruma** | Çöp kutusu ve sürüm geçmişi, isteğe bağlı ClamAV taraması, uçtan uca şifreli klasörler, ikinci bir depoya replikasyon (depoda zaten bulunanların ilk kopyasıyla birlikte) ve bir denetim kaydı ([Çöp kutusu ve sürümleme](docs/TRASH-VERSIONING.md), [Koruma](docs/PROTECTION.md), [Uçtan uca şifreleme](docs/E2E-ENCRYPTION.md), [Replikasyon](docs/REPLICATION.md), [Denetim kaydı](docs/BACKEND.md#admin-audit-log)) |
 | **Görüntüleyiciler ve düzenleyiciler** | Görseller, video, ses, PDF, Markdown, kod (Monaco), ofis düzenleyici uygulamasında ya da ONLYOFFICE üzerinden Office belgeleri, draw.io diyagramları, çizilen ve metin olarak düzenlenen Mermaid diyagramları, 3B modeller ve ZIP, 7z, TAR arşivleri ([ONLYOFFICE](docs/ONLYOFFICE.md), [Arşivler](docs/ARCHIVES.md)) |
 | **Arama ve küçük resimler** | İzinlere uyan gömülü tam metin arama; görseller, video, PDF, klasörler ve Office belgeleri için küçük resimler - Office belgelerinin küçük resmini sunucuda ofis düzenleyici uygulamasının motoru ya da bağlı bir ONLYOFFICE çizer ([Arama](docs/SEARCH.md), [Küçük resimler](docs/thumbnails.md)) |

@@ -220,6 +220,12 @@ func (m *Manifest) Validate() error {
 		viewIDs[v.ID] = true
 		switch v.Placement {
 		case "modal", "page", "inspector", "home":
+		case wire.PlacementSetup:
+			// The app's own step of its setup wizard (routes_manifest.go):
+			// a Surface filex draws for an administrator.
+			if v.UI != "" {
+				return fmt.Errorf("manifest: views[%d] (%s): placement setup is a screen filex draws - leave ui out", i, v.ID)
+			}
 		case "viewer":
 			// A viewer opens a FILE in the preview's place: only an
 			// interface can be one — a Surface has no way to show a file.
@@ -229,7 +235,7 @@ func (m *Manifest) Validate() error {
 		case "":
 			v.Placement = "modal"
 		default:
-			return fmt.Errorf("manifest: views[%d]: placement %q must be modal, page, inspector, home or viewer", i, v.Placement)
+			return fmt.Errorf("manifest: views[%d]: placement %q must be modal, page, inspector, home, viewer or setup", i, v.Placement)
 		}
 		if v.Label["en"] == "" {
 			return fmt.Errorf("manifest: views[%d]: label.en is required", i)
@@ -313,6 +319,9 @@ func (m *Manifest) Validate() error {
 		return err
 	}
 	if err := m.checkOfficeEngine(); err != nil {
+		return err
+	}
+	if err := m.checkRoutes(seen); err != nil {
 		return err
 	}
 	for i := range m.PublicPages {

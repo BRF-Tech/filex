@@ -105,4 +105,15 @@ export const MySharesApi = {
   async revoke(id: number): Promise<void> {
     await api.delete(`/files/share/${id}`);
   },
+
+  /**
+   * A short address for one of the caller's links (filex 0.60), asked of the
+   * app holding the link-shortener role: the same route the share dialog
+   * uses (`POST /api/files/short-links`), by the link's TOKEN. The answer is
+   * the URL as the server spelled it (percent-encoded): copy that.
+   */
+  async shorten(token: string): Promise<string> {
+    const { data } = await api.post<{ url?: string }>('/files/short-links', { share: token });
+    return data.url ?? '';
+  },
 };

@@ -40,7 +40,7 @@ Every token is **bound to a user** and inherits that user's account role
 exactly like that user signing in - minus the cookie. An optional
 `expires_in_days` sets a hard expiry; an expired token authenticates as nobody
 (401). While its user's account is switched off (**Admin → Users**) a token is
-refused on every route, `/api/ai`, MCP and `/api/sharex` included, with the
+refused on every route, `/api/ai`, MCP and the deprecated `/api/sharex` included, with the
 answer a session gets: `403 {"error":"this account is disabled","reason":"account_disabled"}`.
 Switched back on, the same token works again. filex stamps each token's
 last-used time on every request.
@@ -388,7 +388,7 @@ Notes:
   [below](#encrypted-folders-and-fxe)), `413` an upload too large for this
   endpoint (use an upload ticket), or over the account's per-file upload limit
   (`code: FILE_TOO_LARGE`) or its quota (`code: QUOTA_EXCEEDED`) - a write
-  through `/api/ai/upload`, `file_write`, ShareX or an upload ticket asks both,
+  through `/api/ai/upload`, `file_write`, an [uploader](UPLOADERS.md) or an upload ticket asks both,
   as the explorer's upload does ([QUOTAS.md](QUOTAS.md#where-it-is-enforced));
   `423` an app has locked the path (the
   message names the app, e.g. a document out for signature), `501`
@@ -602,7 +602,7 @@ answers `isError` with the code as the first word of its text
 | Code | When | What to do |
 |---|---|---|
 | `E2E_ENCRYPTED` | `file_read` / `GET /api/ai/download` of an encrypted file; `file_unzip` / `archive_extract` of an encrypted archive; `app_actions` / `app_run` / `file_convert` on an encrypted file (an app cannot read it); `file_share` / `POST /api/ai/share` and `file_request_create` of an encrypted folder or anything in it (the explorer's Share answers the same) | Tell the person: they open it in the filex web UI with the folder unlocked, or download it there and run [`filex decrypt`](CLI.md#filex-decrypt---an-encrypted-folder-offline). There is no way to get the plaintext through this surface. |
-| `E2E_PLAINTEXT_REFUSED` | `file_write`, `POST /api/ai/upload`, `file_upload_ticket` (at mint and at redeem), `file_zip`'s and `archive_create`'s `dest`, and `file_unzip`'s and `archive_extract`'s destination inside an encrypted folder; also ShareX uploads, which have no flag | The bytes would be stored there **unencrypted**. Upload through the web UI with the folder unlocked; or, when the person wants plaintext there, repeat with `allow_plaintext: true` (a form field `allow_plaintext=true` on a multipart upload). |
+| `E2E_PLAINTEXT_REFUSED` | `file_write`, `POST /api/ai/upload`, `file_upload_ticket` (at mint and at redeem), `file_zip`'s and `archive_create`'s `dest`, and `file_unzip`'s and `archive_extract`'s destination inside an encrypted folder; also an [uploader](UPLOADERS.md)'s upload (and the deprecated ShareX endpoint), which has no flag | The bytes would be stored there **unencrypted**. Upload through the web UI with the folder unlocked; or, when the person wants plaintext there, repeat with `allow_plaintext: true` (a form field `allow_plaintext=true` on a multipart upload). |
 | `E2E_BOUNDARY` | `file_move`, `file_copy`, or `file_zip` / `archive_create` packing to another folder, would take an encrypted file out of its folder, a plaintext one into it, or cross two encrypted folders | The [transfer guard](E2E-ENCRYPTION.md#ways-plaintext-still-reaches-the-server) the explorer's paste and move obey. The encrypted folder itself may be moved or zipped whole; its key file travels with it. `allow_plaintext` lets a zip land in an encrypted folder; nothing lets ciphertext out. |
 
 The key file is not yours to change from here: writing, renaming, moving or

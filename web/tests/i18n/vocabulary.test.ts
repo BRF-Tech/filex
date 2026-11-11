@@ -107,7 +107,6 @@ const SCOPE_IS_THEIRS: Record<string, string> = {
 const OVERRIDE_IS_ANOTHER_THING: Record<string, string> = {
   'authProviders.envReadOnly': 'an environment variable pins the setting; the page cannot replace it',
   'server.auth_provider.environment_managed': 'an environment variable pins the setting (see authProviders.envReadOnly)',
-  'appPlugins.deleteConfirm': 'an app\'s per-action settings, not a person\'s permission',
   'appearance.css.hint': 'CSS overriding the theme\'s --fe-* variables',
 };
 

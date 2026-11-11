@@ -38,6 +38,16 @@ const (
 	// at the minute it named. An app without it is never woken, and there
 	// is no other way in — see schedule.go.
 	PermSchedule Permission = "schedule"
+	// PermData is the app's own key-value store (filex 0.60.0, data.go):
+	// kept beside filex, never in its tables, erased with the app.
+	PermData Permission = "data"
+	// PermPublicRoutes lets the app answer visitors with no account at the
+	// addresses the administrator gives its `routes` (filex 0.60.0).
+	PermPublicRoutes Permission = "public_routes"
+	// PermLinkShortener is the link-shortener role (filex 0.60.0): filex
+	// hands the app each of its links a person asks to shorten, and the app
+	// may ask whether such a link is still open (link_live).
+	PermLinkShortener Permission = "link_shortener"
 	// The interface's own permissions (uiperm.go) — DERIVED from the
 	// manifest's `ui` block, never listed in `permissions`: `ui` for having
 	// an interface at all, `ui:eval` / `ui:wasm-eval` for its script-policy
@@ -126,6 +136,7 @@ var bare = map[Permission]bool{
 	PermFilesRead: true, PermFilesWrite: true, PermFilesLock: true, PermSign: true, PermMailSend: true,
 	PermNotifySend: true, PermUsersLookup: true, PermSettings: true, PermState: true,
 	PermPublicPages: true, PermSchedule: true,
+	PermData: true, PermPublicRoutes: true, PermLinkShortener: true,
 	PermUI: true, PermUIEval: true, PermUIWasmEval: true, PermUIPackageFetch: true, PermUIDownload: true,
 	PermUIFramePackage: true, PermUIConnectBlob: true, PermUIPrint: true,
 	// Derived from `encrypted_folders` (e2eplain.go); parsed here so a stored
@@ -326,6 +337,12 @@ func (p Permission) Label(lang string) string {
 		return permText(lang, "public_pages", nil)
 	case p == PermSchedule:
 		return permText(lang, "schedule", nil)
+	case p == PermData:
+		return permText(lang, "data", nil)
+	case p == PermPublicRoutes:
+		return permText(lang, "public_routes", nil)
+	case p == PermLinkShortener:
+		return permText(lang, "link_shortener", nil)
 	case p == PermFilesCoEdit:
 		return permText(lang, "files_co_edit", nil)
 	case p == PermOfficeEngine:

@@ -13514,6 +13514,7 @@ function closeRecoveryKey() {
       :share-max-ttl-days="shareMaxTtlDays"
       :initial-tab="permInitialTab /* surucu:d1 */"
       :mail-ready="capabilitiesData?.mail?.ready"
+      :short-links="capabilitiesData?.short_links?.available === true"
       :can-configure="callerAdmin"
       :perm="permTarget.perm || dirPerm"
       :sharing="permTargetSharing /* which of its sections the account may use (lib/sharingHeld) */"

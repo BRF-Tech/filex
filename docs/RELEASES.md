@@ -19,14 +19,44 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.59.0, 6 November 2026
-The certificate check is now each connection's own: every S3, WebDAV and FTPS storage and every replication target has its own Skip certificate verification switch in its advanced settings, so a NAS with a self-signed certificate no longer takes the check away from the bucket beside it (GitHub #134, thanks to @kladiv). The 0.58.2 variable FILEX_STORAGE_TLS_SKIP_VERIFY writes the switch on to the storages and targets that exist at the first start and is not read again, so nothing stops connecting across the upgrade. The CLI (filex client login --insecure-skip-tls-verify, kept with that one address) and the desktop app (Advanced at sign-in, or the account in App settings) reach a filex server with a self-signed certificate too. The FTPS endpoint can permit plain FTP for a scanner that cannot do TLS, off by default, on Login security, and every setting that turns a protection off now carries the same warning under it. A saved password, key or client secret is no longer sent to a new address or over a weaker connection: a new SMTP host, identity provider address or storage endpoint, or a certificate check, host-key check or encryption turned off, needs it typed again. Security fixes, both reported by @mappygrid: switching an account off now stops its API tokens on every route, its open sockets and its links, and suspending a tenant stops what its people already hold and takes a person signed in, not an API key (GHSA-58wc-42xh-89v8); and what a tenant's people made on a storage - an upload ticket, a link, a queued job, an editor's save - stops when the platform operator moves that storage to another tenant (GHSA-fxm3-597v-wpgj). Upgrading is recommended.
+::: tip Latest - v0.59.1, 9 November 2026
+Reviewing an app update no longer waits for the whole app to download. The permission review of an app from a repository or an address - an install, an update, a store link, a plugin request - downloaded the module, the interface and the office engine before it answered; for the Office editor that is 140 MB from GitHub, and Review update answered 504 from a reverse proxy or came minutes later. The review now reads the app's filex-app.json alone, for every version an app has published: its permissions, and the SHA-256 it pins for each file. Install and Upgrade then download the files and refuse any that does not match what was reviewed.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.59.0
-docker pull ghcr.io/brf-tech/filex:full-v0.59.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.59.1
+docker pull ghcr.io/brf-tech/filex:full-v0.59.1
 ```
+
+## v0.59.1
+
+<span class="filex-release-date">9 November 2026</span>
+
+Reviewing an app update no longer waits for the whole app to download. The permission review of an app from a repository or an address - an install, an update, a store link, a plugin request - downloaded the module, the interface and the office engine before it answered; for the Office editor that is 140 MB from GitHub, and Review update answered 504 from a reverse proxy or came minutes later. The review now reads the app's filex-app.json alone, for every version an app has published: its permissions, and the SHA-256 it pins for each file. Install and Upgrade then download the files and refuse any that does not match what was reviewed.
+
+## What changed
+
+### Fixed
+
+- **"Review update" no longer waits for the whole app to download.** The
+  permission review of an app from a repository or an address (an install, an
+  update, a store link, a plugin request) downloaded the module, the interface
+  bundle and the office engine before it answered. For the Office editor that
+  is 140 MB from GitHub, and the review answered 504 from a reverse proxy or
+  came minutes later. The review now reads the source's `filex-app.json` alone,
+  for every version an app has published: the permissions, and the SHA-256 the
+  manifest pins for each file. **Install** and **Upgrade** download the files
+  and refuse any that does not match what was reviewed (`from_manifest` in the
+  dry run's answer: [APP-PLUGINS-API.md](./APP-PLUGINS-API.md)).
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0591---2026-11-09)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.59.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.59.1`
 
 ## v0.59.0
 
@@ -2030,223 +2060,13 @@ entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.53.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.53.0`
 
-## v0.52.0
-
-<span class="filex-release-date">5 October 2026</span>
-
-LDAP and Active Directory groups reach filex: a filex group can name directory groups and follows them at every sign-in, a directory sync opens accounts, brings the directory's groups in and can switch off people the directory no longer lists, and a group can make its members administrators - contributed by @manjotsc (#90). Apps can now come from a store: a store such as filex Apps (apps.filex.sh) sends you to your own filex with an install link, which opens the same permission review, holds the app to the store's pins and installs nothing until you press Install. A store is trusted once, after you compare its key fingerprints, and a paid app's license is the store's: checked every day, and an app whose license does not hold is held, never removed. A CSV saved from ONLYOFFICE keeps the cells nobody changed (#88), asking what is below a folder no longer reads the whole storage (#89) and the README is a short page with the detail one click away (#87), all contributed by @berkbasarir; following his report (#86), Admin > Roles points out a role an older version's page may have saved without Encrypt, with one click to give it back. The Snap runs inside the snap's strict confinement and needs no snap connect step. Security: an app is now held to a folder-confined API token's folder, and the token learns nothing about what lies outside it.
-
-## What changed
-
-### Added
-
-- **The README in five more languages** - Turkish, German, Spanish, French and
-  Simplified Chinese (`README.tr.md`, `README.de.md`, `README.es.md`,
-  `README.fr.md`, `README.zh-CN.md`), each linked from a language line under
-  the badges of all six. An interface label is written as filex's interface
-  shows it in that language - the built-in Turkish catalogue, the German,
-  Spanish and French language packs - so a reader finds on screen what the page
-  named; there is no Chinese interface yet, so the Chinese page keeps the
-  English label and glosses it. Code blocks, commands, link targets and
-  screenshots are the English README's, unchanged. Each translation names the
-  commit it was made from and says that the English text holds where the two
-  differ; the German, Spanish, French and Chinese pages are machine
-  translations awaiting review by a native speaker, and say so.
-  `scripts/check-links.mjs` and `scripts/check-doc-anchors.mjs` read
-  the translations too, so a renamed docs heading names the link to fix in each
-  of them ([CONTRIBUTING.md](./CONTRIBUTING.md#docs)). Contributed by Berk
-  Başarır ([#84](https://github.com/BRF-Tech/filex/pull/84)).
-- **Installing from an app store, and paid apps.** An app store's **Install**
-  opens an install link on your filex (`/admin/store-install#store=…&intent=…`)
-  that lands on the same install review a repository gets, filled in from the
-  store and marked *From store &lt;origin&gt;*; the administrator still decides.
-  Before the review opens, filex checks that it trusts the store - the first
-  link asks an administrator to compare the store's key fingerprints and trust
-  it (trust on first use; or `FILEX_APP_STORE_URLS` + `FILEX_APP_STORE_KEYS`),
-  and a store whose keys change is asked about again - that the link is signed
-  by one of the store's `index` keys (ed25519 over the sha256 of the canonical
-  JSON, the module-signature rule), current and not used here before, and
-  that the repository serves exactly the manifest, module, interface and
-  permissions the store approved; **Install** reads and checks it all again.
-  A link is made for one filex (`filex_origin`, signed) and names the commit
-  the store reviewed, which is what filex reads. A store link installs or
-  upgrades - from the same store and repository only - never downgrades, and
-  the store is told how the link ended. A **paid app**'s license is issued and kept by the store:
-  filex keeps the key sealed with `FILEX_SECRET_KEY` (shown by its prefix only,
-  never in an answer, a log or the audit log), asks the store at the install
-  and every day, and HOLDS the app - installed, nothing removed, nothing run,
-  state *Unlicensed* - when the store says revoked, expired, invalid, out of
-  seats or for another app, or once the grace the store signed has ended
-  without an answer; turning the server's clock back does not stretch a grace.
-  Admin → Apps gets *Trusted stores* and, on a paid app's page, *License*
-  (status, licensee, seats, dates, key, **Verify now**); a band on every admin
-  page names a held app. An app reads its own license's status and dates with
-  `fx.license.get()` (`@brftech/filex-app-ui`). `FILEX_APP_GITHUB_RAW_BASE`
-  points GitHub installs at a mirror. Migration 00081. ([APP-PLUGINS.md →
-  Installing from a store](./APP-PLUGINS.md#installing-from-a-store),
-  [APP-PLUGINS-API.md → The store contract](./APP-PLUGINS-API.md#the-store-contract-0520))
-- **LDAP groups** ([docs/LDAP.md → Groups](./LDAP.md#groups), migration
-  00084). A group can name LDAP / Active Directory groups, by DN or by name,
-  beside its SSO groups: every sign-in to the web UI reads the person's
-  directory groups (`group_attr`, or a search with `group_filter`) and joins
-  and leaves the linked groups as the directory says. A failed group read
-  never refuses a sign-in or takes anybody out of a group; the file protocols
-  never move memberships. New settings: `group_filter`, `group_base_dn`
-  (`FILEX_LDAP_GROUP_*`), also on Admin → Identity providers. Contributed by
-  Manjot Singh ([#90](https://github.com/BRF-Tech/filex/pull/90)), with the
-  directory sync, several directories, permanent ids, administrators through
-  a group, Users, Groups, Add user and Identity providers entries below. The
-  tenant boundary and partial-answer rules of directory sync, and the
-  session gate on its doors, were added on top of it before the release.
-- **LDAP directory sync** ([docs/LDAP.md → Directory sync](./LDAP.md#directory-sync)).
-  Admin → Identity providers → an LDAP provider → **Sync now**, and every
-  `sync_interval` on its own: filex reads every person the directory lists,
-  opens the accounts nobody has signed in to yet (as their first sign-in
-  would: the first sign-in rule decides) and brings everyone's LDAP-linked
-  group memberships in step; accounts the directory stopped listing lose
-  them, and are switched off with `sync_disable_missing`. A search that finds
-  nobody changes nothing. It also brings **every directory group in as a
-  filex group** (`sync_groups`, on by default; `sync_group_filter` picks
-  which), followed by its permanent id (or, with none, its DN): renamed
-  with it, and flagged *Removed from LDAP* - never deleted - when it is
-  gone. Which groups exist
-  is managed on the directory. Each LDAP provider syncs its own directory,
-  accounts and groups. New settings `sync_interval`, `sync_filter`,
-  `sync_disable_missing`, `sync_groups`, `sync_group_filter`
-  (`FILEX_LDAP_SYNC_*`). A run in which an account could not be looked up
-  counts nobody as no longer listed, and a person whose entry lost its
-  e-mail is still listed by their permanent id; a `group_filter` that names
-  people by their sign-in name (`%u`) leaves memberships to the sign-in. On a
-  multi-tenant install sync reaches only the accounts the directory already
-  holds and those of its own tenant - another account at the same address
-  waits for its person's sign-in in their realm - and a tenant's own
-  directory opens its groups in that tenant. **Sync now** needs an
-  administrator signed in to the panel, not an API key.
-- **Each LDAP directory keeps to its own** ([docs/LDAP.md → Several directories](./LDAP.md#several-directories),
-  migration 00084). An account belongs to the LDAP provider that made it -
-  another never signs it in - and `email_domains` limits a directory to its
-  own addresses; the Users page makes no local account at an address a
-  directory of that account's tenant owns. An account from before 0.52 with no password here and no
-  SSO identity is taken by the first directory that signs it in, as any
-  directory could sign it in before; one with a password here is the main
-  directory's alone.
-- **LDAP: switched off there, switched off here** ([docs/LDAP.md → Directory sync](./LDAP.md#directory-sync),
-  migration 00085). Directory sync switches off the account of a person the
-  directory has switched off - Active Directory's "account disabled",
-  389-ds's `nsAccountLock`, an OpenLDAP password-policy lock with no end -
-  administrators included (never the last one), so their sessions, API keys
-  and SFTP keys stop with their password. An account with a password of its
-  own here is left on, and the report says so. An account sync switched off (this
-  way or with `sync_disable_missing`) comes back on when the directory lets
-  the person back in; one switched off or on by hand stays as the
-  administrator left it. The Users list and a person's page say **Disabled
-  by LDAP**.
-- **LDAP: people known by their permanent id** ([docs/LDAP.md → Who is who](./LDAP.md#who-is-who),
-  migration 00085). A sign-in or sync finds a person by `entryUUID` /
-  `objectGUID` before their e-mail: someone whose address changes in the
-  directory keeps their account and files, and its e-mail follows; an
-  address the directory gives to someone new no longer signs them in to the
-  previous owner's account - sign-in is refused and sync lists the problem.
-- **A group can make its members administrators** ([docs/GROUPS.md → Administrators](./GROUPS.md#administrators),
-  migration 00086). A group's role can be **Administrator (full access)**:
-  linked to an LDAP or SSO group, the directory decides who administers
-  filex, so the local administrator from setup can go. Its LDAP links are
-  full DNs and count only for people of the group's own directory. Leaving
-  the group gives back the earlier level; the last administrator of a tenant
-  is never demoted; an administrator made by hand is never demoted by a
-  group. Only a signed-in full administrator sets one up or changes who is
-  in it.
-- **Where people come from.** The Users page has a **Source** column -
-  Local, SSO, LDAP or Proxy - and a **Groups** column (two groups a row,
-  those that give a role or folder access first, then "+N") with a group
-  filter; a person's page and a group's member list show the source too. The
-  Groups page says whether a group's members are added by hand or come from
-  SSO or LDAP, and filters by it.
-- **Add user, clearer** - people of an LDAP directory arrive at sign-in or
-  with directory sync. The dialog suggests the username and display name
-  from the e-mail, says what the role gives, and offers three ways in: set a
-  password (generate, show, copy), send an invitation, or no password (an
-  SSO account made ahead of its first sign-in, or API keys only). It adds the
-  account to groups made here, and has **Create and add another**.
-- **Identity providers, one tab per kind.** The page is a set of summary
-  cards, one tab per kind of sign-in (LDAP first, Windows and PAM too); a
-  card opens the provider's own page - for LDAP its settings in sections
-  (Connection, People, Groups, Directory sync) and its sync.
-
-### Changed
-
-- **The Snap runs without Chromium's own sandbox again, inside the snap's
-  strict confinement.** 0.50 and 0.51 asked the Snap Store for
-  `browser-support` with `allow-sandbox: true` so that Chromium could build its
-  sandbox inside the snap. Snapcraft grants that to trusted publishers only,
-  never connects it by itself and reviews it by hand: those revisions waited
-  in manual review, the stable channel stayed on 0.49, and the newer snap did
-  not open until `sudo snap connect filex-app:browser-sandbox` was run. The
-  snap now asks for no such permission, as Snapcraft advises for Electron
-  apps: the app starts with `--no-sandbox`, and snapd's AppArmor profile,
-  seccomp filter and namespaces confine it as a whole. For you: no
-  `snap connect` step, and snap updates reach the stable channel by themselves
-  again. What it costs: the confinement keeps the app away from the rest of
-  the system, but unlike Chromium's sandbox it does not wall the pages the app
-  shows off from the app itself. The `.deb`, the `.rpm` and the AppImage keep
-  Chromium's sandbox, and the launcher still refuses to start them without it.
-  The release checks the snap's confinement now, where it checked the sandbox
-  ([DESKTOP.md](./DESKTOP.md#the-snap-and-the-sandbox)).
-
-- **A release is tagged only after GitHub has tested its commit (#76).** `pnpm release` pushes both `main` branches untagged, starts a dry run of `release.yml` on the export commit and waits until it and CI have passed there; only then are the tags made, and the tag run's new `verify` job publishes nothing without those two runs on its commit. A red run spends no version number, a resume never goes back past a pushed tag, and `--resume --only deploy` re-reads the deploy on the tagged commits ([CONTRIBUTING.md → Release process](./CONTRIBUTING.md#release-process)).
-- Nothing changes on upgrade: migrations 00084 to 00086 add the LDAP group
-  table, empty, a label saying where each account comes from (an account
-  with an OIDC subject is SSO, one with a password here Local; one with
-  neither has no label yet and takes the label, and for LDAP the directory,
-  of its next sign-in),
-  the permanent id column and the administrator switch, off.
-- The Roles page's introduction says one role per person.
-
-- **The README reads top to bottom as a short page, with the detail one click away.**
-  `README.md` is titled `filex` and opens with a three-line description of
-  what filex is, three buttons (live demo, quick start, documentation), the
-  picture and six cards in place of one long paragraph. *Why filex* is a tour
-  of eight parts - the explorer, storage and protocols, sharing and
-  protection, people and access, desktop app & CLI, embedding, apps, AI
-  agents - each a line that says what it is for, up to four bullets, one
-  picture and a block that opens on a click and holds the text that stood
-  there before with its screenshots as a gallery, each over its caption. A new
-  section, *Coming from Nextcloud, Dropbox or Google Drive*, sets out in one
-  table what each of them and File Browser is and what filex is beside it,
-  then what filex does not have: no calendar, contacts, mail or chat, no
-  Android or iOS app, no placeholder files, no office editor of its own. *Try
-  it now* and *Quick start - binary* are one *Quick start*; the documentation
-  index, folded by topic, moved above *Features*, which leads with a
-  thirteen-row table and keeps its 55 entries in a block that opens on a
-  click. *Development* sits under a new *Contributing* section. Sections are
-  first-level headings and the parts of the tour second-level, with a line of
-  air before each. No picture and no link target was dropped: the container
-  and live demo badges became a link and a button, and the CI badge moved to
-  *Contributing*. About 2,500 words are in view where 13,900 were. The five
-  translations are left whole at the commit they name
-  ([CONTRIBUTING.md → Docs](./CONTRIBUTING.md#docs)), and step 1 of the
-  release process says where a new surface goes in this layout, so the page
-  does not grow back into a wall
-  ([CONTRIBUTING.md → Release process](./CONTRIBUTING.md#release-process)).
-  Contributed by Berk Başarır
-  ([#87](https://github.com/BRF-Tech/filex/pull/87)).
-
-**This release has more to it than fits on one page.** The rest of the
-entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0520---2026-10-05).
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.52.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.52.0`
-
 ## Earlier releases
 
-The 132 releases before v0.52.0, in brief. Full notes are on GitHub.
+The 133 releases before v0.53.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.52.0](https://github.com/BRF-Tech/filex/releases/tag/v0.52.0) | 5 October 2026 | LDAP and Active Directory groups reach filex: a filex group can name directory groups and follows them at every sign-in, a directory sync opens accounts, brings the directory's groups in and can switch off people the directory no… |
 | [v0.51.0](https://github.com/BRF-Tech/filex/releases/tag/v0.51.0) | 4 October 2026 | Who may encrypt is now an organisation's decision, contributed by @berkbasarir (#83): the tenant policy (Off, Administrators only, Permitted, or Approval), a new files.encrypt permission and, on multi-tenant installs, a ceiling… |
 | [v0.50.0](https://github.com/BRF-Tech/filex/releases/tag/v0.50.0) | 3 October 2026 | Office documents open, convert and get their thumbnails through the connected ONLYOFFICE Document Server: LibreOffice is gone from every image and from filex, and the Test on the ONLYOFFICE card now downloads the way a document… |
 | [v0.49.0](https://github.com/BRF-Tech/filex/releases/tag/v0.49.0) | 29 September 2026 | Roles and per-person permissions, contributed by @manjotsc (#75): 28 named permissions, one role per person built from them, per-person exceptions on top, and refusals that name the permission and the role in the reader's… |
@@ -2382,4 +2202,4 @@ The 132 releases before v0.52.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-11-06 from 152 published releases.</small>
+<small>Last refreshed 2026-11-09 from 153 published releases.</small>

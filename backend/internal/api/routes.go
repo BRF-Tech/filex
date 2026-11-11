@@ -69,10 +69,12 @@ import (
 	"github.com/brf-tech/filex/backend/internal/secretbox"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
+	"github.com/brf-tech/filex/backend/internal/shortlink"
 	"github.com/brf-tech/filex/backend/internal/space"
 	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
+	"github.com/brf-tech/filex/backend/internal/templates"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/tenantdomain"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
@@ -136,7 +138,12 @@ type Deps struct {
 	// Nil when FILEX_APP_PLUGINS_DISABLED or the CPU architecture has no
 	// wazero compiler — the user routes then answer 404, the admin ones 503
 	// with AppPluginsDisabledReason.
-	AppPlugins               *wasmplugin.Registry
+	AppPlugins *wasmplugin.Registry
+	// Routes is where the router keeps the addresses of the apps' public
+	// routes (internal/shortlink): the server passes shortlink.Live(), which
+	// its own TLS also reads; nil gives this router one of its own (tests,
+	// where several routers live in one process).
+	Routes                   *shortlink.Snapshot
 	AppPluginsDisabledReason string
 	// AppStore is the app store side (internal/appstore): trusted stores,
 	// install links, paid apps' licenses. Nil when the app runtime is off.
@@ -233,6 +240,9 @@ type Deps struct {
 	FTPSAddr func() string
 	// Mailer sends invite/share notices (optional; nil → links shown on-screen).
 	Mailer *mailer.Service
+	// Templates renders the mails and the public pages (internal/templates);
+	// nil = filex's own templates only.
+	Templates *templates.Renderer
 	// ZipCache caches folder-share ZIPs (shared with the background warmer).
 	ZipCache *sharezip.Cache
 	// FileCache holds the locally prepared copies of big files that live on
@@ -441,6 +451,24 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.Cfg.AppUIOrigin != "" {
 		r.Use(appUIHostSplit(d.Cfg.AppUIOrigin, d.Cfg.BasePath))
 	}
+	// An app's public route on a host of its own (a link shortener's
+	// l.example.com): that host answers the route's addresses and /healthz and
+	// nothing else - never the SPA, the API or a share (internal/shortlink).
+	// The bases are the registry's, rebuilt whenever they change
+	// (SetRoutesChanged below); the door is built once the tenant resolver is.
+	var routeDoor *handlers.RouteDoor
+	serveRoute := func(w http.ResponseWriter, req *http.Request, v shortlink.Visit) {
+		if routeDoor == nil {
+			http.NotFound(w, req)
+			return
+		}
+		routeDoor.Serve(w, req, v)
+	}
+	routes := d.Routes
+	if routes == nil {
+		routes = &shortlink.Snapshot{}
+	}
+	r.Use(shortlink.HostSplit(routes, serveRoute))
 	// The browser-facing headers every answer carries, whatever proxy is (or
 	// is not) in front: nosniff, the referrer policy, and on filex's own pages
 	// who may frame them (FILEX_FRAME_ANCESTORS). Above the base-path
@@ -462,6 +490,10 @@ func BuildRouter(d *Deps) http.Handler {
 	// ITS root, never under the app's base — and below Logger, so a request
 	// refused for arriving outside the base is still in the access log.
 	r.Use(basepath.Middleware(d.Cfg.BasePath))
+	// The routes' addresses on filex's own address (`/l/<code>`), under the
+	// base path like every route; their prefixes never shadow one of filex's
+	// own (reservedFirstSegment, checked when an address is given).
+	r.Use(shortlink.OwnAddress(routes, serveRoute))
 	// One permission resolution per request, however many storages it
 	// touches (perm.WithMemo; every acl.LoadSet consults it).
 	r.Use(perm.Middleware)
@@ -620,6 +652,11 @@ func BuildRouter(d *Deps) http.Handler {
 	// host and not the operator's. See internal/tenanturl — new absolute-URL
 	// builders belong on it too.
 	tenants := tenanturl.New(d.Store, d.Cfg.PublicURL, d.Cfg.MultiTenant)
+	if d.AppPlugins != nil {
+		routeDoor = handlers.NewRouteDoor(d.AppPlugins, d.Store, tenants, d.Cfg.MultiTenant)
+		routeDoor.Misses.Alarm = routeMissAlarm(d)
+		wireRouteHosts(d, r, tenants, routes)
+	}
 
 	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver, d.Cfg.PublicURL, d.ZipCache)
 	sh.AttachTenants(tenants)
@@ -654,6 +691,25 @@ func BuildRouter(d *Deps) http.Handler {
 	tuh.AttachSearchIndex(d.Index)
 	tuh.AttachStaged(suh)
 	tuh.AttachBody(d.Body)
+	// Uploaders (0.60): the upload door - an uploader's key, POST
+	// /api/uploads, one new file into the uploader's folder and a link back -
+	// and each upload's deletion link (/x/{token}, credential-free: GET is a
+	// confirmation page, only its POST deletes). handlers/uploads.go and
+	// handlers/upload_delete.go.
+	uploadsH := handlers.NewUploads(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL)
+	uploadsH.AttachTenants(tenants)
+	uploadsH.AttachMultiTenant(d.Cfg.MultiTenant)
+	uploadsH.AttachACL(d.ACL)
+	uploadsH.AttachE2EPolicy(d.E2EPolicy)
+	uploadsH.AttachThumbs(d.Thumbs)
+	uploadsH.AttachSearchIndex(d.Index)
+	uploadsH.AttachStaged(suh)
+	uploadsH.AttachBody(d.Body)
+	udh := handlers.NewUploadDelete(d.Store, d.StorageResolver)
+	udh.AttachMultiTenant(d.Cfg.MultiTenant)
+	udh.AttachACL(d.ACL)
+	udh.AttachSearchIndex(d.Index)
+	udh.AttachLocale(d.Cfg.DefaultLocale)
 	// Same fallback language as the share pages — without this a drop page
 	// renders in whatever the two-language table falls back to, independently
 	// of the server's own default.
@@ -718,6 +774,16 @@ func BuildRouter(d *Deps) http.Handler {
 	// (spa_brand.go), and the public shell is the same index.html.
 	brandingSrc := handlers.NewBrandingSource(d.Store, d.Cfg.MultiTenant)
 	brander := newShellBrander(brandingSrc, d.Cfg.BasePath)
+	// The mails and public pages render in this branding (internal/templates):
+	// the tenant's own, or the address's for a page that belongs to no link.
+	if d.Templates == nil {
+		d.Templates = &templates.Renderer{Store: d.Store, MultiTenant: d.Cfg.MultiTenant}
+	}
+	d.Templates.SetBrand(brandingSrc.TemplateBrand, templateTenantForHost(d.Store))
+	sh.AttachTemplates(d.Templates)
+	mh.Templates = d.Templates
+	dh.AttachTemplates(d.Templates)
+	pubAPI.AttachTemplates(d.Templates)
 	// A Web Push shows the installed app's icon (#219): the PNG the manifest
 	// names for the person's tenant branding, read off the manifest the build
 	// ships as this branding dresses it (spa_brand.go pushIcon).
@@ -734,7 +800,7 @@ func BuildRouter(d *Deps) http.Handler {
 			return brander.pushIcon(builtManifest, brandingSrc.ForProvider(ctx, tenantID))
 		})
 	}
-	publicShell := publicShellHandler(d.Embed, d.Cfg.BasePath, brander)
+	publicShell := publicShellHandler(d.Embed, d.Cfg.BasePath, brander, d.Templates)
 	sh.AttachShell(publicShell)
 	dh.AttachShell(publicShell)
 	// …and the no-JS body of an app link: the copies the app exposed, as
@@ -860,6 +926,7 @@ func BuildRouter(d *Deps) http.Handler {
 	ush := handlers.NewUsers(d.Store)
 	ush.ACL = d.ACL
 	ush.Mailer, ush.Tenants = d.Mailer, tenants
+	ush.Templates = d.Templates
 	if d.AuthLive != nil {
 		ush.DirectoryFor = d.AuthLive.DirectoryFor
 	}
@@ -871,6 +938,7 @@ func BuildRouter(d *Deps) http.Handler {
 	groupsH := handlers.NewGroupsAdmin(d.Store, d.ACL)
 	seth := handlers.NewSettings(d.Store)
 	seth.AttachMailer(d.Mailer)
+	seth.Templates = d.Templates
 	seth.LoginGuard = d.LoginGuard
 	// A demo's settings page is a public page: the sign-in settings'
 	// addresses are masked (handlers/demo_redact.go).
@@ -1085,8 +1153,15 @@ func BuildRouter(d *Deps) http.Handler {
 	}
 	grantsH := handlers.NewGrants(d.Store, d.ACL)
 	grantsH.AttachInvite(d.Share, d.Mailer, d.Cfg.PublicURL)
+	grantsH.Templates = d.Templates
 	grantsH.AttachTenants(tenants)
 	grantsH.AttachBranding(brandingSrc)
+	// "Get short link" (handlers/short_links.go): the shortener app keeps the
+	// address; a mailed link carries it.
+	shortH := &handlers.ShortLinks{Grants: grantsH, Apps: apH, Registry: d.AppPlugins}
+	grantsH.ShortAddress = shortH.MailAddress
+	ch.ShortLinks = shortH.Available
+	uploadsH.Shorten = shortH.ForUpload
 	selfTokensH := handlers.NewSelfTokens(d.Store, d.ACL, d.ProtocolAuth)
 	desktopAuthH := handlers.NewDesktopAuth(d.Store)
 
@@ -1115,6 +1190,12 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Post("/event", pubAPI.Event)
 		r.Get("/file/{ref}", pubAPI.File)
 		r.Get("/entries", pubAPI.Entries)
+		// The page's text slots, in the visitor's language
+		// (handlers/public_slots.go, internal/templates slot.share.*).
+		r.Get("/slots", pubAPI.ShareSlots)
+		// The page's identity: the link's tenant's (Ç3), the address's for a
+		// token that names no live link (handlers.PublicAPI.LinkBranding).
+		r.Get("/branding", pubAPI.ShareBranding)
 	})
 	r.Route("/api/public/d/{token}", func(r chi.Router) {
 		r.Get("/", pubAPI.DropState)
@@ -1122,6 +1203,8 @@ func BuildRouter(d *Deps) http.Handler {
 		// The bot check's pass for the upload below (handlers/captcha.go).
 		r.Post("/captcha", captchaH.DropPass)
 		r.Post("/upload", pubAPI.DropUpload)
+		r.Get("/slots", pubAPI.DropSlots)
+		r.Get("/branding", pubAPI.DropBranding)
 	})
 
 	// ────── the bot check (internal/captcha) ──────
@@ -1152,6 +1235,15 @@ func BuildRouter(d *Deps) http.Handler {
 	// caller minted the ticket, and the URL can do nothing but that one write.
 	r.Put("/u/{ticket}", tuh.Upload)
 	r.Post("/u/{ticket}", tuh.Upload)
+
+	// ────── uploaders: the upload door and the deletion link ──────
+	// No session on either. The door is authenticated by an uploader's key,
+	// which no other route looks up (a leaked key adds files to one folder
+	// and does nothing else); the deletion link is a credential for one
+	// delete, and its GET never deletes - link previews fetch every URL.
+	r.Post("/api/uploads", uploadsH.Upload)
+	r.Get("/x/{token}", udh.Page)
+	r.Post("/x/{token}", udh.Delete)
 	// Selection archive, redeem half. Credential-free on purpose and by the
 	// same reasoning as /u/ above: the ticket authorizes exactly one archive,
 	// was minted under an authenticated caller's own grants, is unguessable,
@@ -1215,7 +1307,7 @@ func BuildRouter(d *Deps) http.Handler {
 		if d.AuthLive != nil {
 			tlsBox = d.AuthLive.Options().Box
 		}
-		tlsH := &handlers.TLSHooks{Store: d.Store, Box: tlsBox, PublicURL: d.Cfg.PublicURL}
+		tlsH := &handlers.TLSHooks{Store: d.Store, Box: tlsBox, PublicURL: d.Cfg.PublicURL, ShortLinks: routes}
 		r.Get("/api/tls/ask", tlsH.Ask)
 		r.Get("/api/tls/certificate", tlsH.Certificate)
 	}
@@ -1300,6 +1392,8 @@ func BuildRouter(d *Deps) http.Handler {
 	// brandingSrc itself is made above, beside the public shell.
 	sh.AttachBranding(brandingSrc)
 	dh.AttachBranding(brandingSrc)
+	udh.AttachBranding(brandingSrc)
+	udh.AttachTemplates(d.Templates)
 	seth.AttachBranding(brandingSrc)
 	pubAPI.AttachBranding(brandingSrc)
 	r.Get("/api/branding", handlers.NewBranding(brandingSrc).Get)
@@ -1332,6 +1426,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// /api/admin/providers (a tenant IS a provider row).
 	if d.Cfg.Cloud.Enabled {
 		cloudSvc := cloudpkg.New(d.Store, d.Mailer, d.Cfg.Cloud.PlansJSON, d.Cfg.Cloud.BaseHost)
+		cloudSvc.AttachTemplates(d.Templates)
 		cloudH := handlers.NewCloud(cloudSvc, cloudpkg.NewStripe(d.Cfg.Cloud.StripeSecret), d.Cfg.MultiTenant)
 		cloudH.WebhookSecret = d.Cfg.Cloud.StripeWebhookSecret
 		cloudH.Origin = tenants.ForProvider
@@ -1594,6 +1689,20 @@ func BuildRouter(d *Deps) http.Handler {
 			r.With(handlers.RequirePermission(d.ACL, perm.AccessAPI)).Post("/api/tokens", selfTokensH.Create)
 			r.With(handlers.RequirePermission(d.ACL, perm.AccessAPI)).Patch("/api/tokens/{id}", selfTokensH.Update)
 			r.Delete("/api/tokens/{id}", selfTokensH.Delete)
+
+			// Self-service uploaders - a screenshot tool's, a shortcut's, a
+			// script's own key, folder and link rule (handlers/uploaders.go).
+			// access.api, as for an API token: the key is used from outside the
+			// web app. Deleting asks nothing.
+			uploadersH := handlers.NewUploaders(d.Store, d.StorageResolver, d.Cfg.PublicURL)
+			uploadersH.ShortLinks = shortH.Available
+			uploadersH.AttachACL(d.ACL)
+			uploadersH.AttachTenants(tenants)
+			r.Get("/api/auth/uploaders", uploadersH.List)
+			r.With(handlers.RequirePermission(d.ACL, perm.AccessAPI)).Post("/api/auth/uploaders", uploadersH.Create)
+			r.With(handlers.RequirePermission(d.ACL, perm.AccessAPI)).Patch("/api/auth/uploaders/{id}", uploadersH.Update)
+			r.With(handlers.RequirePermission(d.ACL, perm.AccessAPI)).Post("/api/auth/uploaders/{id}/key", uploadersH.RotateKey)
+			r.Delete("/api/auth/uploaders/{id}", uploadersH.Delete)
 		})
 
 		// Desktop authorization, browser half. Session-authenticated: the SPA
@@ -1759,6 +1868,11 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Post("/ops", oh.Submit)
 			r.Get("/ops/{id}", oh.Status)
 			r.With(write).Post("/ops/{id}/cancel", oh.Cancel)
+
+			// "Get short link" (handlers/short_links.go): the shortener app
+			// answers; the link must be one the caller may mail.
+			r.Get("/short-links", shortH.Get)
+			r.With(write).Post("/short-links", shortH.Post)
 
 			// App plugins — the file-menu actions and views installed
 			// plugins offer (handlers/app_plugins.go, docs/APP-PLUGINS.md).
@@ -2302,6 +2416,16 @@ func BuildRouter(d *Deps) http.Handler {
 					r.Get("/{id}/overrides", apAdm.GetOverrides)
 					r.Put("/{id}/overrides", apAdm.PutOverrides)
 					r.Get("/{id}/logs", apAdm.Logs)
+					// Setting an app up, Reconfigure (handlers/app_setup.go).
+					r.Get("/{id}/setup", apAdm.Setup)
+					r.Get("/{id}/setup/view", apAdm.SetupView)
+					r.Post("/{id}/setup/view", apAdm.SetupView)
+					r.Post("/{id}/setup/routes/{route}/bases", apAdm.AddRouteBase)
+					r.Patch("/{id}/setup/bases/{base}", apAdm.PatchRouteBase)
+					r.Delete("/{id}/setup/bases/{base}", apAdm.DeleteRouteBase)
+					r.Post("/{id}/setup/complete", apAdm.CompleteSetup)
+					r.Get("/{id}/erase", apAdm.Erase)
+					r.Post("/{id}/reconfigure", apAdm.Reconfigure)
 					// An app's thumbnail limits (wasmplugin/thumbnails.go).
 					r.Get("/{id}/thumbnails", apAdm.ThumbLimits)
 					r.Put("/{id}/thumbnails", apAdm.PutThumbLimits)
@@ -2382,6 +2506,23 @@ func BuildRouter(d *Deps) http.Handler {
 					r.Patch("/", seth.Update)
 					r.Post("/smtp-test", seth.SMTPTest)
 					r.Put("/{key}", seth.Set)
+				})
+
+				// The mail and public-page templates (handlers/templates_admin.go,
+				// internal/templates): each administrator edits their own scope's
+				// - the install's, or their tenant's - read off the session,
+				// never off the request.
+				tplH := handlers.NewTemplatesAdmin(d.Store, d.Templates)
+				if d.Mailer != nil {
+					tplH.Send, tplH.Ready = d.Mailer, d.Mailer.Ready
+				}
+				r.Route("/templates", func(r chi.Router) {
+					r.Get("/", tplH.List)
+					r.Get("/{key}", tplH.Get)
+					r.Put("/{key}", tplH.Put)
+					r.Delete("/{key}", tplH.Delete)
+					r.Post("/{key}/preview", tplH.Preview)
+					r.Post("/{key}/test", tplH.TestMail)
 				})
 
 				/* tema:v1 - operator-defined themes (handlers/themes.go).
@@ -2840,10 +2981,11 @@ func BuildRouter(d *Deps) http.Handler {
 		r.With(auth.RequireAdminToken).Route("/admin", aiAdmin.Register)
 	})
 
-	// ────── ShareX uploader (token-authenticated) ──────
-	// POST a file/image/text from ShareX → stored + indexed via the AI path,
-	// a public /s/<token> share is minted, and {"url":"<link>?inline=1"} is
-	// returned (inline so images/text render in-browser).
+	// ────── ShareX uploader (token-authenticated) - DEPRECATED ──────
+	// The pre-0.60 ShareX endpoint, kept unadvertised so installed configs
+	// keep working; removed in the next major release. Its successor is the
+	// upload door above (POST /api/uploads with an uploader's key). It still
+	// answers {"url":"<link>?inline=1"} and stamps origin "sharex".
 	sxUploadH := handlers.NewShareX(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL)
 	sxUploadH.AttachTenants(tenants)
 	sxUploadH.AttachACL(d.ACL)
@@ -2890,7 +3032,7 @@ func BuildRouter(d *Deps) http.Handler {
 
 // UserUIPrefix is the neutral, end-user mount point for the same SPA the
 // admin panel is served from. See wireStatic and GitHub #14.
-const UserUIPrefix = "/drive"
+const UserUIPrefix = handlers.UserUIPrefix
 
 // wireStatic mounts the embedded /admin SPA and the per-asset Web
 // Component bundle at /embed.js (+ neighbouring assets).
@@ -3045,7 +3187,7 @@ func wireStatic(r chi.Router, fsys fs.FS, base string, brand *shellBrander) {
 // nil when the frontend is not bundled — a development build, or a binary
 // built without `pnpm build:web`. The Go pages below then answer every
 // visitor, which is exactly the no-JS fallback, so nothing is unreachable.
-func publicShellHandler(fsys fs.FS, base string, brand *shellBrander) http.Handler {
+func publicShellHandler(fsys fs.FS, base string, brand *shellBrander, rend *templates.Renderer) http.Handler {
 	adminFS, err := stripPrefix(fsys, "admin")
 	if err != nil {
 		return nil
@@ -3061,6 +3203,11 @@ func publicShellHandler(fsys fs.FS, base string, brand *shellBrander) http.Handl
 			data = shell.index
 		}
 		data = brand.index(data, r)
+		// The administrator's frame around the application (page.shell;
+		// public_shell_template.go), with its nonce'd scripts.
+		if framed, ok := templatedShell(rend, data, r); ok {
+			data = framed
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		// ⚠ no-store, not no-cache: this document is served at a public link,
 		// and a shared or intermediate cache holding it would hand the next

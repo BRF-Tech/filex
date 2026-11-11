@@ -71,6 +71,7 @@ import {
   UsersRound,
   Webhook,
   Wrench,
+  FileCode2,
 } from 'lucide-vue-next';
 import type { MegaMenuEntry, MegaMenuItem, MegaMenuSection } from '@brftech/filex-core';
 
@@ -192,6 +193,7 @@ export const ADMIN_NAV: AdminNavEntry[] = [
         pages: [
           { route: 'settings', label: 'nav.general', hint: 'nav.hint.settings', icon: Settings, only: 'platform' },
           { route: 'branding', label: 'nav.branding', hint: 'nav.hint.branding', icon: Palette },
+          { route: 'templates', label: 'nav.templates', hint: 'nav.hint.templates', icon: FileCode2 },
           { route: 'appearance', label: 'nav.appearance', hint: 'nav.hint.appearance', icon: Brush, only: 'platform' },
           { route: 'tenancy', label: 'nav.tenancy', hint: 'nav.hint.tenancy', icon: Network, only: 'platform' },
           { route: 'tenant-self', label: 'nav.myTenant', hint: 'nav.hint.myTenant', icon: Building2, only: 'tenantSelf' },

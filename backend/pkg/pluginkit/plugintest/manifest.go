@@ -168,16 +168,27 @@ func InspectManifest(m wire.Manifest) Report {
 		seen["v:"+v.ID] = true
 		switch v.Placement {
 		case "modal", "page", "inspector", "home":
+		case wire.PlacementSetup:
+			// The app's own setup step (filex 0.60.0): the one setup.view
+			// names, an administrator's, never an action's.
+			if m.Setup == nil || m.Setup.View != v.ID {
+				r = r.err(w, "a setup view is the one setup.view names")
+			}
+			if v.Requires != "" {
+				r = r.err(w, "a setup view is an administrator's - leave requires out")
+			}
 		case "":
-			r = r.err(w, "placement is required (modal|page|inspector|home)")
+			r = r.err(w, "placement is required (modal|page|inspector|home|setup)")
 		default:
-			r = r.err(w, "unknown placement %q (modal|page|inspector|home)", v.Placement)
+			r = r.err(w, "unknown placement %q (modal|page|inspector|home|setup)", v.Placement)
 		}
 		if v.Placement == "inspector" && v.Applies.Kind == "" && len(v.Applies.Ext) == 0 && len(v.Applies.Mime) == 0 {
 			r = r.err(w, "an inspector section needs `applies`, or it is shown on every file")
 		}
 		r = append(r, inspectApplies(w, v.Applies)...)
 	}
+
+	r = append(r, inspectRoutes(m)...)
 
 	for i, p := range m.PublicPages {
 		w := fmt.Sprintf("manifest.public_pages[%d] (%s)", i, p.ID)
@@ -290,6 +301,58 @@ func InspectRegistered(p *pluginkit.Plugin) Report {
 	for id := range p.Pages {
 		if _, ok := pageByID(m, id); !ok {
 			r = r.err("plugin.pages", "a public page %q is registered that the manifest never declares", id)
+		}
+	}
+	return r
+}
+
+// inspectRoutes checks `routes`, `setup` and `link_shortener` (filex 0.60.0)
+// the way the host does: each needs its permission, the shortener names a
+// declared route, a setup view exists with the setup placement.
+func inspectRoutes(m wire.Manifest) Report {
+	var r Report
+	routes := map[string]bool{}
+	for i, rt := range m.Routes {
+		w := fmt.Sprintf("manifest.routes[%d] (%s)", i, rt.ID)
+		if rt.ID == "" {
+			r = r.err(w, "a route with no id")
+		}
+		if routes[rt.ID] {
+			r = r.err(w, "two routes share the id %q", rt.ID)
+		}
+		routes[rt.ID] = true
+		if rt.Label["en"] == "" {
+			r = r.err(w, "label.en is required")
+		}
+	}
+	if len(m.Routes) > 0 && !hasPerm(m, "public_routes") {
+		r = r.err("manifest.routes", "the manifest declares routes but never asks for the public_routes permission")
+	}
+	if len(m.Routes) == 0 && hasPerm(m, "public_routes") {
+		r = r.err("manifest.permissions", "public_routes without routes")
+	}
+	if ls := m.LinkShortener; ls != nil {
+		if !hasPerm(m, "link_shortener") {
+			r = r.err("manifest.link_shortener", "the link_shortener block needs the link_shortener permission")
+		}
+		if !routes[ls.Route] {
+			r = r.err("manifest.link_shortener", "route %q is not declared in routes", ls.Route)
+		}
+	} else if hasPerm(m, "link_shortener") {
+		r = r.err("manifest.permissions", "link_shortener without a link_shortener block")
+	}
+	if st := m.Setup; st != nil && st.View != "" {
+		found := false
+		for _, v := range m.Views {
+			if v.ID == st.View {
+				found = true
+				if v.Placement != wire.PlacementSetup {
+					r = r.err("manifest.setup", "view %q has placement %q, not setup", v.ID, v.Placement)
+				}
+			}
+		}
+		if !found {
+			r = r.err("manifest.setup", "view %q is not declared in views", st.View)
 		}
 	}
 	return r

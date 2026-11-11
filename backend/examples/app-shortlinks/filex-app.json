@@ -1,0 +1,40 @@
+{
+  "manifest_version": 1,
+  "name": "shortlinks",
+  "version": "0.1.0",
+  "label": { "en": "Short links", "tr": "Kısa bağlantılar" },
+  "description": {
+    "en": "Short addresses for filex's links: a share, a file request or an upload's link becomes a few random symbols on the address you give the app.",
+    "tr": "filex bağlantıları için kısa adresler: bir paylaşımın, dosya isteğinin ya da yüklemenin bağlantısı, uygulamaya verdiğiniz adreste birkaç rastgele sembol olur."
+  },
+  "filex": ">=0.60.0",
+  "languages": ["en", "tr"],
+  "permissions": ["data", "public_routes", "link_shortener"],
+  "user_permissions": [
+    {
+      "id": "use",
+      "label": { "en": "Get short links", "tr": "Kısa bağlantı almak" },
+      "description": {
+        "en": "\"Get short link\" on the links the person may make.",
+        "tr": "Kişinin açabildiği bağlantılarda \"Kısa bağlantı al\"."
+      },
+      "default": "user"
+    }
+  ],
+  "views": [
+    { "id": "setup", "placement": "setup", "label": { "en": "Set up short links", "tr": "Kısa bağlantıları kur" } }
+  ],
+  "routes": [
+    { "id": "go", "label": { "en": "Short links", "tr": "Kısa bağlantılar" }, "default_prefix": "l" }
+  ],
+  "setup": {
+    "view": "setup",
+    "reset": {
+      "warning": {
+        "en": "Every short link this app made stops working: the codes and where they went are erased.",
+        "tr": "Bu uygulamanın ürettiği her kısa bağlantı çalışmaz olur: kodlar ve gittikleri yerler silinir."
+      }
+    }
+  },
+  "link_shortener": { "route": "go", "requires": "use" }
+}

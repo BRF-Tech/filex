@@ -56,9 +56,11 @@ func fixture(t *testing.T) *Compiled {
 		sharedC, sharedErr = sharedRT.Compile(context.Background(), fixtureWasm, "", m, nil, func(level, msg string) {})
 	})
 	require.NoError(t, sharedErr)
-	// A copy so a test may swap the manifest without touching the others.
-	c := *sharedC
-	return &c
+	// A copy so a test may swap the manifest without touching the others,
+	// with no warm pool of its own yet (the struct holds a mutex: copied
+	// field by field).
+	return &Compiled{Name: sharedC.Name, Manifest: sharedC.Manifest, SHA256: sharedC.SHA256,
+		rt: sharedC.rt, cp: sharedC.cp, logger: sharedC.logger}
 }
 
 func runAction(t *testing.T, c *Compiled, action string, budget time.Duration) ([]byte, error) {

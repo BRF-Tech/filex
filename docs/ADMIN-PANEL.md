@@ -26,14 +26,14 @@ People, Settings, Maintenance & records:
 | | Apps | One row per installed app that has a screen of its own - see [Apps](APP-PLUGINS.md). The section is not shown when no app has one. |
 | | Storage | Storages, Connections, Sync runs, Replica, Usage & cost - see [Storage](STORAGE.md), [Protocols](PROTOCOLS.md), [Replication](REPLICATION.md), [Usage & cost](USAGE.md) |
 | **People** | People & access | Users, Groups, Roles, Folder access, Tenants - see [Roles & permissions](PERMISSIONS.md), [Groups](GROUPS.md), [RBAC & folder access](RBAC.md), [Multi-tenancy](MULTI-TENANCY.md) |
-| **Settings** | General | General (the server's defaults - default language, sync interval, unfinished uploads, file cache, thumbnail cache upkeep - the thumbnail settings, the search settings and the mail server), Branding, Appearance (themes, the default folder view, the stylesheet), Multi-tenant mode, My tenant - see [Configuration](CONFIGURATION.md), [Thumbnails](thumbnails.md), [Multi-tenancy](MULTI-TENANCY.md), [Tenant self-service](TENANT-ADMIN.md) |
+| **Settings** | General | General (the server's defaults - default language, sync interval, unfinished uploads, file cache, thumbnail cache upkeep - the thumbnail settings, the search settings and the mail server), Branding, Templates (every mail and public page), Appearance (themes, the default folder view, the stylesheet), Multi-tenant mode, My tenant - see [Configuration](CONFIGURATION.md), [Templates](TEMPLATES.md), [Thumbnails](thumbnails.md), [Multi-tenancy](MULTI-TENANCY.md), [Tenant self-service](TENANT-ADMIN.md) |
 | | Security & data | Identity providers, Sign-in security, Bot protection, Encryption, Protection - see [SSO](SSO.md), [LDAP](LDAP.md), [Bot protection](BOT-PROTECTION.md), [End-to-end encryption](E2E-ENCRYPTION.md), [Protection](PROTECTION.md) |
 | | File processing & integrations | Archives, Plugins (with Install requests, the trusted stores and who sees [the store screen](APP-PLUGINS.md#the-store-screen)), External services, Webhooks, Notifications (the history and the [notification digest](NOTIFICATIONS.md#the-digest)'s defaults), API / MCP, AI assistant - see [Archives](ARCHIVES.md), [Storage plugins](PLUGINS.md), [Apps](APP-PLUGINS.md), [OnlyOffice](ONLYOFFICE.md), [Notifications & webhooks](NOTIFICATIONS.md), [MCP](MCP.md), [AI assistant](AI-ASSISTANT.md) |
 | **Maintenance & records** | Maintenance & records | Queue, Tools, Audit log, Updates, About - see [Updates](UPDATES.md) |
 
-![The Settings panel open over Admin → Settings → General: three columns, a line under every page](https://filex.sh/shots/megamenu/settings-panel-1440.42b03e9a539f.png)
+![The Settings panel open over Admin → Settings → General: three columns, a line under every page](https://filex.sh/shots/megamenu/settings-panel-1440.e51582dc1f4f.png)
 
-![The Settings panel in Turkish, in the dark theme](https://filex.sh/shots/megamenu/settings-dark-tr-1440.9b8bf80addd3.png)
+![The Settings panel in Turkish, in the dark theme](https://filex.sh/shots/megamenu/settings-dark-tr-1440.7d56953e4946.png)
 
 Every page is two clicks away: the panel's button, then the page. The
 page's own sub-pages (a storage's settings, a person's page, a file's
@@ -89,7 +89,8 @@ the same rule the server applies to each page's API:
 
   What they are offered works on their tenant: Files, File history, Shares,
   Trash, Tagged files, Duplicates, Storages, Connections, Sync runs; Users,
-  Groups, Roles, Folder access; under Settings, Branding, My tenant (their
+  Groups, Roles, Folder access; under Settings, Branding, Templates (their
+  tenant's own), My tenant (their
   own sign-in and domains), Encryption, API / MCP and Notifications - where
   they see their tenant's [summary defaults](NOTIFICATIONS.md#the-digest),
   not the instance's history; and Tools, Audit log, About. The capability behind it is `caller_platform` (true on a

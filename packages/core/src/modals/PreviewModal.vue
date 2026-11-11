@@ -33,7 +33,7 @@ import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import Modal from './Modal.vue';
 import StarButton from '../components/StarButton.vue';
-import { ensureMonaco, getMonaco, ensureHighlight } from '../composables/useMonacoLoader';
+import { ensureMonaco, getMonaco, ensureHighlight, monacoEditorOptions } from '../composables/useMonacoLoader';
 import { localeTag, useLocale } from '../composables/useLocale';
 import { resolveLocale } from '../locales/resolve';
 import { browserProbeURL } from '../lib/externalReach';
@@ -1168,15 +1168,10 @@ async function tryMountMonaco(text: string, extension: string): Promise<boolean>
       : props.theme === 'light'
         ? false
         : window.matchMedia?.('(prefers-color-scheme: dark)').matches;
-    monacoEditor = monaco.editor.create(monacoEl.value, {
-      value: text,
-      language: monacoLanguageFor(extension),
-      readOnly: !editable,
-      theme: dark ? 'vs-dark' : 'vs',
-      automaticLayout: true,
-      minimap: { enabled: false },
-      fontSize: 13,
-    });
+    monacoEditor = monaco.editor.create(
+      monacoEl.value,
+      monacoEditorOptions({ value: text, language: monacoLanguageFor(extension), readOnly: !editable, dark: !!dark }),
+    );
     if (editable) {
       monacoEditor.addCommand(
         monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,

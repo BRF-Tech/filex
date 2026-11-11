@@ -223,10 +223,12 @@
       "updates": "New releases and the update policy",
       "about": "Version and build",
       "aiAssistant": "The assistant in the explorer: provider, model, limits",
-      "botProtection": "A captcha on sign-in, PINs and drop boxes"
+      "botProtection": "A captcha on sign-in, PINs and drop boxes",
+      "templates": "The HTML of every mail and public page"
     },
     "aiAssistant": "AI assistant",
-    "botProtection": "Bot protection"
+    "botProtection": "Bot protection",
+    "templates": "Templates"
   },
   "login": {
     "title": "Sign in",
@@ -1328,7 +1330,10 @@
       "no_pin": "This link has no PIN.",
       "not_recoverable": "This link was created before filex could keep a PIN, so it can no longer be shown. Create a new link to set a PIN you can see.",
       "no_secret_key": "This server has no encryption key (FILEX_SECRET_KEY), so PINs cannot be kept or shown. Ask an administrator to configure one."
-    }
+    },
+    "shortLink": "Get short link",
+    "shortLinkTitle": "Short link",
+    "shortLinkFull": "Full link:"
   },
   "search": {
     "title": "Search index",
@@ -1692,7 +1697,7 @@
     "creds": "Demo account: {email} · password: {password}",
     "sandbox": "Shared sandbox - everything resets nightly; storages, plugins and apps are switched off here.",
     "adminHint": "The admin panel is read-only here for every account - run your own filex to change what it shows.",
-    "alsoIncluded": "Also included: apps - sandboxed WebAssembly add-ons installed through a permission review, with e-Signature, Convert, an office editor, filextext and draw.io shipping alongside · an app you allow editing a file together, or a file of an encrypted folder, decrypted in your browser · language packs, right-to-left layout included · instance themes on the Appearance screen · the links you made, under My shares · personal and team tags · symlinked folders · a view and sort remembered per folder · roles, groups and per-person exceptions, per-file and per-folder access, and apps' own permissions · multi-tenancy, each tenant with its own sign-in realm and able to run itself - its own sign-in providers, domain and certificate · OIDC SSO, LDAP / Active Directory and sign-in with a Windows or Linux account · sign-in attempt limits with an IP allow-list · in-place viewers and editors, Office in the office editor app or through ONLYOFFICE · thumbnails of office documents, SVG, HEIC, text and archives, and folders drawn with the files that came into them last · Default apps: which app opens a kind of file · creating a document from + New - Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever ONLYOFFICE is connected or the office editor app is installed · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
+    "alsoIncluded": "Also included: apps - sandboxed WebAssembly add-ons installed through a permission review, with e-Signature, Convert, an office editor, filextext and draw.io shipping alongside · an app you allow editing a file together, or a file of an encrypted folder, decrypted in your browser · language packs, right-to-left layout included · instance themes on the Appearance screen · the links you made, under My shares · uploaders - a key for ShareX, curl or a script that answers each upload with a link · every mail and public page an editable template · personal and team tags · symlinked folders · a view and sort remembered per folder · roles, groups and per-person exceptions, per-file and per-folder access, and apps' own permissions · multi-tenancy, each tenant with its own sign-in realm and able to run itself - its own sign-in providers, domain and certificate · OIDC SSO, LDAP / Active Directory and sign-in with a Windows or Linux account · sign-in attempt limits with an IP allow-list · in-place viewers and editors, Office in the office editor app or through ONLYOFFICE · thumbnails of office documents, SVG, HEIC, text and archives, and folders drawn with the files that came into them last · Default apps: which app opens a kind of file · creating a document from + New - Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever ONLYOFFICE is connected or the office editor app is installed · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
     "features": {
       "storageTitle": "6 storage drivers, both directions",
       "storageBody": "Mount local disks, S3, SFTP, WebDAV, FTP/FTPS and SMB/NAS side by side as one tree - then reach that same tree back as S3, SFTP, FTPS, NFSv3 or WebDAV.",
@@ -2769,7 +2774,6 @@
     "installed": "{name} installed",
     "upgraded": "{name} upgraded",
     "deleted": "{name} removed",
-    "deleteConfirm": "Remove the app “{name}”? Its module, settings and action overrides are deleted from the server.",
     "permissionsCount": "{count} permission | {count} permissions",
     "scheduledBadge": "Wakes hourly",
     "checkUpdates": "Check for updates",
@@ -2807,7 +2811,8 @@
       "disabled": "Off",
       "refused": "Refused",
       "failed": "Failed",
-      "unlicensed": "Unlicensed"
+      "unlicensed": "Unlicensed",
+      "setup": "Needs setup"
     },
     "source": {
       "upload": "Uploaded",
@@ -2820,7 +2825,9 @@
       "reviewUpdate": "Review update",
       "upgrade": "Upgrade",
       "remove": "Remove",
-      "rollback": "Back to {version}"
+      "rollback": "Back to {version}",
+      "setup": "Finish setup",
+      "reconfigure": "Reconfigure"
     },
     "empty": {
       "title": "No apps installed",
@@ -3104,7 +3111,113 @@
       "missing": "No app named “{name}” is installed on this server."
     },
     "rollbackConfirm": "Put {name} back to {version}? Everybody moves to it at once; {current} is kept, so you can go forward again the same way.",
-    "rolledBack": "{name} is back to {version}."
+    "rolledBack": "{name} is back to {version}.",
+    "setup": {
+      "title": "Set up {name}",
+      "step": {
+        "app": "The app's settings",
+        "addresses": "Addresses",
+        "people": "Who may use it",
+        "finish": "Finish"
+      },
+      "lead": {
+        "app": "The app asks a few questions of its own. They are decided once: changing them later means Reconfigure, which erases the app's data.",
+        "addresses": "Where visitors reach the app. An address is not changed once the app runs: you can add one, or switch one off.",
+        "people": "Who may use the app's permissions. Each decision is saved as you make it.",
+        "finish": "Check what was chosen, then start the app."
+      },
+      "appDone": "The app's own settings are saved.",
+      "appAgain": "Open its settings again",
+      "back": "Back",
+      "next": "Next",
+      "later": "Later",
+      "complete": "Finish setup",
+      "finishText": "The app starts running for everyone it is offered to.",
+      "nodeLocal": "This app's data is kept on this server's own disk. If filex runs on more than one server behind one address, give apps a shared database first (FILEX_APP_DATA_DSN), or each server keeps different data.",
+      "needsSetup": "This app runs nothing until it is set up.",
+      "doneToast": "{name} is set up and running.",
+      "addr": {
+        "kindLabel": "Kind of address",
+        "kindOwn": "This filex's address",
+        "kindOwnHelp": "{host} and a path, for example {host}/l/…",
+        "kindHost": "A host of its own",
+        "kindHostHelp": "A name that answers this app and nothing else, for example l.example.com",
+        "host": "Host",
+        "prefix": "Path prefix",
+        "prefixOptional": "Path prefix (optional)",
+        "tenant": "Tenant it belongs to",
+        "tenantPlatform": "The platform",
+        "everyTenant": "Every tenant, on its own address",
+        "preview": "Addresses will look like:",
+        "codeWord": "code",
+        "dnsHint": "Point {host} at this filex ({target}) in DNS, and let your reverse proxy serve a certificate for it. On that host filex answers this app and nothing else.",
+        "add": "Add address",
+        "none": "No address yet. Add at least one.",
+        "colAddress": "Address",
+        "colKind": "Kind",
+        "colTenant": "Tenant",
+        "colState": "State",
+        "default": "Default",
+        "on": "On",
+        "off": "Off",
+        "makeDefault": "Make default",
+        "switchOff": "Switch off",
+        "switchOn": "Switch on",
+        "remove": "Remove"
+      },
+      "people": {
+        "default": {
+          "viewer": "every account",
+          "user": "accounts that can change files",
+          "admin": "administrators only"
+        },
+        "appDefault": "Until you decide: {who}.",
+        "useDefault": "Default",
+        "allow": "Allow",
+        "deny": "Deny",
+        "roles": "Roles",
+        "rolesNote": "A role's decision reaches everyone who holds it. To give this permission to a few people only, add them under People instead.",
+        "roleUser": "User (built-in)",
+        "roleViewer": "Viewer (built-in)",
+        "colRole": "Role",
+        "colHolders": "Who holds it",
+        "colDecision": "Decision",
+        "colGroup": "Group",
+        "colGivesRole": "Role it gives",
+        "colPerson": "Person",
+        "holdersBuiltin": "{n} person on this role | {n} people on this role",
+        "holdersPeople": "{n} person: {names} | {n} people: {names}",
+        "holdersPeopleMore": "{n} person: {names} and {more} more | {n} people: {names} and {more} more",
+        "holdersGroups": "groups: {groups}",
+        "holdersNone": "Nobody yet",
+        "groups": "Groups",
+        "groupAdmin": "Administrators",
+        "groupAdminHolds": "Its members are administrators and hold every app permission.",
+        "groupNoRole": "No role",
+        "groupNoRoleHint": "It gives no role: decide for its people one by one, or give the group a role under Groups.",
+        "groupShared": "Deciding here decides for the role {role}, which also reaches: {who}. To reach only this group's people, add them under People.",
+        "people": "People",
+        "peopleNote": "A person's own decision, whatever their role says.",
+        "searchPerson": "Find a person by name or address",
+        "clearPerson": "Back to their role's decision"
+      }
+    },
+    "erase": {
+      "titleReconfigure": "Reconfigure {name}",
+      "titleRemove": "Remove {name}",
+      "leadReconfigure": "Reconfigure erases everything {name} keeps and opens its setup again.",
+      "leadRemove": "Removing {name} erases everything it keeps, with the app itself.",
+      "final": "This cannot be undone.",
+      "data": "{n} entry of the app's own data ({size}) | {n} entries of the app's own data ({size})",
+      "links": "{n} link the app opened (it stops working) | {n} links the app opened (they stop working)",
+      "state": "{n} record the app keeps on files | {n} records the app keeps on files",
+      "locks": "{n} file lock (lifted) | {n} file locks (lifted)",
+      "nothing": "The app keeps no data yet.",
+      "thenWizard": "Its setup opens again right after.",
+      "typeLabel": "Type {name} to confirm",
+      "doReconfigure": "Erase and reconfigure",
+      "doRemove": "Erase and remove"
+    }
   },
   "defaultApps": {
     "title": "Default apps",
@@ -4465,5 +4578,91 @@
   },
   "securityOff": {
     "note": "This is not safe and not recommended. Apply it only if you know what you are doing."
+  },
+  "templates": {
+    "title": "Templates",
+    "subtitle": "The mails filex sends and the pages it shows people who open a link, as templates you can change.",
+    "themeNote": "Colors, logo and footer text come from",
+    "group": {
+      "mail": "Mails",
+      "page": "Public pages",
+      "slot": "Link page texts"
+    },
+    "source": {
+      "default": "Default",
+      "instance": "This server",
+      "tenant": "This tenant"
+    },
+    "part": {
+      "body": "HTML",
+      "subject": "Subject",
+      "text": "Plain text",
+      "textHelp": "Leave empty and the plain-text version is made from the HTML."
+    },
+    "partLabel": "Part of the template",
+    "inLayout": "framed by {layout}",
+    "slotHelp": "A short text the public link page shows in a fixed place of its card. Empty: the page uses its own words.",
+    "lastError": "Failed at {when}, the default was used instead:",
+    "failedBadge": "Failed recently",
+    "editorLabel": "Template source",
+    "varsTitle": "Variables",
+    "varsHelp": "Click one to put it in. A sentence of the language packs is written with the t filter, for example:",
+    "hooks": "The page's own script needs: {hooks}",
+    "startFromDefault": "Start from the default",
+    "reset": "Back to the default",
+    "resetTitle": "Back to the default?",
+    "resetText": "Your text of this template is removed and filex's own is used again.",
+    "resetTextTenant": "Your tenant's text of this template is removed: this server's is used again, or filex's own.",
+    "resetDone": "The template is back to the default.",
+    "testMail": "Send a test mail to me",
+    "testSent": "Test mail sent to {to}.",
+    "saved": "Template saved.",
+    "notSaved": "The template was not saved.",
+    "preview": "Preview",
+    "previewLang": "Preview language",
+    "view": {
+      "html": "HTML",
+      "text": "Plain text"
+    },
+    "viewLabel": "Preview of",
+    "removed": "Taken out, it will not reach anybody: {what}",
+    "missing": "Missing, the page needs it: {what}",
+    "unsavedTitle": "Unsaved changes",
+    "unsavedText": "This template has changes that are not saved. Open another one and lose them?",
+    "discard": "Discard changes",
+    "lang": {
+      "en": "English",
+      "tr": "Türkçe"
+    },
+    "name": {
+      "mail_layout": "Mail layout (every mail)",
+      "mail_share": "A link shared by mail",
+      "mail_file_request": "A file request",
+      "mail_grant": "Access given to an account",
+      "mail_account": "A new account",
+      "mail_notification": "A notification",
+      "mail_digest": "A notification digest",
+      "mail_smtp_test": "SMTP test",
+      "mail_cloud_verify": "Cloud sign-up code",
+      "mail_app": "A mail an app sends",
+      "page_layout": "Page layout (every page below)",
+      "page_pin": "PIN gate",
+      "page_unlocked": "PIN accepted",
+      "page_error": "Link not available / errors",
+      "page_zip_wait": "Preparing a ZIP",
+      "page_folder": "A shared folder (without JavaScript)",
+      "page_file_request": "File request upload page (without JavaScript)",
+      "page_app": "An app's link (without JavaScript)",
+      "page_cache_wait": "Preparing a download",
+      "page_shell": "Public link page (frame)",
+      "slot_share_title": "Shared link: title",
+      "slot_share_intro": "Shared link: introduction",
+      "slot_share_footer": "Shared link: footer line",
+      "slot_file_request_title": "File request: title",
+      "slot_file_request_intro": "File request: introduction",
+      "slot_file_request_footer": "File request: footer line",
+      "page_delete_confirm": "Deletion link: confirm",
+      "page_delete_done": "Deletion link: done"
+    }
   }
 }

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="{{ lang }}" dir="{{ dir }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>{{ mail.subject }}</title>
+<style>
+body { margin: 0; padding: 0; background-color: #f2f4f8; color: #1b2129; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+.outer { width: 100%; background-color: #f2f4f8; padding: 24px 12px; box-sizing: border-box; }
+.card { width: 100%; max-width: 560px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dfe4ec; border-radius: 12px; }
+.head { padding: 22px 28px 4px 28px; }
+.logo { display: block; height: 32px; max-width: 200px; border: 0; }
+.brand-name { font-size: 16px; font-weight: 700; color: #1b2129; }
+.body { padding: 8px 28px 26px 28px; font-size: 15px; line-height: 1.55; color: #1b2129; }
+h1 { margin: 10px 0 14px 0; font-size: 20px; line-height: 1.3; font-weight: 700; color: #1b2129; }
+p { margin: 0 0 14px 0; }
+.facts { margin: 0 0 16px 0; padding: 12px 14px; background-color: #f6f8fb; border: 1px solid #e3e8ef; border-radius: 8px; font-size: 14px; }
+.facts p { margin: 0; }
+.btn { display: inline-block; padding: 12px 22px; border-radius: 8px; background-color: {{ theme.accent }}; color: {{ theme.on_accent }}; font-weight: 600; font-size: 15px; text-decoration: none; }
+.note { font-size: 13px; color: #5d6875; }
+.link { font-size: 13px; color: #5d6875; word-break: break-all; }
+.link a { color: {{ theme.accent }}; }
+.foot { max-width: 560px; margin: 0 auto; padding: 14px 28px 0 28px; font-size: 12px; line-height: 1.5; color: #7a8492; text-align: center; }
+.foot p { margin: 0 0 6px 0; }
+.foot a { color: #7a8492; }
+@media (prefers-color-scheme: dark) {
+  body, .outer { background-color: #12151a !important; }
+  .card { background-color: #1f242c !important; border-color: #3a424d !important; }
+  .body, h1, .brand-name { color: #e7ebf1 !important; }
+  .facts { background-color: #262c35 !important; border-color: #3a424d !important; }
+  .note, .link, .foot, .foot a { color: #97a1af !important; }
+}
+</style>
+</head>
+<body>
+<div class="outer">
+<table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0">
+<tr><td class="head">
+{%- if brand.logo_url != blank -%}
+<img class="logo" src="{{ brand.logo_url }}" alt="{{ brand.name | default: site.name }}" height="32">
+{%- elsif brand.name != blank -%}
+<span class="brand-name">{{ brand.name }}</span>
+{%- endif -%}
+</td></tr>
+<tr><td class="body">
+{{ content }}
+</td></tr>
+</table>
+<div class="foot">
+{%- if brand.footer_text != blank %}<p>{{ brand.footer_text }}</p>{% endif -%}
+{%- unless brand.hide_powered_by %}<p>{{ 'mail.footer' | t_html: filex: product.link }}</p>{% endunless -%}
+</div>
+</div>
+</body>
+</html>

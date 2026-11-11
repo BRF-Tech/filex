@@ -418,7 +418,7 @@ the form has no field):
 
 | The platform's page: the Realm field empty and free | A tenant's own address: the field filled in and read-only |
 |---|---|
-| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.b1ff259e52ea.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.e4218f0ec8be.png) |
+| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.fad94188c6d2.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.08fab51c5372.png) |
 
 **The handoff to a tenant's own address.** The session cookie belongs to the
 host it was set on. A realm typed on the platform's page for a tenant that has
@@ -496,7 +496,7 @@ rather than on `PublicURL`:
 | Share / file-request links | `/s/{token}`, `/d/{token}` |
 | Realtime | the `wss://…/api/ws` endpoint advertised with a ticket |
 | Email | drop-received notice, item-grant notice, **account-created (temp password + login link)**, invite share link |
-| Integrations | the `/s/{token}` and `/u/{ticket}` URLs returned to AI / MCP / ShareX |
+| Integrations | the `/s/{token}` and `/u/{ticket}` URLs returned to AI / MCP; an uploader's link, private link and `/x/{token}` deletion link ([UPLOADERS.md](UPLOADERS.md)) |
 
 Two ways in, because not every URL is minted while a browser waits:
 
@@ -690,7 +690,7 @@ is the honest form of that proof.
 | `/api/admin/captcha` | Switch the [bot check](BOT-PROTECTION.md) off for every tenant's sign-in and links, or point it at their own keys. One setting for the instance: a tenant's address and a typed realm are checked with it. |
 | `/api/admin/providers` | Tenant lifecycle. |
 | `/api/admin/plugins` | Install a process filex runs. The tenancy check runs **before** the `plugins_disabled` 503, so the refusal does not disclose whether plugins are switched on. |
-| `/api/admin/app-plugins` | Apps are instance-wide (the table has no tenant column): install one into every tenant's file menu, change its grants and settings, or force-lift the file locks it holds. |
+| `/api/admin/app-plugins` | Apps are instance-wide (the table has no tenant column): install one into every tenant's file menu, change its grants and settings, or force-lift the file locks it holds. An app's setup (the addresses of its public routes, 0.60) is the operator's too; what the app KEEPS is held to each tenant - its own data's `tenant` scope is the tenant of the person, or of the address, a call is made for, so a short link made in one tenant is not found on another tenant's address ([APP-PLUGINS-API.md → An app's own data](APP-PLUGINS-API.md#an-apps-own-data-060)). A route's host of its own belongs to one tenant. |
 | `/api/admin/plugin-requests` | An [install request](APP-PLUGINS.md#install-requests) asks for an instance-wide plugin: leaving, reading, approving and rejecting one are the platform operator's, like the plugins themselves. |
 | `PUT /api/admin/roles/builtin` | The built-in User and Viewer roles are one row each, held by every account of every tenant without a custom role: take downloads away from everyone, or put `admin.*` into the User role and make every account on the platform a delegated administrator of its own tenant. Reading stays open - a tenant's admin needs to see what their people start from - and a tenant's own roles are custom roles (`permission_rules.provider_id`). |
 | `/api/admin/e2e/tenants` | Switch another tenant's end-to-end encryption off, or read every tenant's ceiling and policy: whether a tenant may use encryption at all (`providers.e2e_allowed`) is the platform operator's decision. The tenant's own policy and requests (`/api/admin/e2e`, `/api/admin/e2e/requests`) are the tenant administrator's, scoped to their tenant rather than gated; the ceiling above them is the operator's. The write is a person's too: an API key gets `403 session_required`. |
@@ -791,12 +791,23 @@ Each tenant on its own host wants its own name (the Display name,
 external-service URLs, and mail sender identity. Branding shipped without a
 schema change ([§4](#4-data-model)): a tenant's values are kept under
 `tenant.<id>.branding.*` keys in the global `settings` table, and
-`GET /api/public/branding` answers them on the tenant's host. The installed app
+`GET /api/public/branding` answers them on the tenant's host. A link's page
+asks `GET /api/public/{s,d}/{token}/branding` instead: the branding of the
+tenant the link was made in, on any host (the address's for a dead token). The installed app
 follows the same host: each tenant's host serves a manifest, an `index.html` and
 icons in the tenant's name and logo, so a tenant's users install the tenant's
 app ([CONFIGURATION.md → The installed app](CONFIGURATION.md#the-installed-app-pwa)).
 The rest of this list is still the instance's. Ties into `FILEX_DEFAULT_LOCALE`
 (already shipped).
+
+**Templates.** A tenant's administrator replaces the install's mail and page
+templates for their own tenant (*Admin → Settings → Templates*, rows of the
+`templates` table with the tenant's id; deleting the tenant deletes them). A
+tenant's template wins over the install's, the install's over filex's own. A
+link's pages and the mails about a link wear the link's tenant's templates and
+branding at any address; a page that belongs to no link, and every "this link
+is not available" page, wears the address's
+([TEMPLATES.md](TEMPLATES.md#who-edits-which-templates)).
 
 **Encryption.** `providers.e2e_allowed` (the operator's ceiling, default on) and
 `providers.e2e_policy` (`off` | `admins` | `permitted` | `approval`, the tenant

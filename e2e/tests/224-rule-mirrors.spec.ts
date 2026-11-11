@@ -11,17 +11,46 @@
  *   - `?action=newfile` with `dry_run` says whether a name is free without
  *     writing anything, and offers the server's own " (2)" name when it is
  *     not - on a case-sensitive local disk "REPORT.md" is free beside
- *     "Report.md", which the dialog used to refuse;
+ *     "Report.md", which the dialog used to refuse (a test of its own, run
+ *     where the disk under the storage is case-sensitive: caseInsensitiveDisk);
  *   - the New document dialog prefills that free name (`Untitled (2).txt`)
  *     when `Untitled.txt` is already in the folder;
  *   - the Add user form's suggestion is the server's identity rule
  *     (`gözlük@…` → `gozluk`, which the page's own copy spelled `g.zl.k`).
  */
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { loginAs } from '../helpers/auth';
-import { dropStorageByName, newAuthedRequest, seedLocalStorage } from '../helpers/seed';
+import { dropStorageByName, newAuthedRequest, seedLocalStorage, storageRoot } from '../helpers/seed';
 
 const STORE = `e2e-rules-${Date.now()}`;
+const MOUNT = `/tmp/filex-${STORE}`;
+
+/**
+ * Why the disk this spec's storage lives on cannot answer the case question;
+ * '' when it can. The probe does what the test asks the server about: it
+ * writes Report.md and REPORT.md side by side, in a folder of its own beside
+ * the storage (the local profile runs the server on this machine, on this
+ * disk), and counts what is there.
+ *
+ * ⚠ A case-insensitive disk (NTFS on Windows, APFS by default on a Mac) holds
+ * ONE file under both names, so there the server is right to call REPORT.md
+ * taken: that is a missing prerequisite, not a failure (2026-11-11, #320 -
+ * red on Windows with main's own binary as well).
+ */
+function caseInsensitiveDisk(): string {
+  const dir = mkdtempSync(path.join(path.dirname(storageRoot(MOUNT)), 'filex-case-probe-'));
+  try {
+    writeFileSync(path.join(dir, 'Report.md'), 'a');
+    writeFileSync(path.join(dir, 'REPORT.md'), 'b');
+    const held = readdirSync(dir);
+    if (held.length === 2) return '';
+    return `the disk under ${dir} is case-insensitive: Report.md and REPORT.md are one file there (${held.join(', ')}); run this on a case-sensitive disk (Linux) to measure it`;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 async function newFile(api: APIRequestContext, name: string, type: string, dryRun = false) {
   const r = await api.post('/api/files/manager?action=newfile', {
@@ -49,7 +78,7 @@ test.describe('The server’s rules, published and applied (#211)', () => {
 
   test.beforeAll(async ({ request, playwright, baseURL }) => {
     await dropStorageByName(request, STORE);
-    await seedLocalStorage(request, STORE, `/tmp/filex-${STORE}`);
+    await seedLocalStorage(request, STORE, MOUNT);
     api = await newAuthedRequest(playwright, baseURL ?? '');
   });
 
@@ -82,12 +111,19 @@ test.describe('The server’s rules, published and applied (#211)', () => {
     expect(taken.status).toBe(200);
     expect(taken.body).toMatchObject({ dry_run: true, taken: true, code: 'NAME_TAKEN', suggested: 'Report (2).md' });
 
-    const other = await newFile(api, 'REPORT.md', 'md', true);
-    expect(other.body.taken, 'a case-sensitive disk holds REPORT.md beside Report.md').toBe(false);
-
     const free = await newFile(api, 'fresh.md', 'md', true);
     expect(free.body).toMatchObject({ dry_run: true, taken: false, name: 'fresh.md' });
     expect(await names(api), 'a dry run writes nothing').not.toContain('fresh.md');
+  });
+
+  test('on a case-sensitive disk, REPORT.md is free beside Report.md', async () => {
+    const insensitive = caseInsensitiveDisk();
+    if (insensitive) console.warn(`skipped: ${insensitive}`);
+    test.skip(insensitive !== '', insensitive);
+    const made = await newFile(api, 'Notes.md', 'md');
+    expect(made.status, JSON.stringify(made.body)).toBe(200);
+    const other = await newFile(api, 'NOTES.md', 'md', true);
+    expect(other.body.taken, 'a case-sensitive disk holds NOTES.md beside Notes.md').toBe(false);
   });
 
   test('the New document dialog offers the server’s free name', async ({ page }) => {

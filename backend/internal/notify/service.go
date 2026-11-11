@@ -326,20 +326,14 @@ func (s *service) mailNow(ctx context.Context, e Event) {
 	}
 	lang := PersonLang(u)
 	said := SayEvent(lang, e)
-	body := strings.Join(said.Lines, "\n")
-	if e.Mail.Link != "" {
-		if body != "" {
-			body += "\n\n"
-		}
-		body += e.Mail.Link
-	}
-	to, subject := u.Email, said.Title
+	c := MailContent{Event: string(e.Event), Title: said.Title, Lines: said.Lines, Link: e.Mail.Link, TenantID: userTenantID(u)}
+	to := u.Email
 	if !s.beginDelivery() {
 		return
 	}
 	go func() {
 		defer s.endDelivery()
-		if err := s.mail(context.WithoutCancel(ctx), lang, to, subject, body); err != nil {
+		if err := s.mail(context.WithoutCancel(ctx), lang, to, c); err != nil {
 			slog.Debug("notify: email not sent", slog.String("event", string(e.Event)), slog.String("err", err.Error()))
 		}
 	}()
@@ -1169,4 +1163,12 @@ func (s *service) Stop() {
 		<-pushDone
 	}
 	s.waitIdle()
+}
+
+// userTenantID is the tenant u's account is in (0: none).
+func userTenantID(u *model.User) int64 {
+	if u != nil && u.ProviderID != nil {
+		return *u.ProviderID
+	}
+	return 0
 }

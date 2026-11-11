@@ -21,6 +21,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/api"
 	"github.com/brf-tech/filex/backend/internal/apierr"
+	"github.com/brf-tech/filex/backend/internal/appdata"
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
@@ -141,10 +142,15 @@ func newAppFixture(t *testing.T, cfgMutate func(*config.Config)) *appFixture {
 	shareSvc := share.NewService(store)
 	shareSvc.AttachSecret("0123456789abcdef0123456789abcdef")
 
+	// The apps' own data, as internal/server opens it by default: a file per
+	// app (internal/appdata). Only an app granted `data` touches it.
+	appData, err := appdata.OpenSQLite(filepath.Join(t.TempDir(), "app-data"), 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = appData.Close() })
 	reg, err := wasmplugin.New(wasmplugin.Options{
-		Store: store, Share: shareSvc,
+		Store: store, Share: shareSvc, Data: appData, MultiTenant: cfg.MultiTenant,
 		Dir: filepath.Join(t.TempDir(), "app-plugins"), SecretKey: "0123456789abcdef0123456789abcdef",
-		StorageResolver: resolver, Demo: cfg.Demo.Mode,
+		StorageResolver: resolver, Demo: cfg.Demo.Mode, RoutePool: cfg.AppRoutePool,
 		// The install sources these tests serve are loopback httptest
 		// servers: the guarded client reaches them only with this on (the
 		// FILEX_PLUGIN_LOOPBACK_SOURCES the e2e run sets too).
@@ -214,9 +220,16 @@ func (f *appFixture) installEchoWith(t *testing.T, mutate func(m map[string]any)
 	wasm, err := os.ReadFile(filepath.Join(echoDir, "echo.wasm"))
 	require.NoError(t, err)
 	var m struct {
-		Permissions []string `json:"permissions"`
+		Permissions []string        `json:"permissions"`
+		Setup       json.RawMessage `json:"setup"`
+		Routes      json.RawMessage `json:"routes"`
 	}
 	_ = json.Unmarshal(manifest, &m)
+	// An app with a setup (or routes) is installed waiting for its wizard.
+	wantState := "running"
+	if len(m.Setup) > 0 || len(m.Routes) > 0 {
+		wantState = "setup"
+	}
 
 	body := func(grant []string) (*bytes.Buffer, string) {
 		var buf bytes.Buffer
@@ -276,7 +289,7 @@ func (f *appFixture) installEchoWith(t *testing.T, mutate func(m map[string]any)
 		State string `json:"state"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &st))
-	assert.Equal(t, "running", st.State)
+	assert.Equal(t, wantState, st.State)
 	return st.ID
 }
 

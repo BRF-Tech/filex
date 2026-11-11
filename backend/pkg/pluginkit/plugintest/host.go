@@ -153,6 +153,18 @@ type Host struct {
 
 	shares map[string]*Share
 	keys   map[string]*IssuedKey
+
+	// The app's own data (data.go): by scope ("app", "t:<tenant>"), then key.
+	data    map[string]map[string]*dataRow
+	dataRev int64
+	// route is true inside a route visit: data may be read and counted,
+	// not written.
+	route bool
+	// Tenant is the tenant the calls run in (0 = the platform's own): the
+	// `tenant` scope of the app's data. Change it to play another tenant.
+	Tenant int64
+	// links are filex's public links by token, live or not (SetLinkLive).
+	links  map[string]bool
 	caCert *x509.Certificate
 	caPEM  string
 	caKey  *ecdsa.PrivateKey
@@ -232,6 +244,8 @@ func NewHost(m wire.Manifest) *Host {
 		locks:            map[string]time.Time{},
 		engines:          map[string]bool{},
 		shares:           map[string]*Share{},
+		data:             map[string]map[string]*dataRow{},
+		links:            map[string]bool{},
 		keys:             map[string]*IssuedKey{},
 		Network:          map[string][]byte{},
 		assets:           map[string][]byte{},
@@ -435,17 +449,27 @@ func (h *Host) State(ref, key string) (string, bool) {
 // EnterJob makes the following calls behave like an action job (writable).
 // The Harness does this around Run; call it directly only when driving the
 // plugin's functions yourself.
-func (h *Host) EnterJob() { h.mu.Lock(); h.writable, h.share = true, ""; h.mu.Unlock() }
+func (h *Host) EnterJob() {
+	h.mu.Lock()
+	h.writable, h.share = true, ""
+	h.route = false
+	h.mu.Unlock()
+}
 
 // EnterScreen makes the following calls behave like a view event: readable,
 // but no outputs, state, locks, engines or shares.
-func (h *Host) EnterScreen() { h.mu.Lock(); h.writable, h.share = false, ""; h.mu.Unlock() }
+func (h *Host) EnterScreen() {
+	h.mu.Lock()
+	h.writable, h.share = false, ""
+	h.route = false
+	h.mu.Unlock()
+}
 
 // EnterShare makes the following calls behave like a page event on that
 // link: not writable, but state_set and share_state("") answer for it.
 func (h *Host) EnterShare(token string) {
 	h.mu.Lock()
-	h.writable, h.share = false, token
+	h.writable, h.share, h.route = false, token, false
 	h.mu.Unlock()
 }
 

@@ -78,6 +78,13 @@ func hostFunctions() []HostFunc {
 		jsonFn("cert_issue", PermSign, hfCertIssue),
 		jsonFn("host_sign", PermSign, hfHostSign),
 		jsonFn("key_destroy", PermSign, hfKeyDestroy),
+		// The app's own data and the shortener's one question (data.go).
+		jsonFn("data_get", PermData, hfDataGet),
+		jsonFn("data_put", PermData, hfDataPut),
+		jsonFn("data_delete", PermData, hfDataDelete),
+		jsonFn("data_list", PermData, hfDataList),
+		jsonFn("data_incr", PermData, hfDataIncr),
+		jsonFn("link_live", PermLinkShortener, hfLinkLive),
 	}
 	return fns
 }
@@ -101,6 +108,10 @@ func jsonFn(name string, perm Permission, h jsonHandler) HostFunc {
 			}
 			if s.thumb && !thumbHostFns[name] {
 				stack[0] = writeJSON(p, errEnvelope(hostErr(wire.ErrPermissionDenied, thumbDenied)))
+				return
+			}
+			if s.route && !routeHostFns[name] {
+				stack[0] = writeJSON(p, errEnvelope(hostErr(wire.ErrPermissionDenied, routeDenied)))
 				return
 			}
 			if perm != "" && !s.plugin.Grants.Has(perm) {
@@ -138,6 +149,10 @@ func rawFn(name string, perm Permission, h rawHandler) HostFunc {
 			}
 			if s.thumb && !thumbHostFns[name] {
 				stack[0] = writeFrame(p, 2, errJSON(hostErr(wire.ErrPermissionDenied, thumbDenied)))
+				return
+			}
+			if s.route && !routeHostFns[name] {
+				stack[0] = writeFrame(p, 2, errJSON(hostErr(wire.ErrPermissionDenied, routeDenied)))
 				return
 			}
 			if perm != "" && !s.plugin.Grants.Has(perm) {

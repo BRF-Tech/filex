@@ -2,9 +2,10 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
-	"path"
 	"strings"
+	"sync"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -17,25 +18,27 @@ import (
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
-// ShareX is the token-authenticated endpoint that lets ShareX (the Windows
-// screenshot / upload tool) push a file, image, or text capture into filex and
-// get back a public, browser-viewable link in one round trip.
+// ShareX is the DEPRECATED POST /api/sharex/upload: a ShareX capture
+// authenticated with an API token (`write`), answered with {"url": …}. It is
+// kept, unadvertised, so the ShareX configs installed before 0.60 keep
+// working, and is removed in the next major release.
 //
-// It is a thin wrapper over the same aiOps core the /api/ai surface uses, so an
-// upload is stored AND indexed (a plain driver write into an un-indexed folder
-// never creates the DB cache row a share lookup needs), then a public /s/<token>
-// share is minted for it. The reply is the exact JSON ShareX's custom-uploader
-// URL parser expects:
+// ⚠ Its successor is the upload door, POST /api/uploads (uploads.go): an
+// uploader's own key that opens nothing but that door, the folder and the
+// link set in filex, a deletion link. Nothing new goes here - a fix that
+// belongs to both goes into uploadCore and the helpers beside it.
+//
+// It writes through the same aiOps core the agent API uses, so an upload is
+// stored AND indexed (a plain driver write into an un-indexed folder never
+// creates the DB row a link needs), then mints a public /s/<token> link:
 //
 //	POST /api/sharex/upload   (multipart/form-data)
 //	  file    → the captured bytes           (ShareX default FileFormName)
 //	  folder  → optional target directory    (default: "sharex")
 //	→ 200 {"url":"<PublicURL>/s/<token>?inline=1"}
 //
-// The link carries ?inline=1 so images/text render in the browser instead of
-// forcing a download (see Share.HandleDownload). Every capture is stored under a
-// random-prefixed filename so a fresh, collision-free share is minted each time
-// (re-using a name would silently repoint the previous share at the new bytes).
+// Every write stamps origin "sharex" (writehook.OriginShareX) until the
+// endpoint goes, so a webhook consumer reading this path sees no change.
 type ShareX struct {
 	ops        *aiOps
 	defaultDir string
@@ -55,14 +58,17 @@ const shareXMaxUpload = 512 << 20 // 512 MiB
 // enabled storage's root (aiOps.resolveStorage owns that resolution).
 const shareXDefaultDir = "sharex"
 
+// shareXDeprecatedOnce logs the deprecation once per process, not per upload.
+var shareXDeprecatedOnce sync.Once
+
 // NewShareX constructs the ShareX upload handler. publicURL is the base used to
 // build the returned /s/<token> link (empty yields a relative link). shareSvc
 // must be non-nil for sharing to work — it is the same *share.Service the rest
 // of the app uses.
 func NewShareX(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string) *ShareX {
 	ops := newAIOps(store, resolver, shareSvc, publicURL)
-	// Same aiOps core, distinct writehook origin — ShareX captures stamp
-	// their file events (and AV scans) as origin "sharex", not "ai".
+	// Same aiOps core, distinct writehook origin: the deprecated endpoint's
+	// writes keep stamping "sharex" (see the type's comment).
 	ops.origin = writehook.OriginShareX
 	return &ShareX{
 		ops:        ops,
@@ -92,6 +98,13 @@ func (h *ShareX) AttachStaged(s *StagedUpload) { h.ops.staged = s }
 // Upload accepts a ShareX multipart capture (`file`), stores + indexes it, mints
 // a public inline-viewable share, and returns {"url": …}.
 func (h *ShareX) Upload(w http.ResponseWriter, r *http.Request) {
+	// RFC 9745: the client (and whoever reads its traffic) is told the door
+	// is going, with the page that says where to.
+	w.Header().Set("Deprecation", "true")
+	w.Header().Set("Link", `<https://docs.filex.sh/UPLOADERS>; rel="deprecation"`)
+	shareXDeprecatedOnce.Do(func() {
+		slog.Warn("POST /api/sharex/upload is deprecated and is removed in the next major release: make an uploader (account settings, Uploaders) and use POST /api/uploads")
+	})
 	// Spilled multipart temp files outlive the response unless dropped here —
 	// see the note in AI.Upload.
 	defer func() {
@@ -114,11 +127,11 @@ func (h *ShareX) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	folder := shareXCleanFolder(r.FormValue("folder"))
+	folder := cleanUploadFolder(r.FormValue("folder"))
 	if folder == "" {
 		folder = h.defaultDir
 	}
-	name := shareXFilename(fh.Filename)
+	name := uploadFilename(fh.Filename)
 	dest := name
 	if folder != "" {
 		dest = folder + "/" + name
@@ -152,7 +165,7 @@ func (h *ShareX) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"url": shareXInlineURL(res.URL)})
+	writeJSON(w, http.StatusOK, map[string]string{"url": inlineURL(res.URL)})
 }
 
 // ensureFolder mkdirs every segment of folder (cumulatively) so the whole parent
@@ -175,54 +188,4 @@ func (h *ShareX) ensureFolder(ctx context.Context, folder string) error {
 		}
 	}
 	return nil
-}
-
-// shareXInlineURL appends ?inline=1 (respecting an existing query string) so the
-// share's download endpoint serves the bytes with Content-Disposition: inline —
-// images and text then render in the browser instead of downloading.
-func shareXInlineURL(u string) string {
-	if u == "" {
-		return u
-	}
-	sep := "?"
-	if strings.Contains(u, "?") {
-		sep = "&"
-	}
-	return u + sep + "inline=1"
-}
-
-// shareXFilename derives a safe, unique storage name from the multipart part's
-// filename. It strips any directory component (Windows clients may send a full
-// path), sanitizes the basename, and prefixes a short random token so concurrent
-// or same-named captures never collide (which would repoint an earlier share).
-func shareXFilename(raw string) string {
-	raw = strings.ReplaceAll(raw, "\\", "/")
-	base := strings.TrimSpace(path.Base(raw))
-	if base == "" || base == "." || base == "/" {
-		base = "upload"
-	}
-	// sanitizeFilename neutralizes quote/backslash/newline; drop any residual
-	// separators so the name stays a single path segment.
-	base = strings.ReplaceAll(sanitizeFilename(base), "/", "_")
-	return randHex6() + "-" + base
-}
-
-// shareXCleanFolder normalizes an optional `folder` form value into a safe bare
-// relative path: it drops any adapter:// prefix, strips "."/".." segments
-// (traversal defense in depth on top of resolveStorage's own checks), and
-// sanitizes each remaining segment. An empty/invalid input yields "".
-func shareXCleanFolder(raw string) string {
-	raw = strings.ReplaceAll(raw, "\\", "/")
-	if i := strings.Index(raw, "://"); i >= 0 {
-		raw = raw[i+3:]
-	}
-	out := make([]string, 0)
-	for _, seg := range strings.Split(raw, "/") {
-		seg = strings.TrimSpace(seg)
-		if seg == "" || seg == "." || seg == ".." {
-			continue
-		}
-		out = append(out, sanitizeFilename(seg))
-	}
-	return strings.Join(out, "/")
 }

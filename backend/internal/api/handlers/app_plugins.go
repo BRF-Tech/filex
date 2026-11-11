@@ -849,6 +849,13 @@ func (h *AppPlugins) enqueue(w http.ResponseWriter, r *http.Request, c *checked,
 }
 
 func (h *AppPlugins) callFail(w http.ResponseWriter, r *http.Request, err error) {
+	writeAppCallFailure(w, r, err)
+}
+
+// writeAppCallFailure answers a failed app call (wasmplugin.CallError) for
+// every door that calls an app: a screen, the setup wizard's step, the
+// shortener.
+func writeAppCallFailure(w http.ResponseWriter, r *http.Request, err error) {
 	var ce *wasmplugin.CallError
 	if errors.As(err, &ce) {
 		code := http.StatusBadGateway

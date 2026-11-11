@@ -8522,6 +8522,112 @@
         "x-filex-token-verb": "write"
       }
     },
+    "/api/files/short-links": {
+      "get": {
+        "operationId": "getShortLink",
+        "summary": "The short address a link has, \"\" for none",
+        "tags": [
+          "Sharing"
+        ],
+        "parameters": [
+          {
+            "name": "share",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The public link's token (a share or a file request) the caller may mail."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`{url}`: the address the link-shortener app keeps for the link, `\"\"` when it has none.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_shortener`: no app holds the link-shortener role."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/APP-PLUGINS-API.md#the-link-shortener-role-060"
+        },
+        "x-filex-token-verb": "read"
+      },
+      "post": {
+        "operationId": "makeShortLink",
+        "summary": "A short address for a link, made when it has none",
+        "tags": [
+          "Sharing"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "share"
+                ],
+                "properties": {
+                  "share": {
+                    "type": "string",
+                    "description": "The public link's token."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`{url}`: the short address, the same one again for the same link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_shortener`: no app holds the link-shortener role."
+          },
+          "422": {
+            "description": "`shorten_refused {message}`: the app refused, in the reader's language."
+          },
+          "503": {
+            "description": "`app_busy`: the app's warm instances are all busy; try again."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/APP-PLUGINS-API.md#the-link-shortener-role-060"
+        },
+        "x-filex-token-verb": "write"
+      }
+    },
     "/api/files/stat": {
       "get": {
         "operationId": "statNode",

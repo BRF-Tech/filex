@@ -28,6 +28,9 @@ import {
   type AssistantPrefs,
   type PluginActionsResponse,
   type SettingsUser,
+  type UploaderMade,
+  type UploaderSaved,
+  type UploadersList,
   type UserSettingsHost,
 } from '@brftech/filex-core';
 
@@ -143,6 +146,14 @@ const host: UserSettingsHost = {
     setAssistantPrefs: async (prefs) => (await api.put<AssistantPrefs>('/files/assistant/prefs', prefs)).data,
     clearAssistantHistory: async () => {
       await api.delete('/files/assistant/conversations');
+    },
+    // 0.60 - the person's uploaders (core UploadersPanel).
+    uploaders: async () => (await api.get<UploadersList>('/auth/uploaders')).data,
+    createUploader: async (req) => (await api.post<UploaderMade>('/auth/uploaders', req)).data,
+    updateUploader: async (id, req) => (await api.patch<UploaderSaved>(`/auth/uploaders/${id}`, req)).data,
+    rotateUploaderKey: async (id) => (await api.post<UploaderMade>(`/auth/uploaders/${id}/key`)).data,
+    deleteUploader: async (id) => {
+      await api.delete(`/auth/uploaders/${id}`);
     },
   },
   setUser(u: SettingsUser) {

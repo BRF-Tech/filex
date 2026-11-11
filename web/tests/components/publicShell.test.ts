@@ -94,6 +94,43 @@ describe('the public shell — one frame for every link', () => {
     expect(style).toContain('--fe-text-on-primary');
   });
 
+  it('wears the LINK’s tenant’s branding, whatever address it is opened at (Ç3)', async () => {
+    // The address answers bravo; the link was made in alpha. The page asks
+    // the link (`/api/public/{s,d}/<token>/branding`) and wears what it says.
+    for (const [kind, linkApi] of [
+      ['share', '/api/public/s/tok123'],
+      ['request', '/api/public/d/tok123'],
+    ] as const) {
+      fetchMock.mockReset();
+      fetchMock.mockImplementation(
+        router({
+          '/api/public/branding': { name: 'Bravo Works', accent: '#0055aa' },
+          [`${linkApi}/branding`]: { name: 'Alpha Studio', accent: '#aa2200' },
+          '/api/public/s/tok123': { kind: 'file', needs_pin: false, unlocked: true, node: { name: 'list.pdf', size: 10, mime: 'application/pdf' } },
+          '/api/public/d/tok123': { kind: 'drop', folder: 'Inbox', needs_pin: false, unlocked: true },
+        }),
+      );
+      const w = open(kind);
+      await vi.waitFor(() => expect(w.find('[data-testid="public-brand"]').text()).toContain('Alpha Studio'));
+      expect(w.find('[data-testid="public-brand"]').text(), kind).not.toContain('Bravo');
+      expect(w.find('[data-testid="public-page"]').attributes('style') ?? '', kind).toContain('--fe-primary: #aa2200');
+      const asked = fetchMock.mock.calls.map((c) => String(c[0]));
+      expect(asked, kind).toContain(`${linkApi}/branding`);
+      w.unmount();
+    }
+  });
+
+  it('a server without the link route still gets the address’s branding', async () => {
+    fetchMock.mockImplementation(
+      router({
+        '/api/public/branding': { name: 'Acme Files' },
+        '/api/public/s/tok123': { kind: 'file', needs_pin: false, unlocked: true, node: { name: 'a.pdf', size: 1, mime: 'application/pdf' } },
+      }),
+    );
+    const w = open('share');
+    await vi.waitFor(() => expect(w.find('[data-testid="public-brand"]').text()).toContain('Acme Files'));
+  });
+
   it('the bytes come from /s/<token>, not from a second download route', async () => {
     // ⚠⚠ `/s/<token>` has always served the file and still does: the SPA is
     // what a JavaScript browser gets when it NAVIGATES there, and

@@ -48,7 +48,7 @@ import (
 // Public link pages (/p, /s, /d, /u), the protocol servers (/dav, /s3) and
 // /metrics are outside: the first have no account behind the request, the
 // protocols are phase 3, and /metrics is RequireAdmin.
-var permRoutePrefixes = []string{"/api/files/", "/api/ai/", "/api/auth/", "/api/tokens", "/api/me/", "/api/notifications/", "/api/sharex/"}
+var permRoutePrefixes = []string{"/api/files/", "/api/ai/", "/api/auth/", "/api/tokens", "/api/me/", "/api/notifications/", "/api/sharex/", "/api/uploads"}
 
 type permRoute struct {
 	// route is a permission checked by handlers.RequirePermission before the
@@ -139,6 +139,11 @@ var permRouteTable = map[string]permRoute{
 	"POST /api/tokens":                      gated(perm.AccessAPI),
 	"PATCH /api/tokens/{id}":                gated(perm.AccessAPI),
 	"DELETE /api/tokens/{id}":               exemptBecause(whyWithdraw),
+	"POST /api/auth/uploaders":              gated(perm.AccessAPI),
+	"PATCH /api/auth/uploaders/{id}":        gated(perm.AccessAPI),
+	"POST /api/auth/uploaders/{id}/key":     gated(perm.AccessAPI),
+	"DELETE /api/auth/uploaders/{id}":       exemptBecause(whyWithdraw),
+	"POST /api/uploads":                     inHandler("the uploader's owner: access.api, files.create in the uploader's folder, share.links on a public link - asked before the bytes land (handlers/uploads.go)"),
 	"PUT /api/me/prefs/":                    exemptBecause(whyOwnState),
 	"PUT /api/me/open-with/{ext}":           exemptBecause(whyOwnState),
 	"DELETE /api/me/open-with/{ext}":        exemptBecause(whyOwnState),
@@ -220,6 +225,7 @@ var permRouteTable = map[string]permRoute{
 	"DELETE /api/files/permissions/groups/{id}":             inHandler("share.users"),
 	"POST /api/files/permissions/invite":                    inHandler("share.users"),
 	"POST /api/files/permissions/share-mail":                inHandler("share.links"),
+	"POST /api/files/short-links":                           inHandler("a link the caller may mail (mailableShare: its creator or an administrator, and share.links on its item today), and the shortener app's own permission (link_shortener.requires)"),
 	"POST /api/files/comments":                              gated(perm.CommentsWrite),
 	"DELETE /api/files/comments/{id}":                       exemptBecause(whyWithdraw),
 	"POST /api/files/plugins/actions/{plugin}/{action}/run": gated(perm.PluginsRun),

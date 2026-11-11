@@ -441,6 +441,14 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.branding' },
       },
       {
+        // The mail and public-page templates (internal/templates): each
+        // administrator edits their own scope's, the install's or the tenant's.
+        path: 'templates',
+        name: 'templates',
+        component: () => import('@/views/Templates.vue'),
+        meta: { breadcrumb: 'nav.templates' },
+      },
+      {
         // tema:v1 — the instance's own themes plus the raw-CSS escape hatch.
         //
         // ⚠⚠ A route of its own, and not a section of Settings, because this

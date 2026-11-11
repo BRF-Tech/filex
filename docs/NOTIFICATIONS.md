@@ -453,8 +453,9 @@ of them tickable on a target in **Admin → Webhooks**:
 The six **write** events (`file.uploaded`, `file.updated`, `file.upload_failed`,
 `file.deleted`, `file.moved`, `file.trashed`) come from one shared post-write
 gate, so every one of them carries `meta.origin` - which surface wrote it:
-`manager`, `ai`, `sharex`, `dav`, `ops`, `s3`, `sftp`, `ftp`, `nfs`,
-`onlyoffice`. The other events are emitted by their own subsystems and carry
+`manager`, `ai`, `uploader` (an [uploader](UPLOADERS.md)'s key, 0.60),
+`sharex` (the deprecated `/api/sharex/upload`, until it is removed), `dav`,
+`ops`, `s3`, `sftp`, `ftp`, `nfs`, `onlyoffice`. The other events are emitted by their own subsystems and carry
 their own `meta` instead, as listed above.
 
 **Inside an end-to-end encrypted folder** every event about an item in it
@@ -997,7 +998,9 @@ translates).
   words the bell says. When they mark it urgent, each drop is emailed at once,
   in the words the bell says for that row (the title as the subject); with
   notifications switched off (`FILEX_NOTIFY_ENABLED=false`) the owner still
-  gets that email, in the same words.
+  gets that email, in the same words. The two mails are the templates
+  `mail.notification` and `mail.digest` ([TEMPLATES.md](TEMPLATES.md)): HTML
+  with a plain-text part, in the branding's colours.
 - **Webhooks.** Every webhook receives every event on its own, as before -
   nothing a receiver relies on is held. The digest is an event too,
   `notification.digest`, and it goes **only** to a webhook target that ticks it
@@ -1243,7 +1246,7 @@ say where each switch is saved:
   this device's, and another device keeps its own. The part is drawn only
   where the device has one of them.
 
-![User settings, Notifications in Turkish, dark: Hesabım, with the in-app bell's switch and the events it tells about](https://filex.sh/shots/usersettings/notifications-tr-dark-1440.09e2dac8a16f.png)
+![User settings, Notifications in Turkish, dark: Hesabım, with the in-app bell's switch and the events it tells about](https://filex.sh/shots/usersettings/notifications-tr-dark-1440.cd5804c61856.png)
 
 `GET`/`PATCH /api/notifications/settings` stores one preference row per user:
 

@@ -35,6 +35,21 @@ func exportUICall() int32 { return finish(dispatchUICall(pdk.Input())) }
 //go:wasmexport thumbnail
 func exportThumbnail() int32 { return finish(dispatchThumbnail(pdk.Input())) }
 
+// One visit to one of the app's public routes (filex 0.60.0).
+//
+//go:wasmexport route
+func exportRoute() int32 { return finish(dispatchRoute(pdk.Input())) }
+
+// The link-shortener role: a short address for one of filex's links.
+//
+//go:wasmexport shorten
+func exportShorten() int32 { return finish(dispatchShorten(pdk.Input())) }
+
+// Told before filex erases the app's data (Reconfigure, removal).
+//
+//go:wasmexport reset
+func exportReset() int32 { return finish(dispatchReset(pdk.Input())) }
+
 // Reserved: nothing calls this yet, and the `events:<name>` permission that
 // would gate it is refused at install until something does.
 //

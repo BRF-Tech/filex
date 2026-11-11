@@ -34,7 +34,7 @@ export type {
   PluginActionRow,
   PluginViewRow,
 } from '@brftech/filex-core';
-import type { PluginText, PluginApplies, PluginField } from '@brftech/filex-core';
+import type { PluginText, PluginApplies, PluginField, PluginSurface } from '@brftech/filex-core';
 
 /**
  * A settings/action form input (wire.Field).
@@ -125,7 +125,7 @@ export interface AppPluginManifestUI {
   extras?: Record<string, { catalog?: { url?: string; sha256?: string } }>;
 }
 
-export type AppPluginState = 'running' | 'disabled' | 'refused' | 'failed' | 'unlicensed' | string;
+export type AppPluginState = 'running' | 'disabled' | 'refused' | 'failed' | 'unlicensed' | 'setup' | string;
 
 /**
  * `app` — a module that runs; `language_pack` — languages for filex itself
@@ -368,6 +368,100 @@ export interface AppPlugin {
   update_said?: string;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Setting an app up (filex 0.60, docs/APP-PLUGINS-API.md → Setting an app up):
+ * an app whose manifest has a `setup` block (or public routes) is installed
+ * in the state `setup` and runs nothing until an administrator finishes its
+ * wizard - the app's own setup screen, then the addresses of its routes, then
+ * who may use its permissions.
+ */
+export interface AppSetupBase {
+  id: number;
+  /** "" = this filex's own address (the prefix is then required). */
+  host: string;
+  prefix: string;
+  /** The tenant a host of its own belongs to (0 = the platform). */
+  tenant_id: number;
+  /** The address a code is appended to, as the server builds it. */
+  url: string;
+  enabled: boolean;
+  default: boolean;
+}
+
+export interface AppSetupRoute {
+  id: string;
+  label: PluginText;
+  default_prefix?: string;
+  bases: AppSetupBase[];
+}
+
+export interface AppSetupPermission {
+  id: string;
+  /** app.<app>.<id> - the key roles and exceptions store decisions by. */
+  key: string;
+  label: PluginText;
+  description?: PluginText;
+  default: 'viewer' | 'user' | 'admin' | string;
+}
+
+export interface AppSetup {
+  /** The app's live state; `setup` until the wizard is finished. */
+  state: AppPluginState;
+  /** The app has a setup at all (a `setup` block or routes). */
+  needed: boolean;
+  /** The wizard was finished (Reconfigure starts it again). */
+  done: boolean;
+  /** The app's own setup screen, when it has one. */
+  app_step: { view: string; done: boolean } | null;
+  routes: AppSetupRoute[];
+  permissions: AppSetupPermission[];
+  /** This filex's own address(es), for "this filex's own address". */
+  own_hosts: string[];
+  multi_tenant: boolean;
+  tenants?: { id: number; name: string }[];
+  /** Where the app's own data lives; `node_local` warns that it is this
+   *  node's alone (no shared app-data database configured). */
+  data?: { driver: string; node_local: boolean };
+  /** The app's own words before its data is erased. */
+  warning?: PluginText | null;
+}
+
+/** One answer of the app's setup screen. */
+export interface AppSetupViewAnswer {
+  surface: PluginSurface | null;
+  app_done: boolean;
+}
+
+/** What Reconfigure and removing the app erase, counted. */
+export interface AppEraseCounts {
+  data_keys: number;
+  data_bytes: number;
+  state_rows: number;
+  locks: number;
+  links: number;
+}
+
+export interface AppEraseAnswer {
+  counts: AppEraseCounts;
+  warning?: PluginText | null;
+  /** What the administrator types to confirm: the app's name. */
+  confirm: string;
+}
+
+/** A refused base, said about one field. */
+export interface AppSetupRefusal {
+  error: string;
+  field?: 'host' | 'prefix' | string;
+  message?: string;
+}
+
+/** `refusal` from an axios error's body, when it is one of the setup routes'. */
+export function setupRefusalOf(err: unknown): AppSetupRefusal | null {
+  if (!axios.isAxiosError(err)) return null;
+  const d = err.response?.data as Partial<AppSetupRefusal> | undefined;
+  return d && typeof d.error === 'string' ? { error: d.error, field: d.field, message: d.message } : null;
 }
 
 export interface AppPluginList {
@@ -953,8 +1047,73 @@ export const AppPluginsApi = {
     return data;
   },
 
-  async remove(id: number): Promise<void> {
-    await api.delete(`${BASE}/${id}`);
+  /**
+   * Removes the app and everything it keeps. `confirm` is the app's name as
+   * the administrator typed it: an app with data answers 409
+   * `confirm_required` without it (the dialog that asks is AppEraseDialog).
+   */
+  async remove(id: number, confirm?: string): Promise<void> {
+    await api.delete(`${BASE}/${id}`, confirm === undefined ? undefined : { data: { confirm } });
+  },
+
+  /** The app's setup, as its wizard draws it. */
+  async setup(id: number): Promise<AppSetup> {
+    const { data } = await api.get<AppSetup>(`${BASE}/${id}/setup`);
+    return {
+      ...data,
+      app_step: data.app_step ?? null,
+      routes: (data.routes ?? []).map((r) => ({ ...r, bases: r.bases ?? [] })),
+      permissions: data.permissions ?? [],
+      own_hosts: data.own_hosts ?? [],
+      tenants: data.tenants ?? [],
+    };
+  },
+
+  /** The app's own setup screen: `open` with no body, then its events. */
+  async setupView(id: number, body?: { event: string; action_id?: string; state?: Record<string, unknown>; data?: Record<string, unknown> }): Promise<AppSetupViewAnswer> {
+    const { data } = body
+      ? await api.post<AppSetupViewAnswer>(`${BASE}/${id}/setup/view`, body)
+      : await api.get<AppSetupViewAnswer>(`${BASE}/${id}/setup/view`);
+    return { surface: data.surface ?? null, app_done: data.app_done === true };
+  },
+
+  /** Adds an address to a route. 400 `{error, field, message}` when refused. */
+  async addSetupBase(id: number, route: string, base: { host: string; prefix: string; tenant_id: number; default: boolean }): Promise<AppSetupBase> {
+    const { data } = await api.post<{ base: AppSetupBase }>(`${BASE}/${id}/setup/routes/${encodeURIComponent(route)}/bases`, base);
+    return data.base;
+  },
+
+  async patchSetupBase(id: number, base: number, change: { enabled?: boolean; default?: boolean }): Promise<AppSetupBase> {
+    const { data } = await api.patch<{ base: AppSetupBase }>(`${BASE}/${id}/setup/bases/${base}`, change);
+    return data.base;
+  },
+
+  /** Only while the setup is not finished (409 `setup_done` after it). */
+  async deleteSetupBase(id: number, base: number): Promise<void> {
+    await api.delete(`${BASE}/${id}/setup/bases/${base}`);
+  },
+
+  /** Ends the wizard: the app runs. 409 `setup_app_step` / `setup_no_base`. */
+  async completeSetup(id: number): Promise<AppPlugin> {
+    const { data } = await api.post<{ plugin: AppPlugin }>(`${BASE}/${id}/setup/complete`, {});
+    return data.plugin;
+  },
+
+  /** What Reconfigure or removing the app would erase. */
+  async erase(id: number): Promise<AppEraseAnswer> {
+    const { data } = await api.get<Omit<Partial<AppEraseAnswer>, 'counts'> & { counts?: Partial<AppEraseCounts> }>(`${BASE}/${id}/erase`);
+    const c: Partial<AppEraseCounts> = data.counts ?? {};
+    return {
+      counts: { data_keys: c.data_keys ?? 0, data_bytes: c.data_bytes ?? 0, state_rows: c.state_rows ?? 0, locks: c.locks ?? 0, links: c.links ?? 0 },
+      warning: data.warning ?? null,
+      confirm: data.confirm ?? '',
+    };
+  },
+
+  /** Erases the app's data and opens its setup again. */
+  async reconfigure(id: number, confirm: string): Promise<AppPlugin> {
+    const { data } = await api.post<{ plugin: AppPlugin }>(`${BASE}/${id}/reconfigure`, { confirm });
+    return data.plugin;
   },
 
   /**

@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/appdata"
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/enginebin"
@@ -101,6 +102,16 @@ type Options struct {
 	// Screenshots and tests only: an app on a moved clock dates its
 	// signatures and reminders with a time that is not now.
 	Clock AppClock
+	// Data is where apps keep their own data (internal/appdata, the `data`
+	// permission). Nil answers every data_* call `unavailable`.
+	Data appdata.Store
+	// MultiTenant mirrors FILEX_MULTI_TENANT: the `tenant` scope of an app's
+	// data is the call's tenant. Off, every call is in the platform's scope.
+	MultiTenant bool
+	// RoutePool is how many warm instances answer one app's route and
+	// shortener calls at once (FILEX_APP_ROUTE_POOL; 0 = half the CPUs,
+	// 1 to 16). See pool.go.
+	RoutePool int
 }
 
 const (
@@ -146,6 +157,12 @@ type Installed struct {
 	// hold is why the app's license keeps it from running ("" = it does
 	// not); see StateUnlicensed.
 	hold string
+	// setup is the host's record of the app's setup (setup.go); nil for an
+	// app that was never set up.
+	setup *SetupRecord
+	// reg is the registry the entry was put in (put): a state change asks it
+	// to rebuild the served routes.
+	reg  *Registry
 	logs *logRing
 	sem  chan struct{}
 	// calls bounds the plugin's concurrent screen calls (Options.PerPluginCalls).
@@ -192,13 +209,21 @@ func (p *Installed) State() (string, string) {
 	if p.state == StateRunning && p.hold != "" {
 		return StateUnlicensed, p.hold
 	}
+	// Waiting for its setup: loaded, running nothing (setup.go).
+	if p.state == StateRunning && p.Manifest != nil && p.Manifest.NeedsSetup() && (p.setup == nil || !p.setup.Done) {
+		return StateSetup, "waiting to be set up"
+	}
 	return p.state, p.stateErr
 }
 
 func (p *Installed) setState(state, err string) {
 	p.mu.Lock()
 	p.state, p.stateErr, p.stateCode = state, err, ""
+	reg := p.reg
 	p.mu.Unlock()
+	if reg != nil {
+		reg.routesChanged()
+	}
 	if err != "" {
 		p.logs.add("error", state+": "+err)
 	}
@@ -218,7 +243,28 @@ func (p *Installed) setCallFailure(state string, err error) {
 
 // Registry is the installed set plus the runtime.
 type Registry struct {
-	opts    Options
+	opts Options
+	// tenantKeys caches whether a provider is the platform's own tenant
+	// (data.go tenantKey); counters adds up route visits' counts (data.go).
+	tenantKeys sync.Map
+	counters   counterBuffer
+	// linkCache keeps link_live's answers for linkLiveTTL (data.go).
+	linkMu    sync.Mutex
+	linkCache map[linkLiveKey]linkLiveEntry
+	// settingsCache keeps an app's public settings for a visit (routes.go).
+	settingsMu    sync.Mutex
+	settingsCache map[string]cachedSettings
+	// setupMu serialises the setup doors (setup.go); routeHosts and
+	// onRoutes are the router's (SetRouteHosts, SetRoutesChanged).
+	setupMu    sync.Mutex
+	routeHosts RouteHosts
+	onRoutes   func()
+	routesSig  chan struct{}
+	routesStop chan struct{}
+	// setups are the setup records by app name (setup.go), read at Load
+	// and handed to every entry put under that name - an upgrade keeps
+	// its app's setup.
+	setups  map[string]*SetupRecord
 	rt      *Runtime
 	box     *secretbox.Box
 	trusted []ed25519.PublicKey
@@ -474,6 +520,9 @@ func (r *Registry) Close(ctx context.Context) {
 	r.upgradeMu.Lock()
 	r.closing = true
 	r.upgradeMu.Unlock()
+	r.stopRoutes()
+	// A visit's count waiting to be written is written now.
+	r.counters.close(ctx)
 	r.mu.Lock()
 	for _, p := range r.byID {
 		p.mu.Lock()
@@ -498,6 +547,10 @@ func (r *Registry) Load(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	setups := r.loadSetups(ctx)
+	r.mu.Lock()
+	r.setups = setups
+	r.mu.Unlock()
 	for _, row := range rows {
 		r.recoverInterruptedUpgrade(row)
 		p, err := r.entryFor(row)
@@ -622,8 +675,13 @@ func (r *Registry) put(p *Installed) {
 	// SetLicenseHold takes: set after it, a hold set in between was
 	// overwritten with the one read before (license_hold.go, Y5).
 	p.setHold(r.holds[p.Row.Name])
+	p.mu.Lock()
+	p.setup = r.setups[p.Row.Name]
+	p.reg = r
+	p.mu.Unlock()
 	r.byID[p.Row.ID] = p
 	r.byName[p.Row.Name] = p
+	r.routesChanged()
 }
 
 func (r *Registry) drop(p *Installed) {
@@ -631,6 +689,7 @@ func (r *Registry) drop(p *Installed) {
 	delete(r.byID, p.Row.ID)
 	delete(r.byName, p.Row.Name)
 	r.mu.Unlock()
+	r.routesChanged()
 }
 
 // entryFor turns a row into an Installed (manifest + grant parsed).
@@ -759,6 +818,13 @@ func (r *Registry) compile(ctx context.Context, p *Installed) {
 		r.persistError(ctx, p, err.Error())
 		return
 	}
+	// ...and for one with routes or the shortener role (routes_manifest.go).
+	if err := checkRouteExports(ctx, p.Manifest, c); err != nil {
+		_ = c.Close(ctx)
+		p.setState(StateRefused, err.Error())
+		r.persistError(ctx, p, err.Error())
+		return
+	}
 	p.dropThumbModule(ctx)
 	p.mu.Lock()
 	if p.compiled != nil {
@@ -863,6 +929,9 @@ func (p *Installed) running() (*Compiled, error) {
 	defer p.mu.RUnlock()
 	if p.hold != "" {
 		return nil, &CallError{Code: CodeUnsupported, Message: "plugin is not running: " + p.hold}
+	}
+	if p.compiled != nil && p.Manifest != nil && p.Manifest.NeedsSetup() && (p.setup == nil || !p.setup.Done) {
+		return nil, &CallError{Code: CodeUnsupported, Message: "plugin is not running: it is waiting to be set up"}
 	}
 	if p.compiled == nil {
 		msg := "plugin is not running"
@@ -1034,6 +1103,9 @@ const (
 	ErrCodeDemo                  = "demo_refused"
 	ErrCodeFetch                 = "fetch_failed"
 	ErrCodeNotFound              = "not_found"
+	// ErrCodeShortenerTaken: another app already holds the link-shortener
+	// role (routes.go) - one at a time.
+	ErrCodeShortenerTaken = "shortener_taken"
 	// ErrCodeIncompatible: the manifest's `filex` range leaves the running
 	// filex out (compat.go).
 	ErrCodeIncompatible = "incompatible"
@@ -1601,6 +1673,9 @@ func (r *Registry) Install(ctx context.Context, in *InstallInput) (*Status, *Dry
 	if err := r.checkGrant(st.m, in.Granted, ErrCodePermissionsIncomplete); err != nil {
 		return nil, nil, err
 	}
+	if other := r.ShortenerConflict(st.m.Name, st.m); other != "" {
+		return nil, nil, installErr(ErrCodeShortenerTaken, "the app "+other+" already shortens filex links; remove or switch it off first")
+	}
 	// ⚠⚠ From here on the install finishes — or undoes itself — whatever
 	// the client does. Measured 2026-09-21: the 20 MB signing module took
 	// 29 s to compile on a busy machine, the admin page's request gave up
@@ -1842,6 +1917,11 @@ func (r *Registry) SetEnabled(ctx context.Context, id int64, on bool) (*Status, 
 	if r.opts.Demo {
 		return nil, installErr(ErrCodeDemo, "app plugins cannot be changed on the demo instance")
 	}
+	if on {
+		if other := r.ShortenerConflict(p.Row.Name, p.Manifest); other != "" {
+			return nil, installErr(ErrCodeShortenerTaken, "the app "+other+" already shortens filex links; switch it off first")
+		}
+	}
 	p.Row.Enabled = on
 	if err := r.opts.Store.UpdateAppPlugin(ctx, p.Row); err != nil {
 		return nil, err
@@ -1876,6 +1956,12 @@ func (r *Registry) Remove(ctx context.Context, id int64) error {
 	if r.opts.Demo {
 		return installErr(ErrCodeDemo, "app plugins cannot be changed on the demo instance")
 	}
+	// What the app keeps goes with it (its own data, the links it opened):
+	// told first, while the module still runs (setup.go). The handler asked
+	// for the app's name typed back when there is anything (ConfirmRemove).
+	if err := r.eraseData(ctx, p, true); err != nil {
+		p.log("warn", "removing: some of its data could not be erased: "+err.Error())
+	}
 	p.mu.Lock()
 	if p.compiled != nil {
 		_ = p.compiled.Close(ctx)
@@ -1887,6 +1973,7 @@ func (r *Registry) Remove(ctx context.Context, id int64) error {
 	if err := r.opts.Store.DeleteAppPlugin(ctx, id); err != nil {
 		return err
 	}
+	_ = r.forgetSetup(ctx, p.Row.Name)
 	// Its thumbnail limits go with it (00077).
 	_ = r.opts.Store.DeleteAppThumbLimits(ctx, id)
 	// An office engine it brought lets go of its files first.
@@ -1956,6 +2043,11 @@ func (r *Registry) PutSettings(ctx context.Context, id int64, values map[string]
 	if r.opts.Demo {
 		return installErr(ErrCodeDemo, "app plugins cannot be changed on the demo instance")
 	}
+	// A visit reads the settings it is handed from memory (routes.go): the
+	// next one reads them again.
+	r.settingsMu.Lock()
+	delete(r.settingsCache, p.Row.Name)
+	r.settingsMu.Unlock()
 	current, err := r.opts.Store.GetAppPluginSettings(ctx, p.Row.ID)
 	if err != nil {
 		return err

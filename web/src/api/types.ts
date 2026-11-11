@@ -316,6 +316,9 @@ export interface DemoMode {
 }
 
 export interface Capabilities {
+  /** "Get short link" (filex 0.60): an app holding the link-shortener role
+   *  runs and THIS person may use it. Absent on an older server. */
+  short_links?: { available: boolean };
   version: string;
   build: string;
   /** The AI assistant (task #269): its state for the caller and whether the

@@ -32,7 +32,7 @@
  * of the app wizard; everything else - the trust question, the cancel, a
  * second link arriving - is this page's, the same for both.
  */
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { RouterLink, useRouter } from 'vue-router';
 import { AlertTriangle, Check, ShieldCheck, Store } from 'lucide-vue-next';
@@ -49,6 +49,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import AppPluginInstallWizard from '@/components/plugins/AppPluginInstallWizard.vue';
+import AppSetupWizard from '@/components/plugins/AppSetupWizard.vue';
 import StorageStoreReview from '@/components/plugins/StorageStoreReview.vue';
 import type { Plugin } from '@/api/plugins';
 
@@ -202,6 +203,16 @@ function onInstalled(p: AppPlugin) {
   installed.value = p;
 }
 
+/** An app that is set up before it runs (filex 0.60): its wizard opens once
+ *  the review dialog has closed. ⚠ Mounted only then: a dialog on the page
+ *  carries its own close button, and while Install is on its way the review
+ *  must be the only dialog there is (no × anywhere). */
+const setupMounted = ref(false);
+const setupOpen = ref(false);
+function onSetupDone(p: AppPlugin) {
+  installed.value = p;
+}
+
 function onStorageInstalled(p: Plugin) {
   installedStorage.value = p;
 }
@@ -222,6 +233,11 @@ async function onWizard(open: boolean) {
   if (open) return;
   if (installed.value || installedStorage.value) {
     state.value = 'done';
+    if (installed.value?.state === 'setup') {
+      setupMounted.value = true;
+      await nextTick();
+      setupOpen.value = true;
+    }
   } else {
     const h = review.value?.handle;
     state.value = 'cancelled';
@@ -403,6 +419,7 @@ function useLabel(use: string): string {
       @installed="onInstalled"
       @upgraded="onInstalled"
     />
+    <AppSetupWizard v-if="setupMounted" v-model="setupOpen" :plugin="installed" @done="onSetupDone" />
     <StorageStoreReview
       :model-value="wizardOpen && isStorage"
       :review="review"

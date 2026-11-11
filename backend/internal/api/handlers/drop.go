@@ -32,6 +32,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
+	"github.com/brf-tech/filex/backend/internal/templates"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 )
 
@@ -42,6 +43,8 @@ import (
 // ("blind drop"). The target folder is resolved server-side from the token;
 // the anonymous client can never influence the destination path.
 type Drop struct {
+	// Templates renders the pages (internal/templates); nil = filex's own.
+	Templates *templates.Renderer
 	// ACL, when wired, closes a link whose creator may no longer make it
 	// (link_creator.go). Nil in tests built by hand: every link answers.
 	ACL       *acl.Resolver
@@ -216,7 +219,7 @@ func (h *Drop) Page(w http.ResponseWriter, r *http.Request) {
 	// A JavaScript browser gets the branded public surface; everything else
 	// falls through to the page below (public_shell.go says why).
 	if wantsPublicShell(r, h.Shell) {
-		h.Shell.ServeHTTP(w, r)
+		h.Shell.ServeHTTP(w, withShellPage(r, h.Store, h.ACL, h.Tenants.MultiTenant, h.DefaultLocale, "file_request"))
 		return
 	}
 	tok := pathParam(r, "token")
@@ -238,7 +241,7 @@ func (h *Drop) Page(w http.ResponseWriter, r *http.Request) {
 	if locked {
 		// GET otherwise shows the PIN form; the accepted uploader page is
 		// reachable via a successful POST (see Upload) or the cookie.
-		h.renderDropPinForm(w, r, tok, "")
+		h.renderDropPinForm(w, r, sh, tok, "")
 		return
 	}
 	h.renderUploader(w, r, tok, sh, "")
@@ -271,10 +274,10 @@ func (h *Drop) Upload(w http.ResponseWriter, r *http.Request) {
 	// (internal/share/pin.go).
 	switch err := h.Service.CheckPIN(r.Context(), sh, pin); {
 	case errors.Is(err, share.ErrLocked):
-		h.renderDropPinForm(w, r, tok, "pin_locked")
+		h.renderDropPinForm(w, r, sh, tok, "pin_locked")
 		return
 	case err != nil:
-		h.renderDropPinForm(w, r, tok, "pin_wrong")
+		h.renderDropPinForm(w, r, sh, tok, "pin_wrong")
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -773,11 +776,21 @@ func (h *Drop) notifyOwner(r *http.Request, sh *model.Share, node *model.Node, c
 	if h.Mailer != nil && sh.CreatedBy != nil {
 		if u, err := h.Store.GetUser(ctx, *sh.CreatedBy); err == nil && u != nil && strings.TrimSpace(u.Email) != "" {
 			said := notify.SayEvent(locale, ev)
-			mailBody := strings.Join(said.Lines, "\n")
+			link := ""
 			if base := h.Tenants.FromRequest(r); base != "" {
-				mailBody += "\n\n" + base + "/admin/"
+				link = base + "/admin/"
 			}
-			_ = h.Mailer.Send(mailer.WithLanguage(ctx, locale), u.Email, said.Title, mailBody)
+			lines := make([]any, len(said.Lines))
+			for i, l := range said.Lines {
+				lines[i] = l
+			}
+			// The template every notification email uses (mail.notification),
+			// as the notify service would have sent it.
+			_ = sendTemplateMail(ctx, orDefaultTemplates(h.Templates), h.Mailer, u.Email,
+				templates.Target{TenantID: mailTenant(ctx, sh), Lang: locale}, "mail.notification", map[string]any{
+					"notice": map[string]any{"event": string(ev.Event), "title": said.Title, "lines": lines},
+					"link":   map[string]any{"url": link},
+				})
 		}
 	}
 }
@@ -809,7 +822,7 @@ func (h *Drop) resolveKind(w http.ResponseWriter, r *http.Request, tok string) (
 // ─────────────────── rendering ───────────────────
 
 func (h *Drop) renderUploader(w http.ResponseWriter, r *http.Request, tok string, sh *model.Share, pin string) {
-	lang, t, chrome, footer := h.pub(r)
+	lang, t, _, _ := h.pub(r)
 	ds := parseDropSettings(sh.DropSettings)
 	folderName := ""
 	if node, err := h.Store.GetNode(r.Context(), sh.NodeID); err == nil && node != nil {
@@ -831,21 +844,14 @@ func (h *Drop) renderUploader(w http.ResponseWriter, r *http.Request, tok string
 		"t": dropScriptStrings(t),
 	}
 	cfgJSON, _ := json.Marshal(cfg)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	if err := dropUploaderTemplate.Execute(w, map[string]any{
-		"Lang":      lang,
-		"Dir":       pageDir(lang),
-		"T":         t,
-		"Folder":    leafname.Visible(folderName),
-		"NameMax":   dropNameMax,
-		"Config":    template.JS(cfgJSON),
-		"BrandCSS":  chrome.BrandCSS,
-		"BrandHead": chrome.BrandHead,
-		"Footer":    footer,
-	}); err != nil {
-		slog.Error("drop: uploader render failed", slog.String("err", err.Error()))
+	title := t["drop_title"]
+	if folderName != "" {
+		title += " - " + leafname.Visible(folderName)
 	}
+	writePublicPage(w, r, pageTemplates(h.Templates, h.Branding), linkTarget(r, sh, lang), "page.file_request", http.StatusOK, title, map[string]any{
+		"folder": map[string]any{"name": leafname.Visible(folderName)},
+		"form":   map[string]any{"name_max": dropNameMax},
+	}, &pageScript{Script: strings.Replace(dropUploaderScript, "__CONFIG__", string(cfgJSON), 1)})
 }
 
 // dropScriptStrings is the subset of the string table the uploader script
@@ -877,59 +883,29 @@ func dropScriptStrings(t map[string]string) map[string]string {
 	return out
 }
 
-// renderDropPinForm renders the gate on a PIN-protected drop link. errKey is a
-// string-table key ("pin_wrong") or empty — never a sentence, so the gate and
-// the uploader behind it cannot end up in different languages.
-func (h *Drop) renderDropPinForm(w http.ResponseWriter, r *http.Request, token, errKey string) {
-	lang, t, chrome, footer := h.pub(r)
+// renderDropPinForm renders the gate (page.pin) on a PIN-protected drop
+// link. errKey is a string-table key ("pin_wrong") or empty — never a
+// sentence, so the gate and the uploader behind it cannot end up in different
+// languages. Action posts back to /d/{token}.
+func (h *Drop) renderDropPinForm(w http.ResponseWriter, r *http.Request, sh *model.Share, token, errKey string) {
+	lang, t, _, _ := h.pub(r)
 	errMsg := ""
+	status := http.StatusOK
 	if errKey != "" {
-		errMsg = t[errKey]
+		errMsg, status = t[errKey], http.StatusUnauthorized
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if errMsg != "" {
-		w.WriteHeader(http.StatusUnauthorized)
-	} else {
-		w.WriteHeader(http.StatusOK)
-	}
-	// Reuse the shared PIN form template; Action posts back to /d/{token}.
-	// Lang + T are NOT optional here: the template asks for {{.T.pin_heading}}
-	// and friends, and html/template renders a missing key as "" — which is
-	// how this page shipped with an empty title, heading and button.
-	if err := pinFormTemplate.Execute(w, map[string]any{
-		"Lang":      lang,
-		"Dir":       pageDir(lang),
-		"T":         t,
-		"Action":    basepath.Path(r.Context(), "/d/"+path.Clean(token)),
-		"Error":     errMsg,
-		"BrandCSS":  chrome.BrandCSS,
-		"BrandHead": chrome.BrandHead,
-		"Footer":    footer,
-	}); err != nil {
-		slog.Error("drop: pin form render failed", slog.String("err", err.Error()))
-	}
+	writePublicPage(w, r, pageTemplates(h.Templates, h.Branding), linkTarget(r, sh, lang), "page.pin", status, t["pin_title"], map[string]any{
+		"form": map[string]any{"action": basepath.Path(r.Context(), "/d/"+path.Clean(token)), "error": errMsg},
+		"link": map[string]any{"kind": "file_request"},
+	}, nil)
 }
 
-// renderDropError shows a styled error page. It takes string-table KEYS, not
-// sentences: the caller is a code path and the language belongs to the visitor.
+// renderDropError shows a styled error page (page.error). It takes
+// string-table KEYS, not sentences: the caller is a code path and the
+// language belongs to the visitor. The address's template, as every
+// "not available" page.
 func (h *Drop) renderDropError(w http.ResponseWriter, r *http.Request, status int, key string) {
-	lang, t, chrome, footer := h.pub(r)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	// Reuse the shared error page template.
-	if err := errorPageTemplate.Execute(w, map[string]any{
-		"Lang":      lang,
-		"Dir":       pageDir(lang),
-		"T":         t,
-		"Title":     t["err_"+key+"_title"],
-		"Body":      t["err_"+key+"_body"],
-		"Code":      status,
-		"BrandCSS":  chrome.BrandCSS,
-		"BrandHead": chrome.BrandHead,
-		"Footer":    footer,
-	}); err != nil {
-		slog.Error("drop: error page render failed", slog.String("err", err.Error()))
-	}
+	renderPublicError(w, r, pageTemplates(h.Templates, h.Branding), h.DefaultLocale, h.Branding, status, key)
 }
 
 // dropNameMax is the longest name a file request's uploader may give, in
@@ -1031,79 +1007,11 @@ func (l *ipLimiter) allowN(key string, n int) bool {
 // sign-in throttle.
 func clientIP(r *http.Request) string { return clientip.FromRequest(r) }
 
-// dropUploaderTemplate is a dependency-free upload page: drag-and-drop or pick,
+// dropUploaderScript is page.file_request's own script: drag-and-drop or pick,
 // one or many files, optional name/note, live progress. All limits are echoed
-// so the visitor sees them; the actual enforcement is server-side.
-var dropUploaderTemplate = template.Must(template.New("drop").Parse(`<!doctype html>
-<html lang="{{.Lang}}" dir="{{.Dir}}"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.T.drop_title}}{{if .Folder}} - {{.Folder}}{{end}}</title>
-` + publicPageStyle + `
-{{.BrandCSS}}
-<style>
-.card { width: 520px; text-align: start; }
-.drop { border: 2px dashed var(--px-line); border-radius: 12px; padding: 28px 16px; text-align: center; cursor: pointer; color: var(--px-muted); transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease; }
-.drop:hover, .drop.over { border-color: var(--px-accent); background: var(--px-accent-soft); color: var(--px-accent); }
-.drop:focus-visible { outline: 2px solid var(--px-accent); outline-offset: 2px; }
-.drop svg { width: 38px; height: 38px; margin-bottom: 6px; }
-.drop .big { font-size: 1rem; font-weight: 600; color: var(--px-fg); }
-.drop .hint { font-size: 0.82rem; margin-top: 6px; }
-input[type=file] { display: none; }
-.field { margin-top: 14px; }
-label { display: block; font-size: 0.82rem; color: var(--px-muted); margin-bottom: 5px; }
-input[type=text], textarea { width: 100%; padding: 11px; border: 1px solid var(--px-line); border-radius: 9px; font-size: 0.95rem; background: transparent; color: inherit; font-family: inherit; }
-input[type=text]:focus, textarea:focus { outline: none; border-color: var(--px-accent); box-shadow: 0 0 0 3px var(--px-accent-soft); }
-textarea { resize: vertical; min-height: 64px; }
-.files { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
-.f { display: flex; align-items: center; gap: 10px; font-size: 0.86rem; padding: 8px 10px; border: 1px solid var(--px-line); border-radius: 9px; }
-.f .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.f .sz { color: var(--px-muted); font-variant-numeric: tabular-nums; }
-.f .x { cursor: pointer; color: var(--px-muted); border: 0; background: none; font-size: 1rem; border-radius: 6px; padding: 2px 7px; }
-.f .x:hover { color: var(--px-err); background: var(--px-err-soft); }
-.f .x:focus-visible { outline: 2px solid var(--px-accent); outline-offset: 1px; }
-.bar { height: 6px; border-radius: 999px; background: var(--px-line); overflow: hidden; margin-top: 16px; display: none; }
-.bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--px-accent), var(--px-accent-hover)); transition: width 0.2s ease; }
-.msg { margin-top: 14px; font-size: 0.88rem; }
-.msg.err { color: var(--px-err); }
-.done { text-align: center; }
-.foot { margin-top: 16px; text-align: center; color: var(--px-muted); font-size: 0.72rem; }
-@media (prefers-reduced-motion: reduce) { .drop, .bar > i { transition: none; } }
-</style>
-</head><body>
-<main class="wrap">
-{{.BrandHead}}
-<div class="card" id="card">
-  <h1>{{.T.drop_heading}}{{if .Folder}} · {{.Folder}}{{end}}</h1>
-  <p class="sub" id="sub">{{.T.drop_sub}}</p>
-
-  <div class="drop" id="drop" role="button" tabindex="0" aria-label="{{.T.drop_zone_aria}}">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14.9A7 7 0 1 1 15.7 8h1.8a4.5 4.5 0 0 1 2.5 8.2"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>
-    <div class="big">{{.T.drop_zone_big}}</div>
-    <div class="hint" id="hint">{{.T.drop_zone_hint}}</div>
-  </div>
-  <input type="file" id="file" multiple>
-
-  <div class="field" id="nameField" style="display:none">
-    <label for="uploaderName">{{.T.drop_name_label}}</label>
-    <input type="text" id="uploaderName" maxlength="{{.NameMax}}" placeholder="{{.T.drop_name_ph}}">
-  </div>
-  <div class="field">
-    <label for="note">{{.T.drop_note_label}}</label>
-    <textarea id="note" maxlength="2000" placeholder="{{.T.drop_note_ph}}"></textarea>
-  </div>
-
-  <div class="files" id="files"></div>
-  <div class="bar" id="bar"><i id="barfill"></i></div>
-  <div class="msg" id="msg" role="status"></div>
-  <button class="btn" id="send" disabled>{{.T.drop_send}}</button>
-  <div class="foot" id="foot"></div>
-</div>
-{{.Footer}}
-</main>
-
-<script>
-var CFG = {{.Config}};
+// so the visitor sees them; the actual enforcement is server-side. Its hooks
+// are the elements it reads (templates.Def.Hooks).
+const dropUploaderScript = `var CFG = __CONFIG__;
 var picked = [];
 var el = function(id){ return document.getElementById(id); };
 var drop = el('drop'), fileInput = el('file'), filesBox = el('files'), sendBtn = el('send'), msg = el('msg');
@@ -1204,5 +1112,4 @@ function fail(code, res){
   msg.className='msg err'; msg.textContent = (m[code]||T.drop_err_generic);
 }
 render();
-</script>
-</body></html>`))
+`

@@ -70,6 +70,8 @@ export interface EndpointMap {
   shareCreate: string | null;
   shareList: string | null;
   shareDelete: string | null;
+  /** A link's short address (filex 0.60): `/api/files/short-links`. */
+  shortLinks: string | null;
   limits: string | null;
   capabilities: string | null;
   /** A PDF's preview on a path of its own (`/api/files/pdf`, GitHub #124);
@@ -152,6 +154,9 @@ export interface ExplorerConfig {
 
   shareCreate?: string;
   shareList?: string;
+  /** A link's short address (filex 0.60): GET `?share=<token>` reads the one
+   *  it has, POST `{share}` asks the link-shortener app for one. */
+  shortLinks?: string;
   /** DELETE template; `{uuid}` placeholder is replaced at call time. */
   shareDelete?: string;
 

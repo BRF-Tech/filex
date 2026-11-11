@@ -223,10 +223,12 @@
       "updates": "Yeni sürümler ve güncelleme kuralı",
       "about": "Sürüm ve derleme bilgisi",
       "aiAssistant": "Gezgindeki asistan: sağlayıcı, model, sınırlar",
-      "botProtection": "Oturum açma, PIN ve yükleme kutularında captcha"
+      "botProtection": "Oturum açma, PIN ve yükleme kutularında captcha",
+      "templates": "Her e-postanın ve herkese açık sayfanın HTML'i"
     },
     "aiAssistant": "AI asistanı",
-    "botProtection": "Bot koruması"
+    "botProtection": "Bot koruması",
+    "templates": "Şablonlar"
   },
   "login": {
     "title": "Oturum aç",
@@ -1328,7 +1330,10 @@
       "no_pin": "Bu bağlantıda PIN yok.",
       "not_recoverable": "Bu bağlantı, filex PIN'i saklayabilmeye başlamadan önce oluşturulmuş; artık gösterilemez. Görebileceğiniz bir PIN için yeni bir bağlantı oluşturun.",
       "no_secret_key": "Bu sunucuda şifreleme anahtarı (FILEX_SECRET_KEY) tanımlı değil, bu yüzden PIN'ler saklanamaz ve gösterilemez. Yöneticinizden tanımlamasını isteyin."
-    }
+    },
+    "shortLink": "Kısa bağlantı al",
+    "shortLinkTitle": "Kısa bağlantı",
+    "shortLinkFull": "Tam bağlantı:"
   },
   "search": {
     "title": "Arama indeksi",
@@ -1692,7 +1697,7 @@
     "creds": "Demo hesabı: {email} · parola: {password}",
     "sandbox": "Ortak deneme alanı - her gece sıfırlanır; burada depolama, eklenti ve uygulamalar kapalıdır.",
     "adminHint": "Burada yönetim paneli her hesap için salt okunur - gösterdiklerini değiştirmek için kendi filex'inizi çalıştırın.",
-    "alsoIncluded": "Ayrıca: uygulamalar - izin incelemesinden geçerek kurulan WebAssembly eklentileri, e-İmza, Dönüştür, ofis düzenleyici, filextext ve draw.io ile birlikte · izin verdiğiniz bir uygulamayla bir dosyayı birlikte düzenleme ya da şifreli bir klasördeki dosyayı tarayıcınızda çözülmüş olarak açma · dil paketleri ve sağdan sola yerleşim · Görünüm ekranından kurum temaları · oluşturduğunuz bağlantılar, Paylaştıklarım'da · kişisel ve takım etiketleri · sembolik bağlantılı klasörler · klasör başına hatırlanan görünüm ve sıralama · roller, gruplar ve kişiye özel istisnalar, dosya ve klasör bazında erişim ve uygulamaların kendi izinleri · her kiracının kendi realm'iyle (oturum açma adıyla) çok kiracılık; kiracı kendi oturum açma sağlayıcılarını, alan adını ve sertifikasını kendisi yönetir · OIDC SSO, LDAP / Active Directory ve Windows ya da Linux hesabıyla oturum açma · IP izin listesiyle giriş denemesi sınırı · yerinde görüntüleyiciler ve düzenleyiciler, ofis düzenleyici uygulamasında ya da ONLYOFFICE ile Office belgeleri · ofis belgesi, SVG, HEIC, metin ve arşiv küçük resimleri, içine en son gelen dosyalarla çizilen klasörler · Varsayılan uygulamalar: bir dosya türünü hangi uygulamanın açacağı · + Yeni menüsünden belge oluşturma - Markdown, metin, CSV ve kod her yerde; Word, Excel, PowerPoint ve OpenDocument ise ONLYOFFICE bağlıyken ya da ofis düzenleyici uygulaması kuruluyken · tüm seçimi tek akışlı arşiv olarak indirme · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
+    "alsoIncluded": "Ayrıca: uygulamalar - izin incelemesinden geçerek kurulan WebAssembly eklentileri, e-İmza, Dönüştür, ofis düzenleyici, filextext ve draw.io ile birlikte · izin verdiğiniz bir uygulamayla bir dosyayı birlikte düzenleme ya da şifreli bir klasördeki dosyayı tarayıcınızda çözülmüş olarak açma · dil paketleri ve sağdan sola yerleşim · Görünüm ekranından kurum temaları · oluşturduğunuz bağlantılar, Paylaştıklarım'da · yükleyiciler - ShareX, curl ya da bir betik için, her yüklemeye bir bağlantıyla yanıt veren bir anahtar · düzenlenebilir bir şablon olarak her e-posta ve herkese açık sayfa · kişisel ve takım etiketleri · sembolik bağlantılı klasörler · klasör başına hatırlanan görünüm ve sıralama · roller, gruplar ve kişiye özel istisnalar, dosya ve klasör bazında erişim ve uygulamaların kendi izinleri · her kiracının kendi realm'iyle (oturum açma adıyla) çok kiracılık; kiracı kendi oturum açma sağlayıcılarını, alan adını ve sertifikasını kendisi yönetir · OIDC SSO, LDAP / Active Directory ve Windows ya da Linux hesabıyla oturum açma · IP izin listesiyle giriş denemesi sınırı · yerinde görüntüleyiciler ve düzenleyiciler, ofis düzenleyici uygulamasında ya da ONLYOFFICE ile Office belgeleri · ofis belgesi, SVG, HEIC, metin ve arşiv küçük resimleri, içine en son gelen dosyalarla çizilen klasörler · Varsayılan uygulamalar: bir dosya türünü hangi uygulamanın açacağı · + Yeni menüsünden belge oluşturma - Markdown, metin, CSV ve kod her yerde; Word, Excel, PowerPoint ve OpenDocument ise ONLYOFFICE bağlıyken ya da ofis düzenleyici uygulaması kuruluyken · tüm seçimi tek akışlı arşiv olarak indirme · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
     "features": {
       "storageTitle": "6 depolama sürücüsü, iki yönde",
       "storageBody": "Yerel diskleri, S3'ü, SFTP'yi, WebDAV'ı, FTP/FTPS'i ve SMB/NAS paylaşımlarını tek bir ağaçta yan yana bağlayın - sonra aynı ağaca S3, SFTP, FTPS, NFSv3 ya da WebDAV olarak geri erişin.",
@@ -2769,7 +2774,6 @@
     "installed": "{name} kuruldu",
     "upgraded": "{name} yükseltildi",
     "deleted": "{name} kaldırıldı",
-    "deleteConfirm": "“{name}” uygulaması kaldırılsın mı? Modülü, ayarları ve işlem geçersiz kılmaları sunucudan silinir.",
     "permissionsCount": "{count} izin | {count} izin",
     "scheduledBadge": "Saatte bir uyanır",
     "checkUpdates": "Güncellemeleri denetle",
@@ -2807,7 +2811,8 @@
       "disabled": "Kapalı",
       "refused": "Reddedildi",
       "failed": "Başarısız",
-      "unlicensed": "Lisanssız"
+      "unlicensed": "Lisanssız",
+      "setup": "Kurulum bekliyor"
     },
     "source": {
       "upload": "Yüklendi",
@@ -2820,7 +2825,9 @@
       "reviewUpdate": "Güncellemeyi incele",
       "upgrade": "Yükselt",
       "remove": "Kaldır",
-      "rollback": "{version} sürümüne dön"
+      "rollback": "{version} sürümüne dön",
+      "setup": "Kurulumu tamamla",
+      "reconfigure": "Yeniden yapılandır"
     },
     "empty": {
       "title": "Kurulu uygulama yok",
@@ -3104,7 +3111,113 @@
       "missing": "Bu sunucuda “{name}” adında kurulu bir uygulama yok."
     },
     "rollbackConfirm": "{name}, {version} sürümüne geri alınsın mı? Herkes hemen o sürüme geçer; {current} saklanır, aynı yoldan yeniden ileri gidebilirsiniz.",
-    "rolledBack": "{name}, {version} sürümüne geri alındı."
+    "rolledBack": "{name}, {version} sürümüne geri alındı.",
+    "setup": {
+      "title": "{name} kurulumu",
+      "step": {
+        "app": "Uygulamanın ayarları",
+        "addresses": "Adresler",
+        "people": "Kimler kullanabilir",
+        "finish": "Bitir"
+      },
+      "lead": {
+        "app": "Uygulama kendi sorularını sorar. Bunlar bir kez kararlaştırılır: sonradan değiştirmek, uygulamanın verisini silen Yeniden yapılandır ile olur.",
+        "addresses": "Ziyaretçilerin uygulamaya ulaştığı adresler. Uygulama çalışırken bir adres değiştirilmez: adres ekleyebilir ya da kapatabilirsiniz.",
+        "people": "Uygulamanın izinlerini kimlerin kullanabileceği. Her karar verdiğiniz anda kaydedilir.",
+        "finish": "Seçilenleri gözden geçirin, sonra uygulamayı başlatın."
+      },
+      "appDone": "Uygulamanın kendi ayarları kaydedildi.",
+      "appAgain": "Ayarlarını yeniden aç",
+      "back": "Geri",
+      "next": "İleri",
+      "later": "Sonra",
+      "complete": "Kurulumu tamamla",
+      "finishText": "Uygulama, sunulduğu herkes için çalışmaya başlar.",
+      "nodeLocal": "Bu uygulamanın verisi bu sunucunun kendi diskinde tutulur. filex tek bir adresin arkasında birden fazla sunucuda çalışıyorsa önce uygulamalara ortak bir veritabanı verin (FILEX_APP_DATA_DSN); yoksa her sunucu farklı veri tutar.",
+      "needsSetup": "Bu uygulama kurulumu tamamlanana kadar hiçbir şey çalıştırmaz.",
+      "doneToast": "{name} kuruldu ve çalışıyor.",
+      "addr": {
+        "kindLabel": "Adres türü",
+        "kindOwn": "Bu filex'in adresi",
+        "kindOwnHelp": "{host} ve bir yol, örneğin {host}/l/…",
+        "kindHost": "Kendine ait bir alan adı",
+        "kindHostHelp": "Yalnızca bu uygulamaya cevap veren bir ad, örneğin l.example.com",
+        "host": "Alan adı",
+        "prefix": "Yol öneki",
+        "prefixOptional": "Yol öneki (isteğe bağlı)",
+        "tenant": "Ait olduğu kiracı",
+        "tenantPlatform": "Platform",
+        "everyTenant": "Her kiracı, kendi adresinde",
+        "preview": "Adresler şöyle görünecek:",
+        "codeWord": "kod",
+        "dnsHint": "DNS'te {host} adını bu filex'e ({target}) yönlendirin ve ters vekil sunucunuzun onun için bir sertifika sunmasını sağlayın. filex o alan adında yalnızca bu uygulamaya cevap verir.",
+        "add": "Adres ekle",
+        "none": "Henüz adres yok. En az bir tane ekleyin.",
+        "colAddress": "Adres",
+        "colKind": "Tür",
+        "colTenant": "Kiracı",
+        "colState": "Durum",
+        "default": "Varsayılan",
+        "on": "Açık",
+        "off": "Kapalı",
+        "makeDefault": "Varsayılan yap",
+        "switchOff": "Kapat",
+        "switchOn": "Aç",
+        "remove": "Kaldır"
+      },
+      "people": {
+        "default": {
+          "viewer": "her hesap",
+          "user": "dosyaları değiştirebilen hesaplar",
+          "admin": "yalnızca yöneticiler"
+        },
+        "appDefault": "Siz karar verene kadar: {who}.",
+        "useDefault": "Varsayılan",
+        "allow": "İzin ver",
+        "deny": "Reddet",
+        "roles": "Roller",
+        "rolesNote": "Bir rolün kararı o rolü taşıyan herkese ulaşır. Bu izni yalnızca birkaç kişiye vermek için onları aşağıda Kişiler bölümüne ekleyin.",
+        "roleUser": "Kullanıcı (yerleşik)",
+        "roleViewer": "İzleyici (yerleşik)",
+        "colRole": "Rol",
+        "colHolders": "Kimde var",
+        "colDecision": "Karar",
+        "colGroup": "Grup",
+        "colGivesRole": "Verdiği rol",
+        "colPerson": "Kişi",
+        "holdersBuiltin": "Bu rolde {n} kişi | Bu rolde {n} kişi",
+        "holdersPeople": "{n} kişi: {names} | {n} kişi: {names}",
+        "holdersPeopleMore": "{n} kişi: {names} ve {more} kişi daha | {n} kişi: {names} ve {more} kişi daha",
+        "holdersGroups": "gruplar: {groups}",
+        "holdersNone": "Henüz kimse",
+        "groups": "Gruplar",
+        "groupAdmin": "Yöneticiler",
+        "groupAdminHolds": "Üyeleri yöneticidir ve uygulama izinlerinin hepsine sahiptir.",
+        "groupNoRole": "Rol yok",
+        "groupNoRoleHint": "Rol vermiyor: kişilerini tek tek belirleyin ya da Gruplar'da gruba bir rol verin.",
+        "groupShared": "Burada karar vermek {role} rolü için karar vermektir; bu karar şunlara da ulaşır: {who}. Yalnızca bu grubun kişilerine ulaşmak için onları Kişiler bölümüne ekleyin.",
+        "people": "Kişiler",
+        "peopleNote": "Kişinin kendi kararı; rolü ne derse desin.",
+        "searchPerson": "Ada ya da adrese göre kişi bulun",
+        "clearPerson": "Rolünün kararına dön"
+      }
+    },
+    "erase": {
+      "titleReconfigure": "{name} uygulamasını yeniden yapılandır",
+      "titleRemove": "{name} uygulamasını kaldır",
+      "leadReconfigure": "Yeniden yapılandırma, {name} uygulamasının tuttuğu her şeyi siler ve kurulumunu yeniden açar.",
+      "leadRemove": "{name} uygulamasını kaldırmak, uygulamayla birlikte tuttuğu her şeyi siler.",
+      "final": "Bu işlem geri alınamaz.",
+      "data": "Uygulamanın kendi verisinden {n} kayıt ({size}) | Uygulamanın kendi verisinden {n} kayıt ({size})",
+      "links": "Uygulamanın açtığı {n} bağlantı (çalışmaz olur) | Uygulamanın açtığı {n} bağlantı (çalışmaz olur)",
+      "state": "Uygulamanın dosyalarda tuttuğu {n} kayıt | Uygulamanın dosyalarda tuttuğu {n} kayıt",
+      "locks": "{n} dosya kilidi (kaldırılır) | {n} dosya kilidi (kaldırılır)",
+      "nothing": "Uygulama henüz veri tutmuyor.",
+      "thenWizard": "Hemen ardından kurulumu yeniden açılır.",
+      "typeLabel": "Onaylamak için {name} yazın",
+      "doReconfigure": "Sil ve yeniden yapılandır",
+      "doRemove": "Sil ve kaldır"
+    }
   },
   "defaultApps": {
     "title": "Varsayılan uygulamalar",
@@ -4465,5 +4578,91 @@
   },
   "securityOff": {
     "note": "Bu ayar güvenli değildir ve önerilmez. Ne yaptığınızı biliyorsanız uygulayın."
+  },
+  "templates": {
+    "title": "Şablonlar",
+    "subtitle": "filex'in gönderdiği e-postalar ve bir bağlantıyı açan kişilere gösterdiği sayfalar, değiştirebileceğiniz şablonlar olarak.",
+    "themeNote": "Renkler, logo ve alt bilgi metni şuradan gelir:",
+    "group": {
+      "mail": "E-postalar",
+      "page": "Herkese açık sayfalar",
+      "slot": "Bağlantı sayfası metinleri"
+    },
+    "source": {
+      "default": "Varsayılan",
+      "instance": "Bu sunucu",
+      "tenant": "Bu kiracı"
+    },
+    "part": {
+      "body": "HTML",
+      "subject": "Konu",
+      "text": "Düz metin",
+      "textHelp": "Boş bırakırsanız düz metin sürümü HTML'den oluşturulur."
+    },
+    "partLabel": "Şablonun bölümü",
+    "inLayout": "{layout} içinde",
+    "slotHelp": "Herkese açık bağlantı sayfasının kartında sabit bir yerde gösterilen kısa bir metin. Boş: sayfa kendi sözlerini kullanır.",
+    "lastError": "{when} tarihinde başarısız oldu, yerine varsayılan kullanıldı:",
+    "failedBadge": "Yakın zamanda başarısız oldu",
+    "editorLabel": "Şablon kaynağı",
+    "varsTitle": "Değişkenler",
+    "varsHelp": "Eklemek için birine tıklayın. Dil paketlerindeki bir cümle t filtresiyle yazılır, örneğin:",
+    "hooks": "Sayfanın kendi betiğinin ihtiyacı olanlar: {hooks}",
+    "startFromDefault": "Varsayılandan başla",
+    "reset": "Varsayılana dön",
+    "resetTitle": "Varsayılana dönülsün mü?",
+    "resetText": "Bu şablonun sizin metniniz kaldırılır ve yeniden filex'in kendi şablonu kullanılır.",
+    "resetTextTenant": "Bu şablonun kiracınıza ait metni kaldırılır: yeniden bu sunucunun şablonu ya da filex'in kendi şablonu kullanılır.",
+    "resetDone": "Şablon varsayılana döndü.",
+    "testMail": "Bana test e-postası gönder",
+    "testSent": "Test e-postası {to} adresine gönderildi.",
+    "saved": "Şablon kaydedildi.",
+    "notSaved": "Şablon kaydedilmedi.",
+    "preview": "Önizleme",
+    "previewLang": "Önizleme dili",
+    "view": {
+      "html": "HTML",
+      "text": "Düz metin"
+    },
+    "viewLabel": "Önizlenen",
+    "removed": "Çıkarıldı, kimseye ulaşmayacak: {what}",
+    "missing": "Eksik, sayfanın buna ihtiyacı var: {what}",
+    "unsavedTitle": "Kaydedilmemiş değişiklikler",
+    "unsavedText": "Bu şablonda kaydedilmemiş değişiklikler var. Başka birini açıp bunları kaybetmek istiyor musunuz?",
+    "discard": "Değişiklikleri at",
+    "lang": {
+      "en": "English",
+      "tr": "Türkçe"
+    },
+    "name": {
+      "mail_layout": "E-posta düzeni (tüm e-postalar)",
+      "mail_share": "E-postayla paylaşılan bağlantı",
+      "mail_file_request": "Dosya isteği",
+      "mail_grant": "Bir hesaba verilen erişim",
+      "mail_account": "Yeni hesap",
+      "mail_notification": "Bildirim",
+      "mail_digest": "Bildirim özeti",
+      "mail_smtp_test": "SMTP testi",
+      "mail_cloud_verify": "Bulut kayıt kodu",
+      "mail_app": "Bir uygulamanın gönderdiği e-posta",
+      "page_layout": "Sayfa düzeni (aşağıdaki tüm sayfalar)",
+      "page_pin": "PIN kapısı",
+      "page_unlocked": "PIN kabul edildi",
+      "page_error": "Bağlantı kullanılamıyor / hatalar",
+      "page_zip_wait": "ZIP hazırlanıyor",
+      "page_folder": "Paylaşılan klasör (JavaScript olmadan)",
+      "page_file_request": "Dosya isteği yükleme sayfası (JavaScript olmadan)",
+      "page_app": "Bir uygulamanın bağlantısı (JavaScript olmadan)",
+      "page_cache_wait": "İndirme hazırlanıyor",
+      "page_shell": "Herkese açık bağlantı sayfası (çerçeve)",
+      "slot_share_title": "Paylaşılan bağlantı: başlık",
+      "slot_share_intro": "Paylaşılan bağlantı: giriş",
+      "slot_share_footer": "Paylaşılan bağlantı: alt satır",
+      "slot_file_request_title": "Dosya isteği: başlık",
+      "slot_file_request_intro": "Dosya isteği: giriş",
+      "slot_file_request_footer": "Dosya isteği: alt satır",
+      "page_delete_confirm": "Silme bağlantısı: onay",
+      "page_delete_done": "Silme bağlantısı: tamamlandı"
+    }
   }
 }

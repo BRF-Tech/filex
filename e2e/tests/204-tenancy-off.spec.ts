@@ -33,6 +33,7 @@ const PAGES = [
   '/admin/protection',
   '/admin/settings',
   '/admin/branding',
+  '/admin/templates',
   '/admin/appearance',
 ];
 

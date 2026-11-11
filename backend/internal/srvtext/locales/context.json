@@ -1,6 +1,7 @@
 {
   "about": "Context for translators - not read by the server. `groups`: where the keys under a prefix appear (the longest matching prefix wins). `keys`: a note for one key. `vars`: what each {placeholder} holds; `key_vars` overrides it for one key. scripts/lib/i18n-catalogue.mjs merges this into filex-catalogue-context.json, and web/tests/i18n/langPackCatalogue.test.ts fails when a server key has no group or a placeholder no description.",
   "groups": {
+    "server.route.": "The page a visitor sees at an app's public address (a short link) when there is nothing to send them to: the link is not available, they tried too often, or the app is busy; and the button on an app's preview page (go).",
     "server.assistant.": "The AI assistant built into the explorer (Admin, Settings, AI assistant): the names of the actions it takes for a person (tool.*), each step's status, the question on the card that asks the person to approve an action that cannot be undone (confirm.*) and why it asks (why.*), the lines between the turns of a conversation (note.*), and the connection test on the settings page (test.*).",
     "server.coedit.": "Editing a file together in an app (the office editor): the question the explorer asks a person whose changes did not reach the others before their connection was lost, when the editor opens again. Shown above the app's frame with two buttons (apply / discard). {name} is the file's name, {count} how many changes.",
     "server.event_off.": "Why a notification event can never happen on this server, shown greyed beside its switch (Settings → Notifications, Admin → Webhooks) to the administrator who could switch it on. One short sentence; a screen name in brackets (Protection) is the admin page where it is turned on.",
@@ -38,6 +39,8 @@
     "server.public.cache_": "Public page: a big file on slow storage is copied locally before the download starts.",
     "server.public.folder_": "Public page: a shared folder's file list.",
     "server.public.file_count": "Public page: a shared folder's file list - the counts line \"3 folders · 12 files\".",
+    "server.public.uploaddel_": "The page an upload's deletion link opens (Account settings, Uploaders: a screenshot tool keeps the link and opens it in a browser). The title and heading ask whether to delete the file, the file's name is shown under them, the sub line says what deleting does, the button deletes; the done page says it was deleted. A stranger may read it, so no filex jargon.",
+    "server.public.err_uploaddel_": "Why a deletion link (see server.public.uploaddel_) did not delete anything: an unknown or used link, a file that is gone already, an owner who may no longer delete it, a failure, too many attempts. A title (one or two words) and one or two short sentences.",
     "server.public.err_": "Public page: a share link that cannot be served (title + one sentence).",
     "server.public.err_captcha_": "Public page without JavaScript: a link whose PIN or upload is protected by a bot check, which needs JavaScript (title + one sentence).",
     "server.public.err_drop_": "Public page: a file-request link that cannot be used (title + one sentence).",
@@ -173,6 +176,7 @@
     "wait": "a length of time with its unit, e.g. 3 minutes",
     "date": "a date and time in the reader's time zone, e.g. 2026-10-03 14:00 (or 2026-10-03 14:00 UTC when the account has no time zone)",
     "max": "a whole number, the most items one request may name, e.g. 200",
+    "max_mb": "a whole number of megabytes, the largest file one upload may carry, e.g. 512",
     "site": "the instance's name, its Display name the administrator set (Admin → Settings → Branding)",
     "size": "a size with its unit, e.g. 1.4 MB",
     "pin": "the PIN (access code), e.g. 4821",
@@ -225,6 +229,9 @@
     "min": "the smallest number allowed"
   },
   "key_vars": {
+    "server.error.uploader_name_too_long": {"max": "a number of characters, e.g. 100"},
+    "server.error.template_too_large": {"kb": "a size in kibibytes, the number alone, e.g. 128"},
+    "server.error.uploader_link_days_invalid": {"max": "a number of days, e.g. 3650"},
     "server.error.app_encrypted_read": {"name": "the file's path inside its storage, e.g. Reports/q3.pdf"},
     "server.error.app_encrypted_file_read": {"name": "the file's path inside its storage, e.g. Reports/q3.docx.fxe"},
     "server.error.app_encrypted_file_write": {"name": "the file's path inside its storage, e.g. Reports/q3.docx.fxe"},

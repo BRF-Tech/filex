@@ -34,3 +34,9 @@ func hostSignInfo([]byte) []byte        { return nil }
 func hostCertIssue([]byte) []byte       { return nil }
 func hostSign([]byte) []byte            { return nil }
 func hostKeyDestroy([]byte) []byte      { return nil }
+func hostDataGet([]byte) []byte         { return nil }
+func hostDataPut([]byte) []byte         { return nil }
+func hostDataDelete([]byte) []byte      { return nil }
+func hostDataList([]byte) []byte        { return nil }
+func hostDataIncr([]byte) []byte        { return nil }
+func hostLinkLive([]byte) []byte        { return nil }

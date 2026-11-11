@@ -9086,6 +9086,10 @@ filex-explorer {
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--fe-text-muted);
+  /* A label of two words ("Full link") beside a long address: the address
+   * gives way (it ends in an ellipsis), the label stays on one line. */
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .fe-share__pin {
   font-family: var(--fe-font-mono);
@@ -14104,6 +14108,33 @@ filex-explorer {
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
+/* The administrator's text slots (internal/templates slot.*): an
+   introduction under the heading, a line in the footer. */
+.fe-ppage__intro {
+  margin: 0 0 4px;
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.fe-ppage__intro > :first-child,
+.fe-ppage__footslot > :first-child {
+  margin-top: 0;
+}
+.fe-ppage__intro > :last-child,
+.fe-ppage__footslot > :last-child {
+  margin-bottom: 0;
+}
+.fe-ppage__footslot {
+  font-size: 12.5px;
+  color: var(--fe-text-muted);
+  text-align: center;
+  max-width: 480px;
+  overflow-wrap: anywhere;
+}
+.fe-ppage__footslot a,
+.fe-ppage__intro a {
+  color: var(--fe-primary);
+}
 .fe-ppage__state {
   display: flex;
   flex-direction: column;
@@ -16392,3 +16423,38 @@ filex-explorer {
   }
 }
 /* === /fix/264-stacked-table === */
+
+/* === CodeEditor (components/CodeEditor.vue): a box of source code === */
+.fe-code-editor {
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  overflow: hidden;
+  background: var(--fe-bg);
+}
+.fe-code-editor__box {
+  width: 100%;
+}
+.fe-code-editor__plain {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 8px 12px;
+  font-family: var(--fe-font-mono);
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--fe-text);
+  background: transparent;
+  resize: vertical;
+}
+.fe-code-editor__errline {
+  background: color-mix(in srgb, var(--fe-danger) 12%, transparent);
+}
+.fe-code-editor__errglyph {
+  background: var(--fe-danger);
+  border-radius: 50%;
+  width: 8px !important;
+  height: 8px !important;
+  margin-block-start: 6px;
+  margin-inline-start: 6px;
+}
+/* === /CodeEditor === */

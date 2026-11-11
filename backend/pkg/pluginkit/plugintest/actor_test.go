@@ -58,3 +58,55 @@ func TestHarness_ActorHoldsTheAppsPermissionsUntilToldOtherwise(t *testing.T) {
 		t.Fatalf("no user_permissions, yet %v", p)
 	}
 }
+
+// The harness's administrator carries the role filex sends one ("admin",
+// model.RoleAdmin), so an app that reads Actor.Role sees in a test what it
+// sees on a server.
+func TestHarness_ActorIsAnAdministratorAsFilexSaysIt(t *testing.T) {
+	if got := plugintest.New(&pluginkit.Plugin{Manifest: manifest()}).Actor.Role; got != "admin" {
+		t.Fatalf("default actor role %q, want admin", got)
+	}
+}
+
+// Harness.Routes reaches every screen as Context.Routes (0.60.0), on Open,
+// Change, Submit and Press alike - a screen that makes an address of its own
+// is tested without building its events by hand.
+func TestHarness_RoutesReachEveryScreen(t *testing.T) {
+	m := manifest()
+	var seen []string
+	h := plugintest.New(&pluginkit.Plugin{
+		Manifest: m,
+		Views: map[string]pluginkit.ViewFunc{"options": func(in *wire.ViewEventInput) (*wire.Surface, error) {
+			url := ""
+			for _, b := range in.Context.Routes["go"] {
+				if b.Default {
+					url = b.URL
+				}
+			}
+			seen = append(seen, in.Event+"="+url)
+			return &wire.Surface{Done: true}, nil
+		}},
+	})
+	if _, err := h.Open("options"); err != nil {
+		t.Fatal(err)
+	}
+	h.Routes = map[string][]wire.RouteBase{"go": {
+		{ID: 1, URL: "https://l.example.com/"},
+		{ID: 2, URL: "https://files.example.com/l/", Default: true},
+	}}
+	if _, err := h.Open("options"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Submit("options", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"open=", "open=https://files.example.com/l/", "submit=https://files.example.com/l/"}
+	if len(seen) != len(want) {
+		t.Fatalf("screens saw %v, want %v", seen, want)
+	}
+	for i := range want {
+		if seen[i] != want[i] {
+			t.Fatalf("screens saw %v, want %v", seen, want)
+		}
+	}
+}

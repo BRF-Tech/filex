@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -86,7 +89,14 @@ func TestCapabilities_TheVersionInParts(t *testing.T) {
 
 // B16: which notification events cannot happen here, why, and whether this
 // caller could change it - the server's answer, said in the reader's words.
+//
+// ⚠ The scanning state is set here, never taken from the host: scanning is
+// on by default (FILEX_CLAMAV) and binary mode finds clamdscan or clamscan on
+// PATH, so on a host with ClamAV installed (the maintainer's WSL) the test
+// server scans and "file.infected" can happen. Assumed off, this test was red
+// there from the commit that wrote it (928b8c64b) to 0.60.0 (task #317).
 func TestCapabilities_EventsThatCannotHappen(t *testing.T) {
+	t.Setenv("FILEX_CLAMAV", "0")
 	srv, client, store := testutil.NewTestServer(t)
 
 	anon := capsOf(t, &http.Client{}, srv.URL)
@@ -122,6 +132,28 @@ func TestCapabilities_EventsThatCannotHappen(t *testing.T) {
 	require.Contains(t, m, "file.infected")
 	assert.Equal(t, false, m["file.infected"]["fixable"], "a member cannot switch scanning on: the switch is not offered")
 	assert.Equal(t, false, m["e2e.request_created"]["fixable"])
+}
+
+// B16, the other side: on a server that scans, an infected upload can be
+// reported, so the event is not listed.
+func TestCapabilities_AnInfectedFileCanBeReportedWhereScanningIsOn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake clamscan is a POSIX shell script")
+	}
+	fake := filepath.Join(t.TempDir(), "clamscan")
+	require.NoError(t, os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	t.Setenv("FILEX_CLAMAV", "")
+	t.Setenv("FILEX_CLAMAV_BIN", fake)
+
+	srv, client, store := testutil.NewTestServer(t)
+	email, pw := testutil.SeedAdmin(t, store)
+	testutil.LoginAs(t, srv, client, email, pw)
+	caps := capsOf(t, client, srv.URL)
+	require.Equal(t, true, caps["antivirus"], "the fake clamscan makes scanning available")
+	off, _ := caps["event_off"].(map[string]any)
+	require.NotNil(t, off)
+	assert.NotContains(t, off, "file.infected")
+	assert.Contains(t, off, "e2e.escrow_used", "the other events are still listed")
 }
 
 // B4: the Add user form's username is identity.Suggest's - the one a first

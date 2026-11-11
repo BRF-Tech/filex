@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"html/template"
 	"io"
 	"log/slog"
@@ -43,10 +44,14 @@ import (
 	"github.com/brf-tech/filex/backend/internal/zipstream"
 
 	"github.com/brf-tech/filex/backend/internal/httpx"
+	"github.com/brf-tech/filex/backend/internal/leafname"
+	"github.com/brf-tech/filex/backend/internal/templates"
 )
 
 // Share handles share creation and the public viewer endpoints.
 type Share struct {
+	// Templates renders the pages (internal/templates); nil = filex's own.
+	Templates *templates.Renderer
 	// Captcha is the bot check on the PIN. The no-JavaScript form and a PIN
 	// in the address (?pin=, X-Filex-Pin) cannot carry it: while
 	// `share_password` is protected they are refused (pinNeedsCaptcha) and the
@@ -1028,7 +1033,7 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// — no-JS browsers, curl, download managers, the PIN form's own POST —
 	// falls through to the pages below (public_shell.go says why).
 	if wantsPublicShell(r, h.Shell) {
-		h.Shell.ServeHTTP(w, r)
+		h.Shell.ServeHTTP(w, withShellPage(r, h.Store, h.ACL, h.Tenants.MultiTenant, h.DefaultLocale, "share"))
 		return
 	}
 	tok := pathParam(r, "token")
@@ -1067,7 +1072,7 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 
 	// PIN required and none supplied: the form.
 	if !unlocked && pin == "" {
-		h.renderPINForm(w, r, tok, "")
+		h.renderPINForm(w, r, sh, tok, "")
 		return
 	}
 
@@ -1081,10 +1086,10 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	if sh.PinHash != "" && pin != "" {
 		switch err := h.Service.CheckPIN(r.Context(), sh, pin); {
 		case errors.Is(err, share.ErrLocked):
-			h.renderPINForm(w, r, tok, "pin_locked")
+			h.renderPINForm(w, r, sh, tok, "pin_locked")
 			return
 		case err != nil:
-			h.renderPINForm(w, r, tok, "pin_wrong")
+			h.renderPINForm(w, r, sh, tok, "pin_wrong")
 			return
 		}
 		// Mint the unlock so the visitor's NEXT request — the confirmed
@@ -1109,7 +1114,7 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// the interstitial would put a second page between the visitor and the
 	// thing they were sent for.
 	if sh.PinHash != "" && !resolved.IsApp() && r.URL.Query().Get("confirmed") != "1" && r.Method == http.MethodPost {
-		h.renderUnlockedPage(w, r, tok, pin)
+		h.renderUnlockedPage(w, r, resolved, tok, pin)
 		return
 	}
 
@@ -1444,7 +1449,8 @@ func (h *Share) serveFolderZip(ctx context.Context, w http.ResponseWriter, r *ht
 	default:
 		// Cold cache → kick off the build and show a progress page.
 		h.Zip.StartOrGet(cachePath, files, nodeID, drv)
-		h.renderZipWaitPage(w, r, name, pin)
+		sh, _ := h.Store.GetShareByID(ctx, shareID)
+		h.renderZipWaitPage(w, r, sh, name, pin)
 	}
 }
 
@@ -1473,69 +1479,31 @@ func serveZipFile(w http.ResponseWriter, cachePath, name string) error {
 	return err
 }
 
-// renderZipWaitPage shows a "preparing…" page that polls ?zip=status for build
-// progress and, once ready, navigates to ?zip=wait to download. pin (when the
-// share is PIN-protected) is threaded through so the poll/download requests stay
-// authenticated — the viewer already proved it, so embedding it here is safe.
-func (h *Share) renderZipWaitPage(w http.ResponseWriter, r *http.Request, name, pin string) {
+// renderZipWaitPage shows a "preparing…" page (page.zip_wait) that polls
+// ?zip=status for build progress and, once ready, navigates to ?zip=wait to
+// download. pin (when the share is PIN-protected) is threaded through so the
+// poll/download requests stay authenticated — the viewer already proved it,
+// so embedding it here is safe. The page wears the link's tenant's template.
+func (h *Share) renderZipWaitPage(w http.ResponseWriter, r *http.Request, sh *model.Share, name, pin string) {
 	pinQuery := ""
 	if pin != "" {
 		pinQuery = "&pin=" + url.QueryEscape(pin)
 	}
-	lang, t, footer := h.pub(r)
-	chrome := h.chrome(r) /* wiring:e1 */
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	// PinQuery is used only inside a JS string (html/template JS-escapes it); the
-	// static href works for no-PIN shares and the script rewrites it with the pin
-	// for PIN shares (which already require JS via the unlock page).
-	_ = zipWaitTemplate.Execute(w, map[string]any{
-		"Lang":      lang,
-		"Dir":       pageDir(lang),
-		"T":         t,
-		"Name":      name,
-		"Sub":       publicFill(t, "zip_sub", map[string]string{"name": name}),
-		"Hint":      publicLinkSentence(t, "zip_hint", "zip_link", "dl", "?zip=wait"),
-		"PinQuery":  pinQuery,
-		"BrandCSS":  chrome.BrandCSS,
-		"BrandHead": chrome.BrandHead,
-		"Footer":    footer,
-	})
+	lang, t, _ := h.pub(r)
+	// The static href works for no-PIN shares; the script rewrites it with
+	// the pin for PIN shares (which already require JS via the unlock page).
+	q, _ := json.Marshal(pinQuery)
+	writePublicPage(w, r, pageTemplates(h.Templates, h.Branding), linkTarget(r, sh, lang), "page.zip_wait", http.StatusOK, t["zip_title"],
+		map[string]any{
+			"folder": map[string]any{"name": leafname.Visible(name)},
+			"zip":    map[string]any{"url": "?zip=wait"},
+		},
+		&pageScript{Script: strings.Replace(zipWaitScript, "__PINQUERY__", string(q), 1)})
 }
 
-// zipWaitTemplate is a dependency-free progress page for a folder-share ZIP
-// that's still being built.
-var zipWaitTemplate = template.Must(template.New("zipwait").Parse(`<!doctype html>
-<html lang="{{.Lang}}" dir="{{.Dir}}"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.T.zip_title}}</title>
-` + publicPageStyle + `
-{{.BrandCSS}}
-<style>
-.track { height: 10px; border-radius: 999px; background: var(--px-line); overflow: hidden; }
-.bar { height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, var(--px-accent), var(--px-accent-hover)); transition: width 0.4s ease; }
-.pct { margin-top: 10px; font-size: 0.95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
-.hint { margin: 16px 0 0; font-size: 0.8rem; color: var(--px-muted); }
-.hint a { color: var(--px-accent); }
-@media (prefers-reduced-motion: reduce) { .bar { transition: none; } }
-</style>
-</head><body>
-<main class="wrap">
-{{.BrandHead}}
-<div class="card">
-<div class="icon-badge">` + publicIconFolderZip + `</div>
-<h1>{{.T.zip_heading}}</h1>
-<p class="sub">{{.Sub}}</p>
-<div class="track" aria-hidden="true"><div id="bar" class="bar"></div></div>
-<div class="pct"><span id="pct">%0</span></div>
-<p class="hint">{{.Hint}}</p>
-</div>
-{{.Footer}}
-</main>
-<script>
-(function(){
-  var q = "{{.PinQuery}}";
+// zipWaitScript is page.zip_wait's own script (its hooks: #bar, #pct, #dl).
+const zipWaitScript = `(function(){
+  var q = __PINQUERY__;
   var dl = document.getElementById("dl");
   if (dl) { dl.href = "?zip=wait" + q; }
   function tick(){
@@ -1552,8 +1520,7 @@ var zipWaitTemplate = template.Must(template.New("zipwait").Parse(`<!doctype htm
   }
   tick();
 })();
-</script>
-</body></html>`))
+`
 
 // extractPIN returns the PIN from query, header, or POST form.
 func (h *Share) extractPIN(r *http.Request) string {
@@ -1592,67 +1559,6 @@ func shareURLPath(r *http.Request, token string) string {
 	return basepath.Path(r.Context(), "/s/"+path.Clean(token))
 }
 
-// publicPageStyle is the shared inline stylesheet for every public
-// share-facing page (PIN gate, unlocked, error, zip-wait, drop). These pages
-// are served standalone with no access to the SPA's asset pipeline, so
-// everything stays inline and dependency-free. Light/dark comes from CSS
-// custom properties + prefers-color-scheme.
-const publicPageStyle = `<style>
-:root {
-  color-scheme: light dark;
-  --px-bg1: #f5f7fb; --px-bg2: #e9edf4;
-  --px-card: #ffffff;
-  --px-fg: #1b2129; --px-muted: #66727f;
-  --px-line: #d7dde5;
-  --px-accent: #2f6ceb; --px-accent-hover: #2559c9;
-  --px-accent-soft: rgba(47, 108, 235, 0.10);
-  --px-ok: #16a34a; --px-ok-soft: rgba(22, 163, 74, 0.12);
-  --px-err: #dc2626; --px-err-soft: rgba(220, 38, 38, 0.10);
-  --px-shadow: 0 12px 40px rgba(15, 23, 42, 0.10);
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --px-bg1: #12151a; --px-bg2: #191e25;
-    --px-card: #1f242c;
-    --px-fg: #e7ebf1; --px-muted: #97a1af;
-    --px-line: #3a424d;
-    --px-accent: #5b8cff; --px-accent-hover: #8fb0f7;
-    --px-accent-soft: rgba(91, 140, 255, 0.18);
-    --px-ok: #22c55e; --px-ok-soft: rgba(34, 197, 94, 0.14);
-    --px-err: #f87171; --px-err-soft: rgba(248, 113, 113, 0.12);
-    --px-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  }
-}
-* { box-sizing: border-box; }
-body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: linear-gradient(160deg, var(--px-bg1), var(--px-bg2)); color: var(--px-fg); }
-.wrap { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 18px; }
-.card { width: 400px; max-width: 100%; padding: 32px 28px; border-radius: 16px; background: var(--px-card); border: 1px solid var(--px-line); box-shadow: var(--px-shadow); text-align: center; }
-.icon-badge { width: 64px; height: 64px; margin: 0 auto 16px; border-radius: 50%; display: grid; place-items: center; background: var(--px-accent-soft); color: var(--px-accent); }
-.icon-badge.ok { background: var(--px-ok-soft); color: var(--px-ok); }
-.icon-badge.err { background: var(--px-err-soft); color: var(--px-err); }
-.icon-badge svg { width: 30px; height: 30px; }
-h1 { font-size: 1.25rem; margin: 0 0 6px; letter-spacing: -0.01em; }
-.sub { margin: 0 0 20px; color: var(--px-muted); font-size: 0.9rem; line-height: 1.5; overflow-wrap: anywhere; }
-.btn { display: block; width: 100%; margin-top: 18px; padding: 13px; border: 0; border-radius: 10px; font-size: 1rem; font-weight: 600; font-family: inherit; cursor: pointer; background: var(--px-accent); color: var(--px-on-accent, #fff); box-shadow: inset 0 0 0 1px var(--px-accent-edge, transparent); transition: background 0.15s ease; }
-.btn:hover:not(:disabled) { background: var(--px-accent-hover); }
-.btn:focus-visible { outline: 2px solid var(--px-accent); outline-offset: 2px; }
-.btn:disabled { opacity: 0.5; cursor: default; }
-.error { margin-top: 14px; padding: 10px 12px; border-radius: 9px; background: var(--px-err-soft); color: var(--px-err); font-size: 0.86rem; }
-.brand { display: inline-flex; align-items: center; gap: 7px; color: var(--px-muted); font-size: 0.78rem; }
-.brand svg { width: 16px; height: 16px; flex: none; }
-.brand a { color: inherit; font-weight: 600; text-decoration: none; }
-.brand a:hover { text-decoration: underline; color: var(--px-accent); }
-.spinner { width: 15px; height: 15px; border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; display: inline-block; vertical-align: -2px; animation: px-spin 0.8s linear infinite; opacity: 0.5; margin-inline-end: 8px; }
-@keyframes px-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } .btn { transition: none; } }
-/* wiring:e1 - branding chrome (logo/name header + custom footer) */
-.pbrand { display: inline-flex; align-items: center; gap: 10px; max-width: 100%; }
-.pbrand__logo { height: 34px; max-width: 200px; object-fit: contain; display: block; }
-.pbrand__name { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em; overflow-wrap: anywhere; }
-.pfoot { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.pfoot__custom { color: var(--px-muted); font-size: 0.78rem; text-align: center; max-width: 480px; overflow-wrap: anywhere; }
-</style>`
-
 // publicBrandMark is the tiny inline filex logo used in the public-page
 // footer — the same folder+check mark as the SPA's LogoMark.vue, with a solid
 // fill so no gradient ids can collide across pages.
@@ -1662,7 +1568,7 @@ h1 { font-size: 1.25rem; margin: 0 0 6px; letter-spacing: -0.01em; }
 // web/public/icons/icon.svg, site/index.html and desktop/ui/*.html — this
 // copy shipped the pre-rebrand indigo on the page strangers see for a whole
 // wave after the others went blue (2026-09-13, found by the duplicate gate).
-const publicBrandMark = `<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#2f6ceb"/><path d="M7 11a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11z" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M11.5 17.5l3 2.5 5.5-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+const publicBrandMark = templates.ProductMark
 
 // The public-page footer line ("Shared with filex") is built per language by
 // publicFooterLine (public_i18n.go) from the server catalogue.
@@ -1675,150 +1581,53 @@ const (
 	publicIconFolderZip = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7z"/><path d="M12 10.5V16"/><path d="M9.5 13.5 12 16l2.5-2.5"/></svg>`
 )
 
-// pinFormTemplate is a dependency-free HTML page rendered when a share
-// requires a PIN and none was provided.
-var pinFormTemplate = template.Must(template.New("pin").Parse(`<!doctype html>
-<html lang="{{.Lang}}" dir="{{.Dir}}"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.T.pin_title}}</title>
-` + publicPageStyle + `
-{{.BrandCSS}}
-<style>
-.pin-input { width: 100%; padding: 13px 12px; font-size: 1.45rem; letter-spacing: 0.35em; text-align: center; border: 1.5px solid var(--px-line); border-radius: 10px; background: transparent; color: inherit; font-family: inherit; }
-.pin-input:focus { outline: none; border-color: var(--px-accent); box-shadow: 0 0 0 3px var(--px-accent-soft); }
-</style>
-</head><body>
-<main class="wrap">
-{{.BrandHead}}
-<form class="card" method="post" action="{{.Action}}">
-<div class="icon-badge">` + publicIconLock + `</div>
-<h1>{{.T.pin_heading}}</h1>
-<p class="sub">{{.T.pin_sub}}</p>
-<input class="pin-input" type="password" name="pin" inputmode="numeric" autocomplete="one-time-code" aria-label="{{.T.pin_aria}}" autofocus required>
-{{if .Error}}<div class="error" role="alert">{{.Error}}</div>{{end}}
-<button class="btn" type="submit">{{.T.pin_submit}}</button>
-</form>
-{{.Footer}}
-</main>
-</body></html>`))
-
-// renderPINForm renders the gate. errKey is a string-table key ("pin_wrong")
-// or empty — never a sentence, so the gate and the page behind it cannot end up
-// in different languages.
-func (h *Share) renderPINForm(w http.ResponseWriter, r *http.Request, token, errKey string) {
-	lang, t, footer := h.pub(r)
-	chrome := h.chrome(r) /* wiring:e1 */
+// renderPINForm renders the gate (page.pin) of the link sh. errKey is a
+// string-table key ("pin_wrong") or empty — never a sentence, so the gate and
+// the page behind it cannot end up in different languages.
+func (h *Share) renderPINForm(w http.ResponseWriter, r *http.Request, sh *model.Share, token, errKey string) {
+	lang, t, _ := h.pub(r)
 	errMsg := ""
+	status := http.StatusOK
 	if errKey != "" {
-		errMsg = t[errKey]
+		errMsg, status = t[errKey], http.StatusUnauthorized
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if errMsg != "" {
-		w.WriteHeader(http.StatusUnauthorized)
-	} else {
-		w.WriteHeader(http.StatusOK)
-	}
-	_ = pinFormTemplate.Execute(w, map[string]any{
-		"Lang":      lang,
-		"Dir":       pageDir(lang),
-		"T":         t,
-		"Action":    shareURLPath(r, token),
-		"Error":     errMsg,
-		"BrandCSS":  chrome.BrandCSS,
-		"BrandHead": chrome.BrandHead,
-		"Footer":    footer,
-	})
+	writePublicPage(w, r, pageTemplates(h.Templates, h.Branding), linkTarget(r, sh, lang), "page.pin", status, t["pin_title"], map[string]any{
+		"form": map[string]any{"action": shareURLPath(r, token), "error": errMsg},
+		"link": map[string]any{"kind": "share"},
+	}, nil)
 }
 
-// renderUnlockedPage tells the user the PIN matched and auto-posts a
-// confirmed download to the same URL after a brief delay. Without
-// this the browser jumps straight from the PIN form to a streamed
-// attachment and the user has no indication of whether their PIN
-// was accepted.
-func (h *Share) renderUnlockedPage(w http.ResponseWriter, r *http.Request, token, pin string) {
-	lang, t, footer := h.pub(r)
-	chrome := h.chrome(r) /* wiring:e1 */
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_ = unlockedTemplate.Execute(w, map[string]any{
-		"Lang":      lang,
-		"Dir":       pageDir(lang),
-		"T":         t,
-		"Action":    shareURLPath(r, token) + "?confirmed=1",
-		"PIN":       pin,
-		"BrandCSS":  chrome.BrandCSS,
-		"BrandHead": chrome.BrandHead,
-		"Footer":    footer,
-	})
+// renderUnlockedPage tells the user the PIN matched (page.unlocked) and
+// auto-posts a confirmed download to the same URL after a brief delay.
+// Without this the browser jumps straight from the PIN form to a streamed
+// attachment and the user has no indication of whether their PIN was
+// accepted. The hidden form and its script are filex's, not the template's.
+func (h *Share) renderUnlockedPage(w http.ResponseWriter, r *http.Request, sh *model.Share, token, pin string) {
+	lang, t, _ := h.pub(r)
+	form := `<form id="filex-unlock" method="post" action="` + html.EscapeString(shareURLPath(r, token)+"?confirmed=1") +
+		`" style="display:none"><input type="hidden" name="pin" value="` + html.EscapeString(pin) + `"></form>`
+	writePublicPage(w, r, pageTemplates(h.Templates, h.Branding), linkTarget(r, sh, lang), "page.unlocked", http.StatusOK, t["unlocked_title"], nil,
+		&pageScript{Markup: form, Script: "setTimeout(function(){document.getElementById('filex-unlock').submit();}, 700);"})
 }
 
-// renderErrorPage shows a styled HTML error page (404 / expired) instead of
-// plain text.
+// renderErrorPage shows a styled HTML error page (404 / expired, page.error)
+// instead of plain text.
 //
-// It takes a string-table KEY ("notfound", "expired", "folder"),
-// not a sentence: the caller is a code path, and the language belongs to the
+// It takes a string-table KEY ("notfound", "expired", "folder"), not a
+// sentence: the caller is a code path, and the language belongs to the
 // visitor. `err_<key>_title` / `err_<key>_body` are looked up per request.
+//
+// ⚠ The ADDRESS's template and branding, never a link's: the page that says
+// a link is not available must not say whose link it was.
 func (h *Share) renderErrorPage(w http.ResponseWriter, r *http.Request, status int, key string) {
-	lang, t, footer := h.pub(r)
-	chrome := h.chrome(r) /* wiring:e1 */
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	_ = errorPageTemplate.Execute(w, map[string]any{
-		"Lang":      lang,
-		"Dir":       pageDir(lang),
-		"T":         t,
-		"Title":     t["err_"+key+"_title"],
-		"Body":      t["err_"+key+"_body"],
-		"Code":      status,
-		"BrandCSS":  chrome.BrandCSS,
-		"BrandHead": chrome.BrandHead,
-		"Footer":    footer,
-	})
+	renderPublicError(w, r, pageTemplates(h.Templates, h.Branding), h.DefaultLocale, h.Branding, status, key)
 }
 
-var unlockedTemplate = template.Must(template.New("unlocked").Parse(`<!doctype html>
-<html lang="{{.Lang}}" dir="{{.Dir}}"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.T.unlocked_title}}</title>
-` + publicPageStyle + `
-{{.BrandCSS}}
-</head><body>
-<main class="wrap">
-{{.BrandHead}}
-<div class="card">
-<div class="icon-badge ok">` + publicIconCheck + `</div>
-<h1>{{.T.unlocked_heading}}</h1>
-<p class="sub" style="margin-bottom:0"><span class="spinner" aria-hidden="true"></span>{{.T.unlocked_sub}}</p>
-<form id="f" method="post" action="{{.Action}}" style="display:none">
-<input type="hidden" name="pin" value="{{.PIN}}">
-</form>
-<script>setTimeout(function(){document.getElementById('f').submit();}, 700);</script>
-</div>
-{{.Footer}}
-</main>
-</body></html>`))
-
-var errorPageTemplate = template.Must(template.New("err").Parse(`<!doctype html>
-<html lang="{{.Lang}}" dir="{{.Dir}}"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.Title}}</title>
-` + publicPageStyle + `
-{{.BrandCSS}}
-<style>
-.code { display: inline-block; margin-bottom: 14px; padding: 3px 10px; border: 1px solid var(--px-line); border-radius: 999px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; color: var(--px-muted); font-variant-numeric: tabular-nums; }
-</style>
-</head><body>
-<main class="wrap">
-{{.BrandHead}}
-<div class="card">
-<div class="icon-badge err">` + publicIconAlert + `</div>
-<div class="code">{{.Code}}</div>
-<h1>{{.Title}}</h1>
-<p class="sub" style="margin-bottom:0">{{.Body}}</p>
-</div>
-{{.Footer}}
-</main>
-</body></html>`))
+// renderPublicError is the error page a share or a file request link shows.
+func renderPublicError(w http.ResponseWriter, r *http.Request, rend *templates.Renderer, defLocale string, br *BrandingSource, status int, key string) {
+	lang, t, _, _ := publicPageLang(br, r, defLocale)
+	title := t["err_"+key+"_title"]
+	writePublicPage(w, r, rend, addressTarget(r, lang), "page.error", status, title, map[string]any{
+		"error": map[string]any{"code": status, "key": key, "title": title, "body": t["err_"+key+"_body"]},
+	}, nil)
+}

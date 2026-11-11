@@ -20,7 +20,6 @@ instead of a poster). A full file open counts one download. */
 import (
 	"context"
 	"errors"
-	"html/template"
 	"io"
 	"net/http"
 	"net/url"
@@ -32,6 +31,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/captcha"
+	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
@@ -158,18 +158,9 @@ func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r
 	base := shareURLPath(r, sh.Token)
 
 	gallery := share.GalleryEligible(entries)
-	lang, t, footer := h.pub(r)
-	chrome := h.chrome(r) /* wiring:e1 — branded chrome (style+footer stay single-source) */
-	page := share.FolderPageData{
-		Style:   template.HTML(publicPageStyle) + chrome.BrandCSS,
-		Footer:  footer,
-		Lang:    lang,
-		T:       t,
-		Brand:   chrome.BrandHead,
-		Name:    node.Name,
-		SubPath: rel,
-		ZipHref: base + "?zip=1" + pinAmp,
-		Gallery: gallery,
+	lang, t, _ := h.pub(r)
+	folder := map[string]any{
+		"name": leafname.Visible(node.Name), "path": rel, "up_url": "", "zip_url": base + "?zip=1" + pinAmp, "gallery": gallery,
 	}
 	if rel != "" {
 		up := path.Dir(rel)
@@ -178,46 +169,47 @@ func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r
 		}
 		switch {
 		case up != "":
-			page.UpHref = base + "?dir=" + url.QueryEscape(up) + pinAmp
+			folder["up_url"] = base + "?dir=" + url.QueryEscape(up) + pinAmp
 		case pin != "":
-			page.UpHref = base + "?pin=" + url.QueryEscape(pin)
+			folder["up_url"] = base + "?pin=" + url.QueryEscape(pin)
 		default:
-			page.UpHref = base
+			folder["up_url"] = base
 		}
 	}
+	dirs, filesN := 0, 0
+	rows := make([]any, 0, len(entries))
 	for _, e := range entries {
-		row := share.FolderPageEntry{
-			Name: e.Name,
-			Kind: e.Kind,
-		}
+		row := map[string]any{"name": leafname.Visible(e.Name), "kind": string(e.Kind), "url": "", "size": "", "date": "", "thumb": ""}
 		if e.Kind == share.EntryDir {
-			page.DirCount++
-			row.Href = base + "?dir=" + url.QueryEscape(e.RelPath) + pinAmp
+			dirs++
+			row["url"] = base + "?dir=" + url.QueryEscape(e.RelPath) + pinAmp
 		} else {
-			page.FileCnt++
+			filesN++
 			q := ""
 			if pin != "" {
 				q = "?pin=" + url.QueryEscape(pin)
 			}
-			row.Href = base + "/f/" + escapePathSegments(e.RelPath) + q
-			row.SizeLabel = srvtext.Bytes(lang, e.Size)
+			href := base + "/f/" + escapePathSegments(e.RelPath) + q
+			row["url"] = href
+			row["size"] = srvtext.Bytes(lang, e.Size)
 			if !e.Mtime.IsZero() {
-				row.DateLabel = e.Mtime.Format("02.01.2006 15:04")
+				row["date"] = e.Mtime.Format("02.01.2006 15:04")
 			}
 			if gallery && e.Kind == share.EntryImage {
 				sep := "?"
 				if q != "" {
 					sep = "&"
 				}
-				row.ThumbSrc = row.Href + sep + "thumb=1"
+				row["thumb"] = href + sep + "thumb=1"
 			}
 		}
-		page.Entries = append(page.Entries, row)
+		rows = append(rows, row)
 	}
-
-	page.CountsLabel = publicCount(lang, "folder_count", page.DirCount) + " · " + publicCount(lang, "file_count", page.FileCnt)
-
-	_ = share.RenderFolderPage(w, page)
+	// "3 klasör · 12 dosya" and "3 folders · 12 files" do not share a word
+	// order, so the counts come whole from the catalogue.
+	folder["counts"] = publicCount(lang, "folder_count", dirs) + " · " + publicCount(lang, "file_count", filesN)
+	writePublicPage(w, r, pageTemplates(h.Templates, h.Branding), linkTarget(r, sh, lang), "page.folder", http.StatusOK,
+		leafname.Visible(node.Name)+" - "+t["folder_title_suffix"], map[string]any{"folder": folder, "entries": rows}, nil)
 }
 
 // HandleBrowseFile streams a single file UNDER a shared folder:

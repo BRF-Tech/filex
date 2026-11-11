@@ -295,6 +295,27 @@ package exists to prevent.
 
 See [docs/PROTOCOLS.md](https://github.com/BRF-Tech/filex/blob/main/docs/PROTOCOLS.md).
 
+Since 0.60 the **Uploaders** tab of the account settings is exported the same
+way, as `UploadersPanel` (its types `Uploader`, `UploaderRequest`,
+`UploaderMade`, `UploaderSetup`...): an uploader is a key for one program -
+ShareX, curl, a script - that drops files into one folder and answers each with
+a link, and the panel makes one, shows its key once with ShareX's settings file
+and a `curl` line, and replaces or deletes it
+([docs/UPLOADERS.md](https://github.com/BRF-Tech/filex/blob/main/docs/UPLOADERS.md)).
+The web app, the admin panel and the desktop app mount this one.
+
+### Code, and short links
+
+`CodeEditor` is the box of source code filex edits in - its Monaco editor
+(with `monacoEditorOptions`, the options it starts Monaco with), a line the
+caller names marked as refused, and a plain text box in a build without
+Monaco; the template editor (**Settings → Templates**) is drawn with it. When
+an app holds the link-shortener role, `shortLinkTokenOf(address)` reads a
+filex link's token (`/s/<token>`, `/d/<token>`) out of its address and
+`shortDisplayLink(address)` shows an address the way a person reads it - its
+percent escapes decoded, so an emoji in a short address reads as itself
+([docs/APP-PLUGINS.md → Short links](https://github.com/BRF-Tech/filex/blob/main/docs/APP-PLUGINS.md#short-links)).
+
 ### Live updates
 
 An embedded explorer keeps itself current over a WebSocket: it mints a

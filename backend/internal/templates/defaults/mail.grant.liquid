@@ -1,0 +1,4 @@
+<p>{{ 'mail.greeting' | t }}</p>
+<p>{{ 'mail.grant.body' | t: item: item.path }}</p>
+<p><a class="btn" href="{{ link.url }}" data-text="href">{{ 'mail.open' | t }}</a></p>
+<p class="link" data-text="skip">{{ link.url | link_to: link.url }}</p>

@@ -1,0 +1,11 @@
+<style>
+.fname { margin: 0 0 18px; padding: 10px 12px; border: 1px solid var(--px-line); border-radius: 10px; font-weight: 600; overflow-wrap: anywhere; }
+</style>
+<form class="card" method="post" action="{{ form.action }}">
+<div class="icon-badge err"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 7h15"/><path d="M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2"/><path d="M6.5 7l1 12a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4l1-12"/><path d="M10.5 11v6M13.5 11v6"/></svg></div>
+<h1>{{ 'public.uploaddel_heading' | t }}</h1>
+<p class="fname" data-testid="uploaddel-name">{{ file.name }}</p>
+<p class="sub">{{ 'public.uploaddel_sub' | t }}</p>
+<input type="hidden" name="confirm" value="1">
+<button class="btn" type="submit" data-testid="uploaddel-confirm">{{ 'public.uploaddel_button' | t }}</button>
+</form>

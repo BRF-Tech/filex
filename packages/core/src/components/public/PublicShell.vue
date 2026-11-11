@@ -37,6 +37,8 @@
  */
 import { computed } from 'vue';
 import type { LocaleCode, ThemeMode } from '../../types/ExplorerConfig';
+import type { PublicSlots } from '../../types/Public';
+import { sanitizeHtml } from '../../lib/sanitizeHtml';
 import type { PublicStatus } from '../../composables/usePublicLink';
 import type { PublicLayout } from '../../lib/publicLayout';
 import type { CaptchaStore } from '../../composables/useCaptcha';
@@ -102,7 +104,23 @@ const props = defineProps<{
   embedded?: boolean;
   /** The PIN box's bot check (composables/useCaptcha), when the server protects it. */
   pinCaptcha?: CaptchaStore | null;
+  /**
+   * The administrator's text slots (internal/templates slot.*): a title in
+   * place of the heading, an introduction under it, a line in the footer.
+   * Rendered and sanitized by the server; drawn here through sanitizeHtml
+   * too. Empty: the page's own words.
+   */
+  slots?: PublicSlots | null;
 }>();
+
+/** A slot as the card draws it: sanitized again, here (the second wall). */
+function slotHtml(html: string | undefined): string {
+  const s = (html ?? '').trim();
+  return s ? sanitizeHtml(s, 'slot') : '';
+}
+const slotTitle = computed(() => slotHtml(props.slots?.title));
+const slotIntro = computed(() => slotHtml(props.slots?.intro));
+const slotFooter = computed(() => slotHtml(props.slots?.footer));
 
 const emit = defineEmits<{
   (e: 'pin', pin: string): void;
@@ -265,10 +283,26 @@ function pluginNote(plugin: string): string {
            satisfied the person may see it. Do not "restore" the heading here;
            if a gate ever needs to name its subject, that is a decision about
            what the SERVER sends before an unlock, not a template change. -->
-      <header v-if="(title || subject) && showBody" class="fe-ppage__head">
-        <h1 v-if="title" class="fe-ppage__title" data-testid="public-page-title"><bdi>{{ title }}</bdi></h1>
+      <header v-if="(title || subject || slotTitle) && showBody" class="fe-ppage__head">
+        <!-- The administrator's title (slot.*.title) stands in the heading's
+             place, after the gate, like the heading. -->
+        <h1
+          v-if="slotTitle"
+          class="fe-ppage__title fe-ppage__slot"
+          data-testid="public-page-title"
+          data-slot="title"
+          v-html="slotTitle"
+        ></h1>
+        <h1 v-else-if="title" class="fe-ppage__title" data-testid="public-page-title"><bdi>{{ title }}</bdi></h1>
         <p v-if="subject" class="fe-ppage__subject" data-testid="public-page-subject">{{ subject }}</p>
       </header>
+      <div
+        v-if="slotIntro && showBody"
+        class="fe-ppage__intro fe-ppage__slot"
+        data-testid="public-page-intro"
+        data-slot="intro"
+        v-html="slotIntro"
+      ></div>
 
       <!-- ⚠ Said out loud, not discovered. A link that stops working
            tomorrow, or after one more visit, is a fact the person holding it
@@ -343,6 +377,13 @@ function pluginNote(plugin: string): string {
         :plugin-note="pluginNote"
         @update:model-value="(v: string) => emit('update:locale', v)"
       />
+      <div
+        v-if="slotFooter"
+        class="fe-ppage__footslot fe-ppage__slot"
+        data-testid="public-footer-slot"
+        data-slot="footer"
+        v-html="slotFooter"
+      ></div>
       <p v-if="footerText" class="fe-ppage__footline" data-testid="public-footer-text">{{ footerText }}</p>
       <!-- The modest brand line the old page ended on: a small mark and one
            sentence, centred under the card. -->

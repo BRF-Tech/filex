@@ -656,9 +656,20 @@ func (h *AppPluginsAdmin) Delete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// An app that keeps anything (its own data, state, locks, links) goes
+	// with all of it, so the administrator types its name back first: the
+	// same pattern as Reconfigure (app_setup.go).
+	facts, err := h.Registry.ConfirmRemove(r.Context(), p.Row.ID, removeConfirm(r))
+	if errors.Is(err, wasmplugin.ErrConfirm) {
+		writeError(w, r, http.StatusConflict, "confirm_required", nil, "counts", facts.Counts, "confirm", facts.Confirm)
+		return
+	}
 	if err := h.Registry.Remove(r.Context(), p.Row.ID); err != nil {
 		h.fail(w, r, err)
 		return
+	}
+	if facts != nil && facts.Counts.Any() {
+		h.auditApp(r, "app_plugin.remove", p.Row.Name, &facts.Counts)
 	}
 	// Its handlers leave every Default apps rule; the others keep their order.
 	if h.Assoc != nil {

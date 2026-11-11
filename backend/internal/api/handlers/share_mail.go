@@ -15,6 +15,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/templates"
 )
 
 // "Send by e-mail" for a public link, and the same words for the OS share
@@ -185,31 +186,33 @@ func (h *Grants) mailableShare(w http.ResponseWriter, r *http.Request, token str
 	return &mailableShare{share: sh, node: node, rel: rel}, true
 }
 
-// composeShareMail is the message for m in lang: subject, body, and whether
-// the link has a PIN the message leaves out. ONE builder for the e-mail and
-// the OS share sheet (ShareMessage), so the two never say different things.
-func (h *Grants) composeShareMail(ctx context.Context, r *http.Request, lang string, m *mailableShare) (string, string, bool) {
+// shareMailFor is the mail for m in lang - mail.share or mail.file_request,
+// as rendered from its template (internal/templates) - and whether the link
+// has a PIN the message leaves out. ONE builder for the e-mail and the OS
+// share sheet (ShareMessage), so the two never say different things.
+func (h *Grants) shareMailFor(ctx context.Context, r *http.Request, lang string, m *mailableShare) (templates.Mail, bool, error) {
 	sh, node := m.share, m.node
 	link := publicLinkOf(h.Tenants.FromRequest(r), sh)
+	// A link the person shortened goes out short (short_links.go).
+	if h.ShortAddress != nil {
+		link = h.ShortAddress(r, sh, link)
+	}
 	days := linkDaysLeft(sh.ExpiresAt, time.Now())
 	withheld := sh.PinHash != "" || sh.HasPin
-	site := h.siteName(r)
 	name := node.Name
 	if name == "" {
 		name = baseName(m.rel)
 	}
+	key, data := "mail.share", map[string]any(nil)
 	if sh.IsDrop() {
 		ds := parseDropSettings(sh.DropSettings)
-		subject, body := dropInviteMailText(lang, site, name, link, "", withheld, days, ds.MaxFiles, ds.MaxFileSizeMB, ds.AllowedExt)
-		return subject, body, withheld
+		key, data = "mail.file_request", fileRequestMailData(name, link, "", withheld, days, ds.MaxFiles, ds.MaxFileSizeMB, ds.AllowedExt)
+	} else {
+		isDir := node.Type == model.NodeTypeDirectory
+		data = shareMailData(lang, name, isDir, node.Size, link, "", withheld, days)
 	}
-	isDir := node.Type == model.NodeTypeDirectory
-	size := int64(0)
-	if !isDir {
-		size = node.Size
-	}
-	subject, body := shareMailText(lang, site, name, isDir, size, link, "", withheld, days)
-	return subject, body, withheld
+	msg, err := h.templates().Mail(ctx, templates.Target{TenantID: mailTenant(ctx, sh), Lang: lang}, key, data)
+	return msg, withheld, err
 }
 
 // ShareMail e-mails a link the caller made to one or many addresses, each in
@@ -265,7 +268,10 @@ func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	type mailText struct{ subject, body string }
+	type mailText struct {
+		msg templates.Mail
+		err error
+	}
 	texts := map[string]mailText{}
 	withheld := false
 	textIn := func(mailLang string) mailText {
@@ -273,7 +279,7 @@ func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
 			return t
 		}
 		var t mailText
-		t.subject, t.body, withheld = h.composeShareMail(r.Context(), r, mailLang, m)
+		t.msg, withheld, t.err = h.shareMailFor(r.Context(), r, mailLang, m)
 		texts[mailLang] = t
 		return t
 	}
@@ -284,7 +290,12 @@ func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
 	for _, email := range recipients {
 		mailLang := recipientLang(r.Context(), h.Store, email, req.Locale)
 		t := textIn(mailLang)
-		if err := h.Mailer.Send(mailer.WithLanguage(r.Context(), mailLang), email, t.subject, t.body); err != nil {
+		err := t.err
+		if err == nil {
+			err = h.Mailer.SendMessage(mailer.WithLanguage(r.Context(), mailLang), email,
+				mailer.Message{Subject: t.msg.Subject, Text: t.msg.Text, HTML: t.msg.HTML})
+		}
+		if err != nil {
 			// Distinguish "SMTP not set up / not verified" (show the link) from a
 			// transient send failure (worth retrying) so the UI can say which.
 			reason = "send_failed"
@@ -335,6 +346,10 @@ func (h *Grants) ShareMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	subject, body, withheld := h.composeShareMail(r.Context(), r, srvtext.Pick(q.Get("lang")), m)
-	writeJSON(w, http.StatusOK, map[string]any{"subject": subject, "body": body, "pin_withheld": withheld})
+	msg, withheld, err := h.shareMailFor(r.Context(), r, srvtext.Pick(q.Get("lang")), m)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"subject": msg.Subject, "body": msg.Text, "pin_withheld": withheld})
 }

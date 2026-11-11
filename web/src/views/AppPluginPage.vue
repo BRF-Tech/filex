@@ -22,9 +22,9 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
-import { ArrowLeft, Blocks } from 'lucide-vue-next';
+import { ArrowLeft, Blocks, RotateCcw, WandSparkles } from 'lucide-vue-next';
 
-import { AppPluginsApi, type AppPlugin, type AppPluginState } from '@/api/appPlugins';
+import { AppPluginsApi, type AppPlugin, type AppPluginState, type AppSetup } from '@/api/appPlugins';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 import { pluginLabelOf, invalidatePluginActions } from '@brftech/filex-core';
@@ -35,6 +35,8 @@ import Spinner from '@/components/ui/Spinner.vue';
 import AppPluginDetail from '@/components/plugins/AppPluginDetail.vue';
 import AppPluginLanguages from '@/components/plugins/AppPluginLanguages.vue';
 import AppPluginLicense from '@/components/plugins/AppPluginLicense.vue';
+import AppSetupWizard from '@/components/plugins/AppSetupWizard.vue';
+import AppEraseDialog from '@/components/plugins/AppEraseDialog.vue';
 
 const { t, locale } = useI18n();
 const route = useRoute();
@@ -48,6 +50,23 @@ const missing = ref(false);
 
 const name = computed(() => String(route.params.name ?? ''));
 
+/** The app's setup (filex 0.60): whether it has one, and whether it is done.
+ *  null for an app with none, or on a server that has no setup route. */
+const setup = ref<AppSetup | null>(null);
+const setupOpen = ref(false);
+const reconfigureOpen = ref(false);
+
+async function loadSetup(p: AppPlugin | null) {
+  setup.value = null;
+  if (!p) return;
+  try {
+    const s = await AppPluginsApi.setup(p.id);
+    setup.value = s.needed ? s : null;
+  } catch {
+    /* no setup route, or an app without one: nothing to offer */
+  }
+}
+
 async function load() {
   loading.value = true;
   try {
@@ -56,6 +75,7 @@ async function load() {
     engineNames.value = res.runtime.engine_names;
     app.value = found;
     missing.value = !found;
+    void loadSetup(found);
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
   } finally {
@@ -74,14 +94,28 @@ async function onChanged() {
 
 const title = computed(() => (app.value ? pluginLabelOf(app.value.label, locale.value) || app.value.name : name.value));
 
-function stateTone(state: AppPluginState): 'emerald' | 'rose' | 'zinc' {
+function stateTone(state: AppPluginState): 'emerald' | 'rose' | 'amber' | 'zinc' {
   if (state === 'running') return 'emerald';
   if (state === 'failed' || state === 'refused' || state === 'unlicensed') return 'rose';
+  if (state === 'setup') return 'amber';
   return 'zinc';
 }
 
 function stateLabel(state: AppPluginState): string {
-  return ['running', 'disabled', 'refused', 'failed', 'unlicensed'].includes(state) ? t(`appPlugins.state.${state}`) : state;
+  return ['running', 'disabled', 'refused', 'failed', 'unlicensed', 'setup'].includes(state) ? t(`appPlugins.state.${state}`) : state;
+}
+
+/** Reconfigure erased the data; the wizard opens again at once. */
+function onReconfigured(p: AppPlugin | null) {
+  if (p) app.value = p;
+  setupOpen.value = true;
+  void onChanged();
+}
+
+function onSetupDone(p: AppPlugin) {
+  toast.success(t('appPlugins.setup.doneToast', { name: pluginLabelOf(p.label, locale.value) || p.name }));
+  app.value = p;
+  void onChanged();
 }
 
 /** Back to the list it was opened from — the Apps tab, not the first tab. */
@@ -108,11 +142,41 @@ function back() {
           </p>
         </div>
       </div>
-      <Button variant="ghost" size="sm" data-testid="app-plugin-page-back" @click="back">
-        <ArrowLeft class="h-4 w-4" />
-        {{ t('appPlugins.page.back') }}
-      </Button>
+      <div class="flex flex-wrap items-center gap-2">
+        <Button
+          v-if="app && app.state === 'setup'"
+          variant="primary"
+          size="sm"
+          data-testid="app-plugin-page-setup"
+          @click="setupOpen = true"
+        >
+          <WandSparkles class="h-4 w-4" />
+          {{ t('appPlugins.actions.setup') }}
+        </Button>
+        <Button
+          v-else-if="app && setup?.done"
+          variant="outline"
+          size="sm"
+          data-testid="app-plugin-page-reconfigure"
+          @click="reconfigureOpen = true"
+        >
+          <RotateCcw class="h-4 w-4" />
+          {{ t('appPlugins.actions.reconfigure') }}
+        </Button>
+        <Button variant="ghost" size="sm" data-testid="app-plugin-page-back" @click="back">
+          <ArrowLeft class="h-4 w-4" />
+          {{ t('appPlugins.page.back') }}
+        </Button>
+      </div>
     </div>
+
+    <p
+      v-if="app && app.state === 'setup'"
+      class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+      data-testid="app-plugin-page-needs-setup"
+    >
+      {{ t('appPlugins.setup.needsSetup') }}
+    </p>
 
     <div v-if="loading && !app" class="card card-body text-center text-zinc-500"><Spinner /></div>
 
@@ -138,5 +202,8 @@ function back() {
     <AppPluginLicense v-if="app && !missing" :plugin-id="app.id" @changed="onChanged" />
 
     <AppPluginDetail v-if="app && !missing" :plugin="app" :engine-names="engineNames" @changed="onChanged" />
+
+    <AppSetupWizard v-model="setupOpen" :plugin="app" @done="onSetupDone" />
+    <AppEraseDialog v-model="reconfigureOpen" :plugin="app" mode="reconfigure" @done="onReconfigured" />
   </div>
 </template>

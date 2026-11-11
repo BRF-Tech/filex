@@ -808,7 +808,7 @@ The three implementations were first built and tested together on
 
 - **Inside a vault, only the vault API writes.** Every other door - the
   explorer's file API, the operations queue, uploads, the agent API and MCP,
-  ShareX, upload tickets, file requests, archives, apps, the document server's
+  uploaders, upload tickets, file requests, archives, apps, the document server's
   save, WebDAV, SFTP, FTPS, NFS, S3, `filex mount`, desktop folder sync -
   refuses to create, replace, rename, move, copy into or delete anything
   strictly inside a vault folder, `v/` and everything under it included. Each

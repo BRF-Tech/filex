@@ -62,8 +62,23 @@ export function startSink(): Promise<Sink> {
 }
 
 /** Headers (RFC 2047 decoded) and body of one received message. */
-export function parseMail(raw: string): { h: Record<string, string>; body: string } {
-  const [head, ...rest] = raw.split('\n\n');
+/** Quoted-printable to text: soft line breaks out, `=XX` back to bytes, UTF-8. */
+function fromQuotedPrintable(s: string): string {
+  const joined = s.replace(/=\n/g, '');
+  const bytes: number[] = [];
+  for (let i = 0; i < joined.length; i++) {
+    const c = joined[i];
+    if (c === '=' && /^[0-9A-F]{2}$/i.test(joined.slice(i + 1, i + 3))) {
+      bytes.push(parseInt(joined.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else {
+      bytes.push(...Buffer.from(c, 'utf8'));
+    }
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
+function headersOf(head: string): Record<string, string> {
   const h: Record<string, string> = {};
   for (const line of head.split('\n')) {
     const i = line.indexOf(': ');
@@ -73,7 +88,36 @@ export function parseMail(raw: string): { h: Record<string, string>; body: strin
       .replace(/=\?utf-8\?b\?([^?]+)\?=\s*/gi, (_m, b64: string) => Buffer.from(b64, 'base64').toString('utf8'))
       .trim();
   }
-  return { h, body: rest.join('\n\n') };
+  return h;
+}
+
+function decodePart(h: Record<string, string>, body: string): string {
+  return /quoted-printable/i.test(h['Content-Transfer-Encoding'] ?? '') ? fromQuotedPrintable(body) : body;
+}
+
+/**
+ * A mail as the sink kept it: the headers, `body` - the plain-text part,
+ * decoded (a filex mail is multipart/alternative since #314: the HTML of its
+ * template and a plain-text part) - and `html`, the HTML part ('' for a
+ * plain-text mail).
+ */
+export function parseMail(raw: string): { h: Record<string, string>; body: string; html: string } {
+  const [head, ...rest] = raw.split('\n\n');
+  const h = headersOf(head);
+  const whole = rest.join('\n\n');
+  const boundary = /multipart\/alternative;\s*boundary="?([^";]+)"?/i.exec(h['Content-Type'] ?? '')?.[1];
+  if (!boundary) return { h, body: decodePart(h, whole), html: '' };
+  let body = '';
+  let html = '';
+  for (const part of whole.split(`--${boundary}`)) {
+    const at = part.indexOf('\n\n');
+    if (at < 0) continue;
+    const ph = headersOf(part.slice(0, at).trim());
+    const text = decodePart(ph, part.slice(at + 2).replace(/\n$/, ''));
+    if (/^text\/plain/i.test(ph['Content-Type'] ?? '')) body = text;
+    else if (/^text\/html/i.test(ph['Content-Type'] ?? '')) html = text;
+  }
+  return { h, body, html };
 }
 
 /** The n-th message (1-based) once it has arrived. */

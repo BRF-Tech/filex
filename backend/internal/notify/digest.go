@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"path"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -974,20 +973,17 @@ func (s *service) mailDigest(ctx context.Context, userID int64, kept []*model.No
 	// other. The email adds only its frame: when, and how to make a kind
 	// urgent.
 	said := SayEvent(lang, s.digestEvent(ctx, userID, kept, s.clock()))
-	subject := said.Title
-	body := srvtext.Text(lang, "server.mail.digest.intro", srvtext.Vars{"minutes": strconv.Itoa(int(p.window / time.Minute))}) +
-		"\n\n" + strings.Join(said.Lines, "\n")
-	if link != "" {
-		body += "\n\n" + link
-	}
-	body += "\n\n" + srvtext.Text(lang, "server.mail.digest.footer", nil)
+	// The template (mail.digest) adds the frame: the window, and how to make
+	// a kind urgent.
+	c := MailContent{Digest: true, Title: said.Title, Lines: said.Lines, Link: link,
+		Minutes: int(p.window / time.Minute), TenantID: userTenantID(u)}
 	to := u.Email
 	if !s.beginDelivery() {
 		return
 	}
 	go func() {
 		defer s.endDelivery()
-		if err := s.mail(context.WithoutCancel(ctx), lang, to, subject, body); err != nil {
+		if err := s.mail(context.WithoutCancel(ctx), lang, to, c); err != nil {
 			slog.Debug("notify: digest email not sent", slog.Int64("user_id", userID), slog.String("err", err.Error()))
 		}
 	}()

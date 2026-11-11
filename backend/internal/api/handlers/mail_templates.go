@@ -1,170 +1,97 @@
 package handlers
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/brf-tech/filex/backend/internal/leafname"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
-// The e-mails the invite/share/drop flows send, and the notice texts that go
-// with them. Every sentence comes from the server catalogue
-// (internal/srvtext, keys `server.mail.*`), so a language pack translates
-// them the way it translates the screens.
+// The e-mails the invite/share/drop flows send are templates
+// (internal/templates: mail.share, mail.file_request, mail.grant,
+// mail.account, mail.smtp_test - an administrator can edit each); the
+// builders below are the data each one is given. Every sentence the default
+// templates say comes from the server catalogue (`server.mail.*`), in the
+// language the calling flow decided (grants.go, drop.go, settings.go - each
+// says whose: the RECIPIENT's).
 //
-// ⚠⚠ The `lang` each builder takes is the RECIPIENT's language as the calling
-// flow decided it (grants.go, drop.go, settings.go — each says whose); the
-// builders never guess one. An unknown tag reads as English: the catalogue
-// falls back per key, so a pack that translated half a mail sends half of it
-// in its language and the rest in English — never in Turkish, which is what
-// the old `if en … else Turkish` pair sent every third language (measured
-// 2026-09-22: a Spanish account's share mail arrived as "informe.txt dosyası
-// sizinle paylaşıldı").
-//
-// Each line of a mail is its own key: a mail is assembled from the facts it
-// has (a PIN or none, a size or none, an expiry or none), so a translator
-// gets whole sentences and never a fragment glued to a number.
+// ⚠ A name a mail shows is made visible first (leafname.Visible): a bidi
+// control in it is shown, not obeyed - an RLO would reverse the subject line
+// and the facts, `invoice` + U+202E + `fdp.exe` reading as `invoiceexe.pdf`
+// (task #238). The template escapes it for HTML; the subject and the plain
+// text carry it as text.
 
-// mailLines joins a mail body: paragraphs separated by a blank line, a
-// trailing newline. An empty paragraph is dropped, so an optional part that
-// is absent (no PIN, no size) leaves no gap.
-func mailLines(paras ...string) string {
-	var out []string
-	for _, p := range paras {
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return strings.Join(out, "\n\n") + "\n"
-}
-
-// validityLine is "valid for N days" / "does not expire".
-func validityLine(lang string, days int) string {
-	if days > 0 {
-		return srvtext.Plural(lang, "server.mail.valid_days", days, nil)
-	}
-	return srvtext.Text(lang, "server.mail.no_expiry", nil)
-}
-
-// pinLine is the mail's PIN paragraph: the PIN itself when the flow holds
-// it (a link the server made a moment ago, Grants.Invite), else — for a link
-// that has one — that a PIN guards it and the sender gives it separately
-// (share_mail.go never mails a PIN), else nothing.
-func pinLine(lang, pin string, pinWithheld bool) string {
-	switch {
-	case pin != "":
-		return srvtext.Text(lang, "server.mail.label.pin", srvtext.Vars{"pin": pin})
-	case pinWithheld:
-		return srvtext.Text(lang, "server.mail.label.pin_separately", nil)
-	}
-	return ""
-}
-
-// shareMailText builds the subject + body for a public share-link notice.
-// The subject/body name the item (file vs folder), show its size (files only),
-// prefix the site name, and include the PIN (or that one guards the link) +
-// validity window when present.
-func shareMailText(lang, siteName, name string, isDir bool, size int64, link, pin string, pinWithheld bool, expiresDays int) (string, string) {
+// mailName is a file or folder name as a mail shows it: visible, and the
+// catalogue's words for a file with no name ("/" for a folder).
+func mailName(lang, name string, isDir bool) string {
 	if name == "" {
 		if isDir {
-			name = "/"
-		} else {
-			// ⚠ ONE word for "a file with no name", shared with the bell
-			// (`server.notify.word.unnamed`). It was written twice — a mail key
-			// and a notification key — until v0.43.0, so a translator answered
-			// the same question in two places.
-			name = srvtext.Text(lang, "server.notify.word.unnamed", nil)
+			return "/"
 		}
+		// ⚠ ONE word for "a file with no name", shared with the bell
+		// (`server.notify.word.unnamed`).
+		return srvtext.Text(lang, "server.notify.word.unnamed", nil)
 	}
-	// A bidi control in the name is shown, not obeyed (leafname.Visible): an
-	// RLO would reverse the subject line and the facts, `invoice` + U+202E +
-	// `fdp.exe` reading as `invoiceexe.pdf` (task #238).
-	name = leafname.Visible(name)
-	// ⚠ Two keys per sentence, not one with a "{kind}" in it: Turkish (and
-	// most languages) inflect the sentence around the noun — "x dosyası" /
-	// "x klasörü" — so the noun cannot be a value slotted into it.
-	kind := "file"
-	if isDir {
-		kind = "folder"
-	}
-	subject := srvtext.Text(lang, "server.mail.share.subject_"+kind, srvtext.Vars{"name": name})
-	intro := srvtext.Text(lang, "server.mail.share.intro_"+kind, nil)
-	if siteName != "" {
-		intro = srvtext.Text(lang, "server.mail.share.intro_"+kind+"_site", srvtext.Vars{"site": siteName})
-	}
-	facts := srvtext.Text(lang, "server.mail.label."+kind, srvtext.Vars{"name": name})
-	if !isDir && size > 0 {
-		facts += "\n" + srvtext.Text(lang, "server.mail.label.size", srvtext.Vars{"size": srvtext.Bytes(lang, size)})
-	}
-	return subject, mailLines(
-		srvtext.Text(lang, "server.mail.greeting", nil),
-		intro,
-		facts,
-		srvtext.Text(lang, "server.mail.share.download", nil)+"\n"+link,
-		pinLine(lang, pin, pinWithheld),
-		validityLine(lang, expiresDays),
-	)
+	return leafname.Visible(name)
 }
 
-// dropInviteMailText builds the subject + body for a public file-drop
-// (upload) link invite — the inverse of shareMailText. It asks the recipient
-// to UPLOAD files into a named folder, and spells out the configured limits
-// (max files, size per file, allowed types, validity) so the sender's terms
-// are clear up front. maxFiles/maxFileSizeMB <= 0 fall back to the drop
-// defaults; an empty allowedExt means all types.
-func dropInviteMailText(lang, siteName, folder, link, pin string, pinWithheld bool, expiresDays, maxFiles, maxFileSizeMB int, allowedExt []string) (string, string) {
+// shareMailData is mail.share's data: a public link to a file or a folder.
+// pin is the PIN itself, only from the flow that made the link a moment ago
+// (Grants.Invite); pinWithheld says a PIN guards the link and the sender
+// gives it separately (share-mail never mails one).
+func shareMailData(lang, name string, isDir bool, size int64, link, pin string, pinWithheld bool, expiresDays int) map[string]any {
+	kind := "file"
+	if isDir {
+		kind, size = "folder", 0
+	}
+	sizeText := ""
+	if size > 0 {
+		sizeText = srvtext.Bytes(lang, size)
+	}
+	return map[string]any{
+		"item": map[string]any{"name": mailName(lang, name, isDir), "kind": kind, "size": size, "size_text": sizeText},
+		"link": map[string]any{"url": link, "pin": pin, "pin_withheld": pin == "" && pinWithheld, "days_left": expiresDays},
+	}
+}
+
+// fileRequestMailData is mail.file_request's data: a file request (drop)
+// link, with the limits it was made with. maxFiles/maxFileSizeMB <= 0 are the
+// drop defaults; an empty allowedExt is every type.
+func fileRequestMailData(folder, link, pin string, pinWithheld bool, expiresDays, maxFiles, maxFileSizeMB int, allowedExt []string) map[string]any {
 	if folder == "" {
 		folder = "/"
 	}
-	folder = leafname.Visible(folder)
 	if maxFiles <= 0 {
 		maxFiles = dropDefaultMaxFiles
 	}
 	if maxFileSizeMB <= 0 {
 		maxFileSizeMB = dropDefaultMaxFileSizeMB
 	}
-	intro := srvtext.Text(lang, "server.mail.drop_invite.intro", nil)
-	if siteName != "" {
-		intro = srvtext.Text(lang, "server.mail.drop_invite.intro_site", srvtext.Vars{"site": siteName})
+	types := make([]any, 0, len(allowedExt))
+	for _, e := range allowedExt {
+		types = append(types, e)
 	}
-	types := srvtext.Text(lang, "server.mail.drop_invite.types_all", nil)
-	if len(allowedExt) > 0 {
-		types = srvtext.Text(lang, "server.mail.drop_invite.types", srvtext.Vars{"types": strings.Join(allowedExt, ", ")})
+	return map[string]any{
+		"folder": map[string]any{"name": leafname.Visible(folder)},
+		"link":   map[string]any{"url": link, "pin": pin, "pin_withheld": pin == "" && pinWithheld, "days_left": expiresDays},
+		"limits": map[string]any{"max_files": maxFiles, "max_file_mb": maxFileSizeMB, "types": types},
 	}
-	facts := srvtext.Text(lang, "server.mail.label.folder", srvtext.Vars{"name": folder}) + "\n" +
-		srvtext.Plural(lang, "server.mail.drop_invite.limit", maxFiles, srvtext.Vars{"mb": fmt.Sprint(maxFileSizeMB)}) + "\n" +
-		types
-	return srvtext.Text(lang, "server.mail.drop_invite.subject", srvtext.Vars{"folder": folder}), mailLines(
-		srvtext.Text(lang, "server.mail.greeting", nil),
-		intro,
-		facts,
-		srvtext.Text(lang, "server.mail.drop_invite.upload", nil)+"\n"+link,
-		pinLine(lang, pin, pinWithheld),
-		validityLine(lang, expiresDays),
-	)
 }
 
-// itemGrantText builds the notice sent when an existing account is granted
-// access to an item.
-func itemGrantText(lang, item, exploreURL string) (string, string) {
-	return srvtext.Text(lang, "server.mail.grant.subject", nil), strings.TrimSuffix(mailLines(
-		srvtext.Text(lang, "server.mail.greeting", nil),
-		srvtext.Text(lang, "server.mail.grant.body", srvtext.Vars{"item": leafname.Visible(item)}),
-		exploreURL,
-	), "\n")
+// grantMailData is mail.grant's data: an existing account was given access
+// to an item (storage://path), and where it opens it.
+func grantMailData(item, exploreURL string) map[string]any {
+	return map[string]any{
+		"item": map[string]any{"path": leafname.Visible(item)},
+		"link": map[string]any{"url": exploreURL},
+	}
 }
 
-// accountCreatedText builds the welcome notice for a freshly-created account.
-func accountCreatedText(lang, loginURL, email, tempPw string) (string, string) {
-	return srvtext.Text(lang, "server.mail.account.subject", nil), strings.TrimSuffix(mailLines(
-		srvtext.Text(lang, "server.mail.greeting", nil),
-		srvtext.Text(lang, "server.mail.account.intro", nil),
-		srvtext.Text(lang, "server.mail.account.sign_in", srvtext.Vars{"url": loginURL})+"\n"+
-			srvtext.Text(lang, "server.mail.account.email", srvtext.Vars{"email": email})+"\n"+
-			srvtext.Text(lang, "server.mail.account.password", srvtext.Vars{"password": tempPw}),
-		srvtext.Text(lang, "server.mail.account.change", nil),
-	), "\n")
+// accountMailData is mail.account's data: a new account, where it signs in,
+// and its first password.
+func accountMailData(loginURL, email, tempPw string) map[string]any {
+	return map[string]any{
+		"account": map[string]any{"email": email, "password": tempPw},
+		"link":    map[string]any{"url": loginURL},
+	}
 }
 
 // ─────────────────── file-drop notices ───────────────────
@@ -195,10 +122,4 @@ func dropNotifyText(lang, who, folder string, count int, sub string) (string, st
 // locale like the notification does.
 func dropNoteHeader(lang, uploaderName string) string {
 	return srvtext.Text(lang, "server.drop.note_from", srvtext.Vars{"name": uploaderName}) + "\n\n"
-}
-
-// smtpTestMailText is the body of the admin panel's "Test" send. It goes to
-// whichever address the acting admin typed, so it follows that admin's locale.
-func smtpTestMailText(lang string) (string, string) {
-	return srvtext.Text(lang, "server.mail.smtp_test.subject", nil), srvtext.Text(lang, "server.mail.smtp_test.body", nil)
 }

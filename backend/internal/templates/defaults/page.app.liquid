@@ -1,0 +1,16 @@
+<style>
+.files { list-style: none; margin: 18px 0 0; padding: 0; text-align: start; }
+.files li + li { margin-top: 8px; }
+.files a { display: block; padding: 11px 12px; border: 1px solid var(--px-line); border-radius: 10px; color: inherit; text-decoration: none; overflow-wrap: anywhere; }
+.files a:hover { border-color: var(--px-accent); color: var(--px-accent); }
+</style>
+<div class="card">
+<div class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7z"/><path d="M12 10.5V16"/><path d="M9.5 13.5 12 16l2.5-2.5"/></svg></div>
+<h1>{{ app.title }}</h1>
+<p class="sub">{{ 'public.app_sub' | t }}</p>
+{%- if files.size > 0 %}
+<ul class="files">{% for f in files %}<li><a href="{{ f.url }}">{{ f.name }}</a></li>{% endfor %}</ul>
+{%- else %}
+<p class="sub" style="margin-bottom:0">{{ 'public.app_nofiles' | t }}</p>
+{%- endif %}
+</div>

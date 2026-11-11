@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/templates"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/writegate"
@@ -36,10 +37,13 @@ import (
 // owner-level (acl.LevelOwner) on the target path. Viewer/editor accounts and
 // non-owning users get 403 and never see the panel.
 type Grants struct {
-	Store     db.Store
-	ACL       *acl.Resolver
-	Share     *share.Service // optional — nil disables the share fallback in Invite
-	Mailer    *mailer.Service
+	Store  db.Store
+	ACL    *acl.Resolver
+	Share  *share.Service // optional — nil disables the share fallback in Invite
+	Mailer *mailer.Service
+	// Templates renders the mails (internal/templates); nil = filex's own
+	// templates, no replacement counts.
+	Templates *templates.Renderer
 	PublicURL string
 	// Tenants resolves which origin the invite e-mails link to. ⚠ The
 	// account-created mail carries a temporary password next to a login URL —
@@ -50,6 +54,10 @@ type Grants struct {
 	// Settings → Branding): the tenant's own on a tenant's host. Nil: the
 	// platform's `branding.name`, read from the store.
 	Branding *BrandingSource
+	// ShortAddress is the address a link is mailed with: its short address
+	// when the shortener app keeps one for it (ShortLinks.MailAddress), else
+	// long. Nil: always the link itself.
+	ShortAddress func(r *http.Request, sh *model.Share, long string) string
 
 	// mailRate holds each account to shareMailHourlyRecipients addresses an
 	// hour (share_mail.go), made on first use so a Grants built as a literal
@@ -79,15 +87,19 @@ func (h *Grants) AttachInvite(sh *share.Service, m *mailer.Service, publicURL st
 	h.Tenants = tenanturl.New(h.Store, publicURL, h.Tenants.MultiTenant)
 }
 
-// tryMail sends best-effort; returns true iff the mail actually went out (SMTP
-// configured + verified). A false result tells the caller to surface the link /
-// temp password on-screen instead.
-func (h *Grants) tryMail(ctx context.Context, to, subject, body string) bool {
+// tryMail sends the template mail key best-effort; returns true iff the mail
+// actually went out (SMTP configured + verified). A false result tells the
+// caller to surface the link / temp password on-screen instead.
+func (h *Grants) tryMail(ctx context.Context, to string, t templates.Target, key string, data map[string]any) bool {
 	if h.Mailer == nil {
 		return false
 	}
-	return h.Mailer.Send(ctx, to, subject, body) == nil
+	return sendTemplateMail(ctx, h.templates(), h.Mailer, to, t, key, data) == nil
 }
+
+// templates is the renderer the mails are made with; filex's own templates
+// when none is wired.
+func (h *Grants) templates() *templates.Renderer { return pageTemplates(h.Templates, h.Branding) }
 
 // grantView is the enriched grant row returned to the panel.
 type grantView struct {
@@ -904,8 +916,8 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		// The recipient's own language: an account reads its owner's choice
 		// (translated at the last stop, never in the sender's).
 		loc := srvtext.Pick(u.Locale)
-		subject, body := itemGrantText(loc, st.Name+"://"+rel, h.Tenants.FromRequest(r)+"/admin/explore")
-		emailed := h.tryMail(mailer.WithLanguage(r.Context(), loc), email, subject, body)
+		emailed := h.tryMail(r.Context(), email, templates.Target{TenantID: userTenant(u), Lang: loc},
+			"mail.grant", grantMailData(st.Name+"://"+rel, h.Tenants.FromRequest(r)+"/admin/explore"))
 		writeJSON(w, http.StatusOK, map[string]any{"mode": "granted", "user_id": u.ID, "emailed": emailed})
 		return
 	}
@@ -977,8 +989,8 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		loginURL := h.Tenants.FromRequest(r) + "/admin/"
-		subject, body := accountCreatedText(loc, loginURL, email, tempPw)
-		emailed := h.tryMail(mailer.WithLanguage(r.Context(), loc), email, subject, body)
+		emailed := h.tryMail(r.Context(), email, templates.Target{TenantID: mailTenant(r.Context(), nil), Lang: loc},
+			"mail.account", accountMailData(loginURL, email, tempPw))
 		resp := map[string]any{"mode": "user_created", "user_id": newU.ID, "emailed": emailed}
 		if !emailed {
 			resp["temp_password"] = tempPw // show once so the admin can relay it
@@ -1030,9 +1042,8 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 	if node.Type != model.NodeTypeDirectory {
 		size = node.Size
 	}
-	subject, body := shareMailText(lang, h.siteName(r), baseName(rel), node.Type == model.NodeTypeDirectory,
-		size, url, pin, false, linkDaysLeft(sh.ExpiresAt, time.Now()))
-	emailed := h.tryMail(mailer.WithLanguage(r.Context(), lang), email, subject, body)
+	emailed := h.tryMail(r.Context(), email, templates.Target{TenantID: mailTenant(r.Context(), sh), Lang: lang}, "mail.share",
+		shareMailData(lang, baseName(rel), node.Type == model.NodeTypeDirectory, size, url, pin, false, linkDaysLeft(sh.ExpiresAt, time.Now())))
 	writeJSON(w, http.StatusOK, map[string]any{"mode": "shared", "url": url, "emailed": emailed})
 }
 

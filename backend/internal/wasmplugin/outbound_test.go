@@ -34,11 +34,11 @@ type fakeMailer struct {
 	err  error
 }
 
-func (f *fakeMailer) Send(_ context.Context, to, subject, body string) error {
+func (f *fakeMailer) SendAppMail(_ context.Context, m AppMail) error {
 	if f.err != nil {
 		return f.err
 	}
-	f.sent = append(f.sent, to+"|"+subject+"|"+body)
+	f.sent = append(f.sent, m.To+"|"+m.Subject+"|"+m.Body+"|"+m.App+"|"+m.Lang)
 	return nil
 }
 
@@ -97,7 +97,7 @@ func TestOutbound_UsersNotifyMailHTTP_ThroughTheGuest(t *testing.T) {
 	assert.Equal(t, "mail:ok", parts[2])
 	require.Len(t, ml.sent, 1)
 	assert.True(t, strings.HasPrefix(ml.sent[0], "ada@example.test|Subject|Body"), ml.sent[0])
-	assert.Contains(t, ml.sent[0], "Sent by the Echo Fixture app on filex")
+	assert.True(t, strings.HasSuffix(ml.sent[0], "|Echo Fixture|en"), "the app is named, in the mail's language: %s", ml.sent[0])
 
 	// http_request: allowed host answered, cookie stripped, UA names the app.
 	assert.Equal(t, "http:200:pong /hello", parts[3])

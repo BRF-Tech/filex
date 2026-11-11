@@ -142,6 +142,14 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	s.AppStoreSQL = &db.AppStoreSQL{Pool: sqlDB, Time: db.CatalogueTime}
 	// The bot check's marks (00134), the same way; times are unix seconds.
 	s.CaptchaMarkSQL = &db.CaptchaMarkSQL{Pool: sqlDB}
+	// An app's setup record (00138); times are unix seconds.
+	s.AppSetupSQL = &db.AppSetupSQL{Pool: sqlDB}
+	// Uploaders and their deletion links (00136), the same way; times are
+	// unix seconds.
+	s.UploaderSQL = &db.UploaderSQL{Pool: sqlDB}
+	// Templates an administrator replaced (00137), the same way; times are
+	// unix seconds.
+	s.TemplateSQL = &db.TemplateSQL{Pool: sqlDB}
 	// The notification digest (00087), the same way and with the same
 	// timestamp spelling.
 	s.DigestSQL = &db.DigestSQL{Pool: sqlDB, Time: db.CatalogueTime}
@@ -191,6 +199,14 @@ type Store struct {
 	// The bot check's marks (internal/db captcha_marks_sql.go, migration
 	// 00134).
 	*db.CaptchaMarkSQL
+	// An app's setup record (internal/db app_setup_sql.go, migration 00138).
+	*db.AppSetupSQL
+	// Uploaders and their deletion links (internal/db uploaders_sql.go,
+	// migration 00136).
+	*db.UploaderSQL
+	// The templates an administrator replaced (internal/db templates_sql.go,
+	// migration 00137).
+	*db.TemplateSQL
 	// The sign-in attempt counters (internal/db login_throttle_sql.go).
 	*db.LoginThrottleSQL
 	// The office editing sessions (internal/db office_session_sql.go,

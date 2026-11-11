@@ -125,6 +125,9 @@ WORKDIR /src
 # `go mod tidy` has been run locally) — `go mod download` will create one.
 COPY backend/go.mod ./
 COPY backend/go.sum* ./
+# A module go.mod replaces with a copy in the tree (third_party/extism-go-sdk,
+# FILEX.md there): `go mod download` needs it before the sources come.
+COPY backend/third_party/ ./third_party/
 RUN go mod download || go mod tidy
 
 # Copy backend sources + drop in embed assets from the frontend stage.

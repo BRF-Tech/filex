@@ -432,10 +432,12 @@ const CONCEPT_EXEMPTIONS: ConceptExemption[] = [
   // -- debt: a second implementation, recorded until it is removed ----------
   {
     concept: 'brand-mark',
-    file: 'backend/internal/api/handlers/share.go',
+    file: 'backend/internal/templates/render.go',
     reason:
-      'DEBT. publicBrandMark is the mark hand-typed as a Go string for the ' +
-      'no-JavaScript fallback pages, which have no bundler and cannot import ' +
+      'DEBT. ProductMark is the mark hand-typed as a Go string - the one Go ' +
+      'copy since #314: the templates\' product.mark and handlers.publicBrandMark ' +
+      'both read it - for the pages drawn without a bundler, which ' +
+      'cannot import the component. Before #314 it lived in handlers/share.go. ' +
       'the component. It is the RIGHT colour today (#2f6ceb, checked ' +
       '2026-09-23) — the reason here used to say it still filled the ' +
       'pre-rebrand indigo, which was true when it was written and is the case ' +

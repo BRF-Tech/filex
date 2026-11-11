@@ -479,4 +479,26 @@ export const SCREENSHOTS = [
     name: 'e2eapp/app-encrypted-folder-1280.png',
     depicts: ['packages/core/src/components/plugin/AppFrame.vue', 'packages/core/src/lib/appPlaintext.ts', 'e2e/shots/office-app'],
   },
+  // ── v0.60.0: uploaders, templates, setting an app up and short links
+  //    (e2e/shots/uploaders.mjs, templates.mjs, shortlinks.mjs) ──
+  {
+    // An uploader's key, shown once, with ShareX's settings and the curl line.
+    name: 'uploaders/uploaders-key-dark-1440.png',
+    depicts: ['packages/core/src/components/UploadersPanel.vue'],
+  },
+  {
+    // The template editor: the share mail's source and the server's preview.
+    name: 'templates/templates-editor-dark-1440.png',
+    depicts: ['web/src/views/Templates.vue', 'packages/core/src/components/CodeEditor.vue'],
+  },
+  {
+    // The setup wizard's Addresses step.
+    name: 'shortlinks/setup-addresses-1440.png',
+    depicts: ['web/src/components/plugins/AppSetupWizard.vue', 'web/src/components/plugins/AppSetupAddresses.vue'],
+  },
+  {
+    // The share dialog after Get short link.
+    name: 'shortlinks/share-short-dark-1440.png',
+    depicts: ['packages/core/src/modals/PermissionsModal.vue', 'packages/core/src/lib/shortLink.ts'],
+  },
 ];

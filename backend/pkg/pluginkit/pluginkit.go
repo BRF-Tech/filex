@@ -89,6 +89,13 @@ type Plugin struct {
 	// block names. filex refuses to install a manifest with that block whose
 	// module leaves this nil (the export answers an error then).
 	Thumbnail ThumbnailFunc
+	// Route answers the visits to the manifest's `routes` (filex 0.60.0).
+	Route RouteFunc
+	// Shorten is the link-shortener role (the manifest's `link_shortener`
+	// block, filex 0.60.0).
+	Shorten ShortenFunc
+	// Reset is told before filex erases the app's data; optional.
+	Reset ResetFunc
 }
 
 var registered *Plugin

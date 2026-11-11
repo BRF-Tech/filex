@@ -376,7 +376,7 @@ type UserPermission struct {
 // preview's place.
 type View struct {
 	ID        string  `json:"id"`
-	Placement string  `json:"placement"` // modal | page | inspector | home | viewer
+	Placement string  `json:"placement"` // modal | page | inspector | home | viewer | setup
 	Label     Text    `json:"label"`
 	Applies   Applies `json:"applies,omitempty"`
 	Size      string  `json:"size,omitempty"`
@@ -629,6 +629,25 @@ type Manifest struct {
 	// words. filex before 0.57.0 does not know this field and refuses the
 	// manifest - declare it with `filex: ">=0.57.0"`.
 	Engines *EnginesSpec `json:"engines,omitempty"`
+	// Routes are addresses the app answers for visitors with no account
+	// (filex 0.60.0): a link shortener's `l.example.com/<code>`. The app
+	// names a route; the administrator gives it its host and path prefix in
+	// the setup wizard; filex hands each visit to the module's `route` export
+	// from a pool of warm instances and keeps the invariants around it
+	// (routes.go). Needs the `public_routes` permission.
+	Routes []Route `json:"routes,omitempty"`
+	// Setup says an administrator sets the app up ONCE, after install and
+	// before it runs (filex 0.60.0): until then it runs nothing. The wizard
+	// is the app's own `setup` view, then the steps filex draws for what the
+	// app declares (its routes' addresses, who holds its permissions).
+	// Reconfigure erases the app's data and opens the wizard again.
+	Setup *SetupSpec `json:"setup,omitempty"`
+	// LinkShortener gives the app the link-shortener role (filex 0.60.0):
+	// filex offers "Get short link" beside its own links (a share, a file
+	// request, an upload's answer) and asks the module's `shorten` export
+	// for the short address. Needs the `link_shortener` permission and a
+	// route. One app holds the role at a time.
+	LinkShortener *LinkShortenerSpec `json:"link_shortener,omitempty"`
 }
 
 // EnginesSpec is the `engines` block (filex 0.57.0).
@@ -749,7 +768,10 @@ type Actor struct {
 	ID    int64  `json:"id"`
 	Email string `json:"email,omitempty"`
 	Name  string `json:"name,omitempty"`
-	Role  string `json:"role,omitempty"`
+	// Role is the account's role: "admin" for an administrator, "user" for
+	// everybody else. What the person may do in the app is Permissions
+	// (Can), not this.
+	Role string `json:"role,omitempty"`
 	// IP is the address the person's request came from, as filex's own
 	// access log would write it (behind a trusted proxy, the forwarded
 	// client). Set on a VIEW event — the screen somebody is looking at — and
@@ -913,6 +935,11 @@ type CallContext struct {
 	// storage, in the administrator's order, that the person may write.
 	// Adapter-qualified (`depo://`); empty when they may write nowhere.
 	Home string `json:"home,omitempty"`
+	// Routes are the addresses the app's public routes are served at for
+	// this person's tenant, by route id (filex 0.60.0): what a screen needs
+	// to make an address of its own (a short link typed on the app's page).
+	// Absent for an app with no routes, or one not set up yet.
+	Routes map[string][]RouteBase `json:"routes,omitempty"`
 }
 
 // Surface is a declarative screen: nodes drawn by filex's own components.
