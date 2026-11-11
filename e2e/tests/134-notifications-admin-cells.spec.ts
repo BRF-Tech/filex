@@ -82,7 +82,7 @@ async function removeByName(name: string): Promise<void> {
   const list = await api.get('/api/admin/app-plugins');
   if (!list.ok()) return;
   for (const p of (await list.json()).plugins ?? []) {
-    if (p.name === name) await api.delete(`/api/admin/app-plugins/${p.id}`);
+    if (p.name === name) await api.delete(`/api/admin/app-plugins/${p.id}?confirm=${encodeURIComponent(p.name)}`);
   }
 }
 

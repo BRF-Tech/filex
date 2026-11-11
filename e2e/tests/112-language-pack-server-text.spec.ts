@@ -54,7 +54,7 @@ test.describe.serial('Language pack — the text the server writes', () => {
     restoreMail = await mailToSink(api, sink);
 
     const list = await (await api.get('/api/admin/app-plugins')).json();
-    for (const p of list.plugins ?? []) if (p.name === PACK_NAME) await api.delete(`/api/admin/app-plugins/${p.id}`);
+    for (const p of list.plugins ?? []) if (p.name === PACK_NAME) await api.delete(`/api/admin/app-plugins/${p.id}?confirm=${encodeURIComponent(p.name)}`);
     const manifest = {
       manifest_version: 1, name: PACK_NAME, version: '1.0.0', label: { en: 'Spanish (server text e2e)' },
       permissions: [], ui_locales: { es: ES },
@@ -79,7 +79,7 @@ test.describe.serial('Language pack — the text the server writes', () => {
 
   test.afterAll(async ({ request }) => {
     const list = await (await api.get('/api/admin/app-plugins')).json();
-    for (const p of list.plugins ?? []) if (p.name === PACK_NAME) await api.delete(`/api/admin/app-plugins/${p.id}`);
+    for (const p of list.plugins ?? []) if (p.name === PACK_NAME) await api.delete(`/api/admin/app-plugins/${p.id}?confirm=${encodeURIComponent(p.name)}`);
     await restoreMail();
     await api.put(PREFS, { data: { prefs: prefsBefore } }).catch(() => undefined);
     await api.patch('/api/auth/profile', { data: { locale: 'en' } }).catch(() => undefined);

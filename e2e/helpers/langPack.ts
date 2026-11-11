@@ -91,6 +91,6 @@ export async function removeLangPack(api: APIRequestContext, pack: LangPack): Pr
   const list = await api.get('/api/admin/app-plugins');
   if (!list.ok()) return;
   for (const p of (await list.json()).plugins ?? []) {
-    if (p.name === pack.name) await api.delete(`/api/admin/app-plugins/${p.id}`);
+    if (p.name === pack.name) await api.delete(`/api/admin/app-plugins/${p.id}?confirm=${encodeURIComponent(p.name)}`);
   }
 }

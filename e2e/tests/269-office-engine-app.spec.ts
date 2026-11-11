@@ -70,7 +70,7 @@ async function removeApp(api: APIRequestContext, name: string) {
   const list = await api.get('/api/admin/app-plugins');
   if (!list.ok()) return;
   for (const p of ((await list.json()) as { plugins?: Array<{ id: number; name: string }> }).plugins ?? []) {
-    if (p.name === name) await api.delete(`/api/admin/app-plugins/${p.id}`);
+    if (p.name === name) await api.delete(`/api/admin/app-plugins/${p.id}?confirm=${encodeURIComponent(p.name)}`);
   }
 }
 

@@ -127,7 +127,7 @@ test.describe('App plugins — install, run, output, public page', () => {
     if (list.ok()) {
       const body = await list.json();
       for (const p of body.plugins ?? []) {
-        if (p.name === 'echo') await request.delete(`/api/admin/app-plugins/${p.id}`);
+        if (p.name === 'echo') await request.delete(`/api/admin/app-plugins/${p.id}?confirm=${encodeURIComponent(p.name)}`);
       }
     }
   });
@@ -138,7 +138,7 @@ test.describe('App plugins — install, run, output, public page', () => {
     if (list.ok()) {
       const body = await list.json();
       for (const p of body.plugins ?? []) {
-        if (p.name === 'echo') await request.delete(`/api/admin/app-plugins/${p.id}`);
+        if (p.name === 'echo') await request.delete(`/api/admin/app-plugins/${p.id}?confirm=${encodeURIComponent(p.name)}`);
       }
     }
     await dropStorageByName(request, STORAGE);

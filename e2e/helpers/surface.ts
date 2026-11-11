@@ -527,13 +527,24 @@ export async function installedApp(
   return (body.plugins ?? []).find((p) => p.name === name);
 }
 
-/** Remove every copy of an app, so a rerun starts from nothing. */
+/**
+ * Remove every copy of an app, so a rerun starts from nothing.
+ *
+ * ⚠ Since 0.60 (#313) removing an app that keeps anything (state, data,
+ * locks, links) wants its name typed back: `?confirm=<name>`, else 409
+ * confirm_required and the app stays. This helper ignored the answer, so a
+ * sign app an earlier spec left behind stayed installed and the next spec's
+ * Install was disabled - "already installed" - in Firefox's shard 4 of
+ * 0.60.0's gate. A removal that does not happen now says so.
+ */
 export async function removeApp(request: APIRequestContext, name: string) {
   const res = await request.get('/api/admin/app-plugins');
   if (!res.ok()) return;
   const body = (await res.json()) as { plugins?: { id: number; name: string }[] };
   for (const p of body.plugins ?? []) {
-    if (p.name === name) await request.delete(`/api/admin/app-plugins/${p.id}`);
+    if (p.name !== name) continue;
+    const del = await request.delete(`/api/admin/app-plugins/${p.id}?confirm=${encodeURIComponent(p.name)}`);
+    expect(del.ok() || del.status() === 404, `removing ${name}: ${del.status()} ${await del.text()}`).toBe(true);
   }
 }
 

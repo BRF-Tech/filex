@@ -256,7 +256,7 @@ test.describe.serial('Installing from a store, and a paid app’s license', () =
     const list = await api.get('/api/admin/app-plugins');
     if (list.ok()) {
       for (const p of ((await list.json()) as { plugins?: Array<{ id: number; name: string }> }).plugins ?? []) {
-        if (p.name === app || p.name === `${app}-n`) await api.delete(`/api/admin/app-plugins/${p.id}`);
+        if (p.name === app || p.name === `${app}-n`) await api.delete(`/api/admin/app-plugins/${p.id}?confirm=${encodeURIComponent(p.name)}`);
       }
     }
     await dropStorageByName(api, storage);

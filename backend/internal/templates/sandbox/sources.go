@@ -26,7 +26,17 @@ var guestModules = []string{"github.com/osteele/liquid", "github.com/osteele/tue
 // SourceDigest is the digest of the guest's sources under backend (the module
 // root): every non-test Go file of internal/templates/engine and of the guest,
 // build.sh, and the go.sum lines of guestModules.
+//
+// The module's own path is hashed as a placeholder, not as written: the public
+// tree is the same source under another module path (scripts/export-public.sh
+// renames every import), and the module built in one tree is the module the
+// other ships. Hashing the path made 0.60.0's GitHub gate red on the public
+// tree alone: the same engine, "built from other sources".
 func SourceDigest(backend string) (string, error) {
+	module, err := modulePath(filepath.Join(backend, "go.mod"))
+	if err != nil {
+		return "", err
+	}
 	var files []string
 	for _, dir := range []string{"internal/templates/engine", "internal/templates/sandbox/guest"} {
 		matches, err := filepath.Glob(filepath.Join(backend, dir, "*.go"))
@@ -50,6 +60,8 @@ func SourceDigest(backend string) (string, error) {
 		rel, _ := filepath.Rel(backend, f)
 		// Line ends as committed: a Windows checkout's CRLF is not a change.
 		b = []byte(strings.ReplaceAll(string(b), "\r\n", "\n"))
+		// The module path as a placeholder: the public tree's is another.
+		b = []byte(strings.ReplaceAll(string(b), module, moduleToken))
 		sum := sha256.Sum256(b)
 		fmt.Fprintf(h, "%s %s\n", filepath.ToSlash(rel), hex.EncodeToString(sum[:]))
 	}
@@ -79,4 +91,27 @@ func SourceDigest(backend string) (string, error) {
 		fmt.Fprintln(h, l)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// moduleToken stands for the module's own path in the digest.
+const moduleToken = "<module>"
+
+// modulePath is the path go.mod's module directive names.
+func modulePath(gomod string) (string, error) {
+	f, err := os.Open(gomod)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) == 2 && fields[0] == "module" {
+			return strings.Trim(fields[1], `"`), nil
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("%s names no module", gomod)
 }

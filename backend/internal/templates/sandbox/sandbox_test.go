@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -59,6 +60,75 @@ func TestEngineIsBuiltFromTheseSources(t *testing.T) {
 		t.Fatalf("engine.wasm.gz was built from other sources (%s, these are %s): the dialect, the guest, build.sh "+
 			"or the Liquid library changed - run sh backend/internal/templates/sandbox/build.sh and commit both files",
 			strings.TrimSpace(string(want)), got)
+	}
+}
+
+// The public tree is this source under another module path (the export
+// renames every import): the digest must say the same of both, and still see
+// any other change. Red before 0.60.0's fix - the GitHub gate failed
+// TestEngineIsBuiltFromTheseSources on the public tree alone.
+func TestDigestIsTheSameUnderAnotherModulePath(t *testing.T) {
+	here, err := SourceDigest("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gomod, err := os.ReadFile("../../../go.mod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	own := strings.Fields(strings.SplitN(string(gomod), "\n", 2)[0])[1]
+	const public = "github.com/example/renamed/backend"
+	copyTree := func(edit func(rel string, b []byte) []byte) string {
+		dst := t.TempDir()
+		for _, rel := range []string{"go.mod", "go.sum", "internal/templates/sandbox/build.sh"} {
+			b, err := os.ReadFile(filepath.Join("../../..", rel))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(dst, rel), edit(rel, b))
+		}
+		for _, dir := range []string{"internal/templates/engine", "internal/templates/sandbox/guest"} {
+			matches, _ := filepath.Glob(filepath.Join("../../..", dir, "*.go"))
+			if len(matches) == 0 {
+				t.Fatalf("no Go file in %s", dir)
+			}
+			for _, m := range matches {
+				b, err := os.ReadFile(m)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rel := filepath.ToSlash(filepath.Join(dir, filepath.Base(m)))
+				writeFile(t, filepath.Join(dst, rel), edit(rel, b))
+			}
+		}
+		return dst
+	}
+	renamed := copyTree(func(_ string, b []byte) []byte { return []byte(strings.ReplaceAll(string(b), own, public)) })
+	got, err := SourceDigest(renamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != here {
+		t.Fatalf("the same sources under %s digest as %s, here %s", public, got, here)
+	}
+	changed := copyTree(func(rel string, b []byte) []byte {
+		if strings.HasPrefix(rel, "internal/templates/sandbox/guest/") {
+			return append(b, []byte("\n// a change\n")...)
+		}
+		return b
+	})
+	if got, _ := SourceDigest(changed); got == here {
+		t.Fatal("a change to the guest left the digest as it was")
+	}
+}
+
+func writeFile(t *testing.T, path string, b []byte) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

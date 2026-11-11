@@ -38,7 +38,15 @@ async function writeInEditor(page: Page, text: string) {
   }
   await box.locator('.view-lines').click();
   await page.keyboard.press('Control+A');
-  await page.keyboard.insertText(text);
+  await page.keyboard.press('Delete');
+  // One line at a time: Firefox handed Monaco a multi-line insertText twice
+  // over (0.60.0's gate: one/two/one/two/nmae, the refused line 5, not 3).
+  const lines = text.split('\n');
+  for (const [i, line] of lines.entries()) {
+    if (i > 0) await page.keyboard.press('Enter');
+    if (line) await page.keyboard.insertText(line);
+  }
+  await expect(box.locator('.view-line')).toHaveCount(lines.length);
 }
 
 async function put(api: APIRequestContext, key: string, body: string) {
