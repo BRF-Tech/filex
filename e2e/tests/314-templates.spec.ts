@@ -37,8 +37,18 @@ async function writeInEditor(page: Page, text: string) {
     return;
   }
   await box.locator('.view-lines').click();
-  await page.keyboard.press('Control+A');
+  // Monaco reads its keymap from the user agent, and Playwright's WebKit
+  // says Macintosh: there select-all is Meta+A, and Control+A only goes to
+  // the line's start (0.60.0's gate: the "fixed" text landed beside the old).
+  const webkit = page.context().browser()?.browserType().name() === 'webkit';
+  await page.keyboard.press(webkit ? 'Meta+A' : 'Control+A');
   await page.keyboard.press('Delete');
+  await expect(box.locator('.view-line')).toHaveCount(1);
+  await expect
+    .poll(async () => ((await box.locator('.view-lines').textContent()) ?? '').replace(/\u00a0/g, '').trim(), {
+      message: 'the editor is empty before it is written',
+    })
+    .toBe('');
   // One line at a time: Firefox handed Monaco a multi-line insertText twice
   // over (0.60.0's gate: one/two/one/two/nmae, the refused line 5, not 3).
   const lines = text.split('\n');

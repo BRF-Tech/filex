@@ -35,6 +35,7 @@ import { underBase } from '../helpers/base';
 import { seedLocalStorage, dropStorageByName } from '../helpers/seed';
 import { guardFixture, installThroughWizard, minimalPDF, resolveApp } from '../helpers/appPlugin';
 import { removeApp } from '../helpers/surface';
+import { parseMail } from '../helpers/smtpSink';
 import { advance, drawSignature, next, press, SEND, SIGN } from '../helpers/wizard';
 
 const APP = resolveApp('sign');
@@ -107,9 +108,11 @@ function startSmtp(): Promise<number> {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve((server.address() as net.AddressInfo).port)));
 }
 
+/** A raw message as the sink kept it, as its reader sees it: the plain-text part. */
+const textOf = (raw: string) => parseMail(raw).body;
 /** The completion mail to the outside signer — the one that carries the hash. */
 const completionMails = () =>
-  mails.filter((m) => m.to.includes(OUTSIDE) && /SHA-256 of the signed file|İmzalı dosyanın SHA-256/.test(m.data));
+  mails.filter((m) => m.to.includes(OUTSIDE) && /SHA-256 of the signed file|İmzalı dosyanın SHA-256/.test(textOf(m.data)));
 
 // The wizard walk lives in ONE place, e2e/helpers/wizard.ts. ⚠ This spec's
 // own `next()` was `.last().click()` with no wait at all, and it was used for
@@ -305,7 +308,9 @@ test.describe('App plugin: sign — certified, sealed, hashed to everyone, locke
   });
 
   test('the hash in the mail is the SHA-256 of the file the delivery link hands out', async ({ request, baseURL }) => {
-    const mail = completionMails().pop()!;
+    // The plain-text part, decoded: since #314 a mail is multipart/alternative
+    // and its text part quoted-printable, which folds the fingerprint's line.
+    const mail = { data: textOf(completionMails().pop()!.data) };
     const hash = /(?:SHA-256 of the signed file|İmzalı dosyanın SHA-256 özeti)[^\n]*:\n([0-9a-f]{64})\n/.exec(mail.data);
     expect(hash, `the mail carries the file's SHA-256:\n${mail.data}`).toBeTruthy();
     sentHash = hash![1];
