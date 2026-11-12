@@ -64,6 +64,18 @@ the share shed (503), p50 / p99 / max, and filex's CPU in cores. Every H4 run
 sent 9,987-9,992 visits a second; about 10,000 were 404s, the rest 429s
 and the shed.
 
+**2026-11-12, v0.60.1** (the released linux/amd64 binary; the runner and the
+shortener built from the tag), on the build host (20 CPUs, load 1.2 before
+the run and 2.8 once the runner and the module were built),
+`FILEX_APP_ROUTE_POOL=4`, one round:
+
+| Round | Build | H3 | H4 | H4-edited |
+|---|---|---|---|---|
+| 1 | v0.60.1 | 1000/1000, p99 4.7 | 1.36 % · 0.32 / 3.55 / 142 · 2.05 | 1.76 % · 0.32 / 2.87 / 29.3 · 2.04 |
+
+H4's slowest 0.1 % took 103-142 ms; the 0.5-0.6 s pause of round 2 below
+did not come back.
+
 **2026-11-12, task #324** (the door's pages as templates), on the build host
 (20 CPUs, idle before the run), `FILEX_APP_ROUTE_POOL=4`, main (53e088135)
 and the branch one after the other, three rounds:
