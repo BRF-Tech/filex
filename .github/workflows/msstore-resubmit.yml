@@ -49,7 +49,7 @@ jobs:
       TAG: ${{ inputs.tag }}
       RUN: ${{ inputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Download the release's Store package
         shell: pwsh
         env:
@@ -66,7 +66,7 @@ jobs:
           gh run download $run -R $env:GITHUB_REPOSITORY -n "msix-$env:TAG" -D pkg
           if ($LASTEXITCODE -ne 0) { throw "run $run has no msix-$env:TAG artifact (kept 90 days)" }
           Get-ChildItem pkg
-      - uses: microsoft/microsoft-store-apppublisher@v1.1
+      - uses: microsoft/microsoft-store-apppublisher@15abd1c50fcc164b19cb240fb04ef3c49bf715a2 # v1.1
       - name: Submit to the Microsoft Store
         shell: pwsh
         run: |

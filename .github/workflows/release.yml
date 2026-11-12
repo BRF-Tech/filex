@@ -324,7 +324,7 @@ jobs:
       candidate: ${{ steps.p.outputs.candidate }}
       surfaces: ${{ steps.p.outputs.surfaces }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.sha }}
           sparse-checkout: desktop/package.json
@@ -585,13 +585,13 @@ jobs:
     steps:
       # The CircleCI reader, this commit's copy (see the note on runs on a tag
       # above). Not in a dry run: verify asks nothing there.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: needs.plan.outputs.publish == 'true'
         with:
           ref: ${{ github.sha }}
           path: .ci
           sparse-checkout: .github/workflows/scripts
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         if: needs.plan.outputs.publish == 'true'
         with:
           node-version: "22"
@@ -811,15 +811,15 @@ jobs:
       PUBLISH: ${{ needs.plan.outputs.publish }}
       SURFACES: ${{ needs.plan.outputs.surfaces }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
       # ── Frontend → backend/embed (the binaries need it prebuilt) ────────
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: "9.12.0"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
           cache: pnpm
@@ -846,7 +846,7 @@ jobs:
           cp -r web/dist/. backend/embed/admin/
           cp -r packages/webcomponent/dist/. backend/embed/web/
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.25"
 
@@ -886,7 +886,7 @@ jobs:
             printf '\nSnap package follows (Snap Store outage).\n' >> /tmp/release-notes.md
           fi
           wc -c /tmp/release-notes.md
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           version: "~> v2"
           # A dry run builds the same eight binaries and publishes nothing:
@@ -928,7 +928,7 @@ jobs:
           ls -la bare
       - name: Keep the binaries for the smoke tests (dry run)
         if: env.PUBLISH != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cli-binaries
           path: |
@@ -1009,17 +1009,17 @@ jobs:
       FROM_RELEASE: ${{ needs.plan.outputs.publish == 'true' || needs.plan.outputs.full != 'true' }}
       ASSET: ${{ matrix.asset }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.sha }}
           path: .ci
           sparse-checkout: .github/workflows/scripts
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
       - name: The binary (from the artifact)
         if: env.FROM_RELEASE != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: cli-binaries
           path: bin
@@ -1115,15 +1115,15 @@ jobs:
       # to promote (#181): a push by digest, untagged.
       PUSH: ${{ needs.plan.outputs.candidate == 'true' || needs.verify.outputs.promote == 'false' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - id: meta
         run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       # No setup-qemu-action: each job is native for its platform. Adding it
       # back would silently re-enable emulation for whichever arch is missing
       # a runner, turning a broken matrix into a slow build instead of a
       # visible failure.
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1131,7 +1131,7 @@ jobs:
 
       - name: Full image
         id: full
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: docker/Dockerfile
@@ -1154,7 +1154,7 @@ jobs:
 
       - name: Slim image
         id: slim
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: docker/Dockerfile.slim
@@ -1175,7 +1175,7 @@ jobs:
       # from the builder's cache of the builds above, so this is an export,
       # not a rebuild — and each image run and driven on this architecture.
       - name: Load both images for the smoke test
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: docker/Dockerfile
@@ -1187,7 +1187,7 @@ jobs:
           cache-from: type=gha,scope=full-${{ matrix.arch }}
           load: true
           tags: filex-smoke:full
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: docker/Dockerfile.slim
@@ -1199,12 +1199,12 @@ jobs:
           cache-from: type=gha,scope=slim-${{ matrix.arch }}
           load: true
           tags: filex-smoke:slim
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.sha }}
           path: .ci
           sparse-checkout: .github/workflows/scripts
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
       - name: Run both images on ${{ matrix.arch }} and drive them with their own CLI
@@ -1229,7 +1229,7 @@ jobs:
           FULL_DIGEST: ${{ steps.full.outputs.digest }}
           SLIM_DIGEST: ${{ steps.slim.outputs.digest }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: env.PUSH == 'true'
         with:
           name: digests-${{ matrix.arch }}
@@ -1269,14 +1269,14 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: digests-${{ matrix.arch }}
           path: /tmp/digests
           # The dry run's, or this run's own when there was none (#181).
           run-id: ${{ needs.verify.outputs.dry_run || github.run_id }}
           github-token: ${{ github.token }}
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1329,15 +1329,15 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: digests-*
           merge-multiple: true
           path: /tmp/digests
           run-id: ${{ needs.verify.outputs.dry_run || github.run_id }}
           github-token: ${{ github.token }}
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1394,11 +1394,11 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: "9.12.0"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: pnpm
@@ -1560,24 +1560,24 @@ jobs:
       # the Snap Store is down - never in only=snap, the run that adds them.
       SKIP_SNAP: ${{ vars.FILEX_SKIP_SNAP == 'true' && needs.plan.outputs.only != 'snap' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.plan.outputs.ref }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.sha }}
           path: .ci
           sparse-checkout: .github/workflows/scripts
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: "9.12.0"
       # ⚠ 22: electron-builder 26.12 and later (the core24 snap, 0.55) load
       # @electron/rebuild 4, which is ESM only and needs Node 22.12 or newer.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: pnpm
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         if: env.PROMOTE != 'true'
         with:
           go-version-file: backend/go.mod
@@ -1789,7 +1789,7 @@ jobs:
       # other rows take the Release's own files, below.)
       - name: The files the dry run built
         if: env.PROMOTE == 'true' && (env.ONLY != 'stores' || matrix.label == 'store')
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-files-${{ matrix.label }}
           path: desktop/release
@@ -1868,7 +1868,7 @@ jobs:
       # x64 emulation of Windows on Arm), the copy most Windows users have.
       - name: Keep the arm64 packages for the check on arm64 machines
         if: matrix.label == 'windows' || matrix.label == 'linux-arm64'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-arm64-${{ matrix.label }}
           path: |
@@ -1888,7 +1888,7 @@ jobs:
       # arm64 ones.
       - name: Keep the x64 Linux packages for the check
         if: matrix.label == 'linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-x64-linux
           path: |
@@ -1906,7 +1906,7 @@ jobs:
         run: node "$CI_SCRIPTS"/release-files.mjs keep desktop/release
       - name: Keep the release files for the tag run
         if: env.CANDIDATE == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-files-${{ matrix.label }}
           path: |
@@ -1927,7 +1927,7 @@ jobs:
           retention-days: 14
       - name: Keep the Store package for Partner Center
         if: matrix.label == 'store'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: msix-${{ needs.plan.outputs.tag || format('run-{0}', github.run_id) }}
           path: |
@@ -1937,7 +1937,7 @@ jobs:
           retention-days: 90
       - name: Microsoft Store CLI
         if: matrix.label == 'store' && env.PUBLISH == 'true' && env.MSSTORE_CLIENT_SECRET != '' && env.MSSTORE_PRODUCT_ID != ''
-        uses: microsoft/microsoft-store-apppublisher@v1.1
+        uses: microsoft/microsoft-store-apppublisher@15abd1c50fcc164b19cb240fb04ef3c49bf715a2 # v1.1
       - name: Submit to the Microsoft Store
         if: matrix.label == 'store' && env.PUBLISH == 'true' && env.MSSTORE_CLIENT_SECRET != '' && env.MSSTORE_PRODUCT_ID != ''
         shell: pwsh
@@ -2132,7 +2132,7 @@ jobs:
       # manifests are needed, to submit them by hand.
       - name: Keep the manifests
         if: always() && ((matrix.label == 'windows' && (env.FULL == 'true' || env.ONLY == 'stores')) || (matrix.label == 'macos' && (env.FULL == 'true' || env.ONLY == 'macos')))
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pkg-${{ matrix.label }}-${{ needs.plan.outputs.tag || format('run-{0}', github.run_id) }}
           path: pkg-out
@@ -2269,15 +2269,15 @@ jobs:
           - { os: windows-11-arm, label: windows, artifact: desktop-arm64-windows }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.sha }}
           path: .ci
           sparse-checkout: .github/workflows/scripts
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: ${{ matrix.artifact }}
           path: pkg
@@ -2445,7 +2445,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'the portable .exe did not open' }
           Get-Process filex -ErrorAction SilentlyContinue | Stop-Process -Force
           exit 0
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: desktop-arm64-screenshots-${{ matrix.label }}
@@ -2490,7 +2490,7 @@ jobs:
             echo "### AUR: skipped: no AUR key" >> "$GITHUB_STEP_SUMMARY"
             echo "AUR_SKIP=1" >> "$GITHUB_ENV"
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: env.AUR_SKIP != '1'
       - name: The Linux packages are on the Release
         if: env.AUR_SKIP != '1'
@@ -2517,7 +2517,7 @@ jobs:
           gh release download "${GITHUB_REF_NAME}" -p filex-desktop-amd64.deb -D "$RUNNER_TEMP/rel"
           bash packaging/aur/update-pkgbuild.sh "${GITHUB_REF_NAME}" --deb "$RUNNER_TEMP/rel/filex-desktop-amd64.deb"
           cat packaging/aur/filex-app-bin/.SRCINFO
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: env.AUR_SKIP != '1'
         with:
           name: aur-filex-app-bin
