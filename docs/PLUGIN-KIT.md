@@ -1752,11 +1752,11 @@ func TestOptionsScreen(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plugintest.CheckManifest(t, h.Manifest())     // what filex refuses at install
-	plugintest.CheckRegistered(t, h.Plugin)       // every advertised id has a function
-	plugintest.CheckSurface(t, h.Manifest(), s)   // the renderer's rules
-	plugintest.CheckLanguages(t, h.Manifest(), s) // every declared language
-	plugintest.Golden(t, "options", s)            // the stored shape
+	plugintest.CheckManifest(t, h.Manifest())                 // what filex refuses at install
+	plugintest.CheckRegistered(t, h.Plugin)                   // every advertised id has a function
+	plugintest.CheckSurfaceFor(t, h.Manifest(), "options", s) // the renderer's rules, in the view's placement
+	plugintest.CheckLanguages(t, h.Manifest(), s)             // every declared language
+	plugintest.Golden(t, "options", s)                        // the stored shape
 
 	// A select renders as a row of buttons, so the test reads it as one.
 	if len(plugintest.ChoiceValues(s, "target")) < 5 {
@@ -1829,7 +1829,8 @@ a kit that lies.
 
 | Call | |
 |---|---|
-| `CheckSurface` | unknown node type · a `select` with no readable options · more than one primary button · `show_when` / `required_when` naming a field that does not exist · a hidden field whose value is still being sent · duplicate node ids or field keys · a `steps` node without exactly one active step |
+| `CheckSurface` | unknown node type · a `select` with no readable options · more than one primary button · `show_when` / `required_when` naming a field that does not exist · a hidden field whose value is still being sent · duplicate node ids or field keys · a `steps` node without exactly one active step · (a warning) a screen with no buttons that is neither `done` nor queues a job, a dead end |
+| `CheckSurfaceFor` | the same, for the screen a view draws, read with the view's placement: a `home`, `page` or `inspector` screen stays where it is drawn, so having no buttons is no dead end there (it still is in a `modal` and in the `setup` wizard); a view the manifest does not declare is an error. Prefer it to `CheckSurface` for a view's screen |
 | `CheckManifest` | the closed permission set · an action whose view is not declared · a placement filex cannot draw · a page without `public_pages` · an output mode without `files:write` |
 | `CheckRegistered` | a menu row that opens a screen nobody wrote, and the reverse |
 | `CheckLanguages` | a `Text` missing a language the manifest promised, or carrying one it did not declare; the same words under two languages (a missing translation reads exactly like that) |
@@ -1838,7 +1839,7 @@ a kit that lies.
 | `Golden` | the stored shape of a screen; `-update` rewrites it, `git diff` is the review |
 
 Findings come back as a `Report` when you want to look rather than fail
-(`InspectSurface`, `InspectLanguages`, `InspectLocaleParity`,
+(`InspectSurface`, `InspectSurfaceFor`, `InspectLanguages`, `InspectLocaleParity`,
 `InspectJobResult`, …): errors fail
 the test, warnings are logged. `LangOpts{SameAllowed: […]}` is for the strings
 that are the same in every language on purpose - format names, brands, units.

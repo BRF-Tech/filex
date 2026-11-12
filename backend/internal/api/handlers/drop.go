@@ -29,6 +29,8 @@ import (
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/share"
+	"github.com/brf-tech/filex/backend/internal/shortlink"
+	"github.com/brf-tech/filex/backend/internal/spancount"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -946,26 +948,43 @@ func sanitizeSubName(s string) string {
 	return out
 }
 
-// ─────────────────── per-IP rate limiter ───────────────────
+// ─────────────────── per-client rate limiter ───────────────────
 
-type ipWindow struct {
-	count int
-	reset time.Time
-}
-
+// ipLimiter holds a client - an IPv4 address or an IPv6 /64, or an account
+// where share_mail.go keys it so - to limit actions over the clock's current
+// window and the one before it (internal/spancount): at most limit in any
+// stretch one window long, and a client that reached it waits until the end
+// of the next window (two windows at most). The file request's uploads, the
+// bot check, upload tickets, deletion links and share mail all count here.
+//
+// ⚠⚠ Built to be flooded (#325). Before 0.60.1 every new client past 4,096
+// swept the whole map under the lock, so a flood of fresh addresses was an
+// O(n²) loop - the mistake the short-link limiter's first flood measurement
+// found (2026-11-11). Now a request is O(1) under the lock: a window's map is
+// replaced whole when the clock turns, and it holds at most
+// spancount.MaxClients clients. A client a full map cannot hold is let
+// through uncounted (a flood from more addresses than that is past what a
+// per-address limit stops) rather than the map growing without end.
+//
+// ⚠ An IPv6 client is its /64 (shortlink.ClientKey, the short-link
+// limiter's own key, #335): one subscriber holds a whole /64, so keyed by the
+// full address one host was 2^64 fresh clients - past every limit, and able
+// to fill the map so that every newcomer went uncounted.
 type ipLimiter struct {
-	mu     sync.Mutex
-	hits   map[string]*ipWindow
-	limit  int
-	window time.Duration
+	mu    sync.Mutex
+	w     spancount.Window
+	limit int
+	// now is the clock; nil = time.Now.
+	now func() time.Time
 }
 
 func newIPLimiter(limit int, window time.Duration) *ipLimiter {
-	return &ipLimiter{hits: make(map[string]*ipWindow), limit: limit, window: window}
+	return &ipLimiter{w: spancount.Window{Span: window}, limit: limit}
 }
 
-// allow reports whether ip may perform another action within the window.
-func (l *ipLimiter) allow(ip string) bool { return l.allowN(ip, 1) }
+// allow reports whether the client at ip (its address, its /64 for IPv6) may
+// perform another action within the window.
+func (l *ipLimiter) allow(ip string) bool { return l.allowN(shortlink.ClientKey(ip), 1) }
 
 // allowN reports whether key may perform n more actions within the window,
 // and counts them when it may: all n fit in what is left, or none is counted
@@ -978,26 +997,16 @@ func (l *ipLimiter) allowN(key string, n int) bool {
 	if n > l.limit {
 		return false
 	}
+	now := time.Now()
+	if l.now != nil {
+		now = l.now()
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	now := time.Now()
-	w := l.hits[key]
-	if w == nil || now.After(w.reset) {
-		l.hits[key] = &ipWindow{count: n, reset: now.Add(l.window)}
-		// Opportunistic prune so the map can't grow unbounded.
-		if len(l.hits) > 4096 {
-			for k, v := range l.hits {
-				if now.After(v.reset) {
-					delete(l.hits, k)
-				}
-			}
-		}
-		return true
-	}
-	if w.count+n > l.limit {
+	if l.w.Count(now, key)+n > l.limit {
 		return false
 	}
-	w.count += n
+	l.w.Add(now, key, n)
 	return true
 }
 

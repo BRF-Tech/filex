@@ -163,7 +163,7 @@ func TestMissLimiter_AFloodOfAddressesStaysBounded(t *testing.T) {
 	if took := time.Since(began); took > 20*time.Second {
 		t.Fatalf("%d fresh addresses took %v: not O(1) a miss", MaxClients+50000, took)
 	}
-	if n := len(l.daily.cur); n > MaxClients {
+	if n, _ := l.daily.Clients(); n > MaxClients {
 		t.Fatalf("daily map holds %d clients, the cap is %d", n, MaxClients)
 	}
 	if n := len(d.cur); n > MaxClients {
@@ -172,8 +172,8 @@ func TestMissLimiter_AFloodOfAddressesStaysBounded(t *testing.T) {
 	// Two days on, both spans are new.
 	clk.t = clk.t.Add(2 * MissDailyWindow)
 	l.Miss("203.0.113.1")
-	if n := len(l.daily.cur) + len(l.daily.prev); n != 1 {
-		t.Fatalf("two days later: %d clients", n)
+	if cur, prev := l.daily.Clients(); cur+prev != 1 {
+		t.Fatalf("two days later: %d clients", cur+prev)
 	}
 }
 

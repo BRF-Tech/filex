@@ -118,6 +118,18 @@ export function stepNamed(block: string, name: string) {
 }
 
 /**
+ * The step of a job that runs an action (`- uses: <action>@<commit> # <tag>`),
+ * whatever commit it is pinned to: a step without a name of its own is named
+ * by its whole `uses:` line, and the commit changes with every update of the
+ * action (packaging/ci/ci-actions-pinned.patch, actionsPinned.test.ts).
+ */
+export function stepUsing(block: string, action: string) {
+  const s = stepsOf(block).find((x) => x.name.startsWith(`${action}@`));
+  expect(s, `a step that uses ${action}`).toBeTruthy();
+  return s!;
+}
+
+/**
  * A step's `if:` for one matrix row, evaluated as GitHub would: the few
  * operators and functions these conditions use, and nothing else (anything
  * more fails the test instead of being guessed at). An env variable the job

@@ -1,0 +1,16 @@
+{
+  "Version": "17.0.0",
+  "Name": "filex (YOUR-FILEX-HOST)",
+  "DestinationType": "ImageUploader, TextUploader, FileUploader",
+  "RequestMethod": "POST",
+  "RequestURL": "https://YOUR-FILEX-HOST/api/uploads",
+  "Headers": {
+    "Authorization": "Bearer fxu_YOUR_KEY"
+  },
+  "Body": "MultipartFormData",
+  "FileFormName": "file",
+  "URL": "{json:url}",
+  "ThumbnailURL": "{json:thumbnail_url}",
+  "DeletionURL": "{json:deletion_url}",
+  "ErrorMessage": "{json:error}"
+}

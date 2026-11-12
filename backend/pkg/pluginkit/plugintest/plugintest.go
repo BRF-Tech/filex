@@ -28,9 +28,9 @@
 //		if err != nil {
 //			t.Fatal(err)
 //		}
-//		plugintest.CheckSurface(t, h.Manifest(), s)   // structure
-//		plugintest.CheckLanguages(t, h.Manifest(), s) // every declared language
-//		plugintest.Golden(t, "options", s)            // shape, vs testdata/golden
+//		plugintest.CheckSurfaceFor(t, h.Manifest(), "options", s) // structure, in the view's placement
+//		plugintest.CheckLanguages(t, h.Manifest(), s)             // every declared language
+//		plugintest.Golden(t, "options", s)                        // shape, vs testdata/golden
 //	}
 //
 // # The fake host

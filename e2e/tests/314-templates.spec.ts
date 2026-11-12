@@ -8,7 +8,9 @@
  *  2. the public link page: the slot is there, its script is not, and the
  *     page runs under a nonce Content-Security-Policy;
  *  3. a template that never ends is refused at save, with the engine's words;
- *  4. an edited "not available" page is the one a dead link shows.
+ *  4. an edited "not available" page is the one a dead link shows;
+ *  5. the page an app's public address answers with (page.route, #324) is
+ *     in the editor, previewed with an app's words, and saved like the rest.
  *
  * Every template this spec writes is reset at the end: templates are the
  * install's, and the next spec opens links too.
@@ -22,7 +24,7 @@ import { dropStorageByName, newAuthedRequest, seedLocalStorage, storageRoot } fr
 const STORAGE = 'e2e-templates';
 const MOUNT = '/tmp/filex-e2e-templates';
 const FILE = 'price-list.pdf';
-const WRITTEN = ['slot.share.intro', 'page.error'];
+const WRITTEN = ['slot.share.intro', 'page.error', 'page.route'];
 
 /**
  * Replace what the template editor holds, as a person would: filex's code
@@ -153,5 +155,21 @@ test.describe('Templates', () => {
     expect(answer?.status()).toBe(404);
     await expect(page.locator('.e2e-gone')).toBeVisible();
     await expect(page.locator('body')).toContainText('Ask the sender for a new link.');
+  });
+
+  test("the page an app's address answers with is a template too", async ({ page }) => {
+    await loginAs(page);
+    await page.goto('/admin/templates');
+    await expect(page.getByTestId('templates-list')).toBeVisible({ timeout: 15_000 });
+    const item = page.getByTestId('template-item-page.route');
+    await expect(item).toContainText("A page of an app's address");
+    await item.click();
+    await expect(page.getByTestId('template-editor')).toHaveAttribute('data-key', 'page.route');
+    // The preview is the server's, with an app's words in it.
+    await expect(page.getByTestId('template-preview-frame')).toHaveAttribute('srcdoc', /Where this short link goes/, { timeout: 15_000 });
+    const res = await put(api, 'page.route', '<div class="card"><h1 class="e2e-route">{{ route.title }}</h1><p>{{ route.text }}</p></div>');
+    expect(res.ok(), await res.text()).toBeTruthy();
+    const saved = await api.get('/api/admin/templates/page.route');
+    expect(((await saved.json()) as { current: { body: string } }).current.body).toContain('e2e-route');
   });
 });

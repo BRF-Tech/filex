@@ -106,6 +106,14 @@ func TestSetup_AnAppWithRoutesWaitsForItsWizard(t *testing.T) {
 	_, ok := h.reg.Shortener()
 	assert.False(t, ok, "the shortener role is not held before the setup")
 
+	// The Apps list's row says it by its state alone. ⚠ 0.60.0 sent the
+	// reason as the row's state_error, and a Turkish panel read "Kurulum
+	// bekliyor waiting to be set up": the label in the reader's language,
+	// then the server's English under it, drawn as an error.
+	row := h.reg.StatusOf(h.p)
+	assert.Equal(t, StateSetup, row.State)
+	assert.Empty(t, row.StateError, "waiting for a setup is a state, not an error")
+
 	// Finishing before the app's step and an address is refused.
 	assert.ErrorIs(t, h.reg.CompleteSetup(ctx, h.p.Row.ID, 1), ErrSetupAppStep)
 	_, _, err = h.reg.SetupView(ctx, h.p.Row.ID, nil, "en", wire.ViewEventInput{Event: "action", ActionID: "finish"})
@@ -262,50 +270,75 @@ func TestPool_ConcurrencyIsBoundedAndOverflowIsShed(t *testing.T) {
 	pool := c.hot(poolSize(h.reg.opts.RoutePool))
 	require.Equal(t, 2, pool.size)
 
-	var wg sync.WaitGroup
-	var ok, busy atomic.Int32
-	for i := 0; i < 40; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, err := h.visit(t, "hit-x", false); err == nil {
-				ok.Add(1)
-			} else if IsCode(err, CodeBusy) {
-				busy.Add(1)
-			} else {
-				t.Error(err)
-			}
-		}()
-	}
-	wg.Wait()
-	assert.LessOrEqual(t, pool.peak.Load(), int32(2), "never more calls at once than the pool")
-	assert.Equal(t, int32(40), ok.Load()+busy.Load())
-	assert.Positive(t, ok.Load())
-
-	// Two slow calls hold both instances; four more fill the queue; the next
-	// is answered busy without waiting for its wait.
-	var slow sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		slow.Add(1)
-		go func() { defer slow.Done(); _, _ = h.visit(t, "sleep", false) }()
-	}
-	time.Sleep(200 * time.Millisecond)
+	// ⚠ Nothing here may hang on how fast this machine is (#337). The calls
+	// go to the pool itself with a budget of a minute, not through Route and
+	// its one second: on a loaded machine under -race the first calls on two
+	// fresh instances ran out of that second, and none of forty succeeded.
+	// The queue is seen full in the pool's own count, the instances are held
+	// by the test itself: before, two `sleep` visits were given 200 ms to take
+	// them and four queued calls 100 ms to start waiting.
+	ctx := context.Background()
 	s := &Scope{plugin: h.p, reg: h.reg, route: true}
-	in, _ := json.Marshal(wire.RouteInput{Path: "hit-y", Method: "GET"})
+	in, _ := json.Marshal(wire.RouteInput{Path: "hit-x", Method: "GET"})
+	const budget = time.Minute
+
+	// Forty calls at once, thirty times over. The first round starts the
+	// instances; the warm rounds after it are where calls follow each other
+	// on one instance fastest, so a count that holds a call past the moment
+	// it gave its instance back reads more than 2 here (#337: 3 or 4 in 65 of
+	// 300 such rounds under -race), while the pool still runs two calls at a
+	// time.
+	const rounds, calls = 30, 40
+	var ok, busy atomic.Int32
+	for r := 0; r < rounds; r++ {
+		var wg sync.WaitGroup
+		for i := 0; i < calls; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if _, err := pool.call(WithScope(ctx, s), "route", in, budget, routeWait); err == nil {
+					ok.Add(1)
+				} else if IsCode(err, CodeBusy) {
+					busy.Add(1)
+				} else {
+					t.Error(err)
+				}
+			}()
+		}
+		wg.Wait()
+	}
+	assert.LessOrEqual(t, pool.peak.Load(), int32(2), "never more calls at once than the pool")
+	assert.Zero(t, pool.overlaps.Load(), "an instance answers one call at a time")
+	assert.Equal(t, int32(rounds*calls), ok.Load()+busy.Load())
+	assert.Positive(t, ok.Load(), "a call that found a free place in the pool ran")
+
+	// Both instances held, the queue full: the next call is answered busy
+	// without waiting for its wait.
+	var held []*warm
+	for i := 0; i < pool.size; i++ {
+		w, err := pool.acquire(ctx, "route", time.Minute)
+		require.NoError(t, err)
+		held = append(held, w)
+	}
 	var queued sync.WaitGroup
-	for i := 0; i < 4; i++ {
+	for i := int32(0); i < pool.queue; i++ {
 		queued.Add(1)
 		go func() {
 			defer queued.Done()
-			_, _ = pool.call(WithScope(context.Background(), s), "route", in, routeBudget, 2*time.Second)
+			_, err := pool.call(WithScope(ctx, s), "route", in, budget, time.Minute)
+			assert.NoError(t, err, "a queued call gets an instance once one is given back")
 		}()
 	}
-	time.Sleep(100 * time.Millisecond)
+	require.Eventually(t, func() bool { return pool.waiting.Load() == pool.queue }, time.Minute, time.Millisecond, "the queue fills")
 	t0 := time.Now()
-	_, err = pool.call(WithScope(context.Background(), s), "route", in, routeBudget, 2*time.Second)
+	_, err = pool.call(WithScope(ctx, s), "route", in, budget, time.Minute)
 	assert.True(t, IsCode(err, CodeBusy), "%v", err)
-	assert.Less(t, time.Since(t0), 100*time.Millisecond, "a full queue answers at once")
-	slow.Wait()
+	// Its wait is a minute: answered in less than that, it never queued.
+	assert.Less(t, time.Since(t0), 10*time.Second, "a full queue answers at once")
+	assert.Equal(t, pool.queue, pool.waiting.Load(), "the refused call did not take a place in the queue")
+	for _, w := range held {
+		pool.release(w, true)
+	}
 	queued.Wait()
 }
 

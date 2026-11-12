@@ -378,6 +378,15 @@ const WORKFLOW_GUARDS = [
   'only=snap builds, checks, attaches by name and sends each Linux snap, and nothing else; FILEX_SKIP_SNAP does not stop it',
   "verify asks the tag's commit for CI and a dry run of everything, for only=snap as for only=arm64",
   'a dry run of only=snap is let through without asking, like one of only=arm64',
+  // 2026-11: compromised accounts pushed a CI secret stealer to many
+  // repositories. Every action runs at a full commit, never a tag that can be
+  // moved, and the jobs that read a publishing secret run in the release
+  // environment, which only main and v* tags may deploy to
+  // (packaging/ci/ci-actions-pinned.patch, packaging/ci/release-environment.patch,
+  // web/tests/deploy/actionsPinned.test.ts).
+  'every action a workflow runs is pinned to a full commit, its tag in a comment',
+  'every job that reads a publishing secret runs in the release environment',
+  'every workflow says at the top what its token may do',
 ];
 
 /**
@@ -707,6 +716,11 @@ export default function plan({ repo, version, tag, platform = process.platform }
     branch: 'main',
     remote: 'origin',
     exportRemote: 'origin',
+    // GitHub's ruleset on the public repository that refuses deleting or
+    // moving a v* tag ("release tags", 2026-11-12): the one way to take back
+    // a public tag that names the private release commit (lesson #55) starts
+    // by switching it off (stages.mjs, push stage).
+    tagRuleset: 27105600,
     exportScript: 'scripts/export-public.sh',
     // The Go module lives in backend/, so its tag is backend/vX.Y.Z (stages.mjs
     // signs and pushes `${backendTagPrefix}${tag}`). 0.50: the plan did not
@@ -1100,6 +1114,7 @@ export default function plan({ repo, version, tag, platform = process.platform }
             'tests/deploy/releaseStoresOnly.test.ts',
             'tests/deploy/releaseDesktopUpgrade.test.ts',
             'tests/deploy/releaseSnapFollows.test.ts',
+            'tests/deploy/actionsPinned.test.ts',
           ],
           env: (c) => ({ FILEX_WORKFLOWS_DIR: workflowsOf(c.exportTarget) }),
           mustPass: WORKFLOW_GUARDS,

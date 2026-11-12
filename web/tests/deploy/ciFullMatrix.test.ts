@@ -242,7 +242,7 @@ describe('ci.yml: the full matrix', () => {
       expect(cacheAt, `${key} keeps the package files`).toBeGreaterThan(0);
       expect(installAt, `${key} installs after it, under the name the gate knows`).toBeGreaterThan(cacheAt);
       const cache = b.slice(cacheAt, installAt);
-      expect(cache, key).toContain('uses: actions/cache@v4');
+      expect(cache, key).toMatch(/uses: actions\/cache@[0-9a-f]{40} # v\d/);
       expect(cache, key).toContain('path: ~/.cache/filex-ci-debs');
       const cacheKey = /\n\s+key: (.+)\n/.exec(cache)?.[1].trim() ?? '';
       const restore = /\n\s+restore-keys: (.+)/.exec(cache)?.[1].trim() ?? '';

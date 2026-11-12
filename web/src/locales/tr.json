@@ -4653,6 +4653,7 @@
       "page_folder": "Paylaşılan klasör (JavaScript olmadan)",
       "page_file_request": "Dosya isteği yükleme sayfası (JavaScript olmadan)",
       "page_app": "Bir uygulamanın bağlantısı (JavaScript olmadan)",
+      "page_route": "Bir uygulama adresinin sayfası (kısa bağlantı önizlemesi)",
       "page_cache_wait": "İndirme hazırlanıyor",
       "page_shell": "Herkese açık bağlantı sayfası (çerçeve)",
       "slot_share_title": "Paylaşılan bağlantı: başlık",

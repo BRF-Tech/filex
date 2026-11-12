@@ -10,6 +10,13 @@
  *     host answers the route and nothing else, so it needs a DNS record and a
  *     certificate, which the step says.
  *
+ * ⚠ Each kind keeps its OWN prefix. The route's default prefix ("l") is the
+ * own address's starting value (it is required there) and only the
+ * placeholder of a host of its own: 0.60.0 kept one prefix for both, so the
+ * "l" came along on a switch and l.example.com was added as
+ * https://l.example.com/l. Kept per kind rather than cleared on a switch, so
+ * switching back and forth loses nothing a person typed.
+ *
  * ⚠ The rules are the SERVER's. A refused address comes back as a code, the
  * field it is about and a sentence in the reader's language; the sentence is
  * drawn under that field and nothing is guessed here.
@@ -43,7 +50,8 @@ type Kind = 'own' | 'host';
 interface Draft {
   kind: Kind;
   host: string;
-  prefix: string;
+  /** The prefix of each kind, kept apart (see the note above). */
+  prefixes: Record<Kind, string>;
   tenant: string;
   busy: boolean;
   errors: { host?: string; prefix?: string; other?: string };
@@ -56,13 +64,28 @@ watch(
   () => {
     for (const r of props.routes) {
       if (drafts.value[r.id]) continue;
-      drafts.value[r.id] = { kind: 'own', host: '', prefix: r.default_prefix ?? '', tenant: '0', busy: false, errors: {} };
+      drafts.value[r.id] = { kind: 'own', host: '', prefixes: { own: r.default_prefix ?? '', host: '' }, tenant: '0', busy: false, errors: {} };
     }
   },
   { immediate: true },
 );
 function draftOf(route: AppSetupRoute): Draft {
   return drafts.value[route.id];
+}
+
+/** The prefix field's value: the one of the kind chosen now. */
+function prefixOf(d: Draft): string {
+  return d.prefixes[d.kind];
+}
+function setPrefix(d: Draft, v: string | number | null) {
+  d.prefixes[d.kind] = String(v ?? '');
+}
+/** A refusal was about the kind it was asked for; the other kind starts clean. */
+function setKind(d: Draft, v: string | string[]) {
+  const kind = String(v) as Kind;
+  if (kind === d.kind) return;
+  d.kind = kind;
+  d.errors = {};
 }
 
 const kindChoices = computed<ChoiceOption[]>(() => [
@@ -82,7 +105,7 @@ function routeLabel(r: AppSetupRoute): string {
 /** What the address will look like, before it is asked for. */
 function preview(d: Draft): string {
   const host = d.kind === 'own' ? ownHost.value : d.host.trim().toLowerCase();
-  const prefix = d.prefix.trim().replace(/^\/+|\/+$/g, '');
+  const prefix = prefixOf(d).trim().replace(/^\/+|\/+$/g, '');
   if (!host) return '';
   return `https://${host}${prefix ? `/${prefix}` : ''}/${t('appPlugins.setup.addr.codeWord')}`;
 }
@@ -114,7 +137,7 @@ async function add(route: AppSetupRoute) {
   try {
     const base = await AppPluginsApi.addSetupBase(props.pluginId, route.id, {
       host: d.kind === 'own' ? '' : d.host.trim(),
-      prefix: d.prefix.trim(),
+      prefix: prefixOf(d).trim(),
       tenant_id: d.kind === 'host' && props.multiTenant ? Number(d.tenant) : 0,
       default: !route.bases.some((b) => b.enabled),
     });
@@ -211,7 +234,7 @@ const columns = computed<DataColumn<AppSetupBase>[]>(() => [
           segmented
           :aria-label="t('appPlugins.setup.addr.kindLabel')"
           :testid-prefix="`app-setup-kind-${route.id}`"
-          @update:model-value="(v: string | string[]) => (draftOf(route).kind = String(v) as Kind)"
+          @update:model-value="(v: string | string[]) => setKind(draftOf(route), v)"
         />
         <Input
           v-if="draftOf(route).kind === 'host'"
@@ -224,13 +247,14 @@ const columns = computed<DataColumn<AppSetupBase>[]>(() => [
           :error="draftOf(route).errors.host"
         />
         <Input
-          v-model="draftOf(route).prefix"
+          :model-value="prefixOf(draftOf(route))"
           :name="`app-setup-prefix-${route.id}`"
           :label="draftOf(route).kind === 'own' ? t('appPlugins.setup.addr.prefix') : t('appPlugins.setup.addr.prefixOptional')"
           :placeholder="route.default_prefix || 'l'"
           autocomplete="off"
           monospace
           :error="draftOf(route).errors.prefix"
+          @update:model-value="(v: string | number | null) => setPrefix(draftOf(route), v)"
         />
         <div v-if="draftOf(route).kind === 'host' && multiTenant" class="space-y-1">
           <span class="label-base">{{ t('appPlugins.setup.addr.tenant') }}</span>

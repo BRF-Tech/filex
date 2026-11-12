@@ -780,6 +780,11 @@ func BuildRouter(d *Deps) http.Handler {
 		d.Templates = &templates.Renderer{Store: d.Store, MultiTenant: d.Cfg.MultiTenant}
 	}
 	d.Templates.SetBrand(brandingSrc.TemplateBrand, templateTenantForHost(d.Store))
+	// An app's public address answers with templates too (page.error,
+	// page.route; handlers/route_door.go).
+	if routeDoor != nil {
+		routeDoor.Templates = d.Templates
+	}
 	sh.AttachTemplates(d.Templates)
 	mh.Templates = d.Templates
 	dh.AttachTemplates(d.Templates)

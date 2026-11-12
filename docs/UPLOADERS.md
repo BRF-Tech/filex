@@ -97,6 +97,16 @@ The file is ordinary ShareX JSON. What it sends and reads:
 ⚠ The file carries the key. Treat it as you would a password; if it leaks,
 give the uploader a new key (the old file stops working) or delete it.
 
+**Setting ShareX up by hand.** <a href="uploaders/filex.sxcu" download><code>filex.sxcu</code></a> is the
+same file with placeholders instead of an address and a key, for any filex
+server: a key you made over [the API](#managing-uploaders-over-the-api), or a
+setup guide of your own. Import it as above, then in **Custom uploader
+settings** replace `YOUR-FILEX-HOST` in the **Request URL** with your server's
+address (and its path, when filex is served under one) and `fxu_YOUR_KEY` in
+the `Authorization` header with the uploader's key. The placeholders are plain
+text on purpose: ShareX's `{prompt:...}` does not ask once at import, it opens
+a box at every upload.
+
 ---
 
 ## Other programs

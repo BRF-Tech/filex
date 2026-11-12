@@ -1892,7 +1892,10 @@ on the app's row and page.
 2. **Addresses**, for an app with routes: where it answers. Either **this
    filex's own address with a path** (`files.example.com/l`; on a
    multi-tenant instance every tenant's own address too) or **a host of its
-   own**, with an optional path (`l.example.com`, `go.example.com/x`). A host
+   own**, with an optional path (`l.example.com`, `go.example.com/x`). The
+   path of filex's own address starts with the app's suggestion (`l`); a host
+   of its own starts with none, and each kind keeps what you type in it when
+   you switch between them. A host
    of its own answers that app's addresses and `/healthz`, and nothing else
    of filex - no sign-in page, no API, no share. Point its DNS at filex and
    have your proxy pass it through and certify it; with `FILEX_TLS_MODE=proxy`
@@ -1974,10 +1977,12 @@ What filex holds around every short address, whichever app answers it:
   no cookie. A preview page (a link followed by `+`) is drawn by filex.
 - **Clicks**: chat previewers, crawlers and prefetches are not counted, nor
   the same visitor again within a minute.
-- **filex's own pages, not templates.** The miss page, "too many tries",
-  "unavailable" and the `+` preview are drawn by filex itself, with nothing
-  loaded from elsewhere (they work on a host of the app's own), and they are
-  not among the [templates](TEMPLATES.md) an administrator edits.
+- **filex's pages, from templates.** The miss page, "too many tries" and
+  "unavailable" (`page.error`) and a page the app answers with, such as the
+  `+` preview (`page.route`), are drawn by filex from the
+  [templates](TEMPLATES.md#an-apps-public-address) an administrator edits, in
+  the address's branding, with nothing loaded from elsewhere (they work on a
+  host of the app's own), and drawn once and served again under a flood.
 - **Floods do not take filex down.** The app answers on a few instances kept
   started (`FILEX_APP_ROUTE_POOL`, half the CPUs by default); what does not
   fit is answered *busy* at once, an app that keeps failing is left alone

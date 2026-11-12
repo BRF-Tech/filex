@@ -59,7 +59,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { Check, ChevronDown } from 'lucide-vue-next';
 import { dirOfElement, type TextDirection } from '../lib/direction';
 import { placeListUnder, type ListPlacement } from '../lib/listPlacement';
-import { POPUP_BASE_Z, popupLayer } from '../lib/popupLayer';
+import { POPUP_BASE_Z, popupHost, popupLayer } from '../lib/popupLayer';
 
 export interface SelectOption {
   value: string | number;
@@ -250,7 +250,7 @@ function listen(on: boolean) {
 async function show(at?: number) {
   if (props.disabled || open.value) return;
   const t = trigger.value;
-  target.value = (t?.closest('dialog[open]') as HTMLElement | null) ?? document.body;
+  target.value = popupHost(t);
   if (t) {
     carried.value = readCarried(t);
     place.value = { ...place.value, z: popupLayer(t) };

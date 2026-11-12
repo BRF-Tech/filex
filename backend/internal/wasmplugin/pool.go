@@ -74,7 +74,15 @@ type hotPool struct {
 	idle    chan *warm
 	slots   chan struct{}
 	waiting atomic.Int32
-	// inUse is how many calls run right now (tests read the high-water mark).
+	// inUse is how many calls hold an instance right now (tests read the
+	// high-water mark, peak). A call counts from the moment it has its
+	// instance until the moment before it gives it back. Until #337 it was
+	// uncounted only after it had given the instance back (a defer after
+	// done): the next call could already run on that instance while this one
+	// still counted, and the mark read more than size on a pool that never
+	// ran more than size calls at once - over 300 rounds of 40 visits on a
+	// 2-instance pool (-race), 65 rounds read 3 or 4, while the calls holding
+	// an instance and the guest calls running never passed 2.
 	inUse, peak atomic.Int32
 	// overlaps counts calls handed an instance another call was still
 	// using: never, unless the pool is broken (tests read it).
@@ -182,12 +190,6 @@ func (h *hotPool) call(ctx context.Context, export string, input []byte, budget,
 	if !w.busy.CompareAndSwap(false, true) {
 		h.overlaps.Add(1)
 	}
-	// done gives the instance back: free first, so whoever takes it next
-	// finds it free.
-	done := func(keep bool) {
-		w.busy.Store(false)
-		h.release(w, keep)
-	}
 	n := h.inUse.Add(1)
 	for {
 		p := h.peak.Load()
@@ -195,7 +197,13 @@ func (h *hotPool) call(ctx context.Context, export string, input []byte, budget,
 			break
 		}
 	}
-	defer h.inUse.Add(-1)
+	// done gives the instance back: uncounted and free first, so whoever
+	// takes it next finds it free and this call no longer counted (inUse).
+	done := func(keep bool) {
+		h.inUse.Add(-1)
+		w.busy.Store(false)
+		h.release(w, keep)
+	}
 	cctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	if !w.inst.FunctionExists(export) {

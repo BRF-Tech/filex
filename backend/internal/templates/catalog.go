@@ -48,6 +48,10 @@ type Def struct {
 	Vars []string `json:"vars"`
 	// sample is the data the editor's preview and the save check render with.
 	sample func() map[string]any
+	// selfContained: the page is only ever served where it may load nothing
+	// from anywhere (Target.SelfContained), so its preview is drawn that way
+	// too - without the brand's logo.
+	selfContained bool
 }
 
 // Globals are the variables every template has.
@@ -190,6 +194,18 @@ var Defs = []Def{
 		sample: func() map[string]any {
 			return map[string]any{"app": map[string]any{"title": "Contract.pdf"},
 				"files": []any{map[string]any{"name": "Contract.pdf", "url": "/api/public/s/q8w2e4/file/pub:1?download=1"}}}
+		}},
+	// page.route is the page an app's public address answers with (a short
+	// link's `+` preview): the app's words, never its HTML. The door's own
+	// answers there - a miss, too many tries, unavailable - are page.error
+	// (error.key route_miss / route_busy / route_unavailable).
+	{Key: "page.route", Kind: KindPage, Layout: "page.layout", selfContained: true,
+		Vars: []string{"route.title", "route.text", "route.link", "route.link_label"},
+		sample: func() map[string]any {
+			return map[string]any{"route": map[string]any{
+				"title": "Where this short link goes", "text": "https://files.example.com/s/k3x9p2",
+				"link": "https://files.example.com/s/k3x9p2", "link_label": "Open",
+			}}
 		}},
 
 	{Key: "page.delete_confirm", Kind: KindPage, Layout: "page.layout", Hooks: []string{"name=confirm"},

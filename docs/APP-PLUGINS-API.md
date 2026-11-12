@@ -530,7 +530,7 @@ those as the pin and the grant.
               "update_check": true, "updates_checked_at": "2026-09-26T03:00:00Z"},
   "plugins": [
     {"id": 1, "name": "sign", "version": "1.0.0", "label": {"en": "e-Signature", "tr": "e-İmza"},
-     "enabled": true, "state": "running" | "disabled" | "refused" | "failed", "state_error": "",
+     "enabled": true, "state": "running" | "disabled" | "refused" | "failed" | "setup", "state_error": "",
      "source": "upload" | "url" | "github" | "bundle", "source_url": "", "sha256": "…", "signed": false,
      "permissions": ["files:read", …], "actions": 2, "views": 2, "public_pages": 1,
      "scheduled": true, "kind": "app" | "language-pack", "languages": [],
@@ -2037,6 +2037,9 @@ the state **`setup`**: loaded, running nothing. No action, screen,
 interface call, wake-up, page, thumbnail, route or role of it is reached
 until an administrator finishes its wizard. `setup` overlays `running` the
 way `unlicensed` does, so every door that asks "is the app running" says no.
+In the Apps list the row says `"state": "setup"` with an empty `state_error`
+(0.60.1): waiting for the wizard is a state, not an error, and the panel words
+it in the reader's language.
 
 ```json
 "setup": {
@@ -2133,8 +2136,11 @@ type RouteOutput struct { // exactly one of the three
   - a redirect is `302` with `Cache-Control: no-store`, `Referrer-Policy:
     no-referrer`, `X-Robots-Tag: noindex, nofollow` and no cookie; a
     redirect that breaks the rule above is not made (`503`);
-  - a page is filex's own template (`Content-Security-Policy: default-src
-    'none'`, no script);
+  - a page is the `page.route` template with the app's words in it - an
+    administrator may edit it ([TEMPLATES.md](TEMPLATES.md#an-apps-public-address)),
+    the app gives no HTML (`Content-Security-Policy: default-src 'none'`, no
+    script, nothing loaded from elsewhere); a miss, too many tries and
+    unavailable are `page.error`;
   - **every miss is one page**, `404`, the same bytes whatever the reason -
     never existed, deleted, ended, switched off, the app not answering the
     route now - so a guesser learns nothing from it;

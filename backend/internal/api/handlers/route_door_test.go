@@ -186,6 +186,44 @@ func TestRouteDoor_OwnPagesInTheVisitorsLanguage(t *testing.T) {
 	assert.Equal(t, tr1, tr2, "the same page for every miss")
 }
 
+// The door's pages are templates (#324): an administrator's page.error is
+// what a miss shows (error.key route_miss), their page.route frames an app's
+// page, under the door's own policy, and a save shows at once.
+func TestRouteDoor_PagesAreTheAdministratorsTemplates(t *testing.T) {
+	f := newAppFixture(t, nil)
+	setUpShortener(t, f)
+	before := visit(t, f, http.MethodGet, "", "/l/never-1")
+	require.Equal(t, http.StatusNotFound, before.StatusCode)
+	assert.Contains(t, before.Body, "This link is not available")
+
+	save := func(key, body string) {
+		t.Helper()
+		status, raw := doReq(t, f.admin, http.MethodPut, f.srv.URL+"/api/admin/templates/"+key,
+			map[string]any{"subject": "", "body": body, "text": "", "revision": 0, "lang": "en"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+	}
+	save("page.error", `<div class="card"><h1>EDITED {{ error.key }} {{ error.code }}: {{ error.title }}</h1></div>`)
+	miss := visit(t, f, http.MethodGet, "", "/l/never-2")
+	require.Equal(t, http.StatusNotFound, miss.StatusCode)
+	assert.Contains(t, miss.Body, "EDITED route_miss 404: This link is not available", "a saved page.error is shown at once")
+	assert.Equal(t, miss.Body, visit(t, f, http.MethodGet, "", "/l/never-3").Body, "a miss tells nothing about why")
+	assert.Contains(t, miss.Header.Get("Content-Security-Policy"), "default-src 'none'")
+
+	save("page.route", `<div class="card"><h1>ROUTE-EDIT {{ route.title }}</h1><p>{{ route.text }}</p><a href="{{ route.link }}">{{ route.link_label }}</a></div>`)
+	page := visit(t, f, http.MethodGet, "", "/l/page")
+	require.Equal(t, http.StatusOK, page.StatusCode)
+	assert.Contains(t, page.Body, "ROUTE-EDIT A page")
+	assert.Contains(t, page.Body, "Drawn by filex")
+	assert.Contains(t, page.Body, `href="https://example.com/next"`)
+	assert.Contains(t, page.Header.Get("Content-Security-Policy"), "default-src 'none'")
+	assert.NotContains(t, page.Body, "<script")
+
+	// A host of its own is answered the same way.
+	own := visit(t, f, http.MethodGet, "l.example.test", "/never-4")
+	assert.Equal(t, http.StatusNotFound, own.StatusCode)
+	assert.Contains(t, own.Body, "EDITED route_miss 404")
+}
+
 // Guessing is slow: past the burst of misses a client is held back on every
 // address, a link that exists included.
 func TestRouteDoor_GuessingLocksTheClientOut(t *testing.T) {

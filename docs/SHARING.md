@@ -404,7 +404,12 @@ it is sent reads exactly as the server's refusal of it would ("a.pdf is too big
 **Limits & safety** (enforced server-side): per-submission file count and
 per-file size, an optional extension allowlist, an optional PIN, an expiry, a
 lifetime `max_uploads` cap, and **per-IP rate limiting** on the anonymous upload
-endpoint. Read-only storages reject drops.
+endpoint: 40 submissions from one address in any hour, counted over the
+clock's hour and the one before it, so the turn of an hour is no fresh start
+(`429 rate_limited`; an address that reached it waits until the next hour
+ends). IPv6 addresses are counted per /64, the block one subscriber holds.
+The count costs the same one step under a flood of addresses.
+Read-only storages reject drops.
 
 **The upload cap is exact.** A submission's files are claimed against
 `max_uploads` *before* the first one is written, in one database statement, so

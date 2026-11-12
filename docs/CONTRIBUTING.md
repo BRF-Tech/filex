@@ -1332,7 +1332,10 @@ What `ChoiceSelect` does, so a page never has to:
   a change and is not passed on (the dialog around it stays open); Tab
   chooses and moves on. A disabled option stays listed and is skipped.
 - **where the list goes** - teleported to `<body>` (or into the open
-  `<dialog>` the field sits in), under the field or above it when there is no
+  `<dialog>` the field sits in: `lib/popupLayer` `popupHost`, which the row
+  Actions menu and a table's column menu ask too, because a modal dialog is
+  in the browser's top layer and nothing in `<body>` is drawn over it),
+  under the field or above it when there is no
   room below, from the field's inline-start edge, inside the window
   (`lib/listPlacement`), on the layer `lib/popupLayer` measures, wearing the
   field's computed `--fe-*` tokens; a press outside closes it.
@@ -2702,6 +2705,33 @@ the tags are out:
   into the secret - `<the command> | gh secret set WINGET_TOKEN -R BRF-Tech/filex`
   reads it from the pipe, so it never shows - and resume: the gate asks again.
 
+**The publishing jobs run in the `release` environment** (BRF-Tech/filex →
+Settings → Environments; no reviewer, no wait). Only `main` and `v*` tags may
+deploy to it: the tag run, the dry run of `main` and a run by hand on `main` or
+on a tag (`only=…`, `snap_only=true`) get its secrets, and a run on any other
+branch stops at `verify`. `release.yml`'s `verify` (`CIRCLECI_TOKEN`),
+`binaries` (`HOMEBREW_TAP_DEPLOY_KEY`, `WINGET_TOKEN`), `desktop` (`MSSTORE_*`,
+`SNAPCRAFT_STORE_CREDENTIALS`, `WINGET_TOKEN`, `HOMEBREW_TAP_DEPLOY_KEY`) and
+`aur` (`AUR_SSH_PRIVATE_KEY`), `msstore-resubmit.yml`'s `submit` and
+`nightly-desktop.yml`'s `desktop` name it (`packaging/ci/release-environment.patch`;
+`web/tests/deploy/actionsPinned.test.ts` wants every job that reads a secret
+in it). Until the secrets move into the environment they are the repository's,
+which a job in the environment reads as well; after the move a secret is set
+with `gh secret set <NAME> --env release -R BRF-Tech/filex`, and a job without
+`environment: release` finds it empty.
+
+**GitHub refuses deleting or moving a `v*` tag, and force-pushing or deleting
+`main`**: two rulesets on BRF-Tech/filex, `release tags` (id 27105600: deletion
+and update of `refs/tags/v*`) and `main` (id 21184600: deletion and
+non-fast-forward of the default branch), with no one to bypass them - the same
+rules the public checkout's pre-push gate holds. A new tag is still pushed as
+before. The one way to take a public tag back - it names the private release
+commit, which the push stage refuses out loud and answers with the steps -
+starts by switching the tag ruleset off
+(`gh api -X PUT repos/BRF-Tech/filex/rulesets/27105600 -f enforcement=disabled`)
+and ends, once the export's tag is pushed again, by switching it back on
+(`-f enforcement=active`).
+
 **Around the tool, three more commands** ([The release train's
 tools](#the-release-trains-tools)): `pnpm train X.Y.Z` writes the day's
 release note (the rule above, the cut, what is on the train, the merge queue),
@@ -3720,6 +3750,29 @@ ones not yet published apply on top of one another in this order:
     0.60.0's dry run died five times at `snap install snapcraft` ("unable to
     contact snap store") while the Store went up and down for hours.
     `releaseSnapFollows.test.ts`.
+16. `ci-actions-pinned.patch` (after 0.60.0), on top of 15 - already on the
+    public `main`: pushed without a tag, with the export that brings its
+    guards. Every `uses:` of every workflow names the full commit its tag
+    named that day, the tag in a comment
+    (`actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0`),
+    so a moved or hijacked tag changes nothing a run executes (a campaign of
+    compromised accounts pushed a CI secret stealer to many repositories in
+    2026-11). Nothing changed version: each pin is the commit the tag already
+    named. A new action, or an update of one, is pinned the same way - the
+    commit `git ls-remote --tags https://github.com/<owner>/<repo>` gives
+    for the tag, the `^{}` line of an annotated one - and a tag left in a
+    `uses:` is red (`actionsPinned.test.ts`). The tests find a step by its
+    action (`stepUsing` in `web/tests/helpers/releaseWorkflow.ts`), not by
+    the whole `uses:` line, so an update of a pin moves no test.
+17. `release-environment.patch` (after 0.60.0), on top of 16 - already on the
+    public `main`, pushed with 16: `release.yml`'s `verify`, `binaries`,
+    `desktop` and `aur`, `msstore-resubmit.yml`'s `submit` and
+    `nightly-desktop.yml`'s `desktop` - every job that reads a publishing
+    secret - run in the `release` environment
+    ([Release process](#release-process), "The publishing jobs run in the
+    `release` environment").
+    `actionsPinned.test.ts` wants every job that reads a secret other than
+    the run's own token in it, and no secret at a workflow's top.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and

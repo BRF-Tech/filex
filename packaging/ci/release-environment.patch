@@ -1,0 +1,72 @@
+diff --git a/.github/workflows/msstore-resubmit.yml b/.github/workflows/msstore-resubmit.yml
+index 0b10b932059bdc72116a1a1257087a1ecc601f03..a828adf2ed326e367898f7ac2cc8aa070dff66ed 100644
+--- a/.github/workflows/msstore-resubmit.yml
++++ b/.github/workflows/msstore-resubmit.yml
+@@ -40,6 +40,9 @@ permissions:
+ jobs:
+   submit:
+     runs-on: windows-latest
++    # The release environment: only main and v* tags may deploy to it, and
++    # the publishing secrets this job reads belong there.
++    environment: release
+     env:
+       MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+       MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+diff --git a/.github/workflows/nightly-desktop.yml b/.github/workflows/nightly-desktop.yml
+index 5a9011c7edaa85321c08a0f74dcc9ea4ece0a9ce..862783b13371f4d02b826c867ddb112907685a9f 100644
+--- a/.github/workflows/nightly-desktop.yml
++++ b/.github/workflows/nightly-desktop.yml
+@@ -118,6 +118,9 @@ jobs:
+           - { os: windows-latest, label: windows, targets: "windows" }
+           - { os: macos-15, label: macos, targets: "mac" }
+     runs-on: ${{ matrix.os }}
++    # The release environment: only main and v* tags may deploy to it, and
++    # the publishing secrets this job reads belong there.
++    environment: release
+     env:
+       ND_VERSION: ${{ needs.source.outputs.version }}
+       ND_TARGETS: ${{ matrix.targets }}
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 0ec99bb4ecd28f1b35712c352457706b00d2cc2f..4dd079e90e988980fdfbb99ef754b8afc6be7fc2 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -566,6 +566,9 @@ jobs:
+     # closed, whatever kind of run this is.
+     if: ${{ !cancelled() && needs.plan.result == 'success' }}
+     runs-on: ubuntu-latest
++    # The release environment: only main and v* tags may deploy to it, and
++    # the publishing secrets this job reads belong there.
++    environment: release
+     permissions:
+       actions: read
+       contents: read
+@@ -807,6 +810,9 @@ jobs:
+     needs: [plan, verify]
+     if: needs.plan.outputs.full == 'true'
+     runs-on: ubuntu-latest
++    # The release environment: only main and v* tags may deploy to it, and
++    # the publishing secrets this job reads belong there.
++    environment: release
+     env:
+       PUBLISH: ${{ needs.plan.outputs.publish }}
+       SURFACES: ${{ needs.plan.outputs.surfaces }}
+@@ -1524,6 +1530,9 @@ jobs:
+       # the rows plan wrote.
+       matrix: ${{ fromJSON(needs.verify.outputs.desktop || needs.plan.outputs.desktop) }}
+     runs-on: ${{ matrix.os }}
++    # The release environment: only main and v* tags may deploy to it, and
++    # the publishing secrets this job reads belong there.
++    environment: release
+     # gh release upload needs contents: write; a tag run downloads the dry
+     # run's artifacts (actions: read). Nothing here pushes an image.
+     permissions:
+@@ -2478,6 +2487,9 @@ jobs:
+     needs: [plan, verify, desktop]
+     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.verify.result == 'success' && needs.plan.outputs.publish == 'true' && needs.plan.outputs.full == 'true' && needs.desktop.result != 'skipped' }}
+     runs-on: ubuntu-latest
++    # The release environment: only main and v* tags may deploy to it, and
++    # the publishing secrets this job reads belong there.
++    environment: release
+     env:
+       AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+     steps:

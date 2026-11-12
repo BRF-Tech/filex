@@ -78,6 +78,40 @@ export function popupLayer(
 }
 
 /**
+ * Where a teleported popup is put: the open `<dialog>` its opener sits in, or
+ * `<body>`.
+ *
+ * ⚠⚠ THE BUG THIS EXISTS FOR (0.60.0). A modal dialog — `showModal()`, which
+ * the admin panel's Modal is — lives in the browser's TOP LAYER, above every
+ * z-index the page can stack, so no number `popupLayer` answers can lift a
+ * popup in `<body>` over it. In the app setup wizard a row's Actions menu
+ * opened, its entries were in the DOM, and a click on "Remove" landed on the
+ * "Add address" box under it (Playwright: "subtree intercepts pointer
+ * events"). A popup put INSIDE the open dialog is in the top layer with it,
+ * and the layer it measures is then counted inside the dialog.
+ *
+ * ⚠ `position: fixed` inside the dialog still places against the window (the
+ * `<dialog>` element has no transform; a card inside it may, which is why
+ * the popup goes into the dialog itself, not next to its opener), so the
+ * popup's own placement does not change.
+ *
+ * ⚠ Out of a shadow tree, like `popupLayer`: an embed whose host page opened
+ * a dialog around it is in that dialog too.
+ */
+export function popupHost(openers: Array<Element | null | undefined> | Element | null | undefined): HTMLElement {
+  const list = Array.isArray(openers) ? openers : [openers];
+  for (const opener of list) {
+    let el: Element | null = opener ?? null;
+    for (let guard = 0; el && guard < 50; guard++) {
+      const dialog = typeof el.closest === 'function' ? el.closest('dialog[open]') : null;
+      if (dialog) return dialog as HTMLElement;
+      el = (el.getRootNode() as ShadowRoot | null)?.host ?? null;
+    }
+  }
+  return document.body;
+}
+
+/**
  * The best guesses at what opened a popup, at the moment it opens.
  *
  * `document.activeElement` is the control a click just focused, and the element

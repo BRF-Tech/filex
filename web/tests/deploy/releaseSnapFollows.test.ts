@@ -51,6 +51,7 @@ import {
   narrowing,
   scriptOf,
   stepNamed,
+  stepUsing,
   stepsOf,
   topLevelTerms,
   type Row,
@@ -129,7 +130,7 @@ describe('FILEX_SKIP_SNAP: a release while the Snap Store is down', () => {
     expect(script.indexOf('if [ "$SKIP_SNAP" = true ]; then')).toBeGreaterThan(script.indexOf('> /tmp/release-notes.md'));
     // The notes go to goreleaser after that step, as before.
     const after = stepsOf(binaries).map((s) => s.name);
-    expect(after.indexOf('goreleaser/goreleaser-action@v6')).toBeGreaterThan(after.indexOf('Release notes from CHANGELOG.md'));
+    expect(after.findIndex((n) => n.startsWith('goreleaser/goreleaser-action@'))).toBeGreaterThan(after.indexOf('Release notes from CHANGELOG.md'));
   });
 });
 
@@ -143,7 +144,7 @@ describe('only=snap (snap_only=true): both snaps for a release that went out wit
     expect(runName).toContain("github.event_name == 'workflow_dispatch' && inputs.snap_only && format('publish snap {0} {1}', inputs.tag || github.ref_name, github.sha)");
     // The mapping itself, run: plan's script up to it.
     // (`- id: p` starts no step of its own for stepsOf: it is the checkout's.)
-    const plan = scriptOf(stepNamed(job(release, 'plan'), 'actions/checkout@v4').text);
+    const plan = scriptOf(stepUsing(job(release, 'plan'), 'actions/checkout').text);
     const cut = plan.indexOf('\nfi\n', plan.indexOf('IN_SNAP_ONLY:-false')) + 4;
     expect(cut, 'plan reads snap_only').toBeGreaterThan(4);
     const head = `${plan.slice(0, cut)}echo "$tag|$only|$publish"\n`;

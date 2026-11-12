@@ -33,6 +33,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -88,6 +89,12 @@ type Target struct {
 	ByHost bool
 	// Lang is the reader's language (srvtext tag).
 	Lang string
+	// SelfContained: the page is served where it may load nothing from
+	// anywhere - an app's public address, whose Content-Security-Policy is
+	// default-src 'none', on a host that may serve nothing else of filex
+	// (#324). The brand's logo is an address, so the template is not given
+	// one (brand.logo_url is empty); the theme is inline CSS and stays.
+	SelfContained bool
 }
 
 // Renderer renders templates. The zero value works on filex's own templates
@@ -104,6 +111,19 @@ type Renderer struct {
 	mu     sync.Mutex
 	scopes map[int64]scopeEntry
 	cache  outputCache
+	// gen counts Forget calls: a caller that keeps what a render made (the
+	// app route door's pages) asks Generation, so a saved template is shown
+	// at once rather than when the caller's own cache runs out.
+	gen atomic.Uint64
+}
+
+// Generation changes whenever a template is saved or removed (Forget): what
+// was rendered under another generation may be out of date.
+func (r *Renderer) Generation() uint64 {
+	if r == nil {
+		return 0
+	}
+	return r.gen.Load()
 }
 
 type scopeEntry struct {
@@ -554,6 +574,9 @@ func (r *Renderer) globals(ctx context.Context, t Target, def *Def, data map[str
 	if b.Accent == "" {
 		b.Accent, b.AccentHover, b.OnAccent = "#2f6ceb", "#2559c9", "#ffffff"
 	}
+	if t.SelfContained || def.selfContained {
+		b.LogoURL = ""
+	}
 	dir := "ltr"
 	if srvtext.IsRTL(t.Lang) {
 		dir = "rtl"
@@ -673,4 +696,5 @@ func (r *Renderer) Forget() {
 	r.cache.mu.Lock()
 	r.cache.m = nil
 	r.cache.mu.Unlock()
+	r.gen.Add(1)
 }

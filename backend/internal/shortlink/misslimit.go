@@ -4,6 +4,8 @@ import (
 	"net/netip"
 	"sync"
 	"time"
+
+	"github.com/brf-tech/filex/backend/internal/spancount"
 )
 
 // ── Guessing an address ────────────────────────────────────────────────────
@@ -29,12 +31,13 @@ import (
 //
 // ⚠⚠ Built to be flooded. Every operation is O(1): counts live in maps for
 // the current window, replaced whole when the window turns (the clock, not a
-// sweep, ends them), and each map holds at most MaxClients clients. A flood
-// from more addresses than that is not tracked past the cap - those clients
-// get their first misses uncounted - rather than growing the server's memory
-// or its CPU without end (a sweep over every client on each new one turned a
-// botnet flood into an O(n²) loop in the first measurement, 2026-11-11). The
-// warm-instance pool still bounds what such a flood costs.
+// sweep, ends them; internal/spancount), and each map holds at most
+// MaxClients clients. A flood from more addresses than that is not tracked
+// past the cap - those clients get their first misses uncounted - rather
+// than growing the server's memory or its CPU without end (a sweep over
+// every client on each new one turned a botnet flood into an O(n²) loop in
+// the first measurement, 2026-11-11). The warm-instance pool still bounds
+// what such a flood costs.
 //
 // ⚠ Per process. Two filex processes behind one address each keep their own
 // count, so the rate an attacker gets doubles with them; the floor assumes
@@ -56,53 +59,8 @@ const (
 	// limit alone does not stop.
 	AlarmPerHour = 2000
 	// MaxClients is the most clients one window's map holds.
-	MaxClients = 200000
+	MaxClients = spancount.MaxClients
 )
-
-// window counts per client over the current span of the clock and the one
-// before it: a count is the two added up, so it never drops to zero at a
-// boundary (a fixed window would let a client make twice the limit across
-// one), and turning the span is one map replaced, not a sweep.
-type window struct {
-	span      time.Duration
-	start     time.Time
-	cur, prev map[string]int
-}
-
-// turn moves the window to now's span.
-func (w *window) turn(now time.Time) {
-	start := now.Truncate(w.span)
-	switch {
-	case w.cur == nil:
-		w.start, w.cur = start, map[string]int{}
-	case start.After(w.start):
-		if start.Sub(w.start) == w.span {
-			w.prev = w.cur
-		} else {
-			w.prev = nil
-		}
-		w.start, w.cur = start, map[string]int{}
-	}
-}
-
-// add counts one for client and answers its count over the two spans; 0
-// when the map is full and the client was not in it (not tracked).
-func (w *window) add(now time.Time, client string) int {
-	w.turn(now)
-	n, ok := w.cur[client]
-	if !ok && len(w.cur) >= MaxClients {
-		return 0
-	}
-	n++
-	w.cur[client] = n
-	return n + w.prev[client]
-}
-
-// forget drops a client's count (a lockout starts it again).
-func (w *window) forget(client string) {
-	delete(w.cur, client)
-	delete(w.prev, client)
-}
 
 // MissLimiter counts the addresses each client asked for that led nowhere.
 type MissLimiter struct {
@@ -113,8 +71,8 @@ type MissLimiter struct {
 	Now func() time.Time
 
 	mu       sync.Mutex
-	burst    window
-	daily    window
+	burst    spancount.Window
+	daily    spancount.Window
 	locks    map[string]time.Time
 	locksAt  time.Time
 	total    int
@@ -186,8 +144,9 @@ func (l *MissLimiter) lock(now time.Time, client string, until time.Time) {
 func (l *MissLimiter) Miss(client string) bool {
 	now := l.now()
 	l.mu.Lock()
-	if l.burst.span == 0 {
-		l.burst.span, l.daily.span = MissBurstWindow, MissDailyWindow
+	if l.burst.Span == 0 {
+		l.burst = spancount.Window{Span: MissBurstWindow, Max: MaxClients}
+		l.daily = spancount.Window{Span: MissDailyWindow, Max: MaxClients}
 	}
 	alarm := 0
 	if now.After(l.totalEnd) {
@@ -200,13 +159,13 @@ func (l *MissLimiter) Miss(client string) bool {
 	}
 	locked := false
 	if client != "" {
-		if n := l.daily.add(now, client); n >= MissDaily {
+		if n := l.daily.Add(now, client, 1); n >= MissDaily {
 			l.lock(now, client, now.Add(MissDailyLock))
 		}
-		if n := l.burst.add(now, client); n >= MissBurst {
+		if n := l.burst.Add(now, client, 1); n >= MissBurst {
 			l.lock(now, client, now.Add(MissBurstLock))
 			// A new count once the lockout ends.
-			l.burst.forget(client)
+			l.burst.Forget(client)
 		}
 		until, ok := l.locks[client]
 		locked = ok && now.Before(until)
@@ -228,14 +187,15 @@ const (
 	HitWindow = time.Minute
 )
 
-// RateLimiter is a fixed window per client, O(1) a request (window).
+// RateLimiter counts each client's requests over this window of the clock and
+// the one before, O(1) a request (spancount.Window).
 type RateLimiter struct {
 	Limit  int
 	Window time.Duration
 	Now    func() time.Time
 
 	mu sync.Mutex
-	w  window
+	w  spancount.Window
 }
 
 // Allow counts one request and answers whether it is within the limit. A
@@ -250,9 +210,9 @@ func (l *RateLimiter) Allow(client string) bool {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.w.span == 0 {
-		l.w.span = l.Window
+	if l.w.Span == 0 {
+		l.w = spancount.Window{Span: l.Window, Max: MaxClients}
 	}
-	n := l.w.add(now, client)
+	n := l.w.Add(now, client, 1)
 	return n <= l.Limit
 }

@@ -50,7 +50,7 @@
  * them. Nothing here carries a colour of its own — every value is a `--fe-*`
  * token, so every table follows the palette the person picked.
  */
-import { computed, getCurrentInstance, h, nextTick, onBeforeUnmount, ref, useSlots, watch } from 'vue';
+import { computed, getCurrentInstance, h, nextTick, onBeforeUnmount, ref, shallowRef, useSlots, watch } from 'vue';
 import type { FunctionalComponent, Slots } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
@@ -65,6 +65,7 @@ import {
 import { setTableSort, tableColumnBacking, tableSort } from '../lib/tablePrefs';
 import { useTableEnv } from '../lib/tableEnv';
 import { syncCutTitle } from '../lib/cutTitle';
+import { popupHost } from '../lib/popupLayer';
 import { containBidi } from '../lib/nameRule';
 import { clampAlongInline, dirOfElement, inlineKeyStep, inlineSign, inlineStartX, scrollEdges } from '../lib/direction';
 import ItemCheck from './ItemCheck.vue';
@@ -1084,6 +1085,10 @@ const colMenuY = ref(0);
 /** The x the menu was opened at — kept apart from `colMenuX`, which the clamp rewrites. */
 let colMenuAnchor = 0;
 const colMenuEl = ref<HTMLElement | null>(null);
+/** Where the column menu is teleported: <body>, or the open <dialog> the
+ *  table sits in — a modal dialog is in the top layer, above anything <body>
+ *  can stack (lib/popupLayer `popupHost`, 0.60.1). */
+const colMenuHost = shallowRef<HTMLElement | string>('body');
 
 /* The OS mode for `auto`, and every time it changes while the table is on
    screen - composables/useSystemDark, the one shared listener (#74). It was
@@ -1135,6 +1140,7 @@ async function openColMenu(ev: MouseEvent) {
   colMenuAnchor = ev.clientX || (box ? inlineStartX(box, dir.value) : 0);
   colMenuX.value = colMenuAnchor;
   colMenuY.value = ev.clientY || (box ? box.bottom : 0);
+  colMenuHost.value = popupHost(el);
   colMenuOpen.value = true;
   await nextTick();
   clampColMenu();
@@ -1526,7 +1532,7 @@ defineExpose({ store, layout, pinLead, stacked });
       </div>
     </div>
   </div>
-  <Teleport to="body">
+  <Teleport :to="colMenuHost">
     <div
       v-if="colMenuOpen"
       class="fe-colmenu__backdrop"
@@ -1544,7 +1550,7 @@ defineExpose({ store, layout, pinLead, stacked });
         :aria-label="t('cols.menu')"
         :style="{ top: colMenuY + 'px', left: colMenuX + 'px' }"
         @click.stop
-        @keydown.esc.stop="closeColMenu"
+        @keydown.esc.stop.prevent="closeColMenu"
       >
         <p class="fe-colmenu__title">{{ t('cols.title') }}</p>
         <div v-for="c in menuCols" :key="c.id" class="fe-colmenu__line">

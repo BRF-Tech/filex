@@ -19,14 +19,166 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.59.1, 9 November 2026
-Reviewing an app update no longer waits for the whole app to download. The permission review of an app from a repository or an address - an install, an update, a store link, a plugin request - downloaded the module, the interface and the office engine before it answered; for the Office editor that is 140 MB from GitHub, and Review update answered 504 from a reverse proxy or came minutes later. The review now reads the app's filex-app.json alone, for every version an app has published: its permissions, and the SHA-256 it pins for each file. Install and Upgrade then download the files and refuse any that does not match what was reviewed.
+::: tip Latest - v0.60.0, 12 November 2026
+Uploaders, mail and page templates, and short links through an app. An uploader is a key for one program - ShareX, curl, a phone shortcut, a script - that drops files into one folder and answers each with a public or a private link and a deletion link: Account settings → Uploaders makes one and hands you ShareX's settings file with your address and the key already in it, and the old POST /api/sharex/upload keeps working, deprecated. Every mail filex sends and every page a link opens is now a Liquid template the administrator, or a tenant's administrator, rewrites under Settings → Templates, with a live preview in every language and a test mail; an edited template runs in a WebAssembly sandbox and carries no script, and mails go out as HTML with a plain-text part. A link's pages wear the branding of the tenant it was made in, at any address. Apps can now ask to be set up once in a wizard, keep data of their own beside filex's database (FILEX_APP_DATA_DSN when several replicas share it), answer public addresses of their own, and hold the link-shortener role, which puts Get short link in the share dialog, on file requests, in My shares and on an uploader's answers. The upgrade runs three database migrations.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.59.1
-docker pull ghcr.io/brf-tech/filex:full-v0.59.1
+docker pull ghcr.io/brf-tech/filex:slim-v0.60.0
+docker pull ghcr.io/brf-tech/filex:full-v0.60.0
 ```
+
+## v0.60.0
+
+<span class="filex-release-date">12 November 2026</span>
+
+Uploaders, mail and page templates, and short links through an app. An uploader is a key for one program - ShareX, curl, a phone shortcut, a script - that drops files into one folder and answers each with a public or a private link and a deletion link: Account settings → Uploaders makes one and hands you ShareX's settings file with your address and the key already in it, and the old POST /api/sharex/upload keeps working, deprecated. Every mail filex sends and every page a link opens is now a Liquid template the administrator, or a tenant's administrator, rewrites under Settings → Templates, with a live preview in every language and a test mail; an edited template runs in a WebAssembly sandbox and carries no script, and mails go out as HTML with a plain-text part. A link's pages wear the branding of the tenant it was made in, at any address. Apps can now ask to be set up once in a wizard, keep data of their own beside filex's database (FILEX_APP_DATA_DSN when several replicas share it), answer public addresses of their own, and hold the link-shortener role, which puts Get short link in the share dialog, on file requests, in My shares and on an uploader's answers. The upgrade runs three database migrations.
+
+## What changed
+
+### Added
+
+- **Short links, through an app.** An app can hold the link-shortener role:
+  the share dialog, file requests and My shares offer **Get short link**, the
+  short address is the one to copy, a mailed link carries it, and an
+  uploader can answer each upload with it (**Short link**). The app
+  keeps its links; filex answers each visit with a redirect, a page it draws,
+  or one "not available" page for every miss, holds a guesser back (20 misses
+  in 10 minutes, 100 a day) and keeps a flood off the rest of the server.
+  [APP-PLUGINS.md → Short links](./APP-PLUGINS.md#short-links).
+- **Setting an app up.** An app can ask to be set up once before it runs: it
+  installs as *Needs setup*, and its wizard (its own questions, the addresses
+  of its routes, who may use it) opens after the install. **Reconfigure**
+  erases what the app keeps and opens the wizard again; removing an app that
+  keeps data asks for its name typed back, then erases it.
+  [APP-PLUGINS.md → Setting an app up](./APP-PLUGINS.md#setting-an-app-up).
+- **For app authors:** public routes (`routes`, answered on warm instances),
+  an app's own data (`data_*`, never in filex's database; `FILEX_APP_DATA_DSN`
+  for a database shared by replicas), the `setup` block and placement, the
+  `link_shortener` role and `pkg/pluginkit/shortcode`.
+  [APP-PLUGINS-API.md → Public routes](./APP-PLUGINS-API.md#public-routes-060).
+- **Uploaders: a key for one program that drops files into one folder and
+  answers with a link.** **Account settings → Uploaders** (web app, admin panel,
+  desktop app) makes one: a name, a storage and folder, a **public** link (a
+  share link that opens in the browser) or a **private** one (the file in filex,
+  behind sign-in and the reader's permission), and a link life that the form
+  says the server's ceiling for (`share.max_ttl_days`). The key is shown once,
+  with **Download ShareX settings (.sxcu)** - one file ShareX lists under
+  images, text and files, built by the server with your address and the key -
+  and a `curl` line; curl, PowerShell, phone shortcuts and Flameshot use the
+  same request. **New key** replaces a lost one, **Delete** ends it
+  ([UPLOADERS.md](./UPLOADERS.md)).
+- **`POST /api/uploads`, the upload door.** Multipart `file`, the key as
+  `Authorization: Bearer`; answers `{url, deletion_url, thumbnail_url}`, or
+  `{error, code}` with `error` written for the person a tool shows it to. The
+  key is not an API key: no other route looks it up, the request names no
+  folder, and an upload is always a new name - a leaked tool config adds files
+  to one folder and does nothing else. Each upload is checked as its owner as
+  the account is now (`access.api`, `share.links` for a public link, the
+  folder's storage by its id and tenant) and written to the audit log
+  (`uploader.upload`). Managing uploaders over the API: `/api/auth/uploaders`.
+- **A deletion link for every upload, `/x/{token}`.** Opening it never deletes,
+  because link previews in chat apps fetch every URL: it shows a one-language
+  page with the file's name and a **Delete** button; the button moves that one file
+  to its owner's trash and revokes its public link. One use; it names the
+  file, not its path; it outlives the uploader that made it
+  (`uploader.file_delete` in the audit log).
+- **Mail and page templates: every mail filex sends and every page a link
+  opens is HTML and CSS you can rewrite.** **Admin → Settings → Templates**
+  lists them: the nine mails and the frame they share, the public pages and
+  theirs (the PIN gate, "this link is not available", the waits while a ZIP or
+  a download is prepared, the pages for a browser without JavaScript, a
+  deletion link's two pages), the public link
+  page's frame, and short texts on a share's or a file request's page (a
+  title, an introduction, a footer line). Each is written in
+  [Liquid](https://shopify.github.io/liquid/) in filex's code editor (the
+  file preview's Monaco: colours, line numbers, the line the engine refused
+  marked), with its variables listed, a live preview in every language the
+  server speaks and a test mail to your own address. The install's administrator edits the install's; on a
+  multi-tenant install a tenant's administrator edits their own tenant's;
+  **Back to the default** removes an edit. Colours, logo, name and footer
+  still come from Branding, and every template wears them. An edited template
+  runs in a WebAssembly sandbox with ceilings on time, memory and output,
+  includes nothing but filex's own pieces, and is sanitized: no script, event
+  handler or `javascript:` address reaches a mail or a page, and the public
+  pages carry a nonce-based Content-Security-Policy. A template that fails
+  when it is used is replaced by filex's own for that mail or page, and the
+  editor shows the error ([TEMPLATES.md](./TEMPLATES.md); API
+  `/api/admin/templates`).
+
+### Changed
+
+- **Apps answer with far less work per call.** filex's copy of the extism SDK
+  (`backend/third_party/extism-go-sdk`, one patch, its `FILEX.md` says what
+  and why) keeps the functions an app instance calls instead of building them
+  again on every call: a warm call of an app's public route allocates 5.7 KB
+  instead of 262 KB. Every app call (actions, screens, thumbnails, routes)
+  goes through it.
+- **Mails are HTML with a plain-text part.** Every mail - a share, a file
+  request, access given, a new account, a notification and the digest, the
+  SMTP test, the cloud sign-up code, an app's mail - is sent as
+  `multipart/alternative`: its template's HTML, in the branding's colours and
+  logo, and a plain-text part made from it (or written by the administrator).
+  Until now every mail was plain text. The sentences are the language packs'
+  as before.
+- **A link's pages wear the templates and branding of the tenant the link was
+  made in.** On a multi-tenant install a link's pages - the public link page
+  (its title, icon, logo, name and colours, asked from the new
+  `GET /api/public/{s,d}/{token}/branding`), and the server-drawn ones: its
+  PIN gate, a folder or an upload page without JavaScript, the ZIP wait, a
+  deletion link's pages - used the branding of the address they were opened
+  at; they now use the link's tenant's, at any address. A page that belongs
+  to no link, and every "this link is not available" page, still uses the
+  address's, so it says nothing about whose link a token was. A mail uses the
+  tenant of the link it carries, else the addressee's, else the sender's
+  ([TEMPLATES.md](./TEMPLATES.md#who-edits-which-templates)).
+- **Go dependencies.** Added `github.com/osteele/liquid` v1.9.2 (the template
+  language) and `github.com/andybalholm/cascadia` v1.3.5 (CSS selectors, to
+  move a mail's stylesheet into its elements). Moved with them:
+  `github.com/spf13/cobra` 1.8.1 → 1.10.2, `github.com/spf13/pflag` 1.0.5 →
+  1.0.10, `github.com/fatih/color` 1.17.0 → 1.18.0 and
+  `github.com/mattn/go-colorable` 0.1.13 → 0.1.14 - the CLI's command line
+  and colours. Its help and its errors read exactly as before; `filex completion` now prints cobra 1.10's scripts, which complete the same
+  commands and flags (bash handles the active help itself, and the PowerShell
+  script also works in Constrained Language Mode). Install the completion
+  script again after updating if you saved it to a file.
+- **For the maintainers: the release train's merge queue checks a merge
+  before `main` moves to it.** `pnpm merge-queue` makes each merge in a
+  worktree of its own (`.claude/worktrees/merge-queue`), builds there the
+  workspace packages its `--check` commands import (`packages/core` and the
+  ones it imports, from that merge's own source, or proves their dist is
+  built from it), runs every check there, and fast-forwards `main` only to a
+  green merge. A red check used to stay on `main` as a merge commit, and a
+  web check read whatever `packages/core/dist` the checkout held
+  ([CONTRIBUTING.md → The merge queue](./CONTRIBUTING.md#the-merge-queue-pnpm-merge-queue---queue-file)).
+
+### Deprecated
+
+- **`POST /api/sharex/upload` is deprecated and is removed in the next major
+  release.** It keeps working exactly as before - an API key with `write`, the
+  `folder` field, the `{"url": …}` answer - and now also answers a
+  `Deprecation: true` header. Its file events and webhooks keep
+  `origin: "sharex"` until it is removed, so a webhook consumer reading the old
+  path sees no change; uploads through the new door carry `origin: "uploader"`.
+  Moving: make an uploader, import its `.sxcu`, delete the API key you made
+  for ShareX ([UPLOADERS.md](./UPLOADERS.md#moving-from-the-sharex-endpoint)).
+
+### Removed
+
+- **The hand-edited ShareX configs in `docs/sharex/`.** They needed the host
+  and an API key typed into three files; an uploader's settings file is made
+  for you with both in it. `docs/SHAREX.md` points to Uploaders.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0600---2026-11-11)
+
+Snap package follows (Snap Store outage).
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.60.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.60.0`
 
 ## v0.59.1
 
@@ -1825,247 +1977,13 @@ All three are fixed in 0.54.0; upgrading is recommended.
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.54.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.54.0`
 
-## v0.53.0
-
-<span class="filex-release-date">7 October 2026</span>
-
-Replication finally copies: a storage linked to a replication target now writes its files there, each storage into a folder of its own, and an existing one gets its first full copy on its own (before 0.53 it never copied anything, see #91). The admin panel gets one search for pages, settings, people, groups, API keys, apps, storages and files, in English and in the panel's language, on a phone too. Apps can be browsed and requested from an App store screen inside filex and in the desktop app, and the stores an administrator trusts decide what appears there. Notifications can be held and sent as a digest, urgent ones still at once. Multi-tenant mode is a switch in the admin panel that warns before turning off and never deletes a tenant. A document that changes on disk while it is open in ONLYOFFICE is reloaded when it is clean and asked about when it is not, and with FILEX_ONLYOFFICE_FRAME_ORIGIN the editor runs in a frame on the Document Server's own origin. Comments became a permission of their own for API keys (an existing key that should add comments needs comments: rw), no screen uses a native drop-down any more, and a phone is offered to install filex as a web app, whose notifications now reach it while it is open. Security hardening in the normal train: a folder-confined key is held to its folder whatever the request's content type, and storage credentials are no longer sent back to the admin pages.
-
-## What changed
-
-### Added
-
-- **The App store inside filex** (#162). The navigation panel's **Apps → App
-  store** opens filex's own page over a trusted store's catalog - read and
-  verified on the server from the store's signed index, its icons through
-  filex, no frame of the store and no change to the Content-Security-Policy;
-  a catalog is kept ten minutes and served marked stale while the store is
-  down; the desktop app shows the same screen under the same rule, in a
-  window of its own. A person asks for an app with a reason and follows
-  **My requests**;
-  the request lands on **Install requests** beside an API key's. Approving it
-  asks the store for a **fresh** install link and opens the store review -
-  the same SHA-256, permission and license steps as any install link - and
-  that install closes the request. **Admin → Plugins → Apps → Store screen**
-  turns it on, picks the stores and who sees it (everyone, built-in roles or
-  groups), per tenant; **Trusted stores → Connect** binds this filex to a
-  store with the one-time code its "My instances" page makes (an ed25519 key
-  sealed with `FILEX_SECRET_KEY`, every request signed with a timestamp and a
-  single-use nonce). Reading a link, trusting, connecting and installing stay
-  the platform operator's, signed in to the panel
-  ([APP-PLUGINS.md → The store screen](./APP-PLUGINS.md#the-store-screen)).
-- **The whole test chain runs on GitHub, split into parts that run side by
-  side.** `ci.yml` is a matrix on every push of `main`: the Go suite in the
-  shards of `scripts/test-shards.json` beside PostgreSQL, MySQL, Redis and
-  Samba and again under `-race`, the migrations on three engines and through
-  the CLI (up, three steps down, up), the unit suites in UTC and on
-  Istanbul's clock, the typechecks and the docs gates, Cypress, Playwright on
-  Chromium, Firefox and WebKit in parts with the Document Server specs again
-  with one, the store and S3 lines, both images, and one `All tests (full)`
-  job that is green only when every part was. Every part is named by
-  `scripts/ci-parts.mjs`, and the release gate reads the run part by part: a
-  red part is named at once, and a run without a part is no full matrix.
-  A pull request runs the same less `-race`, Firefox, WebKit and the Document
-  Server, and a push is never cancelled by the next one
-  ([CONTRIBUTING.md → Release process](./CONTRIBUTING.md#release-process)).
-- **A tag run promotes what the dry run of its commit built.** The dry run of
-  an untagged version is the release candidate: it pushes both images by
-  digest with no tag and keeps every desktop row's files with their sums, and
-  the tag run checks each image on its own architecture (built from the
-  tag's commit, `filex --version` naming it) and each file byte for byte
-  before it tags or publishes anything - the images in minutes instead of a
-  second build. The release workflow no longer runs the test suite itself:
-  the push run of the commit is the test, `verify` asks that it was the full
-  matrix, and the dry run packages at once. `-f macos=false` starts a dry run
-  without the macOS row while GitHub has no macOS runner.
-- **The release can be packaged off GitHub.**
-  `node scripts/release/package-local.mjs X.Y.Z [--run [--publish]]` runs the
-  release workflow's packaging on the tag's tree from a maintainer's machine -
-  goreleaser and the GitHub Release, both images for amd64 and arm64, the
-  Windows and Linux desktop packages - and says what it leaves to GitHub
-  (macOS, the arm64 snap) and to a person (npm, the stores)
-  ([CONTRIBUTING.md → When GitHub Actions is
-  down](./CONTRIBUTING.md#when-github-actions-is-down)).
-- **The Playwright and Go suites run in parts, side by side.**
-  `node e2e/run.mjs local --shard i/N` runs part i of N with Playwright's own
-  split - taken after `--grep` and the engines, so the parts add up to the
-  whole run - each part on a server, port, output directory and server log of
-  its own. The Go tests have one shard list, `scripts/test-shards.json`, for
-  every runner: `internal/api/handlers` and `internal/wasmplugin` are cut by
-  test file into exact `-run` groups, the other packages run as package lists,
-  and a test file or package the list does not name runs in a rest group.
-  `node scripts/test-shards.mjs check` holds the list to `go list ./...` and
-  `go test -list`, `e2e-check` holds the parts to the whole run, and
-  `rebalance` re-cuts a package from the times a run measured
-  ([CONTRIBUTING.md → Shards](./CONTRIBUTING.md#shards)).
-- **Comments are an API key's own permission** - `comments`, at **Read**
-  (`read`) or **Read and write** (`comments:rw`), the first permission a key
-  holds at a level. Adding and deleting a comment ask `comments:rw` on every
-  door - `/api/files/comments`, `/api/ai/comments` and the MCP
-  `file_comment_add` / `file_comment_delete` tools - through one check in the
-  handler they all run; reading them asks `read`. A key is minted with it on
-  both API keys screens (**Comments: Read / Read and write**, buttons, not a
-  list), raised or lowered later with **Edit** on Admin → API / MCP, the
-  row's **Comments: allow writing** on the API keys panel, or
-  `PATCH /api/tokens/{id}` / `PATCH /api/admin/ai-tokens/{id}`
-  `{"permissions": {"comments": "rw"}}` - the verbs never change - and every
-  key list answers each key's levels in `permissions`. A key never gives a key
-  a level above its own (`403 token_ceiling`). The rule for every such
-  permission added from now on is in the code and the docs: each declares its
-  default, `read` - existing keys get it with no migration - or none for a
-  super-administrator kind, and `tokenperm_test.go` is red for one that does
-  not ([RBAC.md → Permissions with a
-  level](./RBAC.md#permissions-with-a-level-comments),
-  [CONTRIBUTING.md → Adding a permission](./CONTRIBUTING.md#adding-a-permission)).
-- **Multi-tenant mode is a switch**: Admin → Multi-tenant mode (System →
-  Customization), the platform operator's alone - a tenant's administrator is
-  refused the page and its API (`403 supertenant_only`), an API key the change
-  (`403 session_required`). `FILEX_MULTI_TENANT` or the config file's
-  `multi_tenant`, when set, pin the mode and the switch shows it locked with
-  the variable to change instead; unset, the switch decides, off until somebody
-  turns it on. A change takes effect when filex is restarted and the page says
-  so until then (the mode is handed to the route groups, the sign-in providers
-  and the SFTP, FTPS, NFS, WebDAV and S3 servers once, at start). Turning the
-  mode off while the install has tenants asks for their number first: they go
-  into maintenance mode, nothing is deleted, and turning it back on brings
-  every tenant back as it was. Both directions are in the audit log
-  (`tenancy.enable`, `tenancy.disable`). `/api/capabilities` says
-  `multi_tenant` (the mode in force) on every install, and every screen follows
-  it. `GET`/`PUT /api/admin/tenancy`. ([MULTI-TENANCY.md → Mode
-  gating](./MULTI-TENANCY.md), [ADMIN-PANEL.md](./ADMIN-PANEL.md))
-- **The notification digest - one notification instead of a flood, if you
-  want it.** Optional and off out of the box: every kind of notification is
-  still told at once, so an upgrade changes nobody's notifications. A kind
-  turned off - by an administrator for everybody in their tenant (**Admin →
-  Notifications**, which also sets the window, 1-15 minutes, default 1), or by
-  a person for themselves (user settings → Notifications, an *Urgent* switch
-  beside every kind and one for all the administrator alerts) - is held for
-  the window and told in ONE notification that says, folder by folder, what
-  changed - "Rapor: 30 files added; Fotoğraflar: 3 files moved to the trash, 1
-  comment" - so a folder that receives 30 files in a minute is one badge step,
-  one browser pop-up and one desktop toast, not 30. Every event still keeps
-  its own row the moment it happens (the history, the admin list, the audit
-  log and every webhook are unchanged); a held row is in the person's list,
-  read, until the digest carries it. A digest names and counts only what the
-  person's own bell shows (tenant and grants), survives a restart (the window
-  is in the database) and is never written twice. A file-request owner who
-  holds those notices gets one email per window too. Webhooks can subscribe to the new
-  `notification.digest` event; only a target that ticks it receives it. API:
-  `urgent_overrides` and `digest` on `/api/notifications/settings`,
-  `GET`/`PATCH /api/admin/notifications/digest`. Migration 00087
-  ([NOTIFICATIONS.md → The digest](./NOTIFICATIONS.md#the-digest)).
-- **A search for the whole admin panel** (task #168). The top bar's search
-  button opened the file search page, and a phone had no search at all. Now one
-  search, beside the menu - **Ctrl+K** / **⌘K** (the explorer's palette key, as
-  you have it bound), and a button with a layer over the window on a phone -
-  finds a page and its tabs, a single setting (*Trash retention*, *Require
-  two-factor authentication*), an installed app and what it does, a person, a
-  group, an API key (by its name, never its value), a storage or a share, by
-  its name in the interface's language or in English and by its synonyms
-  (*LDAP* finds *Identity providers*), with Turkish letters and capitals
-  folded. Files come on demand: the first three and a *Search files* row, or
-  `file:` for files alone; `user:`, `app:`, `key:`, `group:`, `storage:` and
-  `setting:` keep one kind. You find only what you may open: the pages are the
-  menu's own, and every record comes from the list its page reads, through the
-  same permission - a delegated administrator holding `admin.users` finds
-  people and groups, a tenant's administrator their own tenant's. Your recent
-  searches are kept on the server (the newest 20, migration 00090), so they
-  follow you to another browser; remove one or all of them, and they are never
-  in the audit log. New: `GET /api/admin/panel-search`, `GET` · `POST` ·
-  `DELETE /api/admin/panel-search/recent`, `DELETE …/recent/{id}`, and
-  `?stats=none` on `GET /api/admin/storages`; core exports `PanelSearch`, its
-  rules and `foldText` ([ADMIN-PANEL.md → Search](./ADMIN-PANEL.md#search)).
-- **CircleCI stands in for GitHub Actions at the release gate.**
-  `.circleci/config.yml` runs, on every push of `main`, the Go suite in the
-  shards of `scripts/test-shards.json` beside PostgreSQL and MySQL (and red
-  unless both engines really ran), the web and package unit suites in UTC,
-  the desktop unit tests and the Playwright suite in Chromium, in parts. When
-  Actions is down, `pnpm release X.Y.Z --resume --gate circleci` reads that
-  workflow on the export commit instead of `ci.yml` and the release dry run,
-  runs here the heavy suites CircleCI does not, and records which CI passed
-  the commit. Once Actions is back, the tag run publishes that commit: its
-  `verify` takes the green CircleCI workflow when GitHub lacks its full
-  matrix and dry run, and with no dry run to promote the tag run builds the
-  images and every desktop package itself (the public repository needs a
-  `CIRCLECI_TOKEN` secret for it).
-  `node scripts/test-shards.mjs go --node i/N` gives copy i of a CI job its
-  shard, and refuses a copy count that is not the list's
-  ([CONTRIBUTING.md → When GitHub Actions is
-  down](./CONTRIBUTING.md#when-github-actions-is-down)).
-- **The language packs keep up with `main` between releases.**
-  `node scripts/langpacks.mjs status` names, for every language pack checkout,
-  the strings it does not translate yet, the ones whose English changed since
-  the pack was translated (which `pack.mjs sync` used to keep without a word)
-  and the ones filex dropped; `todo` writes the translator's worklists, and
-  `apply` checks every answer against the language pack validator and the
-  fixed names (filex, ONLYOFFICE) before it writes anything, then runs the
-  pack's own sync, build and validators and commits locally. `release X.Y.Z`
-  is the whole release-day step of a pack: the release's catalogue, one patch
-  version up, the README's status block, the validators, a commit, and the
-  signed tag and push commands printed, not run
-  ([CONTRIBUTING.md → Translations and language packs](./CONTRIBUTING.md#translations-and-language-packs)).
-- **The language packs are translated every night, by an agent, on the
-  build host.** A timer of its own (`scripts/chain/install-langpacks.sh`
-  installs it, the driver's copy and the pack checkouts) starts
-  `scripts/langpacks-nightly.mjs run`, which waits for the nightly test run
-  to end, fetches `origin/main` into a worktree of its own and, when a pack
-  lacks something, gives each pack's worklist to a Claude Code session that
-  can only read and edit its own directory of copies (no command, web or MCP
-  tool, none of the host user's settings, a HOME of its own) with the
-  project's Claude account asked from the work server at every run; only the
-  answers are taken from it, refused answers or a red validator go back to it
-  once, `apply --commit` commits each pack on the build host, and one
-  notification says per language what was translated and what is left.
-  Nothing is pushed or tagged there: on release day `node scripts/langpacks.mjs pull` fast-forwards a maintainer's packs to their `nightly` remote,
-  `release` refuses a pack not pulled yet and prints the push of the release
-  commit back. Worklist items now carry the answer right after the key, and
-  every worklist's rules ask for the language's own letters and one term per
-  concept
-  ([CONTRIBUTING.md → Translations and language packs](./CONTRIBUTING.md#translations-and-language-packs)).
-- **The release train's tools** (`scripts/train/`), for the maintainers:
-  `pnpm train X.Y.Z` writes the day's release note (the train rule, read from
-  CONTRIBUTING; the 10:00 cut; `main` since the last tag up to the cut; what
-  came after it; the merge queue; the closing "every task to Done");
-  `pnpm merge-queue --queue <note>` merges a train's branches one after another
-  with `--no-ff` and their own messages, merges `CHANGELOG.md` conflicts by
-  Keep a Changelog section, leaves `[Unreleased]` with each heading once, stops
-  for a person on any other conflict and builds and vets the Go module after
-  every merge; `bash scripts/train/filex-ship.sh X.Y.Z` takes a green tag run
-  to everything read back in one command - backup, the trusted-proxy check,
-  the deploy instance by instance with an automatic rollback, both update
-  feeds and the CDN purge, the Releases page, docs.filex.sh, npm and the
-  embeds, then `pnpm release X.Y.Z --resume --only deploy` - with a log per
-  step; and `when-done.mjs` runs a long command and wakes whoever waits for it
-  when it ends. Hosts and keys are settings (`scripts/train/train.env.example`),
-  never in the repository. ([CONTRIBUTING.md → The release train's
-  tools](./CONTRIBUTING.md#the-release-trains-tools))
-- **A `.csv` opens with filex on the desktop too** (#151). *Open with filex*
-  handles eleven types now: the ten office ones and `.csv`, registered the
-  same way on every system (Windows' "Open with" list, the Microsoft Store
-  package, `text/csv` in the Linux desktop entry and `xdg-mime`, macOS with
-  rank *Alternate*), never taking the type over. With ONLYOFFICE on the server
-  it opens in the spreadsheet editor, and a save as CSV - which the server
-  writes back in the file's own dialect, the text of every cell nobody changed
-  kept - goes over the `.csv` as any save goes over its document; a save that
-  comes back as a spreadsheet goes beside it as `<name>.xlsx`
-  ([DESKTOP.md → Opening documents from your computer](./DESKTOP.md#opening-documents-from-your-computer)).
-
-**This release has more to it than fits on one page.** The rest of the
-entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0530---2026-10-07).
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.53.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.53.0`
-
 ## Earlier releases
 
-The 133 releases before v0.53.0, in brief. Full notes are on GitHub.
+The 134 releases before v0.54.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.53.0](https://github.com/BRF-Tech/filex/releases/tag/v0.53.0) | 7 October 2026 | Replication finally copies: a storage linked to a replication target now writes its files there, each storage into a folder of its own, and an existing one gets its first full copy on its own (before 0.53 it never copied… |
 | [v0.52.0](https://github.com/BRF-Tech/filex/releases/tag/v0.52.0) | 5 October 2026 | LDAP and Active Directory groups reach filex: a filex group can name directory groups and follows them at every sign-in, a directory sync opens accounts, brings the directory's groups in and can switch off people the directory no… |
 | [v0.51.0](https://github.com/BRF-Tech/filex/releases/tag/v0.51.0) | 4 October 2026 | Who may encrypt is now an organisation's decision, contributed by @berkbasarir (#83): the tenant policy (Off, Administrators only, Permitted, or Approval), a new files.encrypt permission and, on multi-tenant installs, a ceiling… |
 | [v0.50.0](https://github.com/BRF-Tech/filex/releases/tag/v0.50.0) | 3 October 2026 | Office documents open, convert and get their thumbnails through the connected ONLYOFFICE Document Server: LibreOffice is gone from every image and from filex, and the Test on the ONLYOFFICE card now downloads the way a document… |
@@ -2202,4 +2120,4 @@ The 133 releases before v0.53.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-11-09 from 153 published releases.</small>
+<small>Last refreshed 2026-11-12 from 154 published releases.</small>

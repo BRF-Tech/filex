@@ -155,8 +155,17 @@ func CheckSurface(t TB, m wire.Manifest, s *wire.Surface) {
 //   - at most ONE primary button — a step asks one thing;
 //   - `show_when` / `required_when` name a field of the same form;
 //   - a hidden field's value is not submitted;
-//   - ids and field keys are unique (values arrive flat).
+//   - ids and field keys are unique (values arrive flat);
+//   - a screen with no buttons either closes (done) or queues a job - a
+//     warning. Without the view the screen is read as a step: a view's
+//     screen is measured with its placement by InspectSurfaceFor.
 func InspectSurface(m wire.Manifest, s *wire.Surface) Report {
+	return inspectSurface(m, s, "")
+}
+
+// inspectSurface is InspectSurface for a screen drawn in placement ("" when
+// it is not known).
+func inspectSurface(m wire.Manifest, s *wire.Surface, placement string) Report {
 	var r Report
 	if s == nil {
 		return r.err("surface", "the plugin answered no surface")
@@ -222,7 +231,7 @@ func InspectSurface(m wire.Manifest, s *wire.Surface) Report {
 	if primary > 1 {
 		r = r.err("surface.actions", "%d primary buttons - one step asks ONE thing, so at most one primary button plus Back", primary)
 	}
-	if len(s.Actions) == 0 && !s.Done && s.Job == nil {
+	if len(s.Actions) == 0 && !s.Done && s.Job == nil && !standingPlacements[placement] {
 		r = r.warn("surface.actions", "a screen with no buttons that neither closes (done) nor queues a job is a dead end")
 	}
 	for key := range s.Errors {
@@ -235,6 +244,39 @@ func InspectSurface(m wire.Manifest, s *wire.Surface) Report {
 	}
 	return r
 }
+
+// CheckSurfaceFor is CheckSurface for the screen a view of m draws, read with
+// that view's placement (InspectSurfaceFor). Prefer it whenever the screen is
+// a view's: it knows what the screen is for.
+func CheckSurfaceFor(t TB, m wire.Manifest, viewID string, s *wire.Surface) {
+	t.Helper()
+	InspectSurfaceFor(m, viewID, s).Report(t, false)
+}
+
+// InspectSurfaceFor measures the screen view viewID of m draws: the rules of
+// InspectSurface, read with the view's placement. A screen that stays where
+// it is drawn - an app's `home`, a full `page`, an `inspector` section of the
+// details panel - is not a dead end for having no buttons: nothing has to end
+// it, and the person goes on from it elsewhere. A `modal` step and the
+// `setup` wizard are: with nothing to press, nothing done and no job, the
+// person can only close them unfinished. A view the manifest does not declare
+// is an error.
+//
+// ⚠ InspectSurface cannot know a placement, so it keeps reading every screen
+// as a step: its dead-end warning on an app's home list was noise (#327).
+func InspectSurfaceFor(m wire.Manifest, viewID string, s *wire.Surface) Report {
+	v, ok := findView(m, viewID)
+	if !ok {
+		var r Report
+		r = r.err("view", "the manifest declares no view %q - filex has no placement to draw this screen in", viewID)
+		return append(r, inspectSurface(m, s, "")...)
+	}
+	return inspectSurface(m, s, v.Placement)
+}
+
+// standingPlacements are the placements whose screen stays where it is
+// drawn: an app's home, a full page, a section of the details panel.
+var standingPlacements = map[string]bool{"home": true, "page": true, "inspector": true}
 
 func catalogue() string {
 	out := make([]string, 0, len(NodeTypes))

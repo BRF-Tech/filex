@@ -996,6 +996,9 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     r = await release(fx, [VERSION, '--resume']);
     expect(r.code).toBe(1);
     expect(r.out).toContain('names the PRIVATE release commit');
+    // GitHub refuses deleting a v* tag while its ruleset is on (2026-11-12).
+    expect(r.out).toContain('1. switch off the v* tag ruleset on GitHub first');
+    expect(r.out).toContain('4. switch the ruleset back on');
     git(fx.exp, 'push', '-q', 'origin', `:refs/tags/${TAG}`);
 
     git(fx.src, 'push', '-q', 'origin', `refs/tags/${TAG}`);

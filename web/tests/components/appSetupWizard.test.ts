@@ -161,6 +161,44 @@ describe('AppSetupWizard', () => {
     expect(w.get('[data-testid="app-setup-next"]').attributes('disabled')).toBeUndefined();
   });
 
+  it('each kind of address keeps its own prefix: a host of its own starts with none', async () => {
+    // ⚠ 0.60.0: the own-address prefix ("l", the route's default) was carried
+    // into the optional prefix of a host of its own, and l.example.com became
+    // https://l.example.com/l. The default is the placeholder there, never a value.
+    setupAnswer = fullSetup({ app_step: null, permissions: [] });
+    const w = mountWizard('tr');
+    await flushPromises();
+    const prefix = () => w.get('input[name="app-setup-prefix-go"]').element as HTMLInputElement;
+    expect(prefix().value, 'filex’s own address starts with the route’s default').toBe('l');
+
+    await w.get('[data-testid="app-setup-kind-go-host"]').trigger('click');
+    await flushPromises();
+    expect(prefix().value, 'a host of its own starts with no prefix').toBe('');
+    expect(prefix().placeholder, 'the default is only shown').toBe('l');
+    await w.get('input[name="app-setup-host-go"]').setValue('l.example.com');
+    expect(w.get('[data-testid="app-setup-preview-go"]').text()).toContain('https://l.example.com/kod');
+    expect(w.get('[data-testid="app-setup-preview-go"]').text()).not.toContain('https://l.example.com/l/');
+
+    // What a person types in one kind stays with that kind.
+    await w.get('input[name="app-setup-prefix-go"]').setValue('x');
+    await w.get('[data-testid="app-setup-kind-go-own"]').trigger('click');
+    await flushPromises();
+    expect(prefix().value).toBe('l');
+    await w.get('input[name="app-setup-prefix-go"]').setValue('go');
+    await w.get('[data-testid="app-setup-kind-go-host"]').trigger('click');
+    await flushPromises();
+    expect(prefix().value).toBe('x');
+    await w.get('input[name="app-setup-prefix-go"]').setValue('');
+    await w.get('[data-testid="app-setup-add-button-go"]').trigger('click');
+    await flushPromises();
+    await w.get('[data-testid="app-setup-kind-go-own"]').trigger('click');
+    await flushPromises();
+    expect(prefix().value).toBe('go');
+
+    const adds = calls.filter((c) => c[0] === 'POST' && c[1].endsWith('/bases'));
+    expect(adds.map((c) => c[2])).toEqual([{ host: 'l.example.com', prefix: '', tenant_id: 0, default: true }]);
+  });
+
   it('"Who may use it" names who else holds a role, for the role and for a group', async () => {
     setupAnswer = fullSetup({ app_step: null, routes: [] });
     const w = mountWizard();

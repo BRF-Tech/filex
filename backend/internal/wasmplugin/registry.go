@@ -1016,6 +1016,14 @@ type Status struct {
 // calls it on a nil registry, which then reports languages without coverage.
 func (r *Registry) StatusOf(p *Installed) *Status {
 	state, serr := p.State()
+	// ⚠ Waiting for its setup is a state, not an error: the state's word says
+	// it, in the reader's language. The reason State gives is the server's
+	// English, for its own refusals ("plugin is not running: ..."); as the
+	// row's state_error a Turkish panel read "Kurulum bekliyor waiting to be
+	// set up" (0.60.0).
+	if state == StateSetup {
+		serr = ""
+	}
 	perms := make([]string, 0, len(p.Perms))
 	for _, x := range p.Perms {
 		perms = append(perms, string(x))

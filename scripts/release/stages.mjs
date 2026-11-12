@@ -2195,13 +2195,19 @@ export async function push(R) {
         if (peeled && peeled === S.releaseCommit) {
           // ⚠⚠ Lesson #55, twice (v0.26.0, v0.27.5): the public tag named the
           // private commit, and with it every internal file in its history.
+          // Since 2026-11-12 a GitHub ruleset refuses deleting or moving a v*
+          // tag, so taking the tag back starts by switching it off.
+          const rs = R.plan.tagRuleset;
+          const api = rs ? `gh api -X PUT repos/${R.plan.github?.repo ?? 'BRF-Tech/filex'}/rulesets/${rs}` : '';
           return {
             ok: false,
             detail:
               `⚠⚠ ${R.plan.exportRemote}'s ${tag} names the PRIVATE release commit ${short(peeled)}. The private history is reachable in public.\n` +
-              `  1. git -C ${slash(exp)} push ${R.plan.exportRemote} :refs/tags/${tag}\n` +
-              `  2. push the export's tag again (one ref)\n` +
-              `  3. gh run list --workflow Release: if a run built from that tag, its binaries came from the private tree — that is a real leak, tell the maintainer.`,
+              `  1. switch off the v* tag ruleset on GitHub first, it refuses deleting a v* tag${rs ? ` (ruleset ${rs}, "release tags"): ${api} -f enforcement=disabled` : ''}\n` +
+              `  2. git -C ${slash(exp)} push ${R.plan.exportRemote} :refs/tags/${tag}\n` +
+              `  3. push the export's tag again (one ref)\n` +
+              `  4. switch the ruleset back on${rs ? `: ${api} -f enforcement=active` : ''}\n` +
+              `  5. gh run list --workflow Release: if a run built from that tag, its binaries came from the private tree — that is a real leak, tell the maintainer.`,
           };
         }
         const problems = [];

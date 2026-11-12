@@ -22,6 +22,7 @@ There are two layers, and most installs only need the first:
 - [The editor](#the-editor)
 - [Writing a template](#writing-a-template)
 - [The public link page](#the-public-link-page)
+- [An app's public address](#an-apps-public-address)
 - [Mails](#mails)
 - [Security](#security)
 - [API](#api)
@@ -43,11 +44,12 @@ There are two layers, and most installs only need the first:
 | `page.layout` | The frame of every page below: the document, the base stylesheet, the logo and the footer. | `content` |
 | `page.pin` | A link's PIN gate (shares and file requests). | `form.action`, `form.error`, `link.kind` |
 | `page.unlocked` | "PIN accepted" before the download starts. | - |
-| `page.error` | "This link is not available", and the other error pages. | `error.code`, `error.key`, `error.title`, `error.body` |
+| `page.error` | "This link is not available", and the other error pages - also what an [app's public address](#an-apps-public-address) answers when it leads nowhere, after too many tries and when it is unavailable (`error.key` `route_miss`, `route_busy`, `route_unavailable`). | `error.code`, `error.key`, `error.title`, `error.body` |
 | `page.zip_wait` | "Preparing your download" while a folder's ZIP is built. | `folder.name`, `zip.url` |
 | `page.folder` | A shared folder, for a browser without JavaScript. | `folder.*`, `entries` (each `name`, `kind`, `url`, `size`, `date`, `thumb`) |
 | `page.file_request` | A file request's upload page, for a browser without JavaScript. | `folder.name`, `form.name_max` |
 | `page.app` | An app's link, for a browser without JavaScript. | `app.title`, `files` |
+| `page.route` | A page an [app's public address](#an-apps-public-address) answers with, such as a short link's `+` preview: the app's words, never its HTML. | `route.title`, `route.text`, `route.link` (a web address, or empty), `route.link_label` |
 | `page.delete_confirm` | An [uploader](UPLOADERS.md)'s deletion link (`/x/…`): which file, one button. | `file.name`, `form.action` |
 | `page.delete_done` | The deletion link after the file was deleted. | - |
 | `page.cache_wait` | "Preparing your download" for a big file on slow storage. | `file.name`, `file.percent` |
@@ -62,13 +64,6 @@ Every template also has `lang`, `dir` (`ltr` / `rtl`), `brand.name`,
 `mail.subject`, a page `page.title` and `theme.css` (the page's theme and
 accent stylesheet). The editor lists every variable of the template you have
 open, and puts one in where the cursor is when you click it.
-
-**Not a template:** the pages filex answers an [app's public
-address](APP-PLUGINS.md#short-links) with by itself (an address that leads
-nowhere, too many tries, unavailable) and the page an app draws there (a
-short link's `+` preview). They are filex's own, in the visitor's language,
-with nothing loaded from anywhere else: an app's host of its own serves the
-app and nothing else of filex. Editing them is not possible yet.
 
 ## Who edits which templates
 
@@ -247,6 +242,42 @@ templates:
 | `.fe-ppage__footslot` | The footer slot. |
 | `.fe-ppage__footline` | The branding's footer text. |
 | `.fe-ppage__footmark` | The "Served by" line. |
+
+## An app's public address
+
+An app can answer addresses of its own - a link shortener's `/l/…` on this
+filex's address, or a host of its own such as `go.example.com`
+([APP-PLUGINS.md → Short links](APP-PLUGINS.md#short-links)). What a visitor
+sees there that is not a redirect is a template:
+
+- **`page.error`** when the address leads nowhere (404, `error.key`
+  `route_miss`), after too many tries (429, `route_busy`) and when the app is
+  unavailable (503, `route_unavailable`). Every miss is the same page, whatever
+  the reason, so it says nothing about why.
+- **`page.route`** when the app answers with a page, such as a short link
+  followed by `+` (where it goes, and a button to go there). The app gives
+  words - a title, a text, a web address and its label - never HTML.
+
+Both are put in `page.layout` and wear the **address's** templates and
+branding: a host of its own is its tenant's, filex's own address the tenant of
+the host the visit arrived on.
+
+**They load nothing from anywhere.** A host of the app's own serves the app's
+addresses and `/healthz`, nothing else of filex, so these pages are served
+with a Content-Security-Policy of `default-src 'none'` (inline styles only, no
+image, font or stylesheet from any address, no form, no frame) and drawn
+without the brand's logo: `brand.logo_url` is empty in them, and the default
+layout then shows the brand's name. The theme (`theme.css`) is inline and
+stays. An edited template may name an image or a stylesheet; the browser does
+not fetch it.
+
+**They are drawn once and served again.** A flood of guesses is made of
+exactly these answers, and an edited template renders in the
+[sandbox](#security), filex's dearest render: each page is drawn once per
+language, kind and tenant (an app's page once per its words) and served again
+for a minute, compressed for a browser that takes gzip. A template saved in the
+editor shows at once on the server it was saved on; another replica of filex
+picks it up within that minute, as it does a language pack's new wording.
 
 ## Mails
 

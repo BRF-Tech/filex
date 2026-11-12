@@ -4653,6 +4653,7 @@
       "page_folder": "A shared folder (without JavaScript)",
       "page_file_request": "File request upload page (without JavaScript)",
       "page_app": "An app's link (without JavaScript)",
+      "page_route": "A page of an app's address (a short link's preview)",
       "page_cache_wait": "Preparing a download",
       "page_shell": "Public link page (frame)",
       "slot_share_title": "Shared link: title",

@@ -65,9 +65,9 @@ const emit = defineEmits<{
 
 const { t, dir } = useLocale(() => props.locale);
 
-const menu = ref<{ show: (ev: { clientX: number; clientY: number }, nodes: []) => void } | null>(
-  null,
-);
+const menu = ref<{
+  show: (ev: { clientX: number; clientY: number; target?: EventTarget | null }, nodes: []) => void;
+} | null>(null);
 
 const text = computed(() => props.label || t('row.actions'));
 
@@ -100,10 +100,13 @@ function open(ev: MouseEvent) {
   // (ListView `onRowMenu`): the menu drops from the control the person
   // clicked, and ContextMenu flips it left/up itself when the viewport edge
   // is close — which, for a control pinned to the right edge, is always.
-  const box = (ev.currentTarget as HTMLElement | null)?.getBoundingClientRect();
+  const button = ev.currentTarget as HTMLElement | null;
+  const box = button?.getBoundingClientRect();
   menu.value?.show(
     // ⚠ RTL: the START corner (right in RTL), as ListView `onRowMenu` does.
-    { clientX: box ? inlineStartX(box, dir.value) : ev.clientX, clientY: box ? box.bottom : ev.clientY },
+    // `target`: the button itself, so a row in a <dialog> opens its menu in
+    // that dialog (ContextMenu `show`).
+    { clientX: box ? inlineStartX(box, dir.value) : ev.clientX, clientY: box ? box.bottom : ev.clientY, target: button },
     [],
   );
 }

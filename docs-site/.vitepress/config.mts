@@ -21,6 +21,11 @@ const vueDir = dirname(require.resolve('vue/package.json'))
 
 const REPO = 'https://github.com/BRF-Tech/filex'
 
+// Files in docs/ a page links to for downloading (not markdown, so VitePress
+// does not build or copy them): served at the same path from the site root,
+// so the page's relative link works on the site and on the repository alike.
+const DOWNLOADS = ['uploaders/filex.sxcu']
+
 export default defineConfig({
   title: 'filex',
   titleTemplate: ':title · filex',
@@ -258,12 +263,19 @@ export default defineConfig({
       {
         name: 'filex-docs-logo-dev',
         configureServer(server) {
-          // Serve the shared logo from docs/ during `vitepress dev`
-          // (at build time `buildEnd` copies it into the dist root).
+          // Serve the shared logo and the DOWNLOADS from docs/ during
+          // `vitepress dev` (at build time `buildEnd` copies them into the
+          // dist root).
           server.middlewares.use('/logo.png', (_req, res) => {
             res.setHeader('Content-Type', 'image/png')
             fs.createReadStream(resolve(docsDir, 'logo.png')).pipe(res)
           })
+          for (const file of DOWNLOADS) {
+            server.middlewares.use(`/${file}`, (_req, res) => {
+              res.setHeader('Content-Type', 'application/octet-stream')
+              fs.createReadStream(resolve(docsDir, file)).pipe(res)
+            })
+          }
         }
       }
     ]
@@ -271,5 +283,9 @@ export default defineConfig({
 
   buildEnd(siteConfig) {
     fs.copyFileSync(resolve(docsDir, 'logo.png'), resolve(siteConfig.outDir, 'logo.png'))
+    for (const file of DOWNLOADS) {
+      fs.mkdirSync(dirname(resolve(siteConfig.outDir, file)), { recursive: true })
+      fs.copyFileSync(resolve(docsDir, file), resolve(siteConfig.outDir, file))
+    }
   }
 })

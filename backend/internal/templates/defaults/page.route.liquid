@@ -1,0 +1,13 @@
+<style>
+a.btn { text-decoration: none; text-align: center; }
+</style>
+<div class="card">
+<div class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1.5 1.5"/><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1.5-1.5"/></svg></div>
+<h1>{{ route.title }}</h1>
+{%- if route.text != blank %}
+<p class="sub"{% if route.link == blank %} style="margin-bottom:0"{% endif %}>{{ route.text }}</p>
+{%- endif %}
+{%- if route.link != blank %}
+<a class="btn" href="{{ route.link }}" rel="noopener noreferrer nofollow">{{ route.link_label }}</a>
+{%- endif %}
+</div>

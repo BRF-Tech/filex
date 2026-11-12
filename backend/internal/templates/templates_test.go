@@ -232,6 +232,39 @@ func TestNoScriptComesOutOfAnEditedPage(t *testing.T) {
 	}
 }
 
+// A self-contained page (an app's public address, #324) names no logo
+// address - it is served where it may load nothing - but keeps the brand's
+// name and its inline theme; page.route is only ever served that way, so its
+// preview is drawn that way too. Other pages keep their logo.
+func TestASelfContainedPageNamesNoLogo(t *testing.T) {
+	r := &templates.Renderer{Brand: func(context.Context, templates.Target) templates.Brand {
+		return templates.Brand{Name: "Acme", LogoURL: "https://cdn.example.com/acme.png", ThemeCSS: "<style>:root{--px-accent:#123456}</style>"}
+	}}
+	ctx := context.Background()
+	data := map[string]any{"error": map[string]any{"code": 404, "key": "route_miss", "title": "Gone", "body": ""}}
+	own, err := r.Page(ctx, templates.Target{Lang: "en", SelfContained: true}, "page.error", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(own, "cdn.example.com") || strings.Contains(own, "<img") {
+		t.Fatalf("a self-contained page names the logo:\n%s", own)
+	}
+	if !strings.Contains(own, "Acme") || !strings.Contains(own, "--px-accent:#123456") {
+		t.Fatalf("the brand's name or theme is missing:\n%s", own)
+	}
+	linked, _ := r.Page(ctx, templates.Target{Lang: "en"}, "page.error", data)
+	if !strings.Contains(linked, `src="https://cdn.example.com/acme.png"`) {
+		t.Fatalf("a link's page lost its logo:\n%s", linked)
+	}
+	p, err := r.Preview(ctx, templates.Target{Lang: "en"}, "page.route", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(p.HTML, "cdn.example.com") || !strings.Contains(p.HTML, "Where this short link goes") {
+		t.Fatalf("page.route's preview:\n%s", p.HTML)
+	}
+}
+
 // The save check: a page that lost what its script needs is refused, and a
 // syntax error names its line.
 func TestValidateRefusesWhatWouldBreakThePage(t *testing.T) {

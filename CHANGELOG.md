@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A ShareX template for any filex server.**
+  [docs/uploaders/filex.sxcu](docs/uploaders/filex.sxcu) (also on the docs
+  site, beside the Uploaders page) is the custom uploader file filex makes for
+  an uploader, with `YOUR-FILEX-HOST` and `fxu_YOUR_KEY` in place of the
+  address and the key: import it, fill in the two, and ShareX uploads to
+  `/api/uploads`. A test holds it to the server's own file.
+  [UPLOADERS.md → ShareX](docs/UPLOADERS.md#sharex).
+
+### Changed
+
+- **The pages of an app's public address are templates.** What a short
+  link's address answers when it leads nowhere, after too many tries and when
+  it is unavailable is `page.error` (`error.key` `route_miss`, `route_busy`,
+  `route_unavailable`), and a page the app answers with - a short link's `+`
+  preview - is the new `page.route`: an administrator edits them under
+  *Settings → Templates* like the other public pages, and they wear the
+  address's branding. They still load nothing from elsewhere (no logo, inline
+  styles only, `default-src 'none'`), so they work on a host of the app's own,
+  and each is drawn once per language, kind and tenant and served again for a
+  minute, compressed for a browser that takes gzip.
+  [TEMPLATES.md → An app's public address](docs/TEMPLATES.md#an-apps-public-address).
+
+### Fixed
+
+- **A flood of fresh addresses no longer slows down the per-address limits.**
+  The limits of file request uploads, the bot check, upload tickets, deletion
+  links and share mail swept every address they knew on each new one, so a
+  flood from many addresses cost the server the square of its size. Each
+  request is now one step, a limit holds at most 200,000 addresses at a time,
+  and a count runs over the clock's current window and the one before it: at
+  most the limit in any stretch one window long, so an hour's turn is no
+  fresh start, and a client that reached the limit waits until the next
+  window ends (two windows at most). An IPv6 address is counted per /64, as
+  the short-link limiter counts it: keyed by the full address, one host with
+  a /64 was as many fresh clients as it liked, past every limit and able to
+  fill the 200,000.
+- **For app authors: the test kit no longer calls an app's home list a dead
+  end.** `plugintest.InspectSurfaceFor(manifest, viewID, surface)` and
+  `CheckSurfaceFor` read a screen with its view's placement: a `home`, `page`
+  or `inspector` screen with no buttons stays where it is drawn and is not
+  warned about, while a `modal` step and the `setup` wizard still are, and a
+  view the manifest does not declare is an error. `InspectSurface` and
+  `CheckSurface` are unchanged.
+  [PLUGIN-KIT.md → What the assertions catch](docs/PLUGIN-KIT.md#what-the-assertions-catch).
+- **An app waiting for its setup says so in the reader's language only.** The
+  Apps table's State cell read "Needs setup" followed by the server's English
+  "waiting to be set up" in every language; the list no longer sends that
+  reason as the app's error.
+- **A row's Actions menu inside a dialog can be clicked.** In the setup
+  wizard's Addresses step the menu opened under the dialog and the "Add
+  address" box took its clicks. Menus, a table's column menu and lists opened
+  inside an open dialog are now drawn in that dialog, and Escape closes the
+  menu without closing the dialog.
+- **A host of its own no longer gets the route's prefix.** Switching an
+  address to "A host of its own" kept the default prefix of filex's own
+  address, so `l.example.com` became `https://l.example.com/l`. Each kind of
+  address now keeps its own prefix, and a host of its own starts with none.
+
+### Security
+
+- **The release runs its third-party actions at fixed commits.** Every action
+  the GitHub workflows use is pinned to the full commit its version tag named,
+  the tag beside it in a comment, so a moved or hijacked tag cannot change what
+  a release or a test run executes. The jobs that read a publishing secret (the
+  stores, winget, Homebrew, CircleCI) run in a `release` environment that only
+  `main` and `v*` tags may deploy to, and every workflow says at the top what
+  its token may do. Nothing was found tampered with; this is a second layer.
+
 ## [0.60.0] - 2026-11-11
 
 ### Added

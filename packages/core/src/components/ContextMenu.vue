@@ -4,9 +4,11 @@
  *
  * Teleported under <body> so no parent (Ionic <ion-page>, Filament's
  * transformed flex containers, panel sidebars, …) can shift the
- * `position: fixed` backdrop off-window.
+ * `position: fixed` backdrop off-window — or, opened inside an open
+ * <dialog>, into that dialog: a modal dialog is in the browser's top layer,
+ * above anything <body> can stack (lib/popupLayer `popupHost`, 0.60.1).
  */
-import { ref, computed, nextTick, watch } from 'vue';
+import { ref, computed, nextTick, shallowRef, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import type { FileNode } from '../types/FileNode';
 import { useLocale } from '../composables/useLocale';
@@ -15,7 +17,7 @@ import { menuShortcutHint } from '../composables/useKeyboardShortcuts';
 import { actionIconSvg } from '../lib/actionIcons';
 import { openAlongInline } from '../lib/direction';
 import { heldMenuRows, visibleMenuRows } from '../lib/heldMenuRows'; /* #196 */
-import { POPUP_BASE_Z, openerCandidates, popupLayer } from '../lib/popupLayer'; /* katman:z1 */
+import { POPUP_BASE_Z, openerCandidates, popupHost, popupLayer } from '../lib/popupLayer'; /* katman:z1 */
 
 export interface ContextAction {
   key: string;
@@ -115,6 +117,10 @@ const y = ref(0);
  * API-keys overlay (`.fe-overlay`, z-index 130) used to be drawn at 80 and was
  * invisible. The stylesheet's 80 stays as the value for every ordinary open. */
 const layerZ = ref(POPUP_BASE_Z);
+/* Where the menu is teleported: <body>, or the open <dialog> it was opened in
+ * (lib/popupLayer `popupHost`). ⚠ 0.60.0's app setup wizard: in <body> the
+ * menu was under the modal dialog's top layer and its entries took no click. */
+const host = shallowRef<HTMLElement | string>('body');
 const targetNodes = ref<FileNode[]>([]);
 const menuEl = ref<HTMLElement | null>(null);
 
@@ -128,11 +134,21 @@ let anchorY = 0;
  * it back on hide, so keyboard users don't fall back to <body>. */
 let prevFocus: HTMLElement | null = null;
 
-async function show(ev: { clientX: number; clientY: number }, nodes: FileNode[]) {
+/**
+ * Opens the menu at a point. `target` is what opened it when the caller knows
+ * (a MouseEvent carries it; RowActions passes its button): the best clue to
+ * the dialog and the layer the menu belongs on, beside the focused element
+ * and the one under the point, which a button that takes no focus on a click
+ * (WebKit) or a point on its edge can miss.
+ */
+async function show(ev: { clientX: number; clientY: number; target?: EventTarget | null }, nodes: FileNode[]) {
   prevFocus = (document.activeElement as HTMLElement | null) ?? null; /* wiring:c4 */
   /* katman:z1 — BEFORE the backdrop exists: once it does it covers the
    * viewport and `elementFromPoint` answers with the backdrop itself. */
-  layerZ.value = popupLayer(openerCandidates(ev.clientX, ev.clientY));
+  const from = ev.target && typeof (ev.target as Element).closest === 'function' ? (ev.target as Element) : null;
+  const openers = [from, ...openerCandidates(ev.clientX, ev.clientY)];
+  host.value = popupHost(openers);
+  layerZ.value = popupLayer(openers);
   /* #196 — a new opening draws what is offered now, in its own order. */
   openedRows.value = null;
   sheetHeight.value = null;
@@ -301,7 +317,10 @@ function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     // Scoped close: Esc with the menu open closes ONLY the menu — the
     // explorer's global onClose (which also dismisses modals/toasts)
-    // shouldn't fire underneath.
+    // shouldn't fire underneath. ⚠ preventDefault too: inside a native
+    // <dialog> an Escape whose default is left is the dialog's close request,
+    // and the setup wizard would close with its row's menu.
+    e.preventDefault();
     e.stopPropagation();
     hide();
     return;
@@ -387,7 +406,7 @@ defineExpose({ show, hide });
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport :to="host">
     <transition :name="sheet ? 'fe-sheet' : 'fe-ctx'">
       <div
         v-if="open"
