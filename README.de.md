@@ -354,7 +354,7 @@ Alle Funktionen zu Speicher und Protokollen im Detail: [docs/FEATURES.md → Sto
 </td>
 <td width="50%" valign="top">
 
-![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.890f4cd92081.png)
+![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.3d6279c2e261.png)
 
 <sub>API-Schlüssel - erstellen Sie Ihre eigenen, im Explorer oder in einer Einbettung (Sitzung oder Schlüssel einer Person; eine Einbettung, die über einen Proxy mit einem gemeinsamen *App*-Schlüssel läuft, bekommt diesen Eintrag nicht)</sub>
 
@@ -411,7 +411,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.b32887acb9ed.png)
+![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.58825362c544.png)
 
 <sub>Freigaben - PIN, Ablaufdatum, Download-Limit, `curl`-Einzeiler</sub>
 
@@ -443,7 +443,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.c28cec3a103e.png)
+![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.dadc9345981d.png)
 
 <sub>Jede Tabelle im Adminbereich - ein angeheftetes Menü **Aktionen** pro Zeile, dasselbe Menü, das sich über das ⋮ des Explorers öffnet</sub>
 
@@ -805,7 +805,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 <tr>
 <td width="50%" valign="top">
 
-![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.527c9244531a.png)
+![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.daaf28c9f518.png)
 
 <sub>Solange es im Umlauf ist - das Dokument ist für alle eingefroren, in seinen Details steht, wer unterschrieben hat</sub>
 

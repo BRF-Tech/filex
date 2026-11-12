@@ -11,7 +11,7 @@
 // the run's record, not to a command line. Every text this file hands back
 // has it taken out, whatever said it.
 //
-// The repository secret WINGET_TOKEN is what the tag run uses, and GitHub
+// The release environment's secret WINGET_TOKEN is what the tag run uses, and GitHub
 // never gives a secret's value back: so the vault's copy is asked, and the
 // two are kept the same (wingetTokenFix pipes the one into the other).
 
@@ -54,7 +54,7 @@ export function readWingetToken({ bash, settings = trainSettings, runner = run }
     return {
       error: [
         `${TOKEN_CMD} is not set (the environment, or ${where}): nothing here can read the winget token, so nothing can tell whether the tag run's winget pull requests will work - and 0.57.6's tag run died on an expired one.`,
-        `Set it to a command that prints the token on its standard output and nothing else - the vault's command-line reader for the entry that holds the repository secret WINGET_TOKEN's value. It runs in bash; what it prints is never shown. scripts/train/train.env.example, "the winget token", says more.`,
+        `Set it to a command that prints the token on its standard output and nothing else - the vault's command-line reader for the entry that holds the value of the release environment's secret WINGET_TOKEN. It runs in bash; what it prints is never shown. scripts/train/train.env.example, "the winget token", says more.`,
       ].join('\n'),
     };
   }

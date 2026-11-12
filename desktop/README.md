@@ -345,8 +345,9 @@ behind, still claiming the link.)
 - Snap Store: a Snapcraft (Ubuntu One) account with 2FA → `snapcraft register
   filex-app` (names are reviewed by hand, up to two working days) → `snapcraft
   export-login --snaps=filex-app --acls=package_access,package_push,package_update,package_release
-  --expires=<date> creds.txt` → the file's content as the repository secret
-  `SNAPCRAFT_STORE_CREDENTIALS`. Auto-connecting the plugs above is a
+  --expires=<date> creds.txt` → the file's content as the secret
+  `SNAPCRAFT_STORE_CREDENTIALS` of the `release` environment
+  (`gh secret set SNAPCRAFT_STORE_CREDENTIALS --env release < creds.txt`). Auto-connecting the plugs above is a
   separate request on the Snapcraft forum (store-requests, a week's vote).
   ⚠ Do not add `allow-sandbox: true` back: it is for trusted publishers only,
   and every upload carrying it waits for a manual review.

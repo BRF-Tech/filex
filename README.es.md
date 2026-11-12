@@ -352,7 +352,7 @@ Todas las funciones de almacenamiento y protocolos, en detalle: [docs/FEATURES.m
 </td>
 <td width="50%" valign="top">
 
-![Claves de API](https://filex.sh/shots/sidenav/apikeys-minted-1440.890f4cd92081.png)
+![Claves de API](https://filex.sh/shots/sidenav/apikeys-minted-1440.3d6279c2e261.png)
 
 <sub>Claves de API - cree las suyas, en el explorador o en una integración (la sesión o el token de una persona; una integración servida a través de un proxy con un único token compartido de tipo *app* no recibe esta entrada)</sub>
 
@@ -409,7 +409,7 @@ Todas las funciones de uso compartido y protección, en detalle: [docs/FEATURES.
 <tr>
 <td width="50%" valign="top">
 
-![Cuadro de diálogo Compartir](https://filex.sh/shots/share-modal.b32887acb9ed.png)
+![Cuadro de diálogo Compartir](https://filex.sh/shots/share-modal.58825362c544.png)
 
 <sub>Uso compartido - PIN, caducidad, límite de descargas, `curl` de una línea</sub>
 
@@ -441,7 +441,7 @@ Todas las funciones de uso compartido y protección, en detalle: [docs/FEATURES.
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Enlaces compartidos, con el menú Acciones de una fila abierto](https://filex.sh/shots/signing/admin-table-actions-1440.c28cec3a103e.png)
+![Admin → Enlaces compartidos, con el menú Acciones de una fila abierto](https://filex.sh/shots/signing/admin-table-actions-1440.dadc9345981d.png)
 
 <sub>Cada tabla de administración - un único menú **Acciones** fijado por fila, el mismo menú que abre el ⋮ del explorador</sub>
 
@@ -805,7 +805,7 @@ la genera filex, y el enlace que recibe el socio es un enlace compartido corrien
 <tr>
 <td width="50%" valign="top">
 
-![El documento bloqueado, con su panel Firmas abierto](https://filex.sh/shots/signing/sign-status-1440.527c9244531a.png)
+![El documento bloqueado, con su panel Firmas abierto](https://filex.sh/shots/signing/sign-status-1440.daaf28c9f518.png)
 
 <sub>Mientras está en curso - el documento congelado para todos y, en sus detalles, quién ha firmado</sub>
 

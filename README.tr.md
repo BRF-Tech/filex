@@ -351,7 +351,7 @@ Depolama ve protokollerin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 </td>
 <td width="50%" valign="top">
 
-![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.890f4cd92081.png)
+![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.3d6279c2e261.png)
 
 <sub>API anahtarları - kendinizinkini oluşturun, gezginde ya da gömülü bir gezginde (bir kişinin oturumuyla ya da API anahtarıyla; tek bir ortak *uygulama* API anahtarıyla vekil sunucu üzerinden çalışan gömülü bir gezginde bu öğe yer almaz)</sub>
 
@@ -408,7 +408,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.b32887acb9ed.png)
+![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.58825362c544.png)
 
 <sub>Paylaşım - PIN, son kullanma tarihi, indirme limiti, tek satırlık `curl`</sub>
 
@@ -440,7 +440,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.c28cec3a103e.png)
+![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.dadc9345981d.png)
 
 <sub>Her yönetim tablosu - satır başına sabitlenmiş tek bir **Aksiyon** menüsü, gezgindeki ⋮ ile açılan menünün aynısı</sub>
 
@@ -799,7 +799,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 <tr>
 <td width="50%" valign="top">
 
-![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.527c9244531a.png)
+![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.daaf28c9f518.png)
 
 <sub>Belge imzadayken - herkes için dondurulmuş, kimin imzaladığı ayrıntılarında</sub>
 

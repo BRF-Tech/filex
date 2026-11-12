@@ -1323,7 +1323,7 @@ replaces the key; **Disconnect** forgets it and tells the store to forget it
 too. A store the screen shows but this filex is not connected to still takes
 requests; they wait until it is connected.
 
-![Trusted stores with the store connected, its key's fingerprint, and the Store screen settings under it](https://filex.sh/shots/store/store-connected-1440.3cf3d17b2cc6.png)
+![Trusted stores with the store connected, its key's fingerprint, and the Store screen settings under it](https://filex.sh/shots/store/store-connected-1440.e8c366d40acc.png)
 
 ## Install requests
 
@@ -1401,9 +1401,9 @@ when that install ends ([The store screen](#the-store-screen)). **Reject**
 works as for any request, and the person reads the reason on their *My
 requests*.
 
-![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.8f55858b1c80.png)
+![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.1a39e683cfbe.png)
 
-![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.b89653b966c7.png)
+![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.bf4c0244b443.png)
 
 ### Leaving one
 
@@ -1594,7 +1594,7 @@ files to keep.
   audit trail saved - by anybody who may edit the document, not only the
   requester.
 
-  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.527c9244531a.png)
+  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.daaf28c9f518.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* - and,
@@ -1957,7 +1957,7 @@ dialog, and the text handed to the device's share sheet, carry the short
 address; an [uploader](UPLOADERS.md#make-an-uploader) can answer each upload
 with it. One app holds the role at a time.
 
-![The share dialog after Get short link: the short address leads, the full link one copy away (dark theme)](https://filex.sh/shots/shortlinks/share-short-dark-1440.f4c4dfa2e137.png)
+![The share dialog after Get short link: the short address leads, the full link one copy away (dark theme)](https://filex.sh/shots/shortlinks/share-short-dark-1440.a1bac88e90ff.png)
 
 [`backend/examples/app-shortlinks`](../backend/examples/app-shortlinks/main.go)
 is the smallest app that holds the role; the contract is

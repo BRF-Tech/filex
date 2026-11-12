@@ -95,7 +95,7 @@ link gets the address's.
 
 ## The editor
 
-![Admin, Settings, Templates: the mails and pages, the share mail's source in the code editor with a sign-off added, and the preview the server rendered (dark theme)](https://filex.sh/shots/templates/templates-editor-dark-1440.381c86aa34ed.png)
+![Admin, Settings, Templates: the mails and pages, the share mail's source in the code editor with a sign-off added, and the preview the server rendered (dark theme)](https://filex.sh/shots/templates/templates-editor-dark-1440.3d00cf3a7359.png)
 
 - **The source** is filex's code editor - the one the file preview edits
   code in (Monaco): Liquid and HTML in colour, line numbers, the usual

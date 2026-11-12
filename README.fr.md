@@ -355,7 +355,7 @@ Toutes les fonctionnalités de stockage et de protocoles en détail : [docs/FEA
 </td>
 <td width="50%" valign="top">
 
-![Clés d’API](https://filex.sh/shots/sidenav/apikeys-minted-1440.890f4cd92081.png)
+![Clés d’API](https://filex.sh/shots/sidenav/apikeys-minted-1440.3d6279c2e261.png)
 
 <sub>Clés d’API - créez les vôtres, dans l’explorateur ou dans une intégration (la session ou la clé d’une personne ; une intégration relayée par un proxy avec une seule clé partagée de type *app* n’a pas cette entrée)</sub>
 
@@ -412,7 +412,7 @@ Toutes les fonctionnalités de partage et de protection en détail : [docs/FEAT
 <tr>
 <td width="50%" valign="top">
 
-![Boîte de dialogue de partage](https://filex.sh/shots/share-modal.b32887acb9ed.png)
+![Boîte de dialogue de partage](https://filex.sh/shots/share-modal.58825362c544.png)
 
 <sub>Partage - PIN, expiration, limite de téléchargements, `curl` en une ligne</sub>
 
@@ -444,7 +444,7 @@ Toutes les fonctionnalités de partage et de protection en détail : [docs/FEAT
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/admin-table-actions-1440.c28cec3a103e.png)
+![Admin → Partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/admin-table-actions-1440.dadc9345981d.png)
 
 <sub>Chaque tableau d’administration - un menu **Actions** épinglé par ligne, le même menu qu’ouvre le ⋮ de l’explorateur</sub>
 
@@ -814,7 +814,7 @@ partage ordinaire.
 <tr>
 <td width="50%" valign="top">
 
-![Le document verrouillé, son panneau Signatures ouvert](https://filex.sh/shots/signing/sign-status-1440.527c9244531a.png)
+![Le document verrouillé, son panneau Signatures ouvert](https://filex.sh/shots/signing/sign-status-1440.daaf28c9f518.png)
 
 <sub>Tant que la demande est en cours - le document gelé pour tout le monde et, dans ses détails, qui a signé</sub>
 

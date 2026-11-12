@@ -272,14 +272,16 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   [the engine's event stream](SYNC.md#the-event-stream---json) a program (the desktop
   app) reads instead of its lines, and [`filex sync window`](SYNC.md#filex-sync-window)
 - [Uploaders](UPLOADERS.md) - a key for one program - ShareX (a one-file
-  `.sxcu` made for you), curl, a phone shortcut, a script - that puts files into
-  one folder and answers each with a public or private link and a deletion
-  link whose opening never deletes; the key opens nothing else (0.60)
+  `.sxcu` made for you, or a template for any filex server), curl, a phone
+  shortcut, a script - that puts files into one folder and answers each with a
+  public or private link and a deletion link whose opening never deletes; the
+  key opens nothing else (0.60)
 - [Mail and page templates](TEMPLATES.md) - every mail and every page a link
   opens as a Liquid template the administrator (or a tenant's administrator)
   rewrites, with a live preview and a test mail; the public link page's frame,
-  its text slots and the class names its CSS can rely on; the sandbox, the
-  sanitizer and the Content-Security-Policy behind them (0.60)
+  its text slots and the class names its CSS can rely on; the pages of an
+  app's public address (0.60.1); the sandbox, the sanitizer and the
+  Content-Security-Policy behind them (0.60)
 - [Uploads](UPLOADS.md) - the staged, resumable upload path: chunked, works on
   every driver, survives a dropped connection
 - [File names](FILE-NAMES.md) - the names filex refuses (and the one rule every

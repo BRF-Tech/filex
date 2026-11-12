@@ -1403,17 +1403,18 @@ export function githubTokenExpiry(value) {
 /**
  * What renews the winget token, as lines for a red gate. `reader` is the
  * command that read the vault's copy (FILEX_WINGET_TOKEN_CMD), when known:
- * piped into `gh secret set`, the new value reaches the repository secret
- * without being shown.
+ * piped into `gh secret set --env release`, the new value reaches the release
+ * environment's secret without being shown (a repository secret of the same
+ * name is shadowed by the environment's, so setting that one fixes nothing).
  */
 export function wingetTokenFix({ fork, repo, reader = '' }) {
   return [
     `the fix, by the account that owns ${fork}:`,
     '  1. a new classic token, scope public_repo, with a long expiry (GitHub offers 30 days unless told otherwise):',
     `     ${WINGET_TOKEN_NEW_URL}`,
-    '  2. the new value into the vault entry FILEX_WINGET_TOKEN_CMD reads, and the same value into the repository secret:',
-    `     gh secret set WINGET_TOKEN -R ${repo}`,
-    `     (it reads the value from its standard input${reader ? `: ${reader} | gh secret set WINGET_TOKEN -R ${repo}` : ''})`,
+    '  2. the new value into the vault entry FILEX_WINGET_TOKEN_CMD reads, and the same value into the release environment\'s secret:',
+    `     gh secret set WINGET_TOKEN --env release -R ${repo}`,
+    `     (it reads the value from its standard input${reader ? `: ${reader} | gh secret set WINGET_TOKEN --env release -R ${repo}` : ''})`,
     '  3. resume the release: this gate asks GitHub again',
   ];
 }

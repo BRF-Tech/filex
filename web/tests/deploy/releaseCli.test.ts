@@ -477,7 +477,7 @@ describe.concurrent('pnpm release — preflight stops before anything is written
     expect(r.out).toContain('FAILED  winget: the token for fixture/winget-pkgs works, with more than 14 days left');
     expect(r.out).toContain('GitHub refuses the winget token: 401 "Bad credentials"');
     expect(r.out).toContain('https://github.com/settings/tokens/new?scopes=public_repo&description=filex%20winget%20releases');
-    expect(r.out).toContain('gh secret set WINGET_TOKEN -R fixture/fixture');
+    expect(r.out).toContain('gh secret set WINGET_TOKEN --env release -R fixture/fixture');
     expect(r.out).toContain('STOPPED at preflight');
     expect(r.out).not.toContain(banner('audit'));
     expect(r.out).not.toContain('fixture-winget-token-not-a-real-one');

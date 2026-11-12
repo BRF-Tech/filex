@@ -33,7 +33,7 @@ People, Settings, Maintenance & records:
 
 ![The Settings panel open over Admin → Settings → General: three columns, a line under every page](https://filex.sh/shots/megamenu/settings-panel-1440.e51582dc1f4f.png)
 
-![The Settings panel in Turkish, in the dark theme](https://filex.sh/shots/megamenu/settings-dark-tr-1440.7d56953e4946.png)
+![The Settings panel in Turkish, in the dark theme](https://filex.sh/shots/megamenu/settings-dark-tr-1440.abcb5a9551a1.png)
 
 Every page is two clicks away: the panel's button, then the page. The
 page's own sub-pages (a storage's settings, a person's page, a file's

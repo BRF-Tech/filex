@@ -345,7 +345,7 @@ Every storage and protocol feature in full: [docs/FEATURES.md → Storage and pr
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.890f4cd92081.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.3d6279c2e261.png)
 
 <sub>API keys - mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry)</sub>
 
@@ -400,7 +400,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Share modal](https://filex.sh/shots/share-modal.b32887acb9ed.png)
+![Share modal](https://filex.sh/shots/share-modal.58825362c544.png)
 
 <sub>Sharing - PIN, expiry, download limit, one-line `curl`</sub>
 
@@ -432,7 +432,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.c28cec3a103e.png)
+![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.dadc9345981d.png)
 
 <sub>Every admin table - one pinned **Actions** menu per row, the same menu the explorer's ⋮ opens</sub>
 
@@ -464,7 +464,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Admin, Settings, Templates: the share mail's source in the code editor and the preview the server rendered](https://filex.sh/shots/templates/templates-editor-dark-1440.381c86aa34ed.png)
+![Admin, Settings, Templates: the share mail's source in the code editor and the preview the server rendered](https://filex.sh/shots/templates/templates-editor-dark-1440.3d00cf3a7359.png)
 
 <sub>Templates - every mail filex sends and every page a link opens is HTML and CSS you can rewrite, with a live preview and a test mail; a tenant's administrator rewrites their own tenant's, and an edited template runs in a sandbox and carries no script ([docs/TEMPLATES.md](docs/TEMPLATES.md))</sub>
 
@@ -809,7 +809,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.527c9244531a.png)
+![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.daaf28c9f518.png)
 
 <sub>While it is out - the document frozen for everybody, who has signed in its details</sub>
 
@@ -928,7 +928,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 </td>
 <td width="50%" valign="top">
 
-![The share dialog after Get short link: the short address leads, the full link one copy away](https://filex.sh/shots/shortlinks/share-short-dark-1440.f4c4dfa2e137.png)
+![The share dialog after Get short link: the short address leads, the full link one copy away](https://filex.sh/shots/shortlinks/share-short-dark-1440.a1bac88e90ff.png)
 
 <sub>Short links - an app holding the link-shortener role puts **Get short link** in the share dialog, file requests, My shares and uploaders ([Short links](docs/APP-PLUGINS.md#short-links))</sub>
 

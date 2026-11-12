@@ -158,19 +158,19 @@ describe('wingetTokenVerdict: what GitHub answered, judged', () => {
 });
 
 describe('wingetTokenFix: the renewal, said exactly', () => {
-  it('names the classic token page with public_repo, the vault entry and the repository secret', () => {
+  it('names the classic token page with public_repo, the vault entry and the release environment\'s secret', () => {
     expect(WINGET_TOKEN_NEW_URL).toBe('https://github.com/settings/tokens/new?scopes=public_repo&description=filex%20winget%20releases');
     const lines = wingetTokenFix({ fork: FORK, repo: SECRET_REPO }).join('\n');
     expect(lines).toContain(`the fix, by the account that owns ${FORK}:`);
     expect(lines).toContain(WINGET_TOKEN_NEW_URL);
     expect(lines).toContain('long expiry');
     expect(lines).toContain('the vault entry FILEX_WINGET_TOKEN_CMD reads');
-    expect(lines).toContain(`gh secret set WINGET_TOKEN -R ${SECRET_REPO}`);
+    expect(lines).toContain(`gh secret set WINGET_TOKEN --env release -R ${SECRET_REPO}`);
   });
 
   it('pipes the vault reader into gh secret set when it is known, so the value is never on screen', () => {
     const lines = wingetTokenFix({ fork: FORK, repo: SECRET_REPO, reader: 'vault-read winget' }).join('\n');
-    expect(lines).toContain(`vault-read winget | gh secret set WINGET_TOKEN -R ${SECRET_REPO}`);
+    expect(lines).toContain(`vault-read winget | gh secret set WINGET_TOKEN --env release -R ${SECRET_REPO}`);
   });
 });
 
@@ -197,7 +197,7 @@ describe('the preflight gate: the vault\'s copy asked of GitHub, never printed',
     expect(r.ok).toBe(false);
     expect(r.detail).toContain('401 "Bad credentials"');
     expect(r.detail).toContain(WINGET_TOKEN_NEW_URL);
-    expect(r.detail).toContain(`vault-read winget | gh secret set WINGET_TOKEN -R ${SECRET_REPO}`);
+    expect(r.detail).toContain(`vault-read winget | gh secret set WINGET_TOKEN --env release -R ${SECRET_REPO}`);
     expect(r.detail).not.toContain(TOKEN);
   });
 
@@ -206,7 +206,7 @@ describe('the preflight gate: the vault\'s copy asked of GitHub, never printed',
     const r = await check();
     expect(r.ok).toBe(false);
     expect(r.detail).toContain('in 10 day(s)');
-    expect(r.detail).toContain(`gh secret set WINGET_TOKEN -R ${SECRET_REPO}`);
+    expect(r.detail).toContain(`gh secret set WINGET_TOKEN --env release -R ${SECRET_REPO}`);
   });
 
   it('GitHub not answering is asked again, then red - never a silent pass', async () => {

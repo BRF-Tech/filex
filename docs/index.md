@@ -42,12 +42,12 @@ features:
     linkText: Themes & appearance
   - icon: ✉️
     title: Your words in every mail and page
-    details: Every mail filex sends and every page a link opens is a Liquid template the administrator rewrites under Settings → Templates, with a live preview in every language and a test mail to yourself; a tenant's administrator rewrites their own tenant's. An edited template runs in a WebAssembly sandbox and is sanitized, so no script reaches a mail or a page, and one that fails gives way to filex's own. Mails go out as HTML with a plain-text part.
+    details: Every mail filex sends, every page a link opens and the pages of an app's public address are Liquid templates the administrator rewrites under Settings → Templates, with a live preview in every language and a test mail to yourself; a tenant's administrator rewrites their own tenant's. An edited template runs in a WebAssembly sandbox and is sanitized, so no script reaches a mail or a page, and one that fails gives way to filex's own. Mails go out as HTML with a plain-text part.
     link: /TEMPLATES
     linkText: Mail & page templates
   - icon: 📤
     title: Screenshots straight to a link
-    details: An uploader is a key for one program - ShareX, curl, a phone shortcut, a Flameshot hotkey - that drops files into one folder and answers each with a public or a private link and a deletion link. filex makes ShareX's settings file for you, with your address and the key in it, and the key opens nothing else.
+    details: An uploader is a key for one program - ShareX, curl, a phone shortcut, a Flameshot hotkey - that drops files into one folder and answers each with a public or a private link and a deletion link. filex makes ShareX's settings file for you, with your address and the key in it - or start from the template for any filex server - and the key opens nothing else.
     link: /UPLOADERS
     linkText: Uploaders
   - icon: 🌐

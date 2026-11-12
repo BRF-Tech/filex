@@ -2680,7 +2680,8 @@ committed and in step with GitHub. Then this repository's own preflight gates
 the tags are out:
 
 - **The winget token works, with more than 14 days left** (#290). The tag run
-  opens the winget pull requests with the repository secret `WINGET_TOKEN`: a
+  opens the winget pull requests with the `release` environment's secret
+  `WINGET_TOKEN`: a
   classic token, scope `public_repo`, of the account that owns the fork
   `.goreleaser.yml` publishes from (`brkfun/winget-pkgs`). On 0.57.6 it had
   run out - made with GitHub's 30-day default - and the tag run published the
@@ -2702,7 +2703,7 @@ the tags are out:
   a new classic token at
   <https://github.com/settings/tokens/new?scopes=public_repo&description=filex%20winget%20releases>
   with a long expiry, its value into the vault entry the command reads, then
-  into the secret - `<the command> | gh secret set WINGET_TOKEN -R BRF-Tech/filex`
+  into the secret - `<the command> | gh secret set WINGET_TOKEN --env release -R BRF-Tech/filex`
   reads it from the pipe, so it never shows - and resume: the gate asks again.
 
 **The publishing jobs run in the `release` environment** (BRF-Tech/filex →
@@ -2715,10 +2716,10 @@ branch stops at `verify`. `release.yml`'s `verify` (`CIRCLECI_TOKEN`),
 `aur` (`AUR_SSH_PRIVATE_KEY`), `msstore-resubmit.yml`'s `submit` and
 `nightly-desktop.yml`'s `desktop` name it (`packaging/ci/release-environment.patch`;
 `web/tests/deploy/actionsPinned.test.ts` wants every job that reads a secret
-in it). Until the secrets move into the environment they are the repository's,
-which a job in the environment reads as well; after the move a secret is set
-with `gh secret set <NAME> --env release -R BRF-Tech/filex`, and a job without
-`environment: release` finds it empty.
+in it). The secrets are the environment's, not the repository's: a secret is
+set with `gh secret set <NAME> --env release -R BRF-Tech/filex`, a repository
+secret of the same name is shadowed by it (setting that one fixes nothing),
+and a job without `environment: release` finds it empty.
 
 **GitHub refuses deleting or moving a `v*` tag, and force-pushing or deleting
 `main`**: two rulesets on BRF-Tech/filex, `release tags` (id 27105600: deletion
@@ -4380,9 +4381,10 @@ node scripts/release/package-local.mjs X.Y.Z --run --only images,desktop-windows
 5. Make a personal API token (User Settings, Personal API Tokens) for the
    release tool. It goes in `CIRCLECI_TOKEN` when the tool runs, and in the
    team vault, never in a file.
-6. Give the tag run's `verify` the same kind of token: a repository secret
-   of `BRF-Tech/filex` named **`CIRCLECI_TOKEN`** (Settings, Secrets and
-   variables, Actions; or `gh secret set CIRCLECI_TOKEN -R BRF-Tech/filex`,
+6. Give the tag run's `verify` the same kind of token: a secret of
+   `BRF-Tech/filex`'s `release` environment named **`CIRCLECI_TOKEN`**
+   (Settings, Environments, release; or
+   `gh secret set CIRCLECI_TOKEN --env release -R BRF-Tech/filex`,
    which reads it from stdin). `verify` hands it to `circleci-green.mjs`
    alone, which sends it as the `Circle-Token` header and never prints it;
    no other job reads it. If the project's slug is not `gh/BRF-Tech/filex`

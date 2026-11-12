@@ -322,7 +322,7 @@ docker run -p 5212:5212 \
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.890f4cd92081.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.3d6279c2e261.png)
 
 <sub>API keys（API 密钥）：在资源管理器或嵌入端里签发你自己的密钥（凭某个人的会话或令牌；用一个共享的*应用*令牌做代理的嵌入端没有这个条目）</sub>
 
@@ -370,7 +370,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![共享对话框](https://filex.sh/shots/share-modal.b32887acb9ed.png)
+![共享对话框](https://filex.sh/shots/share-modal.58825362c544.png)
 
 <sub>共享：PIN、过期时间、下载次数上限、单行 `curl` 命令</sub>
 
@@ -402,7 +402,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.c28cec3a103e.png)
+![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.dadc9345981d.png)
 
 <sub>管理面板里的每张表格：每行一个固定的 **Actions**（操作）菜单，与资源管理器的 ⋮ 打开的是同一个菜单</sub>
 
@@ -710,7 +710,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 <tr>
 <td width="50%" valign="top">
 
-![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.527c9244531a.png)
+![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.daaf28c9f518.png)
 
 <sub>等待签署期间：文档对每个人都是冻结的，谁已签署，在文档的详细信息里可以看到</sub>
 
