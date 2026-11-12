@@ -8,7 +8,7 @@
 // failed with "Found dead link ./LAZY-CATALOGUE in file RELEASES.md" — the
 // second time in two days docs.filex.sh froze.
 
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -40,6 +40,28 @@ describe('release body links on the Releases page', async () => {
       `[l](${REPO}docs/LAZY-CATALOGUE.md#modes)`,
     );
     expect(relativeLinks('[l](./LAZY-CATALOGUE.md)', docs)).toBe(`[l](${REPO}docs/LAZY-CATALOGUE.md)`);
+  });
+
+  // ⚠ 2026-11-12: v0.60.1's notes linked the ShareX template,
+  // `docs/uploaders/filex.sxcu`. The file is in the tree, so it became
+  // `./uploaders/filex.sxcu`, VitePress read the unknown extension as a page
+  // and the ship's docs.filex.sh build died on "Found dead link".
+  it('sends a downloadable file of the tree to the repository; a picture stays', () => {
+    mkdirSync(path.join(docs, 'uploaders'), { recursive: true });
+    writeFileSync(path.join(docs, 'uploaders', 'filex.sxcu'), '{}\n');
+    writeFileSync(path.join(docs, 'screenshots', 'a.png'), '');
+    expect(relativeLinks('[t](docs/uploaders/filex.sxcu)', docs)).toBe(`[t](${REPO}docs/uploaders/filex.sxcu)`);
+    expect(relativeLinks('![a](docs/screenshots/a.png)', docs)).toBe('![a](./screenshots/a.png)');
+  });
+
+  it('the Releases page it wrote links on the site only to pages, pictures and folders', () => {
+    const root = path.join(__dirname, '..', '..', '..', 'docs');
+    const page = readFileSync(path.join(root, 'RELEASES.md'), 'utf8');
+    const local = [...page.matchAll(/\]\(\.\/([^)\s#]+)(?:#[^)\s]*)?\)/g)].map((m) => m[1]);
+    const files = local.filter(
+      (rel) => !/\.(?:md|png|jpe?g|gif|svg|webp)$/i.test(rel) && !statSync(path.join(root, rel), { throwIfNoEntry: false })?.isDirectory(),
+    );
+    expect(files, 'regenerate it: cd docs-site && npm run releases').toEqual([]);
   });
 
   it('leaves absolute links alone, and repo files go to the repository', () => {

@@ -426,7 +426,17 @@ function esc(text) {
  */
 export function relativeLinks(text, docsRoot = docsDir) {
   const REPO = 'https://github.com/BRF-Tech/filex/blob/main/'
-  const published = (rel) => fs.existsSync(path.join(docsRoot, rel.replace(/#.*$/, '')))
+  // ⚠ A file a page hands out for downloading (docs/uploaders/filex.sxcu, the
+  // site's DOWNLOADS) is in this tree but is no page: VitePress reads a link
+  // to an extension it does not know as a page and fails the build on it as
+  // dead. v0.60.1's notes linked the ShareX template that way and its ship
+  // stopped at docs.filex.sh (2026-11-12). Only a page, a picture or a folder
+  // stays on the site; any other file goes to the repository.
+  const published = (rel) => {
+    const file = path.join(docsRoot, rel.replace(/#.*$/, ''))
+    if (!fs.existsSync(file)) return false
+    return fs.statSync(file).isDirectory() || /\.(?:md|png|jpe?g|gif|svg|webp)$/i.test(file)
+  }
   const here = (rel) => {
     const [page, fragment] = rel.split('#')
     if (fragment === undefined || !page.endsWith('.md')) return rel
