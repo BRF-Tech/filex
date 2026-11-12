@@ -566,6 +566,9 @@ jobs:
     # closed, whatever kind of run this is.
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-latest
+    # The release environment: only main and v* tags may deploy to it, and
+    # the publishing secrets this job reads belong there.
+    environment: release
     permissions:
       actions: read
       contents: read
@@ -807,6 +810,9 @@ jobs:
     needs: [plan, verify]
     if: needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
+    # The release environment: only main and v* tags may deploy to it, and
+    # the publishing secrets this job reads belong there.
+    environment: release
     env:
       PUBLISH: ${{ needs.plan.outputs.publish }}
       SURFACES: ${{ needs.plan.outputs.surfaces }}
@@ -1524,6 +1530,9 @@ jobs:
       # the rows plan wrote.
       matrix: ${{ fromJSON(needs.verify.outputs.desktop || needs.plan.outputs.desktop) }}
     runs-on: ${{ matrix.os }}
+    # The release environment: only main and v* tags may deploy to it, and
+    # the publishing secrets this job reads belong there.
+    environment: release
     # gh release upload needs contents: write; a tag run downloads the dry
     # run's artifacts (actions: read). Nothing here pushes an image.
     permissions:
@@ -2478,6 +2487,9 @@ jobs:
     needs: [plan, verify, desktop]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.verify.result == 'success' && needs.plan.outputs.publish == 'true' && needs.plan.outputs.full == 'true' && needs.desktop.result != 'skipped' }}
     runs-on: ubuntu-latest
+    # The release environment: only main and v* tags may deploy to it, and
+    # the publishing secrets this job reads belong there.
+    environment: release
     env:
       AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
     steps:

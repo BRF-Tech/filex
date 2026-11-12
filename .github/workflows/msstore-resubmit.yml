@@ -40,6 +40,9 @@ permissions:
 jobs:
   submit:
     runs-on: windows-latest
+    # The release environment: only main and v* tags may deploy to it, and
+    # the publishing secrets this job reads belong there.
+    environment: release
     env:
       MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
       MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}

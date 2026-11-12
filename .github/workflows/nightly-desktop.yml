@@ -118,6 +118,9 @@ jobs:
           - { os: windows-latest, label: windows, targets: "windows" }
           - { os: macos-15, label: macos, targets: "mac" }
     runs-on: ${{ matrix.os }}
+    # The release environment: only main and v* tags may deploy to it, and
+    # the publishing secrets this job reads belong there.
+    environment: release
     env:
       ND_VERSION: ${{ needs.source.outputs.version }}
       ND_TARGETS: ${{ matrix.targets }}
