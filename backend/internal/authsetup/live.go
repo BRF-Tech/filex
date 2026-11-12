@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -99,6 +100,11 @@ func NewEnvEntry(name, from string, cfg map[string]any, d auth.Driver, err error
 			continue
 		}
 		if _, ok := FieldOf(e.Name, k); ok {
+			// The page shows a list the way its box takes one (the OIDC
+			// scopes: "groups offline_access").
+			if list, isList := v.([]string); isList {
+				v = strings.Join(list, " ")
+			}
 			e.Display[k] = v
 		}
 	}

@@ -472,17 +472,10 @@ func DriverConfig(s *Stored, box *secretbox.Box, opts Options) (map[string]any, 
 			cfg["redirect_url"] = strings.TrimRight(opts.PublicURL, "/") + "/api/auth/oidc/callback"
 		}
 		// The driver always asks for openid, profile and email; the page's
-		// scopes box is a space- or comma-separated list of EXTRA ones.
+		// scopes box is a space- or comma-separated list of EXTRA ones, read
+		// as FILEX_OIDC_EXTRA_SCOPES is (ExtraScopes).
 		if sc, _ := cfg["scopes"].(string); sc != "" {
-			var extra []string
-			for _, x := range strings.FieldsFunc(sc, func(r rune) bool { return r == ' ' || r == ',' }) {
-				switch x {
-				case "openid", "profile", "email", "":
-				default:
-					extra = append(extra, x)
-				}
-			}
-			cfg["scopes"] = extra
+			cfg["scopes"] = ExtraScopes(sc)
 		}
 	case "ldap":
 		cfg["multi_tenant"] = opts.MultiTenant

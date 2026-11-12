@@ -557,6 +557,7 @@ the page can never lock the instance out. See
 | `FILEX_OIDC_CLIENT_SECRET` | Client secret |
 | `FILEX_OIDC_REDIRECT_URL` | `<public>/api/auth/oidc/callback` |
 | `FILEX_OIDC_ROLE_CLAIM` | Claim carrying roles/groups |
+| `FILEX_OIDC_EXTRA_SCOPES` | Scopes to ask for besides `openid profile email`, space- or comma-separated (`groups`, `groups offline_access`); a scope named twice, or one of those three, is asked for once. For an identity provider that puts a person's groups in the token only for a scope of its own, so `FILEX_OIDC_ROLE_CLAIM` has something to read ([SSO.md](SSO.md#groups-behind-an-extra-scope)). Read like the Scopes box of a provider added on the Identity providers page |
 | `FILEX_OIDC_ADMIN_GROUP` | Value that elevates to admin. Applied at **every** sign-in - added to the group → admin, removed → `user`; the setup account and the last admin are never demoted ([SSO.md](SSO.md#roles--admin-access)) |
 | `FILEX_OIDC_AUTO_REDIRECT` | **SSO-first login** (default `false`): the login page starts the OIDC flow immediately instead of showing the password form. Local login stays available behind a "Sign in with password" link (`/admin/login?local=1`) for break-glass/`admin@local`. The redirect is skipped on `?local=1`, after a failed IdP round-trip (`?error=oidc`), on `?maintenance=1` and right after signing out (`?signed_out=1`), so a broken IdP can never cause a redirect loop and a sign-out is never undone by the next page. Requires `oidc` in `FILEX_AUTH_DRIVERS`. Multi-tenant: the flag is instance-global; the flow itself already dispatches per request host to the right tenant realm. |
 | `FILEX_OIDC_AUTO_CREATE` | `false` stops SSO from opening an account at a person's first sign-in (only existing accounts sign in). Default `true`. See [LDAP.md → the first sign-in rule](LDAP.md#the-first-sign-in-rule-who-gets-an-account), the one rule every provider follows. |
@@ -1776,6 +1777,7 @@ auth:
     redirect_url: https://files.example.com/api/auth/oidc/callback
     role_claim: realm_access.roles
     admin_group: filex-admin
+    extra_scopes: ""               # besides openid profile email, e.g. "groups" (FILEX_OIDC_EXTRA_SCOPES)
     auto_create: true              # first sign-in opens an account (the first sign-in rule)
     allowed_groups: ""             # only these role_claim groups get one
     # trust_email: false           # unset = the 0.50 upgrade's answer; true = every address counts as verified

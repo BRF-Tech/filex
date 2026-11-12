@@ -2479,6 +2479,12 @@ func envAuthEntries(ctx context.Context, cfg config.Config, store db.Store, logi
 				"admin_group":   cfg.Auth.OIDC.AdminGroup,
 				"trust_email":   trustEmail,
 			}
+			// FILEX_OIDC_EXTRA_SCOPES, read like the panel's Scopes box. Before
+			// 0.60.2 the environment's provider could not ask for any scope
+			// beyond openid, profile and email (GitHub #137).
+			if extra := authsetup.ExtraScopes(cfg.Auth.OIDC.ExtraScopes); len(extra) > 0 {
+				oidcCfg["scopes"] = extra
+			}
 			addFirstLogin(oidcCfg, cfg.Auth.OIDC.AutoCreate, cfg.Auth.OIDC.AllowedGroups)
 			// OIDC discovery often fails transiently when filex and the IdP
 			// boot together (compose restart, host reboot). One 502 used to

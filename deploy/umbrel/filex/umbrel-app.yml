@@ -2,14 +2,10 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.60.1"
+version: "0.60.2"
 releaseNotes: |-
-  filex v0.60.1 - 2026-11-12
-  • A ShareX template for any filex server.
-  • The pages of an app's public address are templates.
-  • A flood of fresh addresses no longer slows down the per-address limits.
-  • For app authors: the test kit no longer calls an app's home list a dead end.
-  • An app waiting for its setup says so in the reader's language only.
+  filex v0.60.2 - 2026-11-12
+  • The OIDC provider the environment defines can ask for more scopes
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

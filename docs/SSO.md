@@ -27,8 +27,9 @@ SSO is **optional and additive**: you can run local password login, OIDC, or
    │  ◄── session cookie ────────│                              │
 ```
 
-1. filex redirects the browser to the IdP with `openid profile email` scopes and
-   a random `state` (stored in a short-lived cookie).
+1. filex redirects the browser to the IdP with the `openid profile email` scopes
+   (and any you add with `FILEX_OIDC_EXTRA_SCOPES`) and a random `state` (stored
+   in a short-lived cookie).
 2. The IdP authenticates the user and redirects back to filex's `redirect_url`.
 3. filex exchanges the code, **verifies the `id_token`** against the provider's
    keys, reads the `email` claim (required), finds the account - inside the
@@ -186,6 +187,9 @@ FILEX_OIDC_REDIRECT_URL=https://files.example.com/api/auth/oidc/callback
 # Optional - admin mapping (see "Roles & admin access")
 FILEX_OIDC_ROLE_CLAIM=realm_access.roles
 FILEX_OIDC_ADMIN_GROUP=filex-admin
+
+# Optional - scopes besides openid profile email (see "Groups behind an extra scope")
+# FILEX_OIDC_EXTRA_SCOPES=groups
 ```
 
 filex discovers the provider's endpoints and keys from
@@ -259,6 +263,9 @@ first boot - see
 - Example (Keycloak realm roles): `FILEX_OIDC_ROLE_CLAIM=realm_access.roles`,
   `FILEX_OIDC_ADMIN_GROUP=filex-admin`, then assign the `filex-admin` realm role
   to the users who should administer filex.
+- ⚠ The claim has to be in the token. Keycloak's realm roles are; some identity
+  providers send a person's groups only for a scope of their own - see
+  [Groups behind an extra scope](#groups-behind-an-extra-scope).
 - A **custom role** can name SSO groups: a **new** account whose groups claim
   (the same `FILEX_OIDC_ROLE_CLAIM`) carries one of them starts with that role
   instead of the built-in User - at creation only; afterwards the role is
@@ -337,12 +344,37 @@ of filex only.
 | `FILEX_OIDC_LOGOUT` | no | What **Sign out** ends: `idp` (default) - filex's session and the IdP's, when the IdP supports it; `local` - filex's session only. See [Signing out](#signing-out). |
 | `FILEX_OIDC_ROLE_CLAIM` | no | Claim holding roles/groups (string or array). Also what filex groups linked to SSO groups are matched against at every sign-in ([GROUPS.md](GROUPS.md#members-and-sso-links)). |
 | `FILEX_OIDC_ADMIN_GROUP` | no | Value within that claim that elevates a user to admin. |
+| `FILEX_OIDC_EXTRA_SCOPES` | no | Scopes to ask for besides `openid profile email`, space- or comma-separated, e.g. `groups`. Each is asked for once. YAML: `auth.oidc.extra_scopes`. See [Groups behind an extra scope](#groups-behind-an-extra-scope). |
 | `FILEX_OIDC_AUTO_CREATE` | no | `false` opens no account at a person's first sign-in: only people who already have one get in. Default `true`. See [the first sign-in rule](LDAP.md#the-first-sign-in-rule-who-gets-an-account). |
 | `FILEX_OIDC_ALLOWED_GROUPS` | no | Comma list of groups (from the `FILEX_OIDC_ROLE_CLAIM` claim): only their members get an account on the first sign-in. Needs the role claim set. |
 | `FILEX_OIDC_TRUST_EMAIL` | no | `true` takes every address the provider sends as verified, `email_verified` or not. Unset: the answer the upgrade to 0.50 took once (on when the database had accounts that came through SSO), off on a fresh install. See [Trust this provider's email addresses](#trust-this-providers-email-addresses). |
 
 The legacy `FILEX_AUTH_OIDC_*` prefix is also accepted for all OIDC keys.
-Requested scopes are always `openid profile email`.
+The requested scopes are `openid profile email`, plus `FILEX_OIDC_EXTRA_SCOPES`.
+
+### Groups behind an extra scope
+
+Some identity providers put a person's groups in the token only when filex asks
+for a scope of their own: VoidAuth and Authentik call it `groups`, and in
+Keycloak a `groups` client scope that is optional for the client works the same
+way. Without it the claim `FILEX_OIDC_ROLE_CLAIM` names is simply not there, so
+nobody is mapped to admin, `FILEX_OIDC_ALLOWED_GROUPS` admits nobody and no
+filex group linked to an SSO group gains members. Ask for the scope, and name
+the claim it fills:
+
+```bash
+FILEX_OIDC_EXTRA_SCOPES=groups
+FILEX_OIDC_ROLE_CLAIM=groups
+FILEX_OIDC_ADMIN_GROUP=filex-admins
+```
+
+The value is space- or comma-separated (`groups offline_access` and
+`groups,offline_access` are the same), `openid`, `profile` and `email` are
+always asked for and need not be named, and a scope named twice is asked for
+once. A provider added on the [Identity providers page](#managing-providers-on-the-identity-providers-page)
+has the same list in its **Scopes** box, read the same way. Before 0.60.2 the
+provider the environment defines could not ask for anything beyond `openid
+profile email`.
 
 ---
 
@@ -526,7 +558,8 @@ The mapping is applied at every sign-in, so the person has to sign in again afte
 being added to the group - an already open session keeps the role it started
 with. If a fresh sign-in still lands as `user`, confirm `FILEX_OIDC_ROLE_CLAIM`
 names the actual claim in the token (inspect it at jwt.io) and that
-`FILEX_OIDC_ADMIN_GROUP` matches a value inside it. On 0.41.0 and older the claim
+`FILEX_OIDC_ADMIN_GROUP` matches a value inside it. A claim that is missing
+altogether may need a scope of its own ([Groups behind an extra scope](#groups-behind-an-extra-scope)). On 0.41.0 and older the claim
 was read only at account creation; set the role in **Admin → Users** there.
 
 ---

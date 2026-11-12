@@ -182,6 +182,7 @@ auth:
     redirectURL: ""       # blank → <publicURL>/api/auth/oidc/callback
     roleClaim: ""         # e.g. realm_access.roles
     adminGroup: ""        # token group/role that grants filex admin
+    extraScopes: ""       # besides openid profile email, e.g. "groups" (space or comma)
   # LDAP / Active Directory. Set drivers "local,ldap" and fill url + baseDN.
   # Keep `local` FIRST in drivers: it is tried first, so admin@local stays
   # answerable while the directory is unreachable.

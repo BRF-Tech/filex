@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.60.2] - 2026-11-12
+
+### Fixed
+
+- **The OIDC provider the environment defines can ask for more scopes**
+  ([#137](https://github.com/BRF-Tech/filex/issues/137)). It asked for
+  `openid profile email` and nothing else, so with an environment-only setup an
+  identity provider that sends a person's groups only for a scope of its own
+  (VoidAuth, Authentik) never sent them, and `FILEX_OIDC_ROLE_CLAIM` had
+  nothing to read. `FILEX_OIDC_EXTRA_SCOPES` (or `auth.oidc.extra_scopes`),
+  space- or comma-separated, adds scopes to the three; it is read like the
+  Scopes box of a provider added on the Identity providers page, and a scope
+  named twice is now asked for once in both.
+  [SSO.md → Groups behind an extra scope](docs/SSO.md#groups-behind-an-extra-scope).
+
 ## [0.60.1] - 2026-11-12
 
 ### Added

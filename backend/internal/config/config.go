@@ -726,6 +726,13 @@ type OIDCConfig struct {
 	RedirectURL  string `yaml:"redirect_url"`
 	RoleClaim    string `yaml:"role_claim"`
 	AdminGroup   string `yaml:"admin_group"`
+	// ExtraScopes are asked for besides openid, profile and email
+	// (FILEX_OIDC_EXTRA_SCOPES): space- or comma-separated, read like the
+	// Scopes box of a provider added in the panel (authsetup.ExtraScopes).
+	// An IdP that puts the groups in the token only for a scope of its own
+	// (VoidAuth, Authentik, Keycloak's "groups" client scope) needs it for
+	// role_claim / admin_group and allowed_groups to see them (GitHub #137).
+	ExtraScopes string `yaml:"extra_scopes"`
 	// AutoRedirect makes the login page start the OIDC flow immediately
 	// (SSO-first installs). The password form stays reachable via ?local=1
 	// for break-glass/admin logins. OFF by default — unchanged behavior.
@@ -1626,6 +1633,9 @@ func applyEnv(c *Config) {
 	}
 	if v := getenvFirst("FILEX_OIDC_ADMIN_GROUP", "FILEX_AUTH_OIDC_ADMIN_GROUP"); v != "" {
 		c.Auth.OIDC.AdminGroup = v
+	}
+	if v := getenvFirst("FILEX_OIDC_EXTRA_SCOPES", "FILEX_AUTH_OIDC_EXTRA_SCOPES"); v != "" {
+		c.Auth.OIDC.ExtraScopes = v
 	}
 	if v := getenvFirst("FILEX_OIDC_AUTO_REDIRECT", "FILEX_AUTH_OIDC_AUTO_REDIRECT"); v != "" {
 		c.Auth.OIDC.AutoRedirect = v == "1" || strings.EqualFold(v, "true")
