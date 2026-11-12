@@ -126,8 +126,10 @@ describe('the release ships arm64', () => {
     const release = code('release.yml');
     const desktop = job(release, 'desktop');
     const snap = step(desktop, 'snapcraft + LXD for the snap');
-    expect(cond(snap)).toBe("startsWith(matrix.label, 'linux') && env.PROMOTE != 'true'");
-    expect(cond(step(desktop, 'Build snap'))).toBe("startsWith(matrix.label, 'linux') && env.PROMOTE != 'true'");
+    // (FILEX_SKIP_SNAP leaves both out while the Snap Store is down:
+    // releaseSnapFollows.test.ts.)
+    expect(cond(snap)).toBe("startsWith(matrix.label, 'linux') && env.PROMOTE != 'true' && env.SKIP_SNAP != 'true'");
+    expect(cond(step(desktop, 'Build snap'))).toBe("startsWith(matrix.label, 'linux') && env.PROMOTE != 'true' && env.SKIP_SNAP != 'true'");
     expect(desktop, 'one snapcraft step for both rows').not.toMatch(/for the arm64 snap\n/);
     const nodes = [...desktop.matchAll(/node-version:\s*"?(\d+)/g)].map((m) => Number(m[1]));
     expect(nodes.length, 'the desktop job sets up Node').toBeGreaterThan(0);
@@ -387,9 +389,11 @@ describe('a release run started by hand', () => {
     // A typed-in tag never reaches a shell as script text: every read of an
     // input is an env mapping, the ref a checkout is given, or the
     // concurrency group (which never cancels: a hand-started run cannot stop
-    // a release in flight).
+    // a release in flight). run-name is a name, never a shell: it reads the
+    // inputs to say what a run was asked (releaseGatesImages.test.ts,
+    // releaseSnapFollows.test.ts).
     const text = code('release.yml');
-    const reads = text.split('\n').filter((l) => /\$\{\{[^}]*\binputs\./.test(l));
+    const reads = text.split('\n').filter((l) => !l.startsWith('run-name:') && /\$\{\{[^}]*\binputs\./.test(l));
     expect(reads.length).toBeGreaterThan(0);
     for (const l of reads) {
       expect(l, 'an input read outside env').toMatch(

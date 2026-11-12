@@ -1,0 +1,263 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 0217d80e1150f1e20e5992545e8ba2da2c31d403..88832d1c521539bad30713407edf16dcc9f8d7e8 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -164,6 +164,33 @@ name: Release
+ #       from a PC, macOS and the arm64 snap with only=macos and
+ #       only=snap-arm64.)
+ #
++#   gh workflow run release.yml -R BRF-Tech/filex --ref v0.60.0 -f snap_only=true
++#   gh workflow run release.yml -R BRF-Tech/filex -f tag=v0.60.0 -f only=snap [-f publish=true]
++#       Both Linux snaps alone, for a release that went out without them
++#       while the Snap Store was down (FILEX_SKIP_SNAP, below): the linux and
++#       linux-arm64 rows of a full run without their own build (no AppImage,
++#       .deb or .rpm: the Release has them, pinned by hash), the app and the
++#       CLI built for the snap, checked for their architecture, each snap
++#       attached to the Release by name (filex-desktop-amd64.snap,
++#       filex-desktop-arm64.snap; --clobber) and sent to the Snap Store's
++#       channels as a full run sends it. snap_only=true is only=snap with
++#       publish=true, on the tag the run is started on. No binaries, images,
++#       npm, winget, Store, cask or AUR, no CLI smoke test and no
++#       desktop-arm64-check. `verify` asks of THAT tag's commit what it asks
++#       for only=arm64.
++#
++# ⚠ FILEX_SKIP_SNAP (a repository variable; unset, no run skips anything):
++# `true` while the Snap Store does not answer. The desktop job's Linux rows
++# then build no snap and send none (the AppImage, .deb and .rpm as always),
++# the Release's notes carry the line "Snap package follows (Snap Store
++# outage)." and only=snap adds the snaps once the Store is back. It is read
++# by the dry run AND by the tag run of the same commit (a tag push takes no
++# input), so it is set before the dry run and deleted once the tag run has
++# ended: gh variable set FILEX_SKIP_SNAP --body true -R BRF-Tech/filex, then
++# gh variable delete FILEX_SKIP_SNAP -R BRF-Tech/filex. (v0.60.0: the Store
++# went up and down for hours, and every dry run died at
++# "snap install snapcraft": "unable to contact snap store".)
++#
+ # A FULL release publishes from its tag push and nothing else: `plan` refuses
+ # publish=true without only=arm64, only=macos, only=snap-arm64 or only=stores
+ # (goreleaser cannot recreate a Release, and a half-rerun release is how
+@@ -210,9 +237,11 @@ name: Release
+ # v1.2.3 <commit>" and "publish snap-arm64 v1.2.3 <commit>" the arm64 snap
+ # alone, "dry run stores v1.2.3 <commit>" and "publish stores v1.2.3
+ # <commit>" the stores alone (the release tool's Microsoft Store check reads
+-# that one when the tag run has no Store job); a tag push is "Release v1.2.3".
+-# scripts/release/checks.mjs (dryRunTitle) spells the same name.
+-run-name: ${{ github.event_name == 'workflow_dispatch' && format('{0} {1} {2}{3}', inputs.publish && 'publish' || 'dry run', inputs.only, inputs.tag && format('{0} ', inputs.tag) || '', github.sha) || format('Release {0}', github.ref_name) }}
++# that one when the tag run has no Store job); "publish snap v1.2.3 <commit>"
++# both snaps alone (snap_only, on the tag it was started on); a tag push is
++# "Release v1.2.3". scripts/release/checks.mjs (dryRunTitle) spells the same
++# name.
++run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.snap_only && format('publish snap {0} {1}', inputs.tag || github.ref_name, github.sha) || github.event_name == 'workflow_dispatch' && format('{0} {1} {2}{3}', inputs.publish && 'publish' || 'dry run', inputs.only, inputs.tag && format('{0} ', inputs.tag) || '', github.sha) || format('Release {0}', github.ref_name) }}
+ 
+ on:
+   push:
+@@ -224,10 +253,14 @@ on:
+         type: string
+         default: ""
+       only:
+-        description: "all: every package. arm64: only the ARM packages (needs a tag). macos: only the macOS desktop packages (needs a tag). snap-arm64: only the Linux arm64 snap, to the Snap Store (needs a tag). stores: the Release's desktop packages to the Snap Store (amd64), winget and the Microsoft Store, nothing built or attached (needs a tag)."
++        description: "all: every package. arm64: only the ARM packages (needs a tag). macos: only the macOS desktop packages (needs a tag). snap-arm64: only the Linux arm64 snap, to the Snap Store (needs a tag). stores: the Release's desktop packages to the Snap Store (amd64), winget and the Microsoft Store, nothing built or attached (needs a tag). snap: only the two Linux snaps, attached and to the Snap Store, for a release that went out without them (needs a tag)."
+         type: choice
+-        options: [all, arm64, macos, snap-arm64, stores]
++        options: [all, arm64, macos, snap-arm64, stores, snap]
+         default: all
++      snap_only:
++        description: "only=snap with publish on, on the tag this run is started on (--ref v1.2.3): both Linux snaps built, attached to its Release and sent to the Snap Store, nothing else."
++        type: boolean
++        default: false
+       publish:
+         description: "Attach to the tag's Release and send to the stores. Off: build, test and keep artifacts only."
+         type: boolean
+@@ -304,6 +337,7 @@ jobs:
+           IN_ONLY: ${{ inputs.only }}
+           IN_PUBLISH: ${{ inputs.publish }}
+           IN_MACOS: ${{ inputs.macos }}
++          IN_SNAP_ONLY: ${{ inputs.snap_only }}
+           GH_TOKEN: ${{ github.token }}
+         run: |
+           set -euo pipefail
+@@ -312,6 +346,13 @@ jobs:
+           else
+             tag="$IN_TAG"; only="${IN_ONLY:-all}"; publish="${IN_PUBLISH:-false}"; macos="${IN_MACOS:-true}"
+           fi
++          # snap_only=true: only=snap, published, on the tag the run was
++          # started on (--ref v1.2.3) unless -f tag names one.
++          if [ "$EVENT" != push ] && [ "${IN_SNAP_ONLY:-false}" = true ]; then
++            [ "$only" = all ] || { echo "::error::snap_only=true is only=snap: leave only out (it says only=$only)"; exit 1; }
++            only=snap; publish=true
++            if [ -z "$tag" ] && [ "$GITHUB_REF_TYPE" = tag ]; then tag="$GITHUB_REF_NAME"; fi
++          fi
+           if [ -n "$tag" ]; then
+             [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::a tag looks like v1.2.3, not '$tag'"; exit 1; }
+             version="${tag#v}"
+@@ -332,8 +373,11 @@ jobs:
+           if [ "$only" = stores ] && [ -z "$tag" ]; then
+             echo "::error::only=stores adds to a release: give its tag (-f tag=v1.2.3)"; exit 1
+           fi
++          if [ "$only" = snap ] && [ -z "$tag" ]; then
++            echo "::error::only=snap adds to a release: give its tag (-f tag=v1.2.3, or start snap_only=true on it with --ref v1.2.3)"; exit 1
++          fi
+           if [ "$EVENT" != push ] && [ "$publish" = true ]; then
+-            [ "$only" = stores ] || [ "$only" = snap-arm64 ] || [ "$only" = macos ] || [ "$only" = arm64 ] || { echo "::error::a full release publishes from its tag push only. To add the ARM packages to $tag, run with only=arm64; the macOS packages, with only=macos; the arm64 snap alone, with only=snap-arm64; to send its desktop packages to the stores, with only=stores."; exit 1; }
++            [ "$only" = snap ] || [ "$only" = stores ] || [ "$only" = snap-arm64 ] || [ "$only" = macos ] || [ "$only" = arm64 ] || { echo "::error::a full release publishes from its tag push only. To add the ARM packages to $tag, run with only=arm64; the macOS packages, with only=macos; the arm64 snap alone, with only=snap-arm64; both snaps, with only=snap; to send its desktop packages to the stores, with only=stores."; exit 1; }
+             gh release view "$tag" -R "$GITHUB_REPOSITORY" --json tagName >/dev/null || { echo "::error::$tag has no GitHub Release to add to"; exit 1; }
+           fi
+           # The desktop rows. `script` is the package.json script for the
+@@ -377,6 +421,13 @@ jobs:
+           if [ "$only" = snap-arm64 ]; then
+             desktop=$(echo "$desktop" | jq -c '{include: [.include[] | select(.label == "linux-arm64") | .script = ""]}')
+           fi
++          # only=snap: both Linux rows of the full matrix, without their
++          # `script`, as only=snap-arm64 keeps the arm64 one: the Release has
++          # the AppImage, .deb and .rpm (pinned by hash), and desktop builds
++          # the app and the CLI for each row and packs its snap alone.
++          if [ "$only" = snap ]; then
++            desktop=$(echo "$desktop" | jq -c '{include: [.include[] | select(.label == "linux" or .label == "linux-arm64") | .script = ""]}')
++          fi
+           # only=stores: the rows of the full matrix that send to a store -
+           # windows (winget), linux (the amd64 snap) and store (the Microsoft
+           # Store) - and nothing else. windows and linux build nothing: their
+@@ -820,11 +871,20 @@ jobs:
+       # ⚠ The script exits non-zero when the tag has no CHANGELOG.md section.
+       # That stops the release HERE, before a single binary, image or package
+       # is published, rather than after.
++      # FILEX_SKIP_SNAP (see the top): the Release says on a line of its own
++      # that its snaps follow. Word for word: the snap releaser and the
++      # release tool's Release check look for exactly this line, and the
++      # releaser deletes it once only=snap has attached both snaps.
+       - name: Release notes from CHANGELOG.md
+         if: env.PUBLISH == 'true'
++        env:
++          SKIP_SNAP: ${{ vars.FILEX_SKIP_SNAP == 'true' }}
+         run: |
+           set -euo pipefail
+           node scripts/release-notes.mjs --github "${GITHUB_REF_NAME}" > /tmp/release-notes.md
++          if [ "$SKIP_SNAP" = true ]; then
++            printf '\nSnap package follows (Snap Store outage).\n' >> /tmp/release-notes.md
++          fi
+           wc -c /tmp/release-notes.md
+       - uses: goreleaser/goreleaser-action@v6
+         with:
+@@ -933,7 +993,7 @@ jobs:
+   cli-smoke:
+     name: CLI + server (${{ matrix.label }})
+     needs: [plan, binaries]
+-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.only != 'macos' && needs.plan.outputs.only != 'snap-arm64' && needs.plan.outputs.only != 'stores' && (needs.plan.outputs.full != 'true' || needs.binaries.result == 'success') }}
++    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.only != 'macos' && needs.plan.outputs.only != 'snap-arm64' && needs.plan.outputs.only != 'stores' && needs.plan.outputs.only != 'snap' && (needs.plan.outputs.full != 'true' || needs.binaries.result == 'success') }}
+     strategy:
+       fail-fast: false
+       matrix:
+@@ -1496,6 +1556,9 @@ jobs:
+       ONLY: ${{ needs.plan.outputs.only }}
+       LABEL: ${{ matrix.label }}
+       ARCHES: ${{ matrix.arches }}
++      # FILEX_SKIP_SNAP (see the top): no snap built, sent or attached while
++      # the Snap Store is down - never in only=snap, the run that adds them.
++      SKIP_SNAP: ${{ vars.FILEX_SKIP_SNAP == 'true' && needs.plan.outputs.only != 'snap' }}
+     steps:
+       - uses: actions/checkout@v4
+         with:
+@@ -1568,13 +1631,13 @@ jobs:
+           # CSC_KEY_PASSWORD secrets) when a real Developer ID lands.
+           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+         run: pnpm --filter ./desktop run ${{ matrix.script }}
+-      # only=snap-arm64: the row has no `script` (see plan), so nothing above
+-      # made the AppImage, .deb or .rpm, whose Release copies are pinned by
+-      # hash. The app and its CLI are built as dist:linux builds them (on this
+-      # arm64 runner the CLI is arm64, checked below), and "Build snap" packs
+-      # the snap alone from them.
++      # only=snap-arm64 and only=snap: the row has no `script` (see plan), so
++      # nothing above made the AppImage, .deb or .rpm, whose Release copies
++      # are pinned by hash. The app and its CLI are built as dist:linux builds
++      # them (the CLI is the runner's architecture, checked below), and
++      # "Build snap" packs the snap alone from them.
+       - name: Build the app and the CLI for the snap alone
+-        if: env.ONLY == 'snap-arm64'
++        if: env.ONLY == 'snap-arm64' || env.ONLY == 'snap'
+         shell: bash
+         run: |
+           set -euo pipefail
+@@ -1633,8 +1696,10 @@ jobs:
+       # ⚠ `--publish never`: on a tag electron-builder publishes by itself, and
+       # a snap's default publisher is the Snap Store — the upload is the
+       # explicit step further down, which says so when it cannot run.
++      # (FILEX_SKIP_SNAP: neither this nor "Build snap" runs - both need the
++      # Snap Store - and the row makes its AppImage, .deb and .rpm alone.)
+       - name: snapcraft + LXD for the snap
+-        if: startsWith(matrix.label, 'linux') && env.PROMOTE != 'true'
++        if: startsWith(matrix.label, 'linux') && env.PROMOTE != 'true' && env.SKIP_SNAP != 'true'
+         run: |
+           set -euo pipefail
+           # ⚠ 8.x: the snapcraft every snap of this workflow was built with
+@@ -1652,7 +1717,7 @@ jobs:
+           snapcraft --version
+           echo "SNAPCRAFT_BUILD_ENVIRONMENT=lxd" >> "$GITHUB_ENV"
+       - name: Build snap
+-        if: startsWith(matrix.label, 'linux') && env.PROMOTE != 'true'
++        if: startsWith(matrix.label, 'linux') && env.PROMOTE != 'true' && env.SKIP_SNAP != 'true'
+         run: pnpm --filter ./desktop exec electron-builder --linux snap --publish never
+       # store-e2e registers the package from loose files, which needs no
+       # certificate but does need Developer Mode. The runner is a throwaway
+@@ -1900,7 +1965,7 @@ jobs:
+           echo "::warning title=Microsoft Store::Not submitted — MSSTORE_* secrets or the MSSTORE_PRODUCT_ID variable are not set. Upload the msix-${TAG} artifact in Partner Center by hand."
+       # (Not in only=stores: the files it sends are the Release's own.)
+       - name: Attach to the release
+-        if: matrix.label != 'store' && env.PUBLISH == 'true' && env.ONLY != 'snap-arm64' && env.ONLY != 'stores'
++        if: matrix.label != 'store' && env.PUBLISH == 'true' && env.ONLY != 'snap-arm64' && env.ONLY != 'stores' && env.ONLY != 'snap'
+         shell: bash
+         env:
+           GH_TOKEN: ${{ github.token }}
+@@ -1934,6 +1999,18 @@ jobs:
+           snap=desktop/release/filex-desktop-arm64.snap
+           [ -f "$snap" ] || { echo "no $snap to attach" >&2; exit 1; }
+           gh release upload "${TAG}" "$snap" --clobber
++      # only=snap: each Linux row's own snap, by name, for the same reasons.
++      - name: Attach the row's snap to the release
++        if: env.ONLY == 'snap' && env.PUBLISH == 'true'
++        shell: bash
++        env:
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          set -euo pipefail
++          snap=desktop/release/filex-desktop-amd64.snap
++          [ "$LABEL" = linux-arm64 ] && snap=desktop/release/filex-desktop-arm64.snap
++          [ -f "$snap" ] || { echo "no $snap to attach" >&2; exit 1; }
++          gh release upload "${TAG}" "$snap" --clobber
+       # ── winget + Homebrew (the desktop app; the CLI goes through goreleaser) ──
+       # desktop/scripts/pkg-manifests.mjs writes both, hashing the files this
+       # job just built and pointing at the VERSIONED release URL. The winget
+@@ -2082,7 +2159,7 @@ jobs:
+       # channels"). The release tool reads stable, candidate and beta back
+       # (scripts/release/plan.mjs) and says so when one lags.
+       - name: Upload to the Snap Store
+-        if: startsWith(matrix.label, 'linux') && env.PUBLISH == 'true'
++        if: startsWith(matrix.label, 'linux') && env.PUBLISH == 'true' && env.SKIP_SNAP != 'true'
+         shell: bash
+         env:
+           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+@@ -2124,6 +2201,16 @@ jobs:
+             exit "$rc"
+           fi
+           echo "### Snap Store: $(basename "$snap") uploaded to stable, candidate, beta and edge" >> "$GITHUB_STEP_SUMMARY"
++      # ⚠ Never a silent skip either: FILEX_SKIP_SNAP says on every Linux row
++      # that no snap was built or sent, and how they follow.
++      - name: The snap follows (FILEX_SKIP_SNAP)
++        if: startsWith(matrix.label, 'linux') && env.SKIP_SNAP == 'true'
++        shell: bash
++        run: |
++          msg="FILEX_SKIP_SNAP is true (the Snap Store is down): the $LABEL row built no snap and sent none. Once the Store is back: gh workflow run release.yml -R $GITHUB_REPOSITORY --ref ${TAG:-<tag>} -f snap_only=true"
++          echo "::warning title=Snap: follows::$msg"
++          echo "### Snap: follows (FILEX_SKIP_SNAP)" >> "$GITHUB_STEP_SUMMARY"
++          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+ 
+   # ── The arm64 packages, on arm64 machines (and Linux x64) ─────────────
+   #
+@@ -2172,7 +2259,7 @@ jobs:
+   desktop-arm64-check:
+     name: Desktop packages on a real ${{ matrix.label }} machine
+     needs: [plan, desktop]
+-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.only != 'macos' && needs.plan.outputs.only != 'snap-arm64' && needs.plan.outputs.only != 'stores' && needs.desktop.result != 'skipped' }}
++    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.only != 'macos' && needs.plan.outputs.only != 'snap-arm64' && needs.plan.outputs.only != 'stores' && needs.plan.outputs.only != 'snap' && needs.desktop.result != 'skipped' }}
+     strategy:
+       fail-fast: false
+       matrix:

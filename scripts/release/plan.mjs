@@ -365,6 +365,19 @@ const WORKFLOW_GUARDS = [
   'a dry run of only=stores publishes nothing, and writes and validates the winget manifest',
   "verify asks the tag's commit for CI and a dry run of everything, for only=stores as for only=arm64, and finds the Store bundle it kept",
   'a dry run of only=stores is let through without asking, like one of only=arm64',
+  // 0.60.0: the Snap Store went up and down for hours, and every dry run
+  // died at "snap install snapcraft". The repository variable FILEX_SKIP_SNAP
+  // (read by the dry run and the tag run alike) leaves the snaps out and the
+  // Release says they follow; only=snap (snap_only=true, on the tag) adds
+  // both once the Store is back (packaging/ci/release-snap-follows.patch,
+  // web/tests/deploy/releaseSnapFollows.test.ts).
+  'FILEX_SKIP_SNAP builds and sends no snap on either Linux row, still makes and attaches the rest, and says so',
+  'FILEX_SKIP_SNAP puts the line the snaps follow by into the Release notes, word for word',
+  'only=snap needs a tag, may publish, and is no full run; snap_only=true is only=snap, published, on its own tag',
+  'only=snap keeps both Linux rows of a full run, without their own builds, and runs plan, verify and desktop alone',
+  'only=snap builds, checks, attaches by name and sends each Linux snap, and nothing else; FILEX_SKIP_SNAP does not stop it',
+  "verify asks the tag's commit for CI and a dry run of everything, for only=snap as for only=arm64",
+  'a dry run of only=snap is let through without asking, like one of only=arm64',
 ];
 
 /**
@@ -397,6 +410,35 @@ export function releaseAssets(version, surfaces = ALL_SURFACES) {
     'filex-desktop-x86_64.rpm',
   ];
   return publishes(surfaces, 'desktop') ? [...binaries, ...desktop] : binaries;
+}
+
+/**
+ * The line a Release's notes carry, on a line of its own and word for word,
+ * while its two snaps follow: release.yml writes it when the repository
+ * variable FILEX_SKIP_SNAP is true (the Snap Store down at the dry run and
+ * the tag run), and the snap releaser deletes it once only=snap has attached
+ * both (v0.60.0).
+ */
+export const SNAP_FOLLOWS_LINE = 'Snap package follows (Snap Store outage).';
+export const RELEASE_SNAPS = ['filex-desktop-amd64.snap', 'filex-desktop-arm64.snap'];
+
+/** Whether a Release's notes say its snaps follow (SNAP_FOLLOWS_LINE). */
+export function snapsFollow(body) {
+  return String(body ?? '').split(/\r?\n/).some((l) => l.trim() === SNAP_FOLLOWS_LINE);
+}
+
+/**
+ * The published check of a Release (`gh release view --json assets,body`)
+ * against the assets it must carry: every one, except the two snaps while its
+ * notes say they follow - and those it has already are no reason to wait.
+ */
+export function releaseAssetsCheck(want, rel) {
+  const have = new Set((rel?.assets ?? []).map((a) => String(a?.name ?? '').trim()).filter(Boolean));
+  const follows = snapsFollow(rel?.body);
+  const missing = want.filter((w) => !have.has(w) && !(follows && RELEASE_SNAPS.includes(w)));
+  const later = follows ? RELEASE_SNAPS.filter((s) => want.includes(s) && !have.has(s)) : [];
+  const note = later.length ? `; ${later.join(' and ')} follow (the notes say "${SNAP_FOLLOWS_LINE}")` : '';
+  return missing.length ? { ok: false, detail: `${have.size} asset(s); missing: ${missing.join(', ')}${note}` } : { ok: true, detail: `${have.size} assets${note}` };
 }
 
 /**
@@ -1057,6 +1099,7 @@ export default function plan({ repo, version, tag, platform = process.platform }
             'tests/deploy/releaseVerifyCircleci.test.ts',
             'tests/deploy/releaseStoresOnly.test.ts',
             'tests/deploy/releaseDesktopUpgrade.test.ts',
+            'tests/deploy/releaseSnapFollows.test.ts',
           ],
           env: (c) => ({ FILEX_WORKFLOWS_DIR: workflowsOf(c.exportTarget) }),
           mustPass: WORKFLOW_GUARDS,
@@ -1119,13 +1162,18 @@ export default function plan({ repo, version, tag, platform = process.platform }
         name: `GitHub Release ${tag} carries the installers, the feeds and the CLI`,
         // #252: a server patch's Release carries the server archives and the
         // CLI binaries alone (its desktop job does not run).
+        // A Release whose notes say its snaps follow (FILEX_SKIP_SNAP, the
+        // Snap Store down at the tag run) is checked without them.
         check: (c) => {
-          const r = run('gh', ['release', 'view', tag, '-R', 'BRF-Tech/filex', '--json', 'assets', '--jq', '.assets[].name']);
+          const r = run('gh', ['release', 'view', tag, '-R', 'BRF-Tech/filex', '--json', 'assets,body']);
           if (r.status !== 0) return { ok: false, detail: `gh release view ${tag}: ${(r.stderr || r.stdout).trim()}` };
-          const have = new Set(r.stdout.split('\n').map((s) => s.trim()).filter(Boolean));
-          const want = releaseAssets(version, c?.surfaces ?? ALL_SURFACES);
-          const missing = want.filter((w) => !have.has(w));
-          return missing.length ? { ok: false, detail: `${have.size} asset(s); missing: ${missing.join(', ')}` } : { ok: true, detail: `${have.size} assets` };
+          let rel;
+          try {
+            rel = JSON.parse(r.stdout);
+          } catch {
+            return { ok: false, detail: `gh release view ${tag}: no JSON (${r.stdout.trim().slice(0, 120)})` };
+          }
+          return releaseAssetsCheck(releaseAssets(version, c?.surfaces ?? ALL_SURFACES), rel);
         },
       },
       // 0.48.1: the arm64 installer joined the x64 one in the ONE feed

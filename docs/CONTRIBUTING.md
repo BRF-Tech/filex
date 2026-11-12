@@ -3695,6 +3695,31 @@ ones not yet published apply on top of one another in this order:
     The step names stay the ones the gate re-runs (`checks.mjs`,
     `INFRA_STEPS`, which knows the cache step too); `ciFullMatrix.test.ts`
     runs the script with stand-ins for sudo, apt-get and pnpm.
+15. `release-snap-follows.patch` (0.60.0), on top of 14: a release while the
+    Snap Store is down. The repository variable `FILEX_SKIP_SNAP` (unset by
+    default) set to `true` leaves the snaps out of the desktop job's Linux
+    rows - no snapcraft, no LXD, no "Build snap", no Store upload - while
+    they still make, check and attach the AppImage, .deb and .rpm, and each
+    says so ("The snap follows (FILEX_SKIP_SNAP)", a warning and a line of
+    the summary). The Release notes get the line
+    `Snap package follows (Snap Store outage).` on a line of its own, word for
+    word, and the release tool's Release check (`plan.mjs`,
+    `releaseAssetsCheck`) wants every asset but the two snaps while the line
+    is there. A tag push takes no input, so the switch is a variable that the
+    dry run and the tag run of the same commit both read: set it before the
+    dry run (`gh variable set FILEX_SKIP_SNAP --body true -R BRF-Tech/filex`)
+    and delete it once the tag run has ended
+    (`gh variable delete FILEX_SKIP_SNAP -R BRF-Tech/filex`, then
+    `gh variable list` to see it gone). Once the Store is back,
+    `gh workflow run release.yml -R BRF-Tech/filex --ref vX.Y.Z -f snap_only=true`
+    (`only=snap` with `publish=true`, on that tag; `-f tag=vX.Y.Z -f only=snap
+    -f publish=true` from `main` does the same) builds both snaps from the
+    tag without the rows' own builds, checks them, attaches each by name
+    (`--clobber`) and uploads it to the four channels; plan, verify and
+    desktop run, nothing else. Then delete the line from the Release notes.
+    0.60.0's dry run died five times at `snap install snapcraft` ("unable to
+    contact snap store") while the Store went up and down for hours.
+    `releaseSnapFollows.test.ts`.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and
