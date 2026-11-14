@@ -252,6 +252,21 @@ describe('ci.yml: the full matrix', () => {
     }
   });
 
+  // 2026-11 (runs 43628691570, 43633299065; task #350): ubuntu-latest became
+  // Ubuntu 26.04, and the Playwright pnpm-lock.yaml pins (1.59.1) had neither a
+  // browser build nor a package list for it - every browser part ended at
+  // "Playwright does not support chromium on ubuntu26.04-x64". The jobs that
+  // install a browser name their Ubuntu, so a new image is a change made on
+  // purpose, together with a Playwright that knows it; and the package files
+  // the cache above keeps are that Ubuntu's.
+  it.runIf(!!DIR)('every job that installs a browser runs on an Ubuntu it names, not ubuntu-latest', () => {
+    const ci = ciCode();
+    const runsOn = (block: string) => /\n {4}runs-on:\s*(\S+)/.exec(block)?.[1];
+    for (const key of ['playwright', 'playwright-ds', 'playwright-extra']) expect(runsOn(job(ci, key)), key).toMatch(/^ubuntu-\d{2}\.\d{2}$/);
+    const shots = path.join(DIR!, 'shots.yml');
+    if (fs.existsSync(shots)) expect(runsOn(fs.readFileSync(shots, 'utf8').replace(/\r\n/g, '\n')), 'shots.yml').toMatch(/^ubuntu-\d{2}\.\d{2}$/);
+  });
+
   it.runIf(!!DIR && !!bash)("ci-browsers.sh installs from the last run's package files, gives Azure's mirror one try and the next mirror another, and keeps the files", () => {
     const script = path.join(DIR!, 'scripts', 'ci-browsers.sh');
     expect(fs.existsSync(script), 'ci-browsers.sh').toBe(true);

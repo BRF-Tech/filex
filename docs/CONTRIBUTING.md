@@ -3774,6 +3774,20 @@ ones not yet published apply on top of one another in this order:
     `release` environment").
     `actionsPinned.test.ts` wants every job that reads a secret other than
     the run's own token in it, and no secret at a workflow's top.
+18. `ci-playwright-ubuntu-2404.patch` (#350, after 0.60.2), on top of 17 -
+    already on the public `main`: pushed without a tag, with the export that
+    brings its guard. `ci.yml`'s `playwright`, `playwright-ds` and
+    `playwright-extra` and `shots.yml`'s `shots` run on `ubuntu-24.04`
+    instead of `ubuntu-latest`. GitHub moved `ubuntu-latest` to Ubuntu 26.04
+    in 2026-11, and the Playwright `pnpm-lock.yaml` pins (1.59.1) has no
+    browser build or package list for it: every browser part ended at
+    "Playwright does not support chromium on ubuntu26.04-x64" (runs
+    43628691570, 43633299065). Move them only together with a Playwright that
+    knows ubuntu26.04 (1.65.1 does), and with a new key for the browsers'
+    package cache, which holds Ubuntu 24.04's files.
+    `ciFullMatrix.test.ts` wants a named Ubuntu on every job that installs a
+    browser. The Go parts stay on `ubuntu-latest`: its 7-Zip (26.00) is one
+    filex supports, which Ubuntu 24.04's (23.01) is not.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and
