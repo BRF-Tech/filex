@@ -1,0 +1,95 @@
+# publiccode.yml: metadata for public-sector software catalogues
+# (https://yml.publiccode.tools). Check it with publiccode-parser
+# (https://github.com/publiccodeyml/libpubliccode).
+publiccodeYmlVersion: "0.8"
+
+name: filex
+url: https://github.com/BRF-Tech/filex
+landingURL: https://filex.sh
+logo: docs/logo.png
+
+platforms:
+  - web
+  - linux
+  - windows
+  - mac
+
+categories:
+  - document-management
+  - collaboration
+
+developmentStatus: stable
+softwareType: standalone/web
+
+organisation:
+  name: BRF Tech
+  uri: https://github.com/BRF-Tech
+
+description:
+  en:
+    shortDescription: >-
+      Self-hosted file manager and file-sharing server with a web interface,
+      shipped as a single Go binary or a Docker image.
+    longDescription: |
+      filex is a self-hosted file manager and file-sharing server. It runs as a
+      single Go binary or as a Docker image (`ghcr.io/brf-tech/filex`), with
+      SQLite built in and PostgreSQL or MySQL as options.
+
+      filex brings the storage you already have - local disks, S3 buckets,
+      SFTP, WebDAV and FTP servers, SMB/NAS shares - into one web interface,
+      side by side. It does not store files itself: they stay where they are,
+      and adding a storage is a mount, not a migration. The same tree is served
+      back over S3, SFTP, FTPS, NFSv3 and WebDAV, so tools such as rclone,
+      restic, WinSCP or FileZilla can work with it.
+
+      Files and folders are shared through links with a PIN, an expiry date and
+      a download limit, and file requests let others upload into a folder
+      without seeing its contents. Trash and version history take back a wrong
+      delete or overwrite. End-to-end encrypted folders are encrypted in the
+      browser, and the server never receives a key.
+
+      People sign in with OIDC single sign-on, LDAP / Active Directory or a
+      local password. Administrators manage roles, groups and per-folder
+      access, read the audit log, and can host several tenants on one
+      installation, each with its own sign-in providers.
+
+      A desktop app for Windows, Linux and macOS (Apple Silicon) keeps the
+      folders you choose in sync with the server. A REST API, a CLI, Vue, React
+      and web component embeds and a built-in MCP server open the same files to
+      other programs. The interface ships in English and Turkish; more
+      languages install as language packs.
+    documentation: https://docs.filex.sh
+    features:
+      - Single Go binary or Docker image, SQLite built in
+      - Local disk, S3, SFTP, WebDAV, FTP and SMB storage in one web interface
+      - Files stay in place; adding a storage is a mount, not a migration
+      - The same tree served over S3, SFTP, FTPS, NFSv3 and WebDAV
+      - Share links with a PIN, an expiry date and a download limit
+      - File requests for uploads into a folder
+      - Trash and version history
+      - End-to-end encrypted folders
+      - OIDC single sign-on and LDAP / Active Directory sign-in
+      - Roles, groups and per-folder permissions
+      - Audit log
+      - Multi-tenancy
+      - Desktop sync app for Windows, Linux and macOS
+      - Vue, React and web component embeds
+      - REST API, CLI and built-in MCP server
+    screenshots:
+      - https://filex.sh/shots/explorer-grid-light.475b0b61faab.png
+      - https://filex.sh/shots/driveshell/driveshell-hero-1440.6410104e072c.png
+
+legal:
+  license: MIT
+  mainCopyrightOwner: BRF Tech
+
+maintenance:
+  type: internal
+  contacts:
+    - name: BRF Tech
+
+localisation:
+  localisationReady: true
+  availableLanguages:
+    - en
+    - tr
