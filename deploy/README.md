@@ -8,7 +8,7 @@ newest release). Full walkthroughs: [`docs/INSTALLATION.md`](../docs/INSTALLATIO
 |---|---|
 | [`compose/`](compose/) | Docker Compose - `docker-compose.minimal.yml` (one container, SQLite) and `docker-compose.full.yml` (Postgres + Redis + Caddy + opt-in draw.io / S3 server (Versity S3 Gateway) / ClamAV, and an optional ONLYOFFICE Document Server behind the `onlyoffice` profile, pinned to a tested version), plus a multi-tenant variant. Office documents need no container: install the [Office editor app](../docs/ONLYOFFICE.md#the-office-editor-app). |
 | [`helm/filex/`](helm/filex/) | Kubernetes Helm chart (PVC + Ingress; optional bundled Postgres/Redis/S3 server, optional wiring to an ONLYOFFICE Document Server you run). Published with every release: `helm repo add brf-tech https://helm.brf.sh`, then `helm install filex brf-tech/filex` (or `oci://ghcr.io/brf-tech/charts/filex`). |
-| [`umbrel/filex/`](umbrel/filex/) | Umbrel app package (`umbrel-app.yml` + app-proxy compose). |
+| [`umbrel/filex/`](umbrel/filex/) | Umbrel App Store package (`umbrel-app.yml` + app-proxy compose), proposed in [getumbrel/umbrel-apps#6375](https://github.com/getumbrel/umbrel-apps/pull/6375). |
 | [`casaos/`](casaos/) | CasaOS / ZimaOS compose with the `x-casaos` store extension (app id `sh.filex.filex`). |
 | [`runtipi/filex/`](runtipi/filex/) | Runtipi app package (`config.json` + dynamic `docker-compose.json`). |
 | [`unraid/filex.xml`](unraid/) | Unraid Community Applications template, published from [BRF-Tech/unraid-templates](https://github.com/BRF-Tech/unraid-templates). |

@@ -1,9 +1,3 @@
-# filex on Umbrel — app-proxy pattern.
-#
-# Umbrel injects APP_DATA_DIR / APP_PASSWORD / DEVICE_DOMAIN_NAME and fronts
-# the app with app_proxy on the manifest `port` (5212). The admin password is
-# the deterministic one Umbrel shows in the app's "Show password" dialog
-# (deterministicPassword: true in umbrel-app.yml).
 version: "3.7"
 
 services:
@@ -11,26 +5,30 @@ services:
     environment:
       APP_HOST: filex_server_1
       APP_PORT: 5212
+      # Share and upload links, WebDAV, S3 and the desktop app cannot send
+      # Umbrel's login cookie. filex checks its own sign-in, token or link on
+      # every one of these routes.
+      PROXY_AUTH_WHITELIST: "/s/*,/d/*,/api/*,/dav,/dav/*,/s3,/s3/*"
 
   server:
+    # The App Store copy also pins this tag's multi-arch digest
+    # (tag@sha256:...); scripts/sync-deploy-versions.mjs moves the tag here.
     image: ghcr.io/brf-tech/filex:v0.60.2
     restart: on-failure
     stop_grace_period: 1m
     environment:
-      # The URL users open in the browser — share links, OIDC redirects and
-      # the callbacks of an ONLYOFFICE Document Server, if you connect one, are built from it.
-      FILEX_PUBLIC_URL: "http://${DEVICE_DOMAIN_NAME}:5212"
-      # First admin — password comes from Umbrel (shown in the app UI).
+      PUID: "1000"
+      PGID: "1000"
+      FILEX_PUBLIC_URL: http://${DEVICE_DOMAIN_NAME}:${APP_PROXY_PORT}
+      # umbrelOS forwards requests from the Umbrel network's gateway, so filex
+      # has to trust it to see each visitor's own address (sign-in limits, logs).
+      FILEX_TRUSTED_PROXIES: "auto, ${NETWORK_IP}/16"
+      FILEX_SECRET_KEY: ${APP_FILEX_SECRET_KEY}
       FILEX_ADMIN_EMAIL: admin@local
       FILEX_ADMIN_PASSWORD: ${APP_PASSWORD}
-      # Seed a local storage on first boot so uploads work immediately.
       FILEX_DEFAULT_STORAGE_DRIVER: local
       FILEX_DEFAULT_STORAGE_PATH: /srv/files
     volumes:
-      # SQLite DB + search index + thumbnail cache.
-      - ${APP_DATA_DIR}/data:/data
-      # The default storage folder (app-scoped).
-      - ${APP_DATA_DIR}/files:/srv/files
-      # Umbrel's shared storage folder (downloads from other apps). Add it in
-      # the filex admin UI as an extra "local" storage at /srv/umbrel.
-      - ${UMBREL_ROOT}/data/storage:/srv/umbrel
+      - ${APP_DATA_DIR}/data/filex:/data
+      # Default for the Files folder setting in umbrel-app.yml.
+      - ${APP_DATA_DIR}/data/files:/srv/files

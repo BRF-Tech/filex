@@ -1,29 +1,55 @@
 # filex - Umbrel app package
 
-Package for the [Umbrel community app store](https://github.com/getumbrel/umbrel-apps)
-(schema: `manifestVersion: 1` + the `app_proxy` compose pattern, modelled on the
-official `file-browser` app).
+The source of the filex package for the
+[Umbrel App Store](https://github.com/getumbrel/umbrel-apps), proposed in
+[getumbrel/umbrel-apps#6375](https://github.com/getumbrel/umbrel-apps/pull/6375).
+It follows that repository's current packaging rules: `manifestVersion: 1`,
+`storage: dataRoot: data`, and an `app_proxy` entry in the compose file.
 
-## Install (community app store / local test)
+## How the store copy differs
+
+The files here are the store package with two exceptions, both because
+`scripts/sync-deploy-versions.mjs` updates them at every release:
+
+- the image is pinned by tag only; the store copy adds that tag's multi-arch
+  digest (`ghcr.io/brf-tech/filex:vX.Y.Z@sha256:...`, from
+  `docker buildx imagetools inspect`);
+- `releaseNotes` is derived from `CHANGELOG.md`; a first submission sends it
+  empty (`releaseNotes: ""`) and `gallery: []`, and Umbrel adds the gallery
+  pictures itself.
+
+## Test on umbrelOS
 
 ```bash
-# On the Umbrel host - install straight from this directory for testing:
-sudo cp -r filex ~/umbrel/app-stores/getumbrel-umbrel-apps-github-53f74447/filex
-umbreld client apps.install.mutate --appId filex
+# On the umbrelOS machine, with this directory copied over (without the
+# .gitkeep files) and the digest added to the image line:
+STORE=/home/umbrel/umbrel/app-stores/getumbrel-umbrel-apps-github-53f74447
+sudo cp -r filex "$STORE/filex"
+sudo umbreld client apps.install.mutate --appId filex
+sudo umbreld client apps.state.query --appId filex
 ```
 
-For a proper store submission, open a PR that adds this `filex/` directory to
-[getumbrel/umbrel-apps](https://github.com/getumbrel/umbrel-apps) and add the
-gallery images (`1.jpg`, `2.jpg`, `3.jpg` - 1600×1000, referenced in
-`umbrel-app.yml`; not included here).
+Check the package with the store's own linter first, in a checkout of
+getumbrel/umbrel-apps: `npm run lint:apps -- filex --check-images`.
 
-## What's required
+## What it sets up
 
-- No mandatory env: Umbrel supplies `APP_DATA_DIR`, `APP_PASSWORD`,
-  `DEVICE_DOMAIN_NAME`, `UMBREL_ROOT`.
-- Login: **admin@local** + the password Umbrel shows in the app's
-  "Show password" dialog (`deterministicPassword: true` →
-  `FILEX_ADMIN_PASSWORD=${APP_PASSWORD}`).
-- Data: `${APP_DATA_DIR}/data` (DB/index/thumbs), `${APP_DATA_DIR}/files`
-  (default storage). Umbrel's shared `data/storage` folder is mounted at
-  `/srv/umbrel` - add it as an extra local storage in the admin UI if wanted.
+- **Sign-in:** `admin@local` (or `admin`) with the password Umbrel shows for
+  the app (`deterministicPassword: true`, `FILEX_ADMIN_PASSWORD=${APP_PASSWORD}`,
+  read on the first start only).
+- **Data:** `${APP_DATA_DIR}/data/filex` is `/data` (database, search index,
+  thumbnails); `${APP_DATA_DIR}/data/files` is `/srv/files`, seeded as the
+  Files storage. The **Files** folder setting (`folderAccess`) can point it at
+  Home, a drive or a network share instead.
+- **Secret key:** `FILEX_SECRET_KEY` comes from `derive_entropy` in
+  `exports.sh`, so it stays the same across restarts and updates.
+- **User:** the container runs filex as 1000:1000 through `PUID`/`PGID`.
+- **Address:** `FILEX_PUBLIC_URL` is `http://${DEVICE_DOMAIN_NAME}:${APP_PROXY_PORT}`
+  and can be changed in the app's settings.
+- **Proxy:** `FILEX_TRUSTED_PROXIES` is `auto, ${NETWORK_IP}/16`. umbrelOS 2.0
+  forwards requests from the Umbrel network's gateway, and without it every
+  visitor would count as that one address in the sign-in limits and the logs.
+- **Umbrel login:** stays on. `PROXY_AUTH_WHITELIST` opens only share links
+  (`/s/*`), upload links (`/d/*`), the API (`/api/*`, for the desktop app and
+  `filex mount`), WebDAV (`/dav`) and S3 (`/s3`); filex checks its own sign-in,
+  token or link on each of them.

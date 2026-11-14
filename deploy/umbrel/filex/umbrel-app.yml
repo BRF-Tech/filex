@@ -1,77 +1,65 @@
 manifestVersion: 1
 id: filex
+storage:
+  dataRoot: data
+folderAccess:
+  - id: files
+    name: Files
+    note: >-
+      The folder filex shows as its Files storage. By default it's inside the app's own storage. Choose a folder in Home, on a drive or on a network share to manage those files with filex instead.
+    mounts:
+      - service: server
+        targetPath: /srv/files
+environment:
+  - name: FILEX_PUBLIC_URL
+    services:
+      - server
+    note: >-
+      The address share links, upload links and emails point to. By default it's this Umbrel's local address. Set it, for example to https://files.example.com, if people open filex through another address.
 category: files
 name: filex
 version: "0.60.2"
+tagline: Self-hosted file manager for all your storages
+description: >-
+  Sign in with the username and password Umbrel shows for the app. filex opens on a Files folder that is ready for uploads, and you can add more storages from its admin panel.
+
+
+  filex is a self-hosted file manager with a modern web UI. Browse, upload, preview, rename, search and share files, and keep local folders, S3-compatible buckets, SFTP, WebDAV, FTP and SMB shares side by side in one tree.
+
+
+  - Share links with a PIN, an expiry and a download limit, and upload links for collecting files from others
+
+  - Trash, file versions and end-to-end encrypted folders
+
+  - Full-text search, and thumbnails for photos, videos and PDFs
+
+  - Users, groups and roles, two-factor sign-in, and optional OIDC or LDAP sign-in
+
+  - The same files over WebDAV and S3, so tools such as rclone or a backup job can use them
+
+  - A desktop app for Windows, Linux and macOS with two-way folder sync
+
+  - Word, Excel and PowerPoint files edited in the browser once you install the office editor app from filex's own app store
 releaseNotes: |-
   filex v0.60.2 - 2026-11-12
   • The OIDC provider the environment defines can ask for more scopes
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
-tagline: Self-hosted file manager for all your storages
-description: >-
-  filex is a fast, self-hosted file manager with a single-binary backend and a
-  modern web UI. Browse, upload, preview, rename, share and edit files across
-  pluggable storage backends - local folders, S3/MinIO, SFTP, WebDAV, FTP and
-  SMB/NAS shares.
 
-
-  It also works the other way round: the same tree is reachable AS S3, SFTP,
-  FTPS, NFS and WebDAV, so rclone, restic, aws s3, WinSCP, a backup job or a
-  media player can point straight at it - with the same filex permissions, trash
-  and quota as the web UI; the POSIX bits and ACLs on the disk are not mapped to
-  filex users. `filex mount` attaches it as a folder on Linux or a
-  drive letter on Windows.
-
-
-  Browsing opens on Home - your storages, what you opened last, what you
-  starred. + New makes a folder or a document: Markdown, text, CSV or code
-  straight away, and Word, Excel or PowerPoint once you install the office
-  editor app, which needs no document server. Nothing here needs LibreOffice
-  installed. Select a dozen
-  files and Download hands back one ZIP, streamed rather than assembled, so a
-  large archive costs the server almost no memory. Every file records its
-  owner, so the listing has an Owner column, the filter row an Owner entry,
-  and quota counts against the owner rather than whoever touched the file
-  last.
-
-
-  Highlights: public share links with PIN and expiry, file-drop upload links,
-  resumable uploads, full-text search, thumbnails of the file itself (a PDF's
-  first page, a video's first frame that is not black, a text file's first
-  lines, an SVG, what is inside an archive) and folders drawn with the files
-  that came into them last, trash and file versioning, end-to-end encrypted folders (encrypted
-  in your browser, so the server only ever holds ciphertext) each with a
-  recovery key shown once, and a policy for who may create them (an
-  administrator's approval when you want one), role-based access control with groups, TOTP 2FA, a
-  sign-in attempt limit on the web form, WebDAV, FTPS and SFTP, optional SSO
-  (OIDC/LDAP), a desktop app with two-way folder sync, an embeddable web
-  component, and an AI/MCP API for agents. An open folder keeps itself current
-  over a WebSocket, so a file somebody else uploads appears without a refresh.
-  For Office documents, install the office editor app from filex's app
-  store: it edits them in the browser with no document server, alone or
-  together - in an encrypted folder too, your browser decrypting the
-  document for it. An ONLYOFFICE Document Server stays optional; draw.io can
-  be connected for diagram editing, and so can a ClamAV
-  container: give filex its address and every
-  file written is scanned, with infected ones quarantined into the trash.
-
-
-  On Umbrel, filex stores its database in the app data directory and manages a
-  dedicated files folder out of the box. Sign in with the username and
-  password shown by Umbrel, then add more storages in the admin UI.
 developer: BRF-Tech
 website: https://filex.sh
 dependencies: []
 repo: https://github.com/BRF-Tech/filex
 support: https://github.com/BRF-Tech/filex/issues
+
 port: 5212
-gallery:
-  - 1.jpg
-  - 2.jpg
-  - 3.jpg
+gallery: []
 path: ""
+
 defaultUsername: admin@local
 deterministicPassword: true
-torOnly: false
+backupIgnore:
+  - data/filex/thumbs/*
+  - data/filex/cache/*
+
 submitter: BRF-Tech
-submission: https://github.com/getumbrel/umbrel-apps
+submission: https://github.com/getumbrel/umbrel-apps/pull/6375

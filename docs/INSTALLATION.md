@@ -261,9 +261,10 @@ Ready-made packages for the common home-server platforms live under
 All of them run the same single container (SQLite + local storage) and end at
 the same [first run](#first-run).
 
-- **Umbrel** - [`deploy/umbrel/filex/`](../deploy/umbrel/filex/): community
-  app-store package (app-proxy pattern); login is `admin@local` + the password
-  Umbrel shows in the app dialog.
+- **Umbrel** - [`deploy/umbrel/filex/`](../deploy/umbrel/filex/): the Umbrel
+  App Store package, proposed in
+  [getumbrel/umbrel-apps#6375](https://github.com/getumbrel/umbrel-apps/pull/6375);
+  login is `admin@local` + the password Umbrel shows for the app.
 - **CasaOS / ZimaOS** - [`deploy/casaos/`](../deploy/casaos/): compose with
   the `x-casaos` store metadata (app id `sh.filex.filex`); paste it via
   *Install a customized app*.
@@ -276,6 +277,9 @@ the same [first run](#first-run).
   to `/srv/files` and set the Public URL.
 - **Portainer** - [`deploy/portainer/`](../deploy/portainer/): App Templates
   v3 JSON; add the raw URL under *Settings → App Templates*.
+- **TrueNAS** - an app for the community train is proposed in
+  [truenas/apps#6515](https://github.com/truenas/apps/pull/6515); it lives in
+  that repository, not under `deploy/`.
 
 ---
 
