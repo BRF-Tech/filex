@@ -37,7 +37,9 @@ concurrency:
 jobs:
   shots:
     name: pnpm shots
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not -latest: the Playwright pnpm-lock.yaml pins has no
+    # browser build for Ubuntu 26.04 (ci.yml, the playwright job).
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

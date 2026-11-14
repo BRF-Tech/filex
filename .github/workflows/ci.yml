@@ -583,10 +583,19 @@ jobs:
   # apps are e2e/helpers/app-locations.mjs's, the font map is the build
   # host's (scripts/chain/run.mjs, FONTS_CONF). It needs no token: the app
   # repositories are public.
+  #
+  # ⚠ The three Playwright jobs (this one, playwright-ds, playwright-extra)
+  # and shots.yml run on ubuntu-24.04, not ubuntu-latest. ubuntu-latest became
+  # Ubuntu 26.04 in November 2026, and the Playwright pnpm-lock.yaml pins
+  # (1.59.1) has no browser build or system-library list for it: every part
+  # ended at "Playwright does not support chromium on ubuntu26.04-x64" (runs
+  # 43628691570, 43633299065). Move them back only together with a Playwright
+  # that knows ubuntu26.04 (1.65.1 does), and drop the browsers' package cache
+  # then: it holds Ubuntu 24.04's .debs.
   playwright:
     name: ${{ matrix.name }}
     needs: [plan, build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -660,7 +669,8 @@ jobs:
     name: ${{ matrix.name }}
     needs: [plan, build]
     if: needs.plan.outputs.profile == 'full'
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not -latest: see the playwright job.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -742,7 +752,8 @@ jobs:
     name: ${{ matrix.name }}
     needs: [plan, build]
     if: needs.plan.outputs.profile == 'full'
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not -latest: see the playwright job.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
