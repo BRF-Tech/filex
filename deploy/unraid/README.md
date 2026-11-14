@@ -1,27 +1,33 @@
 # filex - Unraid Community Applications template
 
-`filex.xml` follows the Unraid CA `<Container version="2">` template schema
-(modelled on the selfhosters.net template repository).
+`filex.xml` is the filex template of Unraid Community Applications. CA reads
+it from [BRF-Tech/unraid-templates](https://github.com/BRF-Tech/unraid-templates)
+(`templates/filex.xml` there, listed under *BRF Tech's Repository*). This file
+is the source: a change here is copied there.
 
 ## Install
 
-- **Without a template repo**: Unraid → Docker → **Add Container** →
-  Template dropdown stays empty; instead save `filex.xml` to
-  `/boot/config/plugins/dockerMan/templates-user/` on the flash drive, then
-  pick `filex` from the Template dropdown.
-- **Via CA**: submit `filex.xml` to a CA-indexed template repository (e.g.
-  a `docker-templates` GitHub repo registered with Community Applications).
+- **Community Applications**: open **Apps** on the Unraid server and search
+  for `filex`.
+- **By hand**: save `filex.xml` to `/boot/config/plugins/dockerMan/templates-user/`
+  on the flash drive, then open **Docker** → **Add Container** and pick
+  `filex` from the **Template** list.
 
-## Required settings
+## Settings
 
 | Field | Required | Notes |
 |---|---|---|
-| Files (`/srv/files`) | yes | The share to manage, e.g. `/mnt/user/files` - seeded as the default storage. |
-| Public URL (`FILEX_PUBLIC_URL`) | yes | `http://<server-ip>:5212` or your reverse-proxy URL - share links are built from it. A path in it (`https://example.com/filex`) is the sub-path filex is served under, and the proxy must pass that path through ([Base path](../../docs/CONFIGURATION.md#base-path)). |
-| Admin Email / Password | no | Empty → random `admin@local` password printed once in the container log. |
+| Files (`/srv/files`) | yes | The share filex manages, for example `/mnt/user/files`. It becomes the first storage on the first start. |
+| Public URL (`FILEX_PUBLIC_URL`) | yes | The address you open filex at, for example `http://192.168.1.10:5212` or your reverse-proxy URL. Share links and sign-in redirects are built from it. A path in it (`https://example.com/filex`) is the sub-path filex is served under, and the proxy must pass that path through ([Base path](../../docs/CONFIGURATION.md#base-path)). |
+| Data (`/data`) | yes | `/mnt/user/appdata/filex`: database (SQLite), search index, thumbnails. |
+| Admin Email / Admin Password | no | Empty: the administrator `admin@local` is created with a random password, printed once in the container log and saved to `/mnt/user/appdata/filex/.first-run.txt`. |
+| Secret Key (`FILEX_SECRET_KEY`) | no | 32 or more random characters. Needed for S3 access keys, push notifications and sign-in provider secrets saved in the admin panel ([The secret key](../../docs/CONFIGURATION.md#the-secret-key)). Back it up and keep it unchanged once set. |
+| PUID / PGID (advanced) | no | `99` / `100` (nobody / users), so files filex writes to your shares get the usual Unraid owner. The container takes ownership of the Data folder once. Empty: runs as root. |
 
-Data (DB, search index, thumbnails) lives in `/mnt/user/appdata/filex`.
-The template pins `:latest` so CA's update checks work; put
-`ghcr.io/brf-tech/filex:vX.Y.Z` (a tag from
-[Releases](https://github.com/BRF-Tech/filex/releases)) in the Repository
-field if you prefer fixed versions.
+The administrator signs in at `http://<server>:5212/admin`; accounts you
+create for other people sign in at `/drive`.
+
+The template uses the `latest` tag, which follows the newest release, so
+Unraid shows an update when one is published. To stay on one version, put a
+release tag in **Repository**, `ghcr.io/brf-tech/filex:vX.Y.Z`
+(a tag from [Releases](https://github.com/BRF-Tech/filex/releases)).

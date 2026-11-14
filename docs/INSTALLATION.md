@@ -264,12 +264,16 @@ the same [first run](#first-run).
 - **Umbrel** - [`deploy/umbrel/filex/`](../deploy/umbrel/filex/): community
   app-store package (app-proxy pattern); login is `admin@local` + the password
   Umbrel shows in the app dialog.
-- **CasaOS** - [`deploy/casaos/`](../deploy/casaos/): compose with the
-  `x-casaos` store metadata; paste it via *Install a customized app*.
+- **CasaOS / ZimaOS** - [`deploy/casaos/`](../deploy/casaos/): compose with
+  the `x-casaos` store metadata (app id `sh.filex.filex`); paste it via
+  *Install a customized app*.
 - **Runtipi** - [`deploy/runtipi/filex/`](../deploy/runtipi/filex/): dynamic
   compose app; the install form asks for the (optional) first admin.
-- **Unraid** - [`deploy/unraid/`](../deploy/unraid/): Community Applications
-  template XML; map a share to `/srv/files` and set the Public URL.
+- **Unraid** - in **Apps** (Community Applications): search for `filex`, from
+  *BRF Tech's Repository*
+  ([BRF-Tech/unraid-templates](https://github.com/BRF-Tech/unraid-templates)).
+  The template is [`deploy/unraid/filex.xml`](../deploy/unraid/); map a share
+  to `/srv/files` and set the Public URL.
 - **Portainer** - [`deploy/portainer/`](../deploy/portainer/): App Templates
   v3 JSON; add the raw URL under *Settings → App Templates*.
 

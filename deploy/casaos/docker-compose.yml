@@ -1,30 +1,21 @@
-# filex on CasaOS — compose with the x-casaos store extension.
-# Schema modelled on the official CasaOS AppStore entries
-# (github.com/IceWhaleTech/CasaOS-AppStore, e.g. Apps/Nextcloud).
-#
-# Install: CasaOS UI -> App Store -> "Install a customized app" -> paste this
-# file (or drop the folder into a CasaOS app store repo).
 name: filex
 services:
   filex:
     image: ghcr.io/brf-tech/filex:v0.60.2
     container_name: filex
-    network_mode: bridge
     restart: unless-stopped
+    network_mode: bridge
     ports:
       - target: 5212
         published: "5212"
         protocol: tcp
     environment:
-      # Set to the URL you actually open, e.g. http://<NAS-IP>:5212 — share
-      # links and SSO redirects are built from it.
       FILEX_PUBLIC_URL: http://localhost:5212
-      # Seed a local storage on first boot so uploads work immediately.
       FILEX_DEFAULT_STORAGE_DRIVER: local
       FILEX_DEFAULT_STORAGE_PATH: /srv/files
-      # Optional: preset the first admin instead of a random password.
-      # FILEX_ADMIN_EMAIL: admin@example.com
-      # FILEX_ADMIN_PASSWORD: change-me
+      FILEX_ADMIN_EMAIL: ""
+      FILEX_ADMIN_PASSWORD: ""
+      FILEX_SECRET_KEY: ""
     volumes:
       - type: bind
         source: /DATA/AppData/$AppID/data
@@ -35,99 +26,82 @@ services:
       - type: bind
         source: /DATA
         target: /media/DATA
+    stop_grace_period: 30s
     x-casaos:
       envs:
         - container: FILEX_PUBLIC_URL
           description:
-            en_US: The URL users open in the browser (http://<NAS-IP>:5212). Share links and SSO redirects are built from it.
+            en_US: The address you open filex at, for example http://192.168.1.10:5212. Share links and sign-in redirects are built from it.
+        - container: FILEX_DEFAULT_STORAGE_DRIVER
+          description:
+            en_US: Storage created on the first start. Keep local to use the /srv/files folder.
+        - container: FILEX_DEFAULT_STORAGE_PATH
+          description:
+            en_US: Container path of the storage created on the first start.
+        - container: FILEX_ADMIN_EMAIL
+          description:
+            en_US: Optional. Email of the first administrator. Leave empty for admin@local.
+        - container: FILEX_ADMIN_PASSWORD
+          description:
+            en_US: Optional. Password of the first administrator. Leave empty for a random password, printed once in the app log.
+        - container: FILEX_SECRET_KEY
+          description:
+            en_US: Optional. 32 or more random characters used to encrypt stored secrets (S3 access keys, push notifications, sign-in provider secrets). Back it up and keep it unchanged once set.
       ports:
         - container: "5212"
           description:
-            en_US: Web UI + API port
+            en_US: Web UI and API port
       volumes:
         - container: /data
           description:
             en_US: filex database (SQLite), search index and thumbnail cache.
         - container: /srv/files
           description:
-            en_US: Default storage folder, seeded on first boot.
+            en_US: Folder used as the first storage.
         - container: /media/DATA
           description:
-            en_US: Whole CasaOS /DATA folder - add it as an extra "local" storage in the filex admin UI to manage your NAS files.
-
+            en_US: The /DATA folder. Add it as another local storage in the filex admin panel to manage your files there.
 x-casaos:
-  architectures:
-    - amd64
-    - arm64
+  id: sh.filex.filex
   main: filex
-  author: BRF-Tech
-  developer: BRF-Tech
-  category: Cloud
-  description:
-    en_US: >-
-      filex is a fast, self-hosted file manager: browse, upload, preview,
-      share and edit files across local folders, S3/MinIO, SFTP, WebDAV,
-      FTP and SMB/NAS shares. It also works the other way round - the same
-      tree is reachable AS S3, SFTP, FTPS, NFS and WebDAV, so rclone,
-      restic, WinSCP or a media player can point straight at it, and
-      `filex mount` attaches it as a drive. Browsing opens on Home - your
-      storages, what you opened last, what you starred - and + New
-      makes a folder or a document: Markdown, text, CSV or code straight
-      away, and Word, Excel or PowerPoint once you install the office
-      editor app, which edits them in the browser with no document server
-      (OpenDocument too; an ONLYOFFICE Document Server stays
-      optional). The templates are real documents compiled into the
-      binary, so no LibreOffice is installed anywhere. A multi-file
-      selection downloads as one streamed ZIP. Public share links with PIN
-      and expiry, file-drop upload links, resumable uploads, full-text
-      search, thumbnails of the file itself (a PDF's first page, a video's
-      first frame that is not black, a text file's first lines, an SVG,
-      what is inside an archive) and folders drawn with the files that came
-      into them last, trash and
-      versioning, file ownership with an Owner column and an Owner filter,
-      end-to-end encrypted folders with a recovery key and a policy for
-      who may create them (an administrator's approval when you want
-      one), RBAC with groups,
-      TOTP 2FA, a sign-in attempt limit on the web form, WebDAV, FTPS and
-      SFTP, optional SSO (OIDC/LDAP), apps - sandboxed WebAssembly add-ons installed through a review of every permission they ask for, with e-Signature, Convert, an office editor, filextext and draw.io shipping alongside, and an app you allow can edit a file of an encrypted folder, decrypted in your browser; language packs that add a language with no code and no release, right-to-left layouts included; instance themes on the Appearance screen; personal and team tags; and My shares, where anybody can see and revoke the links they made; a desktop app with live folder sync and an
-      AI/MCP API for agents. An open folder keeps itself up to date over a
-      WebSocket, so a file somebody else uploads appears without a
-      refresh. Antivirus is optional and needs no fatter image: point
-      filex at a ClamAV container over the network and every file written
-      is scanned, infected ones quarantined into the trash. On first start
-      it creates an admin account and prints the password once in the
-      container logs (also saved to /data/.first-run.txt), unless
-      FILEX_ADMIN_EMAIL / FILEX_ADMIN_PASSWORD are set.
-  tagline:
-    en_US: Self-hosted file manager for all your storages
-  title:
-    en_US: filex
-  icon: https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/logo.png
-  # ⚠ The social card is NOT under docs/screenshots and never was — it is
-  # rendered from site/social-preview.src.html into site/assets/, and site/ is
-  # withheld from the public repository, so no raw.githubusercontent URL can
-  # reach it. filex.sh serves it (the og:image of site/index.html).
-  thumbnail: https://filex.sh/assets/social-preview.png
-  # Published screenshots: e2e/shots/manifest.json names the current file of
-  # each, and `node scripts/shots-site.mjs relink` keeps these three on it.
-  screenshot_link:
-    - https://filex.sh/shots/explorer-grid-light.475b0b61faab.png
-    - https://filex.sh/shots/admin-dashboard.3becd8ffe998.png
-    - https://filex.sh/shots/share-modal.58825362c544.png
-  tips:
-    before_install:
-      en_US: >-
-        After install, check the container logs for the one-time admin@local
-        password (or set FILEX_ADMIN_EMAIL / FILEX_ADMIN_PASSWORD before
-        starting). Set FILEX_PUBLIC_URL to the address you really use.
-        Antivirus is off until you run a scanner: this image ships none, so
-        install a ClamAV container and give filex its address on
-        Settings -> Protection.
   index: /
   port_map: "5212"
   scheme: http
-  store_app_id: filex
+  architectures:
+    - amd64
+    - arm64
+  author: BRF Tech
+  developer: BRF Tech
+  category: Productivity
+  icon: https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/filex/icon.svg
+  thumbnail: https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/filex/thumbnail.png
+  screenshot_link:
+    - https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/filex/screenshot-1.png
+    - https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/filex/screenshot-2.png
+  title:
+    en_US: filex
+  tagline:
+    en_US: Web file manager for local folders and remote storage
+  description:
+    en_US: |
+      filex is a self-hosted web file manager. It browses, uploads, previews, shares and edits files on local folders and on S3, SFTP, WebDAV, FTP and SMB storage. The same files can also be reached over S3, SFTP, FTPS, NFS and WebDAV, so tools such as rclone, restic or WinSCP can connect to filex directly.
+
+      It has share links with a PIN, an expiry date and a download limit, upload-only links, full-text search, thumbnails, trash and version history, end-to-end encrypted folders, roles and groups, two-factor sign-in, and optional OIDC or LDAP sign-in. Add-on apps run in a WebAssembly sandbox and are installed from the admin panel; Word, Excel and PowerPoint files open in the browser once you install the office editor app. A desktop app with folder sync and an MCP server are also available.
+
+      This package keeps the database, search index and thumbnails in /DATA/AppData/filex/data and creates the first storage from /DATA/AppData/filex/files. The /DATA folder is mounted at /media/DATA and can be added as another storage in the admin panel.
+  tips:
+    before_install:
+      en_US: |
+        Before installing, set FILEX_PUBLIC_URL to the address you will open filex at, for example http://192.168.1.10:5212 (your ZimaOS IP or domain). Share links and sign-in redirects are built from it. The default, http://localhost:5212, only works on the device itself.
+
+        On the first start filex creates the administrator admin@local with a random password. The password is printed once in the app log and saved in /DATA/AppData/filex/data/.first-run.txt. To choose the first administrator yourself, set FILEX_ADMIN_EMAIL and FILEX_ADMIN_PASSWORD before installing.
+
+        The app opens at /admin, where the administrator signs in. Accounts you create for other people sign in at /drive.
   version: "0.60.2"
+  update_at: "2026-11-12"
+  release_notes:
+    en_US: First version in the ZimaOS App Store.
   website: https://filex.sh
   repo: https://github.com/BRF-Tech/filex
   support: https://github.com/BRF-Tech/filex/issues
+  docs: https://docs.filex.sh
