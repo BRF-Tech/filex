@@ -173,6 +173,14 @@ test.describe('tema:v1 — a custom theme, composed and worn', () => {
           localStorage.getItem('filex.session');
       }, THEME_ID);
 
+      // ⚠ The page the sign-in landed on (/admin/home) asks its first questions
+      // - /api/auth/me among them - for a moment after it is drawn. On WebKit a
+      // request of that page caught by the route below and answered after the
+      // goto began left the navigation unsent: the goto timed out at 15 s with
+      // nothing reaching the server (0.61.0 gate, webkit 4/4, twice). Let it
+      // finish first, so the route sees only the page this test opens.
+      await page.waitForLoadState('networkidle');
+
       let holding = true;
       let answered = !variant.answerFirst;
       const held: Array<() => void> = [];
@@ -248,6 +256,14 @@ test.describe('tema:v1 — a custom theme, composed and worn', () => {
           return removeItem.call(this, key);
         };
       }, THEME_ID);
+
+      // ⚠ The page the sign-in landed on (/admin/home) asks its first questions
+      // - /api/auth/me among them - for a moment after it is drawn. On WebKit a
+      // request of that page caught by the route below and answered after the
+      // goto began left the navigation unsent: the goto timed out at 15 s with
+      // nothing reaching the server (0.61.0 gate, webkit 4/4, twice). Let it
+      // finish first, so the route sees only the page this test opens.
+      await page.waitForLoadState('networkidle');
 
       let answered = false;
       let failed = 0;
