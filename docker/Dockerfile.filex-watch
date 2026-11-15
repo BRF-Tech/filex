@@ -1,0 +1,55 @@
+# filex-watch image: the agent that reports folders changed on the machine
+# that owns a storage's disk to filex (docs/FILEX-WATCH.md). It runs where the
+# disk is - beside a NAS's other containers, on the server an SFTP storage
+# points at - never beside filex.
+#
+# The Go program and the CA certificates, nothing else: no shell, no package
+# manager. Built for the platform asked (buildx --platform), cross-compiled on
+# the build machine, so an arm64 image needs no emulation.
+#
+# Build (from the repository root):
+#   docker build -f docker/Dockerfile.filex-watch -t filex-watch .
+#
+# Run (the key in a file, the watched folder read-only at /watch):
+#   docker run -d --name filex-watch --restart unless-stopped \
+#     -e FILEX_WATCH_SERVER=https://files.example.com -e FILEX_WATCH_STORAGE=7 \
+#     -v /etc/filex-watch/key:/run/secrets/filex-watch-key:ro \
+#     -v /volume1/media:/watch:ro \
+#     ghcr.io/brf-tech/filex-watch:0.1.0
+#
+# ⚠ It runs as root by default so it can watch every folder of the tree,
+# whoever owns it (it only reads folder listings). `--user` works for a tree
+# that user can read.
+
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+RUN apk --no-cache add ca-certificates
+WORKDIR /src
+COPY backend/go.mod backend/go.sum ./
+# go.mod replaces a module with a copy in the tree (third_party/): the module
+# graph needs it, even for a program that does not import it.
+COPY backend/third_party/ ./third_party/
+RUN go mod download
+COPY backend/ ./
+ARG VERSION=dev
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+    -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+    -o /out/filex-watch ./cmd/filex-watch
+
+FROM scratch
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /out/filex-watch /filex-watch
+# The image's defaults: the folder mounted at /watch, the key a file (a
+# Compose secret lands at /run/secrets/<name>). FILEX_WATCH_SERVER and
+# FILEX_WATCH_STORAGE have no default: they are this install's.
+ENV FILEX_WATCH_ROOT=/watch \
+    FILEX_WATCH_KEY_FILE=/run/secrets/filex-watch-key
+ARG VERSION=dev
+LABEL org.opencontainers.image.title="filex-watch" \
+      org.opencontainers.image.description="Reports the folders that change on this machine to filex" \
+      org.opencontainers.image.source="https://github.com/BRF-Tech/filex" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}"
+ENTRYPOINT ["/filex-watch"]
+CMD ["run"]

@@ -387,6 +387,15 @@ const WORKFLOW_GUARDS = [
   'every action a workflow runs is pinned to a full commit, its tag in a comment',
   'every job that reads a publishing secret runs in the release environment',
   'every workflow says at the top what its token may do',
+  // #352: filex-watch's own release line in the same repository - its tags
+  // only, never a filex tag, and never GitHub's "latest" release, which every
+  // releases/latest/download link of filex names
+  // (packaging/ci/filex-watch-release.patch,
+  // web/tests/deploy/filexWatchRelease.test.ts).
+  'runs on its own tags only, and a filex tag never runs it',
+  'publishes a Release that is never "latest", with checksums',
+  'refuses a tag that names another version than the source',
+  'builds the image from the Dockerfile in this tree, for both architectures',
 ];
 
 /**
@@ -1115,6 +1124,7 @@ export default function plan({ repo, version, tag, platform = process.platform }
             'tests/deploy/releaseDesktopUpgrade.test.ts',
             'tests/deploy/releaseSnapFollows.test.ts',
             'tests/deploy/actionsPinned.test.ts',
+            'tests/deploy/filexWatchRelease.test.ts',
           ],
           env: (c) => ({ FILEX_WORKFLOWS_DIR: workflowsOf(c.exportTarget) }),
           mustPass: WORKFLOW_GUARDS,

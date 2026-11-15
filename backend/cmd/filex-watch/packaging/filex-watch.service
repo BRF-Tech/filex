@@ -1,0 +1,34 @@
+# filex-watch as a systemd service (docs/FILEX-WATCH.md).
+#
+#   sudo cp filex-watch.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now filex-watch
+#   journalctl -u filex-watch -f
+#
+# The settings are in /etc/filex-watch/config.json (config.example.json beside
+# this file) and the key in /etc/filex-watch/key, readable by root only.
+#
+# It runs as root so it can watch every folder of the share, whoever owns
+# them; it only reads folder listings. To run it as another user, give that
+# user read access to the whole tree and to the key file, and set User= below.
+
+[Unit]
+Description=filex-watch - reports folders that change on this machine to filex
+Documentation=https://docs.filex.sh/FILEX-WATCH
+# A network share must be mounted before its folders can be watched.
+After=network-online.target remote-fs.target local-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/filex-watch run --config /etc/filex-watch/config.json
+Restart=always
+RestartSec=10
+# It reads; it never writes the tree it watches.
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/var/log
+
+[Install]
+WantedBy=multi-user.target

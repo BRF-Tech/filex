@@ -653,6 +653,12 @@ func (r *Resolver) Any(ctx context.Context, identifier, secret string) (*Princip
 // principal applies the policy checks every credential type shares and
 // assembles the caller.
 func (r *Resolver) principal(ctx context.Context, u *model.User, tok *model.APIToken) (*Principal, error) {
+	// A filex-watch key opens its own door and no protocol (model.APIToken.
+	// DoorOnly), however it was reached: as a password, or as the parent of
+	// an S3 key or an NFS export.
+	if tok.DoorOnly() {
+		return nil, ErrUnauthorized
+	}
 	if !auth.LoginAllowed(ctx, r.Store, r.MultiTenant, u) {
 		return nil, ErrUnauthorized
 	}

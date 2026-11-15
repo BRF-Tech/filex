@@ -59,6 +59,7 @@ are described on that area's page.
 | ![admin](https://img.shields.io/badge/-admin-red)         | Admin role required - or, where the section says so, the delegated administration permission it names (`admin.users`, `admin.monitor`, `admin.audit`, …; [PERMISSIONS.md](PERMISSIONS.md#delegated-administration)). When an API token calls, the token must also carry the `admin` scope and no `root:` confinement (since v0.41.0): an administrator's token without it gets `403 token missing scope: admin` |
 | ![signed](https://img.shields.io/badge/-signed-yellow)    | A session/token **or** a signed URL - see the route |
 | ![session](https://img.shields.io/badge/-admin%20session-darkred) | An administrator **signed in to the panel**: an API key is refused `403 session_required`, whatever its scopes ([Admin: plugin requests](#admin-plugin-requests), [Admin: encryption policy](#admin-encryption-policy)) |
+| ![watch key](https://img.shields.io/badge/-filex--watch%20key-orange) | A filex-watch key for the storage the path names, and no other credential ([FILEX-WATCH.md](FILEX-WATCH.md)) |
 
 Auth is provided either by a session cookie (`filex_session`) or a Bearer
 token (`Authorization: Bearer <jwt>`). Both are accepted on the same routes.
@@ -2380,7 +2381,9 @@ i18n key per label. Admin UIs render their storage forms from this instead of
 hardcoding a field list, and the root-path guard reads the same declaration.
 `scan_fields` are the settings every storage has whatever its driver (today
 `scan_exclude`); the storage form draws them, the replication-target dialog
-does not.
+does not. `default_sync_mode` is the sync mode a new storage on the driver gets
+when nobody chooses one (`lazy` for `local`, `poll` for the rest - since 0.61),
+and `lazy_fields` (local only) are the settings of `lazy`.
 **Response 200**
 ```json
 [
@@ -2578,9 +2581,20 @@ Storages created on it are left in place.
 [
   { "id": 1, "uid": "7f3a1b2c-…", "name": "Local", "driver": "local",
     "read_only": false, "sort_order": 1, "config": { "path": "/var/lib/filex/local-storage" },
-    "stats": { "file_count": 12, "total_size_bytes": 4200000 }, "last_sync_state": "ok" }
+    "stats": { "file_count": 12, "total_size_bytes": 4200000 }, "last_sync_state": "ok",
+    "sync_mode": "poll", "sync_suggestion": "lazy",
+    "filesystem": { "type": "NFS", "network": true } }
 ]
 ```
+
+`sync_suggestion` (since 0.61) is the mode the panel offers to switch the
+storage to with one click - `lazy` on a `local` storage that polls; absent
+otherwise ([STORAGE.md → Which mode a new storage gets](STORAGE.md#which-mode-a-new-storage-gets)).
+`filesystem` is set for a `local` storage whose folder is on a network
+filesystem or a FUSE mount, where no folder is watched
+([LAZY-CATALOGUE.md → Network filesystems](LAZY-CATALOGUE.md#network-filesystems-no-watch-every-open-from-disk));
+a lazy storage's `catalogue` then says `"watch_off": "network_fs"` with its
+`fs_type`. `GET …/:id` carries the same three.
 
 Credentials in `config` (every field the driver marks secret, and any key that
 is a credential by name) are answered as `***` - here, in `GET …/:id` and in
@@ -2617,6 +2631,14 @@ exactly like one that does not exist); nothing is written then.
 }
 ```
 **Response 200** `{ "id": 7, "name": "Hetzner archive", ... }`
+
+Without `sync_mode` a storage gets its driver's default - `lazy` (live
+watching) for `local` since 0.61, `poll` for the rest; without
+`sync_interval_s`, `900`. The answer (and `PATCH`'s) carries
+`interval_advice` since 0.61: the judgement
+[`GET …/:id/interval-advice`](#get-apiadminstoragesidinterval-advice-) gives,
+for the saved mode and interval - an agent creating a storage through
+`admin_storages_create` hears it too.
 
 A storage is created **enabled** unless the body says `"enabled": false`. (Until
 this release a body without the key, which is what the admin panel's form sends,
@@ -2668,6 +2690,39 @@ is rebuilt at once - wrapped so its writes fan out to the target, or bare - and
 its [initial copy](REPLICATION.md#initial-copy) starts (or is dropped). An id
 that names no target answers **400**; on a multi-tenant install a change of the
 link is the platform operator's (**403** `supertenant_only`).
+
+### `GET /api/admin/storages/:id/interval-advice` ![admin](https://img.shields.io/badge/-admin-red)
+What a scan interval would cost, judged from the storage's last full scan that
+finished `ok` (since 0.61). The storage form asks it while an interval is
+typed; the thresholds are the server's (`internal/syncadvice`).
+**Query** `interval_s` - the interval to judge, in seconds (empty or under 5:
+the server's default; absent: the storage's own); `mode` - the sync mode to
+judge it for (absent: the storage's). `GET /api/admin/storages/interval-advice`
+(no id) is the new-storage form's: nothing is measured, and `driver` stands in
+for the mode when `mode` is absent.
+**Response 200**
+```json
+{ "state": "busy", "mode": "poll", "interval_s": 300, "busy_percent": 80,
+  "suggested_interval_s": 3000, "target_busy_percent": 10,
+  "last_scan": { "duration_s": 240, "entries": 120000, "finished_at": "2026-11-15T09:04:00Z",
+                 "peak_mem_bytes": 3500000000 },
+  "memory": { "peak_bytes": 3500000000, "limit_bytes": 4294967296, "percent": 81,
+              "source": "container", "high": true } }
+```
+
+| `state` | meaning |
+|---|---|
+| `unmeasured` | no full scan has finished yet |
+| `ok` | scans at this interval keep the storage busy under 25 % of the time |
+| `busy` | 25 % or more; `suggested_interval_s` is the shortest round interval (5, 10, 15, 30, 50, 100, 200, 500… minutes) at which scans take at most `target_busy_percent` |
+| `continuous` | a scan takes longer than the interval; a suggestion as for `busy` |
+| `lazy` | live watching: the interval is the refresh age of folders nobody watches; no load figure |
+| `unused` | `fsnotify` or `ondemand`: nothing scans on a schedule (an `fsnotify` storage on a network filesystem is polled at the interval instead, judged like `poll`, with `polls_instead: true`) |
+
+`memory` is there when the last scan's peak and the memory filex was given
+(the container's limit, else the machine's RAM; `source` says which) are both
+known; `high` from 80 %. **400** for an `interval_s` that is not a whole
+number, **404** for a storage the caller cannot see.
 
 ### `DELETE /api/admin/storages/:id` ![admin](https://img.shields.io/badge/-admin-red)
 Removes the storage and its DB cache rows. Files in the underlying backend
@@ -2728,6 +2783,74 @@ present, says why nothing was removed (partial listing, or the guard tripped).
 Validates a connection without persisting. ⚠ The candidate configuration is in
 the body - there is no `:id` in this path, because the usual caller is the
 create form, which has no storage to name yet.
+
+### `GET /api/admin/storages/:id/watch` ![admin](https://img.shields.io/badge/-admin-red)
+The storage page's filex-watch card ([FILEX-WATCH.md](FILEX-WATCH.md)): the
+storage's keys and what each one's agent last said since filex started, and the
+install commands, with the key left as a placeholder.
+
+```json
+{ "storage_id": 7, "storage": "media", "server": "https://files.example.com", "release": "0.1.0", "max_keys": 20,
+  "keys": [{ "id": 12, "name": "nas01", "created_at": "…", "last_used_at": "…", "created_by": "Alice",
+             "agent": { "agent": { "id": "a1b2", "version": "0.1.0", "host": "nas01", "os": "linux", "arch": "amd64", "root": "/volume1/media" },
+                        "seen_at": "…", "seq": 42, "reports": 42, "folders": 118, "resyncs": 1 } }],
+  "setup": { "server": "…", "storage_id": 7, "release": "0.1.0", "image": "ghcr.io/brf-tech/filex-watch:0.1.0",
+             "linux": "…", "macos": "…", "windows": "…", "docker": "…" } }
+```
+
+`agent` is absent until the key's agent reports; the key itself is never in
+this answer. `supported` is false for a storage an agent cannot serve (the
+driver's `watch_agent`, [STORAGE.md → Driver descriptors](STORAGE.md#driver-descriptors-get-apiadminstorage-drivers)):
+an object store, or a driver that streams its own changes.
+
+### `POST /api/admin/storages/:id/watch/keys` ![admin](https://img.shields.io/badge/-admin-red)
+`{name}` (the machine it is for, at most 100 characters; `filex-watch` when
+empty) makes a key: **201** `{key, row, setup}`. `key` (`fxw_…`) is in this
+answer and never again - only its hash is kept - and `setup` carries the
+install commands with it filled in. The key is an API key row of its own kind,
+bound to this storage and to the route below; it is also listed, and can be
+revoked, on the API / MCP page. **409** `watch_keys_full` past 20 keys, **409**
+`watch_unsupported_driver` for a storage an agent cannot serve (`supported`
+above). Audited as `storage.watch_key_create`.
+
+### `DELETE /api/admin/storages/:id/watch/keys/:key` ![admin](https://img.shields.io/badge/-admin-red)
+Revokes the key: its agent is refused from its next report. `{ok: true}`;
+**404** `watch_key_not_found` for a key of another storage, or an API key that
+is not a filex-watch key. Audited as `storage.watch_key_delete`.
+
+### `POST /api/storages/:id/watch/events` ![watch key](https://img.shields.io/badge/-filex--watch%20key-orange)
+The door a filex-watch agent reports changed folders to (`Authorization: Bearer
+fxw_…`). No session, no other key: an ordinary API key - an administrator's
+included - is `401 watch_key_unknown` here, and a filex-watch key is refused
+everywhere else.
+
+```json
+{ "protocol": 1, "agent": { "id": "a1b2", "version": "0.1.0", "host": "nas01" },
+  "seq": 42, "folders": ["/photos/2026"], "resync": false, "subtrees": [] }
+```
+
+**202** `{accepted, seq, queued, ignored, resync, storage, instance}`;
+`instance` names this filex process (made at its start): an agent that hears a
+new one asks for one resync, because the folders the process before had taken
+and not yet handed to its catalogue are gone. The folders are
+handed to the catalogue once the reports have been quiet for two seconds
+(fifteen at most): a Live watching storage reconciles each folder, any other
+mode rescans its subtree (the root: a full scan); `resync` and `subtrees` bring
+the whole storage, or those folders, up to date. A folder inside filex's own
+trees is `ignored`; one the storage excludes from scanning is dropped later.
+The same `seq` from the same agent again is acknowledged and not queued twice.
+An empty report is a heartbeat: it keeps the key's last use current.
+
+| Answer | When |
+|---|---|
+| `400` `watch_report_invalid` | not a report, a protocol this server does not speak, more than 1000 folders, a folder that climbs (`..`) or is not `/`-rooted UTF-8 |
+| `401` `watch_key_missing` / `watch_key_unknown` | no key; not a filex-watch key, revoked, or expired |
+| `403` `watch_key_other_storage` | the key is another storage's (`params.storage` names it) |
+| `403` `watch_owner_not_admin` | the administrator who made the key no longer is one (a switched-off account or suspended tenant: the usual `403`) |
+| `409` `watch_storage_off` | the storage is switched off |
+| `410` `watch_storage_gone` | the storage is gone, or not in the key owner's tenant |
+| `413` `watch_report_too_large` | a body over 1 MiB |
+| `429` `watch_rate_limited` | over 120 reports a minute for the key, or 600 requests a minute from the address (`Retry-After`) |
 
 ---
 
@@ -3824,7 +3947,10 @@ days, newest first. A tenant admin sees its own storages' runs only.
 
 `seen_count` of the last run that finished `ok` is the tombstone guard's
 baseline ([STORAGE.md → Sync](STORAGE.md#sync)). The same rows are listed per
-storage at `GET /api/admin/storages/:id/sync-runs` (`entries`, `total`).
+storage at `GET /api/admin/storages/:id/sync-runs` (`entries`, `total`), where
+each run also carries `peak_mem_bytes` since 0.61: the most memory the filex
+process held while it walked (the whole process; absent for a run from before
+it was measured).
 
 ### `GET /api/admin/sync-runs/:id` ![admin](https://img.shields.io/badge/-admin-red)
 `{run, conflicts}`: the run above plus the sync conflicts detected during it.

@@ -314,6 +314,63 @@ const (
 // (handlers/desktop_auth.go).
 const TokenSourceDesktop = "desktop"
 
+// TokenSourceWatch marks a filex-watch key (handlers/storage_watch.go,
+// docs/FILEX-WATCH.md): the credential of the small program that reports the
+// folders that changed on the machine that owns a storage's disk. It is an API
+// token row like any other - listed, revoked and last-used like one - with
+// three differences that make it a key for ONE door:
+//
+//   - its list names no verb, only `watch:<storage id>` (WatchScopePrefix);
+//   - its hash is taken over a domain of its own (apitoken.HashWatchKey), so
+//     the lookup every other door makes never finds it;
+//   - DoorOnly: every door that resolves a token refuses it all the same
+//     (auth.TokenMayBeUsed, protocolauth), and it cannot parent an S3 key or
+//     an NFS export.
+const TokenSourceWatch = "watch"
+
+// WatchScopePrefix is the scope of a filex-watch key: `watch:<storage id>`,
+// the one storage whose change reports it may send. No door that mints an
+// ordinary token accepts it (apitoken.IsValidScope does not know it): only
+// the storage page's key button writes one.
+const WatchScopePrefix = "watch:"
+
+// DoorOnly reports whether this credential opens one door of its own and no
+// other: a filex-watch key. A door that resolves an API token refuses one.
+func (t *APIToken) DoorOnly() bool {
+	return t != nil && t.Source == TokenSourceWatch
+}
+
+// WatchStorage is the storage a filex-watch key reports for: the id its
+// `watch:` scope names. ok is false for any other token, and for a list that
+// names no storage, or more than one.
+func (t *APIToken) WatchStorage() (id int64, ok bool) {
+	if !t.DoorOnly() {
+		return 0, false
+	}
+	for _, s := range strings.Split(t.Scopes, ",") {
+		s = strings.TrimSpace(s)
+		if !strings.HasPrefix(s, WatchScopePrefix) {
+			continue
+		}
+		var n int64
+		digits := s[len(WatchScopePrefix):]
+		if digits == "" || len(digits) > 18 {
+			return 0, false
+		}
+		for _, c := range digits {
+			if c < '0' || c > '9' {
+				return 0, false
+			}
+			n = n*10 + int64(c-'0')
+		}
+		if ok || n <= 0 {
+			return 0, false
+		}
+		id, ok = n, true
+	}
+	return id, ok
+}
+
 // NormalizeTokenKind maps a stored/incoming value to a canonical kind.
 //
 // ⚠ Anything that is not exactly "user" is app — including the empty string.

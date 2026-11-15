@@ -354,6 +354,13 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 		return "group_grant.delete", "group_grant", id
 
 	// ── storages ──
+	// A storage's filex-watch keys (handlers/storage_watch.go) first: the
+	// key's DELETE is under the /storages/{id} prefix and would otherwise be
+	// recorded as the storage's own deletion. The target is the storage.
+	case method == http.MethodPost && strings.HasPrefix(p, "/api/admin/storages/") && strings.HasSuffix(p, "/watch/keys"):
+		return "storage.watch_key_create", "storage", id
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/storages/") && strings.Contains(p, "/watch/keys/"):
+		return "storage.watch_key_delete", "storage", id
 	case method == http.MethodPost && p == "/api/admin/storages/":
 		return "storage.create", "storage", ""
 	case method == http.MethodPost && p == "/api/admin/storages":

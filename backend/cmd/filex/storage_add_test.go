@@ -21,7 +21,30 @@ func TestStorageAdd_HasTheSyncFlags(t *testing.T) {
 	for _, f := range []string{"sync-mode", "sync-interval", "lazy-fill", "lazy-max-watches", "lazy-watch-ttl"} {
 		assert.NotNil(t, c.Flags().Lookup(f), "--%s", f)
 	}
-	assert.Equal(t, string(model.SyncModePoll), c.Flags().Lookup("sync-mode").DefValue, "the default stays poll")
+	// #351: no fixed default on the flag - an empty --sync-mode is the
+	// driver's default (model.DefaultSyncModeFor), as on the admin API.
+	assert.Equal(t, "", c.Flags().Lookup("sync-mode").DefValue)
+	assert.Equal(t, "900", c.Flags().Lookup("sync-interval").DefValue)
+}
+
+// #351: a local storage added without --sync-mode is catalogued with live
+// watching (lazy, behaviour A), like one made by the env seed or the admin
+// panel; any other driver polls.
+//
+// Break: default storageAddSync's empty mode to model.SyncModePoll again.
+func TestStorageAdd_NoModeIsTheDriversDefault(t *testing.T) {
+	m, _, cfg, err := storageAddSync("local", "", 900, `{"root":"/srv"}`, nil)
+	require.NoError(t, err)
+	assert.Equal(t, model.SyncModeLazy, m)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(cfg), &got))
+	assert.Equal(t, "/srv", got["root"])
+	_, set := got[storage.LazyFillKey]
+	assert.False(t, set, "behaviour A is the lazy default; nothing is written for it")
+
+	m, _, _, err = storageAddSync("s3", "", 900, `{"bucket":"b","prefix":"p"}`, nil)
+	require.NoError(t, err)
+	assert.Equal(t, model.SyncModePoll, m)
 }
 
 func TestStorageAdd_TheSyncModeIsChosen(t *testing.T) {
@@ -29,7 +52,6 @@ func TestStorageAdd_TheSyncModeIsChosen(t *testing.T) {
 		mode string
 		want model.SyncMode
 	}{
-		{"", model.SyncModePoll},
 		{"poll", model.SyncModePoll},
 		{"fsnotify", model.SyncModeFSNotify},
 		{"ondemand", model.SyncModeOnDemand},

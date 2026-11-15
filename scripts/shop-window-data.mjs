@@ -252,6 +252,15 @@ export const SCREENSHOTS = [
     name: 'sidenav/apikeys-minted-1440.png',
     depicts: ['packages/core/src/components/TokensPanel.vue'],
   },
+  // ── v0.61.0: filex-watch's card on a storage's page (e2e/shots/filexwatch.mjs)
+  {
+    name: 'filexwatch/filex-watch-key-1440.png',
+    depicts: ['web/src/components/StorageWatchAgent.vue', 'web/src/api/storageWatch.ts'],
+  },
+  {
+    name: 'filexwatch/filex-watch-1440.png',
+    depicts: ['web/src/components/StorageWatchAgent.vue', 'web/src/api/storageWatch.ts'],
+  },
   // ── v0.43.0: Apps, and the signing round that debuts them ──────────────
   // e2e/shots/signing.mjs, apps.mjs, appearance.mjs and symlinks.mjs.
   {

@@ -725,6 +725,15 @@ type Store interface {
 	AbortUnfinishedSyncRuns(ctx context.Context, errMsg string) (int64, error)
 	ListSyncRuns(ctx context.Context, storageID int64, limit int) ([]*model.SyncRun, error)
 	ListSyncRunsAcrossAll(ctx context.Context, storageID int64, status string, limit, offset int) ([]*model.SyncRun, int64, error)
+	// SetSyncRunPeakMemory records the most memory the process held while run
+	// id walked its storage (migration 00139, task #353; SyncRunMemorySQL).
+	SetSyncRunPeakMemory(ctx context.Context, id, bytes int64) error
+	// SyncRunPeaks returns the recorded peak of every run in ids that has one.
+	SyncRunPeaks(ctx context.Context, ids []int64) (map[int64]int64, error)
+	// LastMeasuredSyncRun is the storage's most recent full scan that
+	// finished "ok", with its peak memory (sql.ErrNoRows when none): what the
+	// storage form's scan-interval advice is measured from.
+	LastMeasuredSyncRun(ctx context.Context, storageID int64) (*model.SyncRun, error)
 	CreateSyncConflict(ctx context.Context, c *model.SyncConflict) error
 	ListUnresolvedConflicts(ctx context.Context) ([]*model.SyncConflict, error)
 	ListConflictsByStorage(ctx context.Context, storageID int64, limit int) ([]*model.SyncConflict, error)

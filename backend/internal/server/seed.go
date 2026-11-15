@@ -248,13 +248,17 @@ func seedDefaultStorage(ctx context.Context, store db.Store, cfg config.Config) 
 	if mount == "" {
 		mount = "/"
 	}
+	// The driver's default sync mode (#351): a local storage - the mounted
+	// folder of every store package (CasaOS, Umbrel, Unraid, TrueNAS) - is
+	// catalogued with live watching, so a file written next to filex shows up
+	// when its folder is opened instead of at the next 15-minute scan.
 	st := &model.Storage{
 		Name:          name,
 		Driver:        s.Driver,
 		MountPath:     mount,
 		ConfigJSON:    json.RawMessage(cfgJSON),
-		SyncMode:      model.SyncModePoll,
-		SyncIntervalS: 900,
+		SyncMode:      model.DefaultSyncModeFor(s.Driver),
+		SyncIntervalS: model.DefaultSyncIntervalS,
 		Enabled:       true,
 	}
 	if _, err := store.CreateStorage(ctx, st); err != nil {

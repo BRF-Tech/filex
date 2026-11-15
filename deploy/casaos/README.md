@@ -20,7 +20,7 @@ and screenshot links point at the store's copies under
 | `FILEX_ADMIN_EMAIL` / `FILEX_ADMIN_PASSWORD` | Optional, empty by default. Empty: the administrator `admin@local` is created with a random password. |
 | `FILEX_SECRET_KEY` | Optional, empty by default. 32 or more random characters; needed for S3 access keys, push notifications and sign-in provider secrets saved in the admin panel ([The secret key](../../docs/CONFIGURATION.md#the-secret-key)). Back it up and keep it unchanged once set. |
 | `/DATA/AppData/$AppID/data` → `/data` | Database (SQLite), search index, thumbnail cache, first-run password file. |
-| `/DATA/AppData/$AppID/files` → `/srv/files` | The first storage, created on the first start (`FILEX_DEFAULT_STORAGE_DRIVER` / `FILEX_DEFAULT_STORAGE_PATH`). |
+| `/DATA/AppData/$AppID/files` → `/srv/files` | The first storage, created on the first start (`FILEX_DEFAULT_STORAGE_DRIVER` / `FILEX_DEFAULT_STORAGE_PATH`), with live watching: a file put in the folder from outside filex shows up when you open its folder ([Which mode a new storage gets](../../docs/STORAGE.md#which-mode-a-new-storage-gets)). |
 | `/DATA` → `/media/DATA` | Add it as another **local** storage in the admin panel to manage the files on the device. filex does not touch it until then. |
 
 ## First sign-in

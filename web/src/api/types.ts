@@ -126,6 +126,13 @@ export interface StorageDriverDescriptor {
   fields: StorageField[];
   capabilities: StorageDriverCapabilities;
   /**
+   * #352: a filex-watch agent can serve a storage on this driver - real
+   * folders on a disk (storage.WatchAgentApplies), not an object store and
+   * not a driver that streams its own changes. The storage page shows its
+   * filex-watch card only where it is true. Absent from a server before 0.61.
+   */
+  watch_agent?: boolean;
+  /**
    * Settings a STORAGE on this driver has for the scan that catalogues it
    * (issue #44 — `scan_exclude`), kept in the same `config` map. Drawn where a
    * storage is created or edited, never in the replication-target dialog: a
@@ -138,6 +145,12 @@ export interface StorageDriverDescriptor {
    * the mode only where they are. Kept in the same `config` map.
    */
   lazy_fields?: StorageField[];
+  /**
+   * The sync mode a new storage on this driver gets when nobody chooses one
+   * (model.DefaultSyncModeFor, #351): `lazy` for local, `poll` for the rest.
+   * The new-storage form starts from it. Absent from a server before 0.61.
+   */
+  default_sync_mode?: SyncMode;
 }
 
 /**
@@ -184,6 +197,13 @@ export interface StorageRef {
   /** A lazily cataloged storage's engine: folders cataloged / waiting /
    *  watched, the watch budget, the background pass. Storage page only. */
   catalogue?: CatalogCoverage | null;
+  /** #351: the mode an administrator is offered to switch this storage to
+   *  with one click (a local storage that polls: `lazy`). Absent: none. */
+  sync_suggestion?: SyncMode;
+  /** #351: a local storage whose folder is on a network filesystem or a
+   *  FUSE mount, where a watch cannot be trusted. Absent: a local disk, or
+   *  not a local storage. */
+  filesystem?: { type?: string; network: boolean } | null;
   // Cached stats (filled by backend, may be null right after creation)
   file_count?: number;
   total_bytes?: number;
@@ -298,6 +318,28 @@ export interface SyncRun {
   deleted: number;
   scanned: number;
   error?: string | null;
+  /** #353: the most memory the filex process held while the run walked
+   *  (bytes). 0 / absent: not measured (a run from before 0.61). */
+  peak_mem_bytes?: number;
+}
+
+/** GET /admin/storages/{id}/interval-advice (#353, internal/syncadvice):
+ *  what a scan interval would cost, judged by the server from the storage's
+ *  last finished scan. The form words it; it never computes it. */
+export interface IntervalAdvice {
+  state: 'unmeasured' | 'ok' | 'busy' | 'continuous' | 'lazy' | 'unused';
+  mode: string;
+  /** The interval judged; `default_interval` when the field was empty. */
+  interval_s: number;
+  default_interval?: boolean;
+  busy_percent: number;
+  suggested_interval_s?: number;
+  target_busy_percent: number;
+  /** An `fsnotify` storage on a network filesystem, scanned at the interval
+   *  instead of watched (#351) - judged like poll. */
+  polls_instead?: boolean;
+  last_scan?: { duration_s: number; entries: number; finished_at: string; peak_mem_bytes?: number };
+  memory?: { peak_bytes: number; limit_bytes: number; percent: number; source?: 'container' | 'host' | ''; high: boolean };
 }
 
 export interface DriftReport {

@@ -27,6 +27,18 @@ const (
 	CoverageFirstScan = "first_scan"
 )
 
+// Why a lazy storage watches nothing (CatalogueCoverage.WatchOff). Every folder
+// somebody opens is then read from the disk.
+const (
+	// WatchOffNetworkFS: the storage is on a network filesystem or a FUSE
+	// mount, where a change made elsewhere never reaches a watch (#351).
+	WatchOffNetworkFS = "network_fs"
+	// WatchOffUnknownFS: which filesystem it is on could not be told.
+	WatchOffUnknownFS = "unknown_fs"
+	// WatchOffUnavailable: the operating system gave no watcher.
+	WatchOffUnavailable = "unavailable"
+)
+
 // CatalogueCoverage is how much of a storage its catalogue covers — the
 // object the listing, search and drive-usage responses carry, and the admin
 // storage page's catalogue block.
@@ -54,6 +66,10 @@ type CatalogueCoverage struct {
 	HeldBackFolders int64 `json:"held_back_folders,omitempty"`
 	// Reconciles since the syncer started.
 	Reconciles int64 `json:"reconciles,omitempty"`
+	// WatchOff says why nothing is watched (WatchOff*): every opened folder
+	// is read from the disk. FSType names the network filesystem then.
+	WatchOff string `json:"watch_off,omitempty"`
+	FSType   string `json:"fs_type,omitempty"`
 }
 
 // lazyOf returns the running lazy catalogue of a storage, or nil.

@@ -109,6 +109,8 @@ type AIAdmin struct {
 	// assistant: the AI assistant's settings - the AI assistant page's
 	// handler. Nil when none is wired.
 	assistant *AssistantAdmin
+	// watch: a storage's filex-watch keys - the storage page's card.
+	watch *StorageWatch
 }
 
 // AIAdminDeps carries the shared services the wrapped admin handlers need.
@@ -184,6 +186,10 @@ type AIAdminDeps struct {
 	// Assistant backs the AI assistant settings tools: the page's own
 	// settings (and its sealed key). Nil = those tools answer 503.
 	Assistant *AssistantConfig
+	// Watch backs the filex-watch tools: the same handler as the storage
+	// page's card (one record of each key's agent). Nil = a handler of its own
+	// with no agent heard (tests that build the surface alone).
+	Watch *StorageWatch
 }
 
 // newTrashWithOps is the trash handler with the queue "empty the trash now"
@@ -229,7 +235,17 @@ func NewAIAdmin(d AIAdminDeps) *AIAdmin {
 		protection:  NewProtection(d.Store),
 		archives:    newAIArchiveAdmin(d),
 		assistant:   newAIAssistantAdmin(d),
+		watch:       newAIStorageWatch(d),
 	}
+}
+
+// newAIStorageWatch is the storage page's filex-watch handler: the panel's own
+// when one is wired (one record of each key's agent), else one of its own.
+func newAIStorageWatch(d AIAdminDeps) *StorageWatch {
+	if d.Watch != nil {
+		return d.Watch
+	}
+	return NewStorageWatch(d.Store, d.Worker)
 }
 
 // newAIAssistantAdmin is the AI assistant page's handler, nil when no
@@ -345,6 +361,10 @@ func (a *AIAdmin) Register(r chi.Router) {
 		r.Post("/{id}/sync", a.storages.TriggerSync)
 		r.Get("/{id}/sync-runs", a.storagesAdm.SyncRuns)
 		r.Get("/{id}/drift", a.storagesAdm.Drift)
+		// The storage page's filex-watch card (0.61, #352).
+		r.Get("/{id}/watch", a.watch.Status)
+		r.Post("/{id}/watch/keys", a.watch.CreateKey)
+		r.Delete("/{id}/watch/keys/{key}", a.watch.DeleteKey)
 		// The order storages are listed in (issue #57); static, so chi
 		// matches it before /{id}.
 		r.Put("/order", a.storages.SetOrder)
@@ -726,6 +746,12 @@ type adminBodyIn struct {
 	Body map[string]any `json:"body" jsonschema:"JSON request body object"`
 }
 
+// adminWatchKeyIn names one filex-watch key of one storage.
+type adminWatchKeyIn struct {
+	ID  int64 `json:"id" jsonschema:"numeric id of the storage"`
+	Key int64 `json:"key" jsonschema:"numeric id of the filex-watch key (admin_storages_watch lists them)"`
+}
+
 type adminIDBodyIn struct {
 	ID   int64          `json:"id" jsonschema:"numeric id of the target row"`
 	Body map[string]any `json:"body" jsonschema:"JSON request body object"`
@@ -857,11 +883,11 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 			return reqSpec{handler: a.storages.Get, method: http.MethodGet, path: "/api/ai/admin/storages/" + itoa(in.ID),
 				urlParams: idParam(in.ID)}
 		})
-	regAdminTool(r, "admin_storages_create", "Create a storage. body: a storage object {name, driver, mount_path, config_json, …}.",
+	regAdminTool(r, "admin_storages_create", "Create a storage. body: a storage object {name, driver, mount_path, config_json, sync_mode, sync_interval_s, …}; without sync_mode a local storage gets lazy (live watching), any other driver poll. The answer carries interval_advice: what the scan interval would cost, measured on the storage's last scan.",
 		func(in adminBodyIn) reqSpec {
 			return reqSpec{handler: a.storages.Create, method: http.MethodPost, path: "/api/ai/admin/storages", body: in.Body}
 		})
-	regAdminTool(r, "admin_storages_update", "Update a storage by id. body: the full storage object. A credential sent back as *** keeps the saved one, while the driver and the address (host, endpoint, url) stay the same and the save does not turn insecure_skip_tls_verify on; otherwise it has to be typed again (400 SECRET_NEEDED).",
+	regAdminTool(r, "admin_storages_update", "Update a storage by id. body: the full storage object. A credential sent back as *** keeps the saved one, while the driver and the address (host, endpoint, url) stay the same and the save does not turn insecure_skip_tls_verify on; otherwise it has to be typed again (400 SECRET_NEEDED). The answer carries interval_advice: what the saved scan interval would cost, measured on the storage's last scan (state busy or continuous comes with suggested_interval_s; memory.high warns of running out of memory).",
 		func(in adminIDBodyIn) reqSpec {
 			return reqSpec{handler: a.storages.Update, method: http.MethodPatch, path: "/api/ai/admin/storages/" + itoa(in.ID),
 				urlParams: idParam(in.ID), body: in.Body}
@@ -889,6 +915,23 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(in adminIDFiltersIn) reqSpec {
 			return reqSpec{handler: a.storagesAdm.Drift, method: http.MethodGet, path: "/api/ai/admin/storages/" + itoa(in.ID) + "/drift",
 				urlParams: idParam(in.ID), query: filtersToQuery(in.Filters)}
+		})
+	// filex-watch (0.61, #352): the storage page's card - the agent on the
+	// machine that owns the disk, and its keys (docs/FILEX-WATCH.md).
+	regAdminTool(r, "admin_storages_watch", "A storage's filex-watch card: its keys (never the key itself) with what each key's agent last said - version, host, folder, last report - and the install commands for Linux, macOS, Windows and Docker (setup), the key left as a placeholder. filex-watch runs on the machine that owns the storage's disk when that is not the filex machine, and reports the folders that changed there.",
+		func(in adminIDIn) reqSpec {
+			return reqSpec{handler: a.watch.Status, method: http.MethodGet, path: "/api/ai/admin/storages/" + itoa(in.ID) + "/watch",
+				urlParams: idParam(in.ID)}
+		})
+	regAdminTool(r, "admin_storages_watch_key_create", "Make a filex-watch key for a storage: body {name?} names the machine it is for. The answer's `key` is shown this once and never again, and `setup` carries the install commands with it filled in. The key opens one door - the storage's change reports - and nothing else.",
+		func(in adminIDBodyIn) reqSpec {
+			return reqSpec{handler: a.watch.CreateKey, method: http.MethodPost, path: "/api/ai/admin/storages/" + itoa(in.ID) + "/watch/keys",
+				urlParams: idParam(in.ID), body: in.Body}
+		})
+	regAdminTool(r, "admin_storages_watch_key_delete", "Revoke a storage's filex-watch key (id = the storage, key = the key's id from admin_storages_watch): its agent is refused from its next report.",
+		func(in adminWatchKeyIn) reqSpec {
+			return reqSpec{handler: a.watch.DeleteKey, method: http.MethodDelete, path: "/api/ai/admin/storages/" + itoa(in.ID) + "/watch/keys/" + itoa(in.Key),
+				urlParams: map[string]string{"id": itoa(in.ID), "key": itoa(in.Key)}}
 		})
 	regAdminTool(r, "admin_storages_order", "Set the order storages are listed in for everyone (issue #57): ids is every storage's id in the new order; [] goes back to the default. A person's own order (Settings) still comes first for them.",
 		func(in adminStorageOrderIn) reqSpec {

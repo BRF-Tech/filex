@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
 import { StorageDriversApi } from '@/api/storageDrivers';
-import type { StorageDriver, StorageDriverDescriptor, StorageField } from '@/api/types';
+import type { StorageDriver, StorageDriverDescriptor, StorageField, SyncMode } from '@/api/types';
 
 /**
  * The one source every admin surface uses to know what a storage driver
@@ -59,6 +59,15 @@ export const useStorageDriversStore = defineStore('storageDrivers', () => {
   }
 
   /**
+   * The sync mode a new storage on this driver starts with: the server's
+   * default for it (`default_sync_mode`, #351 - live watching for a local
+   * storage). A server that does not say (before 0.61) polls, as it did.
+   */
+  function defaultSyncMode(driver: StorageDriver | undefined): SyncMode {
+    return descriptor(driver)?.default_sync_mode ?? 'poll';
+  }
+
+  /**
    * Fresh config for a driver: every declared field seeded with its
    * default (or an empty value of the right type). Switching drivers
    * replaces the config wholesale — stale keys from the previous driver
@@ -85,5 +94,5 @@ export const useStorageDriversStore = defineStore('storageDrivers', () => {
     return out;
   }
 
-  return { items, loading, loaded, error, names, fetch, descriptor, fields, scanFields, lazyFields, defaults };
+  return { items, loading, loaded, error, names, fetch, descriptor, fields, scanFields, lazyFields, defaultSyncMode, defaults };
 });

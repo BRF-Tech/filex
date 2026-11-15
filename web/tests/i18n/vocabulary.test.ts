@@ -138,6 +138,11 @@ const ENGLISH: Rule[] = [
      "the service provider has turned it off" while the explorer said "the
      platform operator has switched it off" for the same switch). */
   { use: 'platform operator (the supertenant)', wrong: /\bservice providers?\b/i },
+  /* #351 (2026-11-15, the owner): sync_mode `lazy` is "Live watching" on every
+     screen and fsnotify is "Watch the whole storage". "Live watch" used to
+     name fsnotify while the offer to switch a storage to `lazy` said "live
+     watching" - one word for two modes. */
+  { use: 'Live watching (sync_mode lazy) / Watch the whole storage (fsnotify)', wrong: /\blazy catalog\b|^Live watch$/i },
 ];
 
 /* ⚠ `\b` is an ASCII word boundary in JavaScript, even under `u`: before "ş"
@@ -195,6 +200,9 @@ const TURKISH: Rule[] = [
      "Görüntüleyici" under a list that said "İzleyici"). Case-sensitive: a
      file viewer is "görüntüleyici" in lower case, and stays. */
   { use: 'İzleyici (the Viewer role)', wrong: /(?<!\p{L})Görüntüleyici/u },
+  /* #351: `lazy` is "Canlı izleme", fsnotify "Tüm depoyu izle" (see ENGLISH). */
+  /* katalo[gğ]: a vowel suffix softens the g ("Tembel kataloğa geç"). */
+  { use: 'Canlı izleme (sync_mode lazy) / Tüm depoyu izle (fsnotify)', wrong: tr('<tembel katalo[gğ]') },
   { use: 'istisna (an Allow or Deny set for one person)', wrong: tr('<geçersiz kıl'), except: OVERRIDE_IS_ANOTHER_THING },
   /* "platform işletmecisi" is the supertenant on every Turkish screen (the
      maintenance notice, Storage plugins, File types, Admin -> Encryption); the
@@ -292,6 +300,13 @@ describe('one term per concept (docs/CONTRIBUTING.md → Words)', () => {
     expect(offenders({ a: 'Log in to continue.', b: 'The login page' }, ENGLISH).length).toBe(2);
   });
 
+  it('the sync mode names still see the old labels (#351; a detector that finds nothing proves nothing)', () => {
+    expect(offenders({ a: 'Lazy catalog', b: 'Live watch', c: 'Use the lazy catalog here' }, ENGLISH).length).toBe(3);
+    expect(offenders({ ok: 'Live watching', ok2: 'Watch the whole storage', ok3: 'Switch to live watching' }, ENGLISH)).toEqual([]);
+    expect(offenders({ a: 'Tembel katalog', b: 'Tembel kataloğa geç' }, TURKISH).length).toBe(2);
+    expect(offenders({ ok: 'Canlı izleme', ok2: 'Tüm depoyu izle' }, TURKISH)).toEqual([]);
+  });
+
   it('an exception names a key that exists — a stale exemption hides the next copy', () => {
     const stale = Object.keys(TOKEN_IS_THEIRS).filter((k) => !(k in english));
     expect(stale).toEqual([]);
@@ -344,6 +359,9 @@ const SAME: Array<[string, string[]]> = [
   ['API keys (the access permission)', ['conn.tokens.title', 'permissions.items.access.api.label']],
   ['S3 access keys', ['conn.s3keys.title', 'permissions.items.access.s3.label']],
   ['NFS exports', ['conn.nfs.title', 'permissions.items.access.nfs.label']],
+  /* #351: the mode in the storage form's list and the offer to switch to it
+     are one name. */
+  ['live watching (sync_mode lazy)', ['storages.modeLabel.lazy', 'storages.liveOffer.title']],
 ];
 
 describe('one concept, one label', () => {

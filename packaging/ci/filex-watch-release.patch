@@ -1,0 +1,184 @@
+diff --git a/.github/workflows/filex-watch.yml b/.github/workflows/filex-watch.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..cb146d57e4a4f2410b20c3411bb05b155327d0d6
+--- /dev/null
++++ b/.github/workflows/filex-watch.yml
+@@ -0,0 +1,178 @@
++name: filex-watch
++
++# filex-watch's own release line (docs/FILEX-WATCH.md -> Releases): the small
++# agent that runs on the machine that owns a storage's disk and reports the
++# folders that change there. It is versioned apart from filex
++# (backend/internal/watchproto AgentVersion) and released by a tag of its own,
++# filex-watch-v<version> - never by a filex tag, and a filex tag (v*) never
++# runs this.
++#
++# A tag run: test the agent and its protocol, build it for Linux, Windows and
++# macOS on amd64 and arm64, write checksums.txt (sha256), attach the binaries,
++# the service files and the sums to a GitHub Release, and push
++# ghcr.io/brf-tech/filex-watch:<version> for linux/amd64 and linux/arm64.
++#
++# ⚠⚠ The Release is NEVER the repository's "latest" (--latest=false). Every
++# releases/latest/download link filex publishes - the CLI install line, the
++# desktop app's update feed - names a FILEX asset, and an agent release made
++# latest would answer 404 to all of them. The update manifest
++# (scripts/gen-update-manifest.py) and the docs' Releases page
++# (docs-site/scripts/fetch-releases.mjs) leave filex-watch-v* out.
++#
++# Run by hand (gh workflow run filex-watch.yml --ref <branch>): a dry run.
++# Everything is built and tested, the binaries kept as the run's artifact,
++# nothing published.
++#
++# The binaries are not signed, like the filex CLI's: checksums.txt is what a
++# person verifies (sha256sum -c checksums.txt). The job reads no secret but
++# the run's own token, so it needs no environment.
++
++on:
++  push:
++    tags: ["filex-watch-v*"]
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++concurrency:
++  group: filex-watch-${{ github.ref }}
++  cancel-in-progress: false
++
++jobs:
++  release:
++    runs-on: ubuntu-latest
++    permissions:
++      contents: write # the GitHub Release
++      packages: write # ghcr.io/brf-tech/filex-watch
++    env:
++      PUBLISH: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/filex-watch-v') }}
++    steps:
++      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
++
++      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
++        with:
++          go-version: "1.25"
++
++      # The version is written once, in the source; a tag that says another
++      # one is refused before anything is built.
++      - name: The tag names the version the source says
++        id: version
++        run: |
++          set -euo pipefail
++          want=$(sed -n 's/^const AgentVersion = "\(.*\)"$/\1/p' backend/internal/watchproto/watchproto.go)
++          if [ -z "$want" ]; then echo "::error::no AgentVersion in backend/internal/watchproto/watchproto.go"; exit 1; fi
++          if [ "$PUBLISH" = true ]; then
++            tag="${GITHUB_REF_NAME#filex-watch-v}"
++            if [ "$tag" != "$want" ]; then
++              echo "::error::the tag says $tag, watchproto.AgentVersion says $want"
++              exit 1
++            fi
++          fi
++          echo "version=$want" >> "$GITHUB_OUTPUT"
++
++      - name: The agent and its protocol pass their tests
++        working-directory: backend
++        run: go test -count=1 ./cmd/filex-watch/... ./internal/watchproto/...
++
++      - name: The binaries, the service files and their sums
++        working-directory: backend
++        env:
++          VERSION: ${{ steps.version.outputs.version }}
++        run: |
++          set -euo pipefail
++          out="$GITHUB_WORKSPACE/dist"
++          mkdir -p "$out"
++          for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64; do
++            os="${target%/*}"
++            arch="${target#*/}"
++            ext=""
++            if [ "$os" = windows ]; then ext=".exe"; fi
++            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
++              -ldflags "-s -w -X main.version=$VERSION" \
++              -o "$out/filex-watch-$os-$arch$ext" ./cmd/filex-watch
++          done
++          cp cmd/filex-watch/packaging/filex-watch.service \
++             cmd/filex-watch/packaging/sh.filex.watch.plist \
++             cmd/filex-watch/packaging/config.example.json "$out/"
++          cd "$out"
++          sha256sum -- * > checksums.txt
++          cat checksums.txt
++
++      - name: The binary says its version
++        env:
++          VERSION: ${{ steps.version.outputs.version }}
++        run: |
++          set -euo pipefail
++          got=$(./dist/filex-watch-linux-amd64 version)
++          if [ "$got" != "filex-watch $VERSION" ]; then
++            echo "::error::the binary says '$got'"
++            exit 1
++          fi
++
++      - name: Keep the binaries (dry run)
++        if: env.PUBLISH != 'true'
++        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
++        with:
++          name: filex-watch
++          path: dist/
++          retention-days: 7
++
++      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
++
++      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
++        if: env.PUBLISH == 'true'
++        with:
++          registry: ghcr.io
++          username: ${{ github.actor }}
++          password: ${{ secrets.GITHUB_TOKEN }}
++
++      # Cross-compiled on the runner for each platform (the Dockerfile's
++      # build stage runs on $BUILDPLATFORM): no emulation. A dry run builds
++      # both and pushes nothing.
++      - name: The image
++        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
++        with:
++          context: .
++          file: docker/Dockerfile.filex-watch
++          platforms: linux/amd64,linux/arm64
++          build-args: VERSION=${{ steps.version.outputs.version }}
++          push: ${{ env.PUBLISH == 'true' }}
++          tags: ghcr.io/brf-tech/filex-watch:${{ steps.version.outputs.version }}
++          labels: |
++            org.opencontainers.image.source=https://github.com/${{ github.repository }}
++            org.opencontainers.image.version=${{ steps.version.outputs.version }}
++
++      # The notes are the version's section of filex-watch's own changelog,
++      # read with Python (an awk pattern with a bracket is not portable) and
++      # refused when empty, so a Release never goes out with no words.
++      - name: The GitHub Release (never "latest")
++        if: env.PUBLISH == 'true'
++        env:
++          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
++          VERSION: ${{ steps.version.outputs.version }}
++        run: |
++          set -euo pipefail
++          notes="$RUNNER_TEMP/notes.md"
++          python3 - "$VERSION" > "$notes" <<'PY'
++          import re, sys
++          v = sys.argv[1]
++          s = open("backend/cmd/filex-watch/CHANGELOG.md", encoding="utf-8").read()
++          m = re.search(r"^## \[" + re.escape(v) + r"\][^\n]*\n(.*?)(?=^## |\Z)", s, re.S | re.M)
++          if not m or not m.group(1).strip():
++              sys.exit("backend/cmd/filex-watch/CHANGELOG.md has no section for " + v)
++          print(m.group(1).strip())
++          print()
++          print("---")
++          print("**Verify:** `sha256sum -c checksums.txt`")
++          print()
++          print("- **Install** - <https://docs.filex.sh/FILEX-WATCH>")
++          print("- **Image** - `ghcr.io/brf-tech/filex-watch:" + v + "`")
++          PY
++          test -s "$notes"
++          gh release create "$GITHUB_REF_NAME" dist/* \
++            --repo "$GITHUB_REPOSITORY" \
++            --title "filex-watch $VERSION" \
++            --notes-file "$notes" \
++            --latest=false \
++            --verify-tag

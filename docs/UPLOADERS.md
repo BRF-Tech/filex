@@ -35,11 +35,11 @@ the web app, the admin panel and the desktop app.
 | **Link life** | For a public link. **Longest allowed** follows the server's ceiling (`share.max_ttl_days`, and your role's own limit if it has one); **Days** asks for fewer. The form says the ceiling; a longer life is cut to it. Where the server sets no ceiling, Longest allowed means the link does not expire. |
 | **Short link** | Offered only when an app on this server shortens links and you hold its permission ([APP-PLUGINS.md → Short links](APP-PLUGINS.md#short-links)). **Its short address** answers each upload with the short address the app gives the link; **The link itself** (the default) answers the link as it is. |
 
-![The Uploaders tab: your uploaders, then the form that makes one](https://filex.sh/shots/uploaders/uploaders-1440.88f0c13fd3ac.png)
+![The Uploaders tab: your uploaders, then the form that makes one](https://filex.sh/shots/uploaders/uploaders-1440.997f66ab08fe.png)
 
-![The form's link and link life, with the server's ceiling said under it](https://filex.sh/shots/uploaders/uploaders-form-1440.842d9d7525ff.png)
+![The form's link and link life, with the server's ceiling said under it](https://filex.sh/shots/uploaders/uploaders-form-1440.4fa257d840c9.png)
 
-![Short link on: each upload answers with its link's short address](https://filex.sh/shots/shortlinks/uploader-short-1440.ee32c5ef099a.png)
+![Short link on: each upload answers with its link's short address](https://filex.sh/shots/shortlinks/uploader-short-1440.da51da53eb38.png)
 
 **Create uploader** shows the key **once**, with:
 
@@ -47,7 +47,7 @@ the web app, the admin panel and the desktop app.
   images, text and files, with this server's address and the key in it;
 - a `curl` line that uploads a file.
 
-![The key, shown once: Download ShareX settings and the curl line (dark theme)](https://filex.sh/shots/uploaders/uploaders-key-dark-1440.9732aa72f56c.png)
+![The key, shown once: Download ShareX settings and the curl line (dark theme)](https://filex.sh/shots/uploaders/uploaders-key-dark-1440.d40e49640230.png)
 
 The key is stored as a hash: filex cannot show it again. Lost it? **New key**
 on the uploader's row gives it a new one and the old key stops working at

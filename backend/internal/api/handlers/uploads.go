@@ -124,12 +124,17 @@ const uploaderKeyPrefix = "fxu_"
 const uploaderKeyHeader = "X-Filex-Uploader-Key"
 
 // newUploaderKey mints a key: the prefix and 32 random bytes.
-func newUploaderKey() (string, error) {
+func newUploaderKey() (string, error) { return newPrefixedKey(uploaderKeyPrefix) }
+
+// newPrefixedKey mints a key for a door of its own: a prefix that says what
+// it opens (`fxu_` an uploader, `fxw_` a filex-watch agent) and 32 random
+// bytes, base64url.
+func newPrefixedKey(prefix string) (string, error) {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", err
 	}
-	return uploaderKeyPrefix + base64.RawURLEncoding.EncodeToString(raw[:]), nil
+	return prefix + base64.RawURLEncoding.EncodeToString(raw[:]), nil
 }
 
 // hashSecret is the stored form of a bearer secret (a key, a deletion

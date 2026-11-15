@@ -1,6 +1,7 @@
 import { api } from './client';
 import type {
   DriftReport,
+  IntervalAdvice,
   StorageCreateRequest,
   StorageDiscoverResponse,
   StorageDriver,
@@ -33,6 +34,7 @@ interface BackendSyncRun {
   updated?: number;
   deleted?: number;
   error?: string | null;
+  peak_mem_bytes?: number;
 }
 
 function mapStatus(s: string | undefined): SyncRun['state'] {
@@ -64,6 +66,7 @@ function toSyncRun(b: BackendSyncRun): SyncRun {
     deleted: b.deleted ?? 0,
     scanned: b.scanned ?? b.seen_count ?? 0,
     error: b.error ?? null,
+    peak_mem_bytes: b.peak_mem_bytes ?? 0,
   };
 }
 
@@ -135,6 +138,22 @@ export const StoragesApi = {
     });
     const rows = Array.isArray(data) ? (data as BackendSyncRun[]) : (data.entries ?? []);
     return rows.map(toSyncRun);
+  },
+
+  /**
+   * What a scan interval would cost (#353): the server judges `interval_s`
+   * and `mode` - what the form shows, saved or not - against the storage's
+   * last finished scan. Without an id (the new-storage form) nothing is
+   * measured yet, and `driver` stands for the storage's default mode.
+   */
+  async intervalAdvice(
+    id: number | null,
+    q: { interval_s?: number; mode?: string; driver?: string },
+    signal?: AbortSignal,
+  ): Promise<IntervalAdvice> {
+    const url = id ? `/admin/storages/${id}/interval-advice` : '/admin/storages/interval-advice';
+    const { data } = await api.get<IntervalAdvice>(url, { params: q, signal });
+    return data;
   },
 
   async drift(id: number): Promise<DriftReport> {

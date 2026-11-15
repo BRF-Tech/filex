@@ -142,8 +142,15 @@ How the limits hold while an archive is unpacked depends on who reads it:
   queued extraction that left members out ends `partial`, naming them. A
   member name starting with two dots (`..notes`) or a digit and a colon
   (`1:1 notes.txt`) is a name, not a traversal or a drive. 7-Zip is asked for
-  members by their literal names: `*`, `?` and a line break in a name are not
-  special.
+  members by their literal names: `*` and `?` in a name are not special.
+- 7-Zip 25.01 and newer (every version filex accepts) list a line break in a
+  member's name as `_`: a 7z, RAR or encrypted ZIP holding `line` + line
+  break + `break.txt` shows `line_break.txt`. Selected by that name, the
+  member is still found: filex asks 7-Zip again with `?` in place of each
+  `_` and keeps only the member whose name, its line breaks shown as `_`, is
+  the one selected (a member really called `line_break.txt` is that member).
+  A line break is a control character, so the member is then skipped with
+  `name_not_allowed` like any other, as when the whole archive is extracted.
 - A ZIP member's name written without the UTF-8 flag is read in the DOS code
   page of the account's language (857 for Turkish; 437, the ZIP standard's,
   when nothing else fits), so an archive made by Windows' Compressed folders

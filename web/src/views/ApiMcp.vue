@@ -116,6 +116,13 @@ function rootScope(s: string): string | null {
   const r = scopeList(s).find((x) => x.startsWith('root:'));
   return r ? r.slice('root:'.length) : null;
 }
+/** A filex-watch key's storage (`watch:<id>`, #352): the key the storage's
+ *  page made for its agent, which opens that storage's change reports and
+ *  nothing else - so it has no verbs, no folder and no comments to show. */
+function watchStorage(s: string): string | null {
+  const w = scopeList(s).find((x) => x.startsWith('watch:'));
+  return w ? w.slice('watch:'.length) : null;
+}
 
 async function load() {
   loading.value = true;
@@ -435,6 +442,9 @@ function onRowAction(key: string, row: AIToken) {
                (release-candidate sweep, 2026-09-21). The id is the tooltip:
                it is what an API client sends. -->
           <Badge v-if="!scopeList(row.scopes).length" tone="amber" size="xs">{{ t('apiMcp.scopeAll') }}</Badge>
+          <Badge v-if="watchStorage(row.scopes)" tone="sky" size="xs" data-testid="ai-token-watch-chip">{{
+            t('apiMcp.watchKey', { id: watchStorage(row.scopes) })
+          }}</Badge>
           <Badge
             v-for="s in verbScopes(row.scopes)"
             :key="s"
@@ -455,6 +465,7 @@ function onRowAction(key: string, row: AIToken) {
         <span v-if="rootScope(row.scopes)" class="tbl-mono tbl-clamp text-violet-600 dark:text-violet-400">
           📁 {{ rootScope(row.scopes) }}
         </span>
+        <span v-else-if="watchStorage(row.scopes)">-</span>
         <span v-else>{{ t('apiMcp.fullDisk') }}</span>
       </template>
 

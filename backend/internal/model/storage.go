@@ -56,7 +56,7 @@ func (m SyncMode) Implemented() bool {
 // used to store and silently poll) and `push` (declared, never built).
 //
 // The empty string is accepted: it means "unset", and the write path defaults
-// it to poll, which is also the column default.
+// it to the driver's default (DefaultSyncModeFor). The column default is poll.
 func ValidateSyncMode(m SyncMode) error {
 	if m.Implemented() {
 		return nil
@@ -76,6 +76,53 @@ func ValidateSyncMode(m SyncMode) error {
 // catalogue lists one directory at a time and watches visited folders with
 // fsnotify, both of which assume a local filesystem.
 var LazyDrivers = []string{"local"}
+
+// DefaultSyncIntervalS is the scan interval a new storage gets when nobody
+// chose one: 15 minutes. On a lazily catalogued storage it is the age at which
+// a folder nobody watches is read again (the safety net under the watches).
+const DefaultSyncIntervalS = 900
+
+// DefaultSyncModeFor is the sync mode a NEW storage on driver gets when nobody
+// chose one - the one place that decides it (task #351). The env seed, the
+// admin API, `filex storage add` and the storage form (through the driver
+// descriptor's default_sync_mode) all read it.
+//
+// A local storage is catalogued lazily (behaviour A, docs/LAZY-CATALOGUE.md):
+// the folder somebody opens is read from the disk and watched, so a file
+// written next to filex - from the NAS's own share, a download client, another
+// container - shows up when its folder is opened, not at the next 15-minute
+// scan. Every other driver polls: the lazy catalogue lists and watches a local
+// filesystem only.
+//
+// ⚠ This is a default for new storages. An existing row keeps the mode it was
+// saved with (no migration); SyncModeSuggestion offers the switch instead.
+func DefaultSyncModeFor(driver string) SyncMode {
+	for _, d := range LazyDrivers {
+		if d == driver {
+			return SyncModeLazy
+		}
+	}
+	return SyncModePoll
+}
+
+// SyncModeSuggestion is the mode an administrator is offered to switch st to
+// with one click, or "" for none: a storage that polls (or says nothing) on a
+// driver whose new storages are catalogued lazily - an install from before
+// lazy became the default for local storages (task #351). The storage form
+// and the storage list read it from the admin storage answers
+// (`sync_suggestion`).
+func SyncModeSuggestion(st *Storage) SyncMode {
+	if st == nil {
+		return ""
+	}
+	if st.SyncMode != SyncModePoll && st.SyncMode != "" {
+		return ""
+	}
+	if def := DefaultSyncModeFor(st.Driver); def != SyncModePoll {
+		return def
+	}
+	return ""
+}
 
 // ValidateSyncModeFor is ValidateSyncMode plus the one rule that depends on the
 // driver: `lazy` is for local storages only. The admin API calls it on create
@@ -174,6 +221,12 @@ type SyncRun struct {
 	Deleted      int        `json:"deleted"`
 	Status       string     `json:"status"` // running, ok, partial, failed, aborted
 	Error        string     `json:"error,omitempty"`
+	// PeakMemBytes is the most memory the filex process held while the run
+	// walked the storage (sysmem.InUse, sampled; migration 00139, issue
+	// #353). The whole process, not this scan alone. 0: not measured (a run
+	// from before the column). Read only through the stores' SyncRunPeaks and
+	// LastMeasuredSyncRun - the common run columns leave it out.
+	PeakMemBytes int64 `json:"peak_mem_bytes,omitempty"`
 }
 
 // SyncConflict captures backend/DB drift requiring human attention.

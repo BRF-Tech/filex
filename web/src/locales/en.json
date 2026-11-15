@@ -321,17 +321,17 @@
     "fileCount": "{n} file | {n} files",
     "notYetSynced": "Sync has not run yet",
     "modeLabel": {
-      "fsnotify": "Live watch",
+      "fsnotify": "Watch the whole storage",
       "poll": "Periodic poll",
       "ondemand": "On demand",
       "push": "Unsupported (polling)",
-      "lazy": "Lazy catalog"
+      "lazy": "Live watching"
     },
     "modeHelp": {
       "poll": "filex walks the whole storage once every scan interval to find changes made outside it.",
-      "fsnotify": "filex watches the storage for changes made outside it and walks it again after each burst of them.",
+      "fsnotify": "filex watches the whole storage for changes made outside it and walks all of it again after each burst of them.",
       "ondemand": "filex walks the storage only when you press Sync now.",
-      "lazy": "No walk up front: the folder somebody opens is listed straight from the storage and cataloged first. The rest is cataloged in the background or only as people open it (below). Folders nobody is watching are checked again every scan interval."
+      "lazy": "No walk up front: the folder somebody opens is listed straight from the storage, cataloged first and then watched, so a file written next to filex shows up when its folder is opened. The rest is cataloged in the background or only as people open it (below). Folders nobody is watching are checked again every scan interval. On a network filesystem nothing is watched and every opened folder is read from the storage."
     },
     "addNew": "Add storage",
     "newTitle": "Add new storage",
@@ -353,7 +353,7 @@
       "namePlaceholder": "Personal photos",
       "readOnly": "Read-only mount",
       "syncInterval": "Scan every (minutes)",
-      "syncIntervalHint": "How often filex walks this storage for changes made outside it (poll mode). Leave empty for the server default (15 minutes). A large, rarely changing storage is happier with a long interval; a scan that outlasts its interval is not started twice.",
+      "syncIntervalHint": "Periodic poll: how often filex walks the whole storage for changes made outside it; a scan that outlasts its interval is not started twice. Live watching: how old a folder nobody has open may get before it is read again. Leave empty for the server default (15 minutes).",
       "rbac": "Per-item access control (RBAC)",
       "rbacHint": "When on, non-admins see only the files and folders granted to them (listed under Folder access). When off, everyone opens the storage according to their role.",
       "path": "Filesystem path",
@@ -455,6 +455,11 @@
         "converged": "Done",
         "refreshing": "Checking unwatched folders again",
         "off": "Off (only on open)"
+      },
+      "watchOff": {
+        "network_fs": "None: network filesystem",
+        "unknown_fs": "None: filesystem not recognized",
+        "unavailable": "None: no watcher available"
       }
     },
     "actions": {
@@ -531,6 +536,33 @@
       "insecureSkipHostKey": "Anybody who can get between filex and this host can pose as it: read and change every file that crosses, and take this connection's password.",
       "plainFtp": "Without FTPS the password and every file cross the network unencrypted: anybody on the way can read and change them.",
       "followSymlinks": "A link can lead anywhere on this machine: whoever may use this storage reaches, changes and deletes what it points at, however far outside this folder that is."
+    },
+    "advice": {
+      "unmeasured": "filex suggests an interval once this storage's first scan has finished: it measures how long a whole scan takes.",
+      "ok": "The last scan took {duration} for {entries} files and folders: every {interval}, scans keep the storage busy about {pct}% of the time.",
+      "busy": "Every {interval}, scans keep the storage busy about {pct}% of the time (the last one took {duration} for {entries} files and folders). Suggested: {suggested}, which keeps it under {target}%. You can still save your own value.",
+      "continuous": "A scan takes longer than {interval} (the last one took {duration} for {entries} files and folders), so the next one starts as soon as one ends: the storage is scanned all the time. Suggested: {suggested}, which keeps it under {target}%. You can still save your own value.",
+      "lazy": "With live watching, this interval is how old a folder nobody has open may get before filex reads it again - the safety net under the watches. That pass slows down while people use the storage, and filex does not time it as one scan, so there is no load estimate here.",
+      "unused": "This mode does not scan on a schedule, so the interval is not used.",
+      "apply": "Use {interval}",
+      "memoryContainer": "During the last scan filex used {peak} of memory, {pct}% of the {limit} its container may use. If it runs out, the system stops filex. Give the container more memory, or exclude large folders from scanning.",
+      "memoryHost": "During the last scan filex used {peak} of memory, {pct}% of this machine's {limit}. If it runs out, the system stops filex. Add memory, or exclude large folders from scanning."
+    },
+    "liveOffer": {
+      "title": "Live watching",
+      "body": "This storage is scanned as a whole every scan interval, so a file written into its folder outside filex stays hidden until the next scan. With live watching, a folder is read from the storage when it is opened and watched afterwards, so such files show up at once. The scan interval stays as a safety net.",
+      "switch": "Switch to live watching",
+      "switched": "{name} now uses live watching."
+    },
+    "networkFs": {
+      "title": "Network filesystem",
+      "titleTyped": "Network filesystem ({type})",
+      "body": {
+        "lazy": "Changes made on other machines never reach filex's watches here, so every folder is read from the storage when it is opened. To see changes the moment they happen, install filex-watch on the machine the disk is attached to.",
+        "fsnotify": "This storage is on a network filesystem: changes made on other machines never reach filex's watches, so instead of watching the whole storage, filex scans it at its scan interval. To see changes the moment they happen, install filex-watch on the machine the disk is attached to.",
+        "scan": "Changes made on other machines are found by the next scan. To see them the moment they happen, install filex-watch on the machine the disk is attached to."
+      },
+      "docs": "How to set up filex-watch"
     }
   },
   "users": {
@@ -1154,6 +1186,7 @@
     "wholeStorageOf": "{storage} (whole storage)"
   },
   "apiMcp": {
+    "watchKey": "filex-watch, storage {id}",
     "title": "API / MCP",
     "subtitle": "API keys for AI agents, and the MCP connection",
     "newToken": "New API key",
@@ -1249,7 +1282,8 @@
       "added": "Added",
       "updated": "Updated",
       "deleted": "Deleted",
-      "duration": "Duration"
+      "duration": "Duration",
+      "peakMemory": "Peak memory"
     },
     "noResults": "No sync runs recorded",
     "state": {
@@ -1259,6 +1293,40 @@
       "aborted": "Aborted",
       "pending": "Pending"
     }
+  },
+  "storageWatch": {
+    "title": "Changes made on another machine (filex-watch)",
+    "hint": "If this storage's disk is on another machine - a NAS share filex reaches over the network, the folder an SFTP storage points at - filex does not see what is written there until its next sync. Install filex-watch on that machine: it reports the folders that change, and filex looks at those folders alone. When the disk is on this machine, Live watching is enough.",
+    "storageNumber": "Storage number: {id}",
+    "docs": "Installing and troubleshooting",
+    "keyName": "Which machine it is for",
+    "keyNamePlaceholder": "e.g. nas01",
+    "create": "Make a key",
+    "made": "Key made",
+    "shownOnce": "The key is shown this once: copy it now. It goes in the key file the commands below make.",
+    "copiedIt": "I have copied it",
+    "full": "This storage has {max} keys, the most it may have. Revoke one first.",
+    "empty": "No filex-watch key yet. Make one for the machine that owns this storage's disk.",
+    "cols": {
+      "name": "Name",
+      "agent": "Agent",
+      "seen": "Last report"
+    },
+    "madeBy": "Made by {who}",
+    "noAgent": "No report since filex started",
+    "never": "Never",
+    "revoke": "Revoke",
+    "revokeConfirm": "Revoke the key {name}? The agent using it is refused from its next report.",
+    "revoked": "Key revoked",
+    "install": "Install on the machine that owns the disk",
+    "platform": {
+      "linux": "Linux (systemd)",
+      "docker": "Docker",
+      "windows": "Windows",
+      "macos": "macOS"
+    },
+    "replaceBoth": "Replace PASTE-THE-KEY-HERE with the key (shown once, when it is made) and /path/to/the/folder with the folder on that machine that is this storage.",
+    "replaceFolder": "Replace /path/to/the/folder with the folder on that machine that is this storage."
   },
   "shares": {
     "revokedOn": "Revoked {date}",
@@ -1697,7 +1765,7 @@
     "creds": "Demo account: {email} · password: {password}",
     "sandbox": "Shared sandbox - everything resets nightly; storages, plugins and apps are switched off here.",
     "adminHint": "The admin panel is read-only here for every account - run your own filex to change what it shows.",
-    "alsoIncluded": "Also included: apps - sandboxed WebAssembly add-ons installed through a permission review, with e-Signature, Convert, an office editor, filextext and draw.io shipping alongside · an app you allow editing a file together, or a file of an encrypted folder, decrypted in your browser · language packs, right-to-left layout included · instance themes on the Appearance screen · the links you made, under My shares · uploaders - a key for ShareX, curl or a script that answers each upload with a link · every mail and public page an editable template · personal and team tags · symlinked folders · a view and sort remembered per folder · roles, groups and per-person exceptions, per-file and per-folder access, and apps' own permissions · multi-tenancy, each tenant with its own sign-in realm and able to run itself - its own sign-in providers, domain and certificate · OIDC SSO, LDAP / Active Directory and sign-in with a Windows or Linux account · sign-in attempt limits with an IP allow-list · in-place viewers and editors, Office in the office editor app or through ONLYOFFICE · thumbnails of office documents, SVG, HEIC, text and archives, and folders drawn with the files that came into them last · Default apps: which app opens a kind of file · creating a document from + New - Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever ONLYOFFICE is connected or the office editor app is installed · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
+    "alsoIncluded": "Also included: apps - sandboxed WebAssembly add-ons installed through a permission review, with e-Signature, Convert, an office editor, filextext and draw.io shipping alongside · an app you allow editing a file together, or a file of an encrypted folder, decrypted in your browser · language packs, right-to-left layout included · instance themes on the Appearance screen · the links you made, under My shares · uploaders - a key for ShareX, curl or a script that answers each upload with a link · every mail and public page an editable template · personal and team tags · symlinked folders · a view and sort remembered per folder · roles, groups and per-person exceptions, per-file and per-folder access, and apps' own permissions · multi-tenancy, each tenant with its own sign-in realm and able to run itself - its own sign-in providers, domain and certificate · OIDC SSO, LDAP / Active Directory and sign-in with a Windows or Linux account · sign-in attempt limits with an IP allow-list · in-place viewers and editors, Office in the office editor app or through ONLYOFFICE · thumbnails of office documents, SVG, HEIC, text and archives, and folders drawn with the files that came into them last · Default apps: which app opens a kind of file · creating a document from + New - Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever ONLYOFFICE is connected or the office editor app is installed · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · local storages watched live, and filex-watch for a disk on another machine · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
     "features": {
       "storageTitle": "6 storage drivers, both directions",
       "storageBody": "Mount local disks, S3, SFTP, WebDAV, FTP/FTPS and SMB/NAS side by side as one tree - then reach that same tree back as S3, SFTP, FTPS, NFSv3 or WebDAV.",

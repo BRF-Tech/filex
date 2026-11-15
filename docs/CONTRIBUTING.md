@@ -1418,6 +1418,8 @@ reading two names assumes two things.
 | The short name a person signs in with | username | kullanıcı adı | login name, giriş adı |
 | An electronic mail address, or a message | email | e-posta | e-mail, mail |
 | filex reading a storage to bring its catalogue up to date (Sync runs, Sync now, Last sync) | sync | senkron (noun), senkronize et (verb) | eşitleme, senkronizasyon |
+| The sync mode `lazy`: the opened folder read from disk and watched (#351, 2026-11-15) - and the offer to switch to it | Live watching; Switch to live watching | Canlı izleme; Canlı izlemeye geç | Lazy catalog, Tembel katalog; "Live watch" for anything else |
+| The sync mode `fsnotify`: the whole storage watched, walked again after each burst | Watch the whole storage | Tüm depoyu izle | Live watch, Canlı izleme |
 | The desktop app keeping a copy of folders on a computer, both ways (folder sync, "Syncing…") - and any other tool that does the same | folder sync, sync | klasör eşitleme, eşitle | klasör senkronu, senkronizasyon |
 | A replica write mode: wait for the replica, or don't | synchronous / asynchronous | eşzamanlı / eşzamansız | Sync / Async, senkron / asenkron |
 | When a file last changed (column, filter, sort, details) | Modified | Değiştirilme | Tarih, Değiştirildi |
@@ -3788,6 +3790,14 @@ ones not yet published apply on top of one another in this order:
     `ciFullMatrix.test.ts` wants a named Ubuntu on every job that installs a
     browser. The Go parts stay on `ubuntu-latest`: its 7-Zip (26.00) is one
     filex supports, which Ubuntu 24.04's (23.01) is not.
+19. `filex-watch-release.patch` (#352, 0.61): a new workflow,
+    `filex-watch.yml`, filex-watch's own release line - a tag
+    `filex-watch-v*` builds the agent for six platforms with `checksums.txt`,
+    pushes `ghcr.io/brf-tech/filex-watch` and makes a Release that is never
+    "latest"; it touches no other workflow and runs on no filex tag
+    ([filex-watch's own release](#filex-watchs-own-release)).
+    `filexWatchRelease.test.ts` holds it, and reads the patch when there is
+    no public checkout.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and
@@ -4129,6 +4139,33 @@ installs that update by themselves do not take the patch, and a person
 decides (a new patch, or a re-run that passed and the watcher again). Its
 outcome is kept in the release's record (`matrix`). The autonomous release
 round starts it (`scripts/train/auto.mjs`).
+
+### filex-watch's own release
+
+filex-watch ([FILEX-WATCH.md](FILEX-WATCH.md)), the agent beside a storage's
+disk, is released apart from filex and rarely: it is not part of a filex
+release, and a filex release does not make one.
+
+1. Change `AgentVersion` in `backend/internal/watchproto/watchproto.go` and add
+   its section to `backend/cmd/filex-watch/CHANGELOG.md`. The storage page's
+   install commands, the Compose example (`deploy/compose/docker-compose.filex-watch.yml`)
+   and docs/FILEX-WATCH.md name that version; `web/tests/deploy/filexWatchRelease.test.ts`
+   holds them to it. The commit reaches the public `main` with the next filex
+   export.
+2. On the public checkout, an annotated, signed tag `filex-watch-v<version>`
+   on that `main` commit, pushed by its name alone (`git push origin
+   refs/tags/filex-watch-v0.1.0`, never `--tags`).
+3. `.github/workflows/filex-watch.yml` (the public checkout's; its source here
+   is `packaging/ci/filex-watch-release.patch`) refuses a tag that disagrees
+   with `AgentVersion`, tests the agent and its protocol, builds six binaries,
+   `checksums.txt` and the image `ghcr.io/brf-tech/filex-watch:<version>`, and
+   makes a GitHub Release that is **never "latest"** (`--latest=false`): every
+   `releases/latest/download` link filex publishes names a filex asset. The
+   update manifest and the docs' Releases page leave `filex-watch-v*` out.
+   Run by hand on a branch it is a dry run.
+4. The binaries are not signed, like the filex CLI: `checksums.txt` is the
+   check. The job reads no secret but the run's own token, so it needs no
+   environment.
 
 ### The autonomous release round
 

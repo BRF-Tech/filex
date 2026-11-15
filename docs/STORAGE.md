@@ -72,9 +72,14 @@ and offers a "Test connection" before saving.
 ### Admin UI
 Sign in as an admin → **Storages → Add**. Pick a driver, fill in the config
 fields, click **Test connection**, then **Save**. The first sync starts
-automatically. **Scan every (minutes)** on the same form is the storage's own
-poll cadence (`sync_interval_s`); leave it empty for the server default of
-15 minutes - see [Sync](#sync).
+automatically. **Sync mode** starts at the driver's default - **Live watching**
+for a `local` storage, **Periodic poll** for every other driver (see
+[Which mode a new storage gets](#which-mode-a-new-storage-gets)). **Scan every
+(minutes)** on the same form is the storage's own scan interval
+(`sync_interval_s`); leave it empty for the server default of 15 minutes. Under
+it the form says what that interval would cost, measured on the storage's last
+scan ([How long a scan takes](#how-long-a-scan-takes-and-the-interval-filex-suggests)) -
+see [Sync](#sync).
 
 ### Mounting several folders at once
 
@@ -192,7 +197,7 @@ one order, decided in three layers - the most personal wins:
 
 ![A storage row's order menu in the navigation panel](https://filex.sh/shots/sidenav/storage-order-menu-1440.cb8c28254ec6.png)
 
-![The admin Storages table while a row is dragged by its handle: the row in hand is faded, the line shows where it lands](https://filex.sh/shots/sidenav/admin-storages-order-1440.926684c0dced.png)
+![The admin Storages table while a row is dragged by its handle: the row in hand is faded, the line shows where it lands](https://filex.sh/shots/sidenav/admin-storages-order-1440.6bbbd3383337.png)
 
 A storage the person's own order does not name - one added after they
 arranged theirs, or one they could not see then - keeps the position the
@@ -241,6 +246,10 @@ curl -X POST https://files.example.com/api/admin/storages \
   }'
 ```
 
+A body without `sync_mode` gets the driver's default (`lazy` for `local`,
+`poll` for the rest - [Which mode a new storage gets](#which-mode-a-new-storage-gets)),
+and one without `sync_interval_s` gets `900`.
+
 Test credentials **without saving** first:
 `POST /api/admin/storages/test` with the same body → `{ok, sample_listing, object_count}`
 or `{ok:false, error:"…"}` (the driver's error, verbatim). To list the folders
@@ -280,8 +289,8 @@ How the catalogue follows the storage is chosen as on the storage form (until
 
 | Flag | Default | What it sets |
 |---|---|---|
-| `--sync-mode` | `poll` | `poll`, `fsnotify`, `ondemand` or `lazy` ([Lazy catalogue](#lazy-catalogue); `local` storages only, refused on any other driver) |
-| `--sync-interval` | `900` | seconds between two scans |
+| `--sync-mode` | the driver's: `lazy` for `local`, `poll` for the rest | `poll`, `fsnotify`, `ondemand` or `lazy` ([Live watching](#lazy-catalogue); `local` storages only, refused on any other driver) |
+| `--sync-interval` | `900` | seconds between two scans (`lazy`: how old a folder nobody watches may get before it is read again) |
 | `--lazy-fill` | `background` | `lazy` only: `background` (the rest is catalogued in the background) or `on_open` (only the folders people open) |
 | `--lazy-max-watches` | `1024` | `lazy` only: the most visited folders watched at once |
 | `--lazy-watch-ttl` | `60` | `lazy` only: minutes a visited folder stays watched after it was last opened |
@@ -289,10 +298,11 @@ How the catalogue follows the storage is chosen as on the storage form (until
 The lazy settings are written into the storage's config (`lazy_fill`,
 `lazy_max_watches`, `lazy_watch_ttl`) and held to the form's bounds; one given
 without `--sync-mode lazy` is refused, as is a mode the sync worker does not
-implement.
+implement. Since 0.61 a lazy setting given without `--sync-mode` is fine on a
+`local` storage, whose default mode is `lazy`.
 
 ```bash
-filex storage add --name archive --driver local --mount / --config '{"root":"/srv/archive"}' --sync-mode lazy --lazy-fill on_open
+filex storage add --name archive --driver local --mount / --config '{"root":"/srv/archive"}' --lazy-fill on_open
 ```
 
 ### Connect a storage at install time (env / Compose / Helm)
@@ -375,7 +385,7 @@ storage:
 | `driver` | string | - | `local` · `s3` · `sftp` · `webdav` · `ftp` · `smb`, or the name of an installed [plugin](PLUGINS.md). Required. |
 | `config` | object | `{}` | Per-adapter settings (see [Adapters](#adapters)), plus `scan_exclude`, which every storage has - see [Scan exclusions](#scan-exclusions) - and, for a `lazy` storage, `lazy_fill` · `lazy_max_watches` · `lazy_watch_ttl` ([Lazy catalogue](#lazy-catalogue)). |
 | `mount_path` | string | `/` | Logical mount point inside filex. |
-| `sync_mode` | string | `poll` | `poll` · `fsnotify` (the local driver, **or a [plugin](PLUGINS.md) that streams its own changes**) · `ondemand` · `lazy` (local storages only - [Lazy catalogue](#lazy-catalogue)). Anything else is **rejected on write** - see [Modes](#sync). |
+| `sync_mode` | string | the driver's: `lazy` for `local`, `poll` for the rest | `poll` · `fsnotify` (the local driver, **or a [plugin](PLUGINS.md) that streams its own changes**) · `ondemand` · `lazy` (local storages only - [Live watching](#lazy-catalogue)). Anything else is **rejected on write** - see [Modes](#sync) and [Which mode a new storage gets](#which-mode-a-new-storage-gets). |
 | `sync_interval_s` | int (seconds) | `900` | Poll cadence - **Scan every (minutes)** on the storage form. On a `lazy` storage: how old an unwatched folder's listing may get before it is checked again. **Values < 5 s are clamped to 15 min.** |
 | `enabled` | bool | `true` | Disabled storages are hidden and not synced. |
 | `read_only` | bool | `false` | Block all writes to this mount. |
@@ -424,8 +434,16 @@ itself. `scan_fields` lists the
 settings every storage has whatever its driver - today `scan_exclude`
 ([Scan exclusions](#scan-exclusions)). They live in the same `config` object,
 and the storage form draws them beside the driver's fields; the
-replication-target dialog does not, since nothing scans a target. Adding a driver on the backend
-puts it in every picker without a frontend release.
+replication-target dialog does not, since nothing scans a target.
+`default_sync_mode` is the mode a new storage on the driver gets when nobody
+chooses one (`lazy` for `local`, `poll` for the rest); the new-storage form
+starts from it, so the form and the API cannot disagree about the default, and
+`lazy_fields` (local only) are the [Live watching](#lazy-catalogue) settings.
+`watch_agent: true` marks a driver a [filex-watch](FILEX-WATCH.md) agent can
+serve - real folders on a disk: not S3 or another object store, not a driver
+that streams its own changes - and the storage page shows its filex-watch card
+only for such a storage. Adding a driver on the backend puts it in every
+picker without a frontend release.
 
 `capabilities` on `/api/capabilities` still carries the plain
 `storage_drivers: ["ftp","local","s3","sftp","smb","webdav"]` name list for older
@@ -650,15 +668,27 @@ share's ACL), not inside the container. If you *do* run the container as a
 non-root user, the `uid`/`gid` mount options have to match it: CIFS assigns
 ownership at mount time, not from the file itself.
 
-**Trap 1 - use `sync_mode: poll`, never `fsnotify`.** `fsnotify` is an OS-local
-watch (inotify / kqueue / ReadDirectoryChangesW). It sees what *this* machine
-writes to the mount and **never sees what another machine writes to the NAS** -
-so a file dropped on the share from a laptop would stay invisible until
-something else triggered a sync. filex only leaves the OS watch when the driver
-isn't `local` - and a mounted share *is* the `local` driver: nothing falls back,
-nothing warns. Choose `poll` explicitly and set an interval that matches
-how fresh you need the listing (`sync_interval_s`; `900` = 15 min is the default
-when you don't set one, and 60 s is reasonable on a busy share).
+**Trap 1 - a watch never hears another machine.** `fsnotify` (Watch the whole
+storage) is an OS-local watch (inotify / kqueue / ReadDirectoryChangesW). It
+sees what *this* machine writes to the mount and **never sees what another
+machine writes to the NAS** - so a file dropped on the share from a laptop
+would stay invisible until something else triggered a sync. Before 0.61 a
+mounted share, being the `local` driver, kept the watch anyway; since 0.61 filex
+recognizes the network filesystem (below) and polls an `fsnotify` storage on it
+at its own interval instead, with a warning in the log and a note on the
+storage page.
+
+The default for a new local storage, **Live watching** (`lazy`), is safe on a
+mount: filex recognizes a network filesystem under the storage's folder (NFS,
+SMB/CIFS, 9P, a cluster filesystem, a FUSE mount - statfs on Linux, the mount
+type on macOS, a UNC path or network drive on Windows; one rule for both modes
+that watch) and **places no watch there**. Every folder somebody opens is read from the disk, so a file dropped
+on the share from a laptop shows up when its folder is opened; the storage page
+says *Network filesystem* and points at **[filex-watch](FILEX-WATCH.md)**, which runs on the
+machine the disk is attached to and reports changes the moment they happen. With `poll`, set an
+interval that matches how fresh you need the listing (`sync_interval_s`; `900`
+= 15 min is the default when you don't set one, and 60 s is reasonable on a
+busy share).
 
 > A poll over a mounted share detects a file **changed** by another machine, not
 > only a new one, because a mount has no etag and drift falls back to size +
@@ -1146,15 +1176,16 @@ filex serves listings from its DB cache, so it periodically reconciles that
 cache with the real backend to catch changes made **outside** filex (e.g. a file
 uploaded straight to the S3 console).
 
-**Modes** (`sync_mode`):
-- **`poll`** (default) - a full recursive walk every `sync_interval_s` seconds.
+**Modes** (`sync_mode`), with the name the storage form gives each:
+- **`poll`** - **Periodic poll**, the default for every driver but `local`. A
+  full recursive walk every `sync_interval_s` seconds.
   Intervals below 5 s are clamped to 15 minutes. On an object store the walk
   is **one listing**, not one request per folder: the S3 driver hands the sync
   worker the whole tree in a single un-delimited `ListObjectsV2` pass (1,000
   keys a page), so 150,000 objects in a few thousand prefixes cost ~150 calls
   rather than a few thousand. Over two million objects the worker falls back
   to the per-directory walk rather than hold that much in memory.
-- **`fsnotify`** - event-driven instead of timed. It resolves in this order:
+- **`fsnotify`** - **Watch the whole storage**. Event-driven instead of timed. It resolves in this order:
   the **OS watch** (inotify / kqueue / ReadDirectoryChangesW) when the driver is
   `local`; otherwise the **driver's own change stream**, when it has one - today
   that means a [storage plugin](PLUGINS.md) declaring `watch`, since no built-in
@@ -1166,20 +1197,57 @@ uploaded straight to the S3 console).
   watched nor able to start a run, and a hidden folder the storage does not
   exclude is watched like any other. ⚠ A driver stream that **ends** (a plugin restarts, a connection
   drops) drops the storage back to polling rather than leaving it frozen with a
-  stale index.
+  stale index. ⚠ Since 0.61 a `local` storage whose folder is on a network
+  filesystem or a FUSE mount (or one whose kind cannot be told) is **polled at
+  its own interval instead** - the OS watch would never hear what another
+  machine writes there ([Trap 1](#nas-nfs-smb-and-friends)); the server logs
+  it once at start and the storage page says so.
 - **`ondemand`** - only syncs when explicitly triggered
   (`POST /api/admin/storages/{id}/sync`).
-- **`lazy`** - local storages only. No walk up front: the folder somebody
-  opens is listed straight from disk and catalogued first, and the rest is
-  catalogued by a slow background pass or only as people open it. See
-  [Lazy catalogue](#lazy-catalogue).
+- **`lazy`** - **Live watching**, local storages only, and their default
+  since 0.61. No walk up front: the folder somebody opens is listed straight
+  from disk, catalogued first and then watched, and the rest is catalogued by a
+  slow background pass or only as people open it. See
+  [Live watching (lazy catalogue)](#lazy-catalogue).
 
 The storage form offers the mode under **Sync mode** (`lazy` only for a driver
-that supports it). Those four are the whole list, and the server enforces it: a `sync_mode` it
+that supports it). Before 0.61 the form called `lazy` *Lazy catalog* and
+`fsnotify` *Live watch*; the values themselves did not change. Those four are the whole list, and the server enforces it: a `sync_mode` it
 does not implement is refused when the storage is created or changed, with a
 message naming the modes that exist. It used to be stored as typed - a
 `fsnotifiy` typo saved happily and the storage quietly ran the poll loop, so
 the page showed a mode nothing was doing.
+
+#### Which mode a new storage gets
+
+A storage nobody chose a mode for gets **its driver's default** (task #351),
+decided in one place (`model.DefaultSyncModeFor`) and read by every way a
+storage is made - the environment seed (`FILEX_DEFAULT_STORAGE_*`, which every
+store package uses), the admin API, `filex storage add` and the storage form
+(through the driver's `default_sync_mode`):
+
+- **`local` → `lazy` (Live watching, behaviour *click first, fill in the
+  background*).** A local storage is a folder people also write to without
+  filex - the NAS's own share, a download client, another container. Polled,
+  a file copied into it stayed invisible until the next scan, 15 minutes by
+  default; and once the first scan had finished, a folder that had been listed
+  from disk during it went back to the catalogue and looked empty again. With
+  live watching, the folder somebody opens is read from the disk and watched,
+  so such a file shows up when its folder is opened. The scan interval stays as
+  the safety net under the watches.
+- **every other driver → `poll`.** Live watching lists one directory at a
+  time and watches it with the operating system, which only a local
+  filesystem allows.
+
+⚠ **Existing storages keep their mode.** Nothing is migrated: a `local`
+storage made before 0.61 keeps polling until an administrator says otherwise.
+The storage list marks such a storage with **Switch to live watching**, and its
+page offers the same switch with a sentence about what changes; one click
+saves the mode alone (`PATCH /api/admin/storages/{id}` with
+`{"sync_mode": "lazy"}`), nothing else on the row. The admin storage answers
+carry the offer as `sync_suggestion: "lazy"` (`GET /api/admin/storages`,
+`GET /api/admin/storages/{id}`); a storage already on another mode is offered
+nothing.
 
 ⚠ **`push` is not one of them.** It was declared as an enum value for "the
 backend pushes changes at us" and nothing was ever built behind it, so a
@@ -1332,6 +1400,46 @@ counted as a failure), and **Scan now** while a run is in flight starts no
 second walk: it answers **202** with `status: "running"` - the scan you asked
 for is the one in progress. Progress is under *Storages → sync runs* as before.
 
+#### How long a scan takes, and the interval filex suggests
+
+A full scan records how long it took, how many files and folders it saw and,
+since 0.61, the most memory the filex process held while it walked
+(`peak_mem_bytes` on the run, migration 00139; the whole process's, not the
+scan's alone - and **Peak memory** in the storage page's run table). The storage
+form uses the last scan that finished `ok` to say what the interval typed under
+**Scan every (minutes)** would cost, asking the server while you type
+(`GET /api/admin/storages/{id}/interval-advice?interval_s=…&mode=…`; the
+thresholds live in `internal/syncadvice` and nowhere else):
+
+| The interval… | the form says |
+|---|---|
+| keeps scans under a quarter of the time | how long the last scan took, for how many files and folders, and the share of the time scans take at this interval |
+| keeps the storage busy a quarter of the time or more | the share - *every 5 min, scans keep the storage busy about 80% of the time* - and a suggestion with a **Use 50 min** button |
+| is shorter than one scan | that the storage is scanned all the time (the next scan starts as soon as one ends), and a suggestion |
+
+The suggestion is the shortest round interval - 5, 10, 15, 30, 50, 100, 200,
+500, 1000 minutes and on - at which scans take at most **10 %** of the time: a
+4-minute scan suggests 50 minutes. It is advice: any interval still saves (the
+5-second floor aside).
+
+**Memory.** When the last scan's peak reached **80 %** of the memory the process
+was given - the container's limit (cgroup `memory.max`), or the machine's RAM
+when there is none - the form warns that the system stops filex if it runs
+out, whatever the interval.
+
+**A new storage** has no measurement yet: the form says the suggestion comes
+once its first scan has finished. **Live watching** (`lazy`) gets no load
+figure: there the interval is how old a folder nobody has open may get before
+the background pass reads it again, and that pass slows down while people use
+the storage and is not one timed walk, so a "busy N % of the time" would be a
+number filex did not measure; the form says what the interval means instead.
+`fsnotify` and `ondemand` do not scan on a schedule, and the form says the
+interval is not used - except `fsnotify` on a network filesystem, which is
+polled at the interval and judged like `poll` (`polls_instead: true`). A save
+(`POST`, `PATCH /api/admin/storages`, and so the `admin_storages_create` /
+`_update` MCP tools) answers with the same judgement for the saved interval,
+as `interval_advice`.
+
 **Rescanning one folder.** `POST /api/admin/storages/{id}/sync?path=<folder>`
 rescans a single catalogued folder's subtree instead of the whole storage - for
 when you know what changed and a full scan is expensive (169,000 rows is about
@@ -1434,6 +1542,9 @@ with `GET /api/admin/storages/{id}/drift`.
 (@ahjephson). The design, with every rule and its reason:
 [LAZY-CATALOGUE.md](LAZY-CATALOGUE.md).*
 
+`sync_mode: lazy` is **Live watching** on the storage form, and since 0.61 the
+mode a new `local` storage gets ([Which mode a new storage gets](#which-mode-a-new-storage-gets)).
+
 Every other mode catalogues a storage by walking all of it before anything
 else happens, and keeps it current by walking all of it again. On a
 multi-terabyte NAS that is hours of disk I/O before the first folder is
@@ -1446,7 +1557,11 @@ right. `sync_mode: lazy` (local storages only) turns that around:
 - Opened folders are **watched** (fsnotify) for changes made outside filex,
   within a budget: at most `lazy_max_watches` (default 1024) folders, and none
   nobody has opened for `lazy_watch_ttl` minutes (default 60). A folder whose
-  watch goes is checked again the next time somebody opens it.
+  watch goes is checked again the next time somebody opens it. ⚠ On a network
+  filesystem or a FUSE mount nothing is watched - a change made on another
+  machine never reaches a watch - and every opened folder is read from the
+  disk ([Trap 1](#nas-nfs-smb-and-friends); the storage page's catalogue block
+  says *None: network filesystem* under **Watched folders**).
 - ⚠ **A folder nobody has visited is never treated as deleted.** Rows are only
   removed from a folder that was just listed, completely, and only when each
   missing entry is confirmed gone.
@@ -1528,6 +1643,23 @@ restore, whether it came through the explorer or over WebDAV, S3, SFTP or NFS:
 2 seconds after a burst of changes ends, and at most 15 seconds into a long
 one, after which open listings are told to refresh. A storage that syncs rarely
 or only manually therefore still shows the right folder sizes.
+
+### Changes made on another machine: filex-watch
+
+A watch - filex's own, in Live watching or `fsnotify` - sees only what the
+filex machine writes. When a storage's disk is on another machine (a NAS share
+mounted over NFS or SMB, the folder an SFTP storage points at), a file written
+there reaches filex at the next sync. **filex-watch** runs on that machine,
+watches the folder, and reports the folders that change; filex looks at those
+folders alone: a Live watching storage reconciles each one, any other mode
+rescans its subtree, a change at the top of the storage is a full scan. A start,
+a lost connection or a full queue asks for one resync of the whole storage.
+
+The key it reports with is made on the storage's page (the filex-watch card),
+shown once, and opens nothing but that storage's change reports. Installing it
+(Linux, Docker, Windows, macOS), its settings, the protocol and what to do when
+it complains: [FILEX-WATCH.md](FILEX-WATCH.md). A disk on the filex machine
+itself, a Docker bind mount included, does not need it.
 
 ---
 
@@ -1745,4 +1877,5 @@ probe hit its 10-second bound rather than getting an answer.
 
 - [CONFIGURATION.md](CONFIGURATION.md) - global config/env reference
 - [RBAC.md](RBAC.md) - per-storage and per-file access control
+- [FILEX-WATCH.md](FILEX-WATCH.md) - changes made on the machine that owns a storage's disk, when that is not the filex machine
 - [INSTALLATION.md](INSTALLATION.md) · [DOCKER.md](DOCKER.md)

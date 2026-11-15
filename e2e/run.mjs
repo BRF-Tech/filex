@@ -775,6 +775,11 @@ async function seedCypressStorage(baseURL, dataDir) {
       driver: 'local',
       mount_path: root,
       enabled: true,
+      // #351: a local storage nobody chose a mode for is born on live
+      // watching (lazy) since 0.61. The specs on this storage were written
+      // against a polled one (a full first scan, Sync now picking up files
+      // written to disk), so it says so; 147-lazy-catalog covers the other.
+      sync_mode: 'poll',
       config: { path: root },
     }),
   });

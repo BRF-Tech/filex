@@ -220,6 +220,11 @@ var crossings = []crossing{
 		func(f *ownedFixture) string { return fmt.Sprintf("/api/admin/storages/%d", f.storage.ID) }, nil, true},
 	{"trigger sync on another tenant's storage", http.MethodPost,
 		func(f *ownedFixture) string { return fmt.Sprintf("/api/admin/storages/%d/sync", f.storage.ID) }, nil, false},
+	// Task #353: the interval advice reads the storage's last scan.
+	{"read another tenant's storage interval advice", http.MethodGet,
+		func(f *ownedFixture) string {
+			return fmt.Sprintf("/api/admin/storages/%d/interval-advice?interval_s=300", f.storage.ID)
+		}, nil, false},
 
 	// Quota, both the nested and the flat legacy shape.
 	{"read another tenant's user quota", http.MethodGet,
@@ -353,6 +358,7 @@ func TestOwnership_OwnRowsStillWork(t *testing.T) {
 		{"own storage read", http.MethodGet, fmt.Sprintf("/api/admin/storages/%d", mine.storage.ID), nil},
 		{"own storage sync-runs", http.MethodGet, fmt.Sprintf("/api/admin/storages/%d/sync-runs", mine.storage.ID), nil},
 		{"own storage drift", http.MethodGet, fmt.Sprintf("/api/admin/storages/%d/drift", mine.storage.ID), nil},
+		{"own storage interval advice", http.MethodGet, fmt.Sprintf("/api/admin/storages/%d/interval-advice", mine.storage.ID), nil},
 		{"own user quota", http.MethodGet, fmt.Sprintf("/api/admin/quota/%d", mine.user), nil},
 		{"own user quota (nested)", http.MethodGet, fmt.Sprintf("/api/admin/users/%d/quota", mine.user), nil},
 		{"own sync run detail", http.MethodGet, fmt.Sprintf("/api/admin/sync-runs/%d", mine.syncRun), nil},

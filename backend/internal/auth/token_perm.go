@@ -45,7 +45,16 @@ func loaderFor(store db.Store) *perm.Loader {
 
 // TokenMayBeUsed reports whether u may authenticate with tok. A resolution
 // error refuses — a credential that cannot be judged is not accepted.
+//
+// ⚠ A door-only credential (model.APIToken.DoorOnly: a filex-watch key) is
+// refused here whoever owns it. Its hash is taken over a domain of its own,
+// so these doors should never even find one; this is the second lock, for
+// the day a lookup by id or a new door reaches the row another way. Its one
+// door (handlers/storage_watch.go) does not come through here.
 func TokenMayBeUsed(ctx context.Context, store db.Store, u *model.User, tok *model.APIToken) bool {
+	if tok.DoorOnly() {
+		return false
+	}
 	if store == nil {
 		return true
 	}

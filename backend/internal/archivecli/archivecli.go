@@ -662,6 +662,9 @@ func parseTechnicalList(out, archivePath string) []Entry {
 	// `Path = ` begins, and a line that is not `Key = value` continues the
 	// value before it, blank lines included. A field the name seems to carry
 	// is overwritten by the real one 7-Zip prints after the Path.
+	// ⚠ 7-Zip 25.01 and newer print a line feed in a name as `_` (listedName,
+	// task #350): the name is read as printed, and extracting by it is
+	// extractLineBreakMembers' to resolve.
 	var lastKey string
 	blanks := 0
 	for _, raw := range strings.Split(out, "\n") {
@@ -864,7 +867,21 @@ func (s *Service) extractSevenZip(ctx context.Context, archivePath, kind, destDi
 	}
 	// -spd: a member named on the command line is a NAME, not a wildcard -
 	// `a*b.txt` and `why?.txt` selected their look-alikes too (task #238).
-	args := []string{"x", "-t" + kind, "-y", "-aoa", "-bd", "-sccUTF-8", "-spd", "-o" + destDir, "--", archivePath}
+	if err := s.runSevenZipExtract(ctx, bin, kind, archivePath, destDir, destDir, password, true, members); err != nil {
+		return err
+	}
+	return s.extractLineBreakMembers(ctx, bin, kind, archivePath, destDir, password, members)
+}
+
+// runSevenZipExtract is one `7z x` into outDir, with the budget watched over
+// budgetRoot (destDir, or the folder outDir lies in). literal: -spd, the
+// members are names; without it they are 7-Zip wildcards.
+func (s *Service) runSevenZipExtract(ctx context.Context, bin, kind, archivePath, outDir, budgetRoot, password string, literal bool, members []string) error {
+	args := []string{"x", "-t" + kind, "-y", "-aoa", "-bd", "-sccUTF-8"}
+	if literal {
+		args = append(args, "-spd")
+	}
+	args = append(args, "-o"+outDir, "--", archivePath)
 	args = append(args, members...)
 	cctx, cancel := s.timeoutContext(ctx)
 	defer cancel()
@@ -875,7 +892,7 @@ func (s *Service) extractSevenZip(ctx context.Context, archivePath, kind, destDi
 	stopMonitor := make(chan struct{})
 	monitorDone := make(chan error, 1)
 	go func() {
-		err := monitorExtractionBudget(runCtx, destDir, policy.MaxEntries, policy.MaxExpandedBytes, stopMonitor)
+		err := monitorExtractionBudget(runCtx, budgetRoot, policy.MaxEntries, policy.MaxExpandedBytes, stopMonitor)
 		if err != nil {
 			stopProcess()
 		}
@@ -887,7 +904,7 @@ func (s *Service) extractSevenZip(ctx context.Context, archivePath, kind, destDi
 	if err := <-monitorDone; err != nil {
 		return err
 	}
-	if err := checkExtractionBudget(destDir, policy.MaxEntries, policy.MaxExpandedBytes); err != nil {
+	if err := checkExtractionBudget(budgetRoot, policy.MaxEntries, policy.MaxExpandedBytes); err != nil {
 		return err
 	}
 	if err := cctx.Err(); err != nil {

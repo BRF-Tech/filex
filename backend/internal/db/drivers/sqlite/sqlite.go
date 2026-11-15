@@ -100,6 +100,8 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB}
 	// Why a link will not open (00098), the same way.
 	s.NodeLinkStateSQL = &db.NodeLinkStateSQL{Pool: sqlDB}
+	// A full scan's peak memory (00139), the same way.
+	s.SyncRunMemorySQL = &db.SyncRunMemorySQL{Pool: sqlDB}
 	// A page of a person's Recent / Starred, and which rows carry a star
 	// (filex 0.54), the same way.
 	s.UserMetaPageSQL = &db.UserMetaPageSQL{Pool: sqlDB}
@@ -187,6 +189,9 @@ type Store struct {
 	// SetNodeLinkState, NodeLinkStates (internal/db node_link_state_sql.go,
 	// migration 00098).
 	*db.NodeLinkStateSQL
+	// SetSyncRunPeakMemory, SyncRunPeaks, LastMeasuredSyncRun (internal/db
+	// sync_run_memory_sql.go, migration 00139).
+	*db.SyncRunMemorySQL
 	// UserNodeMetaPage, UserNodeMetaAt (internal/db user_meta_page_sql.go).
 	*db.UserMetaPageSQL
 	// ListNodesUnder, ListStaleNodesUnder, CountLiveNodesUnder,
@@ -2596,9 +2601,22 @@ func (s *Store) CreateSyncRun(ctx context.Context, storageID int64, cursorBefore
 	return &model.SyncRun{ID: id, StorageID: storageID, StartedAt: time.Now(), CursorBefore: cursorBefore, Status: "running"}, nil
 }
 
+// syncRunNow is the end of a sync run as precise as its start. On MySQL
+// started_at is DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6), and a bare
+// CURRENT_TIMESTAMP has no fraction: a run that started at 12:00:00.6 and
+// ended at 12:00:00.9 was written as ending at 12:00:00, before it began, so
+// the scan-interval advice (#353) read a negative duration. SQLite keeps
+// whole seconds in both columns.
+func (s *Store) syncRunNow() string {
+	if s.mysql {
+		return `CURRENT_TIMESTAMP(6)`
+	}
+	return `CURRENT_TIMESTAMP`
+}
+
 func (s *Store) FinishSyncRun(ctx context.Context, id int64, cursorAfter string, seen, added, updated, deleted int, status, errMsg string) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
-		`UPDATE sync_runs SET finished_at=CURRENT_TIMESTAMP, cursor_after=?, seen_count=?, added=?, updated=?, deleted=?, status=?, error=? WHERE id=?`,
+		`UPDATE sync_runs SET finished_at=`+s.syncRunNow()+`, cursor_after=?, seen_count=?, added=?, updated=?, deleted=?, status=?, error=? WHERE id=?`,
 		cursorAfter, seen, added, updated, deleted, status, errMsg, id)
 	return err
 }
@@ -2620,7 +2638,7 @@ func (s *Store) GetLastSyncRunByStatus(ctx context.Context, storageID int64, sta
 
 func (s *Store) AbortUnfinishedSyncRuns(ctx context.Context, errMsg string) (int64, error) {
 	res, err := s.conn(ctx).ExecContext(ctx,
-		`UPDATE sync_runs SET status='aborted', finished_at=CURRENT_TIMESTAMP, error=? WHERE finished_at IS NULL`, errMsg)
+		`UPDATE sync_runs SET status='aborted', finished_at=`+s.syncRunNow()+`, error=? WHERE finished_at IS NULL`, errMsg)
 	if err != nil {
 		return 0, err
 	}

@@ -418,7 +418,7 @@ the form has no field):
 
 | The platform's page: the Realm field empty and free | A tenant's own address: the field filled in and read-only |
 |---|---|
-| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.fad94188c6d2.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.08fab51c5372.png) |
+| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.e687e03d5813.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.3524fc97650b.png) |
 
 **The handoff to a tenant's own address.** The session cookie belongs to the
 host it was set on. A realm typed on the platform's page for a tenant that has

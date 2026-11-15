@@ -7,6 +7,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-11-15
+
+### Added
+
+- **The storage form says what a scan interval would cost, measured on the
+  storage's last scan** (task #353). Under **Scan every (minutes)** filex says
+  how long the last full scan took, for how many files and folders, and the
+  share of the time scans at the typed interval keep the storage busy; from a
+  quarter of the time it suggests a rounder, longer interval - *every 5 min,
+  about 80% of the time; suggested 50 min* - with a button that puts it in the
+  field, and a scan that outlasts the interval is said to scan all the time.
+  When the last scan took filex to 80% of the memory it was given (the
+  container's limit, else the machine's RAM) it warns that the system would
+  stop filex. The server judges it while you type
+  (`GET /api/admin/storages/{id}/interval-advice`); any interval still saves.
+  Saving a storage answers with the same judgement (`interval_advice`), so an
+  agent using the `admin_storages_create` / `_update` MCP tools hears it too.
+  A full scan records the most memory the process held while it walked
+  (`peak_mem_bytes` on the run, migration 00139; **Peak memory** in the
+  storage's run table).
+  [STORAGE.md → How long a scan takes](docs/STORAGE.md#how-long-a-scan-takes-and-the-interval-filex-suggests).
+- **Switch to live watching, in one click** (task #351). A `local` storage that
+  polls - every one made before this release - is marked in the storage list
+  and offered the switch on its page; the click saves the mode alone.
+  [STORAGE.md → Which mode a new storage gets](docs/STORAGE.md#which-mode-a-new-storage-gets).
+- **filex-watch: changes made on another machine reach filex in seconds**
+  (task #352). A watch only sees what its own machine writes, so a storage whose
+  disk is elsewhere - a NAS share mounted over the network, the folder an SFTP
+  storage points at - learned of a change made there at its next sync.
+  filex-watch is a small program for that machine (Linux, Windows and macOS on
+  amd64 and arm64, a systemd unit, a launchd daemon, a Windows service, the
+  image `ghcr.io/brf-tech/filex-watch`) that watches the folder and reports the
+  folders that change to `POST /api/storages/{id}/watch/events`; filex looks at
+  those folders alone - a Live watching storage reconciles each one, any other
+  mode rescans its subtree - and a start, a lost connection, a full queue or
+  a filex that started again since its last answer asks for one resync of the
+  storage. The storage's page has a card for it (not for an object store such as S3, whose driver says there is nothing to watch):
+  make a key for a machine (shown once), see what each key's agent last said,
+  copy the install commands, revoke a key; the admin MCP tools
+  `admin_storages_watch`, `admin_storages_watch_key_create` and
+  `admin_storages_watch_key_delete` do the same. The key is an API key of its
+  own kind: it opens that storage's change reports and nothing else - no file
+  API, no protocol, no admin route - and reports as the administrator who made
+  it, as they are now. filex-watch has a release line of its own
+  (`filex-watch-v0.1.0`), never GitHub's "latest" release, and neither the
+  update check nor the Releases page lists it.
+  [docs/FILEX-WATCH.md](docs/FILEX-WATCH.md).
+
+### Changed
+
+- **A new local storage is watched live instead of scanned every 15 minutes**
+  (task #351). A file copied into a storage's folder without filex - over the
+  NAS's own share, by a download client, by another container - stayed
+  invisible until the next scan, and a folder listed from the disk during the
+  first scan looked empty again once it ended. A storage nobody chose a mode
+  for now gets its driver's default, decided in one place and read by the
+  environment seed every store package uses (CasaOS, Umbrel, Unraid, TrueNAS),
+  the admin API, `filex storage add` and the storage form: live watching
+  (`sync_mode: lazy`) for `local`, so the opened folder is read from the disk
+  and watched, and `poll` for every other driver. The scan interval stays as
+  the safety net. Existing storages keep their mode.
+  [STORAGE.md → Which mode a new storage gets](docs/STORAGE.md#which-mode-a-new-storage-gets).
+- **On a network filesystem nothing is watched** (task #351). A watch only hears
+  what passes through this machine, so on NFS, SMB/CIFS, 9P or a FUSE mount
+  (Unraid's `/mnt/user` included) a live-watched storage places none and reads
+  every opened folder from the disk; the storage page says so and names
+  [filex-watch](docs/FILEX-WATCH.md), which reports changes from the machine
+  the disk is attached to.
+  A storage set to **Watch the whole storage** (`fsnotify`) on such a
+  filesystem is polled at its own interval instead, the way it already was on
+  a driver that is not local: the server logs it once at start and the storage
+  page says it is scanned at its interval.
+  [LAZY-CATALOGUE.md → Network filesystems](docs/LAZY-CATALOGUE.md#network-filesystems-no-watch-every-open-from-disk).
+- **The sync modes have new names on screen** (task #351): `lazy` is **Live
+  watching** (it was *Lazy catalog*) and `fsnotify` is **Watch the whole
+  storage** (it was *Live watch*, the name the new default now carries). The
+  values in the API and the configuration do not change.
+
+### Fixed
+
+- **On MySQL a scan no longer ends before it began.** A sync run's start
+  is kept to the microsecond and its end was written to the whole second, so
+  a run that started and ended within one second was stored as ending first.
+  The end is now as precise as the start.
+
+- **Selecting an archive member whose name holds a line break no longer does
+  nothing.** 7-Zip 25.01 and newer (every version filex accepts, the Docker
+  image's included) list a line break in a member's name as `_`, so a 7z, RAR
+  or encrypted ZIP showed `line_break.txt` for `line` + line break +
+  `break.txt`, and extracting that selection wrote nothing and reported
+  nothing. filex now finds the member the listed name stands for, and it is
+  skipped with `name_not_allowed` and named in the result, as when the whole
+  archive is extracted.
+  [ARCHIVES.md → Safety model](docs/ARCHIVES.md#safety-model).
+
 ## [0.60.2] - 2026-11-12
 
 ### Fixed

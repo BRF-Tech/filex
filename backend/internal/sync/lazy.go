@@ -1182,6 +1182,7 @@ func (lc *lazyCatalogue) coverage(ctx context.Context) *CatalogueCoverage {
 		HeldBackFolders:   c.HeldBack,
 		Reconciles:        lc.reconciles.Load(),
 	}
+	cov.WatchOff, cov.FSType = lc.watch.offReason()
 	cov.Complete = c.RootCatalogued && c.Uncatalogued == 0
 	switch {
 	case cov.Complete:

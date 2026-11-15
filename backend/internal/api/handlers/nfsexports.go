@@ -97,7 +97,8 @@ func (h *NFSExports) Create(w http.ResponseWriter, r *http.Request) {
 		t, err := h.Store.GetAPITokenByID(r.Context(), *req.APITokenID)
 		// ⚠ The token must belong to the CALLER — otherwise anyone could mint
 		// an export against somebody else's token and inherit their access.
-		if err != nil || t == nil || t.UserID != u.ID {
+		// Nor a filex-watch key (model.APIToken.DoorOnly), as for an S3 key.
+		if err != nil || t == nil || t.UserID != u.ID || t.DoorOnly() {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such API token"})
 			return
 		}

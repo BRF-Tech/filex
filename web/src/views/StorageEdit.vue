@@ -33,8 +33,11 @@ import { DataTable, StorageTags, type DataColumn } from '@brftech/filex-core';
 import { syncStateLabel, syncTone } from '@/lib/syncTone';
 import StorageDriverFields from '@/components/StorageDriverFields.vue';
 import StorageSyncMode from '@/components/StorageSyncMode.vue';
+import StorageIntervalAdvice from '@/components/StorageIntervalAdvice.vue';
+import StorageLiveWatchOffer from '@/components/StorageLiveWatchOffer.vue';
 import StorageCatalogStatus from '@/components/StorageCatalogStatus.vue';
 import StorageAccess from '@/components/StorageAccess.vue';
+import StorageWatchAgent from '@/components/StorageWatchAgent.vue';
 
 const { t, locale } = useI18n();
 const route = useRoute();
@@ -132,6 +135,10 @@ async function refreshCatalogue() {
         coverage: s.coverage,
         stats: s.stats,
         last_sync_at: s.last_sync_at,
+        // #351: a save answers with the row alone; what is offered about
+        // watching it comes from here.
+        sync_suggestion: s.sync_suggestion,
+        filesystem: s.filesystem,
       };
     }
   } catch {
@@ -195,6 +202,17 @@ async function save() {
 
 // The runs table is read again when the scan starts and when it ends.
 const scan = useSyncNow({ onEnd: () => loadRuns() });
+
+/**
+ * #351 - the storage was switched to live watching with the offer's one
+ * click. The form's own mode follows, so its next Save does not put `poll`
+ * back.
+ */
+function onLiveWatching(updated: StorageRef) {
+  syncMode.value = 'lazy';
+  if (item.value) item.value = { ...item.value, sync_mode: updated.sync_mode ?? 'lazy', sync_suggestion: undefined };
+  void refreshCatalogue();
+}
 
 /**
  * #117 — the Access section turned per-item access control on (its own
@@ -309,6 +327,17 @@ const runColumns = computed<DataColumn<SyncRun>[]>(() => [
     width: 70,
     format: (r: SyncRun) => num(r.deleted),
     sortValue: (r: SyncRun) => r.deleted ?? 0,
+  },
+  // #353: the most memory filex held while the run walked (the whole
+  // process); '-' for a run from before it was measured.
+  {
+    id: 'peak_mem',
+    label: t('sync.fields.peakMemory'),
+    align: 'right',
+    sortable: true,
+    width: 120,
+    format: (r: SyncRun) => (r.peak_mem_bytes ? formatBytes(r.peak_mem_bytes, locale.value, 1024) : '-'),
+    sortValue: (r: SyncRun) => r.peak_mem_bytes ?? 0,
   },
 ]);
 
@@ -426,6 +455,12 @@ onMounted(load);
         placeholder="15"
         data-testid="storage-sync-interval"
       />
+      <StorageIntervalAdvice
+        :storage-id="id"
+        :mode="syncMode === 'push' ? '' : syncMode"
+        :interval-min="syncIntervalMin"
+        @apply="(m: number) => (syncIntervalMin = m)"
+      />
       <StorageSyncMode
         v-model:mode="syncMode"
         v-model:config="config"
@@ -492,6 +527,13 @@ onMounted(load);
       </div>
     </form>
 
+    <!-- #351 - live watching offered to a storage that polls, and a word on a
+         network filesystem, where a watch cannot be trusted. -->
+    <StorageLiveWatchOffer
+      :storage="item"
+      @switched="onLiveWatching"
+    />
+
     <!-- #117 — the whole storage given to people and groups, right under the
          form whose switch decides whether any of it applies. -->
     <StorageAccess
@@ -500,6 +542,7 @@ onMounted(load);
       :rbac-enabled="item.rbac_enabled ?? false"
       @rbac-enabled="onRbacEnabled"
     />
+    <StorageWatchAgent :storage-id="id" :driver="item.driver" />
 
     <section
       v-if="item.catalogue"

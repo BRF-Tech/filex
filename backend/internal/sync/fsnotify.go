@@ -18,7 +18,12 @@ import (
 // after each batch of events. We coalesce events with a 2-second debouncer
 // so a `tar -xf` or `cp -r` doesn't trigger N runs.
 //
-// Falls back to polling if the configured driver is not local.
+// Falls back to polling if the configured driver is not local, and - task
+// #351 - when the storage's folder is on a filesystem a watch cannot be trusted
+// on (watchUntrusted: NFS, SMB/CIFS, 9P, FUSE, or a kind that could not be
+// told). There the watch would hear what this machine writes and never what
+// another machine writes to the share, and the storage would look current
+// while it is not; the poll loop scans it at the storage's own interval.
 func (s *storageSyncer) loopFSNotify() {
 	localDrv, ok := s.driver.(*local.Driver)
 	if !ok {
@@ -36,6 +41,12 @@ func (s *storageSyncer) loopFSNotify() {
 		return
 	}
 	root := localDrv.Root()
+	if why, fsType := watchUntrusted(root); why != "" {
+		slog.Warn("sync: fsnotify mode on a filesystem a watch cannot be trusted on; scanning at the storage's interval instead",
+			slog.String("storage", s.storage.Name), slog.String("reason", why), slog.String("fs_type", fsType))
+		s.loopPoll()
+		return
+	}
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		slog.Error("sync: fsnotify new watcher", slog.String("err", err.Error()))

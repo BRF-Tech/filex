@@ -103,6 +103,9 @@ async function makeTestStorage(request: import('@playwright/test').APIRequestCon
     data: {
       name: STORAGE_NAME,
       driver: 'local',
+      // #351: polled, as this spec was written; local storages default to
+      // live watching (lazy) since 0.61.
+      sync_mode: 'poll',
       config: { path: MOUNT },
       read_only: false,
       enabled: true,

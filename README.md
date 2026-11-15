@@ -277,7 +277,7 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.3d21210a54da.png)
+![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.58769eb1f1d4.png)
 
 <sub>…and the sign-in page, before anybody has signed in</sub>
 
@@ -317,22 +317,25 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 **Every storage in one tree, and that tree reachable from anything.**
 
 - Mount local disks, S3, FTP, SFTP, WebDAV and SMB/NAS shares side by side, and copy or cut
-  in one and paste in another.
+  in one and paste in another; for a storage filex does not ship, install a plugin from the
+  admin panel or from an app store's link.
+- A file written behind filex's back shows up: a local folder is watched live, so what the
+  NAS's share or another app writes there is listed when its folder is opened, not at the next
+  scan, and when the disk is on another machine, [filex-watch](docs/FILEX-WATCH.md) runs there
+  and reports the folders that change in seconds.
 - Reach the same tree as **S3**, **SFTP**, **FTPS**, **NFSv3** and **WebDAV**: point `rclone`,
   `restic`, `aws s3`, WinSCP or FileZilla at it. The same filex permissions (per person, group
   and folder), trash and quota apply as in the web UI; the POSIX bits and ACLs on the disk are
   not mapped to filex users.
 - `filex mount` attaches a remote server over ordinary HTTPS: a folder on Linux, a drive
   letter on Windows (macOS is not supported).
-- For a storage filex does not ship, install a plugin from the admin panel or from an app
-  store's link.
 
 Every storage and protocol feature in full: [docs/FEATURES.md → Storage and protocols](docs/FEATURES.md#storage-and-protocols).
 
 <p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png" alt="Connections: the guides" width="860"></p>
 
 <details>
-<summary><b>Screenshots of storage and protocols</b> - the connection guides, API keys and a storage plugin</summary>
+<summary><b>Screenshots of storage and protocols</b> - the connection guides, API keys, a storage plugin and filex-watch</summary>
 
 <table>
 <tr>
@@ -345,7 +348,7 @@ Every storage and protocol feature in full: [docs/FEATURES.md → Storage and pr
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.3d6279c2e261.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.c7e147b4cebb.png)
 
 <sub>API keys - mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry)</sub>
 
@@ -364,6 +367,22 @@ Every storage and protocol feature in full: [docs/FEATURES.md → Storage and pr
 ![Plugins](https://filex.sh/shots/admin-plugins.6bd96bf65745.png)
 
 <sub>A storage filex does not ship - installed as a plugin on **Plugins → Storage plugins**, describing its own config form</sub>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![The filex-watch card on a storage's page: a key shown once and the commands that install the agent](https://filex.sh/shots/filexwatch/filex-watch-key-1440.64f0c29c10da.png)
+
+<sub>filex-watch - a key for the machine that owns a storage's disk, shown once, with the commands that install the agent on Linux, Docker, Windows or macOS</sub>
+
+</td>
+<td width="50%" valign="top">
+
+![The filex-watch card with the agent heard: its version, host, folder and last report](https://filex.sh/shots/filexwatch/filex-watch-1440.7e366ab5405b.png)
+
+<sub>The same card once the agent reports: what each machine's agent last said, and when</sub>
 
 </td>
 </tr>
@@ -400,7 +419,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Share modal](https://filex.sh/shots/share-modal.58825362c544.png)
+![Share modal](https://filex.sh/shots/share-modal.d6cc52c97dae.png)
 
 <sub>Sharing - PIN, expiry, download limit, one-line `curl`</sub>
 
@@ -432,7 +451,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.dadc9345981d.png)
+![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.043e68a53922.png)
 
 <sub>Every admin table - one pinned **Actions** menu per row, the same menu the explorer's ⋮ opens</sub>
 
@@ -455,7 +474,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 </td>
 <td width="50%" valign="top">
 
-![An uploader's key, shown once, with Download ShareX settings and the curl line](https://filex.sh/shots/uploaders/uploaders-key-dark-1440.9732aa72f56c.png)
+![An uploader's key, shown once, with Download ShareX settings and the curl line](https://filex.sh/shots/uploaders/uploaders-key-dark-1440.d40e49640230.png)
 
 <sub>Uploaders - a key for ShareX, curl or a script, shown once: ShareX's settings file is made for you, and every upload answers with a public or a private link and a deletion link ([docs/UPLOADERS.md](docs/UPLOADERS.md))</sub>
 
@@ -534,7 +553,7 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.c115aaa2f273.png)
+![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.4c65585bf49a.png)
 
 <sub>…and what a locked account's sign-in form says, counting the lock down on its button</sub>
 
@@ -557,7 +576,7 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 </td>
 <td width="50%" valign="top">
 
-![The sign-in form with the bot check above its button](https://filex.sh/shots/botprotection/login-captcha-dark-1440.5cf41f05dd02.png)
+![The sign-in form with the bot check above its button](https://filex.sh/shots/botprotection/login-captcha-dark-1440.77aef295650a.png)
 
 <sub>…and the sign-in form, the bot check above its button</sub>
 
@@ -566,7 +585,7 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <tr>
 <td width="50%" valign="top">
 
-![Demo landing](https://filex.sh/shots/demo-landing.4a147bc884c8.png)
+![Demo landing](https://filex.sh/shots/demo-landing.e484d8ad6b07.png)
 
 <sub>Demo landing</sub>
 
@@ -809,7 +828,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.daaf28c9f518.png)
+![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.eb318cc10a90.png)
 
 <sub>While it is out - the document frozen for everybody, who has signed in its details</sub>
 
@@ -928,7 +947,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 </td>
 <td width="50%" valign="top">
 
-![The share dialog after Get short link: the short address leads, the full link one copy away](https://filex.sh/shots/shortlinks/share-short-dark-1440.a1bac88e90ff.png)
+![The share dialog after Get short link: the short address leads, the full link one copy away](https://filex.sh/shots/shortlinks/share-short-dark-1440.7e4a14e6f6a3.png)
 
 <sub>Short links - an app holding the link-shortener role puts **Get short link** in the share dialog, file requests, My shares and uploaders ([Short links](docs/APP-PLUGINS.md#short-links))</sub>
 
@@ -1064,7 +1083,7 @@ entry with its limits and its guide.
 | Area | What you get |
 |---|---|
 | **The explorer** | One layout in the admin app, the desktop app and every embed: a navigation panel, list, grid and gallery views, tabs, personal and team tags, a ⌘K command palette, remappable keyboard shortcuts, new documents from the **+ New** menu and themes an operator composes ([Integration](docs/INTEGRATION.md), [Themes](docs/INTEGRATION.md#themes)) |
-| **Storage** | Local disks, S3, FTP, SFTP, WebDAV and SMB/NAS mounted side by side, copy and move across them, and a plugin for anything else, from the admin panel or an app store ([Storage](docs/STORAGE.md), [Storage plugins](docs/PLUGINS.md)) |
+| **Storage** | Local disks, S3, FTP, SFTP, WebDAV and SMB/NAS mounted side by side, copy and move across them, and a plugin for anything else, from the admin panel or an app store; a small agent, filex-watch, on the machine that owns a disk filex reaches over the network, so changes made there show at once ([Storage](docs/STORAGE.md), [Storage plugins](docs/PLUGINS.md), [filex-watch](docs/FILEX-WATCH.md)) |
 | **Without a browser** | The same tree served as S3, SFTP, FTPS, NFSv3 and WebDAV - a move or delete there is as safe beside a storage scan as one in the web UI - plus `filex mount` over HTTPS ([Protocols](docs/PROTOCOLS.md)) |
 | **Sign-in** | OIDC, LDAP / Active Directory, Windows and Linux accounts, sign-in attempt limits, and a bot check on the sign-in and the public forms - Turnstile or reCAPTCHA, with a local proof of work when the provider is down ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [OS accounts](docs/OS-LOGIN.md), [Bot protection](docs/BOT-PROTECTION.md)) |
 | **People and access** | Roles and per-person permissions, groups, per-folder access and native multi-tenancy ([Permissions](docs/PERMISSIONS.md), [Groups](docs/GROUPS.md), [Multi-tenancy](docs/MULTI-TENANCY.md)) |

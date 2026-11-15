@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  filex-watch as a launchd daemon on macOS (docs/FILEX-WATCH.md).
+
+    sudo cp sh.filex.watch.plist /Library/LaunchDaemons/
+    sudo launchctl bootstrap system /Library/LaunchDaemons/sh.filex.watch.plist
+    tail -f /var/log/filex-watch.log
+
+  The settings are in /usr/local/etc/filex-watch/config.json and the key in
+  /usr/local/etc/filex-watch/key, readable by root only. To stop it:
+    sudo launchctl bootout system/sh.filex.watch
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>sh.filex.watch</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/filex-watch</string>
+    <string>run</string>
+    <string>--config</string>
+    <string>/usr/local/etc/filex-watch/config.json</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/var/log/filex-watch.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/filex-watch.log</string>
+</dict>
+</plist>

@@ -13,7 +13,7 @@ services:
   server:
     # The App Store copy also pins this tag's multi-arch digest
     # (tag@sha256:...); scripts/sync-deploy-versions.mjs moves the tag here.
-    image: ghcr.io/brf-tech/filex:v0.60.2
+    image: ghcr.io/brf-tech/filex:v0.61.0
     restart: on-failure
     stop_grace_period: 1m
     environment:

@@ -39,8 +39,11 @@ getumbrel/umbrel-apps: `npm run lint:apps -- filex --check-images`.
   read on the first start only).
 - **Data:** `${APP_DATA_DIR}/data/filex` is `/data` (database, search index,
   thumbnails); `${APP_DATA_DIR}/data/files` is `/srv/files`, seeded as the
-  Files storage. The **Files** folder setting (`folderAccess`) can point it at
-  Home, a drive or a network share instead.
+  Files storage with live watching, so a file put into the folder from outside
+  filex shows up when its folder is opened. The **Files** folder setting
+  (`folderAccess`) can point it at Home, a drive or a network share instead; on
+  a network share filex reads every opened folder from the disk instead of
+  watching it ([Network filesystems](https://docs.filex.sh/LAZY-CATALOGUE#network-filesystems-no-watch-every-open-from-disk)).
 - **Secret key:** `FILEX_SECRET_KEY` comes from `derive_entropy` in
   `exports.sh`, so it stays the same across restarts and updates.
 - **User:** the container runs filex as 1000:1000 through `PUID`/`PGID`.

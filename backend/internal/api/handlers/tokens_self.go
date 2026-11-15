@@ -49,7 +49,16 @@ func (h *SelfTokens) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tokens": tokenList(tokens)})
+	// A filex-watch key (model.APIToken.DoorOnly) is the storage page's, not
+	// one of the person's own keys: it is listed and revoked on that storage's
+	// card and on the API / MCP page, where every key is.
+	kept := tokens[:0]
+	for _, t := range tokens {
+		if !t.DoorOnly() {
+			kept = append(kept, t)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": tokenList(kept)})
 }
 
 type selfTokenCreateReq struct {

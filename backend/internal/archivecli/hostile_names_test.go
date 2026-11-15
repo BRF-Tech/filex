@@ -3,6 +3,7 @@ package archivecli
 import (
 	"archive/tar"
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -149,7 +150,13 @@ func TestParseTechnicalList_KeepsLineBreaksInNames(t *testing.T) {
 	assert.EqualValues(t, 5, entries[2].Size)
 }
 
-// The real 7-Zip lists and extracts a member whose name holds a line break.
+// The real 7-Zip lists a member whose name holds a line feed with a `_` in
+// its place (25.01 and newer: listedName), and the archive keeps the line
+// feed. Selected by the name the listing gave it, the member - a file, a
+// folder, a file in that folder - lands under its real name, and nothing
+// else does: not the look-alike the wildcard also matches, not the folder
+// the second run used (task #350; #238 had assumed the listing kept the
+// line feed, and a selection wrote nothing).
 func TestSevenZipLineBreakNameRoundTrip(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows refuses a line break in a file name")
@@ -157,21 +164,94 @@ func TestSevenZipLineBreakNameRoundTrip(t *testing.T) {
 	bin := supportedSevenZip(t)
 	root := t.TempDir()
 	source := filepath.Join(root, "source")
-	require.NoError(t, os.Mkdir(source, 0o700))
 	name := hostilenames.Get("control-newline").Name
-	require.NoError(t, os.WriteFile(filepath.Join(source, name), []byte("lf"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(source, "plain.txt"), []byte("plain"), 0o600))
+	folder := "dir\nx"
+	for rel, body := range map[string]string{
+		name: "lf", "lineXbreak.txt": "look-alike", "plain.txt": "plain", folder + "/inner.txt": "inner",
+	} {
+		writeSourceFile(t, source, rel, body)
+	}
 
 	svc := New(memorySettings{}, Config{SevenZipBin: bin, WorkDir: root})
 	archive := filepath.Join(root, "names.7z")
 	require.NoError(t, svc.Create(context.Background(), source, archive, CreateOptions{Format: "7z"}))
 	entries, err := svc.List(context.Background(), archive, "")
 	require.NoError(t, err)
-	assert.ElementsMatch(t, []string{name, "plain.txt"}, entryNames(entries))
+	listed := listedName(name)
+	require.Equal(t, "line_break.txt", listed)
+	assert.ElementsMatch(t, []string{listed, "lineXbreak.txt", "plain.txt", "dir_x", "dir_x/inner.txt"}, entryNames(entries))
 
+	for _, tc := range []struct {
+		selected []string
+		want     map[string]string
+	}{
+		{nil, map[string]string{name: "lf", "lineXbreak.txt": "look-alike", "plain.txt": "plain", folder + "/inner.txt": "inner"}},
+		{[]string{listed}, map[string]string{name: "lf"}},
+		{[]string{listed, "plain.txt"}, map[string]string{name: "lf", "plain.txt": "plain"}},
+		{[]string{"dir_x"}, map[string]string{folder + "/inner.txt": "inner"}},
+		{[]string{"dir_x/"}, map[string]string{folder + "/inner.txt": "inner"}},
+		{[]string{"dir_x/inner.txt"}, map[string]string{folder + "/inner.txt": "inner"}},
+	} {
+		dest := t.TempDir()
+		require.NoError(t, svc.Extract(context.Background(), archive, dest, "", tc.selected), "%q", tc.selected)
+		assert.Equal(t, tc.want, filesUnder(t, dest), "%q", tc.selected)
+	}
+}
+
+// A listed name that is also a member's real name selects that member: the
+// archive holding both `a_b.txt` and `a` LF `b.txt` lists them alike, and
+// the request names the one whose name it is.
+func TestSevenZipListedNameThatIsARealName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows refuses a line break in a file name")
+	}
+	bin := supportedSevenZip(t)
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	writeSourceFile(t, source, "a_b.txt", "underscore")
+	writeSourceFile(t, source, "a\nb.txt", "lf")
+	svc := New(memorySettings{}, Config{SevenZipBin: bin, WorkDir: root})
+	archive := filepath.Join(root, "twins.7z")
+	require.NoError(t, svc.Create(context.Background(), source, archive, CreateOptions{Format: "7z"}))
 	dest := t.TempDir()
-	require.NoError(t, svc.Extract(context.Background(), archive, dest, "", []string{name}))
-	got, err := os.ReadFile(filepath.Join(dest, name))
-	require.NoError(t, err)
-	assert.Equal(t, "lf", string(got))
+	require.NoError(t, svc.Extract(context.Background(), archive, dest, "", []string{"a_b.txt"}))
+	assert.Equal(t, map[string]string{"a_b.txt": "underscore"}, filesUnder(t, dest))
+}
+
+func writeSourceFile(t *testing.T, source, rel, body string) {
+	t.Helper()
+	local := filepath.Join(source, filepath.FromSlash(rel))
+	require.NoError(t, os.MkdirAll(filepath.Dir(local), 0o700))
+	require.NoError(t, os.WriteFile(local, []byte(body), 0o600))
+}
+
+// filesUnder is every regular file under dir, by slash path, with its body;
+// a folder holding no file fails the test (the second run's must be gone).
+func filesUnder(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	require.NoError(t, filepath.WalkDir(dir, func(local string, d fs.DirEntry, err error) error {
+		if err != nil || local == dir {
+			return err
+		}
+		rel, err := filepath.Rel(dir, local)
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			children, err := os.ReadDir(local)
+			if err != nil {
+				return err
+			}
+			assert.NotEmpty(t, children, "an empty folder is left: %q", rel)
+			return nil
+		}
+		body, err := os.ReadFile(local)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(rel)] = string(body)
+		return nil
+	}))
+	return files
 }

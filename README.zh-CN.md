@@ -260,7 +260,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![套用了运维人员主题的登录页](https://filex.sh/shots/appearance/themed-signin-1440.3d21210a54da.png)
+![套用了运维人员主题的登录页](https://filex.sh/shots/appearance/themed-signin-1440.58769eb1f1d4.png)
 
 <sub>…登录页也是，这时还没有任何人登录</sub>
 
@@ -299,17 +299,17 @@ docker run -p 5212:5212 \
 
 **所有存储都在一棵文件树里，这棵树用什么都能访问。**
 
-- 把本地磁盘、S3、FTP、SFTP、WebDAV 和 SMB/NAS 共享并排挂载，在一个中复制或剪切，在另一个中粘贴。
+- 把本地磁盘、S3、FTP、SFTP、WebDAV 和 SMB/NAS 共享并排挂载，在一个中复制或剪切，在另一个中粘贴；对于 filex 没有内置的存储，从管理面板或应用商店的链接安装一个插件。
+- 绕过 filex 写入的内容也会显示：本地文件夹实时监视，NAS 共享或其他应用写入的文件在打开其文件夹时即会列出，而不必等到下一次扫描；如果磁盘在另一台机器上，就在那里运行 [filex-watch](docs/FILEX-WATCH.md)，它会在几秒钟内报告发生变化的文件夹。
 - 把同一棵文件树当作 **S3**、**SFTP**、**FTPS**、**NFSv3** 和 **WebDAV** 来访问：把 `rclone`、`restic`、`aws s3`、WinSCP 或 FileZilla 指向它。同样的 filex 权限（按人、组和文件夹）、回收站和配额与 Web 界面中一样生效；磁盘上的 POSIX 权限位和 ACL 不会映射到 filex 用户。
 - `filex mount` 通过普通的 HTTPS 挂载远程服务器：在 Linux 上是一个文件夹，在 Windows 上是一个盘符（不支持 macOS）。
-- 对于 filex 没有内置的存储，从管理面板或应用商店的链接安装一个插件。
 
 存储与协议的全部功能：[docs/FEATURES.md → Storage and protocols](docs/FEATURES.md#storage-and-protocols)。
 
 <p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png" alt="How to connect（如何连接）" width="860"></p>
 
 <details>
-<summary><b>存储与协议截图</b> - 连接指南、API 密钥和一个存储插件</summary>
+<summary><b>存储与协议截图</b> - 连接指南、API 密钥、一个存储插件和 filex-watch</summary>
 
 <table>
 <tr>
@@ -322,7 +322,7 @@ docker run -p 5212:5212 \
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.3d6279c2e261.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.c7e147b4cebb.png)
 
 <sub>API keys（API 密钥）：在资源管理器或嵌入端里签发你自己的密钥（凭某个人的会话或令牌；用一个共享的*应用*令牌做代理的嵌入端没有这个条目）</sub>
 
@@ -341,6 +341,22 @@ docker run -p 5212:5212 \
 ![Plugins](https://filex.sh/shots/admin-plugins.6bd96bf65745.png)
 
 <sub>filex 未内置的一个存储：在 **Plugins → Storage plugins**（插件 > 存储插件）中以插件形式安装，配置表单由插件自己描述</sub>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![存储页面上的 filex-watch 卡片：只显示一次的密钥和安装代理的命令](https://filex.sh/shots/filexwatch/filex-watch-key-1440.64f0c29c10da.png)
+
+<sub>filex-watch：为拥有存储磁盘的那台机器生成的密钥，只显示一次，并附有在 Linux、Docker、Windows 或 macOS 上安装代理的命令</sub>
+
+</td>
+<td width="50%" valign="top">
+
+![已收到代理报告的 filex-watch 卡片：版本、主机、文件夹和最后一次报告](https://filex.sh/shots/filexwatch/filex-watch-1440.7e366ab5405b.png)
+
+<sub>代理开始报告后的同一张卡片：每台机器的代理最后一次报告了什么，以及何时报告</sub>
 
 </td>
 </tr>
@@ -370,7 +386,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![共享对话框](https://filex.sh/shots/share-modal.58825362c544.png)
+![共享对话框](https://filex.sh/shots/share-modal.d6cc52c97dae.png)
 
 <sub>共享：PIN、过期时间、下载次数上限、单行 `curl` 命令</sub>
 
@@ -402,7 +418,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.dadc9345981d.png)
+![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.043e68a53922.png)
 
 <sub>管理面板里的每张表格：每行一个固定的 **Actions**（操作）菜单，与资源管理器的 ⋮ 打开的是同一个菜单</sub>
 
@@ -482,7 +498,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![账户被锁定时的登录表单](https://filex.sh/shots/loginsecurity/login-locked-1440.c115aaa2f273.png)
+![账户被锁定时的登录表单](https://filex.sh/shots/loginsecurity/login-locked-1440.4c65585bf49a.png)
 
 <sub>…以及账户被锁定时登录表单显示的内容，锁定的倒计时就在按钮上</sub>
 
@@ -505,7 +521,7 @@ docker run -p 5212:5212 \
 </td>
 <td width="50%" valign="top">
 
-![按钮上方带机器人校验的登录表单](https://filex.sh/shots/botprotection/login-captcha-dark-1440.5cf41f05dd02.png)
+![按钮上方带机器人校验的登录表单](https://filex.sh/shots/botprotection/login-captcha-dark-1440.77aef295650a.png)
 
 <sub>……以及登录表单，按钮上方是机器人校验</sub>
 
@@ -514,7 +530,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![演示首页](https://filex.sh/shots/demo-landing.4a147bc884c8.png)
+![演示首页](https://filex.sh/shots/demo-landing.e484d8ad6b07.png)
 
 <sub>演示首页</sub>
 
@@ -710,7 +726,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 <tr>
 <td width="50%" valign="top">
 
-![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.daaf28c9f518.png)
+![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.eb318cc10a90.png)
 
 <sub>等待签署期间：文档对每个人都是冻结的，谁已签署，在文档的详细信息里可以看到</sub>
 
@@ -898,7 +914,7 @@ filex 可以运行在独立的主机的根路径上，也可以运行在共用�
 | 领域 | 你得到什么 |
 |---|---|
 | **资源管理器** | 管理端、桌面应用和每个嵌入端都用同一套布局：导航面板，列表、网格和画廊视图，标签页，个人标签和团队标签，⌘K 命令面板，可重新映射的键盘快捷键，从 **+ New**（新建）菜单创建的新文档，以及运维人员组合出的主题（[集成](docs/INTEGRATION.md)、[主题](docs/INTEGRATION.md#themes)） |
-| **存储** | 本地磁盘、S3、FTP、SFTP、WebDAV 和 SMB/NAS 并排挂载，可以在它们之间复制和移动；其他任何存储都可以用插件接入，从管理面板或应用商店安装（[存储](docs/STORAGE.md)、[存储插件](docs/PLUGINS.md)） |
+| **存储** | 本地磁盘、S3、FTP、SFTP、WebDAV 和 SMB/NAS 并排挂载，可以在它们之间复制和移动；其他任何存储都可以用插件接入，从管理面板或应用商店安装；在拥有 filex 通过网络访问的磁盘的那台机器上运行小代理 filex-watch，那里的改动会立即显示（[存储](docs/STORAGE.md)、[存储插件](docs/PLUGINS.md)、[filex-watch](docs/FILEX-WATCH.md)） |
 | **不用浏览器** | 同一棵文件树以 S3、SFTP、FTPS、NFSv3 和 WebDAV 的形式提供访问（在那里移动或删除，与存储扫描并行时和在 Web 界面里一样安全），另有基于 HTTPS 的 `filex mount`（[协议](docs/PROTOCOLS.md)） |
 | **登录** | OIDC、LDAP / Active Directory、Windows 和 Linux 账户、登录尝试次数限制，以及登录和公开表单上的机器人校验 - Turnstile 或 reCAPTCHA，服务商不可达时改用本地工作量证明（[SSO](docs/SSO.md)、[LDAP](docs/LDAP.md)、[操作系统账户](docs/OS-LOGIN.md)、[机器人防护](docs/BOT-PROTECTION.md)） |
 | **人员与访问** | 角色和按人设置的权限、群组、按文件夹的访问权限，以及原生多租户（[权限](docs/PERMISSIONS.md)、[群组](docs/GROUPS.md)、[多租户](docs/MULTI-TENANCY.md)） |

@@ -20,6 +20,7 @@ import Badge from '@/components/ui/Badge.vue';
 import { DataTable, type DataColumn } from '@brftech/filex-core';
 import StorageDriverFields from '@/components/StorageDriverFields.vue';
 import StorageSyncMode from '@/components/StorageSyncMode.vue';
+import StorageIntervalAdvice from '@/components/StorageIntervalAdvice.vue';
 
 const { t, te } = useI18n();
 const router = useRouter();
@@ -32,7 +33,9 @@ const name = ref('');
 const readOnly = ref(false);
 /** Poll cadence in minutes; '' = the server default. Seconds on the wire. */
 const syncIntervalMin = ref<number | ''>('');
-/** How the catalog is kept current (StorageSyncMode); the server default. */
+/** How the catalog is kept current (StorageSyncMode). It starts from the
+ *  chosen driver's default, as the server states it (`default_sync_mode`,
+ *  #351: live watching for a local storage) - never a mode of the form's own. */
 const syncMode = ref<SyncMode>('poll');
 const config = ref<Record<string, unknown>>({});
 const saving = ref(false);
@@ -56,6 +59,7 @@ onMounted(async () => {
     driver.value = drivers.items[0].driver;
   }
   config.value = drivers.defaults(driver.value);
+  syncMode.value = drivers.defaultSyncMode(driver.value);
 });
 
 /** The storage's scan settings (issue #44): the same for every driver. */
@@ -72,8 +76,10 @@ function onDriverChange(d: StorageDriver) {
     if (config.value[f.key] !== undefined) kept[f.key] = config.value[f.key];
   }
   config.value = { ...drivers.defaults(d), ...kept };
-  // A mode the new driver does not offer would be refused on save.
-  if (syncMode.value === 'lazy' && drivers.lazyFields(d).length === 0) syncMode.value = 'poll';
+  // A new driver starts from its own default mode (#351): the server's, so a
+  // mode the new driver does not offer (`lazy` off a local storage) is never
+  // kept to be refused on save.
+  syncMode.value = drivers.defaultSyncMode(d);
   testResult.value = null;
   discovered.value = null;
   discoverError.value = '';
@@ -209,6 +215,7 @@ async function createDiscovered() {
           config: { ...config.value, [rootKey.value]: c.root },
           read_only: readOnly.value,
           sync_interval_s: secondsFromMinutes(syncIntervalMin.value),
+          sync_mode: syncMode.value,
         });
       } catch {
         failed.push(c.storageName.trim());
@@ -288,6 +295,13 @@ async function createDiscovered() {
         :hint="t('storages.fields.syncIntervalHint')"
         placeholder="15"
         data-testid="storage-sync-interval"
+      />
+      <StorageIntervalAdvice
+        :storage-id="null"
+        :driver="driver"
+        :mode="syncMode"
+        :interval-min="syncIntervalMin"
+        @apply="(m: number) => (syncIntervalMin = m)"
       />
       <StorageSyncMode
         v-model:mode="syncMode"

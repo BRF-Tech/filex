@@ -291,7 +291,7 @@ knows.
 
 ![Admin → Storages → a storage → Access: two people and a group given the whole storage, each level changed in its row, and Revoke all access](https://filex.sh/shots/storageaccess/storage-access-1440.c3a292fe253f.png)
 
-![The explorer's storage list: Access… on a storage row's menu](https://filex.sh/shots/storageaccess/storage-row-access-1440.50058378992c.png)
+![The explorer's storage list: Access… on a storage row's menu](https://filex.sh/shots/storageaccess/storage-row-access-1440.47bf006b8e09.png)
 
 Under the hood it is an ordinary grant on the storage's **root** - the path
 `<storage>://`, stored with an empty path prefix - so nothing else knows it is

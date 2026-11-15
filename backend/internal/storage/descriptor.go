@@ -129,6 +129,12 @@ type Descriptor struct {
 	// can say "no presigned URLs" before anything is saved.
 	Capabilities Capabilities `json:"capabilities"`
 
+	// WatchAgent says a filex-watch agent can serve a storage on this driver
+	// (WatchAgentApplies: real folders on a disk; not an object store, not a
+	// driver that streams its own changes). The storage page shows its
+	// filex-watch card only where it is true. Filled by Descriptors().
+	WatchAgent bool `json:"watch_agent,omitempty"`
+
 	// ScanFields are the settings a STORAGE on this driver has for the scan
 	// that catalogues it (ScanFields()), as opposed to Fields, which the
 	// driver's Init reads. They live in the same config map and are drawn by
@@ -143,6 +149,12 @@ type Descriptor struct {
 	// (model.LazyDrivers). Same map, same renderer as ScanFields; filled by
 	// the admin descriptor endpoint, which knows which drivers those are.
 	LazyFields []Field `json:"lazy_fields,omitempty"`
+
+	// DefaultSyncMode is the sync mode a new storage on this driver gets when
+	// nobody chooses one (model.DefaultSyncModeFor, task #351): the storage
+	// form starts from it rather than from a mode of its own. Filled by the
+	// admin descriptor endpoint, like LazyFields.
+	DefaultSyncMode string `json:"default_sync_mode,omitempty"`
 }
 
 // ScanExcludeKey is the storage config key holding a storage's scan
@@ -457,6 +469,7 @@ func Descriptors() []Descriptor {
 	for i := range out {
 		if drv, err := Get(out[i].Driver); err == nil {
 			out[i].Capabilities = ComputeCapabilities(drv)
+			out[i].WatchAgent = WatchAgentApplies(drv)
 		}
 		out[i].ScanFields = ScanFields()
 	}

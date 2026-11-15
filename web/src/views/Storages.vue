@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRouter, RouterLink } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Database, GripVertical, Plus, RefreshCcw, RotateCcw } from 'lucide-vue-next';
+import { Database, Eye, GripVertical, Plus, RefreshCcw, RotateCcw } from 'lucide-vue-next';
 
 import { useStoragesStore } from '@/stores/storages';
 import { useSyncNow } from '@/composables/useSyncNow';
@@ -50,6 +50,26 @@ const syncNow = useSyncNow();
 
 function syncOne(s: StorageRef) {
   void syncNow.press(s.id, s.name);
+}
+
+/* #351 - a local storage that polls (an install from before live watching
+ * became the default for local storages; nobody's storage is switched for
+ * them) carries the server's `sync_suggestion`. One click here switches it:
+ * the mode alone, the rest of the row as it is. The list is read again so the
+ * row says what the server now holds. */
+const switching = ref<number | null>(null);
+
+async function switchToLive(s: StorageRef) {
+  switching.value = s.id;
+  try {
+    await storages.update(s.id, { sync_mode: 'lazy' });
+    toast.success(t('storages.liveOffer.switched', { name: s.name }));
+    await storages.fetch();
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.generic')));
+  } finally {
+    switching.value = null;
+  }
 }
 
 async function confirmDelete() {
@@ -144,7 +164,8 @@ const columns = computed<DataColumn<StorageRef>[]>(() => [
         fileCountOf(s),
       )}`,
   },
-  { id: 'sync', label: t('storages.columns.sync'), width: 150 },
+  // Wide enough for the state and the #351 offer beside it.
+  { id: 'sync', label: t('storages.columns.sync'), width: 280 },
   { id: 'last_sync', label: t('storages.columns.lastSync'), width: 300 },
 ]);
 
@@ -284,12 +305,27 @@ onMounted(load);
                by the backend (handlers/storages.go), so the badge was naming
                the OPPOSITE mode to the one running. The state in words
                (syncStateLabel), not the wire value "ok". -->
-          <Badge v-if="storages.deleting(row.id)" tone="amber" dot data-testid="storage-sync-state">
-            {{ t('storages.deleting') }}
-          </Badge>
-          <Badge v-else :tone="syncTone(row.last_sync_state)" dot data-testid="storage-sync-state">
-            {{ syncStateLabel(row.last_sync_state, t) || t('storages.modeLabel.' + (row.sync_mode || 'poll')) }}
-          </Badge>
+          <!-- ONE root (lesson #377): the state, and the #351 offer beside it. -->
+          <div class="flex items-center gap-2 min-w-0 flex-wrap">
+            <Badge v-if="storages.deleting(row.id)" tone="amber" dot data-testid="storage-sync-state">
+              {{ t('storages.deleting') }}
+            </Badge>
+            <Badge v-else :tone="syncTone(row.last_sync_state)" dot data-testid="storage-sync-state">
+              {{ syncStateLabel(row.last_sync_state, t) || t('storages.modeLabel.' + (row.sync_mode || 'poll')) }}
+            </Badge>
+            <Button
+              v-if="row.sync_suggestion === 'lazy' && !storages.deleting(row.id)"
+              size="xs"
+              variant="outline"
+              :loading="switching === row.id"
+              :title="t('storages.liveOffer.body')"
+              :data-testid="`storage-live-offer-${row.id}`"
+              @click.stop="switchToLive(row)"
+            >
+              <Eye class="h-3.5 w-3.5" aria-hidden="true" />
+              {{ t('storages.liveOffer.switch') }}
+            </Button>
+          </div>
         </template>
 
         <template #cell-last_sync="{ row }">

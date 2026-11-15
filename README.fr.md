@@ -286,7 +286,7 @@ Toutes les fonctionnalités de l’explorateur en détail : [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![La page de connexion portant le thème de l’opérateur](https://filex.sh/shots/appearance/themed-signin-1440.3d21210a54da.png)
+![La page de connexion portant le thème de l’opérateur](https://filex.sh/shots/appearance/themed-signin-1440.58769eb1f1d4.png)
 
 <sub>…et la page de connexion, avant que quiconque ne se soit connecté</sub>
 
@@ -326,7 +326,13 @@ Toutes les fonctionnalités de l’explorateur en détail : [docs/FEATURES.md �
 **Tous les stockages dans une seule arborescence, et cette arborescence accessible depuis n’importe quoi.**
 
 - Montez côte à côte des disques locaux, S3, FTP, SFTP, WebDAV et des partages SMB/NAS, et
-  copiez ou coupez dans l’un pour coller dans un autre.
+  copiez ou coupez dans l’un pour coller dans un autre ; pour un stockage que filex ne livre pas,
+  installez une extension depuis le panneau d’administration ou depuis le lien d’une boutique
+  d’applications.
+- Ce qui est écrit sans passer par filex apparaît : un dossier local est surveillé en direct, donc
+  ce que le partage du NAS ou une autre application y écrit est listé dès l’ouverture de son
+  dossier, et non au prochain scan ; et quand le disque est sur une autre machine,
+  [filex-watch](docs/FILEX-WATCH.md) y tourne et signale en quelques secondes les dossiers qui changent.
 - Accédez à la même arborescence en **S3**, **SFTP**, **FTPS**, **NFSv3** et **WebDAV** :
   pointez `rclone`, `restic`, `aws s3`, WinSCP ou FileZilla vers elle. Les mêmes autorisations
   filex (par personne, groupe et dossier), la même corbeille et le même quota s’appliquent
@@ -334,15 +340,13 @@ Toutes les fonctionnalités de l’explorateur en détail : [docs/FEATURES.md �
   aux utilisateurs filex.
 - `filex mount` attache un serveur distant en HTTPS ordinaire : un dossier sous Linux, une
   lettre de lecteur sous Windows (macOS n’est pas pris en charge).
-- Pour un stockage que filex ne livre pas, installez une extension depuis le panneau
-  d’administration ou depuis le lien d’une boutique d’applications.
 
 Toutes les fonctionnalités de stockage et de protocoles en détail : [docs/FEATURES.md → Storage and protocols](docs/FEATURES.md#storage-and-protocols).
 
 <p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png" alt="Guide de connexion" width="860"></p>
 
 <details>
-<summary><b>Captures d’écran du stockage et des protocoles</b> - les guides de connexion, les clés d’API et une extension de stockage</summary>
+<summary><b>Captures d’écran du stockage et des protocoles</b> - les guides de connexion, les clés d’API, une extension de stockage et filex-watch</summary>
 
 <table>
 <tr>
@@ -355,7 +359,7 @@ Toutes les fonctionnalités de stockage et de protocoles en détail : [docs/FEA
 </td>
 <td width="50%" valign="top">
 
-![Clés d’API](https://filex.sh/shots/sidenav/apikeys-minted-1440.3d6279c2e261.png)
+![Clés d’API](https://filex.sh/shots/sidenav/apikeys-minted-1440.c7e147b4cebb.png)
 
 <sub>Clés d’API - créez les vôtres, dans l’explorateur ou dans une intégration (la session ou la clé d’une personne ; une intégration relayée par un proxy avec une seule clé partagée de type *app* n’a pas cette entrée)</sub>
 
@@ -374,6 +378,22 @@ Toutes les fonctionnalités de stockage et de protocoles en détail : [docs/FEA
 ![Extensions](https://filex.sh/shots/admin-plugins.6bd96bf65745.png)
 
 <sub>Un stockage qui n’est pas livré avec filex - installé comme extension dans **Extensions → Extensions de stockage**, il décrit son propre formulaire de configuration</sub>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![La carte filex-watch sur la page d’un stockage : une clé affichée une seule fois et les commandes qui installent l’agent](https://filex.sh/shots/filexwatch/filex-watch-key-1440.64f0c29c10da.png)
+
+<sub>filex-watch - une clé pour la machine à qui appartient le disque d’un stockage, affichée une seule fois, avec les commandes qui installent l’agent sous Linux, Docker, Windows ou macOS</sub>
+
+</td>
+<td width="50%" valign="top">
+
+![La carte filex-watch avec l’agent entendu : sa version, son hôte, son dossier et son dernier signalement](https://filex.sh/shots/filexwatch/filex-watch-1440.7e366ab5405b.png)
+
+<sub>La même carte une fois que l’agent se signale : ce que l’agent de chaque machine a dit en dernier, et quand</sub>
 
 </td>
 </tr>
@@ -412,7 +432,7 @@ Toutes les fonctionnalités de partage et de protection en détail : [docs/FEAT
 <tr>
 <td width="50%" valign="top">
 
-![Boîte de dialogue de partage](https://filex.sh/shots/share-modal.58825362c544.png)
+![Boîte de dialogue de partage](https://filex.sh/shots/share-modal.d6cc52c97dae.png)
 
 <sub>Partage - PIN, expiration, limite de téléchargements, `curl` en une ligne</sub>
 
@@ -444,7 +464,7 @@ Toutes les fonctionnalités de partage et de protection en détail : [docs/FEAT
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/admin-table-actions-1440.dadc9345981d.png)
+![Admin → Partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/admin-table-actions-1440.043e68a53922.png)
 
 <sub>Chaque tableau d’administration - un menu **Actions** épinglé par ligne, le même menu qu’ouvre le ⋮ de l’explorateur</sub>
 
@@ -533,7 +553,7 @@ Toutes les fonctionnalités pour les personnes et l’accès en détail : [docs
 <tr>
 <td width="50%" valign="top">
 
-![Le formulaire de connexion d’un compte verrouillé](https://filex.sh/shots/loginsecurity/login-locked-1440.c115aaa2f273.png)
+![Le formulaire de connexion d’un compte verrouillé](https://filex.sh/shots/loginsecurity/login-locked-1440.4c65585bf49a.png)
 
 <sub>…et ce que dit le formulaire de connexion d’un compte verrouillé, avec le compte à rebours du verrouillage sur son bouton</sub>
 
@@ -556,7 +576,7 @@ Toutes les fonctionnalités pour les personnes et l’accès en détail : [docs
 </td>
 <td width="50%" valign="top">
 
-![Le formulaire de connexion avec la vérification au-dessus de son bouton](https://filex.sh/shots/botprotection/login-captcha-dark-1440.5cf41f05dd02.png)
+![Le formulaire de connexion avec la vérification au-dessus de son bouton](https://filex.sh/shots/botprotection/login-captcha-dark-1440.77aef295650a.png)
 
 <sub>…et le formulaire de connexion, la vérification au-dessus de son bouton</sub>
 
@@ -565,7 +585,7 @@ Toutes les fonctionnalités pour les personnes et l’accès en détail : [docs
 <tr>
 <td width="50%" valign="top">
 
-![Page d’accueil de la démo](https://filex.sh/shots/demo-landing.4a147bc884c8.png)
+![Page d’accueil de la démo](https://filex.sh/shots/demo-landing.e484d8ad6b07.png)
 
 <sub>Page d’accueil de la démo</sub>
 
@@ -814,7 +834,7 @@ partage ordinaire.
 <tr>
 <td width="50%" valign="top">
 
-![Le document verrouillé, son panneau Signatures ouvert](https://filex.sh/shots/signing/sign-status-1440.daaf28c9f518.png)
+![Le document verrouillé, son panneau Signatures ouvert](https://filex.sh/shots/signing/sign-status-1440.eb318cc10a90.png)
 
 <sub>Tant que la demande est en cours - le document gelé pour tout le monde et, dans ses détails, qui a signé</sub>
 
@@ -1047,7 +1067,7 @@ limites et son guide.
 | Domaine | Ce que vous obtenez |
 |---|---|
 | **L’explorateur** | Une même mise en page dans l’application d’administration, l’application de bureau et chaque intégration : un panneau de navigation, des vues liste, grille et galerie, des onglets, des étiquettes personnelles et d’équipe, une palette de commandes ⌘K, des raccourcis clavier reconfigurables, de nouveaux documents depuis le menu **+ Nouveau** et des thèmes composés par l’opérateur ([Intégration](docs/INTEGRATION.md), [Thèmes](docs/INTEGRATION.md#themes)) |
-| **Stockage** | Disques locaux, S3, FTP, SFTP, WebDAV et SMB/NAS montés côte à côte, la copie et le déplacement de l’un à l’autre, et une extension pour tout le reste, depuis le panneau d’administration ou une boutique d’applications ([Stockage](docs/STORAGE.md), [Extensions de stockage](docs/PLUGINS.md)) |
+| **Stockage** | Disques locaux, S3, FTP, SFTP, WebDAV et SMB/NAS montés côte à côte, la copie et le déplacement de l’un à l’autre, et une extension pour tout le reste, depuis le panneau d’administration ou une boutique d’applications ; un petit agent, filex-watch, sur la machine à qui appartient un disque que filex atteint par le réseau, pour que les changements faits là-bas apparaissent aussitôt ([Stockage](docs/STORAGE.md), [Extensions de stockage](docs/PLUGINS.md), [filex-watch](docs/FILEX-WATCH.md)) |
 | **Sans navigateur** | La même arborescence servie en S3, SFTP, FTPS, NFSv3 et WebDAV - un déplacement ou une suppression faits par là sont aussi sûrs, à côté d’une analyse du stockage, que dans l’interface web - plus `filex mount` en HTTPS ([Protocoles](docs/PROTOCOLS.md)) |
 | **Connexion** | OIDC, LDAP / Active Directory, comptes Windows et Linux, limites de tentatives de connexion et une vérification anti-robot à la connexion et sur les formulaires publics - Turnstile ou reCAPTCHA, avec une preuve de travail locale quand le fournisseur ne répond pas ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [Comptes du système](docs/OS-LOGIN.md), [Protection anti-robot](docs/BOT-PROTECTION.md)) |
 | **Personnes et accès** | Rôles et autorisations par personne, groupes, accès par dossier et multilocataire natif ([Autorisations](docs/PERMISSIONS.md), [Groupes](docs/GROUPS.md), [Multilocataire](docs/MULTI-TENANCY.md)) |

@@ -285,7 +285,7 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 <tr>
 <td width="50%" valign="top">
 
-![Die Anmeldeseite trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-signin-1440.3d21210a54da.png)
+![Die Anmeldeseite trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-signin-1440.58769eb1f1d4.png)
 
 <sub>…und die Anmeldeseite, bevor sich irgendjemand angemeldet hat</sub>
 
@@ -325,7 +325,13 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 **Jeder Speicher in einem Baum, und dieser Baum ist von überall erreichbar.**
 
 - Binden Sie lokale Datenträger, S3, FTP, SFTP, WebDAV und SMB/NAS-Freigaben nebeneinander
-  ein, und kopieren oder schneiden Sie in einem aus und fügen Sie in einem anderen ein.
+  ein, und kopieren oder schneiden Sie in einem aus und fügen Sie in einem anderen ein; für
+  einen Speicher, den filex nicht mitliefert, installieren Sie ein Plug-in aus dem Adminbereich
+  oder über den Link eines App-Stores.
+- Was an filex vorbei geschrieben wird, erscheint: Ein lokaler Ordner wird live überwacht, also
+  wird, was die Freigabe des NAS oder eine andere App dort schreibt, beim Öffnen des Ordners
+  aufgelistet, nicht erst beim nächsten Scan; liegt die Festplatte auf einem anderen Rechner,
+  läuft dort [filex-watch](docs/FILEX-WATCH.md) und meldet geänderte Ordner in Sekunden.
 - Erreichen Sie denselben Baum als **S3**, **SFTP**, **FTPS**, **NFSv3** und **WebDAV**:
   Lassen Sie `rclone`, `restic`, `aws s3`, WinSCP oder FileZilla darauf zeigen. Es gelten
   dieselben filex-Berechtigungen (pro Person, Gruppe und Ordner), derselbe Papierkorb und
@@ -333,15 +339,13 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
   werden keinen filex-Benutzern zugeordnet.
 - `filex mount` bindet einen entfernten Server über gewöhnliches HTTPS ein: als Ordner unter
   Linux, als Laufwerksbuchstabe unter Windows (macOS wird nicht unterstützt).
-- Für einen Speicher, den filex nicht mitliefert, installieren Sie ein Plug-in aus dem
-  Adminbereich oder über den Link eines App-Stores.
 
 Alle Funktionen zu Speicher und Protokollen im Detail: [docs/FEATURES.md → Storage and protocols](docs/FEATURES.md#storage-and-protocols).
 
 <p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png" alt="So verbinden Sie sich" width="860"></p>
 
 <details>
-<summary><b>Screenshots zu Speicher und Protokollen</b> - die Verbindungsanleitungen, API-Schlüssel und ein Speicher-Plug-in</summary>
+<summary><b>Screenshots zu Speicher und Protokollen</b> - die Verbindungsanleitungen, API-Schlüssel, ein Speicher-Plug-in und filex-watch</summary>
 
 <table>
 <tr>
@@ -354,7 +358,7 @@ Alle Funktionen zu Speicher und Protokollen im Detail: [docs/FEATURES.md → Sto
 </td>
 <td width="50%" valign="top">
 
-![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.3d6279c2e261.png)
+![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.c7e147b4cebb.png)
 
 <sub>API-Schlüssel - erstellen Sie Ihre eigenen, im Explorer oder in einer Einbettung (Sitzung oder Schlüssel einer Person; eine Einbettung, die über einen Proxy mit einem gemeinsamen *App*-Schlüssel läuft, bekommt diesen Eintrag nicht)</sub>
 
@@ -373,6 +377,22 @@ Alle Funktionen zu Speicher und Protokollen im Detail: [docs/FEATURES.md → Sto
 ![Plug-ins](https://filex.sh/shots/admin-plugins.6bd96bf65745.png)
 
 <sub>Ein Speicher, den filex nicht mitliefert - unter **Plug-ins → Speicher-Plug-ins** als Plug-in installiert, das sein eigenes Konfigurationsformular beschreibt</sub>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![Die filex-watch-Karte auf der Seite eines Speichers: ein nur einmal angezeigter Schlüssel und die Befehle, die den Agenten installieren](https://filex.sh/shots/filexwatch/filex-watch-key-1440.64f0c29c10da.png)
+
+<sub>filex-watch - ein Schlüssel für den Rechner, dem die Festplatte eines Speichers gehört, nur einmal angezeigt, mit den Befehlen, die den Agenten unter Linux, Docker, Windows oder macOS installieren</sub>
+
+</td>
+<td width="50%" valign="top">
+
+![Die filex-watch-Karte mit gemeldetem Agenten: Version, Host, Ordner und letzte Meldung](https://filex.sh/shots/filexwatch/filex-watch-1440.7e366ab5405b.png)
+
+<sub>Dieselbe Karte, sobald der Agent meldet: was der Agent jedes Rechners zuletzt gesagt hat, und wann</sub>
 
 </td>
 </tr>
@@ -411,7 +431,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.58825362c544.png)
+![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.d6cc52c97dae.png)
 
 <sub>Freigaben - PIN, Ablaufdatum, Download-Limit, `curl`-Einzeiler</sub>
 
@@ -443,7 +463,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.dadc9345981d.png)
+![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.043e68a53922.png)
 
 <sub>Jede Tabelle im Adminbereich - ein angeheftetes Menü **Aktionen** pro Zeile, dasselbe Menü, das sich über das ⋮ des Explorers öffnet</sub>
 
@@ -532,7 +552,7 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <tr>
 <td width="50%" valign="top">
 
-![Das Anmeldeformular bei einem gesperrten Konto](https://filex.sh/shots/loginsecurity/login-locked-1440.c115aaa2f273.png)
+![Das Anmeldeformular bei einem gesperrten Konto](https://filex.sh/shots/loginsecurity/login-locked-1440.4c65585bf49a.png)
 
 <sub>…und was das Anmeldeformular eines gesperrten Kontos sagt, während es die Sperre auf seiner Schaltfläche herunterzählt</sub>
 
@@ -555,7 +575,7 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 </td>
 <td width="50%" valign="top">
 
-![Das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche](https://filex.sh/shots/botprotection/login-captcha-dark-1440.5cf41f05dd02.png)
+![Das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche](https://filex.sh/shots/botprotection/login-captcha-dark-1440.77aef295650a.png)
 
 <sub>…und das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche</sub>
 
@@ -564,7 +584,7 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <tr>
 <td width="50%" valign="top">
 
-![Startseite der Demo](https://filex.sh/shots/demo-landing.4a147bc884c8.png)
+![Startseite der Demo](https://filex.sh/shots/demo-landing.e484d8ad6b07.png)
 
 <sub>Startseite der Demo</sub>
 
@@ -805,7 +825,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 <tr>
 <td width="50%" valign="top">
 
-![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.daaf28c9f518.png)
+![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.eb318cc10a90.png)
 
 <sub>Solange es im Umlauf ist - das Dokument ist für alle eingefroren, in seinen Details steht, wer unterschrieben hat</sub>
 
@@ -1037,7 +1057,7 @@ gibt jeder Funktion einen Eintrag mit ihren Grenzen und ihrer Anleitung.
 | Bereich | Was Sie bekommen |
 |---|---|
 | **Der Explorer** | Ein einziges Layout im Adminbereich, in der Desktop-App und in jeder Einbettung: ein Navigationsbereich, Listen-, Raster- und Galerieansicht, Tabs, persönliche Tags und Team-Tags, eine ⌘K-Befehlspalette, neu belegbare Tastenkürzel, neue Dokumente aus dem Menü **+ Neu** und Designs, die ein Betreiber zusammenstellt ([Integration](docs/INTEGRATION.md), [Designs](docs/INTEGRATION.md#themes)) |
-| **Speicher** | Lokale Datenträger, S3, FTP, SFTP, WebDAV und SMB/NAS nebeneinander eingebunden, Kopieren und Verschieben zwischen ihnen und ein Plug-in für alles andere, aus dem Adminbereich oder aus einem App-Store ([Speicher](docs/STORAGE.md), [Speicher-Plug-ins](docs/PLUGINS.md)) |
+| **Speicher** | Lokale Datenträger, S3, FTP, SFTP, WebDAV und SMB/NAS nebeneinander eingebunden, Kopieren und Verschieben zwischen ihnen und ein Plug-in für alles andere, aus dem Adminbereich oder aus einem App-Store; ein kleiner Agent, filex-watch, auf dem Rechner, dem eine über das Netz erreichte Festplatte gehört, damit Änderungen dort sofort erscheinen ([Speicher](docs/STORAGE.md), [Speicher-Plug-ins](docs/PLUGINS.md), [filex-watch](docs/FILEX-WATCH.md)) |
 | **Ohne Browser** | Derselbe Baum, bereitgestellt als S3, SFTP, FTPS, NFSv3 und WebDAV - ein Verschieben oder Löschen dort ist neben einem Speicher-Scan so sicher wie eines in der Weboberfläche -, dazu `filex mount` über HTTPS ([Protokolle](docs/PROTOCOLS.md)) |
 | **Anmeldung** | OIDC, LDAP / Active Directory, Windows- und Linux-Konten, die Begrenzung der Anmeldeversuche und eine Bot-Prüfung bei der Anmeldung und den öffentlichen Formularen - Turnstile oder reCAPTCHA, mit einem lokalen Proof of Work, wenn der Anbieter nicht erreichbar ist ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [Betriebssystemkonten](docs/OS-LOGIN.md), [Bot-Schutz](docs/BOT-PROTECTION.md)) |
 | **Personen und Zugriff** | Rollen und Berechtigungen pro Person, Gruppen, Zugriff pro Ordner und native Mandantenfähigkeit ([Berechtigungen](docs/PERMISSIONS.md), [Gruppen](docs/GROUPS.md), [Mandantenfähigkeit](docs/MULTI-TENANCY.md)) |

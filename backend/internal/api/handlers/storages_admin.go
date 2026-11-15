@@ -305,6 +305,19 @@ func (h *StoragesAdmin) SyncRuns(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Each run's peak memory (#353), read apart from the common run columns
+	// (db.SyncRunMemorySQL). Best effort: the list stands without it.
+	if len(runs) > 0 {
+		ids := make([]int64, len(runs))
+		for i, run := range runs {
+			ids[i] = run.ID
+		}
+		if peaks, err := h.Store.SyncRunPeaks(r.Context(), ids); err == nil {
+			for _, run := range runs {
+				run.PeakMemBytes = peaks[run.ID]
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entries": runs,
 		"total":   total,

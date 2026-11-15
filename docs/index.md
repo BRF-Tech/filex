@@ -80,6 +80,11 @@ features:
     details: Point rclone, restic, aws s3, WinSCP, FileZilla, a scanner that only learned FTP (once you allow plain FTP) or a media player that only learned NFS straight at filex - S3, SFTP, FTPS, NFS and WebDAV, all on the same tree with the same filex permissions and trash as the web UI (the POSIX bits and ACLs on the disk are not mapped to filex users).
     link: /PROTOCOLS
     linkText: Protocol docs
+  - icon: 👀
+    title: Changes made behind filex's back show up
+    details: A new local storage is watched live - a file that a download client, another container or the NAS's own share writes into its folder appears when the folder is opened, not at the next scan, and on a network filesystem every opened folder is read from the disk. When the disk sits on another machine, filex-watch runs there and reports the folders that change, so the change reaches filex in seconds. The storage form says what a scan interval would cost, measured on the last scan.
+    link: /FILEX-WATCH
+    linkText: filex-watch docs
   - icon: 🧩
     title: Teach it a new storage
     details: A backend filex has never heard of is a separate program you install from the admin panel or from an app store's link - it describes its own config form, and its driver then behaves like any built-in one. Any language; a Go SDK makes it three methods. Every capability it claims is probed before anyone can build a storage on it, and a store lists only a plugin its own validator checked, with every build pinned and signed.

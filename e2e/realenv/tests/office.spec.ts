@@ -63,7 +63,9 @@ async function seed(api: APIRequestContext, name: string) {
   if (!list.some((s) => s.name === STORE)) {
     await okJSON(
       await api.post('/api/admin/storages', {
-        data: { name: STORE, driver: 'local', mount_path: '/srv/files', config: { path: '/srv/files' }, enabled: true, read_only: false },
+        // sync_mode: polled, as this spec was written (#351: local storages
+        // default to live watching since 0.61).
+        data: { name: STORE, driver: 'local', mount_path: '/srv/files', sync_mode: 'poll', config: { path: '/srv/files' }, enabled: true, read_only: false },
       }),
       'a local storage',
     );

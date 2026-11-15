@@ -67,9 +67,21 @@ ARCHIVE_RE = re.compile(
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEMVER_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+# filex-watch, the agent beside a storage's disk, has a release line of its
+# own in the same repository (`filex-watch-v0.1.0`, docs/FILEX-WATCH.md). Its
+# releases are not filex versions: a server that read one as an update would
+# offer to install "filex-watch-v0.1.0" from an image that does not exist.
+AGENT_TAG_PREFIX = "filex-watch-v"
+
 # Every layout the migrations have lived in: backend/db/migrations/<dialect>/
 # today, a flat migrations/ directory in the earliest releases.
 MIGRATION_FILE = re.compile(r"(?:^|/)migrations/(?:[a-z]+/)?(\d{5}_[^/]+\.sql)$")
+
+
+def is_filex_release(rel: dict) -> bool:
+    """A published filex release: not a draft, not a prerelease, not the agent's."""
+    tag = rel.get("tag_name") or ""
+    return not rel.get("draft") and not rel.get("prerelease") and not tag.startswith(AGENT_TAG_PREFIX)
 
 
 def git(repo_dir: str, *args: str) -> str:
@@ -346,13 +358,11 @@ def main() -> int:
         if len(batch) < 100 or (args.limit and len(releases) >= args.limit):
             break
         page += 1
-    published = {
-        r["tag_name"].lstrip("v") for r in releases if not r.get("draft") and not r.get("prerelease")
-    }
+    published = {r["tag_name"].lstrip("v") for r in releases if is_filex_release(r)}
     migrations = carry_unpublished(migrations, local_tags, published)
     out = []
     for rel in releases:
-        if rel.get("draft") or rel.get("prerelease"):
+        if not is_filex_release(rel):
             continue
         if args.limit and len(out) >= args.limit:
             break

@@ -130,6 +130,7 @@ export default defineConfig({
         items: [
           { text: 'Storage', link: '/STORAGE' },
           { text: 'Lazy catalogue', link: '/LAZY-CATALOGUE' },
+          { text: 'filex-watch (a disk on another machine)', link: '/FILEX-WATCH' },
           { text: 'Storage plugins', link: '/PLUGINS' },
           { text: 'Apps (app plugins)', link: '/APP-PLUGINS' },
           { text: 'Writing an app plugin', link: '/PLUGIN-KIT' },

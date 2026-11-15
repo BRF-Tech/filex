@@ -1,0 +1,12 @@
+{
+  "server": "https://files.example.com",
+  "storage": 7,
+  "root": "/srv/share",
+  "key_file": "/etc/filex-watch/key",
+  "insecure_skip_tls_verify": false,
+  "quiet": "1s",
+  "max_wait": "10s",
+  "heartbeat": "60s",
+  "subtree_resync": "15m",
+  "queue_max": 4096
+}

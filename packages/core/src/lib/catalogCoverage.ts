@@ -40,6 +40,12 @@ export interface CatalogCoverage {
   filler?: string;
   held_back_folders?: number;
   reconciles?: number;
+  /** Why a lazy storage watches nothing (#351): `network_fs` (a network
+   *  filesystem or a FUSE mount), `unknown_fs`, `unavailable`. Every opened
+   *  folder is then read from the disk. */
+  watch_off?: string;
+  /** The network filesystem's name when `watch_off` is `network_fs`. */
+  fs_type?: string;
 }
 
 /** One entry of a listing's `storage_info`. */

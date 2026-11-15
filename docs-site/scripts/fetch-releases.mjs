@@ -322,6 +322,17 @@ function bodyOf(raw) {
   return neutralize(typeof raw.body === 'string' ? raw.body : '', rules)
 }
 
+/**
+ * A release this page lists: published, and filex's own. filex-watch, the
+ * agent beside a storage's disk, has a release line of its own in the same
+ * repository (`filex-watch-v0.1.0`, docs/FILEX-WATCH.md); its notes are in
+ * that page, not among filex's versions.
+ */
+export const AGENT_TAG_PREFIX = 'filex-watch-v'
+export function isFilexRelease(raw) {
+  return !!raw && !raw.draft && !!raw.tag_name && !String(raw.tag_name).startsWith(AGENT_TAG_PREFIX)
+}
+
 export function normalise(raw) {
   const body = bodyOf(raw)
   const { groups, headline, found } = parseChangelog(body)
@@ -728,7 +739,7 @@ async function main() {
     try {
       const raw = await fetchReleases()
       const fetched = raw
-        .filter((r) => !r.draft && r.tag_name)
+        .filter(isFilexRelease)
         .map(normalise)
         .sort((a, b) => String(b.date).localeCompare(String(a.date)))
       const cachedCount = cached && Array.isArray(cached.releases) ? cached.releases.length : 0

@@ -15,7 +15,7 @@ import { formatNumber } from '@/lib/format';
 
 const props = defineProps<{ catalogue: CatalogCoverage }>();
 
-const { t, locale } = useI18n();
+const { t, te, locale } = useI18n();
 
 const done = computed(() => props.catalogue.catalogued_folders ?? 0);
 const pending = computed(() => props.catalogue.pending_folders ?? 0);
@@ -26,6 +26,14 @@ const behavior = computed(() =>
 const filler = computed(() => {
   const s = props.catalogue.filler || 'off';
   return t('storages.catalog.fillerState.' + s);
+});
+/** #351: why nothing is watched (a network filesystem...), in words; '' while
+ *  the watcher runs. Every opened folder is then read from the disk. */
+const watchOff = computed(() => {
+  const why = props.catalogue.watch_off;
+  if (!why) return '';
+  const key = 'storages.catalog.watchOff.' + why;
+  return te(key) ? t(key) : t('storages.catalog.watchOff.unavailable');
 });
 const summary = computed(() => {
   if (props.catalogue.complete) return t('storages.catalog.complete');
@@ -69,8 +77,13 @@ const summary = computed(() => {
       </div>
       <div>
         <p class="text-xs text-zinc-500">{{ t('storages.catalog.watched') }}</p>
-        <p class="font-semibold" data-testid="storage-catalog-watched">
+        <p
+          class="font-semibold"
+          :class="watchOff ? 'text-amber-600 dark:text-amber-400' : ''"
+          data-testid="storage-catalog-watched"
+        >
           {{
+            watchOff ||
             t('storages.catalog.watchedOf', {
               n: formatNumber(catalogue.watched_folders ?? 0, locale),
               max: formatNumber(catalogue.max_watches ?? 0, locale),

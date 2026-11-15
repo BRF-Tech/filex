@@ -321,17 +321,17 @@
     "fileCount": "{n} dosya | {n} dosya",
     "notYetSynced": "Henüz senkron çalışmadı",
     "modeLabel": {
-      "fsnotify": "Canlı izleme",
+      "fsnotify": "Tüm depoyu izle",
       "poll": "Periyodik tarama",
       "ondemand": "İstek üzerine",
       "push": "Desteklenmiyor (yoklamaya düşüyor)",
-      "lazy": "Tembel katalog"
+      "lazy": "Canlı izleme"
     },
     "modeHelp": {
       "poll": "filex, dışarıda yapılan değişiklikleri bulmak için her tarama aralığında deponun tamamını dolaşır.",
-      "fsnotify": "filex depoda dışarıda yapılan değişiklikleri izler ve her değişiklik dalgasından sonra depoyu yeniden dolaşır.",
+      "fsnotify": "filex deponun tamamını dışarıda yapılan değişiklikler için izler ve her değişiklik dalgasından sonra deponun tamamını yeniden dolaşır.",
       "ondemand": "filex depoyu yalnız Şimdi senkronize et düğmesine bastığınızda dolaşır.",
-      "lazy": "Önceden dolaşma yok: birinin açtığı klasör doğrudan depodan listelenir ve ilk o kataloglanır. Kalanı arka planda ya da yalnız açıldıkça kataloglanır (aşağıda). Kimsenin izlemediği klasörler her tarama aralığında yeniden denetlenir."
+      "lazy": "Önceden dolaşma yok: birinin açtığı klasör doğrudan depodan listelenir, ilk o kataloglanır ve sonra izlenir; böylece filex dışında yazılan bir dosya, klasörü açıldığında görünür. Kalanı arka planda ya da yalnız açıldıkça kataloglanır (aşağıda). Kimsenin izlemediği klasörler her tarama aralığında yeniden denetlenir. Ağ dosya sisteminde hiçbir şey izlenmez; açılan her klasör depodan okunur."
     },
     "addNew": "Depo ekle",
     "newTitle": "Yeni depo ekle",
@@ -353,7 +353,7 @@
       "namePlaceholder": "Kişisel fotoğraflar",
       "readOnly": "Salt okunur mount",
       "syncInterval": "Tarama aralığı (dakika)",
-      "syncIntervalHint": "filex bu depoyu dışarıdan yapılan değişiklikler için ne sıklıkla tarasın (yoklama modu). Sunucu varsayılanı (15 dakika) için boş bırakın. Büyük ve seyrek değişen bir depo uzun aralıkla daha rahattır; aralığını aşan bir tarama ikinci kez başlatılmaz.",
+      "syncIntervalHint": "Periyodik tarama: filex, dışarıda yapılan değişiklikler için deponun tamamını ne sıklıkla dolaşsın; aralığını aşan bir tarama ikinci kez başlatılmaz. Canlı izleme: kimsenin açık tutmadığı bir klasör yeniden okunmadan önce ne kadar eskiyebilir. Sunucu varsayılanı (15 dakika) için boş bırakın.",
       "rbac": "Öğe bazlı erişim denetimi (RBAC)",
       "rbacHint": "Açıkken yönetici olmayanlar yalnızca kendilerine yetki verilen dosya ve klasörleri görür (Klasör erişimi sayfasında listelenir). Kapalıyken herkes depoyu rolüne göre açar.",
       "path": "Dizin yolu",
@@ -455,6 +455,11 @@
         "converged": "Tamamlandı",
         "refreshing": "İzlenmeyen klasörler yeniden denetleniyor",
         "off": "Kapalı (yalnız açıldıkça)"
+      },
+      "watchOff": {
+        "network_fs": "Yok: ağ dosya sistemi",
+        "unknown_fs": "Yok: dosya sistemi tanınmadı",
+        "unavailable": "Yok: izleme kullanılamıyor"
       }
     },
     "actions": {
@@ -531,6 +536,33 @@
       "insecureSkipHostKey": "filex ile bu sunucunun arasına girebilen herkes onun yerine geçebilir: geçen her dosyayı okuyup değiştirebilir ve bu bağlantının parolasını ele geçirebilir.",
       "plainFtp": "FTPS olmadan parola ve her dosya ağda şifresiz gider: yoldaki herkes okuyup değiştirebilir.",
       "followSymlinks": "Bir bağlantı bu makinede herhangi bir yere gidebilir: bu depoyu kullanabilen herkes, bu klasörün ne kadar dışında olursa olsun bağlantının gösterdiği yere ulaşır, onu değiştirir ve siler."
+    },
+    "advice": {
+      "unmeasured": "Bu deponun ilk taraması bitince filex bir aralık önerir: tam bir taramanın ne kadar sürdüğünü ölçer.",
+      "ok": "Son tarama {entries} dosya ve klasör için {duration} sürdü: {interval} aralıkla taramalar depoyu zamanın yaklaşık {'%'}{pct} kadarında meşgul eder.",
+      "busy": "{interval} aralıkla taramalar depoyu zamanın yaklaşık {'%'}{pct} kadarında meşgul eder (son tarama {entries} dosya ve klasör için {duration} sürdü). Önerilen: {suggested}; bu, yükü {'%'}{target} altında tutar. Yine de kendi değerinizi kaydedebilirsiniz.",
+      "continuous": "Bir tarama {interval} süresinden uzun sürüyor (sonuncusu {entries} dosya ve klasör için {duration} sürdü), bu yüzden biri biter bitmez sonraki başlıyor: depo sürekli taranıyor. Önerilen: {suggested}; bu, yükü {'%'}{target} altında tutar. Yine de kendi değerinizi kaydedebilirsiniz.",
+      "lazy": "Canlı izlemede bu aralık, kimsenin açık tutmadığı bir klasörün filex onu yeniden okumadan önce ne kadar eskiyebileceğidir; izlemelerin altındaki güvenlik ağıdır. Bu geçiş depo kullanılırken yavaşlar ve filex onu tek bir tarama olarak ölçmez; bu yüzden burada yük tahmini yoktur.",
+      "unused": "Bu mod zamanlanmış tarama yapmaz; aralık kullanılmaz.",
+      "apply": "{interval} kullan",
+      "memoryContainer": "Son tarama sırasında filex {peak} bellek kullandı; bu, konteynerinin kullanabileceği {limit} belleğin {'%'}{pct} kadarı. Bellek biterse sistem filex'i durdurur. Konteynere daha fazla bellek verin ya da büyük klasörleri taramanın dışında bırakın.",
+      "memoryHost": "Son tarama sırasında filex {peak} bellek kullandı; bu, bu makinenin {limit} belleğinin {'%'}{pct} kadarı. Bellek biterse sistem filex'i durdurur. Bellek ekleyin ya da büyük klasörleri taramanın dışında bırakın."
+    },
+    "liveOffer": {
+      "title": "Canlı izleme",
+      "body": "Bu depo her tarama aralığında baştan sona taranıyor; filex dışında klasörüne yazılan bir dosya bir sonraki taramaya kadar görünmez. Canlı izlemede klasör açıldığında depodan okunur ve ardından izlenir; böyle dosyalar hemen görünür. Tarama aralığı güvenlik ağı olarak kalır.",
+      "switch": "Canlı izlemeye geç",
+      "switched": "{name} artık canlı izleme kullanıyor."
+    },
+    "networkFs": {
+      "title": "Ağ dosya sistemi",
+      "titleTyped": "Ağ dosya sistemi ({type})",
+      "body": {
+        "lazy": "Başka makinelerde yapılan değişiklikler burada filex'in izlemelerine hiç ulaşmaz; bu yüzden her klasör açıldığında depodan okunur. Değişiklikleri anında görmek için diskin bulunduğu makineye filex-watch kurun.",
+        "fsnotify": "Bu depo ağdan bağlı: başka makinelerde yapılan değişiklikler filex'in izlemelerine hiç ulaşmaz; bu yüzden filex tüm depoyu izlemek yerine onu tarama aralığıyla tarar. Değişiklikleri anında görmek için diskin bulunduğu makineye filex-watch kurun.",
+        "scan": "Başka makinelerde yapılan değişiklikler bir sonraki taramada bulunur. Onları anında görmek için diskin bulunduğu makineye filex-watch kurun."
+      },
+      "docs": "filex-watch nasıl kurulur"
     }
   },
   "users": {
@@ -1154,6 +1186,7 @@
     "wholeStorageOf": "{storage} (tüm depo)"
   },
   "apiMcp": {
+    "watchKey": "filex-watch, {id} numaralı depo",
     "title": "API / MCP",
     "subtitle": "Yapay zekâ ajanları için API anahtarları ve MCP bağlantısı",
     "newToken": "Yeni API anahtarı",
@@ -1249,7 +1282,8 @@
       "added": "Eklendi",
       "updated": "Güncellendi",
       "deleted": "Silindi",
-      "duration": "Süre"
+      "duration": "Süre",
+      "peakMemory": "En yüksek bellek"
     },
     "noResults": "Senkron kaydı yok",
     "state": {
@@ -1259,6 +1293,40 @@
       "aborted": "Durduruldu",
       "pending": "Bekliyor"
     }
+  },
+  "storageWatch": {
+    "title": "Başka makinedeki değişiklikler (filex-watch)",
+    "hint": "Bu deponun diski başka bir makinedeyse (filex'in ağ üzerinden eriştiği bir NAS paylaşımı, bir SFTP deposunun gösterdiği klasör) filex orada yazılanları bir sonraki senkrona kadar görmez. O makineye filex-watch kurun: değişen klasörleri bildirir, filex yalnız o klasörlere bakar. Disk bu makinedeyse Canlı izleme yeter.",
+    "storageNumber": "Depo numarası: {id}",
+    "docs": "Kurulum ve sorun giderme",
+    "keyName": "Hangi makine için",
+    "keyNamePlaceholder": "ör. nas01",
+    "create": "Anahtar oluştur",
+    "made": "Anahtar oluşturuldu",
+    "shownOnce": "Anahtar yalnız bu kez gösterilir: şimdi kopyalayın. Aşağıdaki komutların oluşturduğu anahtar dosyasına girer.",
+    "copiedIt": "Kopyaladım",
+    "full": "Bu deponun {max} anahtarı var, en fazla bu kadar olabilir. Önce birini geri alın.",
+    "empty": "Henüz filex-watch anahtarı yok. Bu deponun diskinin bulunduğu makine için bir tane oluşturun.",
+    "cols": {
+      "name": "Ad",
+      "agent": "Ajan",
+      "seen": "Son rapor"
+    },
+    "madeBy": "Oluşturan: {who}",
+    "noAgent": "filex başladığından beri rapor yok",
+    "never": "Hiç",
+    "revoke": "Geri al",
+    "revokeConfirm": "{name} anahtarı geri alınsın mı? Onu kullanan ajanın bir sonraki raporu reddedilir.",
+    "revoked": "Anahtar geri alındı",
+    "install": "Diskin bulunduğu makineye kurun",
+    "platform": {
+      "linux": "Linux (systemd)",
+      "docker": "Docker",
+      "windows": "Windows",
+      "macos": "macOS"
+    },
+    "replaceBoth": "PASTE-THE-KEY-HERE yerine anahtarı (oluşturulduğu an bir kez gösterilir), /path/to/the/folder yerine de o makinede bu depo olan klasörü yazın.",
+    "replaceFolder": "/path/to/the/folder yerine o makinede bu depo olan klasörü yazın."
   },
   "shares": {
     "revokedOn": "İptal edildi · {date}",
@@ -1697,7 +1765,7 @@
     "creds": "Demo hesabı: {email} · parola: {password}",
     "sandbox": "Ortak deneme alanı - her gece sıfırlanır; burada depolama, eklenti ve uygulamalar kapalıdır.",
     "adminHint": "Burada yönetim paneli her hesap için salt okunur - gösterdiklerini değiştirmek için kendi filex'inizi çalıştırın.",
-    "alsoIncluded": "Ayrıca: uygulamalar - izin incelemesinden geçerek kurulan WebAssembly eklentileri, e-İmza, Dönüştür, ofis düzenleyici, filextext ve draw.io ile birlikte · izin verdiğiniz bir uygulamayla bir dosyayı birlikte düzenleme ya da şifreli bir klasördeki dosyayı tarayıcınızda çözülmüş olarak açma · dil paketleri ve sağdan sola yerleşim · Görünüm ekranından kurum temaları · oluşturduğunuz bağlantılar, Paylaştıklarım'da · yükleyiciler - ShareX, curl ya da bir betik için, her yüklemeye bir bağlantıyla yanıt veren bir anahtar · düzenlenebilir bir şablon olarak her e-posta ve herkese açık sayfa · kişisel ve takım etiketleri · sembolik bağlantılı klasörler · klasör başına hatırlanan görünüm ve sıralama · roller, gruplar ve kişiye özel istisnalar, dosya ve klasör bazında erişim ve uygulamaların kendi izinleri · her kiracının kendi realm'iyle (oturum açma adıyla) çok kiracılık; kiracı kendi oturum açma sağlayıcılarını, alan adını ve sertifikasını kendisi yönetir · OIDC SSO, LDAP / Active Directory ve Windows ya da Linux hesabıyla oturum açma · IP izin listesiyle giriş denemesi sınırı · yerinde görüntüleyiciler ve düzenleyiciler, ofis düzenleyici uygulamasında ya da ONLYOFFICE ile Office belgeleri · ofis belgesi, SVG, HEIC, metin ve arşiv küçük resimleri, içine en son gelen dosyalarla çizilen klasörler · Varsayılan uygulamalar: bir dosya türünü hangi uygulamanın açacağı · + Yeni menüsünden belge oluşturma - Markdown, metin, CSV ve kod her yerde; Word, Excel, PowerPoint ve OpenDocument ise ONLYOFFICE bağlıyken ya da ofis düzenleyici uygulaması kuruluyken · tüm seçimi tek akışlı arşiv olarak indirme · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
+    "alsoIncluded": "Ayrıca: uygulamalar - izin incelemesinden geçerek kurulan WebAssembly eklentileri, e-İmza, Dönüştür, ofis düzenleyici, filextext ve draw.io ile birlikte · izin verdiğiniz bir uygulamayla bir dosyayı birlikte düzenleme ya da şifreli bir klasördeki dosyayı tarayıcınızda çözülmüş olarak açma · dil paketleri ve sağdan sola yerleşim · Görünüm ekranından kurum temaları · oluşturduğunuz bağlantılar, Paylaştıklarım'da · yükleyiciler - ShareX, curl ya da bir betik için, her yüklemeye bir bağlantıyla yanıt veren bir anahtar · düzenlenebilir bir şablon olarak her e-posta ve herkese açık sayfa · kişisel ve takım etiketleri · sembolik bağlantılı klasörler · klasör başına hatırlanan görünüm ve sıralama · roller, gruplar ve kişiye özel istisnalar, dosya ve klasör bazında erişim ve uygulamaların kendi izinleri · her kiracının kendi realm'iyle (oturum açma adıyla) çok kiracılık; kiracı kendi oturum açma sağlayıcılarını, alan adını ve sertifikasını kendisi yönetir · OIDC SSO, LDAP / Active Directory ve Windows ya da Linux hesabıyla oturum açma · IP izin listesiyle giriş denemesi sınırı · yerinde görüntüleyiciler ve düzenleyiciler, ofis düzenleyici uygulamasında ya da ONLYOFFICE ile Office belgeleri · ofis belgesi, SVG, HEIC, metin ve arşiv küçük resimleri, içine en son gelen dosyalarla çizilen klasörler · Varsayılan uygulamalar: bir dosya türünü hangi uygulamanın açacağı · + Yeni menüsünden belge oluşturma - Markdown, metin, CSV ve kod her yerde; Word, Excel, PowerPoint ve OpenDocument ise ONLYOFFICE bağlıyken ya da ofis düzenleyici uygulaması kuruluyken · tüm seçimi tek akışlı arşiv olarak indirme · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · canlı izlenen yerel depolar ve başka bir makinedeki disk için filex-watch · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
     "features": {
       "storageTitle": "6 depolama sürücüsü, iki yönde",
       "storageBody": "Yerel diskleri, S3'ü, SFTP'yi, WebDAV'ı, FTP/FTPS'i ve SMB/NAS paylaşımlarını tek bir ağaçta yan yana bağlayın - sonra aynı ağaca S3, SFTP, FTPS, NFSv3 ya da WebDAV olarak geri erişin.",

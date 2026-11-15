@@ -360,6 +360,9 @@ async function main(expectedKid) {
       name: STORAGE,
       driver: 'local',
       mount_path: STORAGE_ROOT,
+      // #351: polled, as this scene was written; local storages default to
+      // live watching (lazy) since 0.61.
+      sync_mode: 'poll',
       config: { path: STORAGE_ROOT },
       enabled: true,
     });

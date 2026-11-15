@@ -85,6 +85,16 @@ func NewWithInterval(store db.Store, fallback time.Duration) *Worker {
 	}
 }
 
+// DefaultInterval is the cadence a storage with no interval of its own is
+// scanned at (FILEX_SYNC_INTERVAL, else 15 minutes) - what an empty interval
+// field on the storage form means.
+func (w *Worker) DefaultInterval() time.Duration {
+	if w == nil || w.fallback <= 0 {
+		return DefaultPollInterval
+	}
+	return w.fallback
+}
+
 // AttachIndex wires a Bleve index into the worker so each sync upsert
 // also lands as a search document. Without this, search only knows
 // about whatever the admin's `Rebuild` button has flushed.

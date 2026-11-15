@@ -29,12 +29,17 @@ func NewStorageDrivers() *StorageDrivers { return &StorageDrivers{} }
 // A driver a storage may be catalogued lazily on (model.LazyDrivers) also
 // carries `lazy_fields`, the settings of sync_mode `lazy`; the storage form
 // offers that mode only where they are (docs/LAZY-CATALOGUE.md).
+//
+// Every driver carries `default_sync_mode`, the mode a new storage on it gets
+// (model.DefaultSyncModeFor, task #351): the new-storage form starts there,
+// so the form and the API cannot disagree about the default.
 func (h *StorageDrivers) List(w http.ResponseWriter, r *http.Request) {
 	out := storage.Descriptors()
 	for i := range out {
 		if model.ValidateSyncModeFor(model.SyncModeLazy, out[i].Driver) == nil {
 			out[i].LazyFields = storage.LazyFields()
 		}
+		out[i].DefaultSyncMode = string(model.DefaultSyncModeFor(out[i].Driver))
 	}
 	writeJSON(w, http.StatusOK, out)
 }

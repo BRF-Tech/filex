@@ -705,6 +705,11 @@ func BuildRouter(d *Deps) http.Handler {
 	uploadsH.AttachSearchIndex(d.Index)
 	uploadsH.AttachStaged(suh)
 	uploadsH.AttachBody(d.Body)
+	// filex-watch (0.61, #352): the door an agent on the machine that owns a
+	// storage's disk reports changed folders to, and the storage page's keys
+	// for it (handlers/storage_watch.go, docs/FILEX-WATCH.md).
+	watchH := handlers.NewStorageWatch(d.Store, d.Worker)
+	watchH.AttachTenants(tenants)
 	udh := handlers.NewUploadDelete(d.Store, d.StorageResolver)
 	udh.AttachMultiTenant(d.Cfg.MultiTenant)
 	udh.AttachACL(d.ACL)
@@ -1247,6 +1252,10 @@ func BuildRouter(d *Deps) http.Handler {
 	// and does nothing else); the deletion link is a credential for one
 	// delete, and its GET never deletes - link previews fetch every URL.
 	r.Post("/api/uploads", uploadsH.Upload)
+	// filex-watch's door: no session, a filex-watch key that no other route
+	// can even look up (apitoken.HashWatchKey); a leaked key makes filex look
+	// at one storage's folders sooner and does nothing else.
+	r.Post("/api/storages/{id}/watch/events", watchH.Events)
 	r.Get("/x/{token}", udh.Page)
 	r.Post("/x/{token}", udh.Delete)
 	// Selection archive, redeem half. Credential-free on purpose and by the
@@ -2485,12 +2494,21 @@ func BuildRouter(d *Deps) http.Handler {
 					// The order storages are listed in (issue #57). Static, so
 					// chi matches it before /{id}.
 					r.Put("/order", stg.SetOrder)
+					// What a scan interval would cost, judged from the last
+					// measured scan while the form is typed (#353). Static
+					// one for the new-storage form, before /{id}.
+					r.Get("/interval-advice", stg.IntervalAdvice)
+					r.Get("/{id}/interval-advice", stg.IntervalAdvice)
 					r.Get("/{id}", stg.Get)
 					r.Patch("/{id}", stg.Update)
 					r.Delete("/{id}", stg.Delete)
 					r.Post("/{id}/sync", stg.TriggerSync)
 					r.Get("/{id}/sync-runs", storagesAdmH.SyncRuns)
 					r.Get("/{id}/drift", storagesAdmH.Drift)
+					// The storage page's filex-watch card (0.61, #352).
+					r.Get("/{id}/watch", watchH.Status)
+					r.Post("/{id}/watch/keys", watchH.CreateKey)
+					r.Delete("/{id}/watch/keys/{key}", watchH.DeleteKey)
 				})
 				panelH.AddStorages(auth.RequireAdmin(http.HandlerFunc(stg.List)))
 
@@ -2877,6 +2895,9 @@ func BuildRouter(d *Deps) http.Handler {
 		ArchiveEngine: archiveEngine,
 		// The AI assistant settings tools: the page's settings and key.
 		Assistant: assistantCfg,
+		// The storage page's filex-watch card: the SAME handler as the
+		// panel's routes, so an agent's status is one record.
+		Watch: watchH,
 	})
 	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL)
 	aiMCP.AttachTenants(tenants)

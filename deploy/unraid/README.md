@@ -17,7 +17,7 @@ is the source: a change here is copied there.
 
 | Field | Required | Notes |
 |---|---|---|
-| Files (`/srv/files`) | yes | The share filex manages, for example `/mnt/user/files`. It becomes the first storage on the first start. |
+| Files (`/srv/files`) | yes | The share filex manages, for example `/mnt/user/files`. It becomes the first storage on the first start, with live watching. `/mnt/user` is Unraid's `shfs`, a FUSE filesystem a watch cannot be trusted on (a write through `/mnt/diskN`, the cache or the mover bypasses it), so filex reads every folder from the disk when it is opened: a file copied onto the share shows up when you open its folder ([Network filesystems](../../docs/LAZY-CATALOGUE.md#network-filesystems-no-watch-every-open-from-disk)). |
 | Public URL (`FILEX_PUBLIC_URL`) | yes | The address you open filex at, for example `http://192.168.1.10:5212` or your reverse-proxy URL. Share links and sign-in redirects are built from it. A path in it (`https://example.com/filex`) is the sub-path filex is served under, and the proxy must pass that path through ([Base path](../../docs/CONFIGURATION.md#base-path)). |
 | Data (`/data`) | yes | `/mnt/user/appdata/filex`: database (SQLite), search index, thumbnails. |
 | Admin Email / Admin Password | no | Empty: the administrator `admin@local` is created with a random password, printed once in the container log and saved to `/mnt/user/appdata/filex/.first-run.txt`. |

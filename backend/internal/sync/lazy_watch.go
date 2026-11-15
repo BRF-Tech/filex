@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path"
 	"path/filepath"
@@ -16,9 +17,35 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/metrics"
+	"github.com/brf-tech/filex/backend/internal/netfs"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 )
+
+// probeWatchFS says which filesystem a local storage's root is on; a test
+// swaps it. Bounded: a hung mount answers "unknown" after the wait instead of
+// holding the storage's start for ever.
+var probeWatchFS = func(root string) (netfs.Info, bool) {
+	return netfs.ProbeWithin(root, 5*time.Second)
+}
+
+// watchUntrusted is the one rule (task #351) for whether an OS watch on a local
+// storage's root can be trusted, for both modes that watch: the lazy catalogue
+// (watchSet.start) and `fsnotify` (loopFSNotify). A watch reports what passes
+// through this kernel, so on a network filesystem or a FUSE mount - or one
+// whose kind could not be told - a change made elsewhere never reaches it.
+// why is "" when the watch can be trusted, else WatchOffNetworkFS or
+// WatchOffUnknownFS; fsType names the network filesystem.
+func watchUntrusted(root string) (why, fsType string) {
+	info, ok := probeWatchFS(root)
+	switch {
+	case !ok:
+		return WatchOffUnknownFS, ""
+	case info.Network:
+		return WatchOffNetworkFS, info.Type
+	}
+	return "", ""
+}
 
 // watchSet is the lazy catalogue's fsnotify budget: watches on VISITED
 // folders only, at most cfg.maxWatches of them (least recently opened out
@@ -37,6 +64,10 @@ type watchSet struct {
 	byDir   map[string]*list.Element
 	lru     *list.List // front: most recently opened
 	refused bool       // the kernel said no once; logged once
+	// off says why there is no watcher at all (WatchOff*; "" while there is
+	// one), and fsType names the network filesystem that is why.
+	off    string
+	fsType string
 
 	// pending folders with events, waiting out the quiet period.
 	pmu     gosync.Mutex
@@ -65,18 +96,58 @@ func newWatchSet(lc *lazyCatalogue) *watchSet {
 	return ws
 }
 
+// start opens the storage's watcher. Without one (an error) nothing is ever
+// watched, so no folder is current and every folder somebody opens is read
+// from the disk - which is the point on a filesystem a watch cannot be trusted
+// on.
+//
+// ⚠⚠ A network filesystem (NFS, SMB/CIFS, 9P, a cluster filesystem) or a FUSE
+// mount gets no watcher (task #351). A watch reports what passes through
+// this kernel; a file another machine writes onto the share - or another
+// process writes past the FUSE layer, as on Unraid's /mnt/user - never does,
+// and a watched folder would be listed from the catalogue without it. A root
+// whose filesystem cannot be told (the probe failed or a hung mount did not
+// answer) is treated the same way.
 func (ws *watchSet) start() error {
 	if ws.root == "" {
+		ws.setOff(WatchOffUnavailable, "")
 		return errors.New("the storage has no local root")
+	}
+	switch why, fsType := watchUntrusted(ws.root); why {
+	case WatchOffUnknownFS:
+		ws.setOff(why, "")
+		return errors.New("could not tell which filesystem the storage is on, so a watch there cannot be trusted")
+	case WatchOffNetworkFS:
+		ws.setOff(why, fsType)
+		kind := fsType
+		if kind == "" {
+			kind = "network"
+		}
+		return fmt.Errorf("the storage is on a network filesystem (%s): a change made on another machine never reaches a watch", kind)
 	}
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
+		ws.setOff(WatchOffUnavailable, "")
 		return err
 	}
 	ws.mu.Lock()
 	ws.w = w
+	ws.off, ws.fsType = "", ""
 	ws.mu.Unlock()
 	return nil
+}
+
+func (ws *watchSet) setOff(why, fsType string) {
+	ws.mu.Lock()
+	ws.off, ws.fsType = why, fsType
+	ws.mu.Unlock()
+}
+
+// offReason says why nothing is watched ("" while the watcher runs).
+func (ws *watchSet) offReason() (why, fsType string) {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	return ws.off, ws.fsType
 }
 
 func (ws *watchSet) close() {

@@ -89,6 +89,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Why a link will not open (00098), written once in internal/db.
 	s.NodeLinkStateSQL = &db.NodeLinkStateSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// A full scan's peak memory (00139), written once in internal/db.
+	s.SyncRunMemorySQL = &db.SyncRunMemorySQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// A page of a person's Recent / Starred, and which rows carry a star
 	// (filex 0.54), written once in internal/db.
 	s.UserMetaPageSQL = &db.UserMetaPageSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
@@ -174,6 +176,9 @@ type Store struct {
 	// SetNodeLinkState, NodeLinkStates (internal/db node_link_state_sql.go,
 	// migration 00098).
 	*db.NodeLinkStateSQL
+	// SetSyncRunPeakMemory, SyncRunPeaks, LastMeasuredSyncRun (internal/db
+	// sync_run_memory_sql.go, migration 00139).
+	*db.SyncRunMemorySQL
 	// UserNodeMetaPage, UserNodeMetaAt (internal/db user_meta_page_sql.go).
 	*db.UserMetaPageSQL
 	// ListNodesUnder, ListStaleNodesUnder, CountLiveNodesUnder,

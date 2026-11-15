@@ -1,0 +1,49 @@
+# filex-watch beside the disk - NOT beside filex.
+#
+# Use this file on the machine that OWNS a storage's disk when that is not the
+# machine filex runs on: a NAS whose share filex mounts over the network, the
+# server an SFTP storage points at. filex's own watch only sees what its own
+# machine writes; this container watches the folder where the writes happen
+# and tells filex which folders changed (docs/FILEX-WATCH.md).
+#
+# When filex and the disk are on the same machine - a Docker bind mount
+# included - you do not need it: switch the storage to Live watching instead.
+#
+#   1. On the storage's page in filex (Admin -> Storages -> the storage), make
+#      a filex-watch key. It is shown once: save it in ./filex-watch-key.
+#   2. Set the three values below: filex's address, the storage's number
+#      (shown on the same card), and the folder that IS the storage here.
+#   3. docker compose -f docker-compose.filex-watch.yml up -d
+#      docker compose -f docker-compose.filex-watch.yml logs -f
+#
+# The card on the storage's page then shows the agent's version, host and
+# when it last reported.
+
+services:
+  filex-watch:
+    image: ghcr.io/brf-tech/filex-watch:0.1.0
+    restart: unless-stopped
+    environment:
+      # filex's address, as people open it.
+      FILEX_WATCH_SERVER: https://files.example.com
+      # The storage's number: its filex-watch card says it.
+      FILEX_WATCH_STORAGE: "7"
+      # A self-signed certificate on filex: uncomment, or better, mount the
+      # CA's certificate and set FILEX_WATCH_CA_FILE to it.
+      # FILEX_WATCH_TLS_SKIP_VERIFY: "true"
+    volumes:
+      # The folder on THIS machine that is the storage, read-only.
+      - /volume1/media:/watch:ro
+    secrets:
+      - filex-watch-key
+    # It only reads folder listings; give it nothing else.
+    read_only: true
+    cap_drop: [ALL]
+    # Root without the rest of its powers, still able to list every folder.
+    cap_add: [DAC_READ_SEARCH]
+    security_opt:
+      - no-new-privileges:true
+
+secrets:
+  filex-watch-key:
+    file: ./filex-watch-key

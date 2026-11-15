@@ -283,7 +283,7 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 <tr>
 <td width="50%" valign="top">
 
-![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.3d21210a54da.png)
+![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.58769eb1f1d4.png)
 
 <sub>…oturum açma sayfası da, henüz kimse oturum açmadan</sub>
 
@@ -323,22 +323,25 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 **Her depo tek bir ağaçta, o ağaç da her şeyden erişilebilir.**
 
 - Yerel diskleri, S3'ü, FTP'yi, SFTP'yi, WebDAV'ı ve SMB/NAS paylaşımlarını yan yana bağlayın;
-  birinde kopyalayın ya da kesin, ötekinde yapıştırın.
+  birinde kopyalayın ya da kesin, ötekinde yapıştırın. filex'le birlikte gelmeyen bir depo için
+  yönetim panelinden ya da bir uygulama mağazasının bağlantısından bir eklenti kurun.
+- filex'in haberi olmadan yazılan da görünür: yerel bir klasör canlı izlenir, yani NAS'ın
+  paylaşımının ya da başka bir uygulamanın oraya yazdığı, bir sonraki taramada değil, klasörü
+  açıldığında listelenir; disk başka bir makinedeyse orada [filex-watch](docs/FILEX-WATCH.md)
+  çalışır ve değişen klasörleri saniyeler içinde bildirir.
 - Aynı ağaca **S3**, **SFTP**, **FTPS**, **NFSv3** ve **WebDAV** olarak erişin: `rclone`,
   `restic`, `aws s3`, WinSCP ya da FileZilla'yı ona yöneltin. Aynı filex izinleri (kişi, grup
   ve klasör bazında), çöp kutusu ve kota web arayüzündeki gibi geçerlidir; diskteki POSIX izin
   bitleri ve ACL'ler filex kullanıcılarına eşlenmez.
 - `filex mount` uzak bir sunucuyu sıradan HTTPS üzerinden bağlar: Linux'ta bir klasör,
   Windows'ta bir sürücü harfi olarak (macOS desteklenmez).
-- filex'le birlikte gelmeyen bir depo için yönetim panelinden ya da bir uygulama mağazasının
-  bağlantısından bir eklenti kurun.
 
 Depolama ve protokollerin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → Storage and protocols](docs/FEATURES.md#storage-and-protocols).
 
 <p align="center"><img src="https://filex.sh/shots/sidenav/connect-1440.45536274e7dc.png" alt="Nasıl bağlanılır" width="860"></p>
 
 <details>
-<summary><b>Depolama ve protokollerin ekran görüntüleri</b> - bağlantı kılavuzları, API anahtarları ve bir depolama eklentisi</summary>
+<summary><b>Depolama ve protokollerin ekran görüntüleri</b> - bağlantı kılavuzları, API anahtarları, bir depolama eklentisi ve filex-watch</summary>
 
 <table>
 <tr>
@@ -351,7 +354,7 @@ Depolama ve protokollerin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 </td>
 <td width="50%" valign="top">
 
-![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.3d6279c2e261.png)
+![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.c7e147b4cebb.png)
 
 <sub>API anahtarları - kendinizinkini oluşturun, gezginde ya da gömülü bir gezginde (bir kişinin oturumuyla ya da API anahtarıyla; tek bir ortak *uygulama* API anahtarıyla vekil sunucu üzerinden çalışan gömülü bir gezginde bu öğe yer almaz)</sub>
 
@@ -370,6 +373,22 @@ Depolama ve protokollerin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 ![Eklentiler](https://filex.sh/shots/admin-plugins.6bd96bf65745.png)
 
 <sub>filex'le birlikte gelmeyen bir depo - **Eklentiler → Depolama eklentileri** sayfasında eklenti olarak kurulur, yapılandırma formunu kendisi tanımlar</sub>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+![Bir deponun sayfasındaki filex-watch kartı: yalnız bir kez gösterilen anahtar ve ajanı kuran komutlar](https://filex.sh/shots/filexwatch/filex-watch-key-1440.64f0c29c10da.png)
+
+<sub>filex-watch - bir deponun diskinin sahibi olan makine için bir anahtar, yalnız bir kez gösterilir; ajanı Linux, Docker, Windows ya da macOS'a kuran komutlarla birlikte</sub>
+
+</td>
+<td width="50%" valign="top">
+
+![Ajanı duyulmuş filex-watch kartı: sürümü, makinesi, klasörü ve son bildirimi](https://filex.sh/shots/filexwatch/filex-watch-1440.7e366ab5405b.png)
+
+<sub>Ajan bildirmeye başlayınca aynı kart: her makinenin ajanının en son ne dediği ve ne zaman</sub>
 
 </td>
 </tr>
@@ -408,7 +427,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.58825362c544.png)
+![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.d6cc52c97dae.png)
 
 <sub>Paylaşım - PIN, son kullanma tarihi, indirme limiti, tek satırlık `curl`</sub>
 
@@ -440,7 +459,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.dadc9345981d.png)
+![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.043e68a53922.png)
 
 <sub>Her yönetim tablosu - satır başına sabitlenmiş tek bir **Aksiyon** menüsü, gezgindeki ⋮ ile açılan menünün aynısı</sub>
 
@@ -528,7 +547,7 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <tr>
 <td width="50%" valign="top">
 
-![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.c115aaa2f273.png)
+![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.4c65585bf49a.png)
 
 <sub>…ve kilitli bir hesabın oturum açma formunun söylediği; düğmesinde kilidin kalan süresi geri sayar</sub>
 
@@ -551,7 +570,7 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 </td>
 <td width="50%" valign="top">
 
-![Düğmesinin üstünde bot doğrulamasıyla oturum açma formu](https://filex.sh/shots/botprotection/login-captcha-dark-1440.5cf41f05dd02.png)
+![Düğmesinin üstünde bot doğrulamasıyla oturum açma formu](https://filex.sh/shots/botprotection/login-captcha-dark-1440.77aef295650a.png)
 
 <sub>…ve düğmesinin üstünde bot doğrulamasıyla oturum açma formu</sub>
 
@@ -560,7 +579,7 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <tr>
 <td width="50%" valign="top">
 
-![Demo açılış sayfası](https://filex.sh/shots/demo-landing.4a147bc884c8.png)
+![Demo açılış sayfası](https://filex.sh/shots/demo-landing.e484d8ad6b07.png)
 
 <sub>Demo açılış sayfası</sub>
 
@@ -799,7 +818,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 <tr>
 <td width="50%" valign="top">
 
-![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.daaf28c9f518.png)
+![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.eb318cc10a90.png)
 
 <sub>Belge imzadayken - herkes için dondurulmuş, kimin imzaladığı ayrıntılarında</sub>
 
@@ -1029,7 +1048,7 @@ ayırır.
 | Alan | Neler sunar |
 |---|---|
 | **Gezgin** | Yönetim uygulamasında, masaüstü uygulamasında ve her gömülü gezginde tek düzen: gezinti paneli, liste, ızgara ve galeri görünümleri, sekmeler, kişisel ve ekip etiketleri, ⌘K komut paleti, yeniden atanabilen klavye kısayolları, **+ Yeni** menüsünden yeni belgeler ve işletmecinin oluşturduğu temalar ([Entegrasyon](docs/INTEGRATION.md), [Temalar](docs/INTEGRATION.md#themes)) |
-| **Depolama** | Yan yana bağlanan yerel diskler, S3, FTP, SFTP, WebDAV ve SMB/NAS, aralarında kopyalama ve taşıma, geri kalan her şey için de yönetim panelinden ya da bir uygulama mağazasından kurulan bir eklenti ([Depolama](docs/STORAGE.md), [Depolama eklentileri](docs/PLUGINS.md)) |
+| **Depolama** | Yan yana bağlanan yerel diskler, S3, FTP, SFTP, WebDAV ve SMB/NAS, aralarında kopyalama ve taşıma, geri kalan her şey için de yönetim panelinden ya da bir uygulama mağazasından kurulan bir eklenti; filex'in ağ üzerinden eriştiği bir diskin sahibi olan makinede küçük bir ajan, filex-watch, orada yapılan değişiklikler hemen görünsün diye ([Depolama](docs/STORAGE.md), [Depolama eklentileri](docs/PLUGINS.md), [filex-watch](docs/FILEX-WATCH.md)) |
 | **Tarayıcı olmadan** | S3, SFTP, FTPS, NFSv3 ve WebDAV olarak sunulan aynı ağaç - orada yapılan bir taşıma ya da silme, bir depo taramasının yanında web arayüzündeki kadar güvenlidir - ayrıca HTTPS üzerinden `filex mount` ([Protokoller](docs/PROTOCOLS.md)) |
 | **Oturum açma** | OIDC, LDAP / Active Directory, Windows ve Linux hesapları, giriş denemesi sınırları ve oturum açma ile herkese açık formlarda bot doğrulaması - Turnstile ya da reCAPTCHA, sağlayıcıya ulaşılamazsa yerel iş ispatı ([SSO](docs/SSO.md), [LDAP](docs/LDAP.md), [İşletim sistemi hesapları](docs/OS-LOGIN.md), [Bot koruması](docs/BOT-PROTECTION.md)) |
 | **Kişiler ve erişim** | Roller ve kişiye özel izinler, gruplar, klasör bazlı erişim ve yerleşik çok kiracılılık ([İzinler](docs/PERMISSIONS.md), [Gruplar](docs/GROUPS.md), [Çok kiracılılık](docs/MULTI-TENANCY.md)) |

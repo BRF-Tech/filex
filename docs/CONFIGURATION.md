@@ -73,7 +73,7 @@ Most installs set a handful of variables and leave the rest at their defaults:
 | Env var | Set it to | Why |
 |---|---|---|
 | `FILEX_PUBLIC_URL` | the address people open, e.g. `https://files.example.com` | Every share link, e-mail link and the OIDC redirect is built on it. Unset, they all point at `http://localhost:5212` ([Public URL](#public-url)). |
-| `FILEX_DEFAULT_STORAGE_DRIVER` + `FILEX_DEFAULT_STORAGE_PATH` | `local` and the folder to serve | Seeds the first storage on a fresh install, so the first screen has files ([Zero-touch seeding](#zero-touch-seeding)). |
+| `FILEX_DEFAULT_STORAGE_DRIVER` + `FILEX_DEFAULT_STORAGE_PATH` | `local` and the folder to serve | Seeds the first storage on a fresh install, so the first screen has files; a `local` one with live watching, so files written into the folder without filex show up when it is opened ([Zero-touch seeding](#zero-touch-seeding)). |
 | `FILEX_DATA_DIR` | a directory that survives a rebuild (the images use `/data`: mount a named volume there) | filex's own data: the SQLite database, the search index, the thumbnail cache ([Server & networking](#server--networking)). |
 | `FILEX_SECRET_KEY` | a long random value, backed up like the database | Seals the secrets filex has to read back. Without it S3 access keys, Web Push and several other features are refused or off ([The secret key](#the-secret-key)). |
 | `FILEX_ADMIN_EMAIL` + `FILEX_ADMIN_PASSWORD` | optional | The first administrator. Omitted, filex creates `admin@local` with a random password printed once ([Zero-touch seeding](#zero-touch-seeding)). |
@@ -638,9 +638,9 @@ next). Nothing to switch on: it is on by default.
 | **What counts** | A wrong password, and a wrong second-factor code. Not: the form asking for the code, a right password on a disabled account, an API token (not a password). |
 | **What resets** | A success resets the *account's* counter - never the address's, so one valid login between guesses cannot launder a spray. A protocol's cached credential and an API token do not reset it either (a busy client would wipe the counter with every request). |
 
-![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.fefb2e1c3fa9.png)
+![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.c7d444544a47.png)
 
-![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.c115aaa2f273.png)
+![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.4c65585bf49a.png)
 
 **The IP allow-list** (`login.ip_allowlist`) is the way back in. An address on it is
 exempt from the per-address limit, and may sign in to **any** locked account (the
@@ -790,6 +790,15 @@ so are configured in [Authentication](#authentication), not here.)
 a fresh install already has a working place for files. Leave
 `FILEX_DEFAULT_STORAGE_DRIVER` empty to seed nothing. (See [STORAGE.md](STORAGE.md)
 for the storage model.)
+
+The seeded storage gets its driver's default sync mode and a 15-minute scan
+interval: since 0.61 a `local` storage is seeded with **Live watching**
+(`sync_mode: lazy`, behaviour *click first, fill in the background*), so a file
+written into the folder without filex - over the NAS's own share, by another
+app - shows up when its folder is opened instead of at the next scan; every
+other driver polls. Both can be changed on the storage's page afterwards. A
+storage seeded by an older release keeps its mode, and its page offers the
+switch ([STORAGE.md → Which mode a new storage gets](STORAGE.md#which-mode-a-new-storage-gets)).
 
 | Env var | Applies to | Description |
 |---|---|---|
@@ -1001,11 +1010,12 @@ your environment.
 
 ### Lazy catalogue settings
 
-A local storage with `sync_mode: lazy` ([STORAGE.md → Lazy
+A local storage with `sync_mode: lazy` - **Live watching** on the storage form,
+and the default for a new local storage since 0.61 ([STORAGE.md → Lazy
 catalogue](STORAGE.md#lazy-catalogue), design in
-[LAZY-CATALOGUE.md](LAZY-CATALOGUE.md)) reads three more keys from its own
+[LAZY-CATALOGUE.md](LAZY-CATALOGUE.md)) - reads three more keys from its own
 `config`. They are per storage, not environment variables: the storage form
-draws them under **Sync mode** when *Lazy catalog* is chosen, and the admin API
+draws them under **Sync mode** when *Live watching* is chosen, and the admin API
 refuses a value outside its bounds (400).
 
 | Key | Default | Bounds | Meaning |
@@ -1016,7 +1026,12 @@ refuses a value outside its bounds (400).
 
 The storage's own `sync_interval_s` (**Scan every**) is how old an unwatched
 folder's listing may get before the background pass, or a connected desktop
-sync pair, checks it again.
+sync pair, checks it again - the safety net under the watches.
+
+On a network filesystem or a FUSE mount (NFS, SMB/CIFS, 9P, Unraid's
+`/mnt/user`...) no folder is watched, whatever `lazy_max_watches` says: a change
+made on another machine never reaches a watch, so every opened folder is read
+from the disk ([LAZY-CATALOGUE.md → Network filesystems](LAZY-CATALOGUE.md#network-filesystems-no-watch-every-open-from-disk)).
 
 > ⚠ **Linux: the kernel's own watch limit.** Each watched folder is one inotify
 > watch, and `fs.inotify.max_user_watches` caps them for the whole user (8,192

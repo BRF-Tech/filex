@@ -20,7 +20,8 @@ import StorageDriverFields from './StorageDriverFields.vue';
 
 const props = defineProps<{
   driver: StorageDriver | undefined;
-  /** The storage's sync mode; '' reads as the server default (poll). */
+  /** The storage's sync mode; '' reads as the driver's default, as the
+   *  server states it (`default_sync_mode`, #351). */
   mode: SyncMode | 'push' | '' | undefined;
   config: Record<string, unknown>;
 }>();
@@ -34,7 +35,7 @@ const { t } = useI18n();
 const drivers = useStorageDriversStore();
 
 const lazyFields = computed(() => drivers.lazyFields(props.driver));
-const current = computed<string>(() => props.mode || 'poll');
+const current = computed<string>(() => props.mode || drivers.defaultSyncMode(props.driver));
 
 const options = computed(() => {
   const modes: string[] = ['poll', 'fsnotify', 'ondemand'];

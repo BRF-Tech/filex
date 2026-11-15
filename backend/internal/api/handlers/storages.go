@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/netfs"
 	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/scanrule"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
@@ -258,6 +259,11 @@ func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
 		// the same object drive usage carries (Worker.CatalogueCoverage), so
 		// Home draws an operator's figure and everybody else's the same way.
 		Coverage *syncpkg.CatalogueCoverage `json:"coverage,omitempty"`
+		// SyncSuggestion is the mode the list offers to switch to with one
+		// click, Filesystem a local storage's network filesystem (#351,
+		// storages_advice.go).
+		SyncSuggestion string      `json:"sync_suggestion,omitempty"`
+		Filesystem     *netfs.Info `json:"filesystem,omitempty"`
 	}
 	enriched := make([]storageWithStats, 0, len(out))
 	for _, st := range out {
@@ -268,11 +274,12 @@ func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
 		if roleFilter != "" && role != roleFilter {
 			continue
 		}
-		row := storageWithStats{Storage: storageShown(st)}
+		row := storageWithStats{Storage: storageShown(st), SyncSuggestion: suggestionOf(st)}
 		if bare {
 			enriched = append(enriched, row)
 			continue
 		}
+		row.Filesystem = storageFS(st)
 		if c, sz, err := h.Store.StorageStats(r.Context(), st.ID); err == nil {
 			row.Stats.FileCount = c
 			row.Stats.TotalSize = sz
@@ -316,11 +323,13 @@ func (h *Storages) Get(w http.ResponseWriter, r *http.Request) {
 			FileCount int64 `json:"file_count"`
 			TotalSize int64 `json:"total_size_bytes"`
 		} `json:"stats"`
-		// Catalogue, Coverage: see List.
-		Catalogue *syncpkg.CatalogueCoverage `json:"catalogue,omitempty"`
-		Coverage  *syncpkg.CatalogueCoverage `json:"coverage,omitempty"`
+		// Catalogue, Coverage, SyncSuggestion, Filesystem: see List.
+		Catalogue      *syncpkg.CatalogueCoverage `json:"catalogue,omitempty"`
+		Coverage       *syncpkg.CatalogueCoverage `json:"coverage,omitempty"`
+		SyncSuggestion string                     `json:"sync_suggestion,omitempty"`
+		Filesystem     *netfs.Info                `json:"filesystem,omitempty"`
 	}
-	out := storageWithStats{Storage: storageShown(st)}
+	out := storageWithStats{Storage: storageShown(st), SyncSuggestion: suggestionOf(st), Filesystem: storageFS(st)}
 	if c, sz, err := h.Store.StorageStats(r.Context(), st.ID); err == nil {
 		out.Stats.FileCount = c
 		out.Stats.TotalSize = sz
@@ -388,8 +397,11 @@ func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 		return
 	}
+	// Nobody chose: the driver's default (#351) - live watching (`lazy`) for
+	// a local storage, so a file written next to filex shows up when its
+	// folder is opened; poll for the rest.
 	if st.SyncMode == "" {
-		st.SyncMode = model.SyncModePoll
+		st.SyncMode = model.DefaultSyncModeFor(st.Driver)
 	}
 	// `lazy` is for local storages only (docs/LAZY-CATALOGUE.md); refused here
 	// with the reason, rather than stored and quietly polled.
@@ -402,7 +414,7 @@ func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st.SyncIntervalS == 0 {
-		st.SyncIntervalS = 900
+		st.SyncIntervalS = model.DefaultSyncIntervalS
 	}
 	if err := h.checkReplicaTarget(r.Context(), &st); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -439,7 +451,7 @@ func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 		h.ReplicaLinks.StorageLinkChanged(r.Context(), created.ID)
 	}
 	auth.SetAuditTarget(r.Context(), strconv.FormatInt(created.ID, 10), created.Name)
-	writeJSON(w, http.StatusOK, storageShown(created))
+	writeJSON(w, http.StatusOK, h.savedAnswer(r.Context(), created))
 }
 
 // Update modifies a storage row.
@@ -527,7 +539,7 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.applyLive(r.Context(), &before, cur)
-	writeJSON(w, http.StatusOK, storageShown(cur))
+	writeJSON(w, http.StatusOK, h.savedAnswer(r.Context(), cur))
 }
 
 // checkReplicaTarget refuses a link to a replication target that does not

@@ -221,3 +221,33 @@ func TestAIAdminGaps_AppLocksAndOneUnlockRow(t *testing.T) {
 	assert.Equal(t, "app_plugin.unlock", rows[0].Action)
 	assert.Equal(t, "docs/sozlesme.txt", rows[0].TargetID)
 }
+
+// TestAIAdminGaps_StorageToolsAnswerWithTheIntervalAdvice - #353: an agent
+// that creates or updates a storage through admin_storages_create / _update
+// hears what its scan interval would cost, the same judgement the storage
+// form shows (the tools run the REST handlers, which answer with it).
+func TestAIAdminGaps_StorageToolsAnswerWithTheIntervalAdvice(t *testing.T) {
+	f := newDoorFix(t)
+	adm := testutil.NewAPIToken(t, f.Store, f.AdminID, "read,write,mcp,admin")
+
+	tl, status, res := adminTool(t, f.URL, adm, "admin_storages_create", map[string]any{"body": map[string]any{
+		"name": "ajan", "driver": "local", "enabled": false, "sync_mode": "poll", "sync_interval_s": 300,
+		"config": map[string]any{"path": t.TempDir()},
+	}})
+	require.False(t, tl.IsError, tl.Text)
+	require.Equal(t, http.StatusOK, status, "%v", res)
+	adv, _ := res["interval_advice"].(map[string]any)
+	require.NotNil(t, adv, "%v", res)
+	assert.Equal(t, "unmeasured", adv["state"])
+	assert.EqualValues(t, 300, adv["interval_s"])
+
+	id, _ := res["id"].(float64)
+	tl, status, res = adminTool(t, f.URL, adm, "admin_storages_update", map[string]any{
+		"id": int64(id), "body": map[string]any{"sync_interval_s": 900},
+	})
+	require.False(t, tl.IsError, tl.Text)
+	require.Equal(t, http.StatusOK, status, "%v", res)
+	adv, _ = res["interval_advice"].(map[string]any)
+	require.NotNil(t, adv, "%v", res)
+	assert.EqualValues(t, 900, adv["interval_s"])
+}

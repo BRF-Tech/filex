@@ -106,6 +106,10 @@ func (s *storageSyncer) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// The most memory the process holds while this run walks (task #353):
+	// recorded on the run, read by the storage form's interval advice.
+	mem := startMemPeak()
+	defer mem.end()
 	c := &walkCounts{}
 	// A backend that can hand over the whole tree in one pass (object stores)
 	// is asked once, up front; the walk then reads directories out of memory.
@@ -113,7 +117,7 @@ func (s *storageSyncer) run(ctx context.Context) error {
 	// directory as before.
 	seen, err := s.walk(ctx, "/", nil, c, s.lister(ctx, "/"), storage.NewCycleGuard(), 0)
 	if err != nil {
-		s.finishRun(ctx, run.ID, seen, c.added, c.updated, 0, err)
+		s.finishRun(ctx, run.ID, seen, c.added, c.updated, 0, mem.end(), err)
 		return err
 	}
 
@@ -153,7 +157,7 @@ func (s *storageSyncer) run(ctx context.Context) error {
 		slog.Warn("sync: folder-size recompute",
 			slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
 	}
-	s.finishRun(ctx, run.ID, seen, c.added, c.updated, deleted, nil)
+	s.finishRun(ctx, run.ID, seen, c.added, c.updated, deleted, mem.end(), nil)
 	// A run whose context died after the walk skipped whatever came after it
 	// (the tombstone pass, the folder sizes); it is recorded as aborted and
 	// the caller hears why.
@@ -168,7 +172,9 @@ func (s *storageSyncer) run(ctx context.Context) error {
 // the row on the run's own context, so exactly the runs that were cut short
 // tried to record their end on a dead context, failed silently, and said
 // `running` for ever.
-func (s *storageSyncer) finishRun(ctx context.Context, runID int64, seen, added, updated, deleted int, runErr error) {
+//
+// peakMem is memPeak's figure for the run (0: not measured).
+func (s *storageSyncer) finishRun(ctx context.Context, runID int64, seen, added, updated, deleted int, peakMem uint64, runErr error) {
 	status, msg := "ok", ""
 	switch {
 	case ctx.Err() != nil:
@@ -187,6 +193,12 @@ func (s *storageSyncer) finishRun(ctx context.Context, runID int64, seen, added,
 		slog.Warn("sync: could not close the run's record",
 			slog.Int64("run", runID), slog.String("status", status),
 			slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
+	}
+	if peakMem > 0 {
+		if err := s.store.SetSyncRunPeakMemory(fctx, runID, int64(peakMem)); err != nil {
+			slog.Debug("sync: could not record the run's peak memory",
+				slog.Int64("run", runID), slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
+		}
 	}
 }
 

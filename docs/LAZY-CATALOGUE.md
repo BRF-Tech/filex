@@ -18,6 +18,18 @@ listed straight from disk at once and catalogued first, in the background; the
 rest of the tree is catalogued afterwards (behaviour A) or only as people visit
 it (behaviour B).
 
+The storage form calls the mode **Live watching** (before 0.61: *Lazy catalog*;
+`fsnotify`, which used to be *Live watch*, is now **Watch the whole storage**).
+Since 0.61 (task #351) it is
+the mode a **new** local storage gets when nobody chooses one, behaviour A -
+from the environment seed every store package uses, the admin API,
+`filex storage add` and the storage form alike (`model.DefaultSyncModeFor`; the
+form reads it from the driver descriptor's `default_sync_mode`). A local folder
+is one people write to without filex, and polled, a file copied into it stayed
+invisible until the next scan; here the folder is read from the disk when it is
+opened. Existing storages keep their mode: an administrator is offered the
+switch (see "Admin and observability").
+
 ## The two behaviours
 
 | | A - click first, fill in the background (default) | B - only on open |
@@ -251,6 +263,52 @@ One `fsnotify` watcher per lazy storage, on **visited** folders only:
   burst).
 - A kernel refusal (`ENOSPC`, inotify's own limit) is logged once and treated as
   a full budget.
+- On a network filesystem or a FUSE mount there is no watcher at all (next
+  section).
+
+## Network filesystems: no watch, every open from disk
+
+A watch (inotify, FSEvents, ReadDirectoryChangesW) reports what passes through
+**this** kernel. When the storage's folder is on NFS, SMB/CIFS, 9P (WSL drive
+mounts, VM shared folders), a cluster filesystem (CephFS, GlusterFS through
+FUSE, Lustre, GPFS...) or any FUSE mount, a file another machine writes - or
+another process writes past the FUSE layer - never passes through it. The watch
+stays quiet, the folder counts as current, and it is listed from the catalogue
+without the new file: exactly task #351's "it appeared once, then the folder
+looked empty".
+
+So when the lazy engine starts it asks which filesystem the storage's root is
+on (`internal/netfs`: Linux `statfs` `f_type`; macOS `f_fstypename` and
+`MNT_LOCAL`; Windows a UNC path or `GetDriveType` = `DRIVE_REMOTE`), and on a
+network filesystem it **opens no watcher**. The rule is one function
+(`sync.watchUntrusted`) shared with `fsnotify` (Watch the whole storage), which
+on such a filesystem falls back to polling at the storage's interval, logging
+it once - the way it already fell back for a driver that is not local. No folder is ever current, so every
+folder somebody opens is listed from the disk with the catalogue laid over it
+and reconciled again - the same path a process without inotify has always
+taken. The filler and the refresh by `sync_interval_s` run as everywhere else.
+A root whose filesystem cannot be told in 5 seconds (a hung mount) or at all is
+treated the same way: a watch filex cannot vouch for is worse than none.
+
+The storage page says so twice: the catalogue block's **Watched folders** reads
+*None: network filesystem* (`catalogue.watch_off: "network_fs"`, with
+`fs_type`), and a note under the form names the filesystem and points at
+**[filex-watch](FILEX-WATCH.md)** on the machine the disk is attached to, which reports changes
+the moment they happen. The admin storage answers carry it as `filesystem:
+{"type": "NFS", "network": true}` for every local storage (the probe is
+remembered for 5 minutes and waited for at most 2 seconds, so a hung mount
+cannot hold the storage list).
+
+⚠ **FUSE counts as a network filesystem, Unraid's `/mnt/user` included.**
+`/mnt/user` is `shfs`, a FUSE filesystem that merges the array's disks and the
+cache pool. inotify on it sees only the changes that go through `/mnt/user` on
+the same kernel; a write through `/mnt/diskN` or `/mnt/cache`, the mover, or
+another container mapped to a disk path bypasses it, and a watch there would
+look trustworthy while missing exactly those files. Reading the opened folder
+from the disk costs one directory listing per open (30 ms at the median in the
+measurement below) and is right every time, so the decision is: no watch on
+FUSE. The same holds for Docker Desktop's file sharing on macOS and Windows
+(virtiofs / gRPC FUSE / 9P) and for WSL's `/mnt/c`.
 
 ## The background filler (behaviour A)
 
@@ -368,9 +426,21 @@ admin panel shows how it ends.
 ## Admin and observability
 
 - The storage form (web admin, new and edit) offers the sync mode for every
-  storage - it offered none before - and `lazy` only for a driver whose
-  descriptor carries `lazy_fields` (the admin descriptor endpoint adds them for
-  `model.LazyDrivers`, today `local`). For `lazy` it draws the behaviour and the
+  storage - it offered none before - and `lazy` (**Live watching**) only for a
+  driver whose descriptor carries `lazy_fields` (the admin descriptor endpoint
+  adds them for `model.LazyDrivers`, today `local`). The new-storage form starts
+  from the driver's `default_sync_mode`.
+- A local storage that polls - one made before 0.61, which is never switched
+  for anybody - carries `sync_suggestion: "lazy"` in the admin storage answers
+  (`model.SyncModeSuggestion`). The storage list shows **Switch to live
+  watching** beside its state, and its page a short explanation with the same
+  button; one click sends `PATCH /api/admin/storages/{id}` with
+  `{"sync_mode": "lazy"}` and nothing else.
+- Under **Scan every (minutes)** the form says what the interval means for the
+  chosen mode. For `lazy` it is this engine's refresh age, the safety net under
+  the watches, and no load figure is given: the refresh pass is throttled and
+  yields to people, and nothing times it as one walk ([STORAGE.md → How long a
+  scan takes](STORAGE.md#how-long-a-scan-takes-and-the-interval-filex-suggests)). For `lazy` it draws the behaviour and the
   two watch knobs with the same field renderer as every other storage setting
   (`web/src/components/StorageSyncMode.vue`). The API refuses a value outside
   the bounds the descriptor advertises (`storage.ValidateLazyConfig`, 400).

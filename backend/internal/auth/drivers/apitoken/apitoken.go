@@ -82,6 +82,10 @@ var ValidScopes = []string{ScopeRead, ScopeWrite, ScopeDelete, ScopeMCP, ScopeAd
 // well-formed `root:<adapter>://<rel>` confinement scope, or a permission of
 // package tokenperm at one of its levels (`comments:read`, `comments:rw`).
 //
+// A filex-watch key's `watch:<storage id>` (model.WatchScopePrefix) is NOT
+// issuable here: the storage page mints those, and a door that issues ordinary
+// tokens answers it as an unknown scope.
+//
 // ⚠ "Well-formed" is decided by the confinement parser itself, not by a
 // non-empty check. A root scope it cannot read (`root:projects`, no storage
 // named) used to be accepted here and then ignored by every surface that
@@ -192,4 +196,17 @@ func ExtractToken(r *http.Request) string {
 func HashToken(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
+}
+
+// watchKeyDomain is put in front of a filex-watch key before it is hashed.
+const watchKeyDomain = "filex-watch\x00"
+
+// HashWatchKey is the stored form of a filex-watch key
+// (model.TokenSourceWatch): the sha256 of the key with a domain of its own in
+// front. Every other door looks a credential up by HashToken(raw), so a watch
+// key presented anywhere but its own door matches no row at all - the same
+// "no other door can even find it" an uploader's key gets from living in its
+// own table. Only handlers/storage_watch.go hashes this way.
+func HashWatchKey(raw string) string {
+	return HashToken(watchKeyDomain + raw)
 }

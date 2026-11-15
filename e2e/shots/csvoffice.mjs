@@ -55,6 +55,16 @@ const BUDGET = [
   'Legal;15000;6200;Dana Reyes;"Contracts; NDAs"',
 ].join('\r\n') + '\r\n';
 
+/** Asks `ok` every half second until it says true (true) or `ms` pass (false). */
+async function waitUntil(ok, ms) {
+  const end = Date.now() + ms;
+  for (;;) {
+    if (await ok()) return true;
+    if (Date.now() > end) return false;
+    await sleep(500);
+  }
+}
+
 /** ONLYOFFICE's spreadsheet is drawn: its frame, then its cell name box. */
 async function spreadsheetReady(page) {
   const frame = page.locator('iframe[name^="frameEditor"]');
@@ -62,6 +72,24 @@ async function spreadsheetReady(page) {
   const inside = page.frameLocator('iframe[name^="frameEditor"]');
   await inside.locator('#ce-cell-name').waitFor({ state: 'visible', timeout: 90_000 });
   if ((await inside.getByText('Choose CSV options').count()) > 0) throw new Error('ONLYOFFICE asked for the CSV options - the config lost the delimiter');
+  // ⚠ The cell name box is drawn before the document is opened. On a loaded
+  // build host (0.61.0, two shots runs in a row) both pictures caught
+  // ONLYOFFICE's "Loading spreadsheet" over an empty grid, its name box
+  // empty: the box names a cell (A1) only once the sheet is open, so wait
+  // for that, and for the load mask to be gone. A Document Server that has
+  // just started on a busy host took over 90 s for its first sheet.
+  const opened = await waitUntil(
+    async () => {
+      const name = await inside
+        .locator('#ce-cell-name')
+        .evaluate((el) => String(el.value ?? el.querySelector('input')?.value ?? ''))
+        .catch(() => '');
+      const masked = await inside.locator('.asc-loadmask').filter({ visible: true }).count().catch(() => 0);
+      return /^[A-Z]+[0-9]+$/.test(name.trim()) && masked === 0;
+    },
+    180_000,
+  );
+  if (!opened) throw new Error('ONLYOFFICE never opened the spreadsheet: its cell name box names no cell, or "Loading" is still over it, after 3 min');
   // The grid is a canvas painted after the toolbar: give it the moment.
   await sleep(2_500);
   return inside;

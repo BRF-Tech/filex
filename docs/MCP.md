@@ -709,7 +709,12 @@ and the operator's addresses as the panel does.
   and `admin_storages_drift` read a storage's own runs and drift report, and
   `admin_storages_order` sets the order storages are listed in for everyone
   (`{ids}`, every storage's id; a person's own order still comes first for
-  them, [STORAGE.md](STORAGE.md)).
+  them, [STORAGE.md](STORAGE.md)). Since 0.61 `admin_storages_watch` reads a
+  storage's filex-watch card (its keys, what each key's agent last said, the
+  install commands), `admin_storages_watch_key_create` (`{id, body: {name}}`)
+  makes a key - shown in that answer only - and
+  `admin_storages_watch_key_delete` (`{id, key}`) revokes one
+  ([FILEX-WATCH.md](FILEX-WATCH.md)).
 - **Trash** (0.50): `admin_trash_restore` and `admin_trash_purge` take
   `queued: true` to run as a job of the operations queue - a restore then
   takes a batch, `body: {node_ids: [...]}` (at most 1000) - and answer `202`
@@ -778,6 +783,10 @@ sign-in opened waiting for approval - and removes an account's SSO bind
 (`sso_unlink: true`); `admin_tenants_create` / `_update` take
 `oidc_trust_email`, and an OIDC's `trust_email` goes in the provider's config
 ([SSO.md](SSO.md#which-account-an-sso-sign-in-opens)).
+`admin_storages_create` and `admin_storages_update` answer with the storage and
+its `interval_advice`: what the saved scan interval would cost, measured on the
+storage's last scan - the judgement the storage form shows
+([STORAGE.md → How long a scan takes](STORAGE.md#how-long-a-scan-takes-and-the-interval-filex-suggests)).
 
 ### Plugin tools
 

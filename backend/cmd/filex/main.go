@@ -476,7 +476,8 @@ func validateStorageInput(driver, configJSON string) error {
 
 // storageAddSync works out the sync settings `filex storage add` writes: the
 // mode (validated as the admin API validates it - `lazy` for local storages
-// only), the scan interval, and the lazy catalogue's settings, written into
+// only; none given is the driver's default, model.DefaultSyncModeFor), the
+// scan interval, and the lazy catalogue's settings, written into
 // the storage's config under the keys the admin form writes (lazy_fill,
 // lazy_max_watches, lazy_watch_ttl) and held to the same bounds. lazy carries
 // only the lazy flags that were given; one given without `--sync-mode lazy` is
@@ -484,7 +485,7 @@ func validateStorageInput(driver, configJSON string) error {
 func storageAddSync(driver, mode string, intervalS int, configJSON string, lazy map[string]any) (model.SyncMode, int, string, error) {
 	m := model.SyncMode(strings.TrimSpace(mode))
 	if m == "" {
-		m = model.SyncModePoll
+		m = model.DefaultSyncModeFor(driver)
 	}
 	if err := model.ValidateSyncModeFor(m, driver); err != nil {
 		return "", 0, "", err
@@ -582,8 +583,8 @@ func storageAddCmd() *cobra.Command {
 	c.Flags().StringVar(&driver, "driver", "", "driver: "+strings.Join(storage.Names(), " | "))
 	c.Flags().StringVar(&mount, "mount", "/", "logical mount path")
 	c.Flags().StringVar(&configJSON, "config", "{}", "JSON object with driver-specific options")
-	c.Flags().StringVar(&syncMode, "sync-mode", string(model.SyncModePoll), "how the catalogue follows the storage: poll | fsnotify | ondemand | lazy (lazy: local storages only)")
-	c.Flags().IntVar(&syncInterval, "sync-interval", 900, "seconds between two scans")
+	c.Flags().StringVar(&syncMode, "sync-mode", "", "how the catalogue follows the storage: poll | fsnotify | ondemand | lazy (lazy: local storages only; default: lazy for a local storage, poll for the rest)")
+	c.Flags().IntVar(&syncInterval, "sync-interval", model.DefaultSyncIntervalS, "seconds between two scans (lazy: the age at which a folder nobody watches is read again)")
 	c.Flags().StringVar(&lazyFill, "lazy-fill", "", "lazy: "+storage.LazyFillBackground+" (catalogue the rest in the background) | "+storage.LazyFillOnOpen+" (only the folders people open)")
 	c.Flags().IntVar(&lazyMaxWatches, "lazy-max-watches", storage.LazyMaxWatchesDefault, "lazy: the most visited folders watched at once")
 	c.Flags().IntVar(&lazyWatchTTL, "lazy-watch-ttl", storage.LazyWatchTTLDefault, "lazy: minutes a visited folder stays watched after it was last opened")

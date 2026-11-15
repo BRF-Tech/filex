@@ -23,4 +23,5 @@ The store assets Runtipi requires are in place: `metadata/logo.jpg` and
   "expose app" modes.
 - Data: `${APP_DATA_DIR}/data/filex` → `/data` (DB/index/thumbs) and
   `${APP_DATA_DIR}/data/files` → `/srv/files` (default storage, seeded on
-  first boot).
+  first boot with live watching: a file put into the folder from outside filex
+  shows up when its folder is opened).

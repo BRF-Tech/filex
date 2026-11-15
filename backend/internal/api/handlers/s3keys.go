@@ -128,7 +128,9 @@ func (h *S3Keys) Create(w http.ResponseWriter, r *http.Request) {
 		// ⚠ The token must belong to the CALLER. Without this check, anyone
 		// could mint a key against someone else's token and inherit their
 		// permissions — the exact opposite of what inheritance is for.
-		if err != nil || t == nil || t.UserID != u.ID {
+		// A filex-watch key is not a parent (model.APIToken.DoorOnly): it
+		// opens one door and no protocol.
+		if err != nil || t == nil || t.UserID != u.ID || t.DoorOnly() {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such API token"})
 			return
 		}

@@ -54,12 +54,17 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   OS, serve it with `local`, and the three traps that come with it
 - [Slow storage](STORAGE.md#slow-storage) - what is already cached, and what is
   actually worth tuning
-- [Lazy catalogue](LAZY-CATALOGUE.md) - `sync_mode: lazy` for big local
-  trees: list the opened folder from disk at once, catalogue it first, fill in
-  the rest in the background or only on open; the deletion-safety invariant,
-  the watch budget and what search, sizes and usage say meanwhile
+- [Lazy catalogue](LAZY-CATALOGUE.md) - `sync_mode: lazy`, **Live watching**,
+  the default for a new local storage: list the opened folder from disk at
+  once, catalogue it first, fill in the rest in the background or only on open;
+  the deletion-safety invariant, the watch budget, network filesystems (no
+  watch, every open from disk) and what search, sizes and usage say meanwhile
 - [Usage & cost](USAGE.md) - reading the provider's own daily report, pricing it
   with a table you can edit, and the two rows that must never be added together
+- [filex-watch](FILEX-WATCH.md) - when a storage's disk is on another machine (a
+  NAS share, an SFTP server): the small agent that runs there and reports the
+  folders that change, its key, install on Linux, Docker, Windows and macOS,
+  settings, the protocol and troubleshooting
 - [Storage plugins](PLUGINS.md) - teaching filex a backend it does not ship:
   installing one, upgrading it in place, and writing one (the protocol, the Go
   SDK, presigned URLs and multipart) - plus **conformance**, the probes that
