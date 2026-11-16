@@ -136,6 +136,11 @@ async function main() {
     await page.getByTestId('storage-watch-name').locator('input').fill('backup-server');
     await page.getByTestId('storage-watch-create').click();
     await page.getByTestId('storage-watch-key').waitFor({ timeout: 10_000 });
+    // ⚠ The key box shows the moment the answer arrives; the keys' table is
+    // reloaded after it (createKey → load()), and until that returns the new
+    // key has no row. Read the card once the row is there, or the check and the
+    // picture race the reload (the v0.61.1 Screenshots run lost that race).
+    await card.locator('[data-testid^="storage-watch-row-"]', { hasText: 'backup-server' }).waitFor({ timeout: 10_000 });
     const command = page.getByTestId('storage-watch-command');
     await mustSay(card, 'the key shown once', [EXAMPLE_KEY, 'The key is shown this once', 'backup-server']);
     await mustSay(command, 'the Linux commands', ['systemctl enable --now filex-watch', EXAMPLE_KEY]);

@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-11-15",
+  "generatedAt": "2026-11-16",
   "releases": [
+    {
+      "tag": "v0.61.1",
+      "date": "2026-11-16T02:31:39Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.61.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Fixed\n\n- **An install upgraded from 0.26.1 or older lists its operations again**\n  (task #356). Before 0.38 filex made its operations queue (`pending_ops`) at\n  start, outside the migrations, and 0.27 to 0.37 added its `dest_storage_id`\n  column the same way; migration 00036 took the table over assuming every\n  install had that column. A SQLite install whose last start was 0.26.1 or\n  older and that was upgraded straight to 0.38 or later kept the table\n  without it, and every `GET /api/files/ops` answered 500 with\n  `no such column: dest_storage_id` while `/healthz` was fine. **Upgrade note:\n  v0.10.0-era SQLite installs upgraded to 0.38 or later (0.61.0 included) are\n  fixed automatically on start**: the column is added with its default, the\n  rows are kept, and the log says so in one INFO line (`db: schema repaired`).\n  An install that added the column by hand is left as it is. PostgreSQL and\n  MySQL were never affected. The repair is not a migration, so this is a\n  patch. A test now takes the schema six releases left (0.1.57 to 0.61.0) to\n  this one and compares it with a fresh install's, table, column and index.\n  [DATABASES.md → Upgrading an old SQLite install](docs/DATABASES.md#upgrading-an-old-sqlite-install).\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0611---2026-11-15)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.61.1",
+        "ghcr.io/brf-tech/filex:full-v0.61.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
     {
       "tag": "v0.61.0",
       "date": "2026-11-15T06:58:51Z",

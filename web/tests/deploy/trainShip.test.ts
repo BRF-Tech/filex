@@ -178,6 +178,47 @@ describe('the steps', () => {
     expect(shOf(byId(steps(ENV, { onFail: 'hold' }).list, 'deploy'))).toContain(' 86 300 hold ');
   });
 
+  it('send an instance on another server (SHIP_<NAME>_HOST) to that server, after the ones before it', () => {
+    const env = { ...ENV, SHIP_INSTANCES: 'demo prod edge', SHIP_EDGE_DIR: '/srv/filex-edge', SHIP_EDGE_PORT: '5214', SHIP_EDGE_HOST: 'edge-box' };
+    const { cfg, problems } = shipSettings(env);
+    expect(problems).toEqual([]);
+    expect(cfg.instances.map((i: { host: string }) => i.host)).toEqual(['app-server', 'app-server', 'edge-box']);
+    const { list } = steps(env);
+    for (const id of ['backup', 'proxies', 'deploy']) {
+      const sh = shOf(byId(list, id));
+      // A run starts with `cat '<common.sh>' ...`; the runner itself also says `&&`.
+      const parts = sh.replace(/^set -o pipefail; /, '').split(/ && (?=cat ')/);
+      expect(parts, id).toHaveLength(2);
+      expect(parts[0], id).toContain("'app-server' '");
+      expect(parts[0], id).toContain('demo:/srv/filex-demo:5212:data/instance.sqlite:filex prod:/srv/filex:5213:data/instance.sqlite:filex;');
+      expect(parts[0], id).not.toContain('edge:');
+      expect(parts[1], id).toContain("'edge-box' '");
+      expect(parts[1], id).toContain('edge:/srv/filex-edge:5214:data/instance.sqlite:filex;');
+      expect(parts[1], id).not.toContain('demo:');
+      expect(sh, id).not.toContain('\n');
+    }
+    expect(shOf(byId(list, 'deploy'))).toContain(`'edge-box' 'f=$(mktemp) && cat > "$f" && bash "$f" ghcr.io/brf-tech/filex v0.53.0 86 300 rollback /var/backups/filex/pre-v0.53.0-20261007-071500 edge:`);
+    expect(shipSettings({ ...env, SHIP_EDGE_HOST: 'a b' }).problems.join('\n')).toContain('SHIP_EDGE_HOST');
+  });
+
+  it('send a pinned server (SHIP_<NAME>_SSH=command) the step name and its words only, no script', () => {
+    const env = { ...ENV, SHIP_INSTANCES: 'demo prod edge', SHIP_EDGE_DIR: '/srv/filex-edge', SHIP_EDGE_PORT: '5214', SHIP_EDGE_HOST: 'edge-box', SHIP_EDGE_SSH: 'command' };
+    expect(shipSettings(env).problems).toEqual([]);
+    const { list } = steps(env);
+    for (const id of ['backup', 'proxies', 'deploy']) {
+      const sh = shOf(byId(list, id));
+      const parts = sh.replace(/^set -o pipefail; /, '').split(/ && (?=cat '|'ssh')/);
+      expect(parts, id).toHaveLength(2);
+      expect(parts[0], id).toMatch(/^cat '/);
+      expect(parts[1], id).toMatch(new RegExp(`^'ssh' '-o' 'BatchMode=yes' '-o' 'ConnectTimeout=20' 'edge-box' '${id} `));
+      expect(parts[1], id).not.toContain('cat ');
+      expect(parts[1], id).not.toContain('mktemp');
+      expect(parts[1], id).toMatch(/ edge:\/srv\/filex-edge:5214:data\/instance\.sqlite:filex'$/);
+    }
+    expect(shOf(byId(list, 'deploy'))).toContain(`'edge-box' 'deploy ghcr.io/brf-tech/filex v0.53.0 86 300 rollback /var/backups/filex/pre-v0.53.0-20261007-071500 edge:/srv/filex-edge:5214:data/instance.sqlite:filex'`);
+    expect(shipSettings({ ...env, SHIP_EDGE_SSH: 'shell' }).problems.join('\n')).toContain('SHIP_EDGE_SSH');
+  });
+
   it('never hands the server a word it could read two ways', () => {
     for (const bad of ['a b', "it's", '$(id)', 'a;b', 'a|b', '`id`', '']) expect(() => remoteRunner([bad]), bad).toThrow();
     const line = remoteRunner(['/srv/x', 'v0.53.0']);

@@ -188,11 +188,20 @@ export function shipSettings(env) {
     const port = str(k('PORT'));
     const db = str(k('DB'), 'data/instance.sqlite');
     const service = str(k('SERVICE'), 'filex');
+    // An instance on another server than SHIP_HOST names its own ssh host.
+    // Unset, it runs on SHIP_HOST, as every instance did before.
+    const ihost = safe(k('HOST'), str(k('HOST'))) || host;
+    // How the server takes a step: `script` (the step file on stdin, run in a
+    // shell - the default) or `command` (the step's name and its words only:
+    // the key is pinned to a forced command on that server that runs its own
+    // copy of the step, so the key cannot run anything else).
+    const via = str(k('SSH'), 'script');
+    if (!['script', 'command'].includes(via)) problems.push(`${k('SSH')}: script or command`);
     if (!dir.startsWith('/') || !SAFE.test(dir) || dir.includes(':')) problems.push(`${k('DIR')}: the instance's compose directory, an absolute path`);
     if (!/^\d+$/.test(port)) problems.push(`${k('PORT')}: the host port its /healthz answers on`);
     if (db !== 'none' && (!SAFE.test(db) || db.startsWith('/') || db.includes('..') || db.includes(':'))) problems.push(`${k('DB')}: its SQLite file, relative to the directory (or none)`);
     if (!SAFE.test(service) || service.includes(':')) problems.push(`${k('SERVICE')}: its compose service`);
-    instances.push({ name, dir, port, db, service, spec: `${name}:${dir}:${port}:${db}:${service}` });
+    instances.push({ name, dir, port, db, service, host: ihost, via, spec: `${name}:${dir}:${port}:${db}:${service}` });
   }
   const backupRoot = str('SHIP_BACKUP_ROOT', '/var/backups/filex');
   if (!backupRoot.startsWith('/') || !SAFE.test(backupRoot)) problems.push('SHIP_BACKUP_ROOT: an absolute directory on the server');
@@ -238,8 +247,8 @@ export function shipSettings(env) {
   return { cfg, problems };
 }
 
-/** ssh to the server, as a shell words. */
-export const sshWords = (cfg) => ['ssh', ...cfg.sshOpts, cfg.host].map(shq).join(' ');
+/** ssh to the server (SHIP_HOST, or the host given), as a shell words. */
+export const sshWords = (cfg, host = cfg.host) => ['ssh', ...cfg.sshOpts, host].map(shq).join(' ');
 
 /**
  * What the server runs for a step file: save stdin to a file, run it, remove
@@ -252,9 +261,53 @@ export function remoteRunner(args) {
 }
 
 /** The shell that sends common.sh and one step file to the server and runs them there. */
-export function sshScript(cfg, step, args) {
+export function sshScript(cfg, step, args, host = cfg.host) {
   const files = [path.join(REMOTE, 'common.sh'), path.join(REMOTE, `${step}.sh`)].map((f) => shq(posixPath(f)));
-  return `cat ${files.join(' ')} | ${sshWords(cfg)} ${shq(remoteRunner(args))}`;
+  return `cat ${files.join(' ')} | ${sshWords(cfg, host)} ${shq(remoteRunner(args))}`;
+}
+
+/**
+ * The instances in their order, cut into runs that share a server: [{ host,
+ * instances }]. All on SHIP_HOST is one run and the step is exactly what it
+ * always was; an instance on another server (SHIP_<NAME>_HOST) starts a run of
+ * its own, so the canary order holds across servers too.
+ */
+export function hostRuns(cfg) {
+  const runs = [];
+  for (const i of cfg.instances) {
+    const h = i.host ?? cfg.host;
+    const via = i.via ?? 'script';
+    const last = runs[runs.length - 1];
+    if (last && last.host === h && last.via === via) last.instances.push(i);
+    else runs.push({ host: h, via, instances: [i] });
+  }
+  return runs;
+}
+
+/**
+ * A step on a server whose key is pinned to a forced command
+ * (SHIP_<NAME>_SSH=command): only the step's name and its words travel, as
+ * the one command line ssh hands the forced command (SSH_ORIGINAL_COMMAND).
+ * The server checks every word against what it allows and runs its own copy
+ * of the step file; there is no script on stdin to run.
+ */
+export function sshCommand(cfg, step, args, host) {
+  for (const a of [step, ...args]) if (!SAFE.test(String(a))) throw new Error(`"${a}" cannot go into a command as it is`);
+  return `${sshWords(cfg, host)} ${shq([step, ...args].join(' '))}`;
+}
+
+/**
+ * One server step over every run, in order, `&&` between them: a run that
+ * fails leaves the servers after it untouched - the deploy's "the instances
+ * after it are not touched", across servers.
+ */
+export function perHost(cfg, step, lead) {
+  return hostRuns(cfg)
+    .map((r) => {
+      const args = [...lead, ...r.instances.map((i) => i.spec)];
+      return r.via === 'command' ? sshCommand(cfg, step, args, r.host) : sshScript(cfg, step, args, r.host);
+    })
+    .join(' && ');
 }
 
 /** `name=(a b c)` of a bash script, as a list. */
@@ -294,7 +347,6 @@ export function buildSteps(cfg, ctx) {
   const notThis = (id, title, surface) => steps.push({ id, title, skipped: `${tag} publishes ${surfaces.join(', ')}, not ${surface}: left as it is` });
   const ssh = sshWords(cfg);
   const env = { FILEX_SHIP_TAG: tag, FILEX_SHIP_VERSION: version, FILEX_SHIP_REPO: repo, FILEX_SHIP_EXPORT: exp, FILEX_SHIP_RUN: runDir };
-  const specs = cfg.instances.map((i) => i.spec);
   const bk = `${cfg.backupRoot}/pre-${tag}-${stamp}`;
   const dl = `${posixPath(runDir)}/desktop`;
   const steps = [];
@@ -302,10 +354,10 @@ export function buildSteps(cfg, ctx) {
   const person = (id, title, lines) => steps.push({ id, title, person: lines });
 
   add('preflight', 'the tag, the public checkout, the release record, the server', { check: ctx.preflight });
-  add('backup', 'every instance copied, the database checked', { sh: `set -o pipefail; ${sshScript(cfg, 'backup', [bk, ...specs])}` });
-  add('proxies', 'every gateway in FILEX_TRUSTED_PROXIES', { sh: `set -o pipefail; ${sshScript(cfg, 'proxies', specs)}` });
+  add('backup', 'every instance copied, the database checked', { sh: `set -o pipefail; ${perHost(cfg, 'backup', [bk])}` });
+  add('proxies', 'every gateway in FILEX_TRUSTED_PROXIES', { sh: `set -o pipefail; ${perHost(cfg, 'proxies', [])}` });
   add('deploy', `instance by instance: ${cfg.instances.map((i) => i.name).join(', ')}`, {
-    sh: `set -o pipefail; ${sshScript(cfg, 'deploy', [cfg.image, tag, String(want), String(cfg.healthWait), ctx.onFail ?? cfg.onFail, bk, ...specs])}`,
+    sh: `set -o pipefail; ${perHost(cfg, 'deploy', [cfg.image, tag, String(want), String(cfg.healthWait), ctx.onFail ?? cfg.onFail, bk])}`,
   });
 
   // A server patch goes into the manifest with auto_ok off: no install takes
@@ -758,9 +810,11 @@ async function preflight({ cfg, repo, exp, tag, gitDir, want, runDir, bash }) {
   for (const f of ['common.sh', 'backup.sh', 'proxies.sh', 'deploy.sh', 'docs-prepare.sh']) if (!fs.existsSync(path.join(REMOTE, f))) problems.push(`scripts/train/remote/${f} is missing`);
   if (want > 0) notes.push(`the release carries migrations up to ${want}`);
   else notes.push('no migration found at the tag: the deploy does not check the migration number');
-  const reach = run(bash ?? 'bash', ['-c', `${sshWords(cfg)} true`], { cwd: runDir });
-  if (reach.status !== 0) problems.push(`ssh ${cfg.host} does not answer: ${(reach.stderr || reach.stdout).trim().split('\n').slice(-3).join(' / ')}`);
-  else notes.push(`${cfg.host} answers`);
+  for (const h of new Set([cfg.host, ...hostRuns(cfg).map((r) => r.host)])) {
+    const reach = run(bash ?? 'bash', ['-c', `${sshWords(cfg, h)} true`], { cwd: runDir });
+    if (reach.status !== 0) problems.push(`ssh ${h} does not answer: ${(reach.stderr || reach.stdout).trim().split('\n').slice(-3).join(' / ')}`);
+    else notes.push(`${h} answers`);
+  }
   return problems.length ? { ok: false, detail: problems.join('\n') } : { ok: true, detail: notes.join('; ') };
 }
 

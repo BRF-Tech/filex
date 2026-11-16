@@ -19,14 +19,50 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.61.0, 15 November 2026
-A file written into a storage's folder without filex now shows up without waiting for a scan. A new local storage is watched live: the folder somebody opens is read from the disk, catalogued and watched, so a file a download client, another container or the NAS's own share wrote there is listed when its folder is opened; on a network filesystem or a FUSE mount (NFS, SMB, Unraid's /mnt/user) nothing is watched and every opened folder is read from the disk. Existing storages keep their mode, and a local one that polls is offered Switch to live watching in one click; on screen the modes are now Live watching (lazy) and Watch the whole storage (fsnotify). When a storage's disk is on another machine - a NAS share, an SFTP server - filex-watch, a small program with a release line of its own (Linux, Windows and macOS, a service or the ghcr.io/brf-tech/filex-watch image), runs there and reports the folders that change, with a key made on the storage's page that opens nothing else, so the change reaches filex in seconds. The storage form says what a scan interval would cost, measured on the storage's last full scan - how busy it keeps the disk, a longer interval when that is too much, a warning near the memory limit - and a full scan records its peak memory. Extracting a selected 7z, RAR or encrypted ZIP member whose name holds a line break no longer does nothing and says nothing: it is named in the result as skipped, as when the whole archive is extracted. The upgrade runs one database migration.
+::: tip Latest - v0.61.1, 16 November 2026
+A patch for SQLite installs that were upgraded across many releases at once. Before 0.38 filex made its operations queue at start, outside the database migrations, and from 0.27 on added a column to it the same way; the migration that took the table over in 0.38 assumed every install had that column. An install whose last start was 0.26.1 or older and that was taken straight to 0.38 or later - a v0.10.0 install upgraded to 0.61.0, for one - kept the table without it, and the operations list answered 500 while the server reported itself healthy. Such an install is now repaired at start: the column is added with its default, the queue's rows are kept, and the log says so in one line. PostgreSQL and MySQL installs were never affected, and the upgrade runs no database migration.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.61.0
-docker pull ghcr.io/brf-tech/filex:full-v0.61.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.61.1
+docker pull ghcr.io/brf-tech/filex:full-v0.61.1
 ```
+
+## v0.61.1
+
+<span class="filex-release-date">16 November 2026</span>
+
+A patch for SQLite installs that were upgraded across many releases at once. Before 0.38 filex made its operations queue at start, outside the database migrations, and from 0.27 on added a column to it the same way; the migration that took the table over in 0.38 assumed every install had that column. An install whose last start was 0.26.1 or older and that was taken straight to 0.38 or later - a v0.10.0 install upgraded to 0.61.0, for one - kept the table without it, and the operations list answered 500 while the server reported itself healthy. Such an install is now repaired at start: the column is added with its default, the queue's rows are kept, and the log says so in one line. PostgreSQL and MySQL installs were never affected, and the upgrade runs no database migration.
+
+## What changed
+
+### Fixed
+
+- **An install upgraded from 0.26.1 or older lists its operations again**
+  (task #356). Before 0.38 filex made its operations queue (`pending_ops`) at
+  start, outside the migrations, and 0.27 to 0.37 added its `dest_storage_id`
+  column the same way; migration 00036 took the table over assuming every
+  install had that column. A SQLite install whose last start was 0.26.1 or
+  older and that was upgraded straight to 0.38 or later kept the table
+  without it, and every `GET /api/files/ops` answered 500 with
+  `no such column: dest_storage_id` while `/healthz` was fine. **Upgrade note:
+  v0.10.0-era SQLite installs upgraded to 0.38 or later (0.61.0 included) are
+  fixed automatically on start**: the column is added with its default, the
+  rows are kept, and the log says so in one INFO line (`db: schema repaired`).
+  An install that added the column by hand is left as it is. PostgreSQL and
+  MySQL were never affected. The repair is not a migration, so this is a
+  patch. A test now takes the schema six releases left (0.1.57 to 0.61.0) to
+  this one and compares it with a fresh install's, table, column and index.
+  [DATABASES.md → Upgrading an old SQLite install](./DATABASES.md#upgrading-an-old-sqlite-install).
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0611---2026-11-15)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.61.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.61.1`
 
 ## v0.61.0
 
@@ -1412,64 +1448,13 @@ Video, audio and PDF thumbnails read a file on a local storage in place instead 
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.56.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.56.2`
 
-## v0.56.1
-
-<span class="filex-release-date">12 October 2026</span>
-
-Every table in the product lays each row out under its name when its pane is too narrow to be a table - the details panel, the explorer on a phone or in a narrow pane, an admin page on a phone - instead of cutting the values to their minimum width; selection, the right-click menu, Actions, sorting and the column menu work as before. The protocol docs now say whose permissions WebDAV, SFTP, FTPS, NFS and the S3 endpoint share: filex's own grants per person, group and folder, not the disk's POSIX bits or ACLs. For maintainers, a release can be cut off Windows: the Store copy's check waits for a Windows machine, on a person's word.
-
-## What changed
-
-### Changed
-
-- **A release can be cut off Windows: the Store copy's check waits for a
-  Windows machine, on a person's word.** `pnpm release` on Linux or macOS
-  stopped red at the pretag's Store gate, which installs and activates an
-  MSIX and so needs Windows. It now names the gate as deferred and waits for
-  `--ack store-deferred`, bound to the release commit; the run's record,
-  `--status`, the deploy stage and the ship list the steps a Windows machine
-  takes until `--ack store-checked` records that they ran green. The Store
-  still gets the bundle the release workflow checks and submits, and on
-  Windows the gate runs as before
-  ([CONTRIBUTING.md](./CONTRIBUTING.md), Release process, step 6).
-- **The docs say which permissions the protocols share.** They are filex's own, per
-  person, group and folder; the POSIX bits and ACLs on the disk are not mapped to filex
-  users ([PROTOCOLS.md](./PROTOCOLS.md)).
-
-### Fixed
-
-- **A table in a narrow place lays each row out under its name instead of
-  cutting it.** In the 300px details panel the e-Signature signer table
-  showed State and When at their 56px minimums, as "Invited ..." and
-  "until S...". Every table in the product (the one table, `DataTable`) now
-  measures its own pane: narrower than the lead and the first three columns
-  side by side at their minimums (`TableLayout.stackBelow`), each row is its
-  tick, its lead and its Actions on one line and every other value after
-  them on one line under the lead that wraps only when it must, each with
-  its column's name small in front of it and " · " between them ("Type
-  Plain text · Owner You · Size 10 B"), whole - the details panel, the
-  explorer's listing on a phone or in a narrow pane, an admin page on a
-  phone. Selection, the right-click menu, the Actions control, sorting and
-  the column menu work as before, the cells keep their roles and their
-  column headers, and a pane that holds the lead and three columns is still
-  a table that scrolls sideways to the rest (a wide spreadsheet preview
-  stays a table).
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0561---2026-10-11)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.56.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.56.1`
-
 ## Earlier releases
 
-The 137 releases before v0.56.1, in brief. Full notes are on GitHub.
+The 138 releases before v0.56.2, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.56.1](https://github.com/BRF-Tech/filex/releases/tag/v0.56.1) | 12 October 2026 | Every table in the product lays each row out under its name when its pane is too narrow to be a table - the details panel, the explorer on a phone or in a narrow pane, an admin page on a phone - instead of cutting the values to… |
 | [v0.56.0](https://github.com/BRF-Tech/filex/releases/tag/v0.56.0) | 11 October 2026 | Apps can edit a file of an end-to-end encrypted folder, or of a vault: the browser decrypts it for an app the person allowed, seals what the app keeps while it edits and encrypts what it saves before it leaves the browser, so the… |
 | [v0.55.0](https://github.com/BRF-Tech/filex/releases/tag/v0.55.0) | 9 October 2026 | An app store lists storage plugins beside apps: the same link and review, every build pinned and signed by the store, the plugin checked by the store's validator before it is listed, and a paid one held while its license does not… |
 | [v0.54.0](https://github.com/BRF-Tech/filex/releases/tag/v0.54.0) | 8 October 2026 | The server does the server's work: the rules, numbers and sentences the web app, the desktop app and the packages used to keep copies of now come from the server, so every surface says the same thing in the reader's language, and… |
@@ -1610,4 +1595,4 @@ The 137 releases before v0.56.1, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-11-15 from 157 published releases.</small>
+<small>Last refreshed 2026-11-16 from 158 published releases.</small>
