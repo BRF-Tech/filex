@@ -9,7 +9,8 @@ import (
 )
 
 // Migrate applies all UP migrations using goose with the driver-supplied
-// embedded FS.
+// embedded FS, then the schema repairs (schema_repair.go): the columns the
+// migrations assume an install has that an earlier release left out.
 func Migrate(ctx context.Context, drv Driver, sqlDB *sql.DB) error {
 	embedFS := drv.MigrationsFS()
 	goose.SetBaseFS(embedFS)
@@ -18,7 +19,12 @@ func Migrate(ctx context.Context, drv Driver, sqlDB *sql.DB) error {
 	if err := goose.SetDialect(drv.Dialect()); err != nil {
 		return fmt.Errorf("migrate: dialect: %w", err)
 	}
-	return goose.UpContext(ctx, sqlDB, ".")
+	if err := goose.UpContext(ctx, sqlDB, "."); err != nil {
+		return err
+	}
+	added, err := repairSchema(ctx, drv.Dialect(), sqlDB)
+	logSchemaRepairs(ctx, drv.Dialect(), added)
+	return err
 }
 
 // MigrateDown rolls back one step.

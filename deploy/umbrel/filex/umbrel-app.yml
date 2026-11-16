@@ -18,7 +18,7 @@ environment:
       The address share links, upload links and emails point to. By default it's this Umbrel's local address. Set it, for example to https://files.example.com, if people open filex through another address.
 category: files
 name: filex
-version: "0.61.0"
+version: "0.61.1"
 tagline: Self-hosted file manager for all your storages
 description: >-
   Sign in with the username and password Umbrel shows for the app. filex opens on a Files folder that is ready for uploads, and you can add more storages from its admin panel.
@@ -41,12 +41,8 @@ description: >-
 
   - Word, Excel and PowerPoint files edited in the browser once you install the office editor app from filex's own app store
 releaseNotes: |-
-  filex v0.61.0 - 2026-11-15
-  • The storage form says what a scan interval would cost, measured on the storage's last scan
-  • Switch to live watching, in one click
-  • filex-watch: changes made on another machine reach filex in seconds
-  • A new local storage is watched live instead of scanned every 15 minutes
-  • On a network filesystem nothing is watched
+  filex v0.61.1 - 2026-11-15
+  • An install upgraded from 0.26.1 or older lists its operations again
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 
 developer: BRF-Tech

@@ -1,6 +1,10 @@
 package db
 
-import "time"
+import (
+	"context"
+	"database/sql"
+	"time"
+)
 
 // SubtreeStatement is one statement NodesUnderSQL runs, as the tests that
 // read its plan need it.
@@ -37,3 +41,29 @@ func (o *NodesUnderSQL) SubtreeStatements(storageID int64, dir string, before ti
 // VanishedNodeIDsSQL is the statement ListVanishedNodeIDs runs, for the test
 // that reads its plan.
 const VanishedNodeIDsSQL = vanishedNodeIDsSQL
+
+// SchemaRepair is one entry of schemaRepairs, for the tests that hold the
+// list to what a fresh install has.
+type SchemaRepair struct {
+	Dialect, Table, Column, DDL string
+}
+
+// SchemaRepairs is schemaRepairs as the tests read it.
+func SchemaRepairs() []SchemaRepair {
+	out := make([]SchemaRepair, 0, len(schemaRepairs))
+	for _, r := range schemaRepairs {
+		out = append(out, SchemaRepair{Dialect: r.dialect, Table: r.table, Column: r.column, DDL: r.ddl})
+	}
+	return out
+}
+
+// RepairSchema runs the schema repairs alone and says what they added, so a
+// test can tell a fixture that needed one from one that did not.
+func RepairSchema(ctx context.Context, dialect string, sqlDB *sql.DB) ([]string, error) {
+	return repairSchema(ctx, dialect, sqlDB)
+}
+
+// TableColumns is the catalogue reader the schema repairs use.
+func TableColumns(ctx context.Context, dialect string, sqlDB *sql.DB, table string) (map[string]bool, error) {
+	return tableColumns(ctx, dialect, sqlDB, table)
+}

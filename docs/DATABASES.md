@@ -81,6 +81,15 @@ describe exactly what is guaranteed:
 
 - **The migrations apply** from an empty database, and applying them a second
   time - what every restart does - changes nothing.
+- **An install upgraded in place has the schema of a fresh one** (SQLite).
+  The schema six releases left on their first start - v0.1.57, the first
+  public one, v0.10.0, v0.26.1, v0.37.0, v0.38.0 and v0.61.0, kept in
+  `backend/internal/db/testdata/upgrade` and written from each release's own
+  image - is taken to this release the way a start does it, and compared with
+  a fresh install table by table, column by column (type, `NOT NULL`, default,
+  key, collation) and index by index. A difference is a query that works on a
+  new install and fails on an upgraded one
+  ([below](#upgrading-an-old-sqlite-install)).
 - **The schemas match.** Each dialect's tables and columns are compared against
   SQLite's, name by name. Types are not compared (`TEXT`, `VARCHAR(190)` and
   `JSONB` are legitimate per-engine answers); names are, because a name that
@@ -126,6 +135,38 @@ FILEX_TEST_MYSQL_DSN='root:filex@tcp(127.0.0.1:3306)/mysql' \
 
 Without the two variables the suites skip themselves and only SQLite runs, so
 nobody is forced to keep two database servers to work on filex.
+
+## Upgrading an old SQLite install
+
+An install can go from any release to the current one in place: at start the
+migrations it has not run yet run, and after them the **schema repairs** - the
+columns the migrations take for granted that an earlier release left out.
+
+There is one so far. Before v0.38.0 filex made its operations queue
+(`pending_ops`) at start, outside the migrations, and from v0.27.0 on it added
+the column `dest_storage_id` the same way. Migration `00036` (v0.38.0) took the
+table over on the belief that every install had that column already. A SQLite
+install whose last start was v0.26.1 or older, upgraded straight to v0.38.0 or
+later, kept the table without it: the operations list
+(`GET /api/files/ops`) answered 500 with `no such column: dest_storage_id`
+while `/healthz` said the server was fine. PostgreSQL and MySQL installs are
+not affected: before v0.38.0 neither could finish a first start, and the table
+they have is the migration's.
+
+Since v0.61.1 such an install is repaired at start, and the log says so once,
+on that start:
+
+```text
+INFO db: schema repaired: added the column(s) an earlier release left out of this database columns=pending_ops.dest_storage_id engine=sqlite3
+```
+
+A repair adds only a column a fresh install has, made the way the migrations
+make it, so the rows are kept and nothing else changes; on every other install
+it reads the table's columns and does nothing. If you added the column by hand
+(`ALTER TABLE pending_ops ADD COLUMN dest_storage_id INTEGER NOT NULL DEFAULT 0`),
+the repair finds it there and leaves it. A repair is not a migration: the
+release that carries one is still a patch, and the newest migration an install
+is at does not move.
 
 ## Moving between engines
 

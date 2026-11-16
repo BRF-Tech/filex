@@ -184,6 +184,17 @@ The DB layer is split:
   MySQL's driver refuses are not things one guarded file can express. A schema
   comparison holds the three trees to the same names - see
   [DATABASES.md](DATABASES.md#what-supported-is-checked-to-mean).
+- **Schema repairs** (`internal/db/schema_repair.go`): after goose, `Migrate`
+  adds the columns the migrations take for granted that an earlier release
+  left out of an install - one list of {engine, table, column, DDL} and one
+  catalogue reader (`pragma_table_info`, `information_schema`). Never a table,
+  never a change to a column that is there; a fresh install's column, made
+  the same way, and a test holds every entry to that
+  ([DATABASES.md → Upgrading an old SQLite install](DATABASES.md#upgrading-an-old-sqlite-install)).
+  ⚠ A migration that writes `CREATE TABLE IF NOT EXISTS` for a table some
+  release made outside the migrations keeps whatever shape that release left:
+  name every column such an install may lack in a repair, and add the
+  release's schema to `internal/db/testdata/upgrade` (`make-fixture.sh`).
 - **Queries** are hand-written behind the one `db.Store` interface. SQLite and
   MySQL share an implementation - the placeholders and column names are
   identical, and the one construct they genuinely disagree on is rewritten at

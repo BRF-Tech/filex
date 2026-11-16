@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.61.1] - 2026-11-15
+
+### Fixed
+
+- **An install upgraded from 0.26.1 or older lists its operations again**
+  (task #356). Before 0.38 filex made its operations queue (`pending_ops`) at
+  start, outside the migrations, and 0.27 to 0.37 added its `dest_storage_id`
+  column the same way; migration 00036 took the table over assuming every
+  install had that column. A SQLite install whose last start was 0.26.1 or
+  older and that was upgraded straight to 0.38 or later kept the table
+  without it, and every `GET /api/files/ops` answered 500 with
+  `no such column: dest_storage_id` while `/healthz` was fine. **Upgrade note:
+  v0.10.0-era SQLite installs upgraded to 0.38 or later (0.61.0 included) are
+  fixed automatically on start**: the column is added with its default, the
+  rows are kept, and the log says so in one INFO line (`db: schema repaired`).
+  An install that added the column by hand is left as it is. PostgreSQL and
+  MySQL were never affected. The repair is not a migration, so this is a
+  patch. A test now takes the schema six releases left (0.1.57 to 0.61.0) to
+  this one and compares it with a fresh install's, table, column and index.
+  [DATABASES.md → Upgrading an old SQLite install](docs/DATABASES.md#upgrading-an-old-sqlite-install).
+
 ## [0.61.0] - 2026-11-15
 
 ### Added

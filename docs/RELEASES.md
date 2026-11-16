@@ -19,14 +19,124 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.60.2, 12 November 2026
-A patch for single sign-on set up in the environment. The OIDC provider filex builds from FILEX_OIDC_* asked the identity provider for openid, profile and email and nothing else, so an identity provider that sends a person's groups only for a scope of its own - VoidAuth, Authentik - never sent them, and the admin mapping, the allowed groups and the SSO-linked groups had nothing to read. FILEX_OIDC_EXTRA_SCOPES (or auth.oidc.extra_scopes in the config file), space- or comma-separated, adds scopes to the three; the Helm chart and the compose files take it too. It is read like the Scopes box of a provider added on the Identity providers page, and a scope named twice is now asked for once in both.
+::: tip Latest - v0.61.0, 15 November 2026
+A file written into a storage's folder without filex now shows up without waiting for a scan. A new local storage is watched live: the folder somebody opens is read from the disk, catalogued and watched, so a file a download client, another container or the NAS's own share wrote there is listed when its folder is opened; on a network filesystem or a FUSE mount (NFS, SMB, Unraid's /mnt/user) nothing is watched and every opened folder is read from the disk. Existing storages keep their mode, and a local one that polls is offered Switch to live watching in one click; on screen the modes are now Live watching (lazy) and Watch the whole storage (fsnotify). When a storage's disk is on another machine - a NAS share, an SFTP server - filex-watch, a small program with a release line of its own (Linux, Windows and macOS, a service or the ghcr.io/brf-tech/filex-watch image), runs there and reports the folders that change, with a key made on the storage's page that opens nothing else, so the change reaches filex in seconds. The storage form says what a scan interval would cost, measured on the storage's last full scan - how busy it keeps the disk, a longer interval when that is too much, a warning near the memory limit - and a full scan records its peak memory. Extracting a selected 7z, RAR or encrypted ZIP member whose name holds a line break no longer does nothing and says nothing: it is named in the result as skipped, as when the whole archive is extracted. The upgrade runs one database migration.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.60.2
-docker pull ghcr.io/brf-tech/filex:full-v0.60.2
+docker pull ghcr.io/brf-tech/filex:slim-v0.61.0
+docker pull ghcr.io/brf-tech/filex:full-v0.61.0
 ```
+
+## v0.61.0
+
+<span class="filex-release-date">15 November 2026</span>
+
+A file written into a storage's folder without filex now shows up without waiting for a scan. A new local storage is watched live: the folder somebody opens is read from the disk, catalogued and watched, so a file a download client, another container or the NAS's own share wrote there is listed when its folder is opened; on a network filesystem or a FUSE mount (NFS, SMB, Unraid's /mnt/user) nothing is watched and every opened folder is read from the disk. Existing storages keep their mode, and a local one that polls is offered Switch to live watching in one click; on screen the modes are now Live watching (lazy) and Watch the whole storage (fsnotify). When a storage's disk is on another machine - a NAS share, an SFTP server - filex-watch, a small program with a release line of its own (Linux, Windows and macOS, a service or the ghcr.io/brf-tech/filex-watch image), runs there and reports the folders that change, with a key made on the storage's page that opens nothing else, so the change reaches filex in seconds. The storage form says what a scan interval would cost, measured on the storage's last full scan - how busy it keeps the disk, a longer interval when that is too much, a warning near the memory limit - and a full scan records its peak memory. Extracting a selected 7z, RAR or encrypted ZIP member whose name holds a line break no longer does nothing and says nothing: it is named in the result as skipped, as when the whole archive is extracted. The upgrade runs one database migration.
+
+## What changed
+
+### Added
+
+- **The storage form says what a scan interval would cost, measured on the
+  storage's last scan** (task #353). Under **Scan every (minutes)** filex says
+  how long the last full scan took, for how many files and folders, and the
+  share of the time scans at the typed interval keep the storage busy; from a
+  quarter of the time it suggests a rounder, longer interval - *every 5 min,
+  about 80% of the time; suggested 50 min* - with a button that puts it in the
+  field, and a scan that outlasts the interval is said to scan all the time.
+  When the last scan took filex to 80% of the memory it was given (the
+  container's limit, else the machine's RAM) it warns that the system would
+  stop filex. The server judges it while you type
+  (`GET /api/admin/storages/{id}/interval-advice`); any interval still saves.
+  Saving a storage answers with the same judgement (`interval_advice`), so an
+  agent using the `admin_storages_create` / `_update` MCP tools hears it too.
+  A full scan records the most memory the process held while it walked
+  (`peak_mem_bytes` on the run, migration 00139; **Peak memory** in the
+  storage's run table).
+  [STORAGE.md → How long a scan takes](./STORAGE.md#how-long-a-scan-takes-and-the-interval-filex-suggests).
+- **Switch to live watching, in one click** (task #351). A `local` storage that
+  polls - every one made before this release - is marked in the storage list
+  and offered the switch on its page; the click saves the mode alone.
+  [STORAGE.md → Which mode a new storage gets](./STORAGE.md#which-mode-a-new-storage-gets).
+- **filex-watch: changes made on another machine reach filex in seconds**
+  (task #352). A watch only sees what its own machine writes, so a storage whose
+  disk is elsewhere - a NAS share mounted over the network, the folder an SFTP
+  storage points at - learned of a change made there at its next sync.
+  filex-watch is a small program for that machine (Linux, Windows and macOS on
+  amd64 and arm64, a systemd unit, a launchd daemon, a Windows service, the
+  image `ghcr.io/brf-tech/filex-watch`) that watches the folder and reports the
+  folders that change to `POST /api/storages/{id}/watch/events`; filex looks at
+  those folders alone - a Live watching storage reconciles each one, any other
+  mode rescans its subtree - and a start, a lost connection, a full queue or
+  a filex that started again since its last answer asks for one resync of the
+  storage. The storage's page has a card for it (not for an object store such as S3, whose driver says there is nothing to watch):
+  make a key for a machine (shown once), see what each key's agent last said,
+  copy the install commands, revoke a key; the admin MCP tools
+  `admin_storages_watch`, `admin_storages_watch_key_create` and
+  `admin_storages_watch_key_delete` do the same. The key is an API key of its
+  own kind: it opens that storage's change reports and nothing else - no file
+  API, no protocol, no admin route - and reports as the administrator who made
+  it, as they are now. filex-watch has a release line of its own
+  (`filex-watch-v0.1.0`), never GitHub's "latest" release, and neither the
+  update check nor the Releases page lists it.
+  [docs/FILEX-WATCH.md](./FILEX-WATCH.md).
+
+### Changed
+
+- **A new local storage is watched live instead of scanned every 15 minutes**
+  (task #351). A file copied into a storage's folder without filex - over the
+  NAS's own share, by a download client, by another container - stayed
+  invisible until the next scan, and a folder listed from the disk during the
+  first scan looked empty again once it ended. A storage nobody chose a mode
+  for now gets its driver's default, decided in one place and read by the
+  environment seed every store package uses (CasaOS, Umbrel, Unraid, TrueNAS),
+  the admin API, `filex storage add` and the storage form: live watching
+  (`sync_mode: lazy`) for `local`, so the opened folder is read from the disk
+  and watched, and `poll` for every other driver. The scan interval stays as
+  the safety net. Existing storages keep their mode.
+  [STORAGE.md → Which mode a new storage gets](./STORAGE.md#which-mode-a-new-storage-gets).
+- **On a network filesystem nothing is watched** (task #351). A watch only hears
+  what passes through this machine, so on NFS, SMB/CIFS, 9P or a FUSE mount
+  (Unraid's `/mnt/user` included) a live-watched storage places none and reads
+  every opened folder from the disk; the storage page says so and names
+  [filex-watch](./FILEX-WATCH.md), which reports changes from the machine
+  the disk is attached to.
+  A storage set to **Watch the whole storage** (`fsnotify`) on such a
+  filesystem is polled at its own interval instead, the way it already was on
+  a driver that is not local: the server logs it once at start and the storage
+  page says it is scanned at its interval.
+  [LAZY-CATALOGUE.md → Network filesystems](./LAZY-CATALOGUE.md#network-filesystems-no-watch-every-open-from-disk).
+- **The sync modes have new names on screen** (task #351): `lazy` is **Live
+  watching** (it was *Lazy catalog*) and `fsnotify` is **Watch the whole
+  storage** (it was *Live watch*, the name the new default now carries). The
+  values in the API and the configuration do not change.
+
+### Fixed
+
+- **On MySQL a scan no longer ends before it began.** A sync run's start
+  is kept to the microsecond and its end was written to the whole second, so
+  a run that started and ended within one second was stored as ending first.
+  The end is now as precise as the start.
+
+- **Selecting an archive member whose name holds a line break no longer does
+  nothing.** 7-Zip 25.01 and newer (every version filex accepts, the Docker
+  image's included) list a line break in a member's name as `_`, so a 7z, RAR
+  or encrypted ZIP showed `line_break.txt` for `line` + line break +
+  `break.txt`, and extracting that selection wrote nothing and reported
+  nothing. filex now finds the member the listed name stands for, and it is
+  skipped with `name_not_allowed` and named in the result, as when the whole
+  archive is extracted.
+  [ARCHIVES.md → Safety model](./ARCHIVES.md#safety-model).
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0610---2026-11-15)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.61.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.61.0`
 
 ## v0.60.2
 
@@ -50,8 +160,6 @@ A patch for single sign-on set up in the environment. The OIDC provider filex bu
   [SSO.md → Groups behind an extra scope](./SSO.md#groups-behind-an-extra-scope).
 
 [Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0602---2026-11-12)
-
-Snap package follows (Snap Store outage).
 
 - **Documentation** - &lt;https://docs.filex.sh>
 - **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
@@ -1356,268 +1464,13 @@ Every table in the product lays each row out under its name when its pane is too
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.56.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.56.1`
 
-## v0.56.0
-
-<span class="filex-release-date">11 October 2026</span>
-
-Apps can edit a file of an end-to-end encrypted folder, or of a vault: the browser decrypts it for an app the person allowed, seals what the app keeps while it edits and encrypts what it saves before it leaves the browser, so the server still holds only ciphertext. Several people can edit one file together through filex's own relay, in ordinary and encrypted folders alike, with watchers and nothing lost to a dropped connection; the office editor app edits Word, Excel and PowerPoint that way with no document server. The Helm chart installs from a Helm repository (helm repo add brf-tech https://helm.brf.sh). The installed web app, its install offer and its notifications wear the instance's own name and logo. Storage plugins and apps get a compatibility window: an old form stays accepted for at least six minor releases or twelve months, so the checksum-only plugin signature 0.55 meant to refuse is still accepted. Fixed: a folder dropped from the desktop arrives as a folder in every browser, an app's interface knows who is looking, and a file of an encrypted folder no longer gives its name away on hover or leaves through a drag out of Cmd+K or Recent.
-
-## What changed
-
-### Added
-
-- **An app edits a file of an end-to-end encrypted folder** (#189). An app
-  whose manifest says `"encrypted_folders": {"open": true}` (filex 0.56; it
-  needs an interface, a `viewer` view and `files:read`) is granted the
-  derived permission `files:e2e-plaintext`, which the install review lists
-  in its own words - the app sees every such file opened with it, the server
-  still holds only encrypted data - and which is never written into
-  `permissions`; an update that starts asking is a new grant, and a module
-  app's describe must say the same. With the folder unlocked, **Open** and
-  **Open with** offer such an app beside filex's own viewer (the Default
-  apps rule for the kind applies; never ONLYOFFICE, never an app without
-  the grant). The browser does both halves, the CryptPad way: the app's read
-  door answers the ciphertext (`?e2e=1`), the explorer decrypts it and
-  transfers the plaintext to the app's sandboxed frame (`FileInfo.plaintext`
-  says so; no `blob:` address is made of it), and encrypts what the app
-  saves before sending it to the save door (`?e2e=1`), which writes a new
-  version only over the file as it was opened (`expect`; `412 changed`
-  otherwise) and refuses a body that is not an encrypted file (`422 not_encrypted`). While the frame holds such a file, save-as, `engine.call`
-  and `job.submit` answer `unavailable`; **Lock** closes the app. In a vault
-  too (its own entry below). Not for a `.fxe`, at most 200 MiB a file
-  (`LIMITS.maxEncryptedBytes`). The administrator's switch
-  `apps.e2e_plaintext` (on; seeded once from `FILEX_APPS_E2E_PLAINTEXT`;
-  `capabilities.apps_e2e_plaintext`) turns it off for every app; every
-  handover and save is an audit row (`app_plugin.e2e_read`,
-  `app_plugin.e2e_save`). An app's save over a file also takes `expect` and
-  answers the version's `modified`
-  ([E2E-ENCRYPTION.md → Editing in an app](./E2E-ENCRYPTION.md#editing-in-an-app),
-  [APP-PLUGINS-API.md](./APP-PLUGINS-API.md#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)).
-- **In a folder whose names are encrypted too, the browser picks the app**
-  (#189). At level 2 the server stores each name as ciphertext and cannot
-  tell the kind of a file, so an app was not offered there. Now the explorer
-  decrypts the name and chooses the app by its extension - the views granted
-  `files:e2e-plaintext` that apply to it, the administrator's rule for the
-  kind, the person's choice, filex's own viewer last - with one rule every
-  surface uses (core `plaintextOpenOf`); neither the name nor its extension
-  is ever sent, and *Choose an app…* offers no "Always use this app" for
-  such a file (that choice is kept on the account). The app doors do not ask
-  a kind of a stored name that is ciphertext - a save there is held to the
-  grant, the encrypted folder, the person's write right, `expect` and
-  ciphertext only - and keep holding every name they can read to its kind
-  ([E2E-ENCRYPTION.md → The kind is the browser's](./E2E-ENCRYPTION.md#the-kind-is-the-browsers)).
-- **What an app keeps while it edits an encrypted file is sealed** (#189).
-  `state.set` in an encrypted session goes to a store of its own,
-  `appStateE2e` in the account's preferences: one ledger per account, app and
-  folder, encrypted in the browser with a key derived from the folder key
-  (HKDF, the signed-in account and the app's name in the context and in the
-  associated data, so a member's ledger copied into another member's
-  preferences does not open), so a "setting" can no longer carry plaintext to
-  the server. It is apart from the app's ordinary store; the same limits hold,
-  measured on what is stored (the server enforces them on the sealed store
-  too, `413 APP_STATE_TOO_LARGE`); a locked folder reads as an empty store
-  ([E2E-ENCRYPTION.md → The app's own store, sealed](./E2E-ENCRYPTION.md#the-apps-own-store-sealed)).
-- **An app edits a file of a vault** (#189, encryption level 3). The same
-  app, granted the same `files:e2e-plaintext`, is offered a file of a vault
-  the person has opened and edits it there - the vault's own way, all in the
-  browser: the explorer picks the app by the name it read from the vault's
-  encrypted index (the server never learns a vault's names), its vault engine
-  reads the file from the packs for the app's `file.read` and writes the
-  app's `file.save` as the vault's next generation, under the vault's write
-  lock, only over the version the app read (`failed` / `changed` otherwise; a
-  file that went meanwhile is not made again). One writer at a time: a save
-  while somebody else writes the vault is refused in the server's words
-  (`failed` / `vault_locked`), and one whose write lock ended before the
-  commit writes nothing and says why and what was not saved (`failed` /
-  `vault_lock_lost`). When the vault locks - **Lock**, or its own lock after
-  15 idle minutes - the app closes with it and the person is told which file
-  lost the changes the app had not saved; the app's reads, saves and
-  `ui.dirty` count as activity in the vault. A minute before the vault would
-  lock itself while the app holds unsaved changes, filex warns above the app
-  in the server's words (the vault's `state` answer now carries `words`) and
-  offers **Keep it open**. The app's own store there is the sealed one, keyed
-  from the vault's own key and the account; where the page cannot tell which
-  account it is signed in as, `state.set` now says so instead of calling the
-  folder locked (folders too). No server door is used and no
-  endpoint was added: the server sees packs and an index, never the file's
-  name, its path or that an app opened it, and its app doors keep refusing a
-  vault (`403 encrypted`, whose sentence now says where a vault's file is
-  opened). The SDK's `FileInfo.plaintext` comes beside `encrypted: "vault"`
-  too ([E2E-ENCRYPTION.md → In a vault](./E2E-ENCRYPTION.md#in-a-vault),
-  [APP-PLUGINS-API.md](./APP-PLUGINS-API.md#a-file-of-an-encrypted-folder-in-the-clear-encrypted_folders-056)).
-
-- **Editing a file together, through filex's relay** (#189). An app whose
-  manifest says `"co_edit": {"open": true}` (filex 0.56; it needs an
-  interface, a `viewer` view and `files:read`) is granted the derived
-  permission `files:co-edit` - the review says it in its own words, it is
-  never written into `permissions` - and edits a file with other people: the
-  bridge's `coedit.*` methods 0.55 defined now answer. filex's page seals what the
-  app appends with the session's key, the relay (`internal/coedit`) puts the
-  sealed entries in one order without reading them, and every member's page
-  reads the whole log through the reader that refuses one the writers did
-  not write; the app never holds a key or opens a connection. A conflict is
-  filex's to retry, the changes lease goes to one writer at a time and only
-  to one that has seen every change, a member's cursor reaches the others
-  unkept, a save with `through` is recorded in the log, a member whose page
-  went away is dropped after 45 s, and a session keeps its unsaved changes
-  for the next person who opens the file (30 days). Who joins and whether
-  they may write are the server's answer (two people behind one proxy token
-  are two members, each request carries the member's token, rights are read
-  again while a member is in). The relay's state is in the database
-  (migration 00107, compare-and-set per session: several processes on one
-  database serve one session), its blobs under `FILEX_COEDIT_DIR`. In an
-  ordinary folder the session's key is the server's, kept sealed with
-  `FILEX_SECRET_KEY` (without it the app edits alone); in an encrypted
-  folder, see the next entry. With the
-  office editor app's 0.3.0, editing office documents - alone or together -
-  needs **no ONLYOFFICE Document Server**; one you have stays supported and
-  optional (filex's office thumbnails and server-side office conversions
-  still use it). New: `FILEX_COEDIT`, `FILEX_COEDIT_DIR`,
-  `FILEX_COEDIT_MAX_MEMBERS`, `FILEX_COEDIT_MAX_LOG_MB`,
-  `FILEX_COEDIT_MAX_BLOB_MB`, `FILEX_COEDIT_UNSAVED_DAYS`; the SDK's
-  `CoEditHello.created`, `coedit.dropped`'s `reason` and
-  `fx.save(data, {through})`
-  ([APP-PLUGINS-API.md → Editing together](./APP-PLUGINS-API.md#editing-together-coedit-056),
-  [CONFIGURATION.md → Editing together](./CONFIGURATION.md#editing-together)).
-- **Editing together in an encrypted folder, watching, and nothing lost to a
-  dropped connection** (#189). A file of an end-to-end encrypted folder is
-  edited together by an app also granted `files:e2e-plaintext`: the member
-  that starts the session makes its key in the page and gives the server
-  only that key sealed with the folder key (`POST …/coedit/{sid}/key`,
-  once); a member that joins (`e2e: true`) is handed it as it is
-  (`sealed_key`) and opens it with the folder key - the server opens neither
-  the key nor anything of the session; not in a vault, not a `.fxe`. A
-  person who may only read the file joins as a **watcher** (`canEdit: false`): every change reaches them live, the relay refuses whatever they
-  would write, and the audit says `app_plugin.coedit_watch`. Every change is
-  kept in the browser's own IndexedDB until the relay placed it (sealed with
-  the folder key in an encrypted folder) and a request that got no answer is
-  sent again: what a lost connection, a closed tab or a crash left is sent
-  when the file is opened again - at once when nobody wrote since, otherwise
-  after the person's answer to a question above the editor in the server's
-  words (`unsent_words`, English and Turkish); a tab still open keeps its own
-  (Web Locks), so none is sent twice. Cursors reach the members connected to
-  every filex process: each member's last sealed cursor is a row (migration
-  00109, `coedit_cursors`), written at most twice a second, read with the
-  log. A save in a session is held to the file the session holds (its base
-  or its last save, by any member) instead of the page's `expect`: two
-  members' saves no longer refuse each other, and a version written outside
-  the session meanwhile is refused (`412 changed`) in an ordinary folder too
-  ([APP-PLUGINS-API.md → Editing together](./APP-PLUGINS-API.md#editing-together-coedit-056),
-  [E2E-ENCRYPTION.md → Editing in an app](./E2E-ENCRYPTION.md#editing-in-an-app)).
-
-- **The Helm chart installs from a Helm repository.** `helm repo add brf-tech https://helm.brf.sh`, then `helm install filex brf-tech/filex`; the same
-  chart is at `oci://ghcr.io/brf-tech/charts/filex`. Every release's chart is
-  published there within ten minutes of the release, from 0.55.0 on, by
-  [BRF-Tech/helm-charts](https://github.com/BRF-Tech/helm-charts); `--version`
-  pins a chart version, and `helm search repo brf-tech/filex --versions` shows
-  which filex release each one installs. The chart's source stays in
-  `deploy/helm/filex`
-  ([INSTALLATION.md → Kubernetes (Helm)](./INSTALLATION.md#kubernetes-helm)).
-
-### Changed
-
-- **A storage plugin build signed over its SHA-256 alone is still accepted:
-  plugins and apps get a compatibility window.** 0.55 said this old form would
-  be refused from 0.56; it is not. A storage plugin or an app built for a
-  release keeps working, unchanged, for at least 6 minor releases or 12 months
-  after it, whichever is longer: an old form it sends (a signature format, a
-  manifest field, a host function, a bridge call) stays accepted with a warning
-  through that window, and is refused only after the CHANGELOG of an earlier
-  release has announced it. The old signature form
-  (`storage-build-signature-sha256`) is accepted at least until filex 0.61 and
-  2027-10-09, whichever comes later; the plugin's row and its log name that
-  end ([PLUGINS.md → Compatibility window](./PLUGINS.md#compatibility-window),
-  [CONTRIBUTING.md → Compatibility window for plugins and apps](./CONTRIBUTING.md#compatibility-window-for-plugins-and-apps)).
-- The co-editing relay prototype (`internal/e2eoffice`, in memory) is
-  replaced by `internal/coedit`, which keeps the same rules in the database
-  (#189).
-- **The README and the first-steps guides are shorter, and start with the
-  short path** (#218; a reader on r/selfhosted called the documentation
-  "extremely verbose and lengthy"). The README is about 6,200 words instead of
-  20,270: each tour part keeps its short version and its screenshots, and the
-  long text and the full feature list are one entry per feature on the new
-  [FEATURES.md](./FEATURES.md); its five translations follow the new
-  structure. [CONFIGURATION.md](./CONFIGURATION.md#quick-start),
-  [DESKTOP.md](./DESKTOP.md#in-five-minutes),
-  [PROTOCOLS.md](./PROTOCOLS.md#quick-start),
-  [ONLYOFFICE.md](./ONLYOFFICE.md#prerequisites) and
-  [APP-PLUGINS.md](./APP-PLUGINS.md) open with what to do first; "since
-  0.xx" stories leave the guides (the release that made a change is in this
-  file) and the reasons and measurements behind them are in
-  [CONTRIBUTING.md → Background notes from the user guides](./CONTRIBUTING.md#background-notes-from-the-user-guides).
-  The arm64 table moved to [INSTALLATION.md](./INSTALLATION.md#arm-arm64).
-  API.md's version note said 0.54, PLUGIN-KIT.md's `engine_ext` still named
-  LibreOffice as the office engine: both corrected.
-- **`pnpm release` builds its two images from the release commit, in
-  minutes** (#165). The pretag's image gates stream `git archive` of the
-  commit into `docker build -` instead of building `.`: on a workstation whose
-  docker reads the checkout through WSL's 9P bridge, BuildKit's walk of it
-  (`.git`, every worktree, the build output) took 30-52 minutes per image at
-  0.54.0 and 0.55.0, and 0.55.0's four pretag runs 4.5 hours. The gate first
-  checks that `.dockerignore` leaves out no tracked file the Dockerfile copies
-  (BuildKit applies none to a tar on stdin), the images start beside the UI
-  build instead of after the binary, and each is taken from the gate cache
-  while what it is made of is unchanged and its image is still under its
-  tag. The pretag goes from 66-74 minutes to about 12-15.
-- **The release gate re-runs a part red on the runner, once, by itself, and
-  asks GitHub again when it does not answer** (#165). A part whose every
-  failed step only sets the machine up (GitHub's setup, a checkout, a
-  toolchain, an artifact, the browser install through apt) is re-run with
-  `gh run rerun --failed` once the run has finished; a red test never is. A
-  5xx, a timeout or a dropped connection is asked again at the next poll
-  instead of stopping the gate. The `ci` stage waits for the tag's run to
-  finish before it reads what it published, and the export's workflow-guard
-  gate is taken from the gate cache on an unchanged tree and workflows
-  ([CONTRIBUTING.md → Release process](./CONTRIBUTING.md#release-process)).
-- **The `-race` shards are cut from measured times, and none is expected to
-  take over 35 minutes** (#174). The longest one is how long CI's full run
-  takes, and that run is the release's land → green gate (50 minutes). 0.53's
-  split was an estimate: by 0.55 the handlers' rest shard had taken every new
-  test file (244 → 437 tests) and ran 53-57 minutes, the run 71-75.
-  `scripts/test-times.json` keeps the median seconds of every test file and
-  package from the `-race` jobs of five GitHub runs (0.53-0.55);
-  `node scripts/test-shards.mjs rebalance --write` cuts the handlers and
-  wasmplugin units from it, `times` re-measures from a run's `race-*`
-  artifacts, and `estimate` says what each shard will take. Still 14 `-race`
-  jobs: wasmplugin runs in three instead of four (`Go (wasmplugin-3-4)` is
-  now `Go (wasmplugin-3)`), and a new `auth` shard (the auth packages, and
-  the SFTP, FTP and NFS servers) takes what `db-io` (37 minutes) and `rest`
-  (41) had too much of. Estimated on GitHub's runner: 26-30 minutes a shard,
-  against 22-61 before. `web/tests/deploy/testShards.test.ts` is red when a
-  shard is estimated past 35 minutes with the tree as it is, so the rest
-  shard's growth shows before a release waits for it. The build host's chain
-  reads the same list, with GitHub's seconds scaled to the host
-  ([CONTRIBUTING.md → Shards](./CONTRIBUTING.md#shards)).
-- **The ship publishes the Helm chart itself and waits for it** (#247).
-  `filex-ship.sh` has a `helm` step, waiting only for the preflight (a red
-  Releases page does not hold it back): it starts the Helm charts
-  repository's publishing (`SHIP_HELM_CMD`, e.g.
-  `gh workflow run publish.yml -R BRF-Tech/helm-charts`) and reads the
-  repository's index (`SHIP_HELM_INDEX`) every 30 seconds until it lists the
-  chart at the release's `appVersion`, for at most `SHIP_HELM_WAIT` minutes
-  (15), red after that. An index that already lists the release is green
-  without starting anything. That repository publishes on a ten-minute
-  schedule, which GitHub had not started for hours, so a release could sit
-  without its chart and nobody saw it. Without the settings the step is left
-  to a person and listed at the end
-  ([CONTRIBUTING.md → The ship](./CONTRIBUTING.md#the-ship-filex-shipsh)).
-
-**This release has more to it than fits on one page.** The rest of the
-entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0560---2026-10-11).
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.56.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.56.0`
-
 ## Earlier releases
 
-The 136 releases before v0.56.0, in brief. Full notes are on GitHub.
+The 137 releases before v0.56.1, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.56.0](https://github.com/BRF-Tech/filex/releases/tag/v0.56.0) | 11 October 2026 | Apps can edit a file of an end-to-end encrypted folder, or of a vault: the browser decrypts it for an app the person allowed, seals what the app keeps while it edits and encrypts what it saves before it leaves the browser, so the… |
 | [v0.55.0](https://github.com/BRF-Tech/filex/releases/tag/v0.55.0) | 9 October 2026 | An app store lists storage plugins beside apps: the same link and review, every build pinned and signed by the store, the plugin checked by the store's validator before it is listed, and a paid one held while its license does not… |
 | [v0.54.0](https://github.com/BRF-Tech/filex/releases/tag/v0.54.0) | 8 October 2026 | The server does the server's work: the rules, numbers and sentences the web app, the desktop app and the packages used to keep copies of now come from the server, so every surface says the same thing in the reader's language, and… |
 | [v0.53.0](https://github.com/BRF-Tech/filex/releases/tag/v0.53.0) | 7 October 2026 | Replication finally copies: a storage linked to a replication target now writes its files there, each storage into a folder of its own, and an existing one gets its first full copy on its own (before 0.53 it never copied… |
@@ -1757,4 +1610,4 @@ The 136 releases before v0.56.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-11-12 from 156 published releases.</small>
+<small>Last refreshed 2026-11-15 from 157 published releases.</small>
