@@ -70,9 +70,11 @@ type Service struct {
 // New constructs a Service.
 func New(store db.Store) *Service {
 	return &Service{
-		store:   store,
-		okTTL:   time.Hour,
-		failTTL: 2 * time.Minute,
+		store: store,
+		okTTL: time.Hour,
+		// A negative verdict is shown to every client for this long. Keep it
+		// short: one slow probe must not hide the editor for minutes (#23).
+		failTTL: 30 * time.Second,
 	}
 }
 
@@ -464,8 +466,14 @@ func externalProbeURL(name, rawURL string) string {
 	return strings.TrimRight(rawURL, "/") + p
 }
 
-// probeTimeout is how long a health probe waits for an answer.
-const probeTimeout = 3 * time.Second
+// probeTimeout is how long one health probe attempt waits for an answer.
+// 10s leaves room for the Document Server's normal 1-2s response and a short
+// latency spike; the previous 3s was too close to observed 2.7s spikes (#23).
+var probeTimeout = 10 * time.Second
+
+// probeAttempts is how many times a failed probe is retried before the service
+// is declared unreachable. One retry absorbs a single stalled connection.
+const probeAttempts = 2
 
 // probeHTTP returns true if the URL responds with 2xx within probeTimeout.
 func probeHTTP(rawURL string) bool {
@@ -475,7 +483,21 @@ func probeHTTP(rawURL string) bool {
 
 // probeHTTPDetail is probeHTTP that also says what it saw when the answer was
 // not a healthy one: the status code, a timeout, or the connection error.
+// A failed first attempt is retried once before it becomes a cached negative
+// verdict; a single latency spike must not hide ONLYOFFICE for every client.
 func probeHTTPDetail(rawURL string) (bool, string) {
+	var detail string
+	for attempt := 0; attempt < probeAttempts; attempt++ {
+		ok, next := probeHTTPOnce(rawURL)
+		if ok {
+			return true, ""
+		}
+		detail = next
+	}
+	return false, detail
+}
+
+func probeHTTPOnce(rawURL string) (bool, string) {
 	client := &http.Client{Timeout: probeTimeout}
 	resp, err := client.Get(rawURL)
 	if err != nil {

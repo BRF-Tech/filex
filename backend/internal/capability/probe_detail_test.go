@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,11 +42,15 @@ func TestProbeHTTPDetail_Timeout(t *testing.T) {
 	defer srv.Close()
 	defer close(release)
 
+	oldTimeout := probeTimeout
+	probeTimeout = 50 * time.Millisecond
+	defer func() { probeTimeout = oldTimeout }()
+
 	start := time.Now()
 	ok, detail := probeHTTPDetail(srv.URL)
 	assert.False(t, ok)
-	assert.Equal(t, "GET "+srv.URL+": no answer within 3s", detail)
-	assert.Less(t, time.Since(start), 5*time.Second)
+	assert.Equal(t, "GET "+srv.URL+": no answer within 50ms", detail)
+	assert.Less(t, time.Since(start), time.Second)
 }
 
 func TestProbeHTTPDetail_ConnectionRefusedNamesTheError(t *testing.T) {
@@ -94,4 +99,21 @@ func TestProbeExternal_CarriesTheDetail(t *testing.T) {
 	assert.Equal(t, "unreachable", st.State)
 	assert.Contains(t, st.Detail, "/healthcheck returned HTTP 502")
 	assert.Contains(t, st.Detail, "docservice")
+}
+
+func TestProbeHTTPDetail_RetriesOnceBeforeFailing(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte("true"))
+	}))
+	defer srv.Close()
+
+	ok, detail := probeHTTPDetail(srv.URL)
+	assert.True(t, ok)
+	assert.Empty(t, detail)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&calls), "one failed attempt must be retried")
 }
