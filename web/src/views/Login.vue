@@ -38,6 +38,7 @@ import { getServerRoot } from '@/api/runtimeConfig';
 import { CaptchaPublicApi } from '@/api/captcha';
 
 import LogoMark from '@/components/LogoMark.vue';
+import GoogleMark from '@/components/GoogleMark.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
@@ -201,6 +202,8 @@ const accentStyle = computed(() => accentButtonStyle(branding.value?.accent, isD
 const ssoLabel = computed(() => branding.value?.sso_label?.trim() || t('login.oidc'));
 /** A button's words: the provider's own label, else the page's. */
 const ssoText = (c: LoginSSO) => c.label?.trim() || ssoLabel.value;
+/** The provider's mark: the official Google G when the button names Google. */
+const isGoogleSSO = (c: LoginSSO) => /google/i.test(`${c.id} ${c.label} ${ssoText(c)}`);
 const wordmark = computed(() => branding.value?.name?.trim() || 'filex');
 
 /*
@@ -498,7 +501,8 @@ function startOidc(c?: LoginSSO) {
           </Button>
         </form>
         <Button v-if="oidcEnabled" variant="outline" block class="mt-3" @click="startOidc()">
-          <Github class="h-4 w-4" />
+          <GoogleMark v-if="ssoChoices[0] && isGoogleSSO(ssoChoices[0])" class="h-4 w-4" />
+          <Github v-else class="h-4 w-4" />
           {{ ssoLabel }}
         </Button>
       </div>
@@ -616,7 +620,8 @@ function startOidc(c?: LoginSSO) {
                 :data-testid="`login-sso-${c.id || 'default'}`"
                 @click="startOidc(c)"
               >
-                <KeyRound class="lg-i18" aria-hidden="true" />
+                <GoogleMark v-if="isGoogleSSO(c)" class="lg-i18" aria-hidden="true" />
+                <KeyRound v-else class="lg-i18" aria-hidden="true" />
                 {{ ssoText(c) }}
               </button>
 
