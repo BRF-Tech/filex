@@ -69,6 +69,10 @@ jobs:
         env:
           STAGES: ${{ inputs.stages }}
           REALENV_PULL: "1"
+          # The Document Server ci.yml's office specs run against
+          # (scripts/ci-docserver.sh): `latest` enforced its JWT with
+          # JWT_ENABLED=false, and office-s2 went red (run 44263716035).
+          REALENV_OO_IMAGE: onlyoffice/documentserver:9.4.0.1
         run: |
           set -uo pipefail
           read -r -a stages <<< "${STAGES:-}"
