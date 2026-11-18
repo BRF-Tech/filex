@@ -329,8 +329,8 @@ describe('the profiles', () => {
     expect(() => buildPlan({ profile: 'targeted', lists, env: { CHAIN_EXTRAS: 'lighthouse' } })).toThrow(/CHAIN_EXTRAS/);
     // The full and nightly profiles never read it.
     expect(names(buildPlan({ profile: 'full', lists, src: REPO, env: { CHAIN_EXTRAS: 's3-live' } }).track)).toEqual(names(full.track));
-    // nightly.mjs s3-live asks for exactly this.
-    expect(fs.readFileSync(path.join(CHAIN, 'nightly.mjs'), 'utf8')).toContain("profile: 'targeted', env: { CHAIN_EXTRAS: 's3-live', ...only }");
+    // The live S3 tests by hand are exactly this (the nightly ran them until #361).
+    expect(fs.readFileSync(path.join(CHAIN, 'nightly.env.example'), 'utf8')).toContain('CHAIN_EXTRAS=s3-live bash scripts/chain/run.sh --profile targeted');
   });
 
   it('refuses a profile it does not have', () => {

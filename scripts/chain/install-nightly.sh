@@ -1,36 +1,31 @@
 #!/usr/bin/env bash
-# Install the nightly run of the test chain on a build host (task #175):
-# its own directory, its own checkout of the private repository, the settings
-# file, and two systemd timers - the run at night and the report in the
-# morning. What the run does: scripts/chain/nightly.mjs and
-# docs/CONTRIBUTING.md -> "The nightly run".
+# Install the nightly on a build host (tasks #175 and #361): its own
+# directory, its own checkout of the private repository, the settings file,
+# and two systemd timers - the night's export and push, and the report in the
+# morning. What a night does: scripts/chain/nightly.mjs and
+# docs/CONTRIBUTING.md -> "The nightly".
 #
-#   sudo bash scripts/chain/install-nightly.sh --root /var/lib/filex-nightly \
-#        --env /etc/filex-nightly.env --remote <clone URL of the repository> \
-#        [--branch main] [--at "01:00 Europe/Istanbul"] [--report-at "07:00 Europe/Istanbul"] \
-#        [--enable] [--dry-run]
+#   sudo bash scripts/chain/install-nightly.sh --root /var/lib/filex-nightly #        --env /etc/filex-nightly.env --remote <clone URL of the repository> #        [--branch main] [--at "02:00 Europe/Istanbul"] [--report-at "07:00 Europe/Istanbul"] #        [--enable] [--dry-run]
 #
 # It never overwrites the settings file and never deletes anything:
 #   1. copies nightly.mjs, nightly-lib.mjs, report.mjs, env.mjs and the
 #      site publisher (nightly-site.sh, nightly-site-remote.sh) from THIS
-#      checkout to <root>/bin (the run executes those copies, never the
+#      checkout to <root>/bin (the night executes those copies, never the
 #      checkout it resets every night - re-run this script to update them);
 #   2. clones --remote into <root>/src when it is not there yet (a remote
 #      that needs a credential: an SSH deploy key, or an https URL with a
 #      read-only token - git keeps it in <root>/src/.git/config, made 0600);
 #   3. writes the settings file from scripts/chain/nightly.env.example with
 #      CHAIN_ROOT filled in, when there is none yet - edit it before the
-#      first night: CHAIN_LOCK, the notification keys, the registry
-#      credential (NIGHTLY_PUBLISH=auto pushes every green night) and the
-#      live S3 bucket are yours to set;
+#      first night: NIGHTLY_COMMIT_AUTHOR, where the push is made from
+#      (NIGHTLY_PUSH_CONTAINER) and the notification keys are yours to set;
 #   4. installs filex-nightly.{service,timer} and
 #      filex-nightly-report.{service,timer} into /etc/systemd/system and
 #      reloads systemd. With --enable it also enables and starts both timers;
 #      without, it prints the command.
 #
 # --dry-run prints every step and changes nothing. Linux, root, systemd,
-# Docker, git, flock, node 20 or later, python3 (the export of the nightly
-# build).
+# Docker, git, node 20 or later, python3 (the export).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,7 +33,7 @@ ROOT=""
 ENV_FILE=""
 REMOTE=""
 BRANCH="main"
-AT="01:00 Europe/Istanbul"
+AT="02:00 Europe/Istanbul"
 REPORT_AT="07:00 Europe/Istanbul"
 UNIT_DIR="/etc/systemd/system"
 ENABLE=0
@@ -77,21 +72,21 @@ run() {
 
 [ "$(uname -s)" = Linux ] || { echo "Linux only" >&2; exit 2; }
 if [ "$DRY" = 0 ] && [ "$(id -u)" != 0 ]; then
-  echo "run it as root: the units go to $UNIT_DIR and the run starts containers" >&2
+  echo "run it as root: the units go to $UNIT_DIR and the night reaches Docker" >&2
   exit 2
 fi
 missing=""
-for tool in git flock docker systemctl python3 node; do
+for tool in git docker systemctl python3 node; do
   command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
 done
 [ -z "$missing" ] || { echo "missing on this host:$missing" >&2; exit 2; }
 NODE="$(command -v node)"
 major="$("$NODE" -p 'process.versions.node.split(".")[0]')"
-[ "$major" -ge 20 ] || { echo "node $major: the nightly run needs node 20 or later" >&2; exit 2; }
+[ "$major" -ge 20 ] || { echo "node $major: the nightly needs node 20 or later" >&2; exit 2; }
 
 say "root $ROOT, settings $ENV_FILE, branch $BRANCH, run at $AT, report at $REPORT_AT"
 
-run mkdir -p "$ROOT/bin" "$ROOT/nightly" "$ROOT/runs"
+run mkdir -p "$ROOT/bin" "$ROOT/nightly"
 for f in nightly.mjs nightly-lib.mjs report.mjs env.mjs nightly-site.sh nightly-site-remote.sh; do
   run install -m 0644 "$HERE/$f" "$ROOT/bin/$f"
 done
@@ -110,7 +105,7 @@ fi
 if [ -e "$ENV_FILE" ]; then
   say "settings file $ENV_FILE is there already: left as it is"
 else
-  say "writing $ENV_FILE from scripts/chain/nightly.env.example: set CHAIN_LOCK, the notification keys, the registry credential and the live S3 bucket before the first night"
+  say "writing $ENV_FILE from scripts/chain/nightly.env.example: set NIGHTLY_COMMIT_AUTHOR, NIGHTLY_PUSH_CONTAINER and the notification keys before the first night"
   if [ "$DRY" = 1 ]; then
     echo "+ sed 's|^CHAIN_ROOT=.*|CHAIN_ROOT=$ROOT|; s|^NIGHTLY_BRANCH=.*|NIGHTLY_BRANCH=$BRANCH|' $HERE/nightly.env.example > $ENV_FILE"
   else

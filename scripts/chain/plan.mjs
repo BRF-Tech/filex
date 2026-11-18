@@ -23,8 +23,8 @@ export const CHAIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const PROFILES = ['full', 'targeted', 'nightly'];
 
 // What the nightly profile adds to the full one (ds-go, s3-live, shots,
-// realenv) is defined next to the nightly run's other decisions, which also
-// need it.
+// realenv) is defined in nightly-lib.mjs, where the nightly that started it
+// until #361 kept its decisions.
 export { DS_EXTRAS, NIGHTLY_EXTRAS, nightlyExtras };
 
 /** Where the Go and -race jobs come from unless CHAIN_GO_LIST / CHAIN_RACE_LIST say otherwise. */
@@ -445,14 +445,14 @@ function trackMinutes(t, table) {
  *   nightly   what full runs, and the NIGHTLY_EXTRAS CHAIN_NIGHTLY_EXTRAS
  *             asks for in the browser round: ds-go and shots (DS_EXTRAS,
  *             which need the Document Server) right after the last line with
- *             it, s3-live and realenv at its end. scripts/chain/nightly.mjs
- *             starts it (task #175).
+ *             it, s3-live and realenv at its end. A person's run since
+ *             #361 (task #175 had a timer start it every night).
  *   targeted  the build and its three fast gates, then only what is asked
  *             for: CHAIN_GO_PKGS, CHAIN_RACE_PKGS, CHAIN_MIGRATE=1,
  *             CHAIN_CY_SPECS, CHAIN_E2E_GREP (on CHAIN_E2E_BROWSERS, with
  *             the Document Server unless CHAIN_E2E_DS=0), and the nightly
  *             extras CHAIN_EXTRAS names (targetedExtras: s3-live by hand,
- *             with credentials a person brings - nightly.mjs s3-live; shots
+ *             with credentials a person brings; shots
  *             for a release's pictures).
  *
  * The shots job takes every scene (`pnpm shots --all`); CHAIN_SHOTS_ONLY

@@ -403,8 +403,8 @@ with the image named (`REALENV_PULL=1` pulls them), and so is every stage on a
 machine without Docker, so it is safe to call anywhere. What each stage
 starts, and how the pieces trust each other, is in `e2e/realenv/README.md`.
 A change to ACME, the TLS hooks, OIDC/LDAP sign-in or the document server's
-diagnosis is measured there before a release. The nightly run (below) runs it
-once a week.
+diagnosis is measured there before a release. Nothing runs it on its own
+since #361 (The nightly run, below): it is a person's run.
 
 ### The whole chain on one Linux host
 
@@ -450,7 +450,8 @@ shards' logs together (`cat out/race-handlers-*/race.out`) and re-cut it from
 the times of a real run.
 
 `--profile full` runs all of it; `nightly` runs the same plus its extras
-in the browser round (The nightly run, below); `targeted` runs the build and
+in the browser round (The nightly run, below: a person's run since #361);
+`targeted` runs the build and
 its fast gates, then only what is asked for (`CHAIN_GO_PKGS`,
 `CHAIN_RACE_PKGS`, `CHAIN_MIGRATE=1`, `CHAIN_CY_SPECS`, `CHAIN_E2E_GREP` on
 `CHAIN_E2E_BROWSERS`, and `CHAIN_EXTRAS` - nightly extras by name, such as
@@ -586,10 +587,10 @@ red, a setup error, or stopped (TERM, INT or HUP reach `run.mjs` as TERM, it
 stops the run, and the resume runs after it), with the run's exit code in
 `CHAIN_EXIT`. Both are commands on the host, one line each, and carry no
 secret: a script there that reads its own settings. They come from the
-settings file (`run.sh --print-hooks` shows them), so a hand run, a CI run and
-the nightly run all take them, and run still under the lock, without its file
-descriptor, in a session of their own (no terminal; a stop of the nightly run
-does not cut them short), at most `CHAIN_HOOK_TIMEOUT_S` seconds each (900).
+settings file (`run.sh --print-hooks` shows them), so every run takes them,
+and they run still under the lock, without its file descriptor, in a session
+of their own (no terminal; a stop of the run does not cut them short), at
+most `CHAIN_HOOK_TIMEOUT_S` seconds each (900).
 A pause that fails or times out does not stop the run: `chain.log` and
 `result.json` `host.pause` say so, the run takes the smaller budget the host
 leaves, and nothing is resumed. The resume gets no second chance from the
@@ -646,199 +647,87 @@ repository keeps the source and its history, and nothing runs there.
 
 ### The nightly run
 
-The same chain runs every night on the build host, on the tip of `main`, so a
-release day starts from a night that already ran everything and only what
-changed since is left (`scripts/chain/nightly.mjs`):
+Every night the build host pushes the tip of `main` to GitHub, and GitHub
+tests it and builds from it (`scripts/chain/nightly.mjs`, #361): a release
+day starts from a night whose whole matrix already ran, and the nightly image
+and desktop packages are only ever made from a green change. The build host
+runs no test, builds no image and packs no snap at night - until 2026-11-18
+it ran the whole chain every night (three to four hours under its own load,
+red for weeks on the host rather than the code), then built the image, the
+amd64 snap and a source archive for GitHub itself.
 
 ```bash
 sudo bash scripts/chain/install-nightly.sh --root /var/lib/filex-nightly \
   --env /etc/filex-nightly.env --remote <clone URL> --dry-run      # once; then without --dry-run
 node /var/lib/filex-nightly/bin/nightly.mjs run --env /etc/filex-nightly.env --dry-run   # what tonight would do
 node /var/lib/filex-nightly/bin/nightly.mjs status --env /etc/filex-nightly.env          # tonight and the last nights
+node /var/lib/filex-nightly/bin/nightly.mjs follow --env /etc/filex-nightly.env          # GitHub's verdict and packages
 node /var/lib/filex-nightly/bin/report.mjs --env /etc/filex-nightly.env --dry-run        # the morning report, printed
 ```
 
-The installer gives the run a directory and a checkout of its own, writes the
-settings file (`scripts/chain/nightly.env.example`; it never overwrites one)
-and installs two systemd timers from `scripts/chain/systemd/`. The timers run
-the copies it puts in `<root>/bin`, never the checkout the run resets every
-night: run the installer again to update them.
+The installer gives the night a directory and a checkout of its own, writes
+the settings file (`scripts/chain/nightly.env.example`; it never overwrites
+one) and installs two systemd timers from `scripts/chain/systemd/`. The
+timers run the copies it puts in `<root>/bin`, never the checkout the night
+resets: run the installer again to update them.
 
-**When it runs.** Its timer starts it at 01:00. It fetches `main` and:
+**The night.** Its timer starts it at 02:00. It fetches `main` and:
 
-- runs nothing when `main` has not moved since the last night that ran -
-  unless that run did not finish (stopped, or a setup error);
-- runs nothing inside a `NIGHTLY_QUIET` window, nor when the run - as long as
-  the last one took - would not be over before the next window starts, and
-  stops a run still going `NIGHTLY_QUIET_MARGIN_MIN` (15) minutes before one.
-  Other work scheduled on the same host goes there: a weekly service-update
-  round, for example. The windows are in UTC, as cron schedules them;
-- otherwise checks `main` out clean (`git clean -x`, `node_modules` kept) and
-  starts `run.sh --profile nightly` with its own `CHAIN_PREFIX` and
-  Document Server subnet, under `CHAIN_LOCK` - the lock every build on the
-  host takes, which the nightly settings must name: a release chain and the
-  nightly run wait for each other. It waits for the lock only as long as the
-  run could still end in time. `CHAIN_PAUSE_CMD` and `CHAIN_RESUME_CMD` in the
-  nightly settings work as in any run (What else the host runs, above): the
-  night's chain pauses what they name and resumes it when the chain ends,
-  before the nightly build. The systemd unit gives a stop 10 minutes, so the
-  resume runs after a stop too.
+- pushes nothing when `main` has not moved since the last night that pushed
+  (or found its export equal to the public `main`). A night whose export was
+  refused or whose push failed leaves nothing behind, so the next one tries
+  again;
+- pushes nothing while GitHub tests a release - `release.yml` running, or
+  `ci.yml` on a push of `main` (`NIGHTLY_RELEASE_BUSY=skip`, the default;
+  `releaseBusy` in `scripts/chain/nightly-lib.mjs`): its full matrix would
+  share the organisation's 20 jobs at once with the release's gate. The
+  record says `deferred`, and the next night pushes. `--force` pushes anyway;
+- otherwise checks `main` out clean and runs `scripts/chain/nightly-export.sh`
+  from that tree: `scripts/export-public.sh` stages the public tree in a clone
+  of the public repository (`NIGHTLY_PUBLIC_DIR`) reset to its `main`, with the
+  same rewrite and the same refusals as a release, and the result is committed
+  on top of the public `main` as **one** commit, by the account the public
+  commits are by (`NIGHTLY_COMMIT_AUTHOR`; the code names nobody). Its message
+  names the night and the public commit it was made on - never the private
+  commit (`nightlyCommitMessage`) - and its `Nightly-Date:` trailer carries the
+  night to GitHub. An export equal to the public `main` pushes nothing;
+- force-pushes that commit to the public repository's **`nightly`** branch
+  (`NIGHTLY_PUSH_BRANCH`), which it replaces every night, through the export's
+  pre-push gate (`scripts/hooks/export-pre-push.sh`: gitleaks with the
+  export's own lists, no root commit, nothing outside `refs/heads`). The
+  build host's push is made from the release workspace
+  (`NIGHTLY_PUSH_CONTAINER`): the commit goes in as a git bundle, and
+  `scripts/chain/nightly-push.sh` - sent on stdin, never written into the
+  command - fetches it into the workspace's own clone of the public
+  repository (`NIGHTLY_PUSH_DIR`), installs the gate there from the
+  workspace's checkout (`NIGHTLY_PUSH_GATE_SRC`) and pushes under
+  `NIGHTLY_PUSH_WRAP` (`with-gh-token`), which hands git the workspace's
+  GitHub token for that one command: the token never leaves the workspace,
+  and nothing on the host reads it. It touches no other checkout there.
+  Without a container, the push is made from the clone on the host with the
+  host's own credential, through the same gate (gitleaks needed there).
 
-**What it runs.** The full chain, and in the browser round the extras no
-other run has (`NIGHTLY_EXTRAS` in `scripts/chain/nightly-lib.mjs`;
-`CHAIN_NIGHTLY_EXTRAS` picks some of them):
+A change that touched the S3 code (`S3_LIVE_PATHS`) is named in the morning
+report: nothing runs the live S3 tests on their own any more (below).
 
-- `ds-go`: the Go test of the office engine against a real Document Server
-  and the Convert app (`backend/internal/server/office_engine_ds_test.go`),
-  which skips itself everywhere else. It runs right after the last browser
-  line with the Document Server, while it is still up, with the Convert build
-  `CHAIN_CONVERT_APP_DIR` names. A run in which it only skipped is red;
-- `s3-live`: the Go tests against a real S3 provider - the provider
-  conformance suite (`TestLiveProviderConformance`), the B2 report reader,
-  issue #21's rename and the driver's `Init` - against the bucket the nightly
-  settings name: `FILEX_TEST_S3_ENDPOINT`, `_REGION`, `_BUCKET`, `_ACCESS_KEY`,
-  `_SECRET_KEY` (and `_PATH_STYLE=0` for virtual-hosted addressing; the build
-  host's are a B2 demo account). The suites read them through
-  `backend/internal/testutil/lives3`, region included: a server with a region
-  of its own refuses a request signed for `auto`. **Only when the S3 code
-  changed** since the last green `s3-live` (or, before the first, since the
-  night the measuring started; `state.json`, `s3_live`): the driver
-  (`storage/drivers/s3/`), the stall policy it wraps every transfer in
-  (`storage/stall/`), the storage contracts it implements (`driver.go`,
-  `object.go`, `tally.go`, `registry.go`, `descriptor.go`, `validate.go`),
-  `testutil/lives3/`, the B2 reader (`usage/b2*`), the live tests and their job,
-  and a `github.com/aws/` line of `go.mod` (`S3_LIVE_PATHS`). Unchanged, the
-  morning report says `s3-live: skipped - S3 driver unchanged since <commit>`
-  and nothing is red. Changed and the settings name no bucket, the job does
-  not run either, and the report carries a **warning** that names the files
-  and the command to test it by hand (below) - not a red night. When it runs,
-  a test that only skipped is red, and only a green run moves the commit the
-  S3 code is measured from: a change nobody tested is reported again the next
-  night. The bucket's key reaches nothing else and is never given to GitHub;
-  the values reach the job in a `0600` file of the run, never on a command
-  line or in a log, and the job's output is written with the key and the
-  secret blanked out;
-- `shots`: `pnpm shots --all --keep-going` on the packages and the web build
-  the chain made - every scene, whatever its digest says, so a scene whose
-  `INPUTS` missed something it shows is caught the night it changed. The app
-  scenes are taken too, with the app builds and the language packs the
-  settings name (`CHAIN_SIGN_APP_DIR`, `CHAIN_CONVERT_APP_DIR`,
-  `CHAIN_LANG_ES_DIR`, `CHAIN_LANG_DE_DIR`, `CHAIN_LANG_FR_DIR`), copied into
-  the job before it starts, and the ONLYOFFICE scene against the chain's
-  Document Server: the job runs right after `ds-go`, while that is still up.
-  Without one of them the job is red before it builds anything, unless
-  `CHAIN_REQUIRE_APPS=0` leaves those scenes out. A shot script that no
-  longer fits the product turns a night red instead of a release day, and a
-  failed scene does not stop the others. A language pack behind the tree
-  (the strings the day added are translated after the night's run) fails
-  `langpack.mjs`; when that is the night's only failed scene, the job is
-  green with a **warning** in the morning report, not red - a release's run
-  of the same job stays red (2026-10-08). Every picture is compared with the published set,
-  which is taken right here - Linux, the chain's Playwright container and
-  fontconfig - and the pictures, the review and the contact sheet are kept
-  in the run's `out/shots/`;
-- `realenv`: `e2e/realenv/run.sh` (Against the real servers, above), once
-  every `NIGHTLY_REALENV_EVERY_DAYS` days (7). The one job that runs on the
-  host itself and not in a container, since it starts containers of its own;
-  it pulls the images it lacks, and a stage it still could not run is red.
+**On GitHub.** `ci.yml`'s push trigger names the branch
+(`packaging/ci/nightly-on-github.patch`), so its full matrix runs on the
+night's commit. When that run ends green, `.github/workflows/nightly-desktop.yml`
+(on `workflow_run`; GitHub runs it as `main` has it, with that run's commit,
+and only for a push in this repository - a pull request's run may name any
+head branch) builds from the commit, unless a newer night already replaced
+it on the branch or it was built or tried before (the `attempted` tag;
+`force` by hand):
 
-The chain's own end-of-run notification is off in a nightly run: the morning
-report is the night's one.
-
-**The live S3 tests by hand.** When the S3 driver itself changes, or the
-report warns that a change went untested, bring credentials for one run - a
-provider's own test bucket, the demo account - in a file of
-`FILEX_TEST_S3_*` lines and run, on the build host:
-
-```bash
-node /var/lib/filex-nightly/bin/nightly.mjs s3-live --env /etc/filex-nightly.env --s3-env /root/s3-test.env
-```
-
-It fetches `main`, checks it out in the nightly run's checkout and runs the
-build, its fast gates and `s3-live` alone (`run.sh --profile targeted` with
-`CHAIN_EXTRAS=s3-live`) under the build lock; the credentials reach the job
-the same way as at night, and nothing logs them. Green, the nightly run
-measures the S3 code from that commit, and the warning stops. Without the
-nightly run, from any checkout on the build host:
-`CHAIN_EXTRAS=s3-live bash scripts/chain/run.sh --profile targeted --env <a file with the chain's settings and the FILEX_TEST_S3_* lines>`.
-
-**The morning report.** At 07:00 a second timer sends one notification for the
-night (`scripts/chain/report.mjs`): green or red and the wall time against the
-previous night; every red job with its one-line summary, its log, the night
-it last passed and the commits since then; every warning a green job left
-(a job's `JOBWARN` lines, such as the shots job's language packs behind the
-tree), which makes the night a warning rather than green; what the previous
-night had red that passes now; the nightly build; and, for a night that did not run, why. A
-night that left no record at all is reported too, and a run still going is
-waited for, at most `NIGHTLY_REPORT_WAIT_MIN` (120) minutes. It posts to
-`CHAIN_NOTIFY_URL` with the key in `CHAIN_NOTIFY_KEY_FILE`, which it never
-logs.
-
-**The nightly build.** After a green night on a commit no nightly build was
-made of yet, `scripts/chain/nightly-build.sh` builds the image of that commit
-from its public form - the tree `scripts/export-public.sh` makes of it, with
-the same rewrite and the same refusals as a release - and never from the
-private tree. Its filex reports the next minor as a pre-release with the
-commit as build metadata (`0.53.0-nightly.20261007+1a2b3c4d`: above every
-0.52.x, below 0.53.0, so the update check offers 0.53.0 when it ships). A red
-night, or a night `main` did not move, builds nothing. **Every green change
-goes out**: the build host's settings say `NIGHTLY_PUBLISH=auto`, so the image
-is pushed to `NIGHTLY_PUSH_REPO` (`ghcr.io/brf-tech/filex`) as `:nightly` and
-`:nightly-<date>` right after the build - the first one too, nobody pushes it
-by hand. It signs in with `NIGHTLY_REGISTRY_USER` and the token in
-`NIGHTLY_REGISTRY_TOKEN_FILE` (both, or neither for the host's own Docker
-login; one of them alone is refused). A push that fails turns the morning
-report into a warning that names it, and `nightly.mjs publish` pushes that
-build again. `manual` - the code's default, for a checkout whose settings name
-no registry - only builds and tags, and leaves the push to `nightly.mjs
-publish`; `off` never pushes.
-
-What a nightly is can be read off it from outside (#266): its version names
-the night and the commit (`0.57.0-nightly.20261014+2ca25999`), and so do its
-labels - the commit (`org.opencontainers.image.revision`), the public commit its
-tree was exported on (`sh.filex.nightly.public-base`, set by
-`nightly-build.sh` once it fetched), the night's test result
-(`sh.filex.nightly.tests`), the source and what the image is
-(`nightlyLabels` in `scripts/chain/nightly-lib.mjs`). How a user tries one:
-[INSTALLATION.md → Nightly builds](INSTALLATION.md#nightly-builds).
-
-**The desktop side of a nightly build** (#266). On a night that made a
-nightly build, `scripts/chain/nightly-desktop.sh` works from the same public
-form, in a public clone of its own (`NIGHTLY_DESKTOP_PUBLIC_DIR`;
-`scripts/chain/nightly-export.sh` is the export both share), every package
-carrying one version (`desktopVersion`: the nightly's, cut to the Snap
-Store's 32 characters when it would be longer):
-
-- **the amd64 snap, for the Snap Store's `edge` channel** (`NIGHTLY_SNAP=edge`),
-  every such night. electron-builder's own container (`NIGHTLY_DESKTOP_IMAGE`;
-  Go mounted from `CHAIN_GOROOT`) leaves the x64 app unpacked with its amd64
-  CLI (`scripts/chain/nightly-desktop-job.sh`, target `snap`), and
-  electron-builder on the host packs the snap from it with snapcraft in LXD - a
-  container has no LXD, and since 0.55 the snap is core24, built by snapcraft.
-  `nightly.mjs` uploads it with the credential in `NIGHTLY_SNAP_CREDENTIALS_FILE`
-  (the output of `snapcraft export-login`, 0600, in snapcraft's environment for
-  that one command, never logged) through `scripts/chain/nightly-snap-edge.mjs`
-  (`snapcraft upload --release=edge`), the script GitHub's arm64 runner uploads
-  the arm64 snap with. A revision the Store holds for its review (`review`) or
-  an upload that failed is a warning in the morning report, not a red night -
-  and the morning reports after it keep saying so, a quiet night's too, until
-  the public channel map shows `edge` serving that version (`snapEdgeState`,
-  `state.json` `last_snap`). A snap asked for and not uploaded (no credential)
-  is a warning as well, never a quiet skip;
-- **the source of every other desktop package** (`NIGHTLY_DESKTOP=github`):
-  the public tree as `filex-nightly-src.tar.gz`, taken before anything is
-  built in it and pushed to `NIGHTLY_DESKTOP_SRC_REPO`
-  (`ghcr.io/brf-tech/filex-nightly-src:nightly`, signed in as the image push
-  is), its annotations the commit, the version and the night.
-  `.github/workflows/nightly-desktop.yml` (packaging/ci/nightly-desktop.patch,
-  below) looks every hour: a revision it has neither built nor tried (the
-  `attempted` tag, so a source that fails is not tried every hour; `force`
-  by hand) is built on GitHub's runners by the same
-  `nightly-desktop-job.sh` - Windows x64 and arm64 (`windows-latest`), macOS
+- **the nightly image**, `ghcr.io/brf-tech/filex:nightly` and `:nightly-<date>`:
+  `docker/Dockerfile`, the recipe a release builds its full image with, amd64,
+  checked to report its version (`filex --version`) before it is pushed;
+- **every desktop package** - Windows x64 and arm64 (`windows-latest`), macOS
   (`macos-15`), Linux x64 and arm64 (`ubuntu-latest`, `ubuntu-24.04-arm`:
-  AppImage, `.deb`, `.rpm`), unsigned - and the arm64 snap, packed with
-  snapcraft in LXD on the arm64 runner and uploaded to `edge` with the
-  repository's `SNAPCRAFT_STORE_CREDENTIALS` (without it: the line
+  AppImage, `.deb`, `.rpm`), unsigned - by `scripts/chain/nightly-desktop-job.sh`,
+  and **both snaps** (amd64 and arm64), packed with snapcraft in LXD and
+  uploaded to `edge` alone with the repository's `SNAPCRAFT_STORE_CREDENTIALS`
+  (`scripts/chain/nightly-snap-edge.mjs`; without it: the line
   `skipped: no Snap Store credential`, not a red run). The packages go to ghcr
   as ONE OCI artifact, `filex-desktop-nightly:nightly-<date>` and `:nightly`,
   with `nightly.json` (the night's manifest:
@@ -846,37 +735,78 @@ Store's 32 characters when it would be longer):
   `SHA256SUMS`; the last `NIGHTLY_KEEP` (7) nights stay. A row that failed
   turns the run red, and the night's manifest says which.
 
-**The morning's follow-up** (`report.mjs`, before it composes the report;
-`nightly.mjs follow` by hand). It asks the registry and GitHub where the last
-source stands (`followVerdict`: built, still building, failed, not taken
-within three hours). Built, it reads the night's `nightly.json` from the
-artifact, makes the page from `site/nightly.src.html` (`renderNightlyPage`:
-the night, the commit, a download per platform, the checksums, and that a
-nightly is not supported) and runs `NIGHTLY_SITE_CMD` once per revision -
-the repository's
+What a nightly is can be read off it from outside (#266): its version names
+the next minor, the night and the commit (`0.62.0-nightly.20261119+1a2b3c4d`,
+`nightlyMeta`: above every 0.61.x, below 0.62.0, so the update check offers
+0.62.0 when it ships), and so do the image's labels - the commit on the
+`nightly` branch (`org.opencontainers.image.revision`), the public commit it
+was made on (`sh.filex.nightly.public-base`), the CI run that passed it with
+its numbers (`sh.filex.nightly.tests`), the source and what the image is
+(`nightlyLabels`, `scripts/chain/nightly-meta.mjs`). Every desktop package
+carries one version (`desktopVersion`: the nightly's, cut to the Snap Store's
+32 characters when it would be longer). How a user tries one:
+[INSTALLATION.md → Nightly builds](INSTALLATION.md#nightly-builds).
+
+**The morning report.** At 07:00 a second timer sends one notification for the
+night (`scripts/chain/report.mjs`): what the night pushed - or why it pushed
+nothing - and the commits since the last nightly; GitHub's verdict on the
+commit (`ciVerdict`: `ci.yml`'s `All tests (full)`, the one a release's gate
+reads too, the wall time against the night before, and every part that was
+not green with its page, the night it last passed and the commits since
+then); the nightly image (its labels on ghcr); and GitHub's desktop packages
+(`followVerdict`: built, still building, failed, none because CI was not
+green, not taken within four hours). Built, it reads the night's
+`nightly.json` from the artifact, makes the page from `site/nightly.src.html`
+(`renderNightlyPage`: the night, the commit, a download per platform, the
+checksums, and that a nightly is not supported) and runs `NIGHTLY_SITE_CMD`
+once per revision - the repository's
 `scripts/chain/nightly-site.sh --ssh <site host> --path <site directory>`,
-which sends `nightly-site-remote.sh` to the site host on stdin: the site host pulls the packages from ghcr itself, checks them
-against `SHA256SUMS`, puts the page beside them in `.nightly/<date>/` and
-points `nightly` at that directory in one rename (`scripts/sync-site.sh`
-never deletes either). And it reads whether `edge` serves the arm64 snap the
-workflow uploaded. What is not as it should be is a warning in the report,
-never a red night.
+which sends `nightly-site-remote.sh` to the site host on stdin: the site host
+pulls the packages from ghcr itself, checks them against `SHA256SUMS`, puts
+the page beside them in `.nightly/<date>/` and points `nightly` at that
+directory in one rename (`scripts/sync-site.sh` never deletes either). And it
+reads whether `edge` serves both snaps. GitHub red is a red report; a
+package, the image, the page or a snap that did not go out is a warning; a
+night with nothing to push is quiet. A final verdict is written into the
+night's record, for the nights after it to compare with. A night that left
+no record at all is reported too. It posts to `CHAIN_NOTIFY_URL` with the key
+in `CHAIN_NOTIFY_KEY_FILE`, which it never logs; GitHub's API is read with
+the token in `NIGHTLY_GITHUB_TOKEN_FILE` (any scope: everything it reads is
+public) for the rate limit.
 
-The desktop side waits for the build lock, keeps to the quiet windows
-(`NIGHTLY_DESKTOP_EXPECT_MIN`, 30) and never turns a green night red: what it
-could not do is a warning in the morning report.
+**What runs nowhere on its own.** GitHub has no bucket, Document Server
+diagnosis or real ACME and SSO servers of ours, so these stay on the build
+host as a person's run - nothing starts them on a timer:
 
-**What it leaves**, under its `CHAIN_ROOT`: the checkout (`src/`); the runs
-(`runs/`, the last `NIGHTLY_KEEP_RUNS` nights), where
-`runs/latest-nightly.json` is the result a release can take as its `--chain`
-evidence (Release process, step 6) when it is green and `main` has not moved
-since the night; and `nightly/` - `tonight.json` (the night so far),
-`history.jsonl` (one line per night, what the report compares with) and
-`state.json` (the last nightly build, the last nightly snap, the last
-source pushed and the last page published, the last realenv night, and `s3_live`:
-the commit the S3 code is measured from).
-`web/tests/deploy/chainNightly.test.ts` holds the decisions above and the
-report's form.
+- the chain's `nightly` profile - the full chain plus `ds-go` (the office
+  engine's Go test against a real Document Server and the Convert app,
+  `backend/internal/server/office_engine_ds_test.go`), `s3-live`, `shots`
+  (`pnpm shots --all --keep-going` with the app builds and language packs the
+  settings name) and `realenv` (`NIGHTLY_EXTRAS` in
+  `scripts/chain/nightly-lib.mjs`; `CHAIN_NIGHTLY_EXTRAS` picks some):
+  `bash scripts/chain/run.sh --profile nightly --env <a chain settings file>`;
+- **the live S3 tests**, when the morning report says the S3 code changed:
+  bring credentials for one run - a provider's own test bucket, the demo
+  account - in the chain's settings as `FILEX_TEST_S3_ENDPOINT`, `_REGION`,
+  `_BUCKET`, `_ACCESS_KEY`, `_SECRET_KEY` (and `_PATH_STYLE=0` for
+  virtual-hosted addressing; the region is part of the request signature, a
+  server with one of its own refuses `auto`) and run
+  `CHAIN_EXTRAS=s3-live bash scripts/chain/run.sh --profile targeted --env <that file>`.
+  The values reach the job in a `0600` file of the run, never on a command
+  line or in a log; a test that only skipped is red;
+- `e2e/realenv/run.sh` (Against the real servers, above), and the screenshots
+  (`shots.yml` takes a release's on a tag).
+
+**What it leaves**, under its `CHAIN_ROOT`: the checkout (`src/`), the clone
+of the public repository the export is made in (`public/`), the page last
+made (`desktop/site/`), and `nightly/` - `tonight.json` (the night so far),
+`history.jsonl` (one line per night, GitHub's verdict added by the morning
+report: what the next nights compare with), `state.json` (the last export,
+the last push, the last page published) and `tonight/` (the night's logs, its
+commit message and bundle). `web/tests/deploy/chainNightly.test.ts` holds the
+decisions above, runs the export and the push against throwaway
+repositories, and holds the report's form; `web/tests/deploy/nightlyDesktop.test.ts`
+holds the workflow.
 
 ### Known flaky tests
 
@@ -2227,7 +2157,7 @@ is the whole flow.
 
 1. **Take them with `pnpm shots` - in the build host's test chain.** The
    published set is taken on Linux, in the chain's Playwright container with
-   its fontconfig (Liberation Sans), where the nightly run takes it
+   its fontconfig (Liberation Sans), where the chain takes it
    (2026-10-06): fonts are the system's, and pictures from two places are a
    README in two typefaces. A run on Windows or macOS takes, compares and
    shows its pictures for you to look at while you work on a screen, stages
@@ -2242,8 +2172,8 @@ is the whole flow.
    `e2e/shots/` script that owns it, or in a new script there - the command
    finds every file in that directory that imports `@playwright/test`, so a new
    script cannot be left out. It takes only the scenes whose inputs changed
-   since the published set (`--all` takes every one; the nightly run takes
-   every one every night, in the chain).
+   since the published set (`--all` takes every one, and so does the chain's
+   nightly profile).
 2. **Look at the contact sheet it prints** (`e2e/.artifacts/shots/contact-sheet.html`):
    only the pictures whose pixels moved past the threshold, the new ones and the
    removed ones, each changed one beside the published picture with a map of
@@ -2457,9 +2387,9 @@ no agent: Claude Code is checked for, and named when it is missing.
   or whose process is gone, is not waited for. The whole run, the wait
   included, has `LANGPACKS_BUDGET_MIN` (330); a pack it could not start by
   then waits for the next night. It is a timer of its own rather than a step
-  of the nightly run: the packs follow `main` whatever the night's tests
-  said, a night that did not run still translates, and the translation needs
-  neither the build lock nor the quiet windows.
+  of the nightly run: the packs follow `main` whatever GitHub says of the
+  night, a night that pushed nothing still translates, and the translation
+  needs no build lock.
 - **What.** It fetches `origin/main` (`LANGPACKS_REF`) into the nightly run's
   checkout and checks it out in a worktree of its own (`<root>/tree`, outside
   that checkout, which the nightly run cleans with `git clean`; removed after
@@ -2760,8 +2690,9 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    ones with a map of the difference, the new ones and the removed ones; the
    rest were taken again and found the same, or not taken because nothing they
    show changed. Every listed picture in English, current, nothing covering it.
-   The last night's sheet (`out/shots/` of the nightly run) shows the same
-   changes the morning after they landed, so release day holds no surprise.
+   Nothing takes the set at night since #361 (The nightly run, above): when
+   the changes since the last release touch the screens, a run of the chain's
+   nightly profile by hand shows the same sheet before release day does.
 
    It takes every scene in one place (task #187): the six that call
    `findApp` or `documentServer` too, with the app builds and the language
@@ -2772,7 +2703,8 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    itself, and the README showed its typeface beside the chain's.
    `langpack.mjs` refuses a language pack that does not cover this tree
    whole (`node scripts/langpacks.mjs status`); the other scenes are still
-   taken, but the run failed - here red, where the nightly run only warns -
+   taken, but the run failed - here red, where the chain's nightly profile
+   only warns -
    and `accept` refuses it. Until the packs are
    translated, take the rest with `CHAIN_SHOTS_ONLY` (the other scripts'
    names, comma-separated) on the same command, and the published language
@@ -3048,9 +2980,9 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    green run of the whole chain on the build host can stand in for them
    (`--chain <result.json>`, from `scripts/chain`): it must be a finished green
    run of a whole-chain profile, on a clean checkout of a commit this release
-   contains, with nothing changed since but what the stamp writes. A green
-   result of the nightly run (`runs/latest-nightly.json`, The nightly run,
-   above) is such a run when `main` has not moved since the night. A patch
+   contains, with nothing changed since but what the stamp writes. The
+   nightly runs no chain since #361 (The nightly run, above): such a run is
+   one a person started on the build host. A patch
    profile is refused for anything but a patch step from the last tag; a patch
    after a release that was never published is a whole release - cut it as a
    minor.
@@ -3696,7 +3628,7 @@ ones not yet published apply on top of one another in this order:
    release went to `stable` alone, and the three preview channels sat on
    0.52.0, amd64 only. The release tool reads `stable`, `candidate` and `beta`
    back at its `ci` stage, and a channel that lags is said to a person at once
-   (`held`, below) - not `edge`, which the nightly run moves on after a
+   (`held`, below) - not `edge`, which the nightly builds move on after a
    release ([The Snap Store's channels](DESKTOP.md#the-snap-stores-channels)).
 9. `release-winget-first-package.patch` (#68, 0.57), on top of 8: until
    winget has the desktop app (`manifests/b/BRFTech/filex-app` is not on
@@ -3735,7 +3667,8 @@ ones not yet published apply on top of one another in this order:
     to ghcr as `filex-desktop-nightly:nightly-<date>` and `:nightly`, the
     arm64 snap uploaded to `edge` alone ([The nightly run](#the-nightly-run)).
     It touches neither `release.yml` nor `ci.yml`, and publishes nothing a
-    release does.
+    release does. Since 21 it builds from a green CI run of the `nightly`
+    branch instead.
 12. `release-surfaces.patch` (#252, 0.57), on top of 11: a tag whose message
     says `surfaces: server` is a server patch ([A server patch](#a-server-patch)):
     `plan` reads the line (`surfaces` output; anything but none, `all` or
@@ -3854,6 +3787,21 @@ ones not yet published apply on top of one another in this order:
     images in the tag run) is deleted; `desktop`, `npm` and the AUR still do
     not run for one, and the run's summary says it is a server patch
     ([A server patch](#a-server-patch)). `releaseSurfaces.test.ts` holds it.
+21. `nightly-on-github.patch` (#361, 0.62), on top of 20: the night moves to
+    GitHub ([The nightly run](#the-nightly-run)). `ci.yml`'s push trigger
+    names `nightly` beside `main` - the branch the build host force-pushes
+    the night's export to, as one commit - and its head comment says what
+    runs nowhere on its own. `nightly-desktop.yml` (11) is started by
+    `workflow_run` instead of every hour: a CI run on `nightly` that ended
+    green, of a push in this repository (a pull request's run may name any
+    head branch). It checks that commit out, with no credential left in the
+    checkout, and builds from it unless a newer night replaced it on the
+    branch or it was built or tried; it builds the nightly image
+    (`ghcr.io/brf-tech/filex:nightly` and `:nightly-<date>`, its labels from
+    `scripts/chain/nightly-meta.mjs`) in a job of its own, and the amd64 snap
+    beside the arm64 one (the build host's until then). Nothing reads
+    `filex-nightly-src` any more. `nightlyDesktop.test.ts` and
+    `ciFullMatrix.test.ts` hold it.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and

@@ -28,7 +28,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { hostFields, hostLine, pauseWords } from '../../../scripts/chain/nightly-lib.mjs';
+import { hostLine, pauseWords } from '../../../scripts/chain/nightly-lib.mjs';
 import { hookLines, hookSettings, parseArgs, pauseOf } from '../../../scripts/chain/run.mjs';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
@@ -123,18 +123,10 @@ describe('what run.mjs makes of the pause', () => {
       'pause hook timed out (CHAIN_HOOK_TIMEOUT_S) after 900 s: the run went on beside what it was to pause, and nothing was resumed',
     );
     expect(pauseWords(null)).toBe('');
-    expect(hostFields({ ...h, pause: { status: 'paused', exit: 0, secs: 14 } })).toMatchObject({ pause: 'paused' });
-    expect(hostFields(h)).not.toHaveProperty('pause');
   });
 });
 
 describe('every run takes the hooks', () => {
-  it('the nightly run starts its chain through run.sh, so the settings file it passes brings the hooks', () => {
-    const nightly = read('nightly.mjs');
-    expect(nightly).toMatch(/const argv = \[path\.join\(cfg\.src, 'scripts', 'chain', 'run\.sh'\), '--profile', profile/);
-    expect(nightly).toMatch(/if \(envFile\) argv\.push\('--env', envFile\);/);
-  });
-
   it('run.sh pauses only once it holds the lock, and starts run.mjs only after the pause', () => {
     const sh = read('run.sh');
     const lock = sh.indexOf('HELD="$LOCK"');
@@ -154,12 +146,9 @@ describe('every run takes the hooks', () => {
     expect(example).toMatch(/^# CHAIN_PAUSE_CMD=/m);
     expect(example).toMatch(/^# CHAIN_RESUME_CMD=/m);
     expect(example).toMatch(/^# CHAIN_HOOK_TIMEOUT_S=900$/m);
-    expect(read('nightly.env.example')).toMatch(/^# CHAIN_PAUSE_CMD=/m);
     const guide = fs.readFileSync(path.join(REPO, 'docs', 'CONTRIBUTING.md'), 'utf8');
     expect(guide).toContain('**What else the host runs.**');
     expect(guide).toContain('`CHAIN_RESUME_CMD`');
-    // A stop of the nightly unit leaves the resume time to boot what it starts.
-    expect(read(path.join('systemd', 'filex-nightly.service'))).toMatch(/^TimeoutStopSec=10min$/m);
   });
 });
 

@@ -227,12 +227,15 @@ const WORKFLOW_GUARDS = [
   'the AUR waits for every desktop row to end and runs past a Windows row that failed, never past verify (#145)',
   'without its key the AUR job says "skipped: no AUR key", stays green and does nothing else (#145)',
   'the AUR job goes on only when the Release has the Linux packages it repackages (#145)',
-  // #266: the nightly desktop packages on GitHub's runners, every hour that
-  // the build host pushed a new source - nothing a release publishes
-  // (packaging/ci/nightly-desktop.patch, web/tests/deploy/nightlyDesktop.test.ts).
-  'the nightly desktop workflow runs every hour and by hand, and publishes nothing a release does',
-  'every row is made by the nightly job script from the source, unsigned, and the arm64 snap goes to edge alone',
-  "the night goes to ghcr as one artifact with its manifest, as nightly-<date> and nightly; old nights go without failing the run, a missing row fails it",
+  // #266, #361: the nightly builds on GitHub's runners, from a green CI run
+  // of the nightly branch - the image, every desktop package and both snaps,
+  // nothing a release publishes (packaging/ci/nightly-desktop.patch,
+  // packaging/ci/nightly-on-github.patch, web/tests/deploy/nightlyDesktop.test.ts).
+  'run once a CI run on the nightly branch ended, and by hand; build only from a green push of this repository, and publish nothing a release does',
+  'check the commit of the CI run out, never with a credential left in it',
+  "build the image from the commit with the release's recipe, check what it reports, and push it as nightly-<date> and nightly",
+  'make every row with the nightly job script, unsigned, and pack both snaps for edge alone',
+  "send the night to ghcr as one artifact with its manifest, as nightly-<date> and nightly; old nights go without failing the run, a missing row fails it",
   // #252: a server patch's tag run publishes the server's surface alone
   // (packaging/ci/release-surfaces.patch); #361: once its commit passed
   // what every release's must, promoting the dry run's images
@@ -292,7 +295,7 @@ const WORKFLOW_GUARDS = [
   'splits Playwright into parts of each engine, and runs the Document Server specs again with one, on every engine',
   'runs the browser lines the build host runs on their own: the store install without a public URL, and S3',
   'the verdict job is green only when every part of its profile is, and a pull request leaves out exactly what ci-parts says',
-  'a pull request runs the light profile; a push of main and a run by hand run the full one',
+  'a pull request runs the light profile; a push of main or of the nightly branch, and a run by hand, run the full one',
   'never cancels the run of a push: each commit keeps its own verdict',
   'takes every migration up, three steps down and up again through the CLI, on three engines',
   'migrate-roundtrip.sh is red when a down does not undo exactly one migration, or an up does not bring them all back',

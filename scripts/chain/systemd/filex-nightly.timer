@@ -1,9 +1,10 @@
-# When the nightly run starts. A template: scripts/chain/install-nightly.sh
-# fills @AT@ (default "01:00 Europe/Istanbul": a calendar time and a time
+# When the nightly starts. A template: scripts/chain/install-nightly.sh
+# fills @AT@ (default "02:00 Europe/Istanbul": a calendar time and a time
 # zone, see systemd.time(7)). Not Persistent: a host that was off at that
-# hour does not start a run in the morning, when the release work wants it.
+# hour does not push in the morning, when the release work wants GitHub's
+# runners.
 [Unit]
-Description=filex nightly test run, every night at @AT@
+Description=filex nightly, every night at @AT@
 
 [Timer]
 OnCalendar=*-*-* @AT@

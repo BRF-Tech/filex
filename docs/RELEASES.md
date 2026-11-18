@@ -19,14 +19,61 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.61.1, 16 November 2026
-A patch for SQLite installs that were upgraded across many releases at once. Before 0.38 filex made its operations queue at start, outside the database migrations, and from 0.27 on added a column to it the same way; the migration that took the table over in 0.38 assumed every install had that column. An install whose last start was 0.26.1 or older and that was taken straight to 0.38 or later - a v0.10.0 install upgraded to 0.61.0, for one - kept the table without it, and the operations list answered 500 while the server reported itself healthy. Such an install is now repaired at start: the column is added with its default, the queue's rows are kept, and the log says so in one line. PostgreSQL and MySQL installs were never affected, and the upgrade runs no database migration.
+::: tip Latest - v0.61.2, 18 November 2026
+A patch for installs with an ONLYOFFICE Document Server, thanks to @trivnvdev-41 (PR #138). filex checks the Document Server's health before it offers the editor, and one slow answer used to hide the editor from everybody for two minutes: the check waited three seconds, once. It now waits up to five seconds, takes a second look after a quick failure such as a refused connection, and a failed check is trusted for 30 seconds instead of two minutes. A server that does not answer at all is not asked twice: it holds up the start of filex and the capabilities answer for one five-second wait, not two.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.61.1
-docker pull ghcr.io/brf-tech/filex:full-v0.61.1
+docker pull ghcr.io/brf-tech/filex:slim-v0.61.2
+docker pull ghcr.io/brf-tech/filex:full-v0.61.2
 ```
+
+## v0.61.2
+
+<span class="filex-release-date">18 November 2026</span>
+
+A patch for installs with an ONLYOFFICE Document Server, thanks to @trivnvdev-41 (PR #138). filex checks the Document Server's health before it offers the editor, and one slow answer used to hide the editor from everybody for two minutes: the check waited three seconds, once. It now waits up to five seconds, takes a second look after a quick failure such as a refused connection, and a failed check is trusted for 30 seconds instead of two minutes. A server that does not answer at all is not asked twice: it holds up the start of filex and the capabilities answer for one five-second wait, not two.
+
+## What changed
+
+### Changed
+
+- **A server patch is published only once the whole test suite passed on
+  it, and is offered to automatic updates at once** (task #361). Until now a
+  patch that changed the server alone went out as soon as GitHub had built
+  it, with the rest of the test suite still running behind it, and installs
+  that update themselves took it only once that suite had passed, usually
+  within the hour. Now every release, a server patch too, is tagged only
+  after GitHub's full test matrix and the release's dry run passed on its
+  commit, and the images it publishes are the ones that dry run built, pulled
+  by digest and checked again before the tag: they report the release, serve
+  the admin interface and the embeddable explorer, and refuse writes in demo
+  mode. [UPDATES.md → What "automatic" actually checks](./UPDATES.md#what-automatic-actually-checks).
+
+### Fixed
+
+- **One slow answer from the Document Server no longer hides ONLYOFFICE for
+  minutes** (by @trivnvdev-41 in
+  [PR #138](https://github.com/BRF-Tech/filex/pull/138)). The health probe
+  behind `/api/capabilities` and the admin page's **Test now** waited 3
+  seconds once, and a failed verdict was kept for two minutes for every
+  client, so one latency spike took the editor away from everybody. A probe
+  now waits up to 5 seconds, asks once more after a quick failure (a refused
+  connection or an error status) within those 5 seconds, and a failed verdict
+  is kept for 30 seconds. A probe that got no answer is not asked again, so a
+  silent service holds the capabilities answer and the server's start no
+  longer than one timeout. The probe's detail says `(2 attempts)` when it
+  asked twice.
+  [BACKEND.md → Test an external service](./BACKEND.md#post-apiadminexternalnametest-).
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0612---2026-11-18)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.61.2) · `ghcr.io/brf-tech/filex:slim-v0.61.2`
 
 ## v0.61.1
 
@@ -1416,44 +1463,13 @@ df, Explorer and Mountain Duck show the real disk instead of a made-up 1 PB: eve
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.56.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.56.3`
 
-## v0.56.2
-
-<span class="filex-release-date">12 October 2026</span>
-
-Video, audio and PDF thumbnails read a file on a local storage in place instead of copying it whole to the temp directory first, so a folder of films no longer fills /tmp, and the copies a killed process left behind are removed at startup.
-
-## What changed
-
-### Fixed
-
-- **A video thumbnail no longer copies the whole film first, and no copy
-  outlives a restart.** To draw one frame, filex copied every video, audio
-  file and PDF whole into the system temp directory before ffmpeg or
-  Ghostscript ran: on a folder of films on a CIFS mount, a 7 GB copy within
-  17 s of opening the folder and 75% iowait, and a killed process left the
-  copy in `/tmp` (14 GB of them on one install). A file on a local storage (a
-  disk, or a share mounted into the container) is now handed to the tool in
-  place, and ffmpeg reads only the opening seconds. Other storages still
-  copy, into `<cache_dir>/.work/`, which filex empties at startup together
-  with the copies older versions left in the temp directory
-  ([thumbnails.md](./thumbnails.md#how-it-works)). Reported by @eLeKaeMe
-  ([GitHub #114](https://github.com/BRF-Tech/filex/issues/114)).
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0562---2026-10-12)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.56.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.56.2`
-
 ## Earlier releases
 
-The 138 releases before v0.56.2, in brief. Full notes are on GitHub.
+The 139 releases before v0.56.3, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.56.2](https://github.com/BRF-Tech/filex/releases/tag/v0.56.2) | 12 October 2026 | Video, audio and PDF thumbnails read a file on a local storage in place instead of copying it whole to the temp directory first, so a folder of films no longer fills /tmp, and the copies a killed process left behind are removed… |
 | [v0.56.1](https://github.com/BRF-Tech/filex/releases/tag/v0.56.1) | 12 October 2026 | Every table in the product lays each row out under its name when its pane is too narrow to be a table - the details panel, the explorer on a phone or in a narrow pane, an admin page on a phone - instead of cutting the values to… |
 | [v0.56.0](https://github.com/BRF-Tech/filex/releases/tag/v0.56.0) | 11 October 2026 | Apps can edit a file of an end-to-end encrypted folder, or of a vault: the browser decrypts it for an app the person allowed, seals what the app keeps while it edits and encrypts what it saves before it leaves the browser, so the… |
 | [v0.55.0](https://github.com/BRF-Tech/filex/releases/tag/v0.55.0) | 9 October 2026 | An app store lists storage plugins beside apps: the same link and review, every build pinned and signed by the store, the plugin checked by the store's validator before it is listed, and a paid one held while its license does not… |
@@ -1595,4 +1611,4 @@ The 138 releases before v0.56.2, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-11-16 from 158 published releases.</small>
+<small>Last refreshed 2026-11-18 from 159 published releases.</small>

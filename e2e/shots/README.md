@@ -78,11 +78,11 @@ published, and no page links one, that nobody looked at
 
 ```bash
 pnpm shots                        # the scenes whose digest moved
-pnpm shots --all                  # every scene: the nightly run, a major release, a set from another OS
+pnpm shots --all                  # every scene: the chain's nightly profile, a major release, a set from another OS
 pnpm shots --only roles,groups    # these; the rest stand as published or as last taken
 pnpm shots --no-build             # shoot bin/filex as it is (still verified)
 pnpm shots --without-apps         # leave out the scenes that need app builds (CI does)
-pnpm shots --all --keep-going     # a failed scene does not stop the rest; the run still fails (the nightly run)
+pnpm shots --all --keep-going     # a failed scene does not stop the rest; the run still fails (the chain's nightly profile)
 ```
 
 A run that failed half way is not wasted: the scenes it took before the
@@ -128,7 +128,7 @@ export.
 
 Fonts come from the operating system - and on Linux from its fontconfig - so
 a picture taken in one place beside pictures taken in another is a README in
-two typefaces. **The published set is taken where the nightly run takes it:
+two typefaces. **The published set is taken where the chain takes it:
 on Linux, in the build host's test chain** (decided 2026-10-06) - the
 Playwright image `scripts/chain/run.mjs` names, with its `FONTS_CONF`, which
 sets sans-serif and system-ui in Liberation Sans. The build host itself sets
@@ -168,9 +168,8 @@ same command takes only those scripts (a release whose language packs are
 behind takes the rest, and the published language pack picture stands).
 A language pack behind the tree fails `langpack.mjs` (it exits 3, and the
 review records the scene as `packs-behind`): on a release's run that is red,
-in the nightly run - when it is the only failed scene - a warning in the
-morning report, since the strings the day added are translated the night
-after. ⚠ The 0.52.0 set, adopted when
+in the chain's nightly profile - when it is the only failed scene - a
+warning, since the strings the day added are translated the night after. ⚠ The 0.52.0 set, adopted when
 the pictures left the repository, was taken on the build host itself (DejaVu
 Sans): the first night's `--all` shows every picture of it changed, and
 accepting that run moves the set to the chain - once.

@@ -74,7 +74,7 @@ describe('the Snap Store channels of a release (#265)', () => {
 
   it('reads stable, candidate and beta back for both architectures, and names each that lags', async () => {
     expect(SNAP_RELEASE_CHANNELS).toEqual(['stable', 'candidate', 'beta', 'edge']);
-    // Not edge: the nightly run moves it on after a release.
+    // Not edge: the nightly builds move it on after a release.
     expect(SNAP_CHECKED_CHANNELS).toEqual(['stable', 'candidate', 'beta']);
     const gate = snapChannel('snap', 'filex-app', ['amd64', 'arm64'], { channels: SNAP_CHECKED_CHANNELS, fetch: store(everywhere(VERSION)) });
     const green = await gate.check({ version: VERSION });

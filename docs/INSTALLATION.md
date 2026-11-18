@@ -534,11 +534,12 @@ oras pull ghcr.io/brf-tech/filex-desktop-nightly:nightly            # the newest
 oras pull ghcr.io/brf-tech/filex-desktop-nightly:nightly-20261014   # one night's
 ```
 
-A nightly is the tip of the source after the nightly test run passed on it -
-every suite, every browser - built only on a night with a change since the
-last one: the server image (the full one, x64), the snap on the Snap Store's
-`edge` channel ([DESKTOP.md → The Snap Store's channels](DESKTOP.md#the-snap-stores-channels))
-and the desktop packages, made from the same public tree. The desktop
+A nightly is the tip of the source on a night it changed, pushed to this
+repository's `nightly` branch (one commit on top of `main`, replaced every
+night) and built only once the full test matrix passed on it there - every
+suite, every browser: the server image (the full one, x64), the snaps on the
+Snap Store's `edge` channel ([DESKTOP.md → The Snap Store's channels](DESKTOP.md#the-snap-stores-channels))
+and the desktop packages, all made from that commit. The desktop
 packages are not signed: Windows SmartScreen and macOS Gatekeeper warn
 before they open one (on macOS: right-click the app, *Open*).
 
@@ -550,13 +551,14 @@ docker inspect --format '{{json .Config.Labels}}' ghcr.io/brf-tech/filex:nightly
 ```
 
 The version is the next minor as a pre-release, with the night and the commit
-(`0.57.0-nightly.20261014+2ca25999`); the admin panel's *About* shows it too,
+(`0.62.0-nightly.20261119+1a2b3c4d`); the admin panel's *About* shows it too,
 and so does filex.sh/nightly (the desktop packages and the snap carry the
 same, cut to the Snap Store's 32 characters when it is longer). The
-labels say the same commit (`org.opencontainers.image.revision`), the
-released public commit it was built on (`sh.filex.nightly.public-base`: a
-nightly is that release plus what [CHANGELOG.md](../CHANGELOG.md) lists under
-*Unreleased*) and its night's test result (`sh.filex.nightly.tests`).
+labels say the same commit (`org.opencontainers.image.revision`, on the
+`nightly` branch that night), the public commit it was made on
+(`sh.filex.nightly.public-base`: a nightly is that commit of `main` plus what
+[CHANGELOG.md](../CHANGELOG.md) lists under *Unreleased*) and the test run
+that passed it (`sh.filex.nightly.tests`).
 
 > ⚠ **Not supported, and not for the data you keep.** A nightly may carry a
 > database migration the release it is heading for still changes, and a

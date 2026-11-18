@@ -60,7 +60,7 @@ const USAGE = `usage: bash scripts/chain/run.sh [options]
 
   --profile full|targeted|nightly   what to run (default: full); nightly is full
                    plus CHAIN_NIGHTLY_EXTRAS (ds-go, s3-live, shots, realenv), and is
-                   what scripts/chain/nightly.mjs starts
+                   a person's run on the build host
   --src DIR        the checkout under test (default: the repository run.sh is in)
   --env FILE       settings, KEY=VALUE lines (default: $CHAIN_ENV, else
                    ~/.config/filex-chain.env when it exists); the process

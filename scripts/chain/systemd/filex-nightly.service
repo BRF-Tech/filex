@@ -1,10 +1,12 @@
-# The nightly run of the test chain (scripts/chain/nightly.mjs, task #175).
+# The nightly (scripts/chain/nightly.mjs, tasks #175 and #361): the private
+# main, exported the way a release is and pushed to the public repository's
+# `nightly` branch, where GitHub tests it and builds from it.
 # A template: scripts/chain/install-nightly.sh fills @NODE@, @BIN@ and @ENV@
 # and installs it as /etc/systemd/system/filex-nightly.service. Started by
 # filex-nightly.timer; `systemctl start filex-nightly.service` runs a night
 # by hand (it does nothing when main has not moved: `nightly.mjs run --force`).
 [Unit]
-Description=filex nightly test run (scripts/chain/nightly.mjs)
+Description=filex nightly: main exported and pushed to the nightly branch (scripts/chain/nightly.mjs)
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -14,13 +16,9 @@ Type=oneshot
 # git, docker and the export read their settings from a home directory.
 Environment=HOME=/root
 ExecStart=@NODE@ @BIN@/nightly.mjs run --env @ENV@
-# 1 is a red night: recorded and reported in the morning, not a failed unit.
+# 1 is an export that refused the change, or a push that failed: recorded and
+# said in the morning report, not a failed unit.
 SuccessExitStatus=1
-# The run stops itself before a NIGHTLY_QUIET window; this is only the backstop.
-TimeoutStartSec=10h
-# A stop reaches run.mjs, which removes the run's containers before it exits;
-# then run.sh runs CHAIN_RESUME_CMD, when a pause hook ran (an emulator that
-# boots again takes a minute or two of this).
-KillSignal=SIGTERM
-TimeoutStopSec=10min
+# The export and the push take minutes; this is only the backstop.
+TimeoutStartSec=1h
 Nice=5

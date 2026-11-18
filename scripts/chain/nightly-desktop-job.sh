@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
 # The desktop app of a nightly build, made from the public tree of the
-# night's commit (task #266) - one script for both places that run it:
-#   - electron-builder's own container on the build host
-#     (scripts/chain/nightly-desktop.sh: the tree at /w/src, out at /w/out,
-#     Go at /usr/local/go), for the app the amd64 snap is packed from;
-#   - GitHub's runners (.github/workflows/nightly-desktop.yml: ND_JOB_SRC and
-#     ND_JOB_OUT name the tree and the out directory), for every desktop
-#     package and the arm64 snap's app.
+# night's commit (task #266) on GitHub's runners
+# (.github/workflows/nightly-desktop.yml: ND_JOB_SRC and ND_JOB_OUT name the
+# tree and the out directory): every desktop package and the apps both snaps
+# are packed from. Until #361 the build host ran it too, in electron-builder's
+# own container, for the amd64 snap.
 #
 #   ND_VERSION   the version every package carries (nightly-lib.mjs desktopVersion)
 #   ND_TARGETS   what to make, comma-separated:
 #                  snap         the x64 app unpacked (release/linux-unpacked), with
-#                               the amd64 CLI in it: the build host packs the snap
-#                               from it (snapcraft needs LXD)
+#                               the amd64 CLI in it: the workflow packs the amd64
+#                               snap from it (snapcraft in LXD)
 #                  snap-arm64   the same for arm64 (release/linux-arm64-unpacked),
 #                               on an arm64 machine: the workflow packs the snap
 #                  linux-x64    AppImage, .deb and .rpm, x64

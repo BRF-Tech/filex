@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-11-16",
+  "generatedAt": "2026-11-18",
   "releases": [
+    {
+      "tag": "v0.61.2",
+      "date": "2026-11-18T02:27:37Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.61.2",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Changed\n\n- **A server patch is published only once the whole test suite passed on\n  it, and is offered to automatic updates at once** (task #361). Until now a\n  patch that changed the server alone went out as soon as GitHub had built\n  it, with the rest of the test suite still running behind it, and installs\n  that update themselves took it only once that suite had passed, usually\n  within the hour. Now every release, a server patch too, is tagged only\n  after GitHub's full test matrix and the release's dry run passed on its\n  commit, and the images it publishes are the ones that dry run built, pulled\n  by digest and checked again before the tag: they report the release, serve\n  the admin interface and the embeddable explorer, and refuse writes in demo\n  mode. [UPDATES.md → What \"automatic\" actually checks](docs/UPDATES.md#what-automatic-actually-checks).\n\n### Fixed\n\n- **One slow answer from the Document Server no longer hides ONLYOFFICE for\n  minutes** (by @trivnvdev-41 in\n  [PR #138](https://github.com/BRF-Tech/filex/pull/138)). The health probe\n  behind `/api/capabilities` and the admin page's **Test now** waited 3\n  seconds once, and a failed verdict was kept for two minutes for every\n  client, so one latency spike took the editor away from everybody. A probe\n  now waits up to 5 seconds, asks once more after a quick failure (a refused\n  connection or an error status) within those 5 seconds, and a failed verdict\n  is kept for 30 seconds. A probe that got no answer is not asked again, so a\n  silent service holds the capabilities answer and the server's start no\n  longer than one timeout. The probe's detail says `(2 attempts)` when it\n  asked twice.\n  [BACKEND.md → Test an external service](docs/BACKEND.md#post-apiadminexternalnametest-).\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0612---2026-11-18)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.61.2",
+        "ghcr.io/brf-tech/filex:full-v0.61.2"
+      ],
+      "hasDesktop": false,
+      "assetCount": 15
+    },
     {
       "tag": "v0.61.1",
       "date": "2026-11-16T02:31:39Z",

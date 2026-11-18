@@ -576,7 +576,7 @@ export function decideScenes({ scripts, digests, manifest, previous = null, mode
  * in the order they ran), or null when none did.
  *
  * Without `keepGoing` the first failure stops the run, and the rest were not
- * run. With it (`pnpm shots --keep-going`, the nightly run's shots job) every
+ * run. With it (`pnpm shots --keep-going`, the chain's shots job) every
  * other scene was still taken - one stale language pack must not leave a
  * night's other scenes untaken - and every failed scene is named. Either way
  * the run is a failure, and `accept` refuses it.
@@ -717,7 +717,7 @@ export function acceptRefusal(manifest, review, { publishPlatform = PUBLISH_PLAT
     return (
       `this run was taken on ${review.platform}, and the published set is taken on ${publishPlatform} - the build host: ` +
       'a picture from here beside the published ones puts two typefaces in one README. Look at this run, then take the ' +
-      `pictures in the build host's test chain (CHAIN_EXTRAS=shots on a targeted run, or the nightly run's shots job) and accept that run.`
+      `pictures in the build host's test chain (CHAIN_EXTRAS=shots on a targeted run, or its nightly profile) and accept that run.`
     );
   }
   if (manifest.platform && review.platform !== manifest.platform && !(review.mode === 'all' && review.complete)) {

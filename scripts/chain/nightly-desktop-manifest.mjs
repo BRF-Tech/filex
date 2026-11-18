@@ -8,8 +8,8 @@
 //
 //   DIR        every row's output, as the workflow downloaded it: the packages
 //              (filex-desktop-*) anywhere under it, each row's targets.txt
-//              ("<target> built|failed"), and the arm64 snap's upload
-//              (snap-arm64.json: { state, revision?, why? })
+//              ("<target> built|failed"), and each snap's upload
+//              (snap-amd64.json, snap-arm64.json: { state, revision?, why? })
 //   --expect   the targets the rows were asked for: one no targets.txt
 //              names (a row that never got that far) is `failed`
 //
@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { classifyDesktopFile, desktopManifest } from './nightly-lib.mjs';
+import { SNAP_ARCHES, classifyDesktopFile, desktopManifest } from './nightly-lib.mjs';
 
 /** The rows' outcomes: every expected target, `failed` unless a targets.txt says otherwise. */
 export function rowsOf(targetsTexts, expect) {
@@ -66,12 +66,15 @@ function main(argv) {
   const all = walk(dir);
   const targetsTexts = all.filter((p) => path.basename(p) === 'targets.txt').map((p) => fs.readFileSync(p, 'utf8'));
   const rows = rowsOf(targetsTexts, o.expect.split(',').filter(Boolean));
-  const snapFile = all.find((p) => path.basename(p) === 'snap-arm64.json');
-  let snapArm64 = null;
-  try {
-    snapArm64 = snapFile ? JSON.parse(fs.readFileSync(snapFile, 'utf8')) : null;
-  } catch {
-    snapArm64 = { state: 'failed', why: 'snap-arm64.json could not be read' };
+  const snap = {};
+  for (const arch of SNAP_ARCHES) {
+    const file = all.find((p) => path.basename(p) === `snap-${arch}.json`);
+    if (!file) continue;
+    try {
+      snap[arch] = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      snap[arch] = { state: 'failed', why: `snap-${arch}.json could not be read` };
+    }
   }
   const packages = all.filter((p) => classifyDesktopFile(path.basename(p)));
   const files = [];
@@ -89,13 +92,14 @@ function main(argv) {
     date: o.date,
     run: o.run ?? '',
     rows,
-    snap: snapArm64 ? { arm64: snapArm64 } : {},
+    snap,
     builtAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
   });
   fs.writeFileSync(path.join(dir, 'nightly.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   fs.writeFileSync(path.join(dir, 'SHA256SUMS'), manifest.files.map((f) => `${f.sha256}  ${f.name}\n`).join(''));
   for (const [t, st] of Object.entries(rows)) console.log(`${t}: ${st}`);
-  console.log(`${manifest.files.length} package(s)${snapArm64 ? `; arm64 snap: ${snapArm64.state}` : ''}`);
+  const snaps = Object.entries(snap).map(([arch, v]) => `${arch} snap: ${v.state}`);
+  console.log(`${manifest.files.length} package(s)${snaps.length ? `; ${snaps.join(', ')}` : ''}`);
   return manifest.files.length ? 0 : 1;
 }
 

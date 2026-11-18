@@ -1054,7 +1054,7 @@ ready-made stacks live in [`deploy/`](deploy/):
 
 Step-by-step instructions for each tier are in
 [docs/INSTALLATION.md](docs/INSTALLATION.md). To try what the next release brings,
-there is a nightly build of every change that passed the nightly tests -
+there is a nightly build of every change that passed the full test matrix on GitHub -
 `ghcr.io/brf-tech/filex:nightly`, the desktop app on [filex.sh/nightly](https://filex.sh/nightly/) and the Snap Store's `edge` channel -
 not supported, and not for the data you keep
 ([docs/INSTALLATION.md → Nightly builds](docs/INSTALLATION.md#nightly-builds)).

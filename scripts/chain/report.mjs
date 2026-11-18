@@ -1,21 +1,23 @@
 #!/usr/bin/env node
-// The nightly run's morning report (task #175): ONE notification for the
-// night, started by its own timer (scripts/chain/systemd/filex-nightly-report.timer,
-// 07:00) whatever the night did - a night that left no record is reported
-// too, which is how a timer that never fired gets noticed.
+// The nightly's morning report (task #175; since #361 it reads the night
+// back from GitHub): ONE notification for the night, started by its own timer
+// (scripts/chain/systemd/filex-nightly-report.timer, 07:00) whatever the night
+// did - a night that left no record is reported too, which is how a timer
+// that never fired gets noticed.
 //
 //   node scripts/chain/report.mjs --env FILE             compose it and send it
 //   node scripts/chain/report.mjs --env FILE --dry-run   compose it and print it; send nothing
 //
-// What it says (scripts/chain/nightly-lib.mjs composeReport): green or red,
-// the wall time against the previous night, every red job with its summary,
-// its log and the commits since it last passed, what the previous night had
-// red that passes now, the nightly build, and - when the night did not run -
-// why. A run still going is waited for, at most NIGHTLY_REPORT_WAIT_MIN
-// minutes; then it is reported as it stands. Before it is composed, GitHub's
-// desktop packages of the last source are followed up and, built, put on
-// filex.sh/nightly (nightly.mjs followDesktop, #266); --dry-run makes the
-// page and publishes nothing.
+// What it says (scripts/chain/nightly-lib.mjs composeReport): what the night
+// pushed (or why it pushed nothing), the commits since the last nightly, and
+// GitHub's verdict on it - ci.yml's `All tests (full)` and every part that
+// was not green, with its page, the night it last passed and the commits
+// since (nightly.mjs followCi, ciVerdict) - then the nightly image, GitHub's
+// desktop packages and the snaps, put on filex.sh/nightly when built
+// (nightly.mjs followDesktop, #266). A night still going is waited for, at
+// most NIGHTLY_REPORT_WAIT_MIN minutes. A final verdict is written into the
+// night's record (history.jsonl), for the nights after it to compare with;
+// --dry-run writes nothing and publishes no page.
 //
 // It posts to CHAIN_NOTIFY_URL (JSON: group, source, severity, title,
 // message) with the Bearer key in CHAIN_NOTIFY_KEY_FILE, which it never logs,
@@ -30,14 +32,14 @@ import { fileURLToPath } from 'node:url';
 
 import { mergeEnv } from './env.mjs';
 import { composeReport, nightlySettings } from './nightly-lib.mjs';
-import { alive, followDesktop, readHistory, readJson } from './nightly.mjs';
+import { alive, followCi, followDesktop, followImage, readHistory, readJson, recordCi } from './nightly.mjs';
 
 const USAGE = `usage: node scripts/chain/report.mjs --env FILE [--dry-run] [--wait-min N]
 
-  --env FILE     the nightly run's settings (default: $NIGHTLY_ENV)
-  --dry-run      print the report; send nothing
-  --wait-min N   wait at most N minutes for a run still going
-                 (default: NIGHTLY_REPORT_WAIT_MIN, 120)
+  --env FILE     the nightly's settings (default: $NIGHTLY_ENV)
+  --dry-run      print the report; send nothing, write nothing
+  --wait-min N   wait at most N minutes for a night still going
+                 (default: NIGHTLY_REPORT_WAIT_MIN, 30)
 
 Exit: 0 sent, 1 the post failed, 2 a setup error.`;
 
@@ -115,17 +117,36 @@ async function main() {
     await sleep(60_000);
     tonight = readJson(tonightFile);
   }
+  const push = (readJson(path.join(cfg.state, 'state.json')) ?? {}).last_push ?? null;
+  let ci = null;
+  if (push?.revision) {
+    try {
+      ci = await followCi(cfg, push.revision);
+    } catch (e) {
+      ci = { state: 'unknown', why: e.message };
+    }
+    if (!args.dryRun) recordCi(cfg.state, push.revision, ci);
+  }
   let follow = null;
   try {
-    follow = await followDesktop(cfg, { dry: !!args.dryRun });
+    follow = await followDesktop(cfg, { dry: !!args.dryRun, ci });
   } catch (e) {
     follow = { state: 'unknown', why: `the follow-up of GitHub's desktop packages failed: ${e.message}` };
   }
+  let image = null;
+  try {
+    image = followImage(cfg, push);
+  } catch (e) {
+    image = { state: 'unknown', why: e.message };
+  }
   const report = composeReport({
-    follow,
-    tonight,
-    result: tonight?.result ? readJson(tonight.result) : null,
+    tonight: readJson(tonightFile) ?? tonight,
     history: readHistory(cfg.state),
+    ci,
+    push,
+    follow,
+    image,
+    imageRef: `${cfg.image.repo}:nightly`,
     commits: commitsIn(cfg.src),
     running: tonight ? alive(tonight.pid) : false,
     nowMs: Date.now(),

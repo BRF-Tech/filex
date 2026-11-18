@@ -1,5 +1,5 @@
 // The settings files of scripts/chain: KEY=VALUE lines, read the same way by
-// the chain (run.mjs), the nightly run (nightly.mjs) and its morning report
+// the chain (run.mjs), the nightly (nightly.mjs) and its morning report
 // (report.mjs), so one file can serve all three. Pure.
 
 /** KEY=VALUE lines; `#` comments, an optional `export `, one pair of quotes. No expansion. */

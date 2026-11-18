@@ -546,7 +546,7 @@ describe('a reviewed run becomes the published set', () => {
     expect(shots).toMatch(/staged for the site: nothing - this run is on/);
   });
 
-  it('the nightly run takes every scene, on Linux, the app and Document Server scenes included (scripts/chain/job/shots.sh, #187)', () => {
+  it("the chain's shots job takes every scene, on Linux, the app and Document Server scenes included (scripts/chain/job/shots.sh, #187)", () => {
     // --all: a scene whose INPUTS missed something it shows keeps its digest,
     // and only taking it again finds its pixels moved (lesson #1150).
     // ⚠ Until #187 the job ran --without-apps: the six scenes that need an app

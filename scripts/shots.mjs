@@ -3,12 +3,12 @@
 // tree, in one command; only what changed is put in front of a person.
 //
 //   pnpm shots                          take the scenes whose inputs changed → compare → review sheet
-//   pnpm shots --all                    every scene, whatever changed (the nightly run, a major release)
+//   pnpm shots --all                    every scene, whatever changed (the chain's nightly profile, a major release)
 //   pnpm shots --only sidenav,capture   these scenes; the rest stand as published or as last taken
 //   pnpm shots --skip packages,web      reuse builds you trust (the verify step still runs)
 //   pnpm shots --no-build [--binary p]  shoot an existing binary (still verified)
 //   pnpm shots --without-apps           leave out the scenes that need app builds (CI's default)
-//   pnpm shots --all --keep-going       a failed scene does not stop the rest (the nightly run); still red
+//   pnpm shots --all --keep-going       a failed scene does not stop the rest (the chain's shots job); still red
 //   then: node scripts/shots-site.mjs upload  &&  node scripts/shots-site.mjs accept --looked
 //
 // ⚠⚠ Why this exists. The screenshots for v0.41.0 were taken three times by
@@ -895,12 +895,12 @@ async function main() {
   if (left.length + survivors.length) throw new Refusal('processes of this run are still running (listed above)');
   if (!publishable) {
     say(`This run is on ${process.platform}: look at it, but the published set is taken on ${PUBLISH_PLATFORM}, the build host -`);
-    say('nothing was staged, and accept refuses it. Take them in its test chain: CHAIN_EXTRAS=shots on a targeted run, or the nightly run.');
+    say('nothing was staged, and accept refuses it. Take them in its test chain: CHAIN_EXTRAS=shots on a targeted run, or its nightly profile.');
   } else if (review.environment !== PUBLISH_ENVIRONMENT) {
     // Linux, but not the build host's test chain (SHOTS_ENVIRONMENT=chain is
     // its shots job): another typeface, and accept refuses it (#187).
     say(`This run is in "${review.environment}", and the published set is taken in "${PUBLISH_ENVIRONMENT}", the build host's test chain:`);
-    say('look at it, but accept refuses it. Take them there: CHAIN_EXTRAS=shots on a targeted run, or the nightly run -');
+    say('look at it, but accept refuses it. Take them there: CHAIN_EXTRAS=shots on a targeted run, or its nightly profile -');
     say('or accept this run on purpose with: node scripts/shots-site.mjs accept --looked --outside-chain (a warning still prints).');
   } else if (toLook) {
     say(`Now LOOK at the contact sheet — the ${toLook} changed, new and removed picture(s): English, current, nothing covering them.`);

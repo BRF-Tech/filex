@@ -315,8 +315,8 @@ export function windowsFeedArches(name, url, opts = {}) {
 /**
  * The Snap Store channels a release puts its revisions on (#265), and the
  * ones the release tool reads back. A release is the newest build there is
- * on the day it ships, so it goes to every channel; the nightly run then
- * puts a newer amd64 build on edge (scripts/chain/nightly.mjs), which is
+ * on the day it ships, so it goes to every channel; the nightly builds then
+ * put newer ones on edge (.github/workflows/nightly-desktop.yml), which is
  * why edge is not read back: by the time a slow tag run is read, the night
  * may have moved it on.
  *

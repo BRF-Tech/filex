@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// A nightly snap to the Snap Store's edge channel, from GitHub's arm64
-// runner (task #266, .github/workflows/nightly-desktop.yml): edge only, never
-// a release's channels.
+// A nightly snap to the Snap Store's edge channel, from GitHub's runners
+// (task #266, .github/workflows/nightly-desktop.yml; the amd64 one since
+// #361, from the x64 runner, the arm64 one from the arm64 runner): edge only,
+// never a release's channels.
 //
 //   node scripts/chain/nightly-snap-edge.mjs <snap file> <result.json>
 //
@@ -10,9 +11,9 @@
 // never printed. Without it the snap is not uploaded and the run says
 // "skipped: no Snap Store credential" - a line, not a red run. The outcome
 // goes to <result.json> ({ state: released | review | failed | skipped,
-// revision?, why? }), which the night's manifest carries: the build host's
-// morning report says it, and says every morning after it until edge serves
-// the revision (snapEdgeState) - a review that never ends is not quiet.
+// revision?, why? }), which the night's manifest carries: the morning report
+// says it, and says every morning after it until edge serves the revision
+// (snapEdgeState) - a review that never ends is not quiet.
 //
 // Exit: 0 released, held for a review, or skipped; 1 the upload failed; 2 usage.
 

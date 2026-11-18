@@ -17,8 +17,9 @@ package s3_test
 //
 // It writes under a prefix of its own and deletes what it wrote. The server is
 // read by internal/testutil/lives3 (FILEX_TEST_S3_PATH_STYLE=0 for
-// virtual-hosted addressing); the build host's nightly run points it at the
-// bucket its settings name (scripts/chain/job/s3-live.sh).
+// virtual-hosted addressing); the build host's chain points it at the
+// bucket its settings name (scripts/chain/job/s3-live.sh), on a run a person
+// starts.
 
 import (
 	"bytes"

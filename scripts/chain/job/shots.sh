@@ -62,7 +62,7 @@
 # binary, and the example plugin the plugins scene installs).
 #
 # The pictures land where this release's go (e2e/shots/release.mjs), in the
-# checkout under test - which the nightly run resets before the next night.
+# checkout under test - which the next run may reset.
 # This job keeps them, with the contact sheet, in /w/run/out/shots.
 . /w/chain/job/common.sh
 cd /w/src || exit 1

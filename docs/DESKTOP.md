@@ -225,7 +225,7 @@ try what comes next:
 | `stable` | The release. | Every release, x64 and arm64. |
 | `candidate` | The release - the same revision as `stable`. | Every release, with `stable`. |
 | `beta` | The release - the same revision as `stable`. | Every release, with `stable`. |
-| `edge` | The newest build: the release on the day it ships, then the **nightly** build of each change that passed the nightly test run, x64 and arm64. | Every release, and every night that made a nightly build (x64 on the build host, arm64 on GitHub's arm64 runner). |
+| `edge` | The newest build: the release on the day it ships, then the **nightly** build of each change that passed the full test matrix, x64 and arm64. | Every release, and every night whose change passed (both on GitHub's runners). |
 
 ```bash
 sudo snap install filex-app --edge              # a new install, on edge

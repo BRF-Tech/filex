@@ -543,10 +543,12 @@ describe('ci.yml: the full matrix', () => {
     }
   });
 
-  it.runIf(!!DIR)('a pull request runs the light profile; a push of main and a run by hand run the full one', () => {
+  it.runIf(!!DIR)('a pull request runs the light profile; a push of main or of the nightly branch, and a run by hand, run the full one', () => {
     const ci = ciCode();
     const on = ci.slice(ci.indexOf('\non:'), ci.indexOf('\npermissions:'));
-    expect(on).toMatch(/\n {2}push:\n {4}branches: \[main\]/);
+    // `nightly` (#361): the build host pushes the night's export there, and
+    // nightly-desktop.yml builds from a green run of it.
+    expect(on).toMatch(/\n {2}push:\n {4}branches: \[main, nightly\]/);
     expect(on).toMatch(/\n {2}pull_request:/);
     expect(on).toMatch(/\n {2}workflow_dispatch:/);
     expect(on, 'nothing calls ci.yml since #174').not.toMatch(/workflow_call/);

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The nightly builds are made on GitHub, from a commit anyone can look
+  at** (task #361). Every night the tip of the development branch goes to
+  this repository's `nightly` branch as one commit on top of `main`, GitHub's
+  full test matrix runs on it, and only a green run builds the nightly image
+  (`ghcr.io/brf-tech/filex:nightly`), the desktop packages on
+  [filex.sh/nightly](https://filex.sh/nightly/) and both snaps on the Snap
+  Store's `edge` channel - all from that commit, which the version names
+  (`0.62.0-nightly.<night>+<commit>`) and the image's labels link to its test
+  run. [INSTALLATION.md → Nightly builds](docs/INSTALLATION.md#nightly-builds).
+
 ## [0.61.2] - 2026-11-18
 
 ### Changed

@@ -12,9 +12,9 @@
 #
 # CHAIN_LOCK_WAIT_MIN (the process environment only) bounds the wait for the
 # lock: a run that has not got it within that many minutes exits 3 without
-# starting. Unset, it waits for as long as it takes. The nightly run sets it,
-# so a release chain that holds the lock past the night does not push the
-# nightly run into the morning (scripts/chain/nightly.mjs).
+# starting. Unset, it waits for as long as it takes (a run started by a
+# timer sets it, so a chain that holds the lock past its window does not push
+# that run into the morning).
 #
 # The hooks (task #194). Once the lock is held, and before run.mjs measures
 # the host it has, run.sh runs CHAIN_PAUSE_CMD - a command that frees the host
@@ -27,7 +27,7 @@
 # `bash -c`, still under the lock, without the lock's file descriptor (a
 # daemon a hook starts cannot keep the lock), in a session of their own
 # (setsid: no terminal, and a signal to the run's process group - a stop of
-# the nightly run - does not cut a hook short; a systemd stop signals every
+# the run - does not cut a hook short; a systemd stop signals every
 # process of the unit, so a hook that must finish ignores TERM itself), at
 # most CHAIN_HOOK_TIMEOUT_S seconds each (then TERM to its process group, and
 # KILL 30 s later). The resume hook gets the run's exit code in CHAIN_EXIT. A

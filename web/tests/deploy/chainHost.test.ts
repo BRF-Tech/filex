@@ -1,7 +1,7 @@
 // What the test chain records of its build host (task #194): the kernel's
 // pressure stall information, the run disk's write latency, each job
 // container's memory and writes, the budget it takes from the host, and how
-// the morning report reads them.
+// the run's own log reads them.
 //
 // ⚠ Why this exists. 0.53's three full runs on the build host were red in
 // three different places, and the same code was green in another run: a
@@ -9,7 +9,8 @@
 // 1, beside an Android emulator's 3.2 GiB), and a 15 s window when the disk
 // completed 1.1 writes per second, each after 10 s. Each time the answer took
 // a Prometheus query by hand (lessons #1222, #1232). The run keeps it now, per
-// job, and the report says it beside the red job.
+// job, and its log says it beside the red job (the nightly's morning report
+// did too until #361, when the night left the build host).
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -28,7 +29,7 @@ import {
   parsePressure,
   readCgroup,
 } from '../../../scripts/chain/host.mjs';
-import { STALL, composeReport, hostLine, nightRecord, resultFields, stallWords } from '../../../scripts/chain/nightly-lib.mjs';
+import { STALL, hostLine, stallWords } from '../../../scripts/chain/nightly-lib.mjs';
 import { hostBudget } from '../../../scripts/chain/schedule.mjs';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
@@ -192,7 +193,7 @@ describe("WebKit's line and the panel's service worker", () => {
   });
 });
 
-describe('the run and the morning report', () => {
+describe('the run and its log', () => {
   const load = (over: Record<string, number | null>) => ({
     host_mem_full: 0.02, host_io_full: 0.1, disk_write_ms: 120, mem_gb: 1, mem_peak_gb: 1.2, written_gb: 0.5, stalled_mem_s: 0, stalled_io_s: 1, ...over,
   });
@@ -221,41 +222,6 @@ describe('the run and the morning report', () => {
       'host: budget 8 GiB; worst memory full 0.08, io full 0.43, disk writes 812 ms (dm-0); the browser round waited 21 min for the disk',
     );
     expect(hostLine(undefined as unknown as typeof h)).toBeNull();
-  });
-
-  it('keeps each night\'s budget and worst pressure in its record: whether the chain still stalls its host, night by night', () => {
-    const host = { budget_gb: 7, configured_gb: 8, budget_cut: true, mem_full_max: 0.05, io_full_max: 0.3, disk_write_ms_max: 400, stalled_secs: 0 };
-    const f = resultFields({ finished: 'x', ok: true, stopped: false, secs: 1, wall: 'w', counts: {}, jobs: [], host });
-    expect(f.host).toEqual({ budget_gb: 7, mem_full_max: 0.05, io_full_max: 0.3, disk_write_ms_max: 400 });
-    expect(nightRecord({ night: 'n', decision: 'ran', host: f.host }).host).toEqual(f.host);
-  });
-
-  it('names the stall beside the red job it may explain, and the host line under the wall time', () => {
-    const now = Date.parse('2026-10-08T04:00:00Z');
-    const sha = 'c'.repeat(40);
-    const r = composeReport({
-      tonight: { night: '2026-10-08', at: '2026-10-07T23:00:07Z', phase: 'done', decision: 'ran', sha, run_id: 'nightly-x', result: '/r/result.json' },
-      result: {
-        finished: '2026-10-08T02:30:00Z', ok: false, stopped: false, secs: 12600, wall: '3h30m00s',
-        counts: { passed: 1, failed: 2, skipped: 0, total: 3 },
-        jobs: [
-          { name: 'build', status: 'passed' },
-          { name: 'e2e-chromium', status: 'failed', summary: 'e2e=1 1 failed', log: '/r/logs/e2e-chromium.log', load: load({ host_mem_full: 0.03, disk_write_ms: 10256 }) },
-          { name: 'race-handlers-3', status: 'failed', summary: 'race=1 tests=210 failed=1 races=0', log: '/r/logs/race-handlers-3.log', load: load({}) },
-        ],
-        host: { budget_gb: 6.75, configured_gb: 8, budget_cut: true, mem_available_start_gb: 7.9, outside: 'android16 3.1 GiB', disk: 'dm-0', mem_full_max: 0.12, io_full_max: 0.71, disk_write_ms_max: 10256, temp_wait_secs: 0 },
-      },
-      history: [],
-      nowMs: now,
-      tz: 'Europe/Istanbul',
-    });
-    expect(r.message).toContain('host: budget 6.75 of 8 GiB (MemAvailable 7.9 GiB at the start; outside the chain: android16 3.1 GiB); worst memory full 0.12, io full 0.71, disk writes 10256 ms (dm-0)');
-    const lines = r.message.split('\n');
-    const red = lines.findIndex((l: string) => l.startsWith('RED e2e-chromium'));
-    expect(lines[red + 2]).toBe("  the host stalled while it ran (disk writes 10256 ms): read a timeout there as the host's before the test's");
-    // A red job the host did not stall under gets no such line.
-    const race = lines.findIndex((l: string) => l.startsWith('RED race-handlers-3'));
-    expect(lines[race + 2] ?? '').not.toMatch(/the host stalled/);
   });
 
   it('writes a LOAD line per job and a PRESSURE line at most once a minute, and keeps `host` in result.json', () => {
