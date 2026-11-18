@@ -935,6 +935,9 @@ describe('the settings', () => {
     // #365: the live S3 tests run on GitHub against a gateway of their own; no FILEX_TEST_S3_* here.
     expect(text).toContain('gh workflow run s3-live.yml -R BRF-Tech/filex');
     expect(text).not.toMatch(/CHAIN_EXTRAS=s3-live/);
+    // #367: ci.yml runs the Document Server's Go test; the profile has no extras left.
+    expect(text).toMatch(/left it in #365, ds-go in #367/);
+    expect(text).not.toMatch(/full chain plus ds-go/);
     for (const k of ['CHAIN_LOCK', 'NIGHTLY_PUBLISH', 'NIGHTLY_SNAP', 'NIGHTLY_QUIET', 'FILEX_TEST_S3_BUCKET', 'FILEX_TEST_S3_ACCESS_KEY', 'FILEX_TEST_S3_SECRET_KEY']) expect(text, k).not.toMatch(new RegExp(`^#? ?${k}=`, 'm'));
   });
 

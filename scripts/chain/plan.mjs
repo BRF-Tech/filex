@@ -16,14 +16,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { DS_EXTRAS, EXTRAS, NIGHTLY_EXTRAS, movedWords, nightlyExtras } from './nightly-lib.mjs';
+import { DS_EXTRAS, EXTRAS, NIGHTLY_EXTRAS, extrasWords, movedWords, nightlyExtras } from './nightly-lib.mjs';
 
 export const CHAIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 export const PROFILES = ['full', 'targeted', 'nightly'];
 
-// The extras a run can add to the full chain (ds-go, shots), and the
-// ones the nightly profile adds, are defined in nightly-lib.mjs, where the
+// The extras a run can add to the full chain (shots), and the ones the
+// nightly profile adds (none since #367), are defined in nightly-lib.mjs, where the
 // nightly that started that profile until #361 kept its decisions.
 export { DS_EXTRAS, EXTRAS, NIGHTLY_EXTRAS, nightlyExtras };
 
@@ -56,7 +56,7 @@ export const SHARD_LISTS = {
  *   Cypress 1.40-1.70 · Playwright chromium 6.62-6.85 (7.15 on its own,
  *   2026-10-15; 4.15 recording nothing, below), firefox 5.52-5.64, webkit
  *   4.98-5.31, nopub 1.66-1.74, nods 1.53-1.60, s3 0.46-0.71 ·
- *   ds-go 0.87-1.01 · shots 2.28-2.52
+ *   shots 2.28-2.52 (ds-go, 0.87-1.01, left the chain in #367)
  * and before them (0.53, cAdvisor): Document Server 0.63-0.72, MySQL
  * 0.68-0.77 + PostgreSQL 0.14 + Redis and Samba 0.04.
  *
@@ -100,7 +100,6 @@ export const WEIGHTS = {
   e2e: 5.75,
   ds: 0.75,
   db: 1,
-  'ds-go': 1.25,
   shots: 2.75,
 };
 
@@ -205,9 +204,8 @@ export const EXPECTED_MINUTES = {
   'e2e-firefox': 34,
   'e2e-webkit': 31,
   'e2e-nods': 3,
-  // The extras: shots as `pnpm shots` took on the host (8.6-9.9 min,
-  // 0.50-0.52), the others estimated until the first nights say.
-  'ds-go': 6,
+  // The extra: shots as `pnpm shots` took on the host (8.6-9.9 min,
+  // 0.50-0.52).
   shots: 10,
 };
 
@@ -434,16 +432,17 @@ function trackMinutes(t, table) {
  *             down on SQLite, PostgreSQL and MySQL; the -race jobs; and the
  *             browser list.
  *   nightly   what full runs, and the NIGHTLY_EXTRAS CHAIN_NIGHTLY_EXTRAS
- *             asks for in the browser round: ds-go (DS_EXTRAS: it needs the
- *             Document Server) right after the last line with it. A person's
- *             run since #361 (task #175 had a timer start it every night);
- *             shots, realenv and s3-live left it in #365.
+ *             asks for in the browser round - one that needs the Document
+ *             Server (DS_EXTRAS) right after the last line with it. A
+ *             person's run since #361 (task #175 had a timer start it every
+ *             night); shots, realenv and s3-live left it in #365 and ds-go in
+ *             #367, so it runs what full runs.
  *   targeted  the build and its three fast gates, then only what is asked
  *             for: CHAIN_GO_PKGS, CHAIN_RACE_PKGS, CHAIN_MIGRATE=1,
  *             CHAIN_CY_SPECS, CHAIN_E2E_GREP (on CHAIN_E2E_BROWSERS, with
  *             the Document Server unless CHAIN_E2E_DS=0), and the extras
- *             CHAIN_EXTRAS names (targetedExtras: ds-go, and shots for a
- *             release's pictures).
+ *             CHAIN_EXTRAS names (targetedExtras: shots, a release's
+ *             pictures).
  *
  * The shots job takes every scene (`pnpm shots --all`); CHAIN_SHOTS_ONLY
  * (comma-separated script names) narrows it to those, with `--only`
@@ -558,9 +557,9 @@ export function buildPlan({ profile, lists, env = {}, src = path.resolve(CHAIN_D
   if (profile === 'nightly') {
     const extras = nightlyExtras(env);
     // The Document Server is stopped once no later line needs it
-    // (run.mjs runTrack): ds-go goes where it is still up, right after the
-    // last browser line with it, so it is not kept running through the lines
-    // without it.
+    // (run.mjs runTrack): an extra that needs it goes where it is still up,
+    // right after the last browser line with it, so it is not kept running
+    // through the lines without it (ds-go did, until #367; none is left).
     const withDs = extras.filter((name) => DS_EXTRAS.includes(name));
     round.splice(round.map((t) => t.ds).lastIndexOf(true) + 1, 0, ...withDs.map(extra));
     for (const name of extras) if (!DS_EXTRAS.includes(name)) round.push(extra(name));
@@ -578,15 +577,16 @@ export function buildPlan({ profile, lists, env = {}, src = path.resolve(CHAIN_D
  * The extras a targeted run adds: CHAIN_EXTRAS (comma-separated, the names
  * of EXTRAS), none by default. `CHAIN_EXTRAS=shots` is a release's
  * pictures; s3-live, the live S3 tests, left the chain in #365 (s3-live.yml
- * runs them against an S3 gateway of its own), and its name is refused with
- * where they run now (MOVED_EXTRAS).
+ * runs them against an S3 gateway of its own) and ds-go, the Document
+ * Server's Go test, in #367 (ci.yml's playwright-ds runs it), and their names
+ * are refused with where they run now (MOVED_EXTRAS).
  */
 export function targetedExtras(env = {}) {
   const v = String(env.CHAIN_EXTRAS ?? '').trim();
   if (!v || v === 'none') return [];
   const asked = v.split(/[\s,]+/).filter(Boolean);
   for (const a of asked) {
-    if (!EXTRAS.includes(a)) throw new Error(`CHAIN_EXTRAS: "${a}" is none of ${EXTRAS.join(', ')} (or none)${movedWords(a)}`);
+    if (!EXTRAS.includes(a)) throw new Error(`CHAIN_EXTRAS: "${a}" is ${extrasWords(EXTRAS, 'a targeted run')}${movedWords(a)}`);
   }
   return EXTRAS.filter((x) => asked.includes(x));
 }

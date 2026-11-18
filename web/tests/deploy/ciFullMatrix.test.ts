@@ -74,6 +74,19 @@ function job(text: string, name: string): string {
   return lines.slice(start, next < 0 ? undefined : next).join('\n');
 }
 
+/** The `run: |` block of one step of a job's lines, by the step's name, unindented. */
+function stepScript(block: string, name: string): string {
+  const lines = block.split('\n');
+  const named = lines.findIndex((l) => l.trim() === `- name: ${name}`);
+  expect(named, `the step "${name}"`).toBeGreaterThanOrEqual(0);
+  const at = lines.findIndex((l, i) => i > named && /^\s+run: \|\s*$/.test(l));
+  expect(at, `the step "${name}" runs a block`).toBeGreaterThan(named);
+  const body = lines.slice(at + 1);
+  const indent = body[0].length - body[0].trimStart().length;
+  const end = body.findIndex((l) => !!l.trim() && l.length - l.trimStart().length < indent);
+  return body.slice(0, end < 0 ? undefined : end).map((l) => l.slice(indent)).join('\n');
+}
+
 function jobNames(text: string): string[] {
   const lines = text.split('\n');
   const start = lines.findIndex((l) => l === 'jobs:');
@@ -419,14 +432,7 @@ describe('ci.yml: the full matrix', () => {
   // "ok 735s", exit 1); a red go test ended it before rc was read. The step runs
   // here as GitHub runs it, with a stand-in `go`.
   it.runIf(!!DIR && !!bash)('the -race step under bash -e: a green shard ends 0, a red one with its own code and its summary line, an empty one red', () => {
-    const lines = job(ciCode(), 'race').split('\n');
-    const named = lines.findIndex((l) => l.trim() === '- name: The shard, under -race');
-    expect(named, 'the -race step').toBeGreaterThanOrEqual(0);
-    const at = lines.findIndex((l, i) => i > named && /^\s+run: \|\s*$/.test(l));
-    const body = lines.slice(at + 1);
-    const indent = body[0].length - body[0].trimStart().length;
-    const end = body.findIndex((l) => !!l.trim() && l.length - l.trimStart().length < indent);
-    const step = body.slice(0, end < 0 ? undefined : end).map((l) => l.slice(indent)).join('\n');
+    const step = stepScript(job(ciCode(), 'race'), 'The shard, under -race');
     const fakeGo = [
       'go() {',
       '  case "${FAKE_GO:-}" in',
@@ -488,6 +494,67 @@ describe('ci.yml: the full matrix', () => {
       expect(docserver, v).toContain(`echo "${v}=`);
     }
     expect(docserver, 'the secret is masked').toContain('echo "::add-mask::$secret"');
+  });
+
+  // #367: until 2026-11-18 the build host's chain ran the office engine's Go
+  // test a second time (ds-go, job/ds-go.sh), and only that job held a skip
+  // to be red; this step read go test's exit code alone, and the test skips
+  // itself without FILEX_TEST_OO_* and FILEX_TEST_CONVERT. ds-go left the
+  // chain, so this step is the test's one run and holds a skip red itself.
+  // It runs here as GitHub runs it (bash -e), with a stand-in `go`
+  // (packaging/ci/ci-ds-go-skip-red.patch).
+  it.runIf(!!DIR && !!bash)("runs the office engine's Go test on the Document Server with every variable it reads, red when it only skipped", () => {
+    const ds = job(ciCode(), 'playwright-ds');
+    const test = fs.readFileSync(path.join(REPO, 'backend', 'internal', 'server', 'office_engine_ds_test.go'), 'utf8');
+    const step = stepScript(ds, 'The office engine on a real Document Server (Go)');
+    const name = /-run '\^(\w+)\$' \.\/internal\/server\//.exec(step)?.[1];
+    expect(name, 'the step names its test').toBe('TestOfficeEngine_TheConvertAppOnARealDocumentServer');
+    expect(test).toContain(`func ${name}(t *testing.T)`);
+    expect(ds).toMatch(/- name: The office engine on a real Document Server \(Go\)\n\s+if: matrix\.engine == 'chromium'\n\s+working-directory: backend\n/);
+    // What the test reads is what ci-docserver.sh hands the steps after it.
+    const docserver = fs.readFileSync(path.join(DIR!, 'scripts', 'ci-docserver.sh'), 'utf8');
+    const reads = [...test.matchAll(/os\.Getenv\("(FILEX_TEST_[A-Z_]+)"\)/g)].map((m) => m[1]);
+    expect(reads).toEqual(expect.arrayContaining(['FILEX_TEST_OO_URL', 'FILEX_TEST_OO_JWT', 'FILEX_TEST_CONVERT']));
+    for (const v of reads) expect(docserver, v).toContain(`echo "${v}=`);
+    expect(docserver).toContain('echo "FILEX_TEST_OO_FIXTURES=$PWD/e2e/fixtures/file-types"');
+    for (const f of ['letter.docx', 'report.xlsx']) expect(fs.existsSync(path.join(REPO, 'e2e', 'fixtures', 'file-types', f)), f).toBe(true);
+
+    const fakeGo = [
+      'go() {',
+      '  case "${FAKE_GO:-}" in',
+      `    skip) echo "--- SKIP: ${name} (0.00s)"; echo ok ;;`,
+      `    red) echo "--- FAIL: ${name} (6.10s)"; echo FAIL; return 1 ;;`,
+      '    none) echo "ok    example.com/x    0.01s [no tests to run]" ;;',
+      `    *) echo "=== RUN   ${name}"; echo "--- PASS: ${name} (6.96s)"; echo ok ;;`,
+      '  esac',
+      '}',
+    ].join('\n');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-ds-go-'));
+    try {
+      fs.writeFileSync(path.join(tmp, 'ds-go.sh'), `${fakeGo}\n${step}\n`);
+      const run = (fake: string) =>
+        spawnSync(bash!, ['--noprofile', '--norc', '-e', '-o', 'pipefail', path.join(tmp, 'ds-go.sh')], {
+          cwd: REPO,
+          encoding: 'utf8',
+          env: { ...process.env, FAKE_GO: fake, RUNNER_TEMP: slash(tmp) },
+        });
+      const refused = `::error::${name} did not pass: a skip is not a pass here`;
+      const green = run('pass');
+      expect(green.status, `${green.stdout}\n${green.stderr}`).toBe(0);
+      expect(green.stdout, 'the log shows the test').toContain(`--- PASS: ${name} (6.96s)`);
+      expect(green.stdout).not.toContain('::error::');
+      for (const fake of ['skip', 'none']) {
+        const r = run(fake);
+        expect(r.status, fake).toBe(1);
+        expect(r.stdout, fake).toContain(refused);
+      }
+      const red = run('red');
+      expect(red.status).toBe(1);
+      expect(red.stdout).toContain(`--- FAIL: ${name}`);
+      expect(red.stdout, "a red test is go test's red, not a skip").not.toContain(refused);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it.runIf(!!DIR)('runs the browser lines the build host runs on their own: the store install without a public URL, and S3', () => {

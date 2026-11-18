@@ -698,7 +698,7 @@ export function acceptRefusal(manifest, review, { publishPlatform = PUBLISH_PLAT
     return (
       `this run was taken on ${review.platform}, and the published set is taken on ${publishPlatform} - the build host: ` +
       'a picture from here beside the published ones puts two typefaces in one README. Look at this run, then take the ' +
-      `pictures in the build host's test chain (CHAIN_EXTRAS=shots on a targeted run, or its nightly profile) and accept that run.`
+      `pictures in the build host's test chain (CHAIN_EXTRAS=shots on a targeted run) and accept that run.`
     );
   }
   if (manifest.platform && review.platform !== manifest.platform && !(review.mode === 'all' && review.complete)) {

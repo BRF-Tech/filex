@@ -39,21 +39,22 @@ const short = (sha) => String(sha ?? '').slice(0, 8) || '?';
 /**
  * What a chain run can add to its browser round on top of the full chain
  * (scripts/chain/plan.mjs): the nightly profile takes NIGHTLY_EXTRAS, a
- * targeted run the ones CHAIN_EXTRAS names. None of them is in the full chain
- * or in GitHub's matrix, each for its own reason:
+ * targeted run the ones CHAIN_EXTRAS names. It is not in the full chain or in
+ * GitHub's matrix:
  *
- *   ds-go    the Go test that needs a real ONLYOFFICE Document Server and the
- *            Convert app (backend/internal/server/office_engine_ds_test.go):
- *            it skips everywhere else. It runs right after the last line
- *            with the Document Server, which is still up for it.
  *   shots   `pnpm shots --all`, every scene - the app scenes with the app
  *            builds and language packs the chain mounts, the ONLYOFFICE scene
  *            against the chain's Document Server (task #187) - each picture
  *            compared with the published one. A release takes its published
  *            set this way (CHAIN_EXTRAS=shots, docs/CONTRIBUTING.md → Release
  *            process); a scene whose language pack is behind the tree is red.
+ *
+ * ds-go, the office engine's Go test on a real Document Server
+ * (backend/internal/server/office_engine_ds_test.go), left the chain in #367:
+ * ci.yml's Chromium row of playwright-ds runs it on every push of main and of
+ * `nightly`, and a skip of it is red there (MOVED_EXTRAS).
  */
-export const EXTRAS = ['ds-go', 'shots'];
+export const EXTRAS = ['shots'];
 
 /**
  * What the chain's nightly profile (run.sh --profile nightly, a person's run
@@ -65,24 +66,33 @@ export const EXTRAS = ['ds-go', 'shots'];
  * chain's one job outside a container. The shots job stays for a release's
  * set (EXTRAS). The live S3 tests (s3-live) left the chain altogether once
  * s3-live.yml ran them green against an S3 gateway of the run's own
- * (44341809830): no bucket and no key of the build host's any more. The
- * profile carries ds-go alone.
+ * (44341809830): no bucket and no key of the build host's any more.
+ *
+ * ⚠ Task #367 (2026-11-18): ds-go, the last of them, left too. ci.yml had
+ * run the same test on every push of main all along (the Chromium row of
+ * playwright-ds, 6.96 s on run 44317838051) and now holds a skip of it to be
+ * red, as job/ds-go.sh did. The profile has no extras left: it runs what full
+ * runs, and CHAIN_NIGHTLY_EXTRAS takes `none` or nothing.
  */
-export const NIGHTLY_EXTRAS = ['ds-go'];
+export const NIGHTLY_EXTRAS = [];
 
-/** Where an extra that left the chain runs now: the error that refuses its name says so. */
+/**
+ * Where an extra that left the chain runs now, from the task it left in: the
+ * error that refuses its name says so.
+ */
 export const MOVED_EXTRAS = {
-  shots: 'every scene runs every week on GitHub (shots.yml); a release takes its set with CHAIN_EXTRAS=shots on a targeted run',
-  realenv: 'realenv runs every week on GitHub (realenv.yml), and by hand with e2e/realenv/run.sh',
-  's3-live': 'the live S3 tests run every week on GitHub against an S3 gateway of their own (s3-live.yml), and by hand with gh workflow run s3-live.yml -R BRF-Tech/filex',
+  shots: 'since #365 every scene runs every week on GitHub (shots.yml); a release takes its set with CHAIN_EXTRAS=shots on a targeted run',
+  realenv: 'since #365 realenv runs every week on GitHub (realenv.yml), and by hand with e2e/realenv/run.sh',
+  's3-live': 'since #365 the live S3 tests run every week on GitHub against an S3 gateway of their own (s3-live.yml), and by hand with gh workflow run s3-live.yml -R BRF-Tech/filex',
+  'ds-go': "since #367 the Document Server's Go test runs on GitHub on every push of main and of nightly (ci.yml, the Chromium row of playwright-ds: \"Playwright + Document Server (chromium)\"), against the server ci-docserver.sh pins and the Convert app's latest release",
 };
 
 /**
  * The extras that need the chain's Document Server (run.mjs starts it for a
- * browser-round job with `ds`, and stops it once no later job needs it): ds-go
- * for its Go test, shots for the ONLYOFFICE scene (e2e/shots/csvoffice.mjs).
+ * browser-round job with `ds`, and stops it once no later job needs it):
+ * shots for the ONLYOFFICE scene (e2e/shots/csvoffice.mjs).
  */
-export const DS_EXTRAS = ['ds-go', 'shots'];
+export const DS_EXTRAS = ['shots'];
 
 /**
  * The code the live S3 tests measure. Since #364 GitHub runs them every
@@ -138,21 +148,30 @@ export function s3Touched(files, goModDiff = '') {
   return hit;
 }
 
-/** The extras a nightly-profile run adds: CHAIN_NIGHTLY_EXTRAS, else all of them, always in NIGHTLY_EXTRAS order. */
+/**
+ * The extras a nightly-profile run adds: CHAIN_NIGHTLY_EXTRAS, else all of
+ * them, always in NIGHTLY_EXTRAS order. With none left (#367) it is always
+ * [], and a name is refused with where that extra runs now.
+ */
 export function nightlyExtras(env = {}) {
   const v = String(env.CHAIN_NIGHTLY_EXTRAS ?? '').trim();
   if (!v) return [...NIGHTLY_EXTRAS];
   if (v === 'none') return [];
   const asked = v.split(/[\s,]+/).filter(Boolean);
   for (const a of asked) {
-    if (!NIGHTLY_EXTRAS.includes(a)) throw new Error(`CHAIN_NIGHTLY_EXTRAS: "${a}" is none of ${NIGHTLY_EXTRAS.join(', ')} (or none)${movedWords(a)}`);
+    if (!NIGHTLY_EXTRAS.includes(a)) throw new Error(`CHAIN_NIGHTLY_EXTRAS: "${a}" is ${extrasWords(NIGHTLY_EXTRAS, 'the nightly profile')}${movedWords(a)}`);
   }
   return NIGHTLY_EXTRAS.filter((x) => asked.includes(x));
 }
 
+/** What a setting that refuses a name could have said instead: "none of a, b (or none)", or that there is nothing left to name. */
+export function extrasWords(list, what) {
+  return list.length ? `none of ${list.join(', ')} (or none)` : `no extra of ${what}, which has none left (none, or leave it unset)`;
+}
+
 /** The end of the error that refuses an extra which left the chain (MOVED_EXTRAS), or ''. */
 export function movedWords(name) {
-  return Object.hasOwn(MOVED_EXTRAS, name) ? `: since #365 ${MOVED_EXTRAS[name]}` : '';
+  return Object.hasOwn(MOVED_EXTRAS, name) ? `: ${MOVED_EXTRAS[name]}` : '';
 }
 
 // ── settings ────────────────────────────────────────────────────────────────

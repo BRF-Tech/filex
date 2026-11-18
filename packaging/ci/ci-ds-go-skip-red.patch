@@ -1,0 +1,59 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 103746b2..6b5dcd56 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -29,12 +29,14 @@ name: CI
+ # matrix runs on it every night, and a green run starts nightly-desktop.yml:
+ # the nightly image and desktop packages are built from that commit.
+ #
+-# What runs nowhere on its own: e2e/realenv (Pebble, Caddy, Keycloak,
+-# OpenLDAP), the Go tests against a real S3 provider and the Document
+-# Server's Go test (the build host's chain runs them when a person asks: its
+-# nightly profile), and the language pack the right-to-left specs prefer
+-# (not published: they install the repository's own fixture instead,
+-# e2e/helpers/langPack.ts). The screenshots are shots.yml's, on a tag.
++# What runs elsewhere: e2e/realenv (Pebble, Caddy, Keycloak, OpenLDAP) and
++# the live S3 tests every week, on the `nightly` branch's commit
++# (realenv.yml, s3-live.yml); the screenshots in shots.yml, on a tag and
++# every week. The Document Server's Go test runs here, in the Chromium row of
++# playwright-ds (until #367 the build host's chain ran it a second time, as
++# its nightly profile's ds-go). What runs nowhere: the language pack the
++# right-to-left specs prefer (not published: they install the repository's
++# own fixture instead, e2e/helpers/langPack.ts).
+ #
+ # ⚠ Nothing calls this workflow any more. Until #174 release.yml ran it as its
+ # `test` job, so every dry run of the release ran the suite a second time;
+@@ -673,7 +675,9 @@ jobs:
+   # The specs whose path differs with an ONLYOFFICE Document Server, on each
+   # engine, with one connected (scripts/ci-parts.mjs, DS_SPECS). The server
+   # calls filex back through the Docker bridge, as on the build host. The
+-  # Chromium row also runs the office engine's Go test on the same server.
++  # Chromium row also runs the office engine's Go test on the same server,
++  # with the Convert app's latest release (browser-prep.mjs apps); a skip of
++  # it is red.
+   playwright-ds:
+     name: ${{ matrix.name }}
+     needs: [plan, build]
+@@ -733,10 +737,21 @@ jobs:
+         run: |
+           mkdir -p backend/embed/admin backend/embed/web
+           touch backend/embed/admin/.placeholder backend/embed/web/.placeholder
++      # Everywhere else the test skips itself, and a skip reads as a pass:
++      # here a run in which it did not pass is red. GitHub runs this block as
++      # `bash -e`, so go test's code is read with `|| rc=$?`.
+       - name: The office engine on a real Document Server (Go)
+         if: matrix.engine == 'chromium'
+         working-directory: backend
+-        run: go test -count=1 -v -run '^TestOfficeEngine_TheConvertAppOnARealDocumentServer$' ./internal/server/
++        run: |
++          rc=0
++          go test -count=1 -v -run '^TestOfficeEngine_TheConvertAppOnARealDocumentServer$' ./internal/server/ > "$RUNNER_TEMP/ds-go.out" 2>&1 || rc=$?
++          cat "$RUNNER_TEMP/ds-go.out"
++          if [ "$rc" -eq 0 ] && ! grep -qE '^--- PASS: TestOfficeEngine_TheConvertAppOnARealDocumentServer ' "$RUNNER_TEMP/ds-go.out"; then
++            echo "::error::TestOfficeEngine_TheConvertAppOnARealDocumentServer did not pass: a skip is not a pass here"
++            rc=1
++          fi
++          exit "$rc"
+       - name: The Document Server's log
+         if: failure()
+         run: |

@@ -13,10 +13,9 @@
 //     three engines, and the -race shards (both from scripts/test-shards.json
 //     through scripts/test-shards.mjs), as many at once as the budget allows
 //     (scripts/chain/schedule.mjs).
-// The nightly profile adds the Go test against the Document Server to the
-// browser round (plan.mjs NIGHTLY_EXTRAS); a targeted run adds the ones
-// CHAIN_EXTRAS names, `pnpm shots` among them for a release's pictures
-// (plan.mjs EXTRAS).
+// A targeted run adds the extras CHAIN_EXTRAS names - `pnpm shots`, a
+// release's pictures (plan.mjs EXTRAS); the nightly profile's extras all
+// left for GitHub (#365, #367), and it runs what full runs.
 //
 // What it leaves, under $CHAIN_ROOT/runs/<run-id>/: chain.log (a JOBSTART and
 // a JOBEXIT line per job), logs/<job>.log, out/<job>/ (test output), and
@@ -59,8 +58,8 @@ const REPO = path.resolve(CHAIN_DIR, '..', '..');
 const USAGE = `usage: bash scripts/chain/run.sh [options]
 
   --profile full|targeted|nightly   what to run (default: full); nightly is full
-                   plus CHAIN_NIGHTLY_EXTRAS (ds-go), and is a person's
-                   run on the build host
+                   plus CHAIN_NIGHTLY_EXTRAS, a person's run on the build
+                   host - none are left since #367, so it runs what full runs
   --src DIR        the checkout under test (default: the repository run.sh is in)
   --env FILE       settings, KEY=VALUE lines (default: $CHAIN_ENV, else
                    ~/.config/filex-chain.env when it exists); the process
@@ -465,10 +464,9 @@ export const KIND = {
   local: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true, browserTmp: true },
   nopub: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true, browserTmp: true },
   s3: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true, browserTmp: true },
-  // The extras (plan.mjs EXTRAS). ds-go runs as root: the
-  // Document Server's secret file is root's, 0600.
-  'ds-go': { image: 'go', script: 'ds-go.sh', mem: '6g', apps: true, dsEnv: true, tmp: true },
-  // browserTmp as a Playwright line: the same harness (`browserTmp` above).
+  // The extra (plan.mjs EXTRAS). browserTmp as a Playwright line: the same
+  // harness (`browserTmp` above). ds-go, the Document Server's Go test, left
+  // the chain in #367: ci.yml's playwright-ds runs it.
   shots: { image: 'pw', script: 'shots.sh', mem: '9g', shares: 4096, browser: true, goroot: true, browserTmp: true },
 };
 
@@ -801,7 +799,7 @@ class Chain {
       '-v', `${c.cache.electron}:/w/cache/electron`, '-v', `${c.cache.home}:/w/home`,
     ];
     if (k.goroot) mounts.push('-v', `${c.cache.goroot}:/usr/local/go:ro`);
-    if (k.browser || k.apps) {
+    if (k.browser) {
       for (const [name, dir] of Object.entries(c.apps)) if (dir) mounts.push('-v', `${dir}:/w/apps/${name}:ro`);
     }
     const env = {
@@ -856,17 +854,6 @@ class Chain {
         REQUIRE_APPS: c.requireApps ? '1' : '0',
         // A Playwright line (KIND `results`): what it records of its tests.
         ...(k.results ? { E2E_RECORD: c.e2eRecord } : {}),
-      });
-    }
-    if (k.dsEnv) {
-      // The Document Server calls the job back at http://filex:PORT: the job
-      // shares the network namespace run.mjs connected to its network.
-      const { ds } = this.dsAddr();
-      Object.assign(env, {
-        DS_URL: `http://${ds}`,
-        DS_SECRET_FILE: '/w/run/etc/ds.secret',
-        PORT: String(c.e2ePort + (job.index ?? 0)),
-        REQUIRE_APPS: c.requireApps ? '1' : '0',
       });
     }
     const envArgs = Object.entries(env).flatMap(([key, v]) => ['-e', `${key}=${v}`]);
@@ -1157,7 +1144,7 @@ class Chain {
         continue;
       }
       this.trackIo = job.io === 'heavy';
-      if (!['cypress', 'ds-go'].includes(job.kind)) await this.cool(job);
+      if (job.kind !== 'cypress') await this.cool(job);
       await this.trackMemory(job);
       await this.trackDisk(job);
       await this.startJob(job, 'e2e');

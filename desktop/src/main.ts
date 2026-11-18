@@ -219,6 +219,7 @@ import {
 } from './sync-policy.js';
 import { SleepGuard, quietMomentForUpdate, syncBusy } from './power.js';
 import { CANCELLED, DownloadTally, downloadEnding } from './download-guard.js';
+import { DocDiagnostics, SLOW_MS, type DocKind } from './doc-diag.js';
 import { anyError } from './syncstatus.js';
 import { isServerApiUrl, normalizeServerUrl, serverUrl } from './server-url.js';
 import { CERT_ACCEPT, CertAnswers, TLS_WORDS, certVerdict, hostOf, skippedHosts } from './tls-trust.js';
@@ -425,24 +426,54 @@ function tokenForOrigin(origin: string | null): string | null {
   return state.accounts.find((a) => originOf(a.serverUrl) === origin)?.token ?? null;
 }
 
+/** A request with no answer after this long is written as waiting
+ *  (src/doc-diag.ts). FILEX_DIAG_SLOW_MS shortens it for the e2e run. */
+function docSlowMs(): number {
+  const shortest = 1_000;
+  const v = Number(process.env.FILEX_DIAG_SLOW_MS);
+  return Number.isFinite(v) && v >= shortest ? v : SLOW_MS;
+}
+
+/** What the document windows go through, in the log (#366): hangs, crashes,
+ *  console errors, failed and stalled requests. See src/doc-diag.ts. */
+const docDiag = new DocDiagnostics({
+  log,
+  slowMs: docSlowMs(),
+  liveProcesses: () => new Set(app.getAppMetrics().map((m) => m.pid)),
+});
+
 /**
- * Attaches the account's bearer to requests the PAGE cannot put a header on.
+ * Every webRequest listener of the default session, in ONE place.
  *
- * `<img>`, `<video>`, `<audio>` and a download link carry no headers by
- * construction — the explorer hands those elements a plain URL. On the web that
- * is fine because the browser has a session cookie for the same origin; in this
- * app the page lives on `app://filex` and the only credential is a bearer
- * token, so every image preview, media player and download came back 401.
+ * ⚠⚠ Electron keeps ONE listener per webRequest event: a second
+ * `onBeforeSendHeaders` (or `onBeforeRequest`, `onCompleted`…) registered
+ * anywhere else REPLACES the one here without a word - the explorer's
+ * previews would go back to 401, or the document windows would stop leaving
+ * their trail in the log. Add to these instead; test/webrequest-once.test.ts
+ * fails on a second registration. Run again on every change to the account
+ * set (accountsChanged): registering an event again replaces its listener,
+ * which is what moves the filter to the new origins.
  *
- * Scoped to the signed-in servers' origins only — never a wildcard — and it
- * never overwrites an Authorization header the page set itself.
+ * The header: attaches the account's bearer to requests the PAGE cannot put
+ * a header on. `<img>`, `<video>`, `<audio>` and a download link carry no
+ * headers by construction — the explorer hands those elements a plain URL. On
+ * the web that is fine because the browser has a session cookie for the same
+ * origin; in this app the page lives on `app://filex` and the only credential
+ * is a bearer token, so every image preview, media player and download came
+ * back 401. Scoped to the signed-in servers' origins only — never a wildcard —
+ * and it never overwrites an Authorization header the page set itself.
+ *
+ * The rest only watch (src/doc-diag.ts): a document window's request that
+ * fails or waits too long is written to the log, path and query redacted,
+ * never a header.
  */
-function wireAuthHeaderInjection(): void {
+function wireWebRequest(): void {
   const origins = [...new Set(state.accounts.map((a) => originOf(a.serverUrl)).filter(Boolean))] as string[];
   // ⚠ An EMPTY url list means "every request" to Electron, which would be the
   // opposite of what this is for. With no accounts, match nothing instead.
   const urls = origins.length ? origins.map((o) => `${o}/*`) : ['https://filex.invalid/*'];
-  session.defaultSession.webRequest.onBeforeSendHeaders({ urls }, (details, done) => {
+  const wr = session.defaultSession.webRequest;
+  wr.onBeforeSendHeaders({ urls }, (details, done) => {
     const headers = details.requestHeaders;
     if (headers.Authorization || headers.authorization) {
       done({ requestHeaders: headers });
@@ -452,6 +483,18 @@ function wireAuthHeaderInjection(): void {
     if (token) headers.Authorization = `Bearer ${token}`;
     done({ requestHeaders: headers });
   });
+  // ⚠ onBeforeRequest holds the request until `done` is called: it is called
+  // whatever the watcher does.
+  wr.onBeforeRequest({ urls }, (details, done) => {
+    try {
+      docDiag.requestStart(details);
+    } finally {
+      done({});
+    }
+  });
+  wr.onResponseStarted({ urls }, (details) => docDiag.requestResponse(details));
+  wr.onCompleted({ urls }, (details) => docDiag.requestDone(details));
+  wr.onErrorOccurred({ urls }, (details) => docDiag.requestError(details));
 }
 
 /** True for the account's API surface — bytes, not pages. ⚠ Under the server's
@@ -890,7 +933,7 @@ function buildTray(): void {
  *  would otherwise keep serving the previous account's token. */
 function accountsChanged(): void {
   refreshTray();
-  wireAuthHeaderInjection();
+  wireWebRequest();
   // Another account on screen is another person's language (#191).
   void syncAccountLocale();
   // A new server's apps open their kinds from now on; a removed one's go
@@ -3176,18 +3219,22 @@ const quietUnload = new WeakSet<BrowserWindow>();
  * our own controls (docWindowChrome + docChromeScript), the title pinned so the
  * admin SPA cannot overwrite it with the Branding name, and external links
  * pushed to the browser. `extraInject` adds to the page on every load — the
- * open-with flow uses it for its "editing a copy" banner.
+ * open-with flow uses it for its "editing a copy" banner. `kind` names the
+ * window in the log: every document window is watched (src/doc-diag.ts) and
+ * leaves [docwin] / [docreq] lines when it hangs, crashes or its requests
+ * fail or stall.
  *
  * ⚠ NOT the app's preload. The page is remote content; handing it `filexApp`
  * would put account tokens and the sync engine one `window.filexApp` away from
  * whatever that origin serves. The credential arrives through the header
- * injector (wireAuthHeaderInjection); the editor preload carries only the
+ * injector (wireWebRequest); the editor preload carries only the
  * `filexDesktop` flag and the controls-only `filexWin` bridge.
  */
 function makeDocumentWindow(
   acc: Account,
   url: string,
   title: string,
+  kind: DocKind,
   extraInject?: () => string,
 ): BrowserWindow {
   const win = new BrowserWindow({
@@ -3208,6 +3255,8 @@ function makeDocumentWindow(
     webPreferences: { preload: preload('preload-editor.cjs'), contextIsolation: true, sandbox: true },
   });
   win.once('ready-to-show', () => showWindow(win));
+  // Before the first load, so a renderer that dies loading the page is seen.
+  docDiag.track(win.webContents, { kind, name: title, home: originOf(acc.serverUrl) });
   // ⚠ Keep the WINDOW title = the file name. /files/edit lives under the admin
   // SPA, which sets document.title to the Branding name ("BRF Teknoloji"); this
   // locks the taskbar entry to the `title` we set above.
@@ -3294,7 +3343,7 @@ function openStoreWindow(acc: Account): BrowserWindow {
     focusWindow(open);
     return open;
   }
-  const win = makeDocumentWindow(acc, storeRouteUrl(acc), bilingual(STORE_STRINGS, 'title', effectiveLocale()));
+  const win = makeDocumentWindow(acc, storeRouteUrl(acc), bilingual(STORE_STRINGS, 'title', effectiveLocale()), 'store');
   storeWindows.set(acc.id, win);
   win.on('closed', () => {
     if (storeWindows.get(acc.id) === win) storeWindows.delete(acc.id);
@@ -3310,7 +3359,7 @@ function openStoreWindow(acc: Account): BrowserWindow {
  */
 function openViewerWindow(acc: Account, remote: string): BrowserWindow {
   const title = remote.slice(remote.lastIndexOf('/') + 1) || remote;
-  return makeDocumentWindow(acc, editRouteUrl(acc, remote), title);
+  return makeDocumentWindow(acc, editRouteUrl(acc, remote), title, 'viewer');
 }
 
 /**
@@ -3327,7 +3376,7 @@ function openEditorWindow(
   mode: 'scratch' | 'twin',
   app: string | null = null,
 ): BrowserWindow {
-  return makeDocumentWindow(acc, editRouteUrl(acc, remote, app), path.basename(localPath), () =>
+  return makeDocumentWindow(acc, editRouteUrl(acc, remote, app), path.basename(localPath), 'editor', () =>
     bannerScript(openWithBanner(localPath, mode)),
   );
 }
@@ -5002,7 +5051,7 @@ function wireIpc(): void {
     const acc = state.accounts.find((a) => a.id === accountId);
     if (!acc) throw new Error('unknown account');
     // ⚠ The credential is put on the request HERE rather than left to
-    // wireAuthHeaderInjection: that one picks a token by ORIGIN, the active
+    // wireWebRequest: that one picks a token by ORIGIN, the active
     // account first, and two accounts on one server share an origin — the
     // download would go out as whoever the window is showing, and come back as
     // that person's 403 (or, worse, as that person's file of the same name).
@@ -6076,7 +6125,7 @@ if (!app.requestSingleInstanceLock()) {
         });
       }
     }
-    wireAuthHeaderInjection();
+    wireWebRequest();
     // The supervisor keeps a `filex sync run --watch` alive per account. It is
     // started here, not when the Sync folders window opens: syncing that only
     // happens while a panel is on screen is not syncing.

@@ -304,6 +304,9 @@ const WORKFLOW_GUARDS = [
   'names every part as scripts/ci-parts.mjs does: the fixed jobs, and every matrix job by its row',
   'the Go parts are the shards of scripts/test-shards.json, plain beside every service and under -race without one',
   'splits Playwright into parts of each engine, and runs the Document Server specs again with one, on every engine',
+  // #367: the office engine's Go test runs only there now, and a skip of it
+  // is red (packaging/ci/ci-ds-go-skip-red.patch).
+  "runs the office engine's Go test on the Document Server with every variable it reads, red when it only skipped",
   'runs the browser lines the build host runs on their own: the store install without a public URL, and S3',
   'the verdict job is green only when every part of its profile is, and a pull request leaves out exactly what ci-parts says',
   'a pull request runs the light profile; a push of main or of the nightly branch, and a run by hand, run the full one',

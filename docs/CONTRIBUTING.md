@@ -450,14 +450,13 @@ list's weights - GitHub's seconds, scaled to the host (`SHARD_TIMING` in
 shards' logs together (`cat out/race-handlers-*/race.out`) and re-cut it from
 the times of a real run.
 
-`--profile full` runs all of it; `nightly` runs the same plus its extra
-in the browser round, `ds-go` (The nightly run, below: a person's run since
-#361); `targeted` runs the build and
+`--profile full` runs all of it; `nightly` runs the same, its extras all
+gone to GitHub (The nightly run, below: a person's run since #361);
+`targeted` runs the build and
 its fast gates, then only what is asked for (`CHAIN_GO_PKGS`,
 `CHAIN_RACE_PKGS`, `CHAIN_MIGRATE=1`, `CHAIN_CY_SPECS`, `CHAIN_E2E_GREP` on
-`CHAIN_E2E_BROWSERS`, and `CHAIN_EXTRAS` - extras by name: `ds-go`, or
-`shots` for a release's pictures, which `CHAIN_SHOTS_ONLY` narrows to some
-shot scripts). `CHAIN_E2E_GREP` reaches Playwright's `--grep`
+`CHAIN_E2E_BROWSERS`, and `CHAIN_EXTRAS` - extras by name: `shots` for a
+release's pictures, which `CHAIN_SHOTS_ONLY` narrows to some shot scripts). `CHAIN_E2E_GREP` reaches Playwright's `--grep`
 as one argument, spaces and all (a test title, or `01-smoke 02-`): a browser
 line's arguments travel to its job one a line (split into words, as they
 were before #244, every word after the first became a file filter).
@@ -810,20 +809,28 @@ nightly chain ran on its own until 2026-11-18:
   run by hand (`FILEX_TEST_S3_*`, [Storage](STORAGE.md#a-local-s3-server)).
   A test that only skipped is red.
 
-**What still runs nowhere on its own**: `ds-go`, the office engine's Go test
-against a real Document Server and the Convert app
-(`backend/internal/server/office_engine_ds_test.go`), in the chain's
-`nightly` profile - a person's run on the build host:
+**On every push, on GitHub** (#367): the office engine's Go test against a
+real Document Server and the Convert app
+(`backend/internal/server/office_engine_ds_test.go`) is a step of `ci.yml`'s
+`Playwright + Document Server (chromium)` part, on the server
+`ci-docserver.sh` pins and the Convert app's latest release
+(`scripts/ci/browser-prep.mjs apps`), on every push of `main` and of
+`nightly`. Everywhere else the test skips itself, so there a run in which it
+did not pass is red (`packaging/ci/ci-ds-go-skip-red.patch`). Until
+2026-11-18 the chain's `nightly` profile ran it a second time, as `ds-go`.
+
+**What is left of the chain's nightly profile**: nothing of its own. Every
+scene, realenv and the live S3 tests (`s3-live`) left it in #365 -
+realenv's was the chain's one job outside a container, and with `s3-live`
+went the build host's last bucket key - and `ds-go` in #367, so
 `bash scripts/chain/run.sh --profile nightly --env <a chain settings file>`
-(`NIGHTLY_EXTRAS` in `scripts/chain/nightly-lib.mjs`; `CHAIN_NIGHTLY_EXTRAS`
-picks some). Every scene, realenv and the live S3 tests (`s3-live`) left
-the profile in #365 - realenv's was the chain's one job outside a container,
-and with `s3-live` went the build host's last bucket key - and a
-`CHAIN_NIGHTLY_EXTRAS` or `CHAIN_EXTRAS` that still names one of them is
-refused with where it runs now. The morning report still names a pushed
-change to the S3 code (`S3_LIVE_PATHS`) and the command that runs
-`s3-live.yml` at once. The chain's `shots` job stays for a release's set
-(Release process).
+(a person's run on the build host) runs what `--profile full` runs
+(`NIGHTLY_EXTRAS` in `scripts/chain/nightly-lib.mjs` is empty;
+`CHAIN_NIGHTLY_EXTRAS` takes `none` or nothing). A `CHAIN_NIGHTLY_EXTRAS` or
+`CHAIN_EXTRAS` that still names one of them is refused with where it runs
+now. The morning report still names a pushed change to the S3 code
+(`S3_LIVE_PATHS`) and the command that runs `s3-live.yml` at once. The
+chain's `shots` job stays for a release's set (Release process).
 
 **What it leaves**, under its `CHAIN_ROOT`: the checkout (`src/`), the clone
 of the public repository the export is made in (`public/`), the page last
@@ -3844,6 +3851,17 @@ ones not yet published apply on top of one another in this order:
     that only skipped is red; #365) and `shots.yml`'s schedule (`pnpm shots
     --all --keep-going`, publishing nothing). `weeklyChecks.test.ts` holds
     them.
+23. `ci-ds-go-skip-red.patch` (#367, 0.62), on top of 22 - already on the
+    public `main`: pushed without a tag, with the export that brings its
+    guard. `ci.yml`'s step "The office engine on a real Document Server
+    (Go)" (the Chromium row of `playwright-ds`) keeps go test's log and is
+    red when `TestOfficeEngine_TheConvertAppOnARealDocumentServer` did not
+    pass: the test skips itself without `FILEX_TEST_OO_*` and
+    `FILEX_TEST_CONVERT`, and the step read go test's exit code alone. The
+    head comment says where realenv, the live S3 tests and the screenshots
+    run. The build host's `ds-go` left the chain with it.
+    `ciFullMatrix.test.ts` runs the step under `bash -e` with a stand-in
+    `go`.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and

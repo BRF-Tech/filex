@@ -36,6 +36,7 @@
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "test:red": "node --experimental-strip-types scripts/openwith-red.mjs",
     "e2e:openwith": "node --experimental-strip-types scripts/openwith-e2e.mjs",
+    "e2e:docwin": "node scripts/docwin-e2e.mjs",
     "e2e:portable": "node scripts/portable-e2e.mjs",
     "e2e:store": "node scripts/store-e2e.mjs"
   },

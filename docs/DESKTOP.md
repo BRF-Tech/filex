@@ -1390,6 +1390,44 @@ fails, and names where it kept your edit. If you saw no message, look for
 (`%APPDATA%\@brftech\filex-desktop\logs\filex-desktop.log` on Windows): every
 upload, write-back and cleanup leaves one.
 
+**A document window froze, or what you type no longer reaches the server** -
+close the window and open the document again; if that does not help, quit
+filex from the tray and start it again. Then look at the log
+(`%APPDATA%\@brftech\filex-desktop\logs\filex-desktop.log` on Windows) for
+`[docwin]` and `[docreq]` lines from that time: every document window - the
+viewer, the "Open with filex" editor and the app store - writes what went
+wrong in it there. Each line names its window (`doc#3`) and the `opened` line
+names the file:
+
+```
+2026-11-18T15:14:02.118Z [docwin] opened {"win":"doc#3","kind":"editor","name":"Report.doc","uptimeMin":412}
+2026-11-18T15:14:31.920Z [docwin] unresponsive {"win":"doc#3","pid":21460}
+2026-11-18T15:14:39.004Z [docwin] responsive {"win":"doc#3","ms":7084}
+2026-11-18T15:15:10.442Z [docwin] frame gone {"win":"doc#3","frame":"https://office.example.com/web-apps/apps/documenteditor/main/index.html","pid":30112}
+2026-11-18T15:15:12.507Z [docwin] console error {"win":"doc#3","msg":"Uncaught TypeError: …","src":"/apps/office/editor.js:1234","repeated":12}
+2026-11-18T15:15:20.731Z [docreq] request waiting {"win":"doc#3","method":"POST","path":"/api/files/plugins/ui/office/editor/coedit/*/append","type":"xhr","ms":15004}
+2026-11-18T15:15:52.016Z [docreq] request failed {"win":"doc#3","method":"POST","path":"/api/files/plugins/ui/office/editor/coedit/*/append","type":"xhr","error":"net::ERR_CONNECTION_RESET","ms":46289}
+2026-11-18T15:28:40.209Z [docwin] closed {"win":"doc#3","ms":878091}
+```
+
+| Line | When |
+|---|---|
+| `[docwin] opened` / `closed` | the window opened (`kind`: `viewer`, `editor` or `store`; `uptimeMin`: how long the app had been running) / closed (`ms` it was open; `unresponsiveMs` if it was stuck when it closed) |
+| `[docwin] unresponsive` / `responsive` | the page stopped answering / answers again, with how long it was stuck |
+| `[docwin] renderer gone` | the page's process ended (`reason`, `exitCode`) - the window is blank from then on |
+| `[docwin] frame gone` | a frame inside the page whose own process ended - an editor served from another address (an ONLYOFFICE Document Server) runs in one: the window around it still answers, typing does not |
+| `[docwin] load failed` | the page or a frame in it could not be loaded |
+| `[docwin] console error` | an error the page reported: at most 10 a minute per window; `repeated` counts the same error held back, `dropped` the others; `held back` at the close says what was never written |
+| `[docreq] request failed` | a request to the account's server ended without an answer (`error`: Chromium's `net::ERR_…`). A request the page itself cancelled is left out unless it had waited 15 seconds with no answer |
+| `[docreq] request http` | the server answered with an error status (`404` aside) |
+| `[docreq] request waiting` / `request slow` | no answer after 15 seconds / the answer, when it finally came |
+
+None of these lines carries a password, a token or a header: the address of
+the account's server is left out, a value that could be a credential (a
+`token=`, `key=`, `ticket=` or `password=` parameter, a share or download
+link's secret, anything that looks like a key) is written as `*`, and file
+names are kept. The lines are for a bug report: attach the log.
+
 **filex recovered an unsaved edit** - the app was closed or crashed while a
 document was open, and the working copy on the server was newer than the file on
 your disk. The newer version is beside your document as

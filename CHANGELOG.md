@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A document window that freezes, crashes or cannot reach the server now
+  says so in the desktop app's log** (task #366). The windows a document
+  opens in - the viewer, the "Open with filex" editor and the app store -
+  left no trace when the page stopped answering or a request never came
+  back, so an editor that took no keystrokes for half an hour could not be
+  explained afterwards. Each now writes `[docwin]` lines for the page
+  hanging and answering again, its process or a frame inside it ending, a
+  load that failed and its console errors (at most ten a minute, repeats
+  counted), and `[docreq]` lines for its requests to the account's server
+  that fail, answer with an error or wait longer than 15 seconds. No line
+  carries a password, a token or a header: credential-looking values are
+  written as `*`. [DESKTOP.md → Troubleshooting](docs/DESKTOP.md#troubleshooting).
+
 ### Changed
 
 - **The nightly builds are made on GitHub, from a commit anyone can look
