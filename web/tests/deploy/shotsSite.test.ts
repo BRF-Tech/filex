@@ -46,7 +46,6 @@ import {
   localImports,
   manifestProblems,
   nextManifest,
-  onlyPacksBehind,
   parsePublishedUrl,
   productInputs,
   publishedName,
@@ -592,10 +591,10 @@ describe('a reviewed run becomes the published set', () => {
     expect(shots).toContain('failure = [runFailure(failed, { keepGoing }), stuck].filter(Boolean).join');
   });
 
-  it('names a scene whose language packs are behind the tree, and tells a run that failed only for that from any other failure (#187)', () => {
-    // The maintainer, 2026-10-08: the nightly chain reports such a run as a warning
-    // (scripts/chain/job/shots.sh, SHOTS_PACKS_BEHIND=warn); a release run
-    // stays red, and accept refuses it either way.
+  it('names a scene whose language packs are behind the tree, and never accepts the run (#187)', () => {
+    // A run that failed only for that is red like any other since #365: the
+    // nightly chain's warning for it (SHOTS_PACKS_BEHIND=warn) left with the
+    // nightly profile's shots job, and accept refuses it either way.
     expect(PACKS_BEHIND).toBe('packs-behind');
     expect(PACKS_BEHIND_EXIT).toBe(3);
     const behind = { file: 'langpack.mjs', timedOut: false, log: 'l.log', reason: PACKS_BEHIND };
@@ -603,15 +602,7 @@ describe('a reviewed run becomes the published set', () => {
     const scene = (status: string | null, extra: Record<string, unknown> = {}) => ({ action: 'shoot', status, digest: 'D', pictures: [], ...extra });
     const run = (scenes: Record<string, unknown>, over: Record<string, unknown> = {}) => ({ ...review, platform: 'linux', failure: 'x', stuck: null, scenes, ...over });
     const onlyPacks = run({ 'capture.mjs': scene('passed'), 'langpack.mjs': scene('failed', { reason: PACKS_BEHIND }), 'pub.mjs': { action: 'published', status: null } });
-    expect(onlyPacksBehind(onlyPacks)).toEqual(['langpack.mjs']);
-    // Anything else in the run makes it a plain failure.
-    expect(onlyPacksBehind(run({ 'langpack.mjs': scene('failed', { reason: PACKS_BEHIND }), 'signing.mjs': scene('failed') }))).toBeNull();
-    expect(onlyPacksBehind(run({ 'langpack.mjs': scene('timed out', { reason: PACKS_BEHIND }) }))).toBeNull();
-    expect(onlyPacksBehind(run({ 'langpack.mjs': scene('failed', { reason: PACKS_BEHIND }), 'z.mjs': scene('not run') }))).toBeNull();
-    expect(onlyPacksBehind({ ...onlyPacks, stuck: 'could not end processes langpack.mjs left behind: 42' })).toBeNull();
-    expect(onlyPacksBehind({ ...onlyPacks, failure: null })).toBeNull();
-    expect(onlyPacksBehind(null)).toBeNull();
-    // ...and never accepted.
+    // Never accepted.
     expect(acceptRefusal({ ...manifest, platform: 'linux' }, { ...onlyPacks, environment: 'chain' })).toMatch(/the run failed/);
     // Where the reason comes from: langpack.mjs's exit code, recorded per scene.
     const shots = readFileSync(path.join(REPO, 'scripts', 'shots.mjs'), 'utf8');

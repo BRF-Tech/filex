@@ -8,7 +8,7 @@
 #   sudo bash scripts/chain/install-langpacks.sh --root /var/lib/filex-langpacks \
 #        --env /etc/filex-langpacks.env --git-name "<name>" --git-email "<email>" \
 #        [--pack <tag>=<clone URL>]... [--init <tag>[,<tag>...]] \
-#        [--at "03:30 Europe/Istanbul"] [--enable] [--dry-run]
+#        [--at "03:30 Europe/Istanbul"] [--runner-list FILE] [--enable] [--dry-run]
 #
 # It never overwrites the settings file and never deletes anything:
 #   1. copies scripts/langpacks-nightly.mjs and every module it imports from
@@ -28,7 +28,10 @@
 #      first night;
 #   5. installs filex-langpacks.{service,timer} into /etc/systemd/system and
 #      reloads systemd. With --enable it also enables and starts the timer;
-#      without, it prints the command.
+#      without, it prints the command. A host whose job runner starts
+#      filex-langpacks already (--runner-list, /etc/brf-watchdog/jobs.enabled
+#      by default; scripts/lib/job-runner.sh) keeps the timer off: --enable is
+#      refused there (exit 3), since the timer would start it a second time.
 #
 # It installs no agent: Claude Code is checked for, and named when missing.
 # --dry-run prints every step and changes nothing. Linux, root, systemd, git,
@@ -47,6 +50,8 @@ AT="03:30 Europe/Istanbul"
 UNIT_DIR="/etc/systemd/system"
 ENABLE=0
 DRY=0
+. "$SCRIPTS/lib/job-runner.sh"
+RUNNER_LIST="$JOB_RUNNER_LIST_DEFAULT"
 
 # The driver and every module it imports, as paths under scripts/. A test
 # (web/tests/i18n/langPacksNightly.test.ts) follows the imports and holds
@@ -65,6 +70,7 @@ while [ $# -gt 0 ]; do
     --init) INITS="${2:?--init needs a tag list}"; shift 2 ;;
     --at) AT="${2:?--at needs a time}"; shift 2 ;;
     --unit-dir) UNIT_DIR="${2:?--unit-dir needs a directory}"; shift 2 ;;
+    --runner-list) RUNNER_LIST="${2:?--runner-list needs a file}"; shift 2 ;;
     --enable) ENABLE=1; shift ;;
     --dry-run) DRY=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -185,8 +191,18 @@ fi
 if ! command -v claude >/dev/null 2>&1; then
   say "Claude Code is not installed on this host: install it (npm install -g @anthropic-ai/claude-code), then run the check below"
 fi
+OWNED="$(runner_jobs "$RUNNER_LIST" filex-langpacks)"
+if [ "$ENABLE" = 1 ] && [ -n "$OWNED" ]; then
+  runner_refuse install-langpacks "$RUNNER_LIST" $OWNED
+  exit 3
+fi
 if [ "$ENABLE" = 1 ]; then
   run systemctl enable --now filex-langpacks.timer
+elif [ -n "$OWNED" ]; then
+  say "timer left off. Check what a night needs and try one by hand:"
+  say "  $NODE $ROOT/bin/scripts/langpacks-nightly.mjs check --env $ENV_FILE --probe"
+  say "  $NODE $ROOT/bin/scripts/langpacks-nightly.mjs run --env $ENV_FILE --dry-run --no-wait"
+  runner_hints install-langpacks $OWNED
 else
   say "not enabled. Check what a night needs, try one by hand, then enable the timer:"
   say "  $NODE $ROOT/bin/scripts/langpacks-nightly.mjs check --env $ENV_FILE --probe"

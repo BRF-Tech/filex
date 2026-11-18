@@ -1,10 +1,12 @@
 #!/bin/bash
-# `pnpm shots --all` (nightly profile): every shot script in e2e/shots/,
-# whatever its digest says - the app scenes and the ONLYOFFICE scene included
-# (task #187). --all because the night is where a scene whose INPUTS missed
-# something it shows is caught: its digest stands still, and only taking it
-# again finds its pixels moved (lesson #1150). Every picture is compared with
-# the published one; the contact sheet lists the ones that moved.
+# `pnpm shots --all` (CHAIN_EXTRAS=shots on a targeted run): every shot
+# script in e2e/shots/, whatever its digest says - the app scenes and the
+# ONLYOFFICE scene included (task #187). --all because a scene whose INPUTS
+# missed something it shows is caught only so: its digest stands still, and
+# only taking it again finds its pixels moved (lesson #1150). Every picture is
+# compared with the published one; the contact sheet lists the ones that
+# moved. Every week GitHub takes every scene too (shots.yml, #364), which is
+# why the nightly profile no longer does (#365); that run publishes nothing.
 #
 # ⚠ THIS is where the published set is taken (scripts/lib/shots-site.mjs
 # PUBLISH_PLATFORM and PUBLISH_ENVIRONMENT, decided 2026-10-06): Linux, the
@@ -43,22 +45,16 @@
 #
 # --keep-going: a scene that fails does not stop the others. A language pack
 # that is behind this tree fails langpack.mjs (it refuses to photograph a pack
-# under 100%), and without it every scene after it would go untaken that
-# night. The run is still a failure, and its review names every failed scene.
-#
-# SHOTS_PACKS_BEHIND=warn (plan.mjs sets it in the nightly profile only): when
-# the run's ONLY failures are scenes whose language packs are behind this tree
-# (langpack.mjs exits PACKS_BEHIND_EXIT; shots-site.mjs onlyPacksBehind reads
-# the run's review), the job is green with a warning (common.sh warn) instead
-# of red - the strings the day added are translated the night after (the maintainer,
-# 2026-10-08, task #187). Anywhere else - a release's targeted
-# CHAIN_EXTRAS=shots run - it stays red, and accept refuses the run either way.
+# under 100%), and without it every scene after it would go untaken. The run
+# is still a failure - red, and its review names every failed scene; accept
+# refuses it. (Until #365 the nightly profile's run was green with a warning
+# when that was its only failure, SHOTS_PACKS_BEHIND=warn.)
 #
 # The build job made the packages, the web build and the embed;
 # shots builds only its own stamped binary from them (--skip
 # packages,web,embed), and verifies it serves this web build before it shoots.
-# A shot script that no longer fits the product turns the night red, not the
-# release day. Playwright image, root, Go mounted at /usr/local/go (the
+# A shot script that no longer fits the product turns the weekly run on GitHub
+# red, not the release day. Playwright image, root, Go mounted at /usr/local/go (the
 # binary, and the example plugin the plugins scene installs).
 #
 # The pictures land where this release's go (e2e/shots/release.mjs), in the
@@ -159,14 +155,5 @@ total=$(find "$REL" -name '*.png' 2>/dev/null | wc -l)
 mkdir -p "$OUT/screenshots"
 [ -d "$REL" ] && cp -a "$REL/." "$OUT/screenshots/"
 [ -d e2e/.artifacts/shots ] && cp -a e2e/.artifacts/shots "$OUT/artifacts"
-behind=""
-if [ "$rc" -ne 0 ] && [ "${SHOTS_PACKS_BEHIND:-}" = warn ]; then
-  behind=$(node -e "import('/w/src/scripts/lib/shots-site.mjs').then((m) => { const fs = require('fs'); const f = '/w/src/' + m.REVIEW_REL; if (!fs.existsSync(f) || fs.statSync(f).mtimeMs < fs.statSync(process.argv[1]).mtimeMs) return; const s = m.onlyPacksBehind(JSON.parse(fs.readFileSync(f, 'utf8'))); if (s) console.log(s.join(' ')); })" "$STAMP") || behind=""
-fi
-if [ -n "$behind" ]; then
-  warn "shots: the language packs are behind this tree, so $behind was not taken; every other scene was ($taken of $total pictures). node scripts/langpacks.mjs status says what is missing; the nightly translation adds it after this run."
-  summary "shots=0 (warning: language packs behind this tree, $behind not taken) taken=$taken of $total in $REL, $scope (contact sheet: out/shots/artifacts/contact-sheet.html)"
-  exit 0
-fi
 summary "shots=$rc taken=$taken of $total in $REL, $scope (contact sheet: out/shots/artifacts/contact-sheet.html)"
 exit $rc

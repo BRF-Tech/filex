@@ -97,7 +97,7 @@ async function main(argv) {
   if (v.tell === 'down') {
     await say(
       'filex release round: the release workspace is not running',
-      `${env.FILEX_AUTO_CONTAINER} has been down since ${v.mark.since}: no release round runs (${cmd}). Start the workspace; the next timer runs the round.`,
+      `${env.FILEX_AUTO_CONTAINER} has been down since ${v.mark.since}: no release round runs (${cmd}). Start the workspace; the next scheduled round goes ahead.`,
       'red',
     );
   } else if (v.tell === 'back') {

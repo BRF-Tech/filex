@@ -16,16 +16,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { DS_EXTRAS, NIGHTLY_EXTRAS, nightlyExtras } from './nightly-lib.mjs';
+import { DS_EXTRAS, EXTRAS, NIGHTLY_EXTRAS, movedWords, nightlyExtras } from './nightly-lib.mjs';
 
 export const CHAIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 export const PROFILES = ['full', 'targeted', 'nightly'];
 
-// What the nightly profile adds to the full one (ds-go, s3-live, shots,
-// realenv) is defined in nightly-lib.mjs, where the nightly that started it
-// until #361 kept its decisions.
-export { DS_EXTRAS, NIGHTLY_EXTRAS, nightlyExtras };
+// The extras a run can add to the full chain (ds-go, s3-live, shots), and the
+// ones the nightly profile adds, are defined in nightly-lib.mjs, where the
+// nightly that started that profile until #361 kept its decisions.
+export { DS_EXTRAS, EXTRAS, NIGHTLY_EXTRAS, nightlyExtras };
 
 /** Where the Go and -race jobs come from unless CHAIN_GO_LIST / CHAIN_RACE_LIST say otherwise. */
 export const SHARD_LISTS = {
@@ -82,9 +82,6 @@ export const SHARD_LISTS = {
  * (CHAIN_MEM_GB 10, and less when MemAvailable is less); and the browser
  * round holds only what its heaviest line STILL TO RUN needs (trackShare), so
  * the pool gets an engine's share back once no line after it needs as much.
- *
- * realenv (a Playwright runner next to Keycloak, OpenLDAP, Pebble and its own
- * Document Server) keeps an engine's 4 until a night measures it.
  */
 export const WEIGHTS = {
   build: 5,
@@ -106,7 +103,6 @@ export const WEIGHTS = {
   'ds-go': 1.25,
   's3-live': 1,
   shots: 2.75,
-  realenv: 4,
 };
 
 /**
@@ -160,8 +156,6 @@ export function weightOf(name, kind) {
  *
  * A Playwright line that runs the suite, or a part of it, is heavy; one that
  * a --grep narrows to a few specs is not (e2e-nods 0.15, e2e-s3 0.01).
- * realenv (a Playwright runner beside its own Document Server) counts as
- * heavy until a night measures it.
  *
  * race-auth (task #174 cut it from race-rest and race-db-io: the auth
  * packages, and the SFTP, FTP and NFS servers with protocolauth) is light
@@ -175,7 +169,7 @@ export function weightOf(name, kind) {
  * Its first night's `load.written_gb` decides: past ~1 GiB it goes here.
  */
 export const IO_HEAVY_JOBS = ['go-io-rest', 'race-db-io', 'race-rest'];
-export const IO_HEAVY_KINDS = ['shots', 'realenv'];
+export const IO_HEAVY_KINDS = ['shots'];
 const PLAYWRIGHT_KINDS = ['local', 'nopub', 's3'];
 
 /** 'heavy' when a job writes to the disk as the jobs above do, else 'light'. */
@@ -212,12 +206,11 @@ export const EXPECTED_MINUTES = {
   'e2e-firefox': 34,
   'e2e-webkit': 31,
   'e2e-nods': 3,
-  // The nightly extras: shots as `pnpm shots` took on the host (8.6-9.9 min,
+  // The extras: shots as `pnpm shots` took on the host (8.6-9.9 min,
   // 0.50-0.52), the others estimated until the first nights say.
   'ds-go': 6,
   's3-live': 6,
   shots: 10,
-  realenv: 25,
 };
 
 /**
@@ -443,23 +436,20 @@ function trackMinutes(t, table) {
  *             down on SQLite, PostgreSQL and MySQL; the -race jobs; and the
  *             browser list.
  *   nightly   what full runs, and the NIGHTLY_EXTRAS CHAIN_NIGHTLY_EXTRAS
- *             asks for in the browser round: ds-go and shots (DS_EXTRAS,
- *             which need the Document Server) right after the last line with
- *             it, s3-live and realenv at its end. A person's run since
- *             #361 (task #175 had a timer start it every night).
+ *             asks for in the browser round: ds-go (DS_EXTRAS: it needs the
+ *             Document Server) right after the last line with it, s3-live at
+ *             its end. A person's run since #361 (task #175 had a timer start
+ *             it every night); shots and realenv left it in #365.
  *   targeted  the build and its three fast gates, then only what is asked
  *             for: CHAIN_GO_PKGS, CHAIN_RACE_PKGS, CHAIN_MIGRATE=1,
  *             CHAIN_CY_SPECS, CHAIN_E2E_GREP (on CHAIN_E2E_BROWSERS, with
- *             the Document Server unless CHAIN_E2E_DS=0), and the nightly
- *             extras CHAIN_EXTRAS names (targetedExtras: s3-live by hand,
- *             with credentials a person brings; shots
- *             for a release's pictures).
+ *             the Document Server unless CHAIN_E2E_DS=0), and the extras
+ *             CHAIN_EXTRAS names (targetedExtras: s3-live by hand, with
+ *             credentials a person brings; shots for a release's pictures).
  *
  * The shots job takes every scene (`pnpm shots --all`); CHAIN_SHOTS_ONLY
  * (comma-separated script names) narrows it to those, with `--only`
- * (shotsOnly). In the nightly profile only, a run whose one failure is a
- * language pack behind the tree is a warning, not a red job
- * (SHOTS_PACKS_BEHIND=warn).
+ * (shotsOnly).
  *
  * `src` is the tree under test: the Go and -race jobs' expected minutes are
  * read from its scripts/test-shards.json.
@@ -561,14 +551,8 @@ export function buildPlan({ profile, lists, env = {}, src = path.resolve(CHAIN_D
       shard: null,
       needs: ['build'],
       weight: WEIGHTS[name],
-      env: {
-        // job/shots.sh: `--only` these scripts instead of `--all`.
-        ...(only ? { SHOTS_ONLY: only } : {}),
-        // A night whose only failed scene is a language pack behind the tree
-        // is a warning in the morning report, not red; a release's run (a
-        // targeted CHAIN_EXTRAS=shots) stays red (the maintainer, 2026-10-08, #187).
-        ...(name === 'shots' && profile === 'nightly' ? { SHOTS_PACKS_BEHIND: 'warn' } : {}),
-      },
+      // job/shots.sh: `--only` these scripts instead of `--all`.
+      env: only ? { SHOTS_ONLY: only } : {},
     };
     return { ...j, expect: expectedMinutes(j, table) };
   };
@@ -576,9 +560,9 @@ export function buildPlan({ profile, lists, env = {}, src = path.resolve(CHAIN_D
   if (profile === 'nightly') {
     const extras = nightlyExtras(env);
     // The Document Server is stopped once no later line needs it
-    // (run.mjs runTrack): ds-go and shots go where it is still up, right
-    // after the last browser line with it, so it is not kept running through
-    // the lines without it.
+    // (run.mjs runTrack): ds-go goes where it is still up, right after the
+    // last browser line with it, so it is not kept running through the lines
+    // without it.
     const withDs = extras.filter((name) => DS_EXTRAS.includes(name));
     round.splice(round.map((t) => t.ds).lastIndexOf(true) + 1, 0, ...withDs.map(extra));
     for (const name of extras) if (!DS_EXTRAS.includes(name)) round.push(extra(name));
@@ -593,19 +577,19 @@ export function buildPlan({ profile, lists, env = {}, src = path.resolve(CHAIN_D
 }
 
 /**
- * The nightly extras a targeted run adds: CHAIN_EXTRAS (comma-separated,
- * the names of NIGHTLY_EXTRAS), none by default. How one of them runs on its
- * own: `CHAIN_EXTRAS=s3-live` with FILEX_TEST_S3_* is the live S3 tests
- * against the bucket a person brings.
+ * The extras a targeted run adds: CHAIN_EXTRAS (comma-separated, the names
+ * of EXTRAS), none by default. How one of them runs on its own:
+ * `CHAIN_EXTRAS=s3-live` with FILEX_TEST_S3_* is the live S3 tests against
+ * the bucket a person brings, `CHAIN_EXTRAS=shots` a release's pictures.
  */
 export function targetedExtras(env = {}) {
   const v = String(env.CHAIN_EXTRAS ?? '').trim();
   if (!v || v === 'none') return [];
   const asked = v.split(/[\s,]+/).filter(Boolean);
   for (const a of asked) {
-    if (!NIGHTLY_EXTRAS.includes(a)) throw new Error(`CHAIN_EXTRAS: "${a}" is none of ${NIGHTLY_EXTRAS.join(', ')} (or none)`);
+    if (!EXTRAS.includes(a)) throw new Error(`CHAIN_EXTRAS: "${a}" is none of ${EXTRAS.join(', ')} (or none)${movedWords(a)}`);
   }
-  return NIGHTLY_EXTRAS.filter((x) => asked.includes(x));
+  return EXTRAS.filter((x) => asked.includes(x));
 }
 
 /**

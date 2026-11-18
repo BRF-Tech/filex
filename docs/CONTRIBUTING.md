@@ -403,8 +403,9 @@ with the image named (`REALENV_PULL=1` pulls them), and so is every stage on a
 machine without Docker, so it is safe to call anywhere. What each stage
 starts, and how the pieces trust each other, is in `e2e/realenv/README.md`.
 A change to ACME, the TLS hooks, OIDC/LDAP sign-in or the document server's
-diagnosis is measured there before a release. Nothing runs it on its own
-since #361 (The nightly run, below): it is a person's run.
+diagnosis is measured there before a release. GitHub runs it every week
+(`.github/workflows/realenv.yml`, The nightly run, below); the build host's
+chain ran it as a job of its nightly profile until #365.
 
 ### The whole chain on one Linux host
 
@@ -450,11 +451,11 @@ shards' logs together (`cat out/race-handlers-*/race.out`) and re-cut it from
 the times of a real run.
 
 `--profile full` runs all of it; `nightly` runs the same plus its extras
-in the browser round (The nightly run, below: a person's run since #361);
-`targeted` runs the build and
+in the browser round, `ds-go` and `s3-live` (The nightly run, below: a
+person's run since #361); `targeted` runs the build and
 its fast gates, then only what is asked for (`CHAIN_GO_PKGS`,
 `CHAIN_RACE_PKGS`, `CHAIN_MIGRATE=1`, `CHAIN_CY_SPECS`, `CHAIN_E2E_GREP` on
-`CHAIN_E2E_BROWSERS`, and `CHAIN_EXTRAS` - nightly extras by name, such as
+`CHAIN_E2E_BROWSERS`, and `CHAIN_EXTRAS` - extras by name: `ds-go`,
 `s3-live`, or `shots` for a release's pictures, which `CHAIN_SHOTS_ONLY`
 narrows to some shot scripts). `CHAIN_E2E_GREP` reaches Playwright's `--grep`
 as one argument, spaces and all (a test title, or `01-smoke 02-`): a browser
@@ -669,7 +670,14 @@ The installer gives the night a directory and a checkout of its own, writes
 the settings file (`scripts/chain/nightly.env.example`; it never overwrites
 one) and installs two systemd timers from `scripts/chain/systemd/`. The
 timers run the copies it puts in `<root>/bin`, never the checkout the night
-resets: run the installer again to update them.
+resets: run the installer again to update them. On the build host its job
+runner starts the night and the report instead (since 2026-11-18, task
+#362), from its own copy of `main`, and logs each run to
+`/var/log/brf-jobs/<id>.log`: where the runner's list (`--runner-list`,
+`/etc/brf-watchdog/jobs.enabled` by default; `scripts/lib/job-runner.sh`)
+names `filex-nightly` or `filex-nightly-report`, the installer leaves the
+timers off and refuses `--enable` (exit 3), since a timer would start each
+job a second time, and prints the runner's commands instead.
 
 **The night.** Its timer starts it at 02:00. It fetches `main` and:
 
@@ -802,9 +810,13 @@ against a real Document Server and the Convert app
 `nightly` profile - a person's run on the build host:
 `bash scripts/chain/run.sh --profile nightly --env <a chain settings file>`
 (`NIGHTLY_EXTRAS` in `scripts/chain/nightly-lib.mjs`; `CHAIN_NIGHTLY_EXTRAS`
-picks some). The profile's other extras are the weekly workflows' above, and
-the morning report still names a pushed change to the S3 code
-(`S3_LIVE_PATHS`).
+picks some). The profile's other extra, `s3-live`, is `s3-live.yml`'s above,
+and leaves the profile once that workflow has run green against a real
+bucket; the morning report still names a pushed change to the S3 code
+(`S3_LIVE_PATHS`). Every scene and realenv left the profile in #365 -
+realenv's was the chain's one job outside a container - and a
+`CHAIN_NIGHTLY_EXTRAS` that still names them is refused with where they run
+now. The chain's `shots` job stays for a release's set (Release process).
 
 **What it leaves**, under its `CHAIN_ROOT`: the checkout (`src/`), the clone
 of the public repository the export is made in (`public/`), the page last
@@ -2181,8 +2193,8 @@ is the whole flow.
    `e2e/shots/` script that owns it, or in a new script there - the command
    finds every file in that directory that imports `@playwright/test`, so a new
    script cannot be left out. It takes only the scenes whose inputs changed
-   since the published set (`--all` takes every one, and so does the chain's
-   nightly profile).
+   since the published set (`--all` takes every one, and so do the chain's
+   `shots` job and `shots.yml`'s weekly run).
 2. **Look at the contact sheet it prints** (`e2e/.artifacts/shots/contact-sheet.html`):
    only the pictures whose pixels moved past the threshold, the new ones and the
    removed ones, each changed one beside the published picture with a map of
@@ -2286,9 +2298,9 @@ failure - the review names every failed scene and `accept` refuses it - but
 the other scenes are taken and compared. The chain's shots job uses it. A
 scene whose language packs are behind this tree (`langpack.mjs` exits 3,
 `PACKS_BEHIND_EXIT` in `scripts/lib/shot-scripts.mjs`) is recorded in the
-review as `"reason": "packs-behind"`; when every failed scene of a run is
-one of those, the nightly chain's shots job is green with a warning instead
-of red (`SHOTS_PACKS_BEHIND=warn`, which only the nightly profile sets).
+review as `"reason": "packs-behind"`, and the run is red like any other
+failure. (Until #365 the nightly chain's shots job was green with a warning
+when every failed scene of its run was one of those.)
 
 ---
 
@@ -2386,7 +2398,9 @@ checkout it sets the identity of the nightly commits and
 `receive.denyCurrentBranch=updateInstead`, so that release day can push the
 release commit back. It writes the settings file once
 (`scripts/langpacks-nightly.env.example`) and installs
-`filex-langpacks.{service,timer}` from `scripts/chain/systemd/`. It installs
+`filex-langpacks.{service,timer}` from `scripts/chain/systemd/` - the timer
+left off where the host's job runner starts `filex-langpacks`, as the
+nightly's installer does ([The nightly run](#the-nightly-run)). It installs
 no agent: Claude Code is checked for, and named when it is missing.
 
 - **When.** The timer starts `run` at 03:30 (Istanbul). It waits while the
@@ -2699,9 +2713,11 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    ones with a map of the difference, the new ones and the removed ones; the
    rest were taken again and found the same, or not taken because nothing they
    show changed. Every listed picture in English, current, nothing covering it.
-   Nothing takes the set at night since #361 (The nightly run, above): when
-   the changes since the last release touch the screens, a run of the chain's
-   nightly profile by hand shows the same sheet before release day does.
+   Nothing takes the set at night since #361 (The nightly run, above).
+   `shots.yml`'s weekly run takes every scene of the `nightly` branch but the
+   app and Document Server ones and keeps its contact sheet in the run's
+   artifact; when the changes since the last release touch the screens, the
+   command above run by hand shows the whole sheet before release day does.
 
    It takes every scene in one place (task #187): the six that call
    `findApp` or `documentServer` too, with the app builds and the language
@@ -2712,9 +2728,8 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    itself, and the README showed its typeface beside the chain's.
    `langpack.mjs` refuses a language pack that does not cover this tree
    whole (`node scripts/langpacks.mjs status`); the other scenes are still
-   taken, but the run failed - here red, where the chain's nightly profile
-   only warns -
-   and `accept` refuses it. Until the packs are
+   taken, but the run failed - red - and `accept` refuses it. Until the
+   packs are
    translated, take the rest with `CHAIN_SHOTS_ONLY` (the other scripts'
    names, comma-separated) on the same command, and the published language
    pack picture stands (0.53.0: 319 strings missing in every pack).
@@ -4273,7 +4288,10 @@ starts it: `scripts/train/install-auto.sh` installs
 `filex-release-auto-report.timer` (07:00), which run
 `scripts/train/auto-host.mjs` - it `docker exec`s the round in the
 workspace, and when the workspace is not running it says so at once and
-once a day, instead of rounds that never happen.
+once a day, instead of rounds that never happen. Where the host's job runner
+starts `filex-release-auto` and its report (the build host since 2026-11-18),
+the installer leaves the timers off and refuses `--enable`, as the nightly's
+does ([The nightly run](#the-nightly-run)).
 
 ### The Store check without a Windows desktop
 

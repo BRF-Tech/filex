@@ -10,7 +10,7 @@
 #        --env /etc/filex-release-auto.env --container <the workspace container> \
 #        [--user <user in it>] [--checkout <private checkout in it>] \
 #        [--notify-from <a settings file with CHAIN_NOTIFY_* or FILEX_NOTIFY_*>] \
-#        [--every "*:0/30"] [--report-at "07:00 Europe/Istanbul"] [--enable] [--dry-run]
+#        [--every "*:0/30"] [--report-at "07:00 Europe/Istanbul"] [--runner-list FILE] [--enable] [--dry-run]
 #
 # It never overwrites the settings file and never deletes anything:
 #   1. copies auto-host.mjs and what it imports (scripts/lib/notify.mjs,
@@ -23,7 +23,11 @@
 #   3. installs filex-release-auto.{service,timer} and
 #      filex-release-auto-report.{service,timer} into /etc/systemd/system and
 #      reloads systemd. With --enable it also enables and starts both timers;
-#      without, it prints the command.
+#      without, it prints the command. A host whose job runner starts the
+#      jobs already (filex-release-auto, filex-release-auto-report in
+#      --runner-list, /etc/brf-watchdog/jobs.enabled by default;
+#      scripts/lib/job-runner.sh) keeps the timers off: --enable is refused
+#      there (exit 3), since a timer would start each job a second time.
 #
 # --dry-run prints every step and changes nothing. Linux, root, systemd,
 # Docker, node 20 or later.
@@ -42,6 +46,8 @@ REPORT_AT="07:00 Europe/Istanbul"
 UNIT_DIR="/etc/systemd/system"
 ENABLE=0
 DRY=0
+. "$SCRIPTS/lib/job-runner.sh"
+RUNNER_LIST="$JOB_RUNNER_LIST_DEFAULT"
 
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}"; }
 
@@ -56,6 +62,7 @@ while [ $# -gt 0 ]; do
     --every) EVERY="${2:?--every needs a calendar spec}"; shift 2 ;;
     --report-at) REPORT_AT="${2:?--report-at needs a time}"; shift 2 ;;
     --unit-dir) UNIT_DIR="${2:?--unit-dir needs a directory}"; shift 2 ;;
+    --runner-list) RUNNER_LIST="${2:?--runner-list needs a file}"; shift 2 ;;
     --enable) ENABLE=1; shift ;;
     --dry-run) DRY=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -157,8 +164,17 @@ if command -v systemd-analyze >/dev/null 2>&1; then
   systemd-analyze calendar "*-*-* $REPORT_AT" >/dev/null || { echo "systemd cannot read the time \"$REPORT_AT\"" >&2; exit 1; }
 fi
 
+OWNED="$(runner_jobs "$RUNNER_LIST" filex-release-auto filex-release-auto-report)"
+if [ "$ENABLE" = 1 ] && [ -n "$OWNED" ]; then
+  runner_refuse install-auto "$RUNNER_LIST" $OWNED
+  exit 3
+fi
 if [ "$ENABLE" = 1 ]; then
   run systemctl enable --now filex-release-auto.timer filex-release-auto-report.timer
+elif [ -n "$OWNED" ]; then
+  say "timers left off. Try a round by hand:"
+  say "  $NODE $ROOT/bin/train/auto-host.mjs run --env $ENV_FILE --dry-run"
+  runner_hints install-auto $OWNED
 else
   say "not enabled. Try it by hand first, then enable the timers:"
   say "  $NODE $ROOT/bin/train/auto-host.mjs run --env $ENV_FILE --dry-run"

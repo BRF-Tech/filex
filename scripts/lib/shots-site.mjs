@@ -593,25 +593,6 @@ export function runFailure(failed, { keepGoing = false } = {}) {
 }
 
 /**
- * The scenes of a failed run that failed ONLY because their language packs
- * are behind this tree (PACKS_BEHIND, e2e/shots/langpack.mjs), when those are
- * all of its failures - or null: no failure, another scene failed, timed out
- * or was not run, or processes were left that could not be ended.
- *
- * The nightly chain's shots job reports such a run as a warning, not a red
- * night (the maintainer, 2026-10-08, task #187): the strings this tree added are
- * translated the night after, and the rest of the scenes were taken. The run
- * itself stays a failure - `accept` refuses it - and a release run is red.
- */
-export function onlyPacksBehind(review) {
-  if (!review?.failure || review.stuck) return null;
-  const notOk = Object.entries(review.scenes ?? {}).filter(([, s]) => s.action === 'shoot' && s.status !== 'passed');
-  if (!notOk.length) return null;
-  if (!notOk.every(([, s]) => s.status === 'failed' && s.reason === PACKS_BEHIND)) return null;
-  return notOk.map(([f]) => f).sort();
-}
-
-/**
  * The manifest a reviewed run turns into: new and changed pictures take their
  * new file, removed ones go, unchanged ones keep the published file (their
  * pixels did not move, so neither does their URL), and every scene that was

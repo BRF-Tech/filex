@@ -83,7 +83,7 @@ import {
 
 const USAGE = `usage: node scripts/chain/nightly.mjs <run|status|follow> [options]
 
-  run       tonight's nightly (what its timer starts): the private main,
+  run       tonight's nightly (what its schedule starts): the private main,
             exported, pushed to the public repository's nightly branch
   status    tonight and the last nights
   follow    GitHub's verdict on the last nightly, its image and desktop

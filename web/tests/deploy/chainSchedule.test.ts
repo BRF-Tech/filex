@@ -20,6 +20,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DS_EXTRAS,
+  EXTRAS,
   IO_HEAVY_JOBS,
   JOB_WEIGHTS,
   NIGHTLY_EXTRAS,
@@ -41,7 +42,7 @@ import {
   trackWeight,
   weightOf,
 } from '../../../scripts/chain/plan.mjs';
-import { KIND, e2eRecordOf, hostJobEnv, jobImages, jobWarnings, parseArgs, parseEnvFile } from '../../../scripts/chain/run.mjs';
+import { KIND, e2eRecordOf, jobImages, jobWarnings, parseArgs, parseEnvFile } from '../../../scripts/chain/run.mjs';
 import { recordSettings } from '../../../e2e/helpers/record';
 import { ioWaits, pickJobs, poolBudget, poolCeiling, readyJobs, simulate } from '../../../scripts/chain/schedule.mjs';
 import { findBash } from '../../../scripts/release/engine.mjs';
@@ -181,25 +182,27 @@ describe('the list format', () => {
 });
 
 describe('the profiles', () => {
-  it('nightly runs what full runs, plus the Go tests on the Document Server and on a real S3, shots and realenv (#175)', () => {
+  it('nightly runs what full runs, plus the Go tests on the Document Server and on a real S3 (#175, #365)', () => {
     // ⚠ Before #175 nightly was full under another name: the extras below ran
     // in no chain at all - the Go test skipped itself, the shot scripts rotted
     // until a release day needed pictures, realenv ran when someone remembered.
+    // Since #365 every scene and realenv run every week on GitHub (#364:
+    // shots.yml, realenv.yml) and the profile no longer takes them.
     const nightly = buildPlan({ profile: 'nightly', lists, src: REPO });
     expect(names(nightly.pool)).toEqual(names(full.pool));
-    expect(NIGHTLY_EXTRAS).toEqual(['ds-go', 's3-live', 'shots', 'realenv']);
+    expect(NIGHTLY_EXTRAS).toEqual(['ds-go', 's3-live']);
+    expect(EXTRAS).toEqual(['ds-go', 's3-live', 'shots']);
     expect(names(nightly.track)).toEqual([
-      'e2e-cypress', 'e2e-chromium', 'e2e-firefox', 'e2e-webkit', 'ds-go', 'shots', 'e2e-nods', 'e2e-nopub', 'e2e-s3', 's3-live', 'realenv',
+      'e2e-cypress', 'e2e-chromium', 'e2e-firefox', 'e2e-webkit', 'ds-go', 'e2e-nods', 'e2e-nopub', 'e2e-s3', 's3-live',
     ]);
     // Right after the last line with the Document Server, which run.mjs stops
-    // once no later line needs it: ds-go and shots (its ONLYOFFICE scene,
-    // #187 - until then shots left that scene out and ran at the end) are the
-    // lines that still need it, so it is not kept up through the lines
-    // without it.
+    // once no later line needs it: ds-go is the line that still needs it, so
+    // it is not kept up through the lines without it. shots needs it too (its
+    // ONLYOFFICE scene, #187), on the targeted run that takes it.
     expect(DS_EXTRAS).toEqual(['ds-go', 'shots']);
     const ds = nightly.track.map((t: { ds: boolean }) => t.ds);
-    expect(names(nightly.track.filter((t: { ds: boolean }) => t.ds))).toEqual(['e2e-chromium', 'e2e-firefox', 'e2e-webkit', 'ds-go', 'shots']);
-    expect(nightly.track[ds.lastIndexOf(true)].name).toBe('shots');
+    expect(names(nightly.track.filter((t: { ds: boolean }) => t.ds))).toEqual(['e2e-chromium', 'e2e-firefox', 'e2e-webkit', 'ds-go']);
+    expect(nightly.track[ds.lastIndexOf(true)].name).toBe('ds-go');
     expect(nightly.track.map((t: { index: number }) => t.index)).toEqual(nightly.track.map((_: unknown, i: number) => i));
     for (const name of NIGHTLY_EXTRAS) {
       const t = nightly.track.find((x: { name: string }) => x.name === name);
@@ -224,33 +227,28 @@ describe('the profiles', () => {
     const env = { CHAIN_SHOTS_ONLY: 'apps,signing' };
     const shots = (profile: string, more: Record<string, string> = {}) =>
       buildPlan({ profile, lists, src: REPO, env: { ...env, ...more } }).track.find((t: { name: string }) => t.name === 'shots');
-    expect(shots('nightly')).toMatchObject({ ds: true, env: { SHOTS_ONLY: 'apps,signing' } });
     expect(shots('targeted', { CHAIN_EXTRAS: 'shots' })).toMatchObject({ ds: true, env: { SHOTS_ONLY: 'apps,signing' } });
     // Only the shots job reads it, and a profile without shots never does.
     const ds = buildPlan({ profile: 'nightly', lists, src: REPO, env }).track.find((t: { name: string }) => t.name === 'ds-go');
     expect(ds.env).toEqual({});
+    expect(shots('nightly')).toBeUndefined();
     expect(() => buildPlan({ profile: 'full', lists, src: REPO, env: { CHAIN_SHOTS_ONLY: 'apps;rm' } })).not.toThrow();
   });
 
-  it('a language pack behind the tree is a warning in the nightly run only; a release run stays red (#187, the maintainer 2026-10-08)', () => {
-    const shots = (profile: string, env: Record<string, string> = {}) =>
-      buildPlan({ profile, lists, src: REPO, env }).track.find((t: { name: string }) => t.name === 'shots');
-    expect(shots('nightly').env).toEqual({ SHOTS_PACKS_BEHIND: 'warn' });
-    expect(shots('nightly', { CHAIN_SHOTS_ONLY: 'langpack' }).env).toEqual({ SHOTS_ONLY: 'langpack', SHOTS_PACKS_BEHIND: 'warn' });
-    expect(shots('targeted', { CHAIN_EXTRAS: 'shots' }).env).toEqual({});
-    // No other job of the night carries it.
-    const others = buildPlan({ profile: 'nightly', lists, src: REPO }).track.filter((t: { name: string; env?: Record<string, string> }) => t.name !== 'shots' && t.env?.SHOTS_PACKS_BEHIND);
-    expect(others).toEqual([]);
-    // The job: green with a JOBWARN line only when the run's review says
-    // every failed scene is behind (shots-site.mjs onlyPacksBehind).
+  it('a language pack behind the tree turns the shots job red, wherever it runs (#187, #365)', () => {
+    // Until #365 the nightly profile's shots job was green with a warning when
+    // that was its only failure (SHOTS_PACKS_BEHIND=warn, the maintainer
+    // 2026-10-08); a release run was always red. The release run is what is left.
+    const shots = (env: Record<string, string> = {}) =>
+      buildPlan({ profile: 'targeted', lists, src: REPO, env: { CHAIN_EXTRAS: 'shots', ...env } }).track.find((t: { name: string }) => t.name === 'shots');
+    expect(shots().env).toEqual({});
+    expect(shots({ CHAIN_SHOTS_ONLY: 'langpack' }).env).toEqual({ SHOTS_ONLY: 'langpack' });
     const job = fs.readFileSync(path.join(CHAIN, 'job', 'shots.sh'), 'utf8').replace(/\r\n/g, '\n');
-    expect(job).toContain('if [ "$rc" -ne 0 ] && [ "${SHOTS_PACKS_BEHIND:-}" = warn ]; then');
-    expect(job).toContain('m.onlyPacksBehind(');
-    expect(job).toMatch(/if \[ -n "\$behind" \]; then\n\s+warn "shots: /);
-    expect(fs.readFileSync(path.join(CHAIN, 'job', 'common.sh'), 'utf8')).toContain('warn() { echo "JOBWARN $*"; }');
+    expect(job).not.toMatch(/SHOTS_PACKS_BEHIND:-|onlyPacksBehind\(|\bwarn "/);
+    expect(job).toMatch(/summary "shots=\$rc taken=\$taken of \$total in \$REL, \$scope[^"]*"\nexit \$rc\n$/);
   });
 
-  it("keeps a job's JOBWARN lines as its warnings, for the morning report", () => {
+  it("keeps a job's JOBWARN lines as its warnings, for the end of the run", () => {
     const log = ['JOBSTART x', 'JOBWARN shots: the language packs are behind this tree', 'noise JOBWARN not at the start', 'SUMMARY shots=0', 'JOBWARN   ', 'JOBWARN second\r', 'JOBEXIT=0'].join('\n');
     expect(jobWarnings(log)).toEqual(['shots: the language packs are behind this tree', 'second']);
     expect(jobWarnings('')).toEqual([]);
@@ -259,27 +257,37 @@ describe('the profiles', () => {
 
   it('nightly takes the extras CHAIN_NIGHTLY_EXTRAS names, in their own order, and refuses one it does not know', () => {
     const only = (v: string) => names(buildPlan({ profile: 'nightly', lists, src: REPO, env: { CHAIN_NIGHTLY_EXTRAS: v } }).track).filter((n: string) => !n.startsWith('e2e-'));
-    expect(only('realenv,ds-go')).toEqual(['ds-go', 'realenv']);
-    expect(only('shots')).toEqual(['shots']);
+    expect(only('s3-live,ds-go')).toEqual(['ds-go', 's3-live']);
     expect(only('s3-live')).toEqual(['s3-live']);
     expect(only('none')).toEqual([]);
-    expect(only('')).toEqual(['ds-go', 'shots', 's3-live', 'realenv']);
-    expect(nightlyExtras({ CHAIN_NIGHTLY_EXTRAS: ' shots , ds-go ' })).toEqual(['ds-go', 'shots']);
-    expect(() => nightlyExtras({ CHAIN_NIGHTLY_EXTRAS: 'shots,lighthouse' })).toThrow(/lighthouse/);
+    expect(only('')).toEqual(['ds-go', 's3-live']);
+    expect(nightlyExtras({ CHAIN_NIGHTLY_EXTRAS: ' s3-live , ds-go ' })).toEqual(['ds-go', 's3-live']);
+    expect(() => nightlyExtras({ CHAIN_NIGHTLY_EXTRAS: 'ds-go,lighthouse' })).toThrow(/lighthouse/);
     // The full profile never takes them, whatever the environment says.
-    expect(names(buildPlan({ profile: 'full', lists, src: REPO, env: { CHAIN_NIGHTLY_EXTRAS: 'ds-go,s3-live,shots,realenv' } }).track)).toEqual(names(full.track));
+    expect(names(buildPlan({ profile: 'full', lists, src: REPO, env: { CHAIN_NIGHTLY_EXTRAS: 'ds-go,s3-live' } }).track)).toEqual(names(full.track));
   });
 
-  it('runs every nightly job in a kind run.mjs knows, with a job script that exists; realenv on the host', () => {
+  it('refuses shots and realenv in the nightly profile, and says where they run now (#365)', () => {
+    // A settings file from before #365 that still names them is refused at
+    // the plan, before anything starts, with the place each one went.
+    expect(() => nightlyExtras({ CHAIN_NIGHTLY_EXTRAS: 'ds-go,shots' })).toThrow(/"shots" is none of ds-go, s3-live \(or none\): since #365 every scene runs every week on GitHub \(shots\.yml\); a release takes its set with CHAIN_EXTRAS=shots/);
+    expect(() => nightlyExtras({ CHAIN_NIGHTLY_EXTRAS: 'realenv' })).toThrow(/since #365 realenv runs every week on GitHub \(realenv\.yml\), and by hand with e2e\/realenv\/run\.sh/);
+    expect(() => buildPlan({ profile: 'targeted', lists, env: { CHAIN_EXTRAS: 'realenv' } })).toThrow(/CHAIN_EXTRAS: "realenv" is none of ds-go, s3-live, shots \(or none\): since #365 realenv runs every week on GitHub/);
+    // realenv's job left with it: the chain's jobs are all containers again.
+    expect(KIND.realenv).toBeUndefined();
+    expect(fs.existsSync(path.join(CHAIN, 'job', 'realenv.sh'))).toBe(false);
+    for (const [name, k] of Object.entries(KIND)) expect(k.image, name).toBeTruthy();
+    const runMjs = fs.readFileSync(path.join(CHAIN, 'run.mjs'), 'utf8');
+    expect(runMjs).not.toMatch(/CHAIN_REALENV_|hostJobEnv|detached: true/);
+  });
+
+  it('runs every job of a nightly run and of a release shots run in a kind run.mjs knows, with a job script that exists', () => {
     const nightly = buildPlan({ profile: 'nightly', lists, src: REPO });
-    for (const j of [...nightly.pool, ...nightly.track]) {
+    const release = buildPlan({ profile: 'targeted', lists, src: REPO, env: { CHAIN_EXTRAS: 'shots' } });
+    for (const j of [...nightly.pool, ...nightly.track, ...release.track]) {
       expect(KIND[j.kind], j.name).toBeTruthy();
       expect(fs.existsSync(path.join(CHAIN, 'job', KIND[j.kind].script)), KIND[j.kind].script).toBe(true);
     }
-    // realenv starts containers with this host's Docker and mounts the tree
-    // by its host path: in a job container that path does not exist.
-    expect(KIND.realenv).toMatchObject({ host: true, script: 'realenv.sh' });
-    expect(KIND.realenv.image).toBeUndefined();
     // ds-go reads the Document Server's secret, which is root's (0600).
     expect(KIND['ds-go']).toMatchObject({ image: 'go', dsEnv: true, apps: true });
     expect(KIND['ds-go'].user).toBeFalsy();
@@ -288,10 +296,9 @@ describe('the profiles', () => {
     expect(KIND['s3-live'].user).toBeFalsy();
     // shots builds its stamped binary and the plugins scene's example plugin.
     expect(KIND.shots).toMatchObject({ image: 'pw', browser: true, goroot: true });
-    // A host job needs no image: asking Docker for "undefined" would end the
-    // run at its setup.
+    // One image a kind, each asked of Docker once.
     const images = { pw: 'pw:1', go: 'go:1', node: 'node:1' };
-    expect(jobImages(new Set(['realenv', 'shots', 'ds-go', 'build']), images).sort()).toEqual(['go:1', 'node:1', 'pw:1']);
+    expect(jobImages(new Set(['shots', 'ds-go', 'go', 'build']), images).sort()).toEqual(['go:1', 'node:1', 'pw:1']);
   });
 
   it('targeted runs the build and its fast gates, then only what is asked for', () => {
@@ -316,7 +323,7 @@ describe('the profiles', () => {
     expect(asked.track[1]).toMatchObject({ engines: ['chromium', 'firefox', 'webkit'], ds: true, args: ['--grep', '(98|116)-[a-z-]+\\.spec'] });
   });
 
-  it('targeted runs a nightly extra by name, alone: the live S3 tests by hand (CHAIN_EXTRAS)', () => {
+  it("targeted runs an extra by name, alone: the live S3 tests by hand, a release's pictures (CHAIN_EXTRAS)", () => {
     const s3 = buildPlan({ profile: 'targeted', lists, env: { CHAIN_EXTRAS: 's3-live' } });
     expect(names(s3.pool)).toEqual(['build', 'web', 'docs', 'e2etsc']);
     expect(s3.track.map((t: { name: string; kind: string }) => `${t.name}:${t.kind}`)).toEqual(['s3-live:s3-live']);
@@ -491,18 +498,20 @@ describe('the weights (#194)', () => {
   };
   const SIDECARS: Record<string, number> = { ds: 0.72, db: 0.95 };
   const nightly = buildPlan({ profile: 'nightly', lists, src: REPO });
+  // shots, measured on the nights until #365, runs on a release's targeted run now.
+  const release = buildPlan({ profile: 'targeted', lists, src: REPO, env: { CHAIN_EXTRAS: 'shots' } });
 
-  it('budget every job of a full and a nightly run for at least what it was measured to hold', () => {
-    const jobs = [...nightly.pool, ...nightly.track];
+  it("budget every job of a full, a nightly and a release's shots run for at least what it was measured to hold", () => {
+    const jobs = [...nightly.pool, ...nightly.track, ...release.track];
     for (const [name, gb] of Object.entries(MEASURED)) {
       const j = jobs.find((x: Job) => x.name === name);
-      expect(j, `${name} is no job of the nightly plan: rename it in MEASURED`).toBeTruthy();
+      expect(j, `${name} is no job of these plans: rename it in MEASURED`).toBeTruthy();
       expect(j.weight, name).toBeGreaterThanOrEqual(gb);
       expect(j.weight, name).toBe(weightOf(name, j.weightKind ?? (j.kind === 'local' || j.kind === 'nopub' || j.kind === 's3' ? 'e2e' : j.kind)));
     }
     for (const [kind, gb] of Object.entries(SIDECARS)) expect(WEIGHTS[kind as keyof typeof WEIGHTS], kind).toBeGreaterThanOrEqual(gb);
-    // Every job of the nightly plan has been measured but realenv (an engine's 4 until a night does).
-    expect(jobs.map((j: Job) => j.name).filter((n: string) => !(n in MEASURED))).toEqual(['realenv']);
+    // Every job of these plans has been measured (realenv, never measured, left the chain in #365).
+    expect(jobs.map((j: Job) => j.name).filter((n: string) => !(n in MEASURED))).toEqual([]);
   });
 
   it('budget a Playwright line the plan does not name for the heaviest engine', () => {
@@ -762,7 +771,7 @@ describe('what run.mjs does with the host (#194)', () => {
 
   it("gives a Go test job a tmpfs /tmp that may run what is written there, and keeps the Go build directory on the disk", () => {
     for (const k of ['go', 'race', 'ds-go', 's3-live']) expect(KIND[k].tmp, k).toBe(true);
-    for (const k of ['build', 'web', 'docs', 'e2etsc', 'shards-check', 'race-build', 'migrate', 'realenv']) expect(KIND[k].tmp, k).toBeFalsy();
+    for (const k of ['build', 'web', 'docs', 'e2etsc', 'shards-check', 'race-build', 'migrate']) expect(KIND[k].tmp, k).toBeFalsy();
     // Not a browser line's: that one is `browserTmp`, of its own size (below).
     for (const k of ['cypress', 'local', 'nopub', 's3', 'shots']) expect(KIND[k].tmp, k).toBeFalsy();
     expect(runMjs).toContain("tmp.push('--tmpfs', `/tmp:rw,exec,nosuid,nodev,size=${c.tmpfsGb}g,mode=1777`)");
@@ -820,7 +829,7 @@ describe('what run.mjs does with the host (#194)', () => {
     // Firefox tests wrote 2.11 GiB with /tmp on the disk and nothing on this
     // tmpfs, in 4 min 19 s against 7 min 51 s.
     for (const k of ['local', 'nopub', 's3']) expect(KIND[k].browserTmp, k).toBe(true);
-    for (const k of ['cypress', 'realenv', 'go', 'race', 'ds-go', 's3-live', 'web', 'build', 'docs', 'e2etsc']) {
+    for (const k of ['cypress', 'go', 'race', 'ds-go', 's3-live', 'web', 'build', 'docs', 'e2etsc']) {
       expect(KIND[k].browserTmp, k).toBeFalsy();
     }
     // One /tmp mount a container: docker refuses a second at the same point.
@@ -893,66 +902,18 @@ describe('a nightly run, replayed with the same minutes', () => {
     expect(sim.peakGb).toBeLessThanOrEqual(10 + 1e-9);
   });
 
-  it('runs ds-go and shots while the Document Server is still up, and s3-live and realenv after every browser line', () => {
+  it('runs ds-go while the Document Server is still up, and s3-live after every browser line', () => {
     expect(at('ds-go').start).toBeGreaterThanOrEqual(at('e2e-webkit').end);
-    expect(at('shots').start).toBeGreaterThanOrEqual(at('ds-go').end);
-    expect(at('shots').end).toBeLessThanOrEqual(at('e2e-nods').start);
+    expect(at('ds-go').end).toBeLessThanOrEqual(at('e2e-nods').start);
     expect(at('s3-live').start).toBeGreaterThanOrEqual(at('e2e-s3').end);
-    expect(at('realenv').start).toBeGreaterThanOrEqual(at('s3-live').end);
+    expect(at('shots')).toBeUndefined();
+    expect(at('realenv')).toBeUndefined();
   });
 
   it('ends within 3 h 30 min: started at 22:00 UTC it is over before a window at 01:45 UTC, less a 15 min margin', () => {
     // scripts/chain/nightly.env.example's NIGHTLY_QUIET keeps the Monday
     // morning clear (a weekly round on the same host at 02:00 UTC).
     expect(sim.wall).toBeLessThanOrEqual(210);
-  });
-});
-
-describe('a host job (realenv)', () => {
-  const env = hostJobEnv(
-    { PATH: '/usr/bin', REALENV_LOCK: '/var/lib/filex-chain/lock', CHAIN_LOCK_HELD: '/var/lib/filex-chain/lock', HOME: '/root' },
-    {
-      job: { name: 'realenv' },
-      dir: '/var/lib/filex-nightly/runs/nightly-20261007-010000Z-1a2b3c4d',
-      src: '/var/lib/filex-nightly/src',
-      prefix: 'fxnightly',
-      images: { ds: 'onlyoffice/documentserver:9.4', pw: 'mcr.microsoft.com/playwright:v1.59.1-noble' },
-      realenv: { stages: 'tls sso', allowSkip: false, privNet: '172.30.52', pubNet: '' },
-    },
-  );
-
-  it('never waits for the lock the chain already holds', () => {
-    // realenv takes REALENV_LOCK around each stage; the chain holds the build
-    // lock for the whole run, so the same lock here would wait forever.
-    expect(env.REALENV_LOCK).toBeUndefined();
-    expect(env.CHAIN_LOCK_HELD).toBeUndefined();
-    expect(fs.readFileSync(path.join(CHAIN, 'job', 'realenv.sh'), 'utf8')).toMatch(/^unset REALENV_LOCK$/m);
-  });
-
-  it("gets its own prefix, its work directory under the job's output, the chain's images, and pulls what it lacks", () => {
-    expect(env).toMatchObject({
-      JOB: 'realenv',
-      SRC: '/var/lib/filex-nightly/src',
-      REALENV_PREFIX: 'fxnightly-re',
-      REALENV_PULL: '1',
-      REALENV_OO_IMAGE: 'onlyoffice/documentserver:9.4',
-      REALENV_RUNNER_IMAGE: 'mcr.microsoft.com/playwright:v1.59.1-noble',
-      REALENV_STAGES: 'tls sso',
-      REALENV_ALLOW_SKIP: '0',
-      REALENV_PRIV_NET: '172.30.52',
-      PATH: '/usr/bin',
-    });
-    expect(env.OUT.replace(/\\/g, '/')).toBe('/var/lib/filex-nightly/runs/nightly-20261007-010000Z-1a2b3c4d/out/realenv');
-    expect(env.REALENV_WORK.replace(/\\/g, '/')).toBe('/var/lib/filex-nightly/runs/nightly-20261007-010000Z-1a2b3c4d/out/realenv/work');
-    expect(env.REALENV_PUB_NET).toBeUndefined();
-  });
-
-  it('is red, not green, when a stage was skipped (unless CHAIN_REALENV_ALLOW_SKIP=1)', () => {
-    // e2e/realenv/run.sh exits 0 when it skips a stage whose images it cannot
-    // get: a night that ran no stage must not read as one they passed.
-    const sh = fs.readFileSync(path.join(CHAIN, 'job', 'realenv.sh'), 'utf8');
-    expect(sh).toMatch(/"\$skipped" -gt 0/);
-    expect(sh).toMatch(/REALENV_ALLOW_SKIP:-0/);
   });
 });
 

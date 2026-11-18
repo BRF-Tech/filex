@@ -13,10 +13,10 @@
 //     three engines, and the -race shards (both from scripts/test-shards.json
 //     through scripts/test-shards.mjs), as many at once as the budget allows
 //     (scripts/chain/schedule.mjs).
-// The nightly profile adds the Go test against the Document Server, the Go
-// tests against a real S3 provider, `pnpm shots` and e2e/realenv to the
-// browser round (plan.mjs NIGHTLY_EXTRAS); realenv is a host job, the one job
-// that is not a container.
+// The nightly profile adds the Go test against the Document Server and the Go
+// tests against a real S3 provider to the browser round (plan.mjs
+// NIGHTLY_EXTRAS); a targeted run adds the ones CHAIN_EXTRAS names, `pnpm
+// shots` among them for a release's pictures (plan.mjs EXTRAS).
 //
 // What it leaves, under $CHAIN_ROOT/runs/<run-id>/: chain.log (a JOBSTART and
 // a JOBEXIT line per job), logs/<job>.log, out/<job>/ (test output), and
@@ -59,8 +59,8 @@ const REPO = path.resolve(CHAIN_DIR, '..', '..');
 const USAGE = `usage: bash scripts/chain/run.sh [options]
 
   --profile full|targeted|nightly   what to run (default: full); nightly is full
-                   plus CHAIN_NIGHTLY_EXTRAS (ds-go, s3-live, shots, realenv), and is
-                   a person's run on the build host
+                   plus CHAIN_NIGHTLY_EXTRAS (ds-go, s3-live), and is a person's
+                   run on the build host
   --src DIR        the checkout under test (default: the repository run.sh is in)
   --env FILE       settings, KEY=VALUE lines (default: $CHAIN_ENV, else
                    ~/.config/filex-chain.env when it exists); the process
@@ -272,13 +272,6 @@ function settings(env, args) {
     s3Live: Object.fromEntries(
       [...S3_LIVE_KEYS.required, ...S3_LIVE_KEYS.optional].filter((k) => env[k] !== undefined).map((k) => [k, env[k]]),
     ),
-    // The realenv job of the nightly profile (job/realenv.sh).
-    realenv: {
-      stages: env.CHAIN_REALENV_STAGES || '',
-      allowSkip: env.CHAIN_REALENV_ALLOW_SKIP === '1',
-      privNet: env.CHAIN_REALENV_PRIV_NET || '',
-      pubNet: env.CHAIN_REALENV_PUB_NET || '',
-    },
   };
 }
 
@@ -477,49 +470,22 @@ export const KIND = {
   local: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true, browserTmp: true },
   nopub: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true, browserTmp: true },
   s3: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true, browserTmp: true },
-  // The nightly extras (plan.mjs NIGHTLY_EXTRAS). ds-go runs as root: the
+  // The extras (plan.mjs EXTRAS). ds-go runs as root: the
   // Document Server's secret file is root's, 0600; so does s3-live, for the
   // bucket's key (etc/s3-live.env, 0600 - never a `-e` argument).
   'ds-go': { image: 'go', script: 'ds-go.sh', mem: '6g', apps: true, dsEnv: true, tmp: true },
   's3-live': { image: 'go', script: 's3-live.sh', mem: '6g', s3Live: true, tmp: true },
   // browserTmp as a Playwright line: the same harness (`browserTmp` above).
   shots: { image: 'pw', script: 'shots.sh', mem: '9g', shares: 4096, browser: true, goroot: true, browserTmp: true },
-  // ⚠ A host job is no container: e2e/realenv/run.sh starts containers of its
-  // own with this host's Docker, and mounts the tree by its path HERE.
-  realenv: { host: true, script: 'realenv.sh' },
 };
 
-/** The images the jobs of these kinds run in (a host job runs in none). */
-export function jobImages(kinds, images) {
-  return [...new Set([...kinds].filter((k) => KIND[k].image).map((k) => images[KIND[k].image]))];
-}
-
 /**
- * The environment of a host job (KIND[kind].host): this process's own, and
- * where the job writes. ⚠ REALENV_LOCK is dropped: the chain holds the build
- * lock for the whole run, and realenv waiting for the same lock would wait
- * forever.
+ * The images the jobs of these kinds run in. Every job is a container: the
+ * one host job, realenv (e2e/realenv/run.sh with this host's Docker), left
+ * the chain in #365 for GitHub's weekly realenv.yml.
  */
-export function hostJobEnv(base, { job, dir, src, prefix, images, realenv = {} }) {
-  const env = { ...base };
-  delete env.REALENV_LOCK;
-  delete env.CHAIN_LOCK_HELD;
-  return {
-    ...env,
-    JOB: job.name,
-    OUT: path.join(dir, 'out', job.name),
-    SRC: src,
-    RUN_DIR: dir,
-    REALENV_PREFIX: `${prefix}-re`,
-    REALENV_PULL: '1',
-    REALENV_WORK: path.join(dir, 'out', job.name, 'work'),
-    REALENV_OO_IMAGE: images.ds,
-    REALENV_RUNNER_IMAGE: images.pw,
-    REALENV_STAGES: realenv.stages || '',
-    REALENV_ALLOW_SKIP: realenv.allowSkip ? '1' : '0',
-    ...(realenv.privNet ? { REALENV_PRIV_NET: realenv.privNet } : {}),
-    ...(realenv.pubNet ? { REALENV_PUB_NET: realenv.pubNet } : {}),
-  };
+export function jobImages(kinds, images) {
+  return [...new Set([...kinds].map((k) => images[KIND[k].image]))];
 }
 
 // Exported: scripts/ci/browser-prep.mjs gives every CI browser part (GitHub's
@@ -969,10 +935,10 @@ class Chain {
     this.status[job.name] = 'running';
     const logFile = path.join(this.dir, 'logs', `${job.name}.log`);
     const k = KIND[job.kind];
-    const image = k.host ? 'host' : this.cfg.images[k.image];
+    const image = this.cfg.images[k.image];
     const start = Date.now();
     this.beforeJob(job);
-    this.load.set(job.name, { cidFile: k.host ? null : this.cidFile(job), cg: null, hostMemFull: null, hostIoFull: null, diskWriteMs: null });
+    this.load.set(job.name, { cidFile: this.cidFile(job), cg: null, hostMemFull: null, hostIoFull: null, diskWriteMs: null });
     fs.writeFileSync(logFile, `JOBSTART ${iso()} ${job.name} ${image} ${k.script}\n`);
     this.log(`JOBSTART ${job.name} lane=${lane} weight=${job.weight}GiB image=${image}`);
     const rc = await new Promise((resolve) => {
@@ -984,17 +950,8 @@ class Chain {
         fs.closeSync(fd);
         resolve(code);
       };
-      // A host job gets a process group of its own: stop() ends the job and
-      // every process it started (detached), not only the bash in front.
-      const child = k.host
-        ? spawn('bash', [path.join(CHAIN_DIR, 'job', k.script)], {
-            cwd: this.cfg.src,
-            env: hostJobEnv(process.env, { job, dir: this.dir, src: this.cfg.src, prefix: this.P, images: this.cfg.images, realenv: this.cfg.realenv }),
-            stdio: ['ignore', fd, fd],
-            detached: true,
-          })
-        : spawn('docker', this.containerArgs(job), { stdio: ['ignore', fd, fd] });
-      this.running.set(job.name, { job, child, host: !!k.host });
+      const child = spawn('docker', this.containerArgs(job), { stdio: ['ignore', fd, fd] });
+      this.running.set(job.name, { job, child });
       child.on('error', (e) => {
         fs.appendFileSync(logFile, `could not start docker: ${e.message}\n`);
         finish(127);
@@ -1397,16 +1354,6 @@ class Chain {
     this.log(`stopping on ${signal}: removing this run's containers`);
     const ids = docker(['ps', '-aq', '--filter', `label=filex-chain-run=${this.runId}`]).stdout.split('\n').filter(Boolean);
     if (ids.length) docker(['rm', '-f', ...ids]);
-    // A host job's containers are its own (realenv removes them on TERM).
-    for (const { job, child, host } of this.running.values()) {
-      if (!host || !child.pid) continue;
-      this.log(`stopping ${job.name} (process group ${child.pid})`);
-      try {
-        process.kill(-child.pid, 'SIGTERM');
-      } catch {
-        /* already gone */
-      }
-    }
   }
 
   async run() {
@@ -1443,8 +1390,9 @@ class Chain {
 
 /**
  * A job's warnings: its `JOBWARN ...` lines (job/common.sh warn), in order.
- * A green job's way to say something a person must read - the nightly shots
- * job when only its language packs are behind the tree (task #187).
+ * A green job's way to say something a person must read. The nightly shots
+ * job said so when only its language packs were behind the tree (task #187),
+ * until shots left the nightly profile (#365); no job warns now.
  */
 export function jobWarnings(text) {
   return String(text ?? '')

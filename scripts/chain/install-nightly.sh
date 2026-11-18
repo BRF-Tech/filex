@@ -5,7 +5,7 @@
 # morning. What a night does: scripts/chain/nightly.mjs and
 # docs/CONTRIBUTING.md -> "The nightly".
 #
-#   sudo bash scripts/chain/install-nightly.sh --root /var/lib/filex-nightly #        --env /etc/filex-nightly.env --remote <clone URL of the repository> #        [--branch main] [--at "02:00 Europe/Istanbul"] [--report-at "07:00 Europe/Istanbul"] #        [--enable] [--dry-run]
+#   sudo bash scripts/chain/install-nightly.sh --root /var/lib/filex-nightly #        --env /etc/filex-nightly.env --remote <clone URL of the repository> #        [--branch main] [--at "02:00 Europe/Istanbul"] [--report-at "07:00 Europe/Istanbul"] #        [--runner-list FILE] [--enable] [--dry-run]
 #
 # It never overwrites the settings file and never deletes anything:
 #   1. copies nightly.mjs, nightly-lib.mjs, report.mjs, env.mjs and the
@@ -22,7 +22,11 @@
 #   4. installs filex-nightly.{service,timer} and
 #      filex-nightly-report.{service,timer} into /etc/systemd/system and
 #      reloads systemd. With --enable it also enables and starts both timers;
-#      without, it prints the command.
+#      without, it prints the command. A host whose job runner starts the
+#      jobs already (filex-nightly, filex-nightly-report in --runner-list,
+#      /etc/brf-watchdog/jobs.enabled by default; scripts/lib/job-runner.sh)
+#      keeps the timers off: --enable is refused there (exit 3), since a timer
+#      would start each job a second time.
 #
 # --dry-run prints every step and changes nothing. Linux, root, systemd,
 # Docker, git, node 20 or later, python3 (the export).
@@ -38,6 +42,8 @@ REPORT_AT="07:00 Europe/Istanbul"
 UNIT_DIR="/etc/systemd/system"
 ENABLE=0
 DRY=0
+. "$HERE/../lib/job-runner.sh"
+RUNNER_LIST="$JOB_RUNNER_LIST_DEFAULT"
 
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}"; }
 
@@ -50,6 +56,7 @@ while [ $# -gt 0 ]; do
     --at) AT="${2:?--at needs a time}"; shift 2 ;;
     --report-at) REPORT_AT="${2:?--report-at needs a time}"; shift 2 ;;
     --unit-dir) UNIT_DIR="${2:?--unit-dir needs a directory}"; shift 2 ;;
+    --runner-list) RUNNER_LIST="${2:?--runner-list needs a file}"; shift 2 ;;
     --enable) ENABLE=1; shift ;;
     --dry-run) DRY=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -135,8 +142,17 @@ if command -v systemd-analyze >/dev/null 2>&1; then
   done
 fi
 
+OWNED="$(runner_jobs "$RUNNER_LIST" filex-nightly filex-nightly-report)"
+if [ "$ENABLE" = 1 ] && [ -n "$OWNED" ]; then
+  runner_refuse install-nightly "$RUNNER_LIST" $OWNED
+  exit 3
+fi
 if [ "$ENABLE" = 1 ]; then
   run systemctl enable --now filex-nightly.timer filex-nightly-report.timer
+elif [ -n "$OWNED" ]; then
+  say "timers left off. Check the settings and try a night by hand:"
+  say "  $NODE $ROOT/bin/nightly.mjs run --env $ENV_FILE --dry-run"
+  runner_hints install-nightly $OWNED
 else
   say "not enabled. Check the settings, try a night by hand, then enable the timers:"
   say "  $NODE $ROOT/bin/nightly.mjs run --env $ENV_FILE --dry-run"

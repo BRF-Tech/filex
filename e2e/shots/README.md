@@ -78,11 +78,11 @@ published, and no page links one, that nobody looked at
 
 ```bash
 pnpm shots                        # the scenes whose digest moved
-pnpm shots --all                  # every scene: the chain's nightly profile, a major release, a set from another OS
+pnpm shots --all                  # every scene: the chain's shots job, a major release, a set from another OS
 pnpm shots --only roles,groups    # these; the rest stand as published or as last taken
 pnpm shots --no-build             # shoot bin/filex as it is (still verified)
 pnpm shots --without-apps         # leave out the scenes that need app builds (CI does)
-pnpm shots --all --keep-going     # a failed scene does not stop the rest; the run still fails (the chain's nightly profile)
+pnpm shots --all --keep-going     # a failed scene does not stop the rest; the run still fails (the chain's shots job)
 ```
 
 A run that failed half way is not wasted: the scenes it took before the
@@ -153,11 +153,10 @@ records it (`"platform": "linux"`, `"environment": "chain"`):
   (`--all`, every scene taken), never a scene at a time;
 - `adopt <dir> --platform <os>` records where an adopted folder was taken.
 
-Every night the chain's shots job (`scripts/chain/job/shots.sh`, `pnpm shots
---all --keep-going`) takes every scene and keeps the pictures, the review and
-the contact sheet in the run's `out/shots/`, so the changes since the
-published set are known the morning after they land. A release takes them the
-same way, into its own checkout:
+The chain's shots job (`scripts/chain/job/shots.sh`, `pnpm shots --all
+--keep-going`) takes every scene and keeps the pictures, the review and the
+contact sheet in the run's `out/shots/`. A release takes its set so, into its
+own checkout:
 
 ```bash
 CHAIN_EXTRAS=shots bash scripts/chain/run.sh --profile targeted --src <the release checkout>
@@ -167,9 +166,12 @@ then `upload` and `accept` from that checkout. `CHAIN_SHOTS_ONLY=a,b` on the
 same command takes only those scripts (a release whose language packs are
 behind takes the rest, and the published language pack picture stands).
 A language pack behind the tree fails `langpack.mjs` (it exits 3, and the
-review records the scene as `packs-behind`): on a release's run that is red,
-in the chain's nightly profile - when it is the only failed scene - a
-warning, since the strings the day added are translated the night after. ⚠ The 0.52.0 set, adopted when
+review records the scene as `packs-behind`): the run is red (until #365 the
+chain's nightly profile warned instead when that was its only failed scene).
+Every week GitHub takes every scene but the app and Document Server ones too
+(`.github/workflows/shots.yml`, publishing nothing), so the changes since the
+published set are known before release day (the build host's nightly chain
+did that every night until #361). ⚠ The 0.52.0 set, adopted when
 the pictures left the repository, was taken on the build host itself (DejaVu
 Sans): the first night's `--all` shows every picture of it changed, and
 accepting that run moves the set to the chain - once.

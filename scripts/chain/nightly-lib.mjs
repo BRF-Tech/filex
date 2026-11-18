@@ -34,13 +34,13 @@ import path from 'node:path';
 const DAY_MS = 86_400_000;
 const short = (sha) => String(sha ?? '').slice(0, 8) || '?';
 
-// ── the extras of the chain's nightly profile ───────────────────────────────
+// ── the extras of a chain run ───────────────────────────────────────────────
 
 /**
- * What the chain's nightly profile (run.sh --profile nightly, a person's run
- * on the build host since #361) runs on top of the full one, in the browser
- * round (scripts/chain/plan.mjs). None of them is in the full chain or in
- * GitHub's matrix, each for its own reason:
+ * What a chain run can add to its browser round on top of the full chain
+ * (scripts/chain/plan.mjs): the nightly profile takes NIGHTLY_EXTRAS, a
+ * targeted run the ones CHAIN_EXTRAS names. None of them is in the full chain
+ * or in GitHub's matrix, each for its own reason:
  *
  *   ds-go    the Go test that needs a real ONLYOFFICE Document Server and the
  *            Convert app (backend/internal/server/office_engine_ds_test.go):
@@ -53,17 +53,30 @@ const short = (sha) => String(sha ?? '').slice(0, 8) || '?';
  *   shots    `pnpm shots --all`, every scene - the app scenes with the app
  *            builds and language packs the chain mounts, the ONLYOFFICE scene
  *            against the chain's Document Server (task #187) - each picture
- *            compared with the published one. It runs right after ds-go,
- *            while the Document Server is still up. A run whose only failed
- *            scene is a language pack behind the tree is a warning, not red
- *            (SHOTS_PACKS_BEHIND=warn; the maintainer, 2026-10-08).
- *   realenv  e2e/realenv/run.sh, filex against the real ACME, SSO and office
- *            servers. It starts containers of its own, so it runs on the host,
- *            not in a job container.
- *
- * CHAIN_NIGHTLY_EXTRAS picks some of them (comma-separated, `none` for none).
+ *            compared with the published one. A release takes its published
+ *            set this way (CHAIN_EXTRAS=shots, docs/CONTRIBUTING.md → Release
+ *            process); a scene whose language pack is behind the tree is red.
  */
-export const NIGHTLY_EXTRAS = ['ds-go', 's3-live', 'shots', 'realenv'];
+export const EXTRAS = ['ds-go', 's3-live', 'shots'];
+
+/**
+ * What the chain's nightly profile (run.sh --profile nightly, a person's run
+ * on the build host since #361) adds to the full one; CHAIN_NIGHTLY_EXTRAS
+ * picks some of them (comma-separated, `none` for none).
+ *
+ * ⚠ Task #365 (2026-11-18): every scene and realenv left the profile once
+ * GitHub ran them every week (#364: shots.yml, realenv.yml) - realenv was the
+ * chain's one job outside a container. The shots job stays for a release's
+ * set (EXTRAS). s3-live leaves too once s3-live.yml has run green against a
+ * real bucket; then the profile carries ds-go alone.
+ */
+export const NIGHTLY_EXTRAS = ['ds-go', 's3-live'];
+
+/** Where an extra that left the chain runs now: the error that refuses its name says so. */
+export const MOVED_EXTRAS = {
+  shots: 'every scene runs every week on GitHub (shots.yml); a release takes its set with CHAIN_EXTRAS=shots on a targeted run',
+  realenv: 'realenv runs every week on GitHub (realenv.yml), and by hand with e2e/realenv/run.sh',
+};
 
 /**
  * The extras that need the chain's Document Server (run.mjs starts it for a
@@ -173,9 +186,14 @@ export function nightlyExtras(env = {}) {
   if (v === 'none') return [];
   const asked = v.split(/[\s,]+/).filter(Boolean);
   for (const a of asked) {
-    if (!NIGHTLY_EXTRAS.includes(a)) throw new Error(`CHAIN_NIGHTLY_EXTRAS: "${a}" is none of ${NIGHTLY_EXTRAS.join(', ')} (or none)`);
+    if (!NIGHTLY_EXTRAS.includes(a)) throw new Error(`CHAIN_NIGHTLY_EXTRAS: "${a}" is none of ${NIGHTLY_EXTRAS.join(', ')} (or none)${movedWords(a)}`);
   }
   return NIGHTLY_EXTRAS.filter((x) => asked.includes(x));
+}
+
+/** The end of the error that refuses an extra which left the chain (MOVED_EXTRAS), or ''. */
+export function movedWords(name) {
+  return Object.hasOwn(MOVED_EXTRAS, name) ? `: since #365 ${MOVED_EXTRAS[name]}` : '';
 }
 
 // ── settings ────────────────────────────────────────────────────────────────
@@ -862,6 +880,14 @@ function lastCiLine(push, ci) {
 }
 
 /**
+ * Where a night's own output is, for a report that has no record to quote:
+ * the build host's job runner logs each job to /var/log/brf-jobs/<id>.log
+ * since it took the night over from the timer (task #362); a host that still
+ * starts it with filex-nightly.timer has the journal.
+ */
+export const NIGHTLY_LOG_WORDS = '/var/log/brf-jobs/filex-nightly.log (the job runner), or journalctl -u filex-nightly.service (a systemd timer)';
+
+/**
  * The morning report: one notification for the night.
  *
  *   tonight   the night's record (nightly.mjs writes tonight.json), or null
@@ -905,9 +931,9 @@ export function composeReport({
       severity: 'warning',
       title: `filex nightly ${localDate(nowMs, tz)}: no run recorded`,
       message: [
-        `The nightly left no record in the last ${maxAgeH} h: its timer did not fire, or it died before it wrote one.`,
+        `The nightly left no record in the last ${maxAgeH} h: nothing started it, or it died before it wrote one.`,
         last ? `Last record: ${last.night} ${last.decision} on ${short(last.sha)}${last.why ? ` (${last.why})` : ''}.` : 'There is no earlier record either.',
-        'Look at: journalctl -u filex-nightly.service',
+        `Look at: ${NIGHTLY_LOG_WORDS}`,
       ].join('\n'),
     };
   }
@@ -920,7 +946,7 @@ export function composeReport({
   if (tonight.phase && tonight.phase !== 'done') {
     const how = running
       ? `still going at ${localTime(nowMs, tz)}: ${tonight.phase}`
-      : `the nightly is gone (pid ${tonight.pid ?? '?'}) and left the night at "${tonight.phase}": it died or was killed - journalctl -u filex-nightly.service`;
+      : `the nightly is gone (pid ${tonight.pid ?? '?'}) and left the night at "${tonight.phase}": it died or was killed - ${NIGHTLY_LOG_WORDS}`;
     lines.push(head, `started ${localTime(at, tz)} (${tz}), ${how}`);
     return { severity: 'warning', title: `filex nightly ${night}: ${running ? 'still running' : `died while ${tonight.phase}`} (${short(tonight.sha)})`, message: finish(lines) };
   }
