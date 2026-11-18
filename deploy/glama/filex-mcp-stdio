@@ -1,0 +1,39 @@
+#!/bin/sh
+# The command Glama starts (deploy/glama/README.md). A throwaway filex in this
+# container - its own data and one local storage under /tmp, an administrator
+# with a random password, no update checks, no thumbnails - then an API key
+# for the MCP surface, then the stdio bridge. stdout carries only MCP
+# messages; filex's own output goes to its log.
+set -eu
+
+D=$(mktemp -d /tmp/filex-mcp.XXXXXX)
+mkdir -p "$D/data" "$D/files"
+P=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
+U=http://127.0.0.1:5212
+
+FILEX_DATA_DIR="$D/data" FILEX_LISTEN=127.0.0.1:5212 \
+  FILEX_ADMIN_EMAIL=admin@example.com FILEX_ADMIN_PASSWORD="$P" \
+  FILEX_DEFAULT_STORAGE_DRIVER=local FILEX_DEFAULT_STORAGE_NAME=files FILEX_DEFAULT_STORAGE_PATH="$D/files" \
+  FILEX_UPDATE_CHECK=0 FILEX_APP_PLUGIN_UPDATE_CHECK=0 FILEX_THUMBS_ENABLED=false \
+  filex serve >"$D/filex.log" 2>&1 &
+
+i=0
+until curl -fsS -o /dev/null "$U/healthz" 2>/dev/null; do
+  i=$((i + 1))
+  if [ "$i" -gt 240 ]; then
+    cat "$D/filex.log" >&2
+    exit 1
+  fi
+  sleep 0.25
+done
+
+curl -fsS -o /dev/null -c "$D/jar" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"admin@example.com\",\"password\":\"$P\"}" "$U/api/auth/login"
+T=$(curl -fsS -b "$D/jar" -H 'Content-Type: application/json' \
+  -d '{"label":"glama","scopes":"read,write,delete,comments:rw,mcp"}' "$U/api/admin/ai-tokens" |
+  node -pe 'JSON.parse(require("fs").readFileSync(0, "utf8")).token')
+rm -f "$D/jar"
+
+export FILEX_MCP_TOKEN="$T"
+unset P T
+exec node /usr/local/lib/filex-mcp-bridge.cjs

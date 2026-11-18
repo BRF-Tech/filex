@@ -2,20 +2,5 @@
   "$schema": "https://glama.ai/mcp/schemas/server.json",
   "maintainers": [
     "brkfun"
-  ],
-  "baseImage": "debian:trixie-slim",
-  "nodeVersion": "24",
-  "buildSteps": [
-    "curl -fsSL -o /tmp/filex.tar.gz https://github.com/BRF-Tech/filex/releases/download/v0.60.2/filex_0.60.2_linux_x86_64.tar.gz",
-    "echo '5065cbd92907be9f5fd977a134555e9ba8aeebe2127ae44bdba3a0d901fd4414  /tmp/filex.tar.gz' | sha256sum -c -",
-    "tar -xzf /tmp/filex.tar.gz -C /usr/local/bin filex && rm -f /tmp/filex.tar.gz",
-    "npm install -g mcp-remote@0.15.2",
-    "printf '%s\\n' '#!/bin/sh' 'set -eu' 'D=$(mktemp -d /tmp/filex-mcp.XXXXXX)' 'mkdir -p \"$D/data\" \"$D/files\"' 'P=$(od -An -N24 -tx1 /dev/urandom | tr -d \" \\n\")' 'FILEX_DATA_DIR=\"$D/data\" FILEX_LISTEN=127.0.0.1:5212 FILEX_ADMIN_EMAIL=admin@example.com FILEX_ADMIN_PASSWORD=\"$P\" FILEX_DEFAULT_STORAGE_DRIVER=local FILEX_DEFAULT_STORAGE_NAME=files FILEX_DEFAULT_STORAGE_PATH=\"$D/files\" FILEX_UPDATE_CHECK=0 FILEX_APP_PLUGIN_UPDATE_CHECK=0 FILEX_THUMBS_ENABLED=false filex serve >\"$D/filex.log\" 2>&1 &' 'i=0' 'until curl -fsS -o /dev/null http://127.0.0.1:5212/healthz 2>/dev/null; do i=$((i+1)); if [ \"$i\" -gt 240 ]; then cat \"$D/filex.log\" >&2; exit 1; fi; sleep 0.25; done' 'curl -fsS -o /dev/null -c \"$D/jar\" -H \"Content-Type: application/json\" -d \"{\\\"email\\\":\\\"admin@example.com\\\",\\\"password\\\":\\\"$P\\\"}\" http://127.0.0.1:5212/api/auth/login' 'T=$(curl -fsS -b \"$D/jar\" -H \"Content-Type: application/json\" -d \"{\\\"label\\\":\\\"glama\\\",\\\"scopes\\\":\\\"read,write,delete,comments:rw,mcp\\\"}\" http://127.0.0.1:5212/api/admin/ai-tokens | node -pe \"JSON.parse(require(\\\"fs\\\").readFileSync(0,\\\"utf8\\\")).token\")' 'umask 077' 'printf \"Authorization: Bearer %s\\n\" \"$T\" > \"$D/headers\"' 'rm -f \"$D/jar\"' 'unset P T' 'exec mcp-remote http://127.0.0.1:5212/api/ai/mcp --header-file \"$D/headers\" --transport http-only --allow-http --silent' > /usr/local/bin/filex-mcp-stdio && chmod 755 /usr/local/bin/filex-mcp-stdio"
-  ],
-  "cmdArguments": [
-    "mcp-proxy",
-    "--",
-    "/usr/local/bin/filex-mcp-stdio"
-  ],
-  "placeholderArguments": {}
+  ]
 }

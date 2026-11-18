@@ -13,6 +13,7 @@ newest release). Full walkthroughs: [`docs/INSTALLATION.md`](../docs/INSTALLATIO
 | [`runtipi/filex/`](runtipi/filex/) | Runtipi app package (`config.json` + dynamic `docker-compose.json`). |
 | [`unraid/filex.xml`](unraid/) | Unraid Community Applications template, published from [BRF-Tech/unraid-templates](https://github.com/BRF-Tech/unraid-templates). |
 | [`portainer/template.json`](portainer/) | Portainer App Templates (v3) definition. |
+| [`glama/`](glama/) | The build behind the [Glama](https://glama.ai/mcp/servers/BRF-Tech/filex) MCP directory listing: a throwaway filex in the image and a stdio bridge to its MCP endpoint, so Glama can start it and list its tools. |
 
 Each app-store directory has its own `README.md` with install steps and the
 required settings. Common to all of them:
