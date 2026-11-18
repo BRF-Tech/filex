@@ -205,14 +205,13 @@ name: Release
 # A tag whose message carries the line `surfaces: server` is a SERVER patch:
 # X.Y.Z+1, its changes reaching the server alone (scripts/release/surfaces.mjs
 # in the private tree says which files do). Its run publishes the server's
-# surface and nothing else, ~30 minutes after its code was done instead of
-# two hours:
-#   - `verify` asks for ci.yml's push run on the commit to have built it
-#     ("Go vet + build" green, waited for while it runs) and no dry run; the
-#     rest of the full matrix runs on behind the release, and the update
-#     manifest offers the patch to automatic updates only once it passed;
-#   - `docker` builds both images in this run (nothing to promote) and
-#     `promote-check` / `docker-manifest` tag them as for any release;
+# surface and nothing else:
+#   - `verify` asks of its commit what it asks of every release: ci.yml's
+#     full matrix and a dry run of everything, both passed (#361; until
+#     0.61.2 it asked for "Go vet + build" alone and let the rest of the
+#     matrix run behind the release), and the tag run promotes that dry
+#     run's images (`promote-check` / `docker-manifest`) - the very images
+#     the release tool pulled by digest and looked into before the tag;
 #   - `binaries` makes the Release with the server archives and the CLI
 #     binaries, without the CLI's Homebrew cask and winget pull request (the
 #     CLI's package managers are another surface), and does not mark it the
@@ -627,53 +626,9 @@ jobs:
             SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
           fi
           export SHA
-          # #252: a server patch is published once GitHub has BUILT its
-          # commit - ci.yml's "Go vet + build" part of the push run, green -
-          # and before the rest of the matrix: that runs on behind the
-          # release, and the update manifest offers the patch to automatic
-          # updates only once it passed. No dry run ran (nothing to promote):
-          # `docker` builds the images here. A red or missing part, or GitHub
-          # not answering, and nothing is published.
-          if [ "$EVENT" = push ] && [ "${SURFACES:-all}" = server ]; then
-            export PART="Go vet + build"
-            poll="${VERIFY_POLL_SECS:-30}"
-            max="${VERIFY_SERVER_WAIT_SECS:-2700}"
-            runs="https://github.com/$GITHUB_REPOSITORY/actions/runs"
-            waited=0
-            while :; do
-              ci=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
-                -f head_sha="$SHA" -f event=push -f per_page=100 \
-                --jq '[.workflow_runs[] | select(.head_sha == env.SHA and .event == "push")][0].id // empty')
-              state=""
-              if [ -n "$ci" ]; then
-                state=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs/$ci/jobs" -f filter=latest -f per_page=100 --paginate \
-                  --jq '.jobs[] | select(.name == env.PART) | "\(.status) \(.conclusion // "")"' | head -1)
-              fi
-              case "$state" in
-                "completed success") break ;;
-                completed*)
-                  echo "::error::$TAG publishes nothing: \"$PART\" of ci.yml run $runs/$ci on $SHA ended ${state#completed }"
-                  exit 1 ;;
-              esac
-              if [ "$waited" -ge "$max" ]; then
-                echo "::error::$TAG publishes nothing: ci.yml on $SHA did not build it within $((max / 60)) min (${ci:+run $runs/$ci, }\"$PART\": ${state:-no such part yet})"
-                exit 1
-              fi
-              sleep "$poll"
-              waited=$((waited + poll))
-            done
-            {
-              echo "evidence=github-server"
-              echo "promote=false"
-            } >> "$GITHUB_OUTPUT"
-            {
-              echo "### $TAG ($SHA) is a server patch"
-              echo "- GitHub built it: \"$PART\" of $runs/$ci"
-              echo "- the rest of the full matrix runs behind it; the update manifest offers it to automatic updates once that passed"
-              echo "- no dry run: this run builds the images, and publishes no desktop package, npm package or package manager"
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
+          # #361: a server patch (#252) is asked what every release is asked
+          # - the full matrix and a dry run, below - and promotes that dry
+          # run's images; only what it publishes differs (`surfaces`).
           export WANT="dry run all $SHA"
           # The last job of ci.yml's full matrix (scripts/ci-parts.mjs, completeName).
           export COMPLETE="All tests (full)"
@@ -800,6 +755,9 @@ jobs:
             echo "### $TAG ($SHA) was tested before it was tagged"
             echo "- CI, the full matrix: $runs/$ci"
             echo "- dry run: $runs/$dry"
+            if [ "${SURFACES:-all}" = server ]; then
+              echo "- a server patch: the dry run's images are promoted; no desktop package, npm package or package manager is published"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ── Binaries (linux/macOS/windows × amd64/arm64) → GitHub Release ───────
