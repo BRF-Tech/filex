@@ -4,7 +4,7 @@
  * `viewer` on a file - one copy for the specs that build such an app by hand
  * (175 the sandbox, 228 a frame of its own package and blob:, 229 ui.print).
  */
-import { expect, type APIRequestContext, type Frame, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Frame, type Locator, type Page } from '@playwright/test';
 import { openSignedIn } from './auth';
 
 /** One row of the install review (wasmplugin.PermissionRow). */
@@ -64,4 +64,30 @@ export async function openAppInterface(page: Page, store: string, fileName: stri
   await frame.waitForFunction(() => document.body.dataset.ready === '1' || !!document.body.dataset.error);
   expect(await frame.evaluate(() => document.body.dataset.error ?? null), 'the interface started').toBeNull();
   return frame;
+}
+
+/**
+ * Click `button` of a question filex draws OVER an app's frame (the changes
+ * an earlier opening left, 235; a print, 229) until the question is gone.
+ *
+ * ⚠ Task #363 (2026-11-18): in Firefox a click made the moment such a row
+ * appears can be lost. ci.yml 44230897479, part "firefox 3/4": 235 clicked
+ * "Apply my changes" 76 ms after the row showed (on the first attempt and
+ * again on the retry) and 229 "Don't allow" 77 ms after (its first attempt).
+ * Playwright logged "click action done" each time, yet no handler ran (no
+ * lease request followed the apply, the print's answer never came in 30 s)
+ * and the row stayed. Playwright's hit-target check counts a click whose
+ * events never reached the page as done; the likeliest place they went is
+ * the app's frame under the row, which the browser had not yet painted the
+ * row over. The row's handlers are sound, and a person never clicks within a
+ * frame or two of a row appearing: the race is the spec's click, so it is
+ * made again until it takes. A second click that does reach the row is
+ * harmless: the answer is taken once (AppFrame answerUnsent clears the
+ * question, denyPrint aborts).
+ */
+export async function clickOverFrame(button: Locator, question: Locator, { timeout = 20_000 }: { timeout?: number } = {}): Promise<void> {
+  await expect(async () => {
+    if (await question.isVisible()) await button.click({ timeout: 2_000 });
+    await expect(question).toBeHidden({ timeout: 1_000 });
+  }, 'the question over the frame took the click').toPass({ timeout, intervals: [250, 500, 1_000] });
 }

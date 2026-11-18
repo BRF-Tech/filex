@@ -36,7 +36,7 @@ import { loginAs } from '../helpers/auth';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage, storageRoot } from '../helpers/seed';
 import { setAccountViewMode } from '../helpers/prefs';
 import { settled } from '../helpers/stable';
-import { installInterfaceApp, openAppInterface, removeAppByName } from '../helpers/appInterface';
+import { clickOverFrame, installInterfaceApp, openAppInterface, removeAppByName } from '../helpers/appInterface';
 import { zip } from '../helpers/zip';
 
 const PW = 'correct horse battery staple';
@@ -508,8 +508,9 @@ test.describe.serial('Editing together: watchers, changes kept through a lost co
       await expect(q).toContainText(name);
       await expect(q).toContainText('Others have edited the document since');
       await expect(page.getByTestId('appframe-unsent-discard')).toHaveText('Discard them');
-      await page.getByTestId('appframe-unsent-apply').click();
-      await expect(q).toBeHidden();
+      // The row lies over the app's frame: a click the moment it appears can
+      // reach the frame instead (Firefox, #363; helpers/appInterface).
+      await clickOverFrame(page.getByTestId('appframe-unsent-apply'), q);
       await started(again);
       await expect.poll(() => changes(b), { timeout: 30_000 }).toEqual([{ changes: ['theirs, meanwhile'] }, { changes: ['mine, from before'] }]);
       expect(await keptCount(page)).toBe(0);

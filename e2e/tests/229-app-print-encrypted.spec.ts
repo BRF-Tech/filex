@@ -29,7 +29,7 @@ import { test, expect, type APIRequestContext, type Frame, type Page } from '@pl
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage, storageRoot } from '../helpers/seed';
-import { installInterfaceApp, openAppInterface, removeAppByName, type ReviewRow } from '../helpers/appInterface';
+import { clickOverFrame, installInterfaceApp, openAppInterface, removeAppByName, type ReviewRow } from '../helpers/appInterface';
 import { zip } from '../helpers/zip';
 
 /* ── the app ────────────────────────────────────────────────────────────── */
@@ -246,7 +246,9 @@ test.describe.serial('An app’s interface prints a PDF through filex, and is to
     expect(await appFrame.boundingBox(), 'the frame keeps its place and size while asked').toEqual(before);
     const barBox = (await bar.boundingBox())!;
     expect(barBox.y, 'the row is over the frame').toBeGreaterThanOrEqual(before!.y - 1);
-    await page.locator('[data-testid="appframe-print-deny"]').click();
+    // The row lies over the app's frame: a click the moment it appears can
+    // reach the frame instead (Firefox, #363; helpers/appInterface).
+    await clickOverFrame(bar.locator('[data-testid="appframe-print-deny"]'), bar);
     expect((await answer).error?.code).toBe('cancelled');
     await expect(page.locator('[data-testid="appframe-print-ask"]')).toHaveCount(0);
     await expect(page.locator('iframe[data-testid="appframe-print"]')).toHaveCount(0);

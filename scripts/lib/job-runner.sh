@@ -8,9 +8,10 @@
 # their systemd timers to the host's job runner (brf-watchdog), which starts
 # the jobs its list names (one job id a line, `#` starts a comment) from its
 # own copy of `main` and logs each one to /var/log/brf-jobs/<id>.log. An
-# installer run with --enable after that turned the timer back on, and every
-# job ran twice a night (the runner warns about a job with a timer of its
-# own). --runner-list names another list; a host without one is left as it was.
+# installer run with --enable after that would turn the timer back on beside
+# the runner, and every job would run twice (the runner warns about a job with
+# a timer of its own). --runner-list names another list; a host without one is
+# left as it was.
 
 JOB_RUNNER_LIST_DEFAULT=/etc/brf-watchdog/jobs.enabled
 
