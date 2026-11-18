@@ -46,18 +46,14 @@ const short = (sha) => String(sha ?? '').slice(0, 8) || '?';
  *            Convert app (backend/internal/server/office_engine_ds_test.go):
  *            it skips everywhere else. It runs right after the last line
  *            with the Document Server, which is still up for it.
- *   s3-live  the Go tests that talk to a REAL S3 provider (FILEX_TEST_S3_*,
- *            backend/internal/testutil/lives3), against the bucket the build
- *            host's settings name (S3_LIVE_KEYS), never GitHub's. When it
- *            runs, a test that only skipped is red.
- *   shots    `pnpm shots --all`, every scene - the app scenes with the app
+ *   shots   `pnpm shots --all`, every scene - the app scenes with the app
  *            builds and language packs the chain mounts, the ONLYOFFICE scene
  *            against the chain's Document Server (task #187) - each picture
  *            compared with the published one. A release takes its published
  *            set this way (CHAIN_EXTRAS=shots, docs/CONTRIBUTING.md → Release
  *            process); a scene whose language pack is behind the tree is red.
  */
-export const EXTRAS = ['ds-go', 's3-live', 'shots'];
+export const EXTRAS = ['ds-go', 'shots'];
 
 /**
  * What the chain's nightly profile (run.sh --profile nightly, a person's run
@@ -67,15 +63,18 @@ export const EXTRAS = ['ds-go', 's3-live', 'shots'];
  * ⚠ Task #365 (2026-11-18): every scene and realenv left the profile once
  * GitHub ran them every week (#364: shots.yml, realenv.yml) - realenv was the
  * chain's one job outside a container. The shots job stays for a release's
- * set (EXTRAS). s3-live leaves too once s3-live.yml has run green against a
- * real bucket; then the profile carries ds-go alone.
+ * set (EXTRAS). The live S3 tests (s3-live) left the chain altogether once
+ * s3-live.yml ran them green against an S3 gateway of the run's own
+ * (44341809830): no bucket and no key of the build host's any more. The
+ * profile carries ds-go alone.
  */
-export const NIGHTLY_EXTRAS = ['ds-go', 's3-live'];
+export const NIGHTLY_EXTRAS = ['ds-go'];
 
 /** Where an extra that left the chain runs now: the error that refuses its name says so. */
 export const MOVED_EXTRAS = {
   shots: 'every scene runs every week on GitHub (shots.yml); a release takes its set with CHAIN_EXTRAS=shots on a targeted run',
   realenv: 'realenv runs every week on GitHub (realenv.yml), and by hand with e2e/realenv/run.sh',
+  's3-live': 'the live S3 tests run every week on GitHub against an S3 gateway of their own (s3-live.yml), and by hand with gh workflow run s3-live.yml -R BRF-Tech/filex',
 };
 
 /**
@@ -86,46 +85,8 @@ export const MOVED_EXTRAS = {
 export const DS_EXTRAS = ['ds-go', 'shots'];
 
 /**
- * The settings of the s3-live job: the variables the live S3 suites read
- * (backend/internal/testutil/lives3), set in the chain's settings file
- * (0600). `required` are the ones without which the job is red: the bucket
- * and its key, and the region - it is part of the request signature, an
- * empty one signs "auto", and a provider with a region of its own refuses
- * that with an error that does not name the region (lesson #927: Versity S3
- * Gateway answers 400 AuthorizationHeaderMalformed). The endpoint may be
- * empty only for AWS itself.
- */
-export const S3_LIVE_KEYS = {
-  required: ['FILEX_TEST_S3_BUCKET', 'FILEX_TEST_S3_ACCESS_KEY', 'FILEX_TEST_S3_SECRET_KEY', 'FILEX_TEST_S3_REGION'],
-  optional: ['FILEX_TEST_S3_ENDPOINT', 'FILEX_TEST_S3_PATH_STYLE'],
-};
-
-/**
- * The file run.mjs hands the s3-live job (`<run>/etc/s3-live.env`, 0600,
- * removed when the run ends): one `KEY=VALUE` line per S3_LIVE_KEYS variable
- * the settings set. The values reach the job through this file and nothing
- * else - not `docker run -e`, whose arguments every process list and `docker
- * inspect` show - and are never logged: `missing` holds names only, the
- * required ones the settings leave unset.
- */
-export function s3LiveFile(env = {}) {
-  const lines = [];
-  const missing = [];
-  for (const key of [...S3_LIVE_KEYS.required, ...S3_LIVE_KEYS.optional]) {
-    const value = env[key];
-    if (value === undefined || value === '') {
-      if (S3_LIVE_KEYS.required.includes(key)) missing.push(key);
-      continue;
-    }
-    if (/[\r\n\0]/.test(String(value))) throw new Error(`${key} holds a line break: one line per value in the settings file`);
-    lines.push(`${key}=${value}`);
-  }
-  return { text: lines.length ? `${lines.join('\n')}\n` : '', missing };
-}
-
-/**
  * The code the live S3 tests measure. Since #364 GitHub runs them every
- * week (.github/workflows/s3-live.yml, the s3-live environment's bucket), so
+ * week (.github/workflows/s3-live.yml, against an S3 gateway of its own), so
  * the night says it when a change it pushes touches one of these: the
  * morning report names the files and the command that runs them now. Read
  * off what the four tests and the driver import:
@@ -141,13 +102,12 @@ export function s3LiveFile(env = {}) {
  *   backend/internal/testutil/lives3/      how the tests find their server
  *   backend/internal/usage/b2              the B2 report reader (TestB2_OverRealS3)
  *   .../handlers/rename_s3_live_test.go    the live rename test itself
- *   scripts/chain/job/s3-live.sh           the job
  *   backend/go.mod                         when a github.com/aws/ line moved:
  *                                          the SDK the driver speaks through
  *
  * Not the catalogue, the sync worker or the handlers the rename test also
  * goes through: their own suites test them on every run, and the live test is
- * there for what only a real provider answers.
+ * there for what only a real S3 server answers.
  */
 export const S3_LIVE_PATHS = [
   'backend/internal/storage/drivers/s3/',
@@ -161,7 +121,6 @@ export const S3_LIVE_PATHS = [
   'backend/internal/testutil/lives3/',
   'backend/internal/usage/b2',
   'backend/internal/api/handlers/rename_s3_live_test.go',
-  'scripts/chain/job/s3-live.sh',
 ];
 
 /**

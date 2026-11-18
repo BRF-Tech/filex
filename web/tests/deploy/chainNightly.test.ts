@@ -27,7 +27,6 @@ import { describe, expect, it } from 'vitest';
 import { parseEnvFile } from '../../../scripts/chain/env.mjs';
 import {
   PAGE_MARKERS,
-  S3_LIVE_KEYS,
   S3_LIVE_PATHS,
   SNAP_ARCHES,
   ciVerdict,
@@ -55,7 +54,6 @@ import {
   platformOfRow,
   releaseBusy,
   renderNightlyPage,
-  s3LiveFile,
   s3Touched,
   snapEdgeState,
   snapUploadVerdict,
@@ -380,23 +378,9 @@ describe('the export and the push, against throwaway repositories', () => {
     expect(s3Touched(['backend/internal/storage/drivers/s3/multipart.go', 'web/src/App.vue'])).toEqual(['backend/internal/storage/drivers/s3/multipart.go']);
     expect(s3Touched(['backend/go.mod'], '-\tgithub.com/aws/aws-sdk-go-v2 v1.30.0\n+\tgithub.com/aws/aws-sdk-go-v2 v1.31.0\n')).toEqual(['backend/go.mod']);
     expect(s3Touched(['backend/go.mod'], '+\tgolang.org/x/net v0.30.0\n')).toEqual([]);
-    for (const p of ['backend/internal/storage/drivers/s3/', 'backend/internal/storage/stall/', 'backend/internal/testutil/lives3/', 'scripts/chain/job/s3-live.sh']) expect(S3_LIVE_PATHS).toContain(p);
-  });
-});
-
-describe('the live S3 job of the chain (s3-live, a person\'s run)', () => {
-  const all = { FILEX_TEST_S3_BUCKET: 'b', FILEX_TEST_S3_ACCESS_KEY: 'k', FILEX_TEST_S3_SECRET_KEY: 's', FILEX_TEST_S3_REGION: 'eu-central-003', FILEX_TEST_S3_ENDPOINT: 'https://s3.example.com' };
-
-  it('hands the job exactly the FILEX_TEST_S3_* settings, one line each, and nothing else', () => {
-    expect(s3LiveFile({ ...all, OTHER: 'x' }).text).toBe(
-      'FILEX_TEST_S3_BUCKET=b\nFILEX_TEST_S3_ACCESS_KEY=k\nFILEX_TEST_S3_SECRET_KEY=s\nFILEX_TEST_S3_REGION=eu-central-003\nFILEX_TEST_S3_ENDPOINT=https://s3.example.com\n',
-    );
-    expect(() => s3LiveFile({ ...all, FILEX_TEST_S3_SECRET_KEY: 'a\nb' })).toThrow(/line break/);
-  });
-
-  it('names - and only names - what is missing, the region included (lesson #927)', () => {
-    expect(s3LiveFile({}).missing).toEqual(S3_LIVE_KEYS.required);
-    expect(s3LiveFile({ ...all, FILEX_TEST_S3_REGION: '' }).missing).toEqual(['FILEX_TEST_S3_REGION']);
+    for (const p of ['backend/internal/storage/drivers/s3/', 'backend/internal/storage/stall/', 'backend/internal/testutil/lives3/']) expect(S3_LIVE_PATHS).toContain(p);
+    // #365: the chain's s3-live job is gone; s3-live.yml runs them, against an S3 gateway of its own.
+    expect(S3_LIVE_PATHS.filter((p) => p.startsWith('scripts/'))).toEqual([]);
   });
 });
 
@@ -948,8 +932,10 @@ describe('the settings', () => {
     expect(cfg.push.author).toBe('');
     // What no longer runs at night says where it stands.
     expect(text).toContain('bash scripts/chain/run.sh --profile nightly --env <file>');
-    expect(text).toMatch(/CHAIN_EXTRAS=s3-live bash scripts\/chain\/run\.sh --profile targeted/);
-    for (const k of ['CHAIN_LOCK', 'NIGHTLY_PUBLISH', 'NIGHTLY_SNAP', 'NIGHTLY_QUIET', 'FILEX_TEST_S3_SECRET_KEY']) expect(text, k).not.toMatch(new RegExp(`^#? ?${k}=`, 'm'));
+    // #365: the live S3 tests run on GitHub against a gateway of their own; no FILEX_TEST_S3_* here.
+    expect(text).toContain('gh workflow run s3-live.yml -R BRF-Tech/filex');
+    expect(text).not.toMatch(/CHAIN_EXTRAS=s3-live/);
+    for (const k of ['CHAIN_LOCK', 'NIGHTLY_PUBLISH', 'NIGHTLY_SNAP', 'NIGHTLY_QUIET', 'FILEX_TEST_S3_BUCKET', 'FILEX_TEST_S3_ACCESS_KEY', 'FILEX_TEST_S3_SECRET_KEY']) expect(text, k).not.toMatch(new RegExp(`^#? ?${k}=`, 'm'));
   });
 
   it('parse the command lines of the night and the report', () => {

@@ -450,14 +450,14 @@ list's weights - GitHub's seconds, scaled to the host (`SHARD_TIMING` in
 shards' logs together (`cat out/race-handlers-*/race.out`) and re-cut it from
 the times of a real run.
 
-`--profile full` runs all of it; `nightly` runs the same plus its extras
-in the browser round, `ds-go` and `s3-live` (The nightly run, below: a
-person's run since #361); `targeted` runs the build and
+`--profile full` runs all of it; `nightly` runs the same plus its extra
+in the browser round, `ds-go` (The nightly run, below: a person's run since
+#361); `targeted` runs the build and
 its fast gates, then only what is asked for (`CHAIN_GO_PKGS`,
 `CHAIN_RACE_PKGS`, `CHAIN_MIGRATE=1`, `CHAIN_CY_SPECS`, `CHAIN_E2E_GREP` on
-`CHAIN_E2E_BROWSERS`, and `CHAIN_EXTRAS` - extras by name: `ds-go`,
-`s3-live`, or `shots` for a release's pictures, which `CHAIN_SHOTS_ONLY`
-narrows to some shot scripts). `CHAIN_E2E_GREP` reaches Playwright's `--grep`
+`CHAIN_E2E_BROWSERS`, and `CHAIN_EXTRAS` - extras by name: `ds-go`, or
+`shots` for a release's pictures, which `CHAIN_SHOTS_ONLY` narrows to some
+shot scripts). `CHAIN_E2E_GREP` reaches Playwright's `--grep`
 as one argument, spaces and all (a test title, or `01-smoke 02-`): a browser
 line's arguments travel to its job one a line (split into words, as they
 were before #244, every word after the first became a file filter).
@@ -797,12 +797,18 @@ nightly chain ran on its own until 2026-11-18:
   out as in any CI run, the pictures kept in the run's artifact. It publishes
   nothing: the published set is still taken and accepted in the build host's
   chain (Release process).
-- `.github/workflows/s3-live.yml` (Sundays): the live S3 tests against the
-  bucket the `s3-live` environment's secrets name - `FILEX_TEST_S3_BUCKET`,
-  `_ACCESS_KEY`, `_SECRET_KEY`, `_REGION`, `_ENDPOINT`, `_PATH_STYLE` - which
-  only main may deploy to. Without them the run says
-  `skipped: no S3 credentials` and is green; with them a test that only
-  skipped is red.
+- `.github/workflows/s3-live.yml` (Sundays): the live S3 tests
+  (`TestLiveProviderConformance`, `TestInit_Integration`,
+  `TestB2_OverRealS3`, `TestRenameOnS3_TheReportersSequence`) against an S3
+  gateway of the run's own - the Versity S3 Gateway `ci.yml`'s S3 line
+  starts, from the same `.github/workflows/scripts/ci-s3.sh` (`ci-s3.sh
+  live`: a bucket of its own, `FILEX_TEST_S3_*` in the job's environment,
+  us-east-1, path style). It reads no secret and reaches no provider (#365,
+  the owner's call: no real account's token for a test), so it measures the
+  S3 code over the wire against a real S3 implementation, not one
+  provider's answers; a provider's own bucket is the conformance test's to
+  run by hand (`FILEX_TEST_S3_*`, [Storage](STORAGE.md#a-local-s3-server)).
+  A test that only skipped is red.
 
 **What still runs nowhere on its own**: `ds-go`, the office engine's Go test
 against a real Document Server and the Convert app
@@ -810,13 +816,14 @@ against a real Document Server and the Convert app
 `nightly` profile - a person's run on the build host:
 `bash scripts/chain/run.sh --profile nightly --env <a chain settings file>`
 (`NIGHTLY_EXTRAS` in `scripts/chain/nightly-lib.mjs`; `CHAIN_NIGHTLY_EXTRAS`
-picks some). The profile's other extra, `s3-live`, is `s3-live.yml`'s above,
-and leaves the profile once that workflow has run green against a real
-bucket; the morning report still names a pushed change to the S3 code
-(`S3_LIVE_PATHS`). Every scene and realenv left the profile in #365 -
-realenv's was the chain's one job outside a container - and a
-`CHAIN_NIGHTLY_EXTRAS` that still names them is refused with where they run
-now. The chain's `shots` job stays for a release's set (Release process).
+picks some). Every scene, realenv and the live S3 tests (`s3-live`) left
+the profile in #365 - realenv's was the chain's one job outside a container,
+and with `s3-live` went the build host's last bucket key - and a
+`CHAIN_NIGHTLY_EXTRAS` or `CHAIN_EXTRAS` that still names one of them is
+refused with where it runs now. The morning report still names a pushed
+change to the S3 code (`S3_LIVE_PATHS`) and the command that runs
+`s3-live.yml` at once. The chain's `shots` job stays for a release's set
+(Release process).
 
 **What it leaves**, under its `CHAIN_ROOT`: the checkout (`src/`), the clone
 of the public repository the export is made in (`public/`), the page last
@@ -3831,10 +3838,12 @@ ones not yet published apply on top of one another in this order:
     and a weekly mode for a third, every week on the `nightly` branch's
     commit and by hand ([The nightly run](#the-nightly-run)) -
     `realenv.yml` (real ACME, SSO and office servers; a skipped stage is
-    red), `s3-live.yml` (the `s3-live` environment's `FILEX_TEST_S3_*`
-    secrets; without them `skipped: no S3 credentials`, green; a test that
-    only skipped is red) and `shots.yml`'s schedule (`pnpm shots --all
-    --keep-going`, publishing nothing). `weeklyChecks.test.ts` holds them.
+    red), `s3-live.yml` (the live S3 tests against an S3 gateway of the
+    run's own, started by `ci-s3.sh live`, which the patch adds beside the
+    argument-less form `ci.yml` runs; no environment and no secret; a test
+    that only skipped is red; #365) and `shots.yml`'s schedule (`pnpm shots
+    --all --keep-going`, publishing nothing). `weeklyChecks.test.ts` holds
+    them.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and

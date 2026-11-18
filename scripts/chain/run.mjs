@@ -13,10 +13,10 @@
 //     three engines, and the -race shards (both from scripts/test-shards.json
 //     through scripts/test-shards.mjs), as many at once as the budget allows
 //     (scripts/chain/schedule.mjs).
-// The nightly profile adds the Go test against the Document Server and the Go
-// tests against a real S3 provider to the browser round (plan.mjs
-// NIGHTLY_EXTRAS); a targeted run adds the ones CHAIN_EXTRAS names, `pnpm
-// shots` among them for a release's pictures (plan.mjs EXTRAS).
+// The nightly profile adds the Go test against the Document Server to the
+// browser round (plan.mjs NIGHTLY_EXTRAS); a targeted run adds the ones
+// CHAIN_EXTRAS names, `pnpm shots` among them for a release's pictures
+// (plan.mjs EXTRAS).
 //
 // What it leaves, under $CHAIN_ROOT/runs/<run-id>/: chain.log (a JOBSTART and
 // a JOBEXIT line per job), logs/<job>.log, out/<job>/ (test output), and
@@ -50,7 +50,7 @@ import {
   readDisk,
   readPressure,
 } from './host.mjs';
-import { S3_LIVE_KEYS, STALL, hostLine, pauseWords, s3LiveFile, stallWords } from './nightly-lib.mjs';
+import { STALL, hostLine, pauseWords, stallWords } from './nightly-lib.mjs';
 import { CHAIN_DIR, PROFILES, WEIGHTS, argsEnv, argsShown, buildPlan, expectedMinutes, loadLists, trackShare, trackWeight } from './plan.mjs';
 import { hostBudget, ioWaits, pickJobs, poolBudget, poolCeiling, readyJobs, simulate } from './schedule.mjs';
 
@@ -59,7 +59,7 @@ const REPO = path.resolve(CHAIN_DIR, '..', '..');
 const USAGE = `usage: bash scripts/chain/run.sh [options]
 
   --profile full|targeted|nightly   what to run (default: full); nightly is full
-                   plus CHAIN_NIGHTLY_EXTRAS (ds-go, s3-live), and is a person's
+                   plus CHAIN_NIGHTLY_EXTRAS (ds-go), and is a person's
                    run on the build host
   --src DIR        the checkout under test (default: the repository run.sh is in)
   --env FILE       settings, KEY=VALUE lines (default: $CHAIN_ENV, else
@@ -267,11 +267,6 @@ function settings(env, args) {
     // CHAIN_PAUSE_CMD / CHAIN_RESUME_CMD: run.sh runs them, this process only
     // says what the pause did (hookSettings, pauseOf).
     hooks: hookSettings(env),
-    // The s3-live job of the nightly profile: the FILEX_TEST_S3_* settings,
-    // handed to the job in a 0600 file by prepare() (nightly-lib s3LiveFile).
-    s3Live: Object.fromEntries(
-      [...S3_LIVE_KEYS.required, ...S3_LIVE_KEYS.optional].filter((k) => env[k] !== undefined).map((k) => [k, env[k]]),
-    ),
   };
 }
 
@@ -471,10 +466,8 @@ export const KIND = {
   nopub: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true, browserTmp: true },
   s3: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true, browserTmp: true },
   // The extras (plan.mjs EXTRAS). ds-go runs as root: the
-  // Document Server's secret file is root's, 0600; so does s3-live, for the
-  // bucket's key (etc/s3-live.env, 0600 - never a `-e` argument).
+  // Document Server's secret file is root's, 0600.
   'ds-go': { image: 'go', script: 'ds-go.sh', mem: '6g', apps: true, dsEnv: true, tmp: true },
-  's3-live': { image: 'go', script: 's3-live.sh', mem: '6g', s3Live: true, tmp: true },
   // browserTmp as a Playwright line: the same harness (`browserTmp` above).
   shots: { image: 'pw', script: 'shots.sh', mem: '9g', shares: 4096, browser: true, goroot: true, browserTmp: true },
 };
@@ -580,32 +573,12 @@ class Chain {
     fs.writeFileSync(path.join(this.dir, 'etc', 'group'), `root:x:0:\nnogroup:x:65534:\nfx:x:${gid}:\n`);
     fs.writeFileSync(path.join(this.dir, 'fc', 'fontconfig', 'fonts.conf'), FONTS_CONF);
     fs.writeFileSync(path.join(this.dir, 'etc', 'ds.secret'), crypto.randomBytes(24).toString('hex'), { mode: 0o600 });
-    this.prepareS3Live();
     if (process.getuid?.() === 0) {
       for (const d of ['out', 'bin', 'tmp', 'home-go']) fs.chownSync(path.join(this.dir, d), uid, gid);
       for (const d of [this.cfg.cache.gomod, this.cfg.cache.gocache]) {
         if (fs.statSync(d).uid === 0 && fs.readdirSync(d).length === 0) fs.chownSync(d, uid, gid);
       }
     }
-  }
-
-  /**
-   * The s3-live job's credentials, from the settings into etc/s3-live.env
-   * (0600, removed with ds.secret when the run ends). Names only in the log;
-   * without the required ones the job itself is red and says which.
-   */
-  prepareS3Live() {
-    if (![...this.plan.pool, ...this.plan.track].some((j) => KIND[j.kind]?.s3Live)) return;
-    let file;
-    try {
-      file = s3LiveFile(this.cfg.s3Live);
-    } catch (e) {
-      this.log(`s3-live: ${e.message} - nothing handed to the job`);
-      return;
-    }
-    if (file.text) fs.writeFileSync(path.join(this.dir, 'etc', 's3-live.env'), file.text, { mode: 0o600 });
-    const given = Object.keys(this.cfg.s3Live).filter((k) => this.cfg.s3Live[k] !== '');
-    this.log(`s3-live: ${given.length ? given.join(', ') : 'no FILEX_TEST_S3_* setting'}${file.missing.length ? `; missing ${file.missing.join(', ')} - the job will be red` : ''}`);
   }
 
   needs() {
@@ -807,12 +780,10 @@ class Chain {
     const ids = docker(['ps', '-aq', '--filter', `label=filex-chain-run=${this.runId}`]).stdout.split('\n').filter(Boolean);
     if (ids.length) docker(['rm', '-f', ...ids]);
     docker(['network', 'rm', `${this.P}-ds`]);
-    for (const secret of ['ds.secret', 's3-live.env']) {
-      try {
-        fs.rmSync(path.join(this.dir, 'etc', secret), { force: true });
-      } catch {
-        /* the run's directory is the user's to tidy */
-      }
+    try {
+      fs.rmSync(path.join(this.dir, 'etc', 'ds.secret'), { force: true });
+    } catch {
+      /* the run's directory is the user's to tidy */
     }
   }
 
@@ -1186,7 +1157,7 @@ class Chain {
         continue;
       }
       this.trackIo = job.io === 'heavy';
-      if (!['cypress', 'ds-go', 's3-live'].includes(job.kind)) await this.cool(job);
+      if (!['cypress', 'ds-go'].includes(job.kind)) await this.cool(job);
       await this.trackMemory(job);
       await this.trackDisk(job);
       await this.startJob(job, 'e2e');

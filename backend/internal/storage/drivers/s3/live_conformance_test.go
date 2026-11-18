@@ -17,9 +17,9 @@ package s3_test
 //
 // It writes under a prefix of its own and deletes what it wrote. The server is
 // read by internal/testutil/lives3 (FILEX_TEST_S3_PATH_STYLE=0 for
-// virtual-hosted addressing); the build host's chain points it at the
-// bucket its settings name (scripts/chain/job/s3-live.sh), on a run a person
-// starts.
+// virtual-hosted addressing). Every week GitHub runs it against an S3
+// gateway of the run's own (.github/workflows/s3-live.yml in the public
+// repository, `ci-s3.sh live`), where a skip is red.
 
 import (
 	"bytes"

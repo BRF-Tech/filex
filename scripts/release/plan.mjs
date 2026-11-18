@@ -237,12 +237,14 @@ const WORKFLOW_GUARDS = [
   'make every row with the nightly job script, unsigned, and pack both snaps for edge alone',
   "send the night to ghcr as one artifact with its manifest, as nightly-<date> and nightly; old nights go without failing the run, a missing row fails it",
   // #364: what the build host's nightly chain ran on its own, every week on
-  // GitHub - real servers, a real S3 provider, every screenshot scene
+  // GitHub - real servers, the live S3 tests (#365: against an S3 gateway of
+  // the run's own, no secret), every screenshot scene
   // (packaging/ci/weekly-checks.patch, web/tests/deploy/weeklyChecks.test.ts).
   'runs every week and by hand, on the nightly branch when scheduled, with the images pulled',
   'reads a skipped stage as red: a week that ran no stage is not a week they passed',
-  "reads the s3-live environment's secrets, and nothing runs without them",
-  'says "skipped: no S3 credentials" without a secret and stays green; runs with the four it needs',
+  'runs every week and by hand against an S3 gateway of its own, and reads no secret',
+  'names four tests that exist, in the packages it runs, each reading its server through lives3',
+  "ci-s3.sh live names the gateway and a bucket of its own to the live tests; without an argument it is ci.yml's S3 line, as before",
   'reads a live test that only skipped as red',
   'takes every scene of the nightly branch every week and by hand, and publishes nothing',
   // #252: a server patch's tag run publishes the server's surface alone

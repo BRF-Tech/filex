@@ -9,8 +9,9 @@
 //	FILEX_TEST_S3_PATH_STYLE  "0" for virtual-hosted addressing (default: path style)
 //
 // Without a bucket, a key and a secret every suite skips itself, so `go test
-// ./...` stays green on a machine that has no server. The build host's nightly
-// run sets them and treats a skip as red (scripts/chain/job/s3-live.sh).
+// ./...` stays green on a machine that has no server. The weekly s3-live.yml
+// run on GitHub sets them for an S3 gateway of its own and treats a skip as
+// red (#365).
 //
 // ⚠ Why one place. Four suites read these variables (the provider
 // conformance, the B2 report reader, issue #21's rename, the driver's Init),

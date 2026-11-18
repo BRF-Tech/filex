@@ -182,18 +182,19 @@ describe('the list format', () => {
 });
 
 describe('the profiles', () => {
-  it('nightly runs what full runs, plus the Go tests on the Document Server and on a real S3 (#175, #365)', () => {
+  it('nightly runs what full runs, plus the Go test on the Document Server (#175, #365)', () => {
     // ⚠ Before #175 nightly was full under another name: the extras below ran
     // in no chain at all - the Go test skipped itself, the shot scripts rotted
     // until a release day needed pictures, realenv ran when someone remembered.
-    // Since #365 every scene and realenv run every week on GitHub (#364:
-    // shots.yml, realenv.yml) and the profile no longer takes them.
+    // Since #365 every scene, realenv and the live S3 tests run every week on
+    // GitHub (#364: shots.yml, realenv.yml, s3-live.yml - the last against an
+    // S3 gateway of its own) and the profile no longer takes them.
     const nightly = buildPlan({ profile: 'nightly', lists, src: REPO });
     expect(names(nightly.pool)).toEqual(names(full.pool));
-    expect(NIGHTLY_EXTRAS).toEqual(['ds-go', 's3-live']);
-    expect(EXTRAS).toEqual(['ds-go', 's3-live', 'shots']);
+    expect(NIGHTLY_EXTRAS).toEqual(['ds-go']);
+    expect(EXTRAS).toEqual(['ds-go', 'shots']);
     expect(names(nightly.track)).toEqual([
-      'e2e-cypress', 'e2e-chromium', 'e2e-firefox', 'e2e-webkit', 'ds-go', 'e2e-nods', 'e2e-nopub', 'e2e-s3', 's3-live',
+      'e2e-cypress', 'e2e-chromium', 'e2e-firefox', 'e2e-webkit', 'ds-go', 'e2e-nods', 'e2e-nopub', 'e2e-s3',
     ]);
     // Right after the last line with the Document Server, which run.mjs stops
     // once no later line needs it: ds-go is the line that still needs it, so
@@ -257,28 +258,38 @@ describe('the profiles', () => {
 
   it('nightly takes the extras CHAIN_NIGHTLY_EXTRAS names, in their own order, and refuses one it does not know', () => {
     const only = (v: string) => names(buildPlan({ profile: 'nightly', lists, src: REPO, env: { CHAIN_NIGHTLY_EXTRAS: v } }).track).filter((n: string) => !n.startsWith('e2e-'));
-    expect(only('s3-live,ds-go')).toEqual(['ds-go', 's3-live']);
-    expect(only('s3-live')).toEqual(['s3-live']);
+    expect(only('ds-go')).toEqual(['ds-go']);
     expect(only('none')).toEqual([]);
-    expect(only('')).toEqual(['ds-go', 's3-live']);
-    expect(nightlyExtras({ CHAIN_NIGHTLY_EXTRAS: ' s3-live , ds-go ' })).toEqual(['ds-go', 's3-live']);
+    expect(only('')).toEqual(['ds-go']);
+    expect(nightlyExtras({ CHAIN_NIGHTLY_EXTRAS: ' ds-go , ' })).toEqual(['ds-go']);
     expect(() => nightlyExtras({ CHAIN_NIGHTLY_EXTRAS: 'ds-go,lighthouse' })).toThrow(/lighthouse/);
     // The full profile never takes them, whatever the environment says.
-    expect(names(buildPlan({ profile: 'full', lists, src: REPO, env: { CHAIN_NIGHTLY_EXTRAS: 'ds-go,s3-live' } }).track)).toEqual(names(full.track));
+    expect(names(buildPlan({ profile: 'full', lists, src: REPO, env: { CHAIN_NIGHTLY_EXTRAS: 'ds-go' } }).track)).toEqual(names(full.track));
   });
 
-  it('refuses shots and realenv in the nightly profile, and says where they run now (#365)', () => {
+  it('refuses shots, realenv and s3-live in the nightly profile, and says where they run now (#365)', () => {
     // A settings file from before #365 that still names them is refused at
     // the plan, before anything starts, with the place each one went.
-    expect(() => nightlyExtras({ CHAIN_NIGHTLY_EXTRAS: 'ds-go,shots' })).toThrow(/"shots" is none of ds-go, s3-live \(or none\): since #365 every scene runs every week on GitHub \(shots\.yml\); a release takes its set with CHAIN_EXTRAS=shots/);
+    expect(() => nightlyExtras({ CHAIN_NIGHTLY_EXTRAS: 'ds-go,shots' })).toThrow(/"shots" is none of ds-go \(or none\): since #365 every scene runs every week on GitHub \(shots\.yml\); a release takes its set with CHAIN_EXTRAS=shots/);
     expect(() => nightlyExtras({ CHAIN_NIGHTLY_EXTRAS: 'realenv' })).toThrow(/since #365 realenv runs every week on GitHub \(realenv\.yml\), and by hand with e2e\/realenv\/run\.sh/);
-    expect(() => buildPlan({ profile: 'targeted', lists, env: { CHAIN_EXTRAS: 'realenv' } })).toThrow(/CHAIN_EXTRAS: "realenv" is none of ds-go, s3-live, shots \(or none\): since #365 realenv runs every week on GitHub/);
-    // realenv's job left with it: the chain's jobs are all containers again.
-    expect(KIND.realenv).toBeUndefined();
-    expect(fs.existsSync(path.join(CHAIN, 'job', 'realenv.sh'))).toBe(false);
+    expect(() => buildPlan({ profile: 'targeted', lists, env: { CHAIN_EXTRAS: 'realenv' } })).toThrow(/CHAIN_EXTRAS: "realenv" is none of ds-go, shots \(or none\): since #365 realenv runs every week on GitHub/);
+    // The settings of a run before the live S3 tests left (CHAIN_NIGHTLY_EXTRAS=ds-go,s3-live,
+    // CHAIN_EXTRAS=s3-live) are refused the same way, with where those tests run now.
+    const s3 = /since #365 the live S3 tests run every week on GitHub against an S3 gateway of their own \(s3-live\.yml\), and by hand with gh workflow run s3-live\.yml -R BRF-Tech\/filex/;
+    expect(() => nightlyExtras({ CHAIN_NIGHTLY_EXTRAS: 'ds-go,s3-live' })).toThrow(s3);
+    expect(() => buildPlan({ profile: 'nightly', lists, src: REPO, env: { CHAIN_NIGHTLY_EXTRAS: 's3-live' } })).toThrow(s3);
+    expect(() => buildPlan({ profile: 'targeted', lists, env: { CHAIN_EXTRAS: 's3-live' } })).toThrow(/CHAIN_EXTRAS: "s3-live" is none of ds-go, shots \(or none\): since #365 the live S3 tests/);
+    // Their jobs left with them: the chain's jobs are all containers again,
+    // and nothing of the chain holds a bucket's key any more.
+    for (const gone of ['realenv', 's3-live']) {
+      expect(KIND[gone], gone).toBeUndefined();
+      expect(fs.existsSync(path.join(CHAIN, 'job', `${gone}.sh`)), gone).toBe(false);
+    }
     for (const [name, k] of Object.entries(KIND)) expect(k.image, name).toBeTruthy();
     const runMjs = fs.readFileSync(path.join(CHAIN, 'run.mjs'), 'utf8');
     expect(runMjs).not.toMatch(/CHAIN_REALENV_|hostJobEnv|detached: true/);
+    expect(runMjs).not.toMatch(/FILEX_TEST_S3_|s3Live|s3-live\.env/);
+    expect(fs.readFileSync(path.join(CHAIN, 'chain.env.example'), 'utf8')).not.toMatch(/FILEX_TEST_S3_|EXTRAS=.*s3-live/);
   });
 
   it('runs every job of a nightly run and of a release shots run in a kind run.mjs knows, with a job script that exists', () => {
@@ -291,9 +302,6 @@ describe('the profiles', () => {
     // ds-go reads the Document Server's secret, which is root's (0600).
     expect(KIND['ds-go']).toMatchObject({ image: 'go', dsEnv: true, apps: true });
     expect(KIND['ds-go'].user).toBeFalsy();
-    // s3-live reads the bucket's key from a 0600 file of the run, which is root's.
-    expect(KIND['s3-live']).toMatchObject({ image: 'go', script: 's3-live.sh', s3Live: true });
-    expect(KIND['s3-live'].user).toBeFalsy();
     // shots builds its stamped binary and the plugins scene's example plugin.
     expect(KIND.shots).toMatchObject({ image: 'pw', browser: true, goroot: true });
     // One image a kind, each asked of Docker once.
@@ -323,11 +331,11 @@ describe('the profiles', () => {
     expect(asked.track[1]).toMatchObject({ engines: ['chromium', 'firefox', 'webkit'], ds: true, args: ['--grep', '(98|116)-[a-z-]+\\.spec'] });
   });
 
-  it("targeted runs an extra by name, alone: the live S3 tests by hand, a release's pictures (CHAIN_EXTRAS)", () => {
-    const s3 = buildPlan({ profile: 'targeted', lists, env: { CHAIN_EXTRAS: 's3-live' } });
-    expect(names(s3.pool)).toEqual(['build', 'web', 'docs', 'e2etsc']);
-    expect(s3.track.map((t: { name: string; kind: string }) => `${t.name}:${t.kind}`)).toEqual(['s3-live:s3-live']);
-    expect(names(buildPlan({ profile: 'targeted', lists, env: { CHAIN_EXTRAS: 'shots, s3-live' } }).track)).toEqual(['s3-live', 'shots']);
+  it("targeted runs an extra by name, alone: the Document Server's Go test, a release's pictures (CHAIN_EXTRAS)", () => {
+    const dsGo = buildPlan({ profile: 'targeted', lists, env: { CHAIN_EXTRAS: 'ds-go' } });
+    expect(names(dsGo.pool)).toEqual(['build', 'web', 'docs', 'e2etsc']);
+    expect(dsGo.track.map((t: { name: string; kind: string }) => `${t.name}:${t.kind}`)).toEqual(['ds-go:ds-go']);
+    expect(names(buildPlan({ profile: 'targeted', lists, env: { CHAIN_EXTRAS: 'shots, ds-go' } }).track)).toEqual(['ds-go', 'shots']);
     // A release's pictures (CHAIN_EXTRAS=shots) come with the Document
     // Server run.mjs starts for them: the ONLYOFFICE scene is taken there too.
     expect(buildPlan({ profile: 'targeted', lists, env: { CHAIN_EXTRAS: 'shots' } }).track).toMatchObject([{ name: 'shots', kind: 'shots', ds: true }]);
@@ -335,9 +343,9 @@ describe('the profiles', () => {
     expect(buildPlan({ profile: 'targeted', lists, env: { CHAIN_EXTRAS: 'none' } }).track).toEqual([]);
     expect(() => buildPlan({ profile: 'targeted', lists, env: { CHAIN_EXTRAS: 'lighthouse' } })).toThrow(/CHAIN_EXTRAS/);
     // The full and nightly profiles never read it.
-    expect(names(buildPlan({ profile: 'full', lists, src: REPO, env: { CHAIN_EXTRAS: 's3-live' } }).track)).toEqual(names(full.track));
-    // The live S3 tests by hand are exactly this (the nightly ran them until #361).
-    expect(fs.readFileSync(path.join(CHAIN, 'nightly.env.example'), 'utf8')).toContain('CHAIN_EXTRAS=s3-live bash scripts/chain/run.sh --profile targeted');
+    expect(names(buildPlan({ profile: 'full', lists, src: REPO, env: { CHAIN_EXTRAS: 'ds-go' } }).track)).toEqual(names(full.track));
+    // The live S3 tests by hand are s3-live.yml's now (#365), not the chain's.
+    expect(fs.readFileSync(path.join(CHAIN, 'nightly.env.example'), 'utf8')).toContain('gh workflow run s3-live.yml -R BRF-Tech/filex');
   });
 
   it('refuses a profile it does not have', () => {
@@ -494,7 +502,7 @@ describe('the weights (#194)', () => {
     'race-handlers-6': 0.65, 'race-handlers-7': 0.63, 'race-handlers-8': 0.67,
     'race-wasmplugin-1': 0.59, 'race-wasmplugin-2': 0.53, 'race-wasmplugin-3': 0.95,
     'e2e-cypress': 1.7, 'e2e-chromium': 4.15, 'e2e-firefox': 5.64, 'e2e-webkit': 5.31, 'e2e-nods': 1.6, 'e2e-nopub': 1.74, 'e2e-s3': 0.71,
-    'ds-go': 1.01, 's3-live': 0.29, shots: 2.52,
+    'ds-go': 1.01, shots: 2.52,
   };
   const SIDECARS: Record<string, number> = { ds: 0.72, db: 0.95 };
   const nightly = buildPlan({ profile: 'nightly', lists, src: REPO });
@@ -770,7 +778,7 @@ describe('what run.mjs does with the host (#194)', () => {
   });
 
   it("gives a Go test job a tmpfs /tmp that may run what is written there, and keeps the Go build directory on the disk", () => {
-    for (const k of ['go', 'race', 'ds-go', 's3-live']) expect(KIND[k].tmp, k).toBe(true);
+    for (const k of ['go', 'race', 'ds-go']) expect(KIND[k].tmp, k).toBe(true);
     for (const k of ['build', 'web', 'docs', 'e2etsc', 'shards-check', 'race-build', 'migrate']) expect(KIND[k].tmp, k).toBeFalsy();
     // Not a browser line's: that one is `browserTmp`, of its own size (below).
     for (const k of ['cypress', 'local', 'nopub', 's3', 'shots']) expect(KIND[k].tmp, k).toBeFalsy();
@@ -829,7 +837,7 @@ describe('what run.mjs does with the host (#194)', () => {
     // Firefox tests wrote 2.11 GiB with /tmp on the disk and nothing on this
     // tmpfs, in 4 min 19 s against 7 min 51 s.
     for (const k of ['local', 'nopub', 's3']) expect(KIND[k].browserTmp, k).toBe(true);
-    for (const k of ['cypress', 'go', 'race', 'ds-go', 's3-live', 'web', 'build', 'docs', 'e2etsc']) {
+    for (const k of ['cypress', 'go', 'race', 'ds-go', 'web', 'build', 'docs', 'e2etsc']) {
       expect(KIND[k].browserTmp, k).toBeFalsy();
     }
     // One /tmp mount a container: docker refuses a second at the same point.
@@ -902,12 +910,10 @@ describe('a nightly run, replayed with the same minutes', () => {
     expect(sim.peakGb).toBeLessThanOrEqual(10 + 1e-9);
   });
 
-  it('runs ds-go while the Document Server is still up, and s3-live after every browser line', () => {
+  it('runs ds-go while the Document Server is still up, and nothing that left the profile', () => {
     expect(at('ds-go').start).toBeGreaterThanOrEqual(at('e2e-webkit').end);
     expect(at('ds-go').end).toBeLessThanOrEqual(at('e2e-nods').start);
-    expect(at('s3-live').start).toBeGreaterThanOrEqual(at('e2e-s3').end);
-    expect(at('shots')).toBeUndefined();
-    expect(at('realenv')).toBeUndefined();
+    for (const gone of ['shots', 'realenv', 's3-live']) expect(at(gone), gone).toBeUndefined();
   });
 
   it('ends within 3 h 30 min: started at 22:00 UTC it is over before a window at 01:45 UTC, less a 15 min margin', () => {
@@ -932,50 +938,6 @@ describe('the Go test on the Document Server (ds-go)', () => {
 
   it('is red when the test only skipped: the test skips itself everywhere it is not told where the server is', () => {
     expect(sh).toMatch(/"\$passed" -eq 0/);
-  });
-});
-
-describe('the Go tests against a real S3 provider (s3-live)', () => {
-  const sh = fs.readFileSync(path.join(CHAIN, 'job', 's3-live.sh'), 'utf8');
-  const runMjs = fs.readFileSync(path.join(CHAIN, 'run.mjs'), 'utf8');
-  const backend = path.join(REPO, 'backend', 'internal');
-  const tests = /^TESTS='([^']+)'$/m.exec(sh)?.[1].split(' ') ?? [];
-  const pkgs = /^PKGS='([^']+)'$/m.exec(sh)?.[1].split(' ') ?? [];
-
-  it('names four tests that exist, in the packages it tests', () => {
-    expect(tests).toEqual(['TestLiveProviderConformance', 'TestInit_Integration', 'TestB2_OverRealS3', 'TestRenameOnS3_TheReportersSequence']);
-    const sources = pkgs
-      .map((p) => path.join(REPO, 'backend', p))
-      .flatMap((dir) => fs.readdirSync(dir).filter((f) => f.endsWith('_test.go')).map((f) => fs.readFileSync(path.join(dir, f), 'utf8')))
-      .join('\n');
-    for (const t of tests) expect(sources, t).toContain(`func ${t}(t *testing.T)`);
-    // Each reads its server through lives3, region included (lesson #927).
-    for (const f of ['storage/drivers/s3/live_conformance_test.go', 'storage/drivers/s3/s3_test.go', 'usage/b2_test.go', 'api/handlers/rename_s3_live_test.go']) {
-      expect(fs.readFileSync(path.join(backend, f), 'utf8'), f).toContain('lives3.Config(t, ');
-    }
-    // TestInit_Integration runs only with INTEGRATION=1.
-    expect(sh).toMatch(/^export INTEGRATION=1$/m);
-  });
-
-  it('is red when a test only skipped, and red without the settings, never skipped', () => {
-    expect(sh).toMatch(/"\$rc" -eq 0 \] && \[ -n "\$notpassed"/);
-    expect(sh).toMatch(/summary "s3-live=1 no settings/);
-    expect(sh).toMatch(/summary "s3-live=1 missing in the nightly settings/);
-    expect(sh).not.toMatch(/exit 0/);
-  });
-
-  it('takes the key from a 0600 file of the run and never prints a value', () => {
-    // Not `docker run -e`: its arguments are in every process list and in
-    // docker inspect. run.mjs writes the file, removes it at the end, and
-    // logs names only.
-    expect(runMjs).toMatch(/'s3-live\.env'\), file\.text, \{ mode: 0o600 \}/);
-    expect(runMjs).toMatch(/for \(const secret of \['ds\.secret', 's3-live\.env'\]\)/);
-    expect(runMjs).not.toMatch(/FILEX_TEST_S3_[A-Z_]+: /);
-    expect(sh).toContain('CREDS=/w/run/etc/s3-live.env');
-    expect(sh).toMatch(/\| redact > "\$OUT\/go\.out"/);
-    expect(sh).toContain('ENVIRON["FILEX_TEST_S3_SECRET_KEY"]');
-    expect(sh).toContain('ENVIRON["FILEX_TEST_S3_ACCESS_KEY"]');
-    expect(sh).not.toMatch(/set -x|echo "\$FILEX_TEST_S3|printenv|env \|/);
   });
 });
 

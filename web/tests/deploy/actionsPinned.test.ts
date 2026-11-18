@@ -13,9 +13,9 @@
 //     environment, which only main and v* tags may deploy to (the repository's
 //     Settings -> Environments). A run started on any other branch never sees
 //     those secrets once they live in the environment, and a job added later
-//     that reads one has to name it too. The live S3 tests' bucket key
-//     (FILEX_TEST_S3_*, s3-live.yml, #364) is no publishing secret: it lives
-//     in the `s3-live` environment, which only main may deploy to as well.
+//     that reads one has to name it too. The live S3 tests read no secret
+//     at all since #365: s3-live.yml starts an S3 gateway of its own
+//     (ci-s3.sh live), and a FILEX_TEST_S3_* secret in any workflow is red.
 //   - Every workflow says at the top what its token may do.
 //
 // The workflows live in the PUBLIC checkout only (see
@@ -85,12 +85,12 @@ describe('the actions the workflows run, and where their secrets go', () => {
         const secrets = secretsIn(block);
         const env = /\n {4}environment:\s*(.+)/.exec(block)?.[1].trim();
         if (env === 'release') inRelease.push(`${file}:${name}`);
-        // The live S3 tests' bucket key (#364) is no publishing secret, and
-        // lives apart from them: the s3-live environment, main only too.
+        // The live S3 tests take no provider's key (the owner, 2026-11-18,
+        // #365): s3-live.yml runs them against a gateway of its own.
         const testOnly = secrets.filter((s) => /^FILEX_TEST_S3_/.test(s));
         const publishing = secrets.filter((s) => !testOnly.includes(s));
         if (publishing.length && env !== 'release') missing.push(`${file}: job ${name} reads ${publishing.join(', ')} outside the release environment`);
-        if (testOnly.length && env !== 's3-live') missing.push(`${file}: job ${name} reads ${testOnly.join(', ')} outside the s3-live environment`);
+        if (testOnly.length) missing.push(`${file}: job ${name} reads ${testOnly.join(', ')}: the live S3 tests read no secret (s3-live.yml, ci-s3.sh live)`);
       }
     }
     expect(missing).toEqual([]);
