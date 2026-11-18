@@ -1,22 +1,25 @@
 name: Live S3
 
-# The Go tests that talk to a REAL S3 provider (#364): the provider
+# The Go tests that talk to a real S3 server (#364, #365): the provider
 # conformance suite, the driver's Init, the B2 report reader over S3 and issue
-# #21's rename, against a bucket of their own that they write to and delete
-# from (backend/internal/testutil/lives3 reads FILEX_TEST_S3_*). Weekly, on the
-# `nightly` branch's commit, and by hand on any ref. Until 2026-11-18 the
-# build host ran them, with a B2 demo account's key, on a night the S3 code
-# changed.
+# #21's rename (backend/internal/testutil/lives3 reads FILEX_TEST_S3_*).
+# Weekly, on the `nightly` branch's commit, and by hand on any ref.
 #
-# The credentials are the `s3-live` environment's secrets - FILEX_TEST_S3_BUCKET,
-# _ACCESS_KEY, _SECRET_KEY, _REGION and _ENDPOINT (and _PATH_STYLE, 0 for
-# virtual-hosted addressing) - and that environment may only be deployed to
-# from main: a scheduled run and a run by hand of main's workflow. Without
-# them the run says "skipped: no S3 credentials" and is green, not red: the
-# tests did not run, and the summary says so. With them, a test that only
-# skipped is red - everywhere else each of them skips itself, and a skip reads
-# as a pass. The region is part of the request signature (lesson #927): a
-# provider with a region of its own refuses one signed for "auto".
+# The server is the run's own: the Versity S3 Gateway ci.yml's S3 line starts
+# (`ci-s3.sh live`, the image e2e/lib/s3server.mjs pins), on 127.0.0.1:7070,
+# with a bucket of its own and a root key made up for that container. No
+# secret is read and no provider is reached (the owner, 2026-11-18: no real
+# token for a test). What it measures is filex's S3 code over the wire against
+# a real S3 implementation - requests signed for us-east-1, path-style
+# addressing, a listing with a delimiter, a ranged read, a multipart upload, a
+# rename by copy, a presigned GET, a delete, the sync worker's catalogue -
+# not one provider's behaviour: B2's, AWS's or Garage's own answers are
+# measured by hand with the conformance test (docs/STORAGE.md). Until
+# 2026-11-18 the build host ran these tests with a B2 demo account's key.
+#
+# Everywhere else each of them skips itself, and a skip reads as a pass: here
+# a test that only skipped is red. The region is part of the request
+# signature (lesson #927): the gateway refuses one signed for "auto".
 
 on:
   schedule:
@@ -36,53 +39,29 @@ env:
 
 jobs:
   s3-live:
-    name: Live S3 (a real provider's bucket)
+    name: Live S3 (a gateway in the job)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment: s3-live
-    env:
-      FILEX_TEST_S3_BUCKET: ${{ secrets.FILEX_TEST_S3_BUCKET }}
-      FILEX_TEST_S3_ACCESS_KEY: ${{ secrets.FILEX_TEST_S3_ACCESS_KEY }}
-      FILEX_TEST_S3_SECRET_KEY: ${{ secrets.FILEX_TEST_S3_SECRET_KEY }}
-      FILEX_TEST_S3_REGION: ${{ secrets.FILEX_TEST_S3_REGION }}
-      FILEX_TEST_S3_ENDPOINT: ${{ secrets.FILEX_TEST_S3_ENDPOINT }}
-      FILEX_TEST_S3_PATH_STYLE: ${{ secrets.FILEX_TEST_S3_PATH_STYLE }}
     steps:
-      - name: The credentials
-        id: creds
-        shell: bash
-        run: |
-          set -euo pipefail
-          missing=""
-          for name in FILEX_TEST_S3_BUCKET FILEX_TEST_S3_ACCESS_KEY FILEX_TEST_S3_SECRET_KEY FILEX_TEST_S3_REGION; do
-            [ -n "${!name:-}" ] || missing="$missing $name"
-          done
-          if [ -n "$missing" ]; then
-            echo "::notice title=Live S3::skipped: no S3 credentials (the s3-live environment has no secret:$missing)"
-            echo "### Live S3: skipped, no S3 credentials (missing:$missing)" >> "$GITHUB_STEP_SUMMARY"
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "the s3-live environment names a bucket, its key and its region"
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        if: steps.creds.outputs.run == 'true'
         with:
           ref: ${{ github.event_name == 'schedule' && 'nightly' || '' }}
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        if: steps.creds.outputs.run == 'true'
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: An S3 gateway for the live tests
+        run: bash .github/workflows/scripts/ci-s3.sh live
       # backend/embed/{admin,web} are build output: //go:embed refuses an empty directory.
       - name: Embed placeholders
-        if: steps.creds.outputs.run == 'true'
         run: |
           mkdir -p backend/embed/admin backend/embed/web
           touch backend/embed/admin/.placeholder backend/embed/web/.placeholder
       - name: The live tests
-        if: steps.creds.outputs.run == 'true'
         shell: bash
         working-directory: backend
         env:
