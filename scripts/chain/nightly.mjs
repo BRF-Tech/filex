@@ -357,7 +357,7 @@ async function runNight(cfg, args) {
   if (cfg.push.busy === 'skip' && !args.force) {
     let busy = null;
     try {
-      busy = releaseBusy(await activeRuns(cfg));
+      busy = releaseBusy(await activeRuns(cfg), { nowMs: Date.now() });
     } catch (e) {
       // GitHub that cannot be asked holds nothing back: the push is the night's one job.
       log(`could not ask GitHub whether a release runs (${e.message}): pushing anyway`);

@@ -305,10 +305,17 @@ export function decidePush({ head, last = null, force = false }) {
  * does not push then (NIGHTLY_RELEASE_BUSY=skip): its full matrix would share
  * the organisation's 20 jobs at once with the release's. Returns { url, why }
  * or null.
+ *
+ * A run created more than `maxAgeH` hours before `nowMs` is no release being
+ * tested: GitHub can leave a run `queued` for good (2026-11-18: a release.yml
+ * run of v0.10.1, queued since 2026-08-06, held the first night back), and a
+ * release's gate does not wait half a day.
  */
-export function releaseBusy(runs = []) {
+export function releaseBusy(runs = [], { nowMs = null, maxAgeH = 12 } = {}) {
   for (const r of runs ?? []) {
     if (!r || r.status === 'completed') continue;
+    const created = Date.parse(r.created_at ?? '');
+    if (nowMs !== null && Number.isFinite(created) && nowMs - created > maxAgeH * 3_600_000) continue;
     const file = String(r.path ?? '').replace(/@.*$/, '').split('/').pop();
     if (file === 'release.yml') return { url: r.html_url ?? '', why: `release.yml runs (${r.display_title || r.head_branch || '?'})` };
     if (file === 'ci.yml' && r.event === 'push' && r.head_branch === 'main') {
@@ -495,13 +502,21 @@ export function snapUploadVerdict(status, text) {
  * Whether the Snap Store's edge channel serves a nightly snap (`last`: its
  * version, revision and upload time), read from the public channel map
  * (api.snapcraft.io/v2/snaps/info). `live` when edge/<arch> carries that
- * version; `held` when it does not - with how long since the upload - so a
- * review that never ends is said every morning, not once.
+ * revision, or that version; `held` when it does not - with how long since
+ * the upload - so a review that never ends is said every morning, not once.
+ *
+ * The Store lists a nightly's version without its build metadata
+ * (`0.62.0-nightly.20261118`, not `...+0d849cb7`): the first nightly built on
+ * GitHub (2026-11-18) was on edge as revisions 63 and 62 and read as held.
+ * The revision decides when both are known; versions are compared without
+ * what follows a `+`.
  */
 export function snapEdgeState(map, last, { arch = 'amd64', nowMs } = {}) {
   if (!last?.version) return null;
   const entry = (map ?? []).find((m) => m?.channel?.name === 'edge' && m?.channel?.architecture === arch);
-  if (entry && entry.version === last.version) return { state: 'live', arch, version: entry.version, revision: entry.revision };
+  const bare = (v) => String(v ?? '').replace(/\+.*$/, '');
+  const same = entry && (Number.isFinite(last.revision) && Number.isFinite(entry.revision) ? entry.revision === last.revision : bare(entry.version) === bare(last.version));
+  if (same) return { state: 'live', arch, version: entry.version, revision: entry.revision };
   const days = last.at ? Math.floor((nowMs - Date.parse(last.at)) / DAY_MS) : null;
   return {
     state: 'held',

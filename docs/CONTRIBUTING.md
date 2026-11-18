@@ -681,7 +681,10 @@ resets: run the installer again to update them.
   `ci.yml` on a push of `main` (`NIGHTLY_RELEASE_BUSY=skip`, the default;
   `releaseBusy` in `scripts/chain/nightly-lib.mjs`): its full matrix would
   share the organisation's 20 jobs at once with the release's gate. The
-  record says `deferred`, and the next night pushes. `--force` pushes anyway;
+  record says `deferred`, and the next night pushes. `--force` pushes anyway.
+  A run created more than 12 hours before is not waited for: GitHub can
+  leave a run `queued` for good (the first night met a `release.yml` run of
+  v0.10.1, queued since 2026-08-06);
 - otherwise checks `main` out clean and runs `scripts/chain/nightly-export.sh`
   from that tree: `scripts/export-public.sh` stages the public tree in a clone
   of the public repository (`NIGHTLY_PUBLIC_DIR`) reset to its `main`, with the
