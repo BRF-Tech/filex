@@ -1,9 +1,9 @@
 diff --git a/.github/workflows/realenv.yml b/.github/workflows/realenv.yml
 new file mode 100644
-index 00000000..9b169b0c
+index 00000000..7412b4f0
 --- /dev/null
 +++ b/.github/workflows/realenv.yml
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,103 @@
 +name: Real servers
 +
 +# filex against REAL third-party servers (e2e/realenv/run.sh, #364): Pebble
@@ -75,6 +75,10 @@ index 00000000..9b169b0c
 +        env:
 +          STAGES: ${{ inputs.stages }}
 +          REALENV_PULL: "1"
++          # The Document Server ci.yml's office specs run against
++          # (scripts/ci-docserver.sh): `latest` enforced its JWT with
++          # JWT_ENABLED=false, and office-s2 went red (run 44263716035).
++          REALENV_OO_IMAGE: onlyoffice/documentserver:9.4.0.1
 +        run: |
 +          set -uo pipefail
 +          read -r -a stages <<< "${STAGES:-}"

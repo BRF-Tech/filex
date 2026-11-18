@@ -72,6 +72,12 @@ describe('filex against the real servers, every week (realenv.yml)', () => {
     expect(realenv).toMatch(/ref: \$\{\{ github\.event_name == 'schedule' && 'nightly' \|\| '' \}\}/);
     expect(realenv).toMatch(/persist-credentials: false/);
     expect(stepNamed(realenv, 'The stages').text).toMatch(/REALENV_PULL: "1"/);
+    // The Document Server ci.yml's office specs run against, never `latest`:
+    // the first run's office-s2 went red on a `latest` that enforced its JWT
+    // with JWT_ENABLED=false (run 44263716035).
+    const ds = /image="\$\{DS_IMAGE:-([^}]+)\}"/.exec(fs.readFileSync(path.join(DIR!, 'scripts', 'ci-docserver.sh'), 'utf8'))?.[1];
+    expect(ds).toMatch(/^onlyoffice\/documentserver:\d/);
+    expect(stepNamed(realenv, 'The stages').text).toContain(`REALENV_OO_IMAGE: ${ds}`);
     expect(scriptOf(stepNamed(realenv, 'Packages, admin UI, embed, server binary').text)).toMatch(/pnpm run build:all/);
     // An input reaches the script through env alone.
     for (const l of text.split('\n').filter((x) => /\$\{\{[^}]*\binputs\./.test(x))) expect(l).toMatch(/^\s+[A-Z_]+: \$\{\{ inputs\.[a-z_]+ \}\}\s*$/);
