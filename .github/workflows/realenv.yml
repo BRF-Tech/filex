@@ -1,0 +1,99 @@
+name: Real servers
+
+# filex against REAL third-party servers (e2e/realenv/run.sh, #364): Pebble
+# (Let's Encrypt's ACME test server) and a real Caddy in front, Keycloak and
+# OpenLDAP for sign-in, the ONLYOFFICE Document Server. Every stage starts its
+# own containers on its own networks and runs its specs in a Playwright
+# container on them; nothing here reaches a host of ours, and no secret is
+# read.
+#
+# Weekly, on the `nightly` branch's commit - the tip of main the build host
+# pushes there every night (ci.yml, nightly-desktop.yml) - and by hand on any
+# ref. Until 2026-11-18 the build host ran it once a week in its nightly
+# chain; GitHub's runners have Docker too.
+#
+# ⚠ run.sh SKIPS a stage whose images it could not get and still exits 0. Here
+# a skipped stage is red: a week that ran no stage must not read as a week they
+# passed (the chain's job said the same).
+
+on:
+  schedule:
+    - cron: "40 5 * * 0"
+  workflow_dispatch:
+    inputs:
+      stages:
+        description: "Stages, space-separated (tls sso office); empty: every stage"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: realenv
+  cancel-in-progress: false
+
+jobs:
+  realenv:
+    name: Real servers (ACME, SSO, office)
+    # ubuntu-24.04, not -latest: the Playwright runner image pnpm-lock.yaml
+    # pins (mcr.microsoft.com/playwright:v<version>-noble) is the same Ubuntu.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'nightly' || '' }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: pnpm
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: pnpm install --frozen-lockfile
+      - name: Packages, admin UI, embed, server binary
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: |
+          set -euo pipefail
+          pnpm run build:all
+          node scripts/check-embed.mjs --binary bin/filex
+      - name: The stages
+        shell: bash
+        env:
+          STAGES: ${{ inputs.stages }}
+          REALENV_PULL: "1"
+        run: |
+          set -uo pipefail
+          read -r -a stages <<< "${STAGES:-}"
+          bash e2e/realenv/run.sh "${stages[@]}" 2>&1 | tee realenv.out
+          rc=${PIPESTATUS[0]}
+          passed=$(grep -E 'realenv: passed:' realenv.out | tail -1 | sed 's/.*passed: *//')
+          skipped=$(grep -c 'realenv: SKIPPED' realenv.out || true)
+          {
+            echo "### Real servers: ${passed:-none} passed"
+            [ "$skipped" -gt 0 ] && grep 'realenv: SKIPPED' realenv.out | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" -eq 0 ] && [ "$skipped" -gt 0 ]; then
+            echo "::error::$skipped stage(s) were skipped: not a pass here"
+            rc=1
+          fi
+          exit "$rc"
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: realenv
+          path: |
+            realenv.out
+            e2e/realenv/.work/logs/
+            e2e/realenv/.work/results/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14

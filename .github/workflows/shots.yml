@@ -18,14 +18,28 @@ name: Screenshots
 # relative links work after download. site/ is not part of this repository, so
 # the command's site-asset sync reports that and moves on.
 #
+# The weekly nightly run (#364): every scene (`pnpm shots --all --keep-going`)
+# of the `nightly` branch's commit - the tip of main the build host pushes
+# there every night - so a shot script that no longer fits the product turns a
+# week red, not a release day. It publishes nothing either: the pictures stay
+# in the run's artifact, and the published set is still taken and accepted in
+# the build host's test chain (docs/CONTRIBUTING.md, Release process). Until
+# 2026-11-18 the build host's nightly chain took every scene each night.
+#
 # ⚠ This file lives in the public checkout only (scripts/export-public.sh keeps
-# .github/workflows across an export); the private repository's twin is the
-# `shots` job in .gitlab-ci.yml.
+# .github/workflows across an export).
 
 on:
   push:
     tags: ["v*"]
+  schedule:
+    - cron: "20 4 * * 0"
   workflow_dispatch:
+    inputs:
+      nightly:
+        description: "Every scene of the nightly branch's commit, as the weekly run takes them"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -43,6 +57,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ (github.event_name == 'schedule' || inputs.nightly) && 'nightly' || '' }}
+          persist-credentials: false
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: "9.12.0"
@@ -65,7 +82,13 @@ jobs:
         env:
           # vue-tsc needs headroom on the full component bundle.
           NODE_OPTIONS: "--max-old-space-size=4096"
-        run: pnpm shots
+          NIGHTLY: ${{ (github.event_name == 'schedule' || inputs.nightly) && 'true' || 'false' }}
+        run: |
+          if [ "$NIGHTLY" = true ]; then
+            pnpm shots --all --keep-going
+          else
+            pnpm shots
+          fi
 
       # ⚠ include-hidden-files: e2e/.artifacts is a dot-directory, and
       # upload-artifact v4.4+ silently leaves hidden paths out of the archive.
@@ -73,7 +96,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: screenshots-${{ github.ref_name }}
+          name: screenshots-${{ (github.event_name == 'schedule' || inputs.nightly) && 'nightly' || github.ref_name }}
           path: |
             docs/screenshots/
             e2e/.artifacts/shots/
