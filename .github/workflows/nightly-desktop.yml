@@ -1,30 +1,38 @@
-# The nightly desktop packages (task #266): every desktop package of the
-# newest nightly - Windows (x64, arm64), macOS, Linux (x64, arm64) - and the
-# arm64 snap for the Snap Store's edge channel, made on GitHub's runners from
-# the source the build host pushes to ghcr every night its nightly run makes
-# a build (scripts/chain/nightly.mjs: ghcr.io/<owner>/filex-nightly-src:nightly,
-# the public tree of the night's commit).
+# The nightly builds (tasks #266, #361): what a green nightly commit makes.
+# Every night the build host pushes ONE commit to the `nightly` branch - the
+# tip of the private main, exported the way a release is, on top of main
+# (scripts/chain/nightly.mjs) - and ci.yml runs its full matrix on it. When
+# that run ends green, this workflow builds from that commit:
+#   - the nightly image, ghcr.io/<owner>/filex:nightly and :nightly-YYYYMMDD
+#     (docker/Dockerfile, amd64), whose version and labels say which commit
+#     it is and that CI was green on it (scripts/chain/nightly-meta.mjs);
+#   - every desktop package - Windows (x64, arm64), macOS, Linux (x64,
+#     arm64) - and both snaps (amd64, arm64) for the Snap Store's edge channel.
 #
 # ⚠ Not a release. Nothing is signed; nothing goes to a GitHub Release, to a
 # store's stable channel or to a package manager. The packages go to ghcr as
 # ONE OCI artifact - filex-desktop-nightly:nightly-YYYYMMDD and :nightly, the
-# last NIGHTLY_KEEP nights - the arm64 snap to edge alone, and the build host
+# last NIGHTLY_KEEP nights - the snaps to edge alone, and the build host
 # puts the newest night on filex.sh/nightly in the morning
-# (scripts/chain/nightly-site.sh). The amd64 snap is the build host's.
+# (scripts/chain/nightly-site.sh).
 #
-# Every hour it asks whether the source is newer than the last packages and
-# than the last attempt: when it is not, it ends in seconds. A source that
-# failed is not tried again every hour (the `attempted` tag); `force` builds
-# it again by hand.
-name: Nightly desktop packages
+# It runs when a CI run on the branch has ended (workflow_run: GitHub runs this
+# file as main has it, with that run's commit), and by hand. Only a green run
+# of a push in this repository builds anything; a commit that is no longer the
+# branch's tip (a newer night was pushed) builds nothing; and a commit that
+# failed here is not tried again on a re-run of CI (the `attempted` tag) -
+# `force` builds the branch's commit again by hand.
+name: Nightly builds
 
 on:
-  schedule:
-    - cron: "17 * * * *"
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [nightly]
   workflow_dispatch:
     inputs:
       force:
-        description: "Build the current nightly source again, even when it was built or tried"
+        description: "Build the nightly branch's commit again, even when it was built or tried"
         type: boolean
         default: false
 
@@ -35,75 +43,152 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  actions: read
 
 env:
   NIGHTLY_KEEP: "7"
   ORAS_VERSION: "1.2.2"
+  BRANCH: nightly
 
 jobs:
   source:
-    name: A new nightly source?
+    name: A new nightly commit?
+    # A green CI run of a PUSH in this repository: a pull request's run names
+    # whatever head branch its fork likes, `nightly` included.
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     outputs:
       build: ${{ steps.s.outputs.build }}
-      version: ${{ steps.s.outputs.version }}
+      version: ${{ steps.s.outputs.desktop_version }}
+      image_version: ${{ steps.s.outputs.version }}
       revision: ${{ steps.s.outputs.revision }}
+      base: ${{ steps.s.outputs.base }}
       date: ${{ steps.s.outputs.date }}
+      ymd: ${{ steps.s.outputs.ymd }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: src
+          ref: ${{ github.event.workflow_run.head_sha || env.BRANCH }}
+          fetch-depth: 2
+          persist-credentials: false
       - uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6 # v1.2.4
         with:
           version: ${{ env.ORAS_VERSION }}
-      - name: The source and the last packages
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: The commit and the last packages
         id: s
         shell: bash
         env:
           FORCE: ${{ inputs.force }}
           GH_TOKEN: ${{ github.token }}
+          CI_RUN: ${{ github.event.workflow_run.id }}
+          CI_URL: ${{ github.event.workflow_run.html_url }}
         run: |
           set -euo pipefail
           printf '%s' "$GH_TOKEN" | oras login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           owner="${GITHUB_REPOSITORY_OWNER,,}"
-          src="ghcr.io/$owner/filex-nightly-src:nightly"
           out="ghcr.io/$owner/filex-desktop-nightly"
-          ann() { oras manifest fetch "$1" 2>/dev/null | jq -r --arg k "$2" '.annotations[$k] // empty' || true; }
-          rev=$(ann "$src" org.opencontainers.image.revision)
-          if [ -z "$rev" ]; then
-            echo "no nightly source at $src yet"
+          rev=$(git -C src rev-parse HEAD)
+          tip=$(git -C src ls-remote origin "refs/heads/$BRANCH" | cut -f1)
+          if [ "$rev" != "$tip" ]; then
+            echo "$rev is not the tip of $BRANCH (${tip:-no branch}): a newer nightly was pushed, and its own CI run builds it"
             echo "build=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          ann() { oras manifest fetch "$1" 2>/dev/null | jq -r --arg k "$2" '.annotations[$k] // empty' || true; }
           built=$(ann "$out:nightly" org.opencontainers.image.revision)
           tried=$(ann "$out:attempted" org.opencontainers.image.revision)
-          echo "source $rev; packages of ${built:-nothing yet}; last attempt ${tried:-none}"
+          echo "commit $rev; packages of ${built:-nothing yet}; last attempt ${tried:-none}"
           if [ "$FORCE" != true ] && { [ "$rev" = "$built" ] || [ "$rev" = "$tried" ]; }; then
             echo "nothing new: $rev was built or tried (to build it again: run this workflow by hand with force)"
             echo "build=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          version=$(ann "$src" sh.filex.nightly.desktop-version)
-          date=$(ann "$src" sh.filex.nightly.date)
-          if [ -z "$version" ] || [ -z "$date" ]; then
-            echo "::error::$src carries no sh.filex.nightly.desktop-version or sh.filex.nightly.date"
-            exit 1
+          : > jobs.jsonl
+          if [ -n "$CI_RUN" ]; then
+            gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN/jobs?filter=latest&per_page=100" --jq '.jobs[] | {name, conclusion}' > jobs.jsonl
           fi
-          mkdir -p src
-          (cd src && oras pull "$src")
-          ls -la src
+          meta=(--tree src --labels labels.txt)
+          if [ -s jobs.jsonl ]; then meta+=(--jobs jobs.jsonl --run "$CI_URL"); fi
+          node src/scripts/chain/nightly-meta.mjs "${meta[@]}" > meta.txt
+          cat meta.txt labels.txt
+          base=$(git -C src rev-parse --verify -q HEAD^ || true)
+          tar --exclude=./.git -C src -czf filex-nightly-src.tar.gz .
           # The attempt, before anything is built.
           echo '{}' > attempt.json
           oras push "$out:attempted" --annotation "org.opencontainers.image.revision=$rev" attempt.json:application/json
           {
             echo "build=true"
-            echo "version=$version"
-            echo "revision=$rev"
-            echo "date=$date"
+            echo "base=$base"
+            cat meta.txt
           } >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: steps.s.outputs.build == 'true'
         with:
           name: nightly-src
-          path: src/filex-nightly-src.tar.gz
+          path: |
+            filex-nightly-src.tar.gz
+            labels.txt
           retention-days: 3
+
+  image:
+    name: The nightly image
+    needs: source
+    if: needs.source.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.source.outputs.image_version }}
+      REVISION: ${{ needs.source.outputs.revision }}
+      BASE: ${{ needs.source.outputs.base }}
+      YMD: ${{ needs.source.outputs.ymd }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: nightly-src
+      - name: The source
+        shell: bash
+        run: mkdir src && tar -xzf filex-nightly-src.tar.gz -C src
+      # The recipe a release builds its full image with, from the nightly
+      # commit's tree, for amd64: what the build host built until #361.
+      - name: Build the image
+        shell: bash
+        run: |
+          set -euo pipefail
+          now=$(date -u +%FT%TZ)
+          labels=(
+            --label "org.opencontainers.image.title=filex nightly"
+            --label "org.opencontainers.image.version=$VERSION"
+            --label "org.opencontainers.image.revision=$REVISION"
+            --label "org.opencontainers.image.created=$now"
+            --label "sh.filex.nightly.public-base=$BASE"
+          )
+          while IFS= read -r line; do
+            [ -n "$line" ] && labels+=(--label "$line")
+          done < labels.txt
+          docker build --pull -f src/docker/Dockerfile \
+            --build-arg "VERSION=$VERSION" --build-arg "COMMIT=${REVISION:0:8}" --build-arg "DATE=$now" \
+            "${labels[@]}" -t filex-nightly:local src
+          reported=$(docker run --rm --entrypoint /usr/local/bin/filex filex-nightly:local --version 2>&1 || true)
+          echo "$reported"
+          case "$reported" in
+            *"$VERSION"*) ;;
+            *) echo "::error::the image's filex --version does not report $VERSION"; exit 1 ;;
+          esac
+      - name: To ghcr.io, as nightly-<date> and nightly
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/filex"
+          for tag in "nightly-$YMD" nightly; do
+            docker tag filex-nightly:local "$repo:$tag"
+            docker push "$repo:$tag"
+          done
+          echo "### $repo:nightly-$YMD (and :nightly), $VERSION" >> "$GITHUB_STEP_SUMMARY"
 
   desktop:
     name: Desktop packages (${{ matrix.label }})
@@ -113,18 +198,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, label: linux-x64, targets: "linux-x64" }
-          - { os: ubuntu-24.04-arm, label: linux-arm64, targets: "linux-arm64,snap-arm64" }
+          - { os: ubuntu-latest, label: linux-x64, targets: "linux-x64,snap", snap: amd64, snap_target: snap, cpu: x64, unpacked: linux-unpacked }
+          - { os: ubuntu-24.04-arm, label: linux-arm64, targets: "linux-arm64,snap-arm64", snap: arm64, snap_target: snap-arm64, cpu: arm64, unpacked: linux-arm64-unpacked }
           - { os: windows-latest, label: windows, targets: "windows" }
           - { os: macos-15, label: macos, targets: "mac" }
     runs-on: ${{ matrix.os }}
     # The release environment: only main and v* tags may deploy to it, and
-    # the publishing secrets this job reads belong there.
+    # the publishing secrets this job reads belong there. A workflow_run runs
+    # on main.
     environment: release
     env:
       ND_VERSION: ${{ needs.source.outputs.version }}
       ND_TARGETS: ${{ matrix.targets }}
       LABEL: ${{ matrix.label }}
+      SNAP: ${{ matrix.snap }}
+      SNAP_TARGET: ${{ matrix.snap_target }}
+      CPU: ${{ matrix.cpu }}
+      UNPACKED: ${{ matrix.unpacked }}
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -162,8 +252,10 @@ jobs:
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
         run: ND_JOB_SRC="$PWD/src" ND_JOB_OUT="$PWD/out" bash src/scripts/chain/nightly-desktop-job.sh
-      - name: snapcraft + LXD for the arm64 snap
-        if: matrix.label == 'linux-arm64'
+      # Both snaps here (the amd64 one on the build host until #361): core24,
+      # packed by snapcraft in LXD from the app the step above left unpacked.
+      - name: snapcraft + LXD for the snap
+        if: matrix.snap != ''
         run: |
           set -euo pipefail
           sudo snap install snapcraft --classic --channel=8.x/stable
@@ -175,21 +267,21 @@ jobs:
           sudo iptables -P FORWARD ACCEPT
           snapcraft --version
           echo "SNAPCRAFT_BUILD_ENVIRONMENT=lxd" >> "$GITHUB_ENV"
-      - name: The arm64 snap
+      - name: The snap
         id: snap
-        if: matrix.label == 'linux-arm64'
+        if: matrix.snap != ''
         shell: bash
         run: |
           set -euo pipefail
-          grep -qx 'snap-arm64 built' out/targets.txt || { echo "::error::the arm64 app was not built, so there is no snap"; exit 1; }
-          (cd src/desktop && pnpm exec electron-builder --linux snap --arm64 --publish never --prepackaged release/linux-arm64-unpacked)
-          cp src/desktop/release/filex-desktop-arm64.snap out/
-      - name: The arm64 snap to edge
-        if: matrix.label == 'linux-arm64' && steps.snap.outcome == 'success'
+          grep -qx "$SNAP_TARGET built" out/targets.txt || { echo "::error::the $SNAP app was not built, so there is no snap"; exit 1; }
+          (cd src/desktop && pnpm exec electron-builder --linux snap "--$CPU" --publish never --prepackaged "release/$UNPACKED")
+          cp "src/desktop/release/filex-desktop-$SNAP.snap" out/
+      - name: The snap to edge
+        if: matrix.snap != '' && steps.snap.outcome == 'success'
         shell: bash
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-        run: node src/scripts/chain/nightly-snap-edge.mjs out/filex-desktop-arm64.snap out/snap-arm64.json
+        run: node src/scripts/chain/nightly-snap-edge.mjs "out/filex-desktop-$SNAP.snap" "out/snap-$SNAP.json"
       - name: Keep the packages
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -198,7 +290,7 @@ jobs:
           path: |
             out/files/
             out/targets.txt
-            out/snap-arm64.json
+            out/snap-*.json
           if-no-files-found: ignore
           retention-days: 3
 
@@ -235,7 +327,7 @@ jobs:
         run: |
           set -euo pipefail
           node src/scripts/chain/nightly-desktop-manifest.mjs --dir out --version "$VERSION" --revision "$REVISION" \
-            --date "$DATE" --expect linux-x64,linux-arm64,snap-arm64,windows,mac \
+            --date "$DATE" --expect linux-x64,snap,linux-arm64,snap-arm64,windows,mac \
             --run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           cat out/nightly.json
       - name: To ghcr.io, as nightly-<date> and nightly

@@ -6,7 +6,8 @@ name: CI
 # build host before every release: 4 h 42 min on 0.51, and the same Go suite
 # five times and vitest eight times over one release. Here every part is a
 # job of its own on GitHub's standard runners (free for a public repository,
-# 20 at once for the organisation), and the push of main runs all of them.
+# 20 at once for the organisation), and a push of main - or of the nightly
+# branch - runs all of them.
 #
 # The parts come from scripts/ci-parts.mjs, not from this file: the Go
 # shards are scripts/test-shards.json (task #171), Playwright is split by
@@ -16,16 +17,24 @@ name: CI
 # tag run's `verify` (release.yml) publishes nothing unless this run on its
 # commit ended with `All tests (full)` green.
 #
-#   full  a push of main, a run by hand: every part below.
+#   full  a push of main or of `nightly`, a run by hand: every part below.
 #   pr    a pull request: the same without -race, with Chromium only, and
 #         without the Document Server, store and S3 lines. The 20 jobs at once
 #         are shared by every BRF-Tech repository, and a pull request is run
 #         in full again by the push that lands it.
 #
-# What the build host still runs and this does not: e2e/realenv (Pebble,
-# Caddy, Keycloak, OpenLDAP; the nightly run), the screenshots (shots.yml on a
-# tag), and the language pack the right-to-left specs prefer (not published:
-# they install the repository's own fixture instead, e2e/helpers/langPack.ts).
+# `nightly` (#361): every night the build host pushes the tip of the private
+# main there - exported the way a release is, as ONE commit on top of main,
+# the branch replaced each time (scripts/chain/nightly.mjs) - so the full
+# matrix runs on it every night, and a green run starts nightly-desktop.yml:
+# the nightly image and desktop packages are built from that commit.
+#
+# What runs nowhere on its own: e2e/realenv (Pebble, Caddy, Keycloak,
+# OpenLDAP), the Go tests against a real S3 provider and the Document
+# Server's Go test (the build host's chain runs them when a person asks: its
+# nightly profile), and the language pack the right-to-left specs prefer
+# (not published: they install the repository's own fixture instead,
+# e2e/helpers/langPack.ts). The screenshots are shots.yml's, on a tag.
 #
 # ⚠ Nothing calls this workflow any more. Until #174 release.yml ran it as its
 # `test` job, so every dry run of the release ran the suite a second time;
@@ -34,7 +43,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, nightly]
   pull_request:
   workflow_dispatch:
 
