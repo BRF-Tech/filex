@@ -111,11 +111,11 @@ export function s3LiveFile(env = {}) {
 }
 
 /**
- * The code the live S3 tests measure. Nothing runs them on its own since
- * #361 (GitHub has no bucket of ours, and the build host runs no tests at
- * night), so the night says it when a change it pushes touches one of these:
- * the morning report warns, names the files and the command that runs the
- * tests by hand. Read off what the four tests and the driver import:
+ * The code the live S3 tests measure. Since #364 GitHub runs them every
+ * week (.github/workflows/s3-live.yml, the s3-live environment's bucket), so
+ * the night says it when a change it pushes touches one of these: the
+ * morning report names the files and the command that runs them now. Read
+ * off what the four tests and the driver import:
  *
  *   backend/internal/storage/drivers/s3/   the driver: requests, multipart,
  *                                          presign, retries (resilience.go)
@@ -305,10 +305,17 @@ export function decidePush({ head, last = null, force = false }) {
  * does not push then (NIGHTLY_RELEASE_BUSY=skip): its full matrix would share
  * the organisation's 20 jobs at once with the release's. Returns { url, why }
  * or null.
+ *
+ * A run created more than `maxAgeH` hours before `nowMs` is no release being
+ * tested: GitHub can leave a run `queued` for good (2026-11-18: a release.yml
+ * run of v0.10.1, queued since 2026-08-06, held the first night back), and a
+ * release's gate does not wait half a day.
  */
-export function releaseBusy(runs = []) {
+export function releaseBusy(runs = [], { nowMs = null, maxAgeH = 12 } = {}) {
   for (const r of runs ?? []) {
     if (!r || r.status === 'completed') continue;
+    const created = Date.parse(r.created_at ?? '');
+    if (nowMs !== null && Number.isFinite(created) && nowMs - created > maxAgeH * 3_600_000) continue;
     const file = String(r.path ?? '').replace(/@.*$/, '').split('/').pop();
     if (file === 'release.yml') return { url: r.html_url ?? '', why: `release.yml runs (${r.display_title || r.head_branch || '?'})` };
     if (file === 'ci.yml' && r.event === 'push' && r.head_branch === 'main') {
@@ -495,13 +502,21 @@ export function snapUploadVerdict(status, text) {
  * Whether the Snap Store's edge channel serves a nightly snap (`last`: its
  * version, revision and upload time), read from the public channel map
  * (api.snapcraft.io/v2/snaps/info). `live` when edge/<arch> carries that
- * version; `held` when it does not - with how long since the upload - so a
- * review that never ends is said every morning, not once.
+ * revision, or that version; `held` when it does not - with how long since
+ * the upload - so a review that never ends is said every morning, not once.
+ *
+ * The Store lists a nightly's version without its build metadata
+ * (`0.62.0-nightly.20261118`, not `...+0d849cb7`): the first nightly built on
+ * GitHub (2026-11-18) was on edge as revisions 63 and 62 and read as held.
+ * The revision decides when both are known; versions are compared without
+ * what follows a `+`.
  */
 export function snapEdgeState(map, last, { arch = 'amd64', nowMs } = {}) {
   if (!last?.version) return null;
   const entry = (map ?? []).find((m) => m?.channel?.name === 'edge' && m?.channel?.architecture === arch);
-  if (entry && entry.version === last.version) return { state: 'live', arch, version: entry.version, revision: entry.revision };
+  const bare = (v) => String(v ?? '').replace(/\+.*$/, '');
+  const same = entry && (Number.isFinite(last.revision) && Number.isFinite(entry.revision) ? entry.revision === last.revision : bare(entry.version) === bare(last.version));
+  if (same) return { state: 'live', arch, version: entry.version, revision: entry.revision };
   const days = last.at ? Math.floor((nowMs - Date.parse(last.at)) / DAY_MS) : null;
   return {
     state: 'held',
@@ -832,11 +847,11 @@ export function lastGreenOf(history, job, before = history.length) {
 const SEVERITY_RANK = { info: 0, success: 1, warning: 2, danger: 3 };
 const worse = (a, b) => (SEVERITY_RANK[b] > SEVERITY_RANK[a] ? b : a);
 
-/** The morning report's line for a pushed change to the S3 code nothing tests on its own, or null. */
+/** The morning report's line for a pushed change to the S3 code: s3-live.yml tests it weekly (#364), or by hand now. Or null. */
 function s3Line(s) {
   if (!s?.files?.length) return null;
   const files = `${s.files.slice(0, 5).join(', ')}${s.files.length > 5 ? ', ...' : ''}`;
-  return `WARNING s3-live: the S3 code changed (${s.files.length} file(s) since ${short(s.since)}: ${files}) and nothing runs the live S3 tests on its own - run them by hand on the build host: CHAIN_EXTRAS=s3-live bash scripts/chain/run.sh --profile targeted --env <the chain's settings with FILEX_TEST_S3_*>`;
+  return `s3-live: the S3 code changed (${s.files.length} file(s) since ${short(s.since)}: ${files}); s3-live.yml tests it on Sunday, or now: gh workflow run s3-live.yml -R BRF-Tech/filex`;
 }
 
 /** The lines on the last nightly's CI, for a night that did not push. */
@@ -863,7 +878,7 @@ function lastCiLine(push, ci) {
  * Returns { severity, title, message }: success (GitHub green), danger
  * (GitHub red, or the export refused the change), warning (CI not over or
  * not found, a push that failed, no record, a package, the image, the page or
- * a snap that did not go out, S3 code nothing tested) or info (nothing to
+ * a snap that did not go out) or info (nothing to
  * push, or a release on GitHub kept the night back).
  */
 export function composeReport({
@@ -997,8 +1012,8 @@ export function composeReport({
   if (sl) lines.push(sl);
   if (il) lines.push(il);
   lines.push(...fl);
-  if (sl || githubTrouble) severity = worse(severity, 'warning');
-  if (verdict === 'green' && (sl || githubTrouble)) verdict = 'green, with a warning';
+  if (githubTrouble) severity = worse(severity, 'warning');
+  if (verdict === 'green' && githubTrouble) verdict = 'green, with a warning';
   return {
     severity,
     title: `filex nightly ${night}: ${verdict} (${short(p.sha)}${c.secs ? `, ${wallOf(c.secs)}` : ''})`,

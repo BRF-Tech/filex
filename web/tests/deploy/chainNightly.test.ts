@@ -117,9 +117,19 @@ describe('a release on GitHub keeps the night back (NIGHTLY_RELEASE_BUSY)', () =
     expect(releaseBusy([run({ status: 'completed' })])).toBeNull();
   });
 
+  it('does not wait for a run GitHub left queued for good: the first night met one from three months before', () => {
+    const now = ms('2026-11-18T04:58:00Z');
+    const ghost = run({ status: 'queued', path: '.github/workflows/release.yml', head_branch: 'v0.10.1', created_at: '2026-08-06T16:36:29Z' });
+    expect(releaseBusy([ghost], { nowMs: now })).toBeNull();
+    expect(releaseBusy([{ ...ghost, created_at: '2026-11-18T03:30:00Z' }], { nowMs: now })?.why).toBe('release.yml runs (v0.10.1)');
+    expect(releaseBusy([{ ...ghost, created_at: '2026-11-17T16:00:00Z' }], { nowMs: now, maxAgeH: 12 })).toBeNull();
+    expect(releaseBusy([{ ...ghost, created_at: '2026-11-17T18:00:00Z' }], { nowMs: now, maxAgeH: 12 })).not.toBeNull();
+    expect(read('nightly.mjs')).toContain('releaseBusy(await activeRuns(cfg), { nowMs: Date.now() })');
+  });
+
   it('asks GitHub only when the night would push, and pushes anyway when GitHub cannot be asked', () => {
     const mjs = read('nightly.mjs');
-    expect(mjs.indexOf('releaseBusy(await activeRuns(cfg))')).toBeGreaterThan(mjs.indexOf('if (!d.push) return record'));
+    expect(mjs.indexOf('releaseBusy(await activeRuns(cfg)')).toBeGreaterThan(mjs.indexOf('if (!d.push) return record'));
     expect(mjs).toMatch(/could not ask GitHub whether a release runs \(\$\{e\.message\}\): pushing anyway/);
     expect(mjs).toMatch(/for \(const status of \['in_progress', 'queued'\]\)/);
   });
@@ -582,9 +592,22 @@ describe("GitHub's packages of a night and filex.sh/nightly (#266)", () => {
       since: last.at,
       days: 2,
     });
-    expect(snapEdgeState([entry('0.61.1', 48), entry(version, 51, 'arm64')], last, { arch: 'arm64', nowMs: now })?.state).toBe('live');
+    expect(snapEdgeState([entry('0.61.1', 48), entry(version, 51, 'arm64')], { ...last, revision: 51 }, { arch: 'arm64', nowMs: now })?.state).toBe('live');
     expect(snapEdgeState([], last, { nowMs: now })?.edge).toBe('no revision');
     expect(snapEdgeState([entry(version, 50)], null, { nowMs: now })).toBeNull();
+  });
+
+  it("takes the Store's version without the build metadata, and the revision before the version (the first night on GitHub)", () => {
+    // Measured 2026-11-18: edge listed revisions 63 (amd64) and 62 (arm64) as
+    // 0.62.0-nightly.20261118, the manifest said 0.62.0-nightly.20261118+0d849cb7.
+    const uploaded = { version: '0.62.0-nightly.20261118+0d849cb7', revision: 63, at: '2026-11-18T06:25:00Z' };
+    const entry = (v: string, revision: number, architecture = 'amd64') => ({ channel: { name: 'edge', architecture }, version: v, revision });
+    expect(snapEdgeState([entry('0.62.0-nightly.20261118', 63)], uploaded, { nowMs: now })?.state).toBe('live');
+    // An older revision of the same day's version is not this upload.
+    expect(snapEdgeState([entry('0.62.0-nightly.20261118', 61)], uploaded, { nowMs: now })?.state).toBe('held');
+    // No revision known: the version decides, without its metadata.
+    expect(snapEdgeState([entry('0.62.0-nightly.20261118', 61)], { ...uploaded, revision: undefined }, { nowMs: now })?.state).toBe('live');
+    expect(snapEdgeState([entry('0.61.2', 60)], { ...uploaded, revision: undefined }, { nowMs: now })?.state).toBe('held');
   });
 
   it("reads snapcraft's answer: released, held for a review, or failed", () => {
@@ -821,11 +844,10 @@ describe('the morning report', () => {
     expect(composeReport({ tonight: tonight(), history, ci: { state: 'unknown', why: 'HTTP 403' }, push: last, commits, nowMs: now, tz }).message).toContain('WARNING GitHub could not be asked about dddddddd: HTTP 403');
   });
 
-  it('turns a green night into a warning when the S3 code changed, the image did not follow, or a package did not go out', () => {
+  it('names a change to the S3 code and where it is tested (#364: s3-live.yml), and turns a green night into a warning when the image did not follow or a package did not go out', () => {
     const s3 = composeReport({ tonight: tonight({ s3: { since: B, files: ['backend/internal/storage/drivers/s3/multipart.go'] } }), history, ci: ci(), push: last, commits, nowMs: now, tz });
-    expect(s3.severity).toBe('warning');
-    expect(s3.title).toMatch(/: green, with a warning \(/);
-    expect(s3.message).toMatch(/WARNING s3-live: the S3 code changed \(1 file\(s\) since bbbbbbbb: backend\/internal\/storage\/drivers\/s3\/multipart\.go\) and nothing runs the live S3 tests on its own - run them by hand on the build host: CHAIN_EXTRAS=s3-live bash scripts\/chain\/run\.sh --profile targeted/);
+    expect(s3.severity).toBe('success');
+    expect(s3.message).toContain('s3-live: the S3 code changed (1 file(s) since bbbbbbbb: backend/internal/storage/drivers/s3/multipart.go); s3-live.yml tests it on Sunday, or now: gh workflow run s3-live.yml -R BRF-Tech/filex');
     const image = composeReport({ tonight: tonight(), history, ci: ci(), push: last, follow: { state: 'built', version: push.version }, image: { state: 'other', version: 'old' }, commits, nowMs: now, tz });
     expect(image.severity).toBe('warning');
     const pkg = composeReport({ tonight: tonight(), history, ci: ci(), push: last, follow: { state: 'failed', version: push.version, conclusion: 'failure', url: 'u' }, commits, nowMs: now, tz });

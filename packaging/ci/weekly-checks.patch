@@ -1,0 +1,285 @@
+diff --git a/.github/workflows/realenv.yml b/.github/workflows/realenv.yml
+new file mode 100644
+index 00000000..9b169b0c
+--- /dev/null
++++ b/.github/workflows/realenv.yml
+@@ -0,0 +1,99 @@
++name: Real servers
++
++# filex against REAL third-party servers (e2e/realenv/run.sh, #364): Pebble
++# (Let's Encrypt's ACME test server) and a real Caddy in front, Keycloak and
++# OpenLDAP for sign-in, the ONLYOFFICE Document Server. Every stage starts its
++# own containers on its own networks and runs its specs in a Playwright
++# container on them; nothing here reaches a host of ours, and no secret is
++# read.
++#
++# Weekly, on the `nightly` branch's commit - the tip of main the build host
++# pushes there every night (ci.yml, nightly-desktop.yml) - and by hand on any
++# ref. Until 2026-11-18 the build host ran it once a week in its nightly
++# chain; GitHub's runners have Docker too.
++#
++# ⚠ run.sh SKIPS a stage whose images it could not get and still exits 0. Here
++# a skipped stage is red: a week that ran no stage must not read as a week they
++# passed (the chain's job said the same).
++
++on:
++  schedule:
++    - cron: "40 5 * * 0"
++  workflow_dispatch:
++    inputs:
++      stages:
++        description: "Stages, space-separated (tls sso office); empty: every stage"
++        type: string
++        default: ""
++
++permissions:
++  contents: read
++
++concurrency:
++  group: realenv
++  cancel-in-progress: false
++
++jobs:
++  realenv:
++    name: Real servers (ACME, SSO, office)
++    # ubuntu-24.04, not -latest: the Playwright runner image pnpm-lock.yaml
++    # pins (mcr.microsoft.com/playwright:v<version>-noble) is the same Ubuntu.
++    runs-on: ubuntu-24.04
++    timeout-minutes: 90
++    steps:
++      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
++        with:
++          ref: ${{ github.event_name == 'schedule' && 'nightly' || '' }}
++          persist-credentials: false
++      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
++        with:
++          version: "9.12.0"
++      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
++        with:
++          node-version: "20"
++          cache: pnpm
++      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
++        with:
++          go-version-file: backend/go.mod
++          cache-dependency-path: backend/go.sum
++      - run: pnpm install --frozen-lockfile
++      - name: Packages, admin UI, embed, server binary
++        env:
++          NODE_OPTIONS: "--max-old-space-size=4096"
++        run: |
++          set -euo pipefail
++          pnpm run build:all
++          node scripts/check-embed.mjs --binary bin/filex
++      - name: The stages
++        shell: bash
++        env:
++          STAGES: ${{ inputs.stages }}
++          REALENV_PULL: "1"
++        run: |
++          set -uo pipefail
++          read -r -a stages <<< "${STAGES:-}"
++          bash e2e/realenv/run.sh "${stages[@]}" 2>&1 | tee realenv.out
++          rc=${PIPESTATUS[0]}
++          passed=$(grep -E 'realenv: passed:' realenv.out | tail -1 | sed 's/.*passed: *//')
++          skipped=$(grep -c 'realenv: SKIPPED' realenv.out || true)
++          {
++            echo "### Real servers: ${passed:-none} passed"
++            [ "$skipped" -gt 0 ] && grep 'realenv: SKIPPED' realenv.out | sed 's/^/- /'
++          } >> "$GITHUB_STEP_SUMMARY"
++          if [ "$rc" -eq 0 ] && [ "$skipped" -gt 0 ]; then
++            echo "::error::$skipped stage(s) were skipped: not a pass here"
++            rc=1
++          fi
++          exit "$rc"
++      - name: Keep the logs
++        if: always()
++        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
++        with:
++          name: realenv
++          path: |
++            realenv.out
++            e2e/realenv/.work/logs/
++            e2e/realenv/.work/results/
++          include-hidden-files: true
++          if-no-files-found: ignore
++          retention-days: 14
+diff --git a/.github/workflows/s3-live.yml b/.github/workflows/s3-live.yml
+new file mode 100644
+index 00000000..bdf16bc1
+--- /dev/null
++++ b/.github/workflows/s3-live.yml
+@@ -0,0 +1,105 @@
++name: Live S3
++
++# The Go tests that talk to a REAL S3 provider (#364): the provider
++# conformance suite, the driver's Init, the B2 report reader over S3 and issue
++# #21's rename, against a bucket of their own that they write to and delete
++# from (backend/internal/testutil/lives3 reads FILEX_TEST_S3_*). Weekly, on the
++# `nightly` branch's commit, and by hand on any ref. Until 2026-11-18 the
++# build host ran them, with a B2 demo account's key, on a night the S3 code
++# changed.
++#
++# The credentials are the `s3-live` environment's secrets - FILEX_TEST_S3_BUCKET,
++# _ACCESS_KEY, _SECRET_KEY, _REGION and _ENDPOINT (and _PATH_STYLE, 0 for
++# virtual-hosted addressing) - and that environment may only be deployed to
++# from main: a scheduled run and a run by hand of main's workflow. Without
++# them the run says "skipped: no S3 credentials" and is green, not red: the
++# tests did not run, and the summary says so. With them, a test that only
++# skipped is red - everywhere else each of them skips itself, and a skip reads
++# as a pass. The region is part of the request signature (lesson #927): a
++# provider with a region of its own refuses one signed for "auto".
++
++on:
++  schedule:
++    - cron: "10 6 * * 0"
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++concurrency:
++  group: s3-live
++  cancel-in-progress: false
++
++env:
++  TESTS: TestLiveProviderConformance TestInit_Integration TestB2_OverRealS3 TestRenameOnS3_TheReportersSequence
++  PKGS: ./internal/storage/drivers/s3 ./internal/usage ./internal/api/handlers
++
++jobs:
++  s3-live:
++    name: Live S3 (a real provider's bucket)
++    runs-on: ubuntu-latest
++    timeout-minutes: 30
++    environment: s3-live
++    env:
++      FILEX_TEST_S3_BUCKET: ${{ secrets.FILEX_TEST_S3_BUCKET }}
++      FILEX_TEST_S3_ACCESS_KEY: ${{ secrets.FILEX_TEST_S3_ACCESS_KEY }}
++      FILEX_TEST_S3_SECRET_KEY: ${{ secrets.FILEX_TEST_S3_SECRET_KEY }}
++      FILEX_TEST_S3_REGION: ${{ secrets.FILEX_TEST_S3_REGION }}
++      FILEX_TEST_S3_ENDPOINT: ${{ secrets.FILEX_TEST_S3_ENDPOINT }}
++      FILEX_TEST_S3_PATH_STYLE: ${{ secrets.FILEX_TEST_S3_PATH_STYLE }}
++    steps:
++      - name: The credentials
++        id: creds
++        shell: bash
++        run: |
++          set -euo pipefail
++          missing=""
++          for name in FILEX_TEST_S3_BUCKET FILEX_TEST_S3_ACCESS_KEY FILEX_TEST_S3_SECRET_KEY FILEX_TEST_S3_REGION; do
++            [ -n "${!name:-}" ] || missing="$missing $name"
++          done
++          if [ -n "$missing" ]; then
++            echo "::notice title=Live S3::skipped: no S3 credentials (the s3-live environment has no secret:$missing)"
++            echo "### Live S3: skipped, no S3 credentials (missing:$missing)" >> "$GITHUB_STEP_SUMMARY"
++            echo "run=false" >> "$GITHUB_OUTPUT"
++          else
++            echo "the s3-live environment names a bucket, its key and its region"
++            echo "run=true" >> "$GITHUB_OUTPUT"
++          fi
++      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
++        if: steps.creds.outputs.run == 'true'
++        with:
++          ref: ${{ github.event_name == 'schedule' && 'nightly' || '' }}
++          persist-credentials: false
++      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
++        if: steps.creds.outputs.run == 'true'
++        with:
++          go-version-file: backend/go.mod
++          cache-dependency-path: backend/go.sum
++      # backend/embed/{admin,web} are build output: //go:embed refuses an empty directory.
++      - name: Embed placeholders
++        if: steps.creds.outputs.run == 'true'
++        run: |
++          mkdir -p backend/embed/admin backend/embed/web
++          touch backend/embed/admin/.placeholder backend/embed/web/.placeholder
++      - name: The live tests
++        if: steps.creds.outputs.run == 'true'
++        shell: bash
++        working-directory: backend
++        env:
++          INTEGRATION: "1"
++        run: |
++          set -uo pipefail
++          run="^($(echo $TESTS | tr ' ' '|'))\$"
++          go test -count=1 -v -timeout 20m -run "$run" $PKGS > ../s3-live.out 2>&1
++          rc=$?
++          grep -E '^(=== RUN|--- (PASS|FAIL|SKIP)|\s+--- (PASS|FAIL|SKIP)|panic:|FAIL|ok )' ../s3-live.out | head -80
++          notpassed=""
++          for t in $TESTS; do
++            grep -qE "^--- PASS: $t " ../s3-live.out || notpassed="$notpassed $t"
++          done
++          if [ "$rc" -eq 0 ] && [ -n "$notpassed" ]; then
++            echo "::error::did not pass:$notpassed - a skip is not a pass here"
++            rc=1
++          fi
++          echo "### Live S3: $([ "$rc" -eq 0 ] && echo "every test passed" || echo "RED -${notpassed:- see the log}")" >> "$GITHUB_STEP_SUMMARY"
++          exit "$rc"
+diff --git a/.github/workflows/shots.yml b/.github/workflows/shots.yml
+index 25a903be..61a33c09 100644
+--- a/.github/workflows/shots.yml
++++ b/.github/workflows/shots.yml
+@@ -18,14 +18,28 @@ name: Screenshots
+ # relative links work after download. site/ is not part of this repository, so
+ # the command's site-asset sync reports that and moves on.
+ #
++# The weekly nightly run (#364): every scene (`pnpm shots --all --keep-going`)
++# of the `nightly` branch's commit - the tip of main the build host pushes
++# there every night - so a shot script that no longer fits the product turns a
++# week red, not a release day. It publishes nothing either: the pictures stay
++# in the run's artifact, and the published set is still taken and accepted in
++# the build host's test chain (docs/CONTRIBUTING.md, Release process). Until
++# 2026-11-18 the build host's nightly chain took every scene each night.
++#
+ # ⚠ This file lives in the public checkout only (scripts/export-public.sh keeps
+-# .github/workflows across an export); the private repository's twin is the
+-# `shots` job in .gitlab-ci.yml.
++# .github/workflows across an export).
+ 
+ on:
+   push:
+     tags: ["v*"]
++  schedule:
++    - cron: "20 4 * * 0"
+   workflow_dispatch:
++    inputs:
++      nightly:
++        description: "Every scene of the nightly branch's commit, as the weekly run takes them"
++        type: boolean
++        default: false
+ 
+ permissions:
+   contents: read
+@@ -43,6 +57,9 @@ jobs:
+     timeout-minutes: 60
+     steps:
+       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
++        with:
++          ref: ${{ (github.event_name == 'schedule' || inputs.nightly) && 'nightly' || '' }}
++          persist-credentials: false
+       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+         with:
+           version: "9.12.0"
+@@ -65,7 +82,13 @@ jobs:
+         env:
+           # vue-tsc needs headroom on the full component bundle.
+           NODE_OPTIONS: "--max-old-space-size=4096"
+-        run: pnpm shots
++          NIGHTLY: ${{ (github.event_name == 'schedule' || inputs.nightly) && 'true' || 'false' }}
++        run: |
++          if [ "$NIGHTLY" = true ]; then
++            pnpm shots --all --keep-going
++          else
++            pnpm shots
++          fi
+ 
+       # ⚠ include-hidden-files: e2e/.artifacts is a dot-directory, and
+       # upload-artifact v4.4+ silently leaves hidden paths out of the archive.
+@@ -73,7 +96,7 @@ jobs:
+         if: always()
+         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+         with:
+-          name: screenshots-${{ github.ref_name }}
++          name: screenshots-${{ (github.event_name == 'schedule' || inputs.nightly) && 'nightly' || github.ref_name }}
+           path: |
+             docs/screenshots/
+             e2e/.artifacts/shots/

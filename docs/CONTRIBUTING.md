@@ -681,7 +681,10 @@ resets: run the installer again to update them.
   `ci.yml` on a push of `main` (`NIGHTLY_RELEASE_BUSY=skip`, the default;
   `releaseBusy` in `scripts/chain/nightly-lib.mjs`): its full matrix would
   share the organisation's 20 jobs at once with the release's gate. The
-  record says `deferred`, and the next night pushes. `--force` pushes anyway;
+  record says `deferred`, and the next night pushes. `--force` pushes anyway.
+  A run created more than 12 hours before is not waited for: GitHub can
+  leave a run `queued` for good (the first night met a `release.yml` run of
+  v0.10.1, queued since 2026-08-06);
 - otherwise checks `main` out clean and runs `scripts/chain/nightly-export.sh`
   from that tree: `scripts/export-public.sh` stages the public tree in a clone
   of the public repository (`NIGHTLY_PUBLIC_DIR`) reset to its `main`, with the
@@ -708,7 +711,7 @@ resets: run the installer again to update them.
   host's own credential, through the same gate (gitleaks needed there).
 
 A change that touched the S3 code (`S3_LIVE_PATHS`) is named in the morning
-report: nothing runs the live S3 tests on their own any more (below).
+report, with where the live S3 tests run (`s3-live.yml`, below).
 
 **On GitHub.** `ci.yml`'s push trigger names the branch
 (`packaging/ci/nightly-on-github.patch`), so its full matrix runs on the
@@ -774,28 +777,34 @@ in `CHAIN_NOTIFY_KEY_FILE`, which it never logs; GitHub's API is read with
 the token in `NIGHTLY_GITHUB_TOKEN_FILE` (any scope: everything it reads is
 public) for the rate limit.
 
-**What runs nowhere on its own.** GitHub has no bucket, Document Server
-diagnosis or real ACME and SSO servers of ours, so these stay on the build
-host as a person's run - nothing starts them on a timer:
+**Every week on GitHub** (#364, `packaging/ci/weekly-checks.patch`), on
+the `nightly` branch's commit, and by hand on any ref - what the build host's
+nightly chain ran on its own until 2026-11-18:
 
-- the chain's `nightly` profile - the full chain plus `ds-go` (the office
-  engine's Go test against a real Document Server and the Convert app,
-  `backend/internal/server/office_engine_ds_test.go`), `s3-live`, `shots`
-  (`pnpm shots --all --keep-going` with the app builds and language packs the
-  settings name) and `realenv` (`NIGHTLY_EXTRAS` in
-  `scripts/chain/nightly-lib.mjs`; `CHAIN_NIGHTLY_EXTRAS` picks some):
-  `bash scripts/chain/run.sh --profile nightly --env <a chain settings file>`;
-- **the live S3 tests**, when the morning report says the S3 code changed:
-  bring credentials for one run - a provider's own test bucket, the demo
-  account - in the chain's settings as `FILEX_TEST_S3_ENDPOINT`, `_REGION`,
-  `_BUCKET`, `_ACCESS_KEY`, `_SECRET_KEY` (and `_PATH_STYLE=0` for
-  virtual-hosted addressing; the region is part of the request signature, a
-  server with one of its own refuses `auto`) and run
-  `CHAIN_EXTRAS=s3-live bash scripts/chain/run.sh --profile targeted --env <that file>`.
-  The values reach the job in a `0600` file of the run, never on a command
-  line or in a log; a test that only skipped is red;
-- `e2e/realenv/run.sh` (Against the real servers, above), and the screenshots
-  (`shots.yml` takes a release's on a tag).
+- `.github/workflows/realenv.yml` (Sundays): `e2e/realenv/run.sh`, filex
+  against Pebble and a real Caddy, Keycloak and OpenLDAP, the Document
+  Server, the images pulled (`REALENV_PULL=1`). A stage it skipped is red.
+- `.github/workflows/shots.yml`'s weekly run: every scene
+  (`pnpm shots --all --keep-going`), the app and Document Server scenes left
+  out as in any CI run, the pictures kept in the run's artifact. It publishes
+  nothing: the published set is still taken and accepted in the build host's
+  chain (Release process).
+- `.github/workflows/s3-live.yml` (Sundays): the live S3 tests against the
+  bucket the `s3-live` environment's secrets name - `FILEX_TEST_S3_BUCKET`,
+  `_ACCESS_KEY`, `_SECRET_KEY`, `_REGION`, `_ENDPOINT`, `_PATH_STYLE` - which
+  only main may deploy to. Without them the run says
+  `skipped: no S3 credentials` and is green; with them a test that only
+  skipped is red.
+
+**What still runs nowhere on its own**: `ds-go`, the office engine's Go test
+against a real Document Server and the Convert app
+(`backend/internal/server/office_engine_ds_test.go`), in the chain's
+`nightly` profile - a person's run on the build host:
+`bash scripts/chain/run.sh --profile nightly --env <a chain settings file>`
+(`NIGHTLY_EXTRAS` in `scripts/chain/nightly-lib.mjs`; `CHAIN_NIGHTLY_EXTRAS`
+picks some). The profile's other extras are the weekly workflows' above, and
+the morning report still names a pushed change to the S3 code
+(`S3_LIVE_PATHS`).
 
 **What it leaves**, under its `CHAIN_ROOT`: the checkout (`src/`), the clone
 of the public repository the export is made in (`public/`), the page last
@@ -3802,6 +3811,15 @@ ones not yet published apply on top of one another in this order:
     beside the arm64 one (the build host's until then). Nothing reads
     `filex-nightly-src` any more. `nightlyDesktop.test.ts` and
     `ciFullMatrix.test.ts` hold it.
+
+22. `weekly-checks.patch` (#364, 0.62), on top of 21: two new workflows
+    and a weekly mode for a third, every week on the `nightly` branch's
+    commit and by hand ([The nightly run](#the-nightly-run)) -
+    `realenv.yml` (real ACME, SSO and office servers; a skipped stage is
+    red), `s3-live.yml` (the `s3-live` environment's `FILEX_TEST_S3_*`
+    secrets; without them `skipped: no S3 credentials`, green; a test that
+    only skipped is red) and `shots.yml`'s schedule (`pnpm shots --all
+    --keep-going`, publishing nothing). `weeklyChecks.test.ts` holds them.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and

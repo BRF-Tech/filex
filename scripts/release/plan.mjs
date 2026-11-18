@@ -236,6 +236,15 @@ const WORKFLOW_GUARDS = [
   "build the image from the commit with the release's recipe, check what it reports, and push it as nightly-<date> and nightly",
   'make every row with the nightly job script, unsigned, and pack both snaps for edge alone',
   "send the night to ghcr as one artifact with its manifest, as nightly-<date> and nightly; old nights go without failing the run, a missing row fails it",
+  // #364: what the build host's nightly chain ran on its own, every week on
+  // GitHub - real servers, a real S3 provider, every screenshot scene
+  // (packaging/ci/weekly-checks.patch, web/tests/deploy/weeklyChecks.test.ts).
+  'runs every week and by hand, on the nightly branch when scheduled, with the images pulled',
+  'reads a skipped stage as red: a week that ran no stage is not a week they passed',
+  "reads the s3-live environment's secrets, and nothing runs without them",
+  'says "skipped: no S3 credentials" without a secret and stays green; runs with the four it needs',
+  'reads a live test that only skipped as red',
+  'takes every scene of the nightly branch every week and by hand, and publishes nothing',
   // #252: a server patch's tag run publishes the server's surface alone
   // (packaging/ci/release-surfaces.patch); #361: once its commit passed
   // what every release's must, promoting the dry run's images
@@ -1097,6 +1106,7 @@ export default function plan({ repo, version, tag, platform = process.platform }
             'tests/deploy/wingetFirstPackage.test.ts',
             'tests/deploy/releaseAurLinuxOnly.test.ts',
             'tests/deploy/nightlyDesktop.test.ts',
+            'tests/deploy/weeklyChecks.test.ts',
             'tests/deploy/releaseSurfaces.test.ts',
             'tests/deploy/releaseNpmTrusted.test.ts',
             'tests/deploy/ciFullMatrix.test.ts',

@@ -32,8 +32,8 @@
 //      token never leaves it (scripts/chain/nightly-push.sh, NIGHTLY_PUSH_WRAP)
 //      - or, with none, from the clone here with this host's own credential;
 //   5. keeps the night's record. When the change touched the S3 code
-//      (nightly-lib.mjs S3_LIVE_PATHS), the morning report says that nothing
-//      ran the live S3 tests on it.
+//      (nightly-lib.mjs S3_LIVE_PATHS), the morning report names it, and
+//      where the live S3 tests run (s3-live.yml, weekly).
 //
 // On GitHub, ci.yml's push trigger names the branch: its full matrix runs on
 // the commit, and green, .github/workflows/nightly-desktop.yml (workflow_run)
@@ -357,14 +357,14 @@ async function runNight(cfg, args) {
   if (cfg.push.busy === 'skip' && !args.force) {
     let busy = null;
     try {
-      busy = releaseBusy(await activeRuns(cfg));
+      busy = releaseBusy(await activeRuns(cfg), { nowMs: Date.now() });
     } catch (e) {
       // GitHub that cannot be asked holds nothing back: the push is the night's one job.
       log(`could not ask GitHub whether a release runs (${e.message}): pushing anyway`);
     }
     if (busy) return record({ decision: 'deferred', why: `GitHub is testing a release - ${busy.why}; the next night pushes`, busy }, 0);
   }
-  // A change to the S3 code is said in the morning: nothing tests it on its own.
+  // A change to the S3 code is said in the morning, with where it is tested.
   const s3 = s3Since(cfg, state.last_export?.sha ?? null, head);
   if (s3) tonight.s3 = s3;
   if (args.dryRun) {
