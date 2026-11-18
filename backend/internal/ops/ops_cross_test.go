@@ -34,6 +34,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/testutil/opswait"
 )
 
 type crossFixture struct {
@@ -102,7 +103,8 @@ func (f *crossFixture) run(t *testing.T, kind string, sources []string, dest str
 	go f.svc.Run(runCtx)
 	defer f.svc.Stop()
 
-	deadline := time.Now().Add(10 * time.Second)
+	start := time.Now()
+	deadline := start.Add(opswait.Budget)
 	for {
 		cur, err := f.svc.Get(ctx, op.ID)
 		require.NoError(t, err)
@@ -111,7 +113,7 @@ func (f *crossFixture) run(t *testing.T, kind string, sources []string, dest str
 			return cur
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("op %d (%s) never finished; status=%s err=%s", op.ID, kind, cur.Status, cur.Error)
+			t.Fatalf("op %d (%s) never finished; status=%s err=%s %s", op.ID, kind, cur.Status, cur.Error, opswait.Waited(start))
 		}
 		time.Sleep(15 * time.Millisecond)
 	}

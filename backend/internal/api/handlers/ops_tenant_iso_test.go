@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/testutil/opswait"
 )
 
 // drainOps runs the queue worker until nothing is pending. The red proof for
@@ -44,7 +45,8 @@ func (f *mtFix) drainOps(t *testing.T) {
 	go f.Ops.Run(runCtx)
 	defer f.Ops.Stop()
 
-	deadline := time.Now().Add(10 * time.Second)
+	start := time.Now()
+	deadline := start.Add(opswait.Budget)
 	for time.Now().Before(deadline) {
 		list, err := f.Ops.List(ctx, "")
 		require.NoError(t, err)
@@ -59,7 +61,7 @@ func (f *mtFix) drainOps(t *testing.T) {
 		}
 		time.Sleep(15 * time.Millisecond)
 	}
-	t.Fatal("queue never drained")
+	t.Fatalf("queue never drained %s", opswait.Waited(start))
 }
 
 // TestOpsSubmit_PerVerbDeleteCannotReachAnotherTenant

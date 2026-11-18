@@ -1,7 +1,8 @@
 // What the release asks GitHub Actions, through the `gh` CLI: the runs of a
 // workflow on one commit, the jobs of a run (ci.yml's matrix, read part by
-// part), the artifacts a run kept, starting a workflow by hand, and the pull
-// requests the export commit merges (--merge-pr).
+// part), the artifacts a run kept and one of them downloaded (the dry run's
+// image digests), starting a workflow by hand, and the pull requests the
+// export commit merges (--merge-pr).
 //
 // The gate stage (stages.mjs → gate) takes this from the plan as
 // `plan.github`, so the release's own test (web/tests/deploy/releaseCli.test.ts)
@@ -90,6 +91,15 @@ export function githubActions(repo) {
       ]);
       if (r.status !== 0) return { error: (r.stderr || r.stdout).trim() || `gh exited ${r.status}` };
       return { names: String(r.stdout).split(/\r?\n/).map((s) => s.trim()).filter(Boolean) };
+    },
+
+    /**
+     * Downloads one artifact of a run into `dir` (#361: the dry run's image
+     * digests, for the candidate the gate stage looks into).
+     */
+    download({ runId, name, dir }) {
+      const r = run('gh', ['run', 'download', String(runId), '-R', repo, '-n', name, '-D', dir]);
+      return r.status === 0 ? { ok: true } : { error: (r.stderr || r.stdout).trim() || `gh exited ${r.status}` };
     },
 
     /**

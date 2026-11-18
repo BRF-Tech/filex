@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/testutil/opswait"
 	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
@@ -105,7 +106,8 @@ func (f *trashFix) otherStorage(t *testing.T) int64 {
 
 func waitDone(t *testing.T, svc *ops.Service, id int64) *ops.Op {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	start := time.Now()
+	deadline := start.Add(opswait.Budget)
 	for time.Now().Before(deadline) {
 		op, err := svc.Get(context.Background(), id)
 		require.NoError(t, err)
@@ -114,7 +116,7 @@ func waitDone(t *testing.T, svc *ops.Service, id int64) *ops.Op {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("op %d never finished", id)
+	t.Fatalf("op %d never finished %s", id, opswait.Waited(start))
 	return nil
 }
 

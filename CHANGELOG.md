@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.61.2] - 2026-11-18
+
+### Changed
+
+- **A server patch is published only once the whole test suite passed on
+  it, and is offered to automatic updates at once** (task #361). Until now a
+  patch that changed the server alone went out as soon as GitHub had built
+  it, with the rest of the test suite still running behind it, and installs
+  that update themselves took it only once that suite had passed, usually
+  within the hour. Now every release, a server patch too, is tagged only
+  after GitHub's full test matrix and the release's dry run passed on its
+  commit, and the images it publishes are the ones that dry run built, pulled
+  by digest and checked again before the tag: they report the release, serve
+  the admin interface and the embeddable explorer, and refuse writes in demo
+  mode. [UPDATES.md → What "automatic" actually checks](docs/UPDATES.md#what-automatic-actually-checks).
+
+### Fixed
+
+- **One slow answer from the Document Server no longer hides ONLYOFFICE for
+  minutes** (by @trivnvdev-41 in
+  [PR #138](https://github.com/BRF-Tech/filex/pull/138)). The health probe
+  behind `/api/capabilities` and the admin page's **Test now** waited 3
+  seconds once, and a failed verdict was kept for two minutes for every
+  client, so one latency spike took the editor away from everybody. A probe
+  now waits up to 5 seconds, asks once more after a quick failure (a refused
+  connection or an error status) within those 5 seconds, and a failed verdict
+  is kept for 30 seconds. A probe that got no answer is not asked again, so a
+  silent service holds the capabilities answer and the server's start no
+  longer than one timeout. The probe's detail says `(2 attempts)` when it
+  asked twice.
+  [BACKEND.md → Test an external service](docs/BACKEND.md#post-apiadminexternalnametest-).
+
 ## [0.61.1] - 2026-11-15
 
 ### Fixed

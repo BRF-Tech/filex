@@ -6,10 +6,12 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -25,6 +27,20 @@ func selfSignedLogin(t *testing.T) *httptest.Server {
 	return srv
 }
 
+// tlsHandshakeBudget is how long runTLSClient keeps asking again when the
+// TLS handshake itself timed out.
+//
+// ⚠ Why (v0.61.2 release rounds, task #360): under -race on a loaded build
+// host the handshake with this test's own httptest server outlasted the
+// client's 15 s twice, and TestClientLogin_ASelfSignedServerNeedsTheSwitch
+// read "TLS handshake timeout" where it waits for the certificate error. The
+// client's bound is the product's and stays (internal/cliclient: a change
+// there would make the release reach the CLI and the desktop app too), so the
+// test asks again instead. Only a handshake timeout is asked again: the
+// certificate error, a success or any other answer comes back at once, and
+// none of them sent a request, so no attempt left anything behind.
+const tlsHandshakeBudget = 60 * time.Second
+
 // runTLSClient is runLogin with stderr kept, and any subcommand.
 func runTLSClient(t *testing.T, cfgPath, stdin string, args ...string) (string, string, error) {
 	t.Helper()
@@ -32,14 +48,22 @@ func runTLSClient(t *testing.T, cfgPath, stdin string, args ...string) (string, 
 	t.Setenv("FILEX_URL", "")
 	t.Setenv("FILEX_TOKEN", "")
 	t.Setenv(cliclient.EnvInsecureSkipTLSVerify, "")
-	c := clientCmd()
-	var out, errOut bytes.Buffer
-	c.SetOut(&out)
-	c.SetErr(&errOut)
-	c.SetIn(strings.NewReader(stdin))
-	c.SetArgs(args)
-	err := c.Execute()
-	return out.String(), errOut.String(), err
+	start := time.Now()
+	for attempt := 1; ; attempt++ {
+		c := clientCmd()
+		var out, errOut bytes.Buffer
+		c.SetOut(&out)
+		c.SetErr(&errOut)
+		c.SetIn(strings.NewReader(stdin))
+		c.SetArgs(args)
+		err := c.Execute()
+		if err == nil || !strings.Contains(err.Error(), "TLS handshake timeout") {
+			return out.String(), errOut.String(), err
+		}
+		if time.Since(start) >= tlsHandshakeBudget {
+			return out.String(), errOut.String(), fmt.Errorf("%w (the TLS handshake timed out on all %d attempts, waited %s)", err, attempt, time.Since(start).Round(time.Millisecond))
+		}
+	}
 }
 
 func TestClientLogin_ASelfSignedServerNeedsTheSwitch(t *testing.T) {

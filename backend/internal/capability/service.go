@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,7 +43,7 @@ type Service struct {
 
 	// Asymmetric cache TTLs (fields so tests can shorten them): a snapshot
 	// where every enabled external probe succeeded lives okTTL (1h); one
-	// with any failed probe lives only failTTL (2m) so the next Get
+	// with any failed probe lives only failTTL (30s) so the next Get
 	// re-probes soon and a transient outage clears itself quickly.
 	okTTL   time.Duration
 	failTTL time.Duration
@@ -70,9 +71,11 @@ type Service struct {
 // New constructs a Service.
 func New(store db.Store) *Service {
 	return &Service{
-		store:   store,
-		okTTL:   time.Hour,
-		failTTL: 2 * time.Minute,
+		store: store,
+		okTTL: time.Hour,
+		// A negative verdict is shown to every client for this long. Keep it
+		// short: one slow probe must not hide the editor for minutes.
+		failTTL: 30 * time.Second,
 	}
 }
 
@@ -231,7 +234,7 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	// "context canceled", and `external` was cached EMPTY for an hour: no
 	// ONLYOFFICE, no draw.io, for everybody (found by the v0.43.0 e2e suite,
 	// 2026-09-22). Detached, with a bound of its own.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refreshBound)
 	defer cancel()
 	caps := &model.Capabilities{
 		Upload:   true,
@@ -464,8 +467,27 @@ func externalProbeURL(name, rawURL string) string {
 	return strings.TrimRight(rawURL, "/") + p
 }
 
-// probeTimeout is how long a health probe waits for an answer.
-const probeTimeout = 3 * time.Second
+// refreshBound is how long one capabilities refresh may take, its probes
+// and the database reads and writes after them. What runs past it fails:
+// a probe round that outlived it lost the verdicts it stored last and the
+// storages' capabilities, and cached that for failTTL.
+const refreshBound = 30 * time.Second
+
+// probeTimeout is how long a health probe waits for an answer, its second
+// attempt included. 5s leaves a Document Server room for a slow answer and a
+// latency spike (3s did not: 2.7s spikes were seen, PR #138). The probes of
+// a refresh run one after the other, at start before the server listens and
+// whenever the cache expires, so a probe that may take longer multiplies:
+// three silent services hold a refresh for 15s, half of refreshBound.
+var probeTimeout = 5 * time.Second
+
+// probeAttempts is how many times a probe asks before the service is
+// declared unreachable. Only a quick failure is asked again, in the time the
+// first attempt left: a refused or reset connection, an error status - a
+// blip that a second look clears. An attempt that got no answer is not: it
+// spent the whole of probeTimeout, and a second wait would only double how
+// long a silent service holds the capabilities answer and the server's start.
+const probeAttempts = 2
 
 // probeHTTP returns true if the URL responds with 2xx within probeTimeout.
 func probeHTTP(rawURL string) bool {
@@ -474,22 +496,52 @@ func probeHTTP(rawURL string) bool {
 }
 
 // probeHTTPDetail is probeHTTP that also says what it saw when the answer was
-// not a healthy one: the status code, a timeout, or the connection error.
+// not a healthy one: the status code, a timeout, or the connection error,
+// and how many attempts it made when it made more than one. A quick failure
+// is asked again before it becomes a cached negative verdict: one blip must
+// not hide ONLYOFFICE for every client. The whole probe stays inside
+// probeTimeout.
 func probeHTTPDetail(rawURL string) (bool, string) {
-	client := &http.Client{Timeout: probeTimeout}
+	deadline := time.Now().Add(probeTimeout)
+	var detail string
+	attempts := 0
+	for attempts < probeAttempts {
+		left := time.Until(deadline)
+		if left <= 0 {
+			break
+		}
+		attempts++
+		ok, timedOut, d := probeHTTPOnce(rawURL, left)
+		if ok {
+			return true, ""
+		}
+		detail = d
+		if timedOut {
+			break
+		}
+	}
+	if attempts > 1 {
+		detail = fmt.Sprintf("%s (%d attempts)", detail, attempts)
+	}
+	return false, detail
+}
+
+// probeHTTPOnce is one attempt, given what is left of probeTimeout.
+func probeHTTPOnce(rawURL string, timeout time.Duration) (ok, timedOut bool, detail string) {
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Get(rawURL)
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			return false, fmt.Sprintf("GET %s: no answer within %s", rawURL, probeTimeout)
+			return false, true, fmt.Sprintf("GET %s: no answer within %s", rawURL, probeTimeout)
 		}
-		return false, fmt.Sprintf("GET %s: %s", rawURL, probeErrorText(err))
+		return false, false, fmt.Sprintf("GET %s: %s", rawURL, probeErrorText(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 == 2 {
-		return true, ""
+		return true, false, ""
 	}
-	return false, fmt.Sprintf("GET %s returned HTTP %d", rawURL, resp.StatusCode)
+	return false, false, fmt.Sprintf("GET %s returned HTTP %d", rawURL, resp.StatusCode)
 }
 
 // probeErrorText drops the `Get "<url>": ` prefix net/http puts in front of
@@ -509,11 +561,15 @@ func probeErrorText(err error) string {
 // container (issue #17: a supervisor change left docservice stopped while the
 // static welcome page still loaded).
 func externalProbeHint(name, detail string) string {
-	if name == "onlyoffice" && (strings.HasSuffix(detail, "HTTP 502") || strings.HasSuffix(detail, "HTTP 503") || strings.HasSuffix(detail, "HTTP 504")) {
+	if name == "onlyoffice" && gatewayError.MatchString(detail) {
 		return detail + " - the document server's web server answered, but its docservice did not: run `supervisorctl status` in that container"
 	}
 	return detail
 }
+
+// gatewayError matches the detail of a probe whose last answer was a
+// 502/503/504, with or without the attempts that follow it.
+var gatewayError = regexp.MustCompile(` returned HTTP 50[234]( \(\d+ attempts\))?$`)
 
 // MarshalJSONForResponse serializes Capabilities for the public API.
 func MarshalJSONForResponse(c *model.Capabilities) ([]byte, error) {

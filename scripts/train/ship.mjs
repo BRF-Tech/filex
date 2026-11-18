@@ -360,10 +360,10 @@ export function buildSteps(cfg, ctx) {
     sh: `set -o pipefail; ${perHost(cfg, 'deploy', [cfg.image, tag, String(want), String(cfg.healthWait), ctx.onFail ?? cfg.onFail, bk])}`,
   });
 
-  // A server patch goes into the manifest with auto_ok off: no install takes
-  // it by itself until GitHub's full matrix passed behind it
-  // (scripts/release/matrix-watch.mjs switches it on).
-  if (cfg.manifestCmd) add('manifest', server ? 'the update manifest, auto_ok off until the matrix passed' : 'the update manifest', { sh: server ? `${cfg.manifestCmd} --no-auto ${tag}` : cfg.manifestCmd });
+  // #361: a server patch goes into the manifest as every release does. Until
+  // 2026-11-18 it went in with auto_ok off (--no-auto) while GitHub's full
+  // matrix ran behind it; the gate stage now waits for that matrix first.
+  if (cfg.manifestCmd) add('manifest', 'the update manifest', { sh: cfg.manifestCmd });
   else person('manifest', 'the update manifest', ['not set up (SHIP_MANIFEST_CMD): publish the update manifest by hand - CONTRIBUTING, Release process, step 9']);
 
   if (!publishes(surfaces, 'desktop')) {
@@ -476,9 +476,6 @@ export function personLines(cfg, { tag, version, releasesCommit = null, release 
   out.push(`  language packs:  node scripts/langpacks.mjs release ${version}   then the tag and push commands it prints, pack by pack`, '');
   if (releasesCommit) out.push(`  push ${releasesCommit.slice(0, 10)} "docs(releases): ${tag}" with the next push of main; the public repository gets it with the next export`, '');
   out.push('  reply on the issues and pull requests this release answers (by hand, never "Fixes #N")', '');
-  // #252: a server patch is in the manifest with auto_ok off until GitHub's
-  // full matrix passed behind it.
-  if (release?.profile === 'server') out.push(`  GitHub's full matrix behind the server patch, then auto_ok on:  node scripts/release/matrix-watch.mjs ${version}`, '');
   out.push(`  then:  pnpm release ${version} --resume --ack deploy`);
   return out;
 }

@@ -30,9 +30,7 @@ Usage:
     # mark a release as unsafe for automatic upgrades
     python3 scripts/gen-update-manifest.py --no-auto v0.7.3 --no-auto v0.7.4
 
-    # and switch it back on (the previous manifest's false is not carried):
-    # a server patch goes out with --no-auto, and scripts/release/matrix-watch.mjs
-    # turns it on once GitHub's full matrix passed behind it (task #252)
+    # and switch it back on (the previous manifest's false is not carried)
     python3 scripts/gen-update-manifest.py --auto v0.57.1
     FILEX_MANIFEST_AUTO=v0.57.1 python3 scripts/gen-update-manifest.py   # the same, for a wrapper that passes only its own options
 

@@ -32,6 +32,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/testutil/opswait"
 )
 
 type crossHTTPFixture struct {
@@ -105,7 +106,8 @@ func (f *crossHTTPFixture) drain(t *testing.T) {
 	go f.svc.Run(runCtx)
 	defer f.svc.Stop()
 
-	deadline := time.Now().Add(10 * time.Second)
+	start := time.Now()
+	deadline := start.Add(opswait.Budget)
 	for time.Now().Before(deadline) {
 		list, err := f.svc.List(ctx, "")
 		require.NoError(t, err)
@@ -120,7 +122,7 @@ func (f *crossHTTPFixture) drain(t *testing.T) {
 		}
 		time.Sleep(15 * time.Millisecond)
 	}
-	t.Fatal("queue never drained")
+	t.Fatalf("queue never drained %s", opswait.Waited(start))
 }
 
 func TestOpsHTTP_Copy_AcrossStorages_WritesIntoTheTarget(t *testing.T) {

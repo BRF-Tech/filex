@@ -23,13 +23,7 @@
 //                    come before the --check commands
 //   --pnpm CMD       the pnpm to install and build with (default: pnpm)
 //   --env FILE       settings (default: $FILEX_TRAIN_ENV, else
-//                    ~/.config/filex-train.env): who is told when it ends, and
-//                    where the private pipeline is (EMBARGO_API,
-//                    EMBARGO_TOKEN_FILE; scripts/lib/embargo.mjs)
-//   --embargo-unchecked WHY
-//                    merge an embargoed branch (sec/<name>) whose tip has no
-//                    green chain anyway; WHY goes into its merge commit as an
-//                    `Embargo-Unchecked:` trailer and into the queue's report
+//                    ~/.config/filex-train.env): who is told when it ends
 //
 // A queue line:   <branch> [<message file>]     (# starts a comment)
 //
@@ -60,11 +54,6 @@
 // and only a green merge moves the release branch - by a fast-forward.
 //
 // What it does for each line, in order:
-//   0. an embargoed branch (sec/<name>) enters only with a green chain on its
-//      tip, asked of the private pipeline before anything is merged (task
-//      #182: one was pushed with `-o ci.skip` and reached main without the
-//      chain ever running on it) - or with --embargo-unchecked, said in the
-//      commit;
 //   1. a branch whose tip is already in the release branch is skipped - so
 //      running the queue again after a stop carries on where it stopped;
 //   2. the queue's worktree is put at the release branch's tip, and
@@ -78,25 +67,40 @@
 //      `### Changed` twice, lesson #706);
 //   5. committed with the line's message file, as written (in the worktree);
 //   6. checked there: [Unreleased] is well formed, the Go module builds and
-//      vets, the workspace packages are installed and built from this merge
-//      (only those another workspace project depends on; one whose dist was
-//      built from exactly this source is proved so and not built again), and
-//      every --check;
+//      vets, an embargoed branch's (sec/<name>) Go packages and their
+//      importers are tested (below), the workspace packages are installed and
+//      built from this merge (only those another workspace project depends
+//      on; one whose dist was built from exactly this source is proved so and
+//      not built again), and every --check;
 //   7. green: the release branch fast-forwards to the checked merge. Red: the
 //      release branch does not move, the merge stays in the worktree to look
 //      at, and the queue stops - fix the branch and run the queue again.
 // When the queue ends, however it ends, it says so (scripts/lib/notify.mjs).
+//
+// ⚠⚠ An embargoed branch (sec/<name>) has no CI before its release (#361,
+// the owner's decision of 2026-11-18). GitHub cannot see it - the public
+// repository gets it only with the export of the patch release that ships it
+// - and GitHub's temporary private forks of a security advisory run no CI
+// ("integrations, including CI, cannot access temporary private forks").
+// Until 2026-11-18 the private forge's runner ran the whole chain on every
+// push of one, on the build host, and this queue refused a tip without a
+// green chain (task #182). Now the queue itself runs the light check on it,
+// where it runs: the build and vet every merge gets, and the tests of the Go
+// packages the branch changed and of every package that imports one
+// (scripts/release/gates/go-targeted.sh, without -race). GitHub's full
+// matrix runs on it at the patch release's gate, before anything is tagged.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { chainVerdict, embargoSettings, isEmbargoed, pipelinesFor, readToken } from '../lib/embargo.mjs';
+import { isEmbargoed } from '../lib/embargo.mjs';
 import { goShellArgv } from '../lib/go-build.mjs';
 import { announce } from '../lib/notify.mjs';
 import { loadSettings } from '../lib/settings.mjs';
-import { Gates, banner, bold, dim, findBash, git, gitOut, green, red, revParse, run, slash, yellow } from '../release/engine.mjs';
+import { goPackageDirs } from '../release/checks.mjs';
+import { Gates, banner, bold, dim, findBash, git, gitOut, green, red, revParse, run, shq, slash, yellow } from '../release/engine.mjs';
 import { normalizeChangelog, resolveInGit, unreleasedProblems } from './changelog-merge.mjs';
 import { since, usageOf } from './cli.mjs';
 
@@ -150,7 +154,7 @@ export function goCheckScript() {
 
 /** The command line, parsed. */
 export function parseArgs(argv) {
-  const o = { queue: null, onto: 'main', msgDir: null, repo: null, plan: false, checks: [], go: true, packages: true, pnpm: 'pnpm', env: '', embargoUnchecked: '' };
+  const o = { queue: null, onto: 'main', msgDir: null, repo: null, plan: false, checks: [], go: true, packages: true, pnpm: 'pnpm', env: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
@@ -168,10 +172,7 @@ export function parseArgs(argv) {
     else if (a === '--no-packages') o.packages = false;
     else if (a === '--pnpm') o.pnpm = next();
     else if (a === '--env') o.env = next();
-    else if (a === '--embargo-unchecked') {
-      o.embargoUnchecked = next().trim();
-      if (!o.embargoUnchecked) throw new Error('--embargo-unchecked needs the reason, in words');
-    } else if (a === '-h' || a === '--help') o.help = true;
+    else if (a === '-h' || a === '--help') o.help = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (!o.help && !o.queue) throw new Error('--queue FILE is required');
@@ -179,25 +180,30 @@ export function parseArgs(argv) {
 }
 
 /**
- * Why an embargoed row may not be merged, or '' when it may: its tip's chain
- * is green on the private pipeline (scripts/lib/embargo.mjs). `ask` is
- * pipelinesFor (a test hands its own). Not embargoed, already merged, or
- * waved through with --embargo-unchecked: ''.
+ * #361: the Go check an embargoed branch (sec/<name>) gets beside the build
+ * and vet of every merge, since nothing else tests it before its release:
+ * the tests of the packages it changed and of every package that imports
+ * one (scripts/release/gates/go-targeted.sh, without -race), with the echo
+ * app fixture the app-plugin tests need. `changed` are the files the merge
+ * changed against the release branch; a change it cannot place (go.mod, a
+ * file at the module root) tests the whole module. null when the branch is
+ * not embargoed or changed no Go file.
  */
-export async function embargoProblem(row, { settings, unchecked = '', ask = pipelinesFor, token = readToken } = {}) {
-  if (!isEmbargoed(row.branch) || row.merged || !row.tip || unchecked) return '';
-  const where = embargoSettings(settings);
-  if (!where) {
-    return `${row.branch}: an embargoed branch enters only with a green chain on its tip, and the settings do not say where the private pipeline is (EMBARGO_API, EMBARGO_TOKEN_FILE) - or say why not with --embargo-unchecked "<why>"`;
-  }
-  let pipelines;
-  try {
-    pipelines = await ask({ api: where.api, token: token(where.tokenFile), sha: row.tip });
-  } catch (e) {
-    return `${row.branch}: the private pipeline could not be asked about ${row.tip.slice(0, 10)} (${e.message}) - or say why not with --embargo-unchecked "<why>"`;
-  }
-  const v = chainVerdict(pipelines);
-  return v.ok ? '' : `${row.branch}: ${v.why} on ${row.tip.slice(0, 10)} - run it (a push without -o ci.skip, or the pipeline by hand) and run the queue again, or say why not with --embargo-unchecked "<why>"`;
+export function embargoGoGate({ branch, changed, wt, bash, hasGoFiles }) {
+  if (!isEmbargoed(branch)) return null;
+  const r = goPackageDirs(changed, hasGoFiles);
+  if (!r.all && !r.dirs.length) return null;
+  const dirs = r.all ? './...' : r.dirs.join(' ');
+  return {
+    name: `go: test the packages ${branch} changed and their importers (no CI sees an embargoed branch)`,
+    cmd: goShellArgv({
+      dir: path.join(wt, 'backend'),
+      checkout: wt,
+      script: 'FILEX_BACKEND_DIR="$PWD" bash "$FILEX_CHECKOUT/scripts/build-wasm-fixture.sh" >/dev/null && bash "$FILEX_CHECKOUT/scripts/release/gates/go-targeted.sh"',
+      more: ` FILEX_GO_DIRS=${shq(dirs)}`,
+      bash: bash ?? 'bash',
+    }),
+  };
 }
 
 // ── the queue's own worktree ────────────────────────────────────────────────
@@ -480,11 +486,8 @@ async function main(argv) {
   for (const r of rows) {
     if (!r.tip) problems.push(`${r.branch}: no such branch`);
     else if (!r.merged && !r.msgOk) problems.push(`${r.branch}: no message - write ${slash(r.msg)} (English, the merge commit's whole message)`);
-    const embargo = await embargoProblem(r, { settings: settings.env, unchecked: o.embargoUnchecked });
-    if (embargo) problems.push(embargo);
+    else if (!r.merged && isEmbargoed(r.branch) && !o.go && fs.existsSync(path.join(repo, 'backend', 'go.mod'))) problems.push(`${r.branch}: an embargoed branch is tested here, and nowhere else before its release - --no-go would leave it untested`);
   }
-  const waved = rows.filter((r) => isEmbargoed(r.branch) && !r.merged && r.tip && o.embargoUnchecked).map((r) => r.branch);
-  if (waved.length) console.log(yellow(`embargoed, merged without a green chain on the tip (--embargo-unchecked): ${waved.join(', ')} - ${o.embargoUnchecked}\n`));
 
   const cand = candidatePath(repo);
   console.log(`${bold('merge queue')} onto ${bold(o.onto)} in ${slash(repo)} ${dim(`(${slash(queueFile)})`)}`);
@@ -535,14 +538,12 @@ async function main(argv) {
       exit = 1;
       break;
     }
-    const trailer = waved.includes(r.branch) ? ['--trailer', `Embargo-Unchecked: ${o.embargoUnchecked}`] : [];
-    const trailerSaid = trailer.length ? ` --trailer "Embargo-Unchecked: ${o.embargoUnchecked.replace(/"/g, "'")}"` : '';
     const byHand = [
       'Resolve it once, with rerere on, in the queue\'s worktree (the next run replays your resolution, checks it, and only then moves the branch):',
       `    git -C ${slash(wt)} ${rr.join(' ')} merge --no-ff --no-commit ${r.tip}`,
       `    node scripts/train/changelog-merge.mjs --git --repo ${slash(wt)}     # if CHANGELOG.md is in conflict too`,
       '    (resolve the rest, git add them)',
-      `    git -C ${slash(wt)} -c rerere.enabled=true commit --cleanup=whitespace -F ${slash(r.msg)}${trailerSaid}`,
+      `    git -C ${slash(wt)} -c rerere.enabled=true commit --cleanup=whitespace -F ${slash(r.msg)}`,
       'then run the queue again: it starts this branch over from the tip, and the recorded resolution replays.',
     ];
     const unmerged = git(wt, 'diff', '--name-only', '--diff-filter=U').stdout.split('\n').map((s) => s.trim());
@@ -584,9 +585,7 @@ async function main(argv) {
       exit = 1;
       break;
     }
-    // An embargoed branch merged without its chain says so in its own commit,
-    // where the history keeps it (task #182).
-    const commit = run('git', ['-C', wt, '-c', 'rerere.enabled=true', 'commit', '--cleanup=whitespace', '-F', r.msg, ...trailer]);
+    const commit = run('git', ['-C', wt, '-c', 'rerere.enabled=true', 'commit', '--cleanup=whitespace', '-F', r.msg]);
     if (commit.status !== 0) {
       git(wt, 'merge', '--abort');
       stop = `${r.branch}: git commit failed (the merge was aborted; ${o.onto} did not move):\n${(commit.stderr || commit.stdout).trim()}`;
@@ -617,6 +616,19 @@ async function main(argv) {
       ...(o.go && fs.existsSync(path.join(wt, 'backend', 'go.mod'))
         ? [{ name: 'go: build + vet', cmd: goShellArgv({ dir: path.join(wt, 'backend'), checkout: wt, script: goCheckScript(), bash: bash ?? 'bash' }) }]
         : []),
+      ...(() => {
+        if (!o.go || !fs.existsSync(path.join(wt, 'backend', 'go.mod'))) return [];
+        const changed = gitOut(wt, 'diff', '--name-only', '--no-renames', before, after).split('\n').filter(Boolean);
+        const hasGoFiles = (d) => {
+          try {
+            return fs.readdirSync(path.join(wt, 'backend', d)).some((f) => f.endsWith('.go'));
+          } catch {
+            return false;
+          }
+        };
+        const g = embargoGoGate({ branch: r.branch, changed, wt, bash, hasGoFiles });
+        return g ? [{ ...g, after: ['go: build + vet'] }] : [];
+      })(),
       ...(workspace ? [{ name: WORKSPACE_GATE, check: () => freshenWorkspace({ dir: wt, bash, pnpm: o.pnpm, stateFile }) }] : []),
       ...o.checks.map((sh, k) => ({ name: `check ${k + 1}: ${sh}`, sh, ...(workspace ? { after: [WORKSPACE_GATE] } : {}) })),
     ];
@@ -658,8 +670,7 @@ async function main(argv) {
 
   const result = exit === 0 ? 'ok' : exit === 3 ? 'waiting' : 'red';
   const title = `filex merge queue onto ${o.onto}: ${exit === 0 ? 'done' : exit === 3 ? 'waiting for a person' : 'RED'} (${since(t0)})`;
-  const wavedLine = waved.length ? [`embargoed without a green chain (--embargo-unchecked): ${waved.length} branch(es) - ${o.embargoUnchecked}`] : [];
-  await announce(settings.env, { title, message: [...done, ...wavedLine, ...(left.length ? [`not reached: ${left.join(', ')}`] : []), ...(stop ? ['', stop] : [])].join('\n'), result }, {
+  await announce(settings.env, { title, message: [...done, ...(left.length ? [`not reached: ${left.join(', ')}`] : []), ...(stop ? ['', stop] : [])].join('\n'), result }, {
     log: (l) => console.log(`  ${dim(l)}`),
   });
   return exit;

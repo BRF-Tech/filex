@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/testutil/opswait"
 )
 
 // Who may encrypt, when the queue runs a rename, a move or a copy onto a
@@ -30,7 +31,8 @@ func runSubmitted(t *testing.T, f *opsFixture, op *ops.Op) *ops.Op {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go f.svc.Run(ctx)
-	deadline := time.Now().Add(30 * time.Second)
+	start := time.Now()
+	deadline := start.Add(opswait.Budget)
 	for {
 		cur, err := f.svc.Get(context.Background(), op.ID)
 		require.NoError(t, err)
@@ -40,7 +42,7 @@ func runSubmitted(t *testing.T, f *opsFixture, op *ops.Op) *ops.Op {
 		}
 		if time.Now().After(deadline) {
 			f.svc.Stop()
-			t.Fatalf("op %d (%s) did not finish; last status=%s err=%s", op.ID, op.Kind, cur.Status, cur.Error)
+			t.Fatalf("op %d (%s) did not finish; last status=%s err=%s %s", op.ID, op.Kind, cur.Status, cur.Error, opswait.Waited(start))
 		}
 		time.Sleep(15 * time.Millisecond)
 	}

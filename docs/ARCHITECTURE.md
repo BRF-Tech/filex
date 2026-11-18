@@ -836,7 +836,6 @@ filemanager/
 ├── docs/                           # this directory
 │
 ├── .gitlab/                        # CI helpers (placeholders)
-├── .gitlab-ci.yml                  # private pipeline: the test chain (CONTRIBUTING)
 ├── .goreleaser.yml                 # release matrix
 ├── docker-compose.yml              # full stack with profiles
 ├── package.json                    # workspace root

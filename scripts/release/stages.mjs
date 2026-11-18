@@ -63,6 +63,7 @@ import {
 } from './checks.mjs';
 import { bold, dim, git, gitOut, lsRemote, revParse, run, slash, yellow } from './engine.mjs';
 import { SURFACES_LINE, affectedSurfaces, publishes, releaseSurfaces, serverPatch, surfacesOfTagMessage, tagMessages } from './surfaces.mjs';
+import { dropCandidate, prepareCandidate } from './candidate.mjs';
 
 // `builtin` names the gates this file runs itself, whatever the plan says —
 // printed by `--plan` so the whole sequence is readable in one place.
@@ -81,17 +82,18 @@ export const STAGES = [
     ],
   },
   { id: 'audit', title: 'audit', what: 'README, screenshots, documentation — a person', builtin: ['waits for: --ack audit (bound to the commit it was given on)'] },
-  { id: 'docs', title: 'docs', what: 'links, site build, anchors, YAML', builtin: [] },
+  { id: 'docs', title: 'docs', what: "links and YAML (the site and its anchors are ci.yml's Docs part)", builtin: [] },
   {
     id: 'stamp', title: 'stamp', what: 'CHANGELOG date, versions, deploy targets, release commit',
     builtin: ['[Unreleased] → [X.Y.Z] - today', 'every workspace package.json', 'sync-deploy-versions, then --check', 'the release page renders from the changelog', 'nothing else changed', 'commit "chore(release): vX.Y.Z" — by path'],
   },
   {
-    id: 'pretag', title: 'pretag', what: 'the fast gates (the profile says which), on the release commit',
+    id: 'pretag', title: 'pretag', what: 'the light gates (the builds, go vet, the embedded UI, the desktop typecheck), on the release commit',
     builtin: [
       'gates side by side, in lanes (`jobs`)',
       'a gate green on exactly these inputs before is not run again (--no-cache)',
       'a gate this machine cannot run (the plan says `deferred`) waits for: --ack <its ack> (bound to the release commit), and stays in the record until it ran elsewhere',
+      'a gate of one surface (the plan says `reaches`) runs only when the changes since the last tag reach it',
       '(after the plan) the chain left the tree as it found it',
     ],
   },
@@ -115,12 +117,13 @@ export const STAGES = [
       'ci.yml, started by the push of main, passed on the export commit as the full matrix: read part by part, every part green (the heavy suites are read here)',
       'release.yml dry run (publish=false, started here) passed on the export commit',
       'the dry run kept what the tag run promotes: both images by digest, the files of every desktop row',
-      'meanwhile, here: the heavy gates GitHub does not run (minor), or a green scripts/chain run (--chain)',
+      "then, here: the candidate - both images the dry run pushed, pulled by digest (nothing is built), the full one's binary copied out, and the plan's candidate gates run on them",
       'waits for both; red spends no number — fix main, resume, and it runs again',
       'a part red on the runner (its setup, a checkout, a toolchain, an artifact, the browser install) is re-run once, by itself; a red test never is',
       'GitHub not answering (a 5xx, a timeout) is asked again at the next poll, ten times in a row at most',
       'GitHub Actions down (--gate circleci): the CircleCI workflow `ci` on the export commit instead, recorded as the source; no dry run',
-      "a server patch (#252): ci.yml's build part alone, no dry run - the full matrix runs behind the release (scripts/release/matrix-watch.mjs)",
+      'every profile alike, a server patch too (#361)',
+      'GitHub Actions down (--gate circleci), meanwhile here: the heavy gates CircleCI does not run, or a green scripts/chain run (--chain)',
     ],
   },
   {
@@ -750,7 +753,7 @@ function describeProfile(R, profile, sel, stage) {
   const S = R.state;
   const source = R.gateSource ?? 'github';
   let changed = '';
-  if (stage === 'pretag' && (profile === 'patch' || profile === 'server')) changed = R.changed ? `, ${R.changed.length} file(s) changed since ${S.prev}` : ', nothing to compare with: every gate runs';
+  if (stage === 'pretag') changed = R.changed ? `, ${R.changed.length} file(s) changed since ${S.prev}` : ', nothing to compare with: every gate runs';
   console.log(`  ${dim('profile ')}  ${bold(profile)}${dim(changed)}`);
   if (stage !== 'pretag') return;
   for (const g of sel.remote) console.log(`  ${dim(source.padEnd(8))}  ${g.name} ${dim(`- ${readFrom(g, source)} on the export commit, read at the gate stage`)}`);
@@ -772,8 +775,10 @@ export async function pretag(R) {
     return red();
   }
   if (R.dry) console.log(`  ${dim('dry run: the chain runs on HEAD as it is — the stamp above was only a scratch copy')}`);
-  R.changed = profile === 'patch' || profile === 'server' ? changedSince(R, S.prev) : null;
-  const sel = selectGates(R.plan, profile, R.changed, { source: R.gateSource ?? 'github' });
+  // The files changed since the last tag: a patch picks its gates by them,
+  // and every profile its gates of one surface (`reaches`, #361).
+  R.changed = changedSince(R, S.prev);
+  const sel = selectGates(R.plan, profile, R.changed, { source: R.gateSource ?? 'github', reached: R.changed ? affectedSurfaces(R.changed).surfaces : null });
   describeProfile(R, profile, sel, 'pretag');
   // #248: a gate this machine cannot run is never run and never skipped in
   // silence. It is named here, and the pretag waits for a person to defer it
@@ -1454,9 +1459,9 @@ export async function gate(R) {
   const dispatch = { workflow: wf.release, ref: branch, inputs: { publish: 'false' } };
   const title = dryRunTitle(sha ?? '<export commit>');
   const startCmd = gh?.command ? gh.command(dispatch) : `gh workflow run ${wf.release} --ref ${branch} -f publish=false`;
-  // #252: a server patch waits for ci.yml's build part alone, and no dry run.
-  if (R.profile === 'server') return gateServer(R);
-  const covered = selectGates(R.plan, R.profile ?? 'minor', R.profile === 'patch' ? (R.changed ?? changedSince(R, S.prev)) : null, { source }).remote;
+  // #361: every profile waits for the same - a server patch too, which until
+  // 2026-11-18 waited for ci.yml's build part alone and started no dry run.
+  const covered = selectGates(R.plan, R.profile ?? 'minor', null, { source }).remote;
   const matrix = R.plan.githubMatrix ?? null;
   const promotion = R.plan.promotion ?? null;
   if (covered.length) describeProfile(R, R.profile ?? 'minor', null, 'gate');
@@ -1479,6 +1484,7 @@ export async function gate(R) {
         `  - ${wf.ci}, started by the push of ${branch}${matrix ? ': the full matrix, read part by part, every part green' : ''}`,
         `  - ${wf.release} as a dry run, started here:  ${startCmd}`,
         `    (named "${title}": it builds and packages everything, and publishes nothing${promotion ? '; the tag run promotes what it keeps' : ''})`,
+        ...(R.plan.candidate ? [`  then, here, the candidate: its images pulled by digest (${R.plan.candidate.artifact}) and ${R.plan.candidate.gates.map((g) => `"${g.name}"`).join(', ')}`] : []),
         `  (GitHub Actions down: pnpm release ${R.version} --resume --gate circleci reads CircleCI instead)`,
       ],
       { dry: true },
@@ -1759,7 +1765,20 @@ export async function gate(R) {
       if (promotion && ciState === 'success' && dryState === 'success') verdicts.push(kept);
       const ok = await R.gates.all('gate', verdicts, R.ctx());
       if (ok) {
-        return settle(done({ exportHead: sha, source: 'github', ci: v.ci.run.url, parts: parts ? partsLine(parts) : null, dryRun: v.dry.run.url, profile: R.profile ?? 'minor' }));
+        // #361: what GitHub built, looked into here before it is tagged.
+        const cand = await lookIntoCandidate(R, v.dry.run);
+        if (!cand.ok) {
+          for (const l of [
+            '',
+            `Nothing is tagged, and ${R.tag} is not spent. The images the dry run built are red here: a fault in what ships -`,
+            `  fix it on ${branch}, push, pnpm release ${R.version} --resume (the export, the land and this gate run again on the fix);`,
+            `  this machine could not look (a pull, the network): pnpm release ${R.version} --resume looks again.`,
+          ]) {
+            console.log(`  ${l}`);
+          }
+          return settle(red());
+        }
+        return settle(done({ exportHead: sha, source: 'github', ci: v.ci.run.url, parts: parts ? partsLine(parts) : null, dryRun: v.dry.run.url, candidate: cand.refs ?? null, profile: R.profile ?? 'minor' }));
       }
       const failed = (ciState === 'failure' || ciState === 'incomplete' ? v.ci.run : null) ?? (dryState === 'failure' ? v.dry.run : null);
       const rerun = failed && gh.rerun ? gh.rerun(failed.id) : 'gh run rerun <id> --failed';
@@ -1793,89 +1812,29 @@ export async function gate(R) {
 }
 
 /**
- * The gate stage of a SERVER patch (#252): GitHub has built the export commit
- * - ci.yml's parts the plan names in `serverGate` (the module vetted and
- * built), the same the tag run's `verify` asks for a server patch - and
- * nothing more is waited for. No dry run is started: a server patch's tag run
- * builds its two images itself and promotes nothing. The rest of the full
- * matrix runs on, behind the release; scripts/release/matrix-watch.mjs reads
- * it and switches the update manifest's auto_ok on once it is green.
+ * #361: the release candidate, here - the images the dry run `dryRun` pushed
+ * by digest (the plan's `candidate`: its artifact, its image), pulled and
+ * looked into by the plan's candidate gates, the binary of the full image
+ * with them (candidate.mjs). Nothing is built. Whatever the gates say, what
+ * was pulled is removed again. → { ok, refs }: `ok` false when it could not
+ * be prepared or a gate is red (both recorded as gates of the stage).
  */
-async function gateServer(R) {
-  const S = R.state;
-  const sha = S.exportHead;
-  const gh = R.plan.github;
-  const want = R.plan.serverGate?.parts ?? [];
-  const wait = { pollMs: 30_000, timeoutMs: 45 * 60_000, unansweredMax: 10, ...(R.plan.serverGate ?? {}) };
-  const line = `ci.yml on the export commit: ${want.join(', ') || '(no part named)'}; the full matrix runs behind the release (scripts/release/matrix-watch.mjs)`;
-  if (R.dry) return waiting([`A server patch: GitHub builds the export commit (${line}), and no dry run is started.`], { dry: true });
-  if ((R.gateSource ?? 'github') !== 'github') {
-    await R.gates.one('gate', {
-      name: 'a server patch is gated on GitHub',
-      check: () => ({ ok: false, detail: `the server lane reads ci.yml on GitHub, and its tag run's verify asks GitHub too: with GitHub Actions down, release it as a patch of every surface (pnpm release ${R.version} --resume --profile patch --gate circleci)` }),
+async function lookIntoCandidate(R, dryRun) {
+  const cand = R.plan.candidate;
+  if (!cand?.gates?.length) return { ok: true, refs: null };
+  const workDir = path.join(R.gates.logsDir ?? os.tmpdir(), '..', 'candidate');
+  const prep = prepareCandidate({ gh: R.plan.github, runId: dryRun.id, cand, workDir, repo: R.repo });
+  try {
+    const got = await R.gates.one('gate', {
+      name: `the candidate: the images of the dry run ${dryRun.id}, pulled by digest`,
+      check: () => (prep.error ? { ok: false, detail: `${prep.error} - could not look is not a pass` } : { ok: true, detail: `${prep.candidate.full}, ${prep.candidate.slim}; ${prep.note}` }),
     }, R.ctx());
-    return red();
-  }
-  if (!sha) {
-    console.log(`  ${bold('FAILED')}  no export commit is recorded — the land stage records it`);
-    return red();
-  }
-  const prevRun = S.stages.gate;
-  if (prevRun?.status === 'done' && prevRun.exportHead === sha && prevRun.profile === 'server') return done({ ...prevRun, note: `GitHub built ${short(sha)}` });
-  if (!gh?.runs || !gh.jobs || !want.length) {
-    await R.gates.one('gate', { name: 'the server gate can ask GitHub', check: () => ({ ok: false, detail: "the plan names no GitHub reader or no serverGate parts" }) }, R.ctx());
-    return red();
-  }
-  console.log(`  ${dim('github  ')}  ${line}`);
-  const t0 = Date.now();
-  let shown = '';
-  let unanswered = 0;
-  for (;;) {
-    const ci = gh.runs({ workflow: R.plan.gateWorkflows?.ci ?? 'ci.yml', sha, event: 'push' });
-    let verdict = null;
-    let run = null;
-    let error = ci.error ?? '';
-    if (!error) {
-      run = runVerdict(ci.runs).run;
-      if (run) {
-        const jr = gh.jobs({ runId: run.id });
-        if (jr.error) error = jr.error;
-        else verdict = partsVerdict(jr.jobs, want, { finished: run.status === 'completed' });
-      }
-    }
-    if (error) {
-      if (transientGithubError(error) && unanswered < wait.unansweredMax) {
-        unanswered += 1;
-        await sleep(wait.pollMs);
-        continue;
-      }
-      await R.gates.one('gate', { name: 'GitHub answered', check: () => ({ ok: false, detail: `could not ask GitHub (${error}) — whether ${short(sha)} built is unknown, and unknown does not pass` }) }, R.ctx());
-      return red();
-    }
-    unanswered = 0;
-    const said = run ? `${run.url ?? `run ${run.id}`}: ${verdict ? partsLine(verdict) : 'no parts yet'}` : 'no ci.yml run of the push yet';
-    if (said !== shown) {
-      console.log(`  ${dim('github  ')}  ${said}`);
-      shown = said;
-    }
-    if (verdict && (verdict.state === 'success' || verdict.state === 'failure' || verdict.state === 'incomplete')) {
-      const ok = await R.gates.one('gate', {
-        name: `ci.yml built ${short(sha)}: ${want.join(', ')}`,
-        check: () =>
-          verdict.state === 'success'
-            ? { ok: true, detail: `${run.url ?? `run ${run.id}`} - ${partsLine(verdict)}` }
-            : {
-                ok: false,
-                detail: `${verdict.failed.map((p) => `${p.name} (${p.conclusion ?? p.state}${p.url ? `, ${p.url}` : ''})`).concat(verdict.missing.map((p) => `${p.name} never ran`)).join('; ')}. Nothing is tagged, and ${R.tag} is not spent: a flake - gh run rerun ${run.id} --failed -R BRF-Tech/filex, then --resume; a fault - fix it on main, then --resume`,
-              },
-      }, R.ctx());
-      if (!ok.ok) return red();
-      return done({ exportHead: sha, source: 'github', profile: 'server', ci: run.url ?? null, parts: partsLine(verdict), matrix: 'behind' });
-    }
-    if (Date.now() - t0 >= wait.timeoutMs) {
-      return waiting([`GitHub has not built ${short(sha)} yet (waited ${Math.round((Date.now() - t0) / 60_000)} min): ${said}`, '', `Carry on waiting with:  pnpm release ${R.version} --resume`]);
-    }
-    await sleep(wait.pollMs);
+    if (!got.ok) return { ok: false };
+    const ok = await R.gates.all('gate', cand.gates, { ...R.ctx(), candidate: prep.candidate });
+    return { ok, refs: { full: prep.candidate.full, slim: prep.candidate.slim } };
+  } finally {
+    const { left } = dropCandidate({ pulled: prep.pulled, workDir });
+    if (left.length) console.log(`  ${yellow('note  ')}  could not remove ${left.join(', ')} (in use?): docker rmi it once nothing uses it`);
   }
 }
 

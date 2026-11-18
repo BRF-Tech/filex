@@ -1767,9 +1767,11 @@ question from a shell.
   the Document Server container (`ds:docservice` and `ds:converter` must be
   `RUNNING`) and read `/var/log/onlyoffice/documentserver/docservice/err.log`.
   Its own log shows the same thing as `connect() failed (111: Connection
-  refused) while connecting to upstream … :8000`. `no answer within 3s` is a
-  different problem: filex gives up at three seconds, so a slow route or TLS
-  handshake fails the check even when the service is up.
+  refused) while connecting to upstream … :8000`. `no answer within 5s` is a
+  different problem: filex gives up at five seconds, so a slow route or TLS
+  handshake fails the check even when the service is up. `(2 attempts)` at
+  the end of the line means the first answer was a quick failure and the
+  second look, inside the same five seconds, failed too.
 
 ### Failure: 415 on open
 Unsupported extension (see the type list above). Expected - use preview/download.

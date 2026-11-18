@@ -41,6 +41,7 @@ import (
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/tenantstore"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/testutil/opswait"
 	"github.com/brf-tech/filex/backend/internal/testutil/wasmfixture"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
@@ -299,7 +300,8 @@ func (f *appFixture) drain(t *testing.T, opID int64) map[string]any {
 	defer cancel()
 	go f.ops.Run(runCtx)
 	defer f.ops.Stop()
-	deadline := time.Now().Add(20 * time.Second)
+	start := time.Now()
+	deadline := start.Add(opswait.Budget)
 	for time.Now().Before(deadline) {
 		_, raw := doReq(t, f.admin, http.MethodGet, f.srv.URL+fmt.Sprintf("/api/files/ops/%d", opID), nil)
 		var op map[string]any
@@ -310,7 +312,7 @@ func (f *appFixture) drain(t *testing.T, opID int64) map[string]any {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("op never finished")
+	t.Fatalf("op never finished %s", opswait.Waited(start))
 	return nil
 }
 

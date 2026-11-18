@@ -84,9 +84,9 @@ pnpm run dev
 - `main` - protected, always green.
 - `feat/<short-name>`, `fix/<short-name>`, `chore/<short-name>` - feature branches.
 - `sec/<short-name>` - an embargoed security fix (a hole in a released
-  version). It lives in the maintainers' private repository only, passes the
-  full chain there (Testing -> The private pipeline) and reaches `main` with
-  the patch release that ships it.
+  version). It lives in the maintainers' private repository only, is tested
+  by the release train's merge queue (Testing -> An embargoed fix) and
+  reaches `main` with the patch release that ships it.
 - `release/v0.X.Y` - short-lived branch only used to cut a release.
 
 We don't run a `develop` branch. Trunk-based development with feature flags
@@ -154,6 +154,15 @@ go test -run TestStorageS3 -v ./internal/storage/s3
 
 Where the whole suite has to be fast it runs in parts, side by side - see
 [Shards](#shards).
+
+**A test that waits for the operations queue to finish a job waits
+`opswait.Budget`** (`internal/testutil/opswait`, 60 s), not a deadline of its
+own, and its failure ends with `opswait.Waited(start)`. A job that is fine
+returns at its first finished poll, so a generous budget costs a green run
+nothing; deadlines of 3 to 20 s sized on a quiet machine went red under
+-race with the handlers shards side by side, five release rounds of 0.61.2 in
+a row, each time in another test. A wait that measures how soon something
+happens keeps its own bound.
 
 For driver tests, we have integration suites under `internal/storage/*/integration_test.go`
 guarded by `//go:build integration`. Run with:
@@ -605,76 +614,35 @@ list in the same line format - for a one-off run, never as a second list kept
 beside `scripts/test-shards.json`. Every setting, with its default, is in
 `scripts/chain/chain.env.example`.
 
-### The private pipeline: embargoed branches and the last-resort gate
+### An embargoed fix
 
-The maintainers' private repository has one CI pipeline, and it runs the chain
-above on the build host's own runner - nothing else. It has no test definition
-of its own: every job is `scripts/chain/run.sh`, so it cannot drift from what
-a hand run tests. The pipeline file and the runner's setup stay in the private
-repository; this is what they do.
+A fix for a hole in a released version lives on `sec/<name>` in the
+maintainers' private repository, and stays off `main` and off the public
+repository until its patch's release window (Release process, below). No CI
+sees it before then (#361, the owner's decision of 2026-11-18): the public
+repository gets it only with the export of the patch release that ships it,
+and GitHub's temporary private forks of a security advisory run no CI
+("integrations, including CI, cannot access temporary private forks"). So:
 
-**When a pipeline starts** - two ways, and no other (no schedule, no merge
-request, no other branch, no tag):
+- **the release train's merge queue tests it**, where the queue runs: the
+  build and vet every merge gets, and the Go tests of the packages it changed
+  and of every package that imports one (`scripts/release/gates/go-targeted.sh`,
+  without `-race`, with the echo app fixture). `--no-go` is refused for such a
+  branch ([The merge queue](#the-merge-queue-pnpm-merge-queue---queue-file));
+- **GitHub's full matrix and the release's dry run run on it at the patch
+  release's gate**, before anything is tagged. A red there is fixed on `main`
+  and the gate runs again; the fix is public from the land on, so a red costs
+  time in the open, never a version number;
+- a person may run the build host's chain on it by hand
+  (`scripts/chain/run.sh --profile targeted`), never on a timer or a push.
 
-- **a push to `sec/<name>`**, an embargoed security branch. A fix for a hole in
-  a released version stays off `main` and off the public repository until its
-  patch's release window (Release process, below); this is where it passes the
-  full chain before that. A push option narrows a run
-  (`git push -o ci.variable="CHAIN_PROFILE=targeted"`), and a newer push to the
-  same branch supersedes a run still going. A push that skips the pipeline
-  (`-o ci.skip`) does not skip the chain: the build host notices a `sec/`
-  tip that no chain ever ran on and starts the whole chain on it within ten
-  minutes, and the release train's merge queue refuses a `sec/` branch whose
-  tip has no green chain - unless it is given the reason
-  (`--embargo-unchecked "<why>"`), which goes into the merge commit as an
-  `Embargo-Unchecked:` trailer (task #182: one embargoed branch reached
-  `main` without the chain, its push skipped);
-- **a run started by hand, or through the API, on `main` or a `sec/` branch**,
-  with `CHAIN_PROFILE` (`full` or `targeted`) and the `targeted` variables
-  (`CHAIN_GO_PKGS`, `CHAIN_E2E_GREP`, ...). This is the last-resort release
-  gate when GitHub and CircleCI are both down: the job's `result.json` is what
-  `pnpm release X.Y.Z --resume --chain result.json` takes.
-
-**The nightly run is not a pipeline.** The build host's own timer starts it
-([The nightly run](#the-nightly-run), below), and it is the night's one
-trigger: a GitLab schedule beside it would run the same chain a second time on
-the same host, under the same lock. So the pipeline has no schedule and no
-`nightly` profile, and both the runner's gate and the job refuse a scheduled
-pipeline.
-
-**Where it runs.** Every job names the one runner tag of the build host's
-runner itself, and that runner takes nothing else: a project runner locked to
-the private repository, protected (protected branches only: `main` and
-`sec/*`), no untagged jobs, one job at a time. A gate on the host, before a
-job's code is fetched, refuses another project, a project that is not private,
-an unprotected or other branch, a tag, a merge request, a schedule and any
-source but a push, a run by hand or the API; a branch that edits the pipeline
-cannot change it. The runner holds `CHAIN_LOCK` like every other build on the
-host (the chain takes it), and the host, not the pipeline, decides the lock,
-the root and the container prefix: a job that sets them is refused. Its jobs
-spend none of the CI minutes the plan gives the shared runners, and none can
-land on a shared runner.
-
-**What it leaves**, as the job's artifact, `chain-result/`: `result.json`,
-`chain.log`, the last lines of every red job's log, `summary.txt` and
-`job.json`. The test output (`out/`, traces) stays on the host, under the
-chain's root, as `runs/gl-<pipeline>-<job>/`; CI runs older than
-`CHAIN_CI_KEEP_DAYS` (7) are removed by the next job, hand runs never.
-
-**What never leaves**, so that an embargoed branch reaches no one before its
-window:
-
-- no artifact is public (developers of the private project only), and none
-  carries test output;
-- no cache is uploaded, and there is no Pages site, release, environment,
-  image push, `include:` or child pipeline;
-- on a `sec/` branch the chain posts nothing to the notification service,
-  which forwards beyond the project (the post carries the commit subject);
-- the public repository has no self-hosted runner of ours, and a `sec/` branch
-  reaches it only through the release that ships the fix (Release process).
-
-`web/tests/deploy/gitlabPipeline.test.ts` holds every rule above (the public
-tree has no pipeline and skips it).
+Until 2026-11-18 the private repository had a pipeline of its own: a push to
+a `sec/` branch ran the whole chain on the build host's runner, a watcher
+started it on a tip pushed with `-o ci.skip`, the merge queue refused a tip
+without a green chain unless told why (`--embargo-unchecked`, task #182), and
+a run by hand was the last-resort release gate when GitHub and CircleCI were
+both down. The pipeline, its runner and the watcher are gone: the private
+repository keeps the source and its history, and nothing runs there.
 
 ### The nightly run
 
@@ -2631,14 +2599,23 @@ thing it starts on GitHub is a dry run of `release.yml`, which publishes nothing
 (step 7). The two judgements no script can make are a person's to confirm: the
 README, screenshot and documentation audit (steps 1-3, `--ack audit`) and the
 parts of the deploy nothing can read back (`--ack deploy`). Off Windows there
-is a third: leaving the Store copy's check for a Windows machine
-(`--ack store-deferred`, step 6). And when the export commit merges an outside
+is a third, in a release that reaches the desktop app: leaving the Store
+copy's check for a Windows machine (`--ack store-deferred`, step 6). And when the export commit merges an outside
 pull request that the export carries in another form, a fourth: those
 differences (`--ack merge-pr`, step 7).
 
 **The tag comes last.** Both `main` branches are pushed without a tag, GitHub
 tests that very commit, and only a commit that passed is tagged (steps 7-8). A
 red run spends no version number: fix `main` and resume.
+
+**Every test runs on GitHub; the build host builds, lints and looks into what
+GitHub built** (#361, the owner's rule of 2026-11-18). Here the tool runs the
+builds with vue-tsc, `go vet`, the embedded UI check, the desktop typecheck
+and - in a release that reaches the desktop app - the Store copy (step 6);
+every test suite and both image builds are parts of `ci.yml`'s full matrix on
+the export commit, which the gate waits for with the release's dry run, in
+every profile (step 7); and the images that dry run built are pulled by digest
+and run here before the tag (step 7, the candidate).
 
 ```bash
 pnpm release 0.45.0 --plan      # every stage and gate, in order; runs nothing
@@ -2649,17 +2626,20 @@ pnpm release 0.45.0 --resume    # carry on (exit 3 = waiting for you, 1 = a red 
 pnpm release 0.45.0 --status    # where the recorded run got to
 pnpm release 0.45.0 --resume --only deploy   # once the tags are out: the deploy
                                 # checks alone, on the tagged commits
-pnpm release 0.45.1 --profile patch   # X.Y.Z+1: builds and packaging always,
-                                # the rest only for what changed (step 6)
-pnpm release 0.45.0 --profile full    # every suite here, before the export
+pnpm release 0.45.1 --profile patch   # X.Y.Z+1: the same light gates and the
+                                # same wait for GitHub as a minor (step 6)
+pnpm release 0.45.0 --profile full    # every suite here as well, before the
+                                # export: a person's choice, never the default
 pnpm release 0.45.0 --resume --no-cache   # run every gate, even one that
                                 # passed on exactly these inputs before
 pnpm release 0.45.0 --resume --chain result.json   # a green scripts/chain run
                                 # on this tree stands in for the heavy gates
+                                # that run here (--gate circleci)
 pnpm release 0.45.0 --resume --gate circleci   # GitHub Actions is down: the
                                 # gate reads CircleCI (see the last section)
-pnpm release 0.45.0 --resume --ack store-deferred   # off Windows: the Store
-                                # copy's check is left for a Windows machine (step 6)
+pnpm release 0.45.0 --resume --ack store-deferred   # off Windows, a release that
+                                # reaches the desktop app: the Store copy's check
+                                # is left for a Windows machine (step 6)
 pnpm release 0.45.0 --resume --ack store-checked    # it ran green there since
 pnpm release 0.45.1 --merge-pr 120,121   # the export commit merges these outside
                                 # pull requests, so GitHub marks them merged (step 7)
@@ -3006,17 +2986,25 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    ⚠⚠ **Not with `git add -A`, and not before these checks.** The release
    commit is the one commit in the project that is allowed to touch
    everything, which is exactly why it must not be written blind. The tool's
-   `pretag` stage runs the fast checks on the release commit, here, before the
-   export:
+   `pretag` stage runs the light checks on the release commit, here, before
+   the export - minutes, and no test suite (#361):
 
    ```bash
    git status --porcelain | grep '^??' && echo "untracked files - commit them or move them to their branch"
-   pnpm -s --filter ./web build      # vue-tsc + vite, the gate nothing else runs
-   (cd web && TZ=UTC npx vitest run) # the unit suite on CI's clock, which is UTC
-   git archive HEAD | docker build --platform linux/amd64 -f docker/Dockerfile      -t filex:release-check -
-   git archive HEAD | docker build --platform linux/amd64 -f docker/Dockerfile.slim -t filex:release-check-slim -
+   pnpm -r --filter './packages/*' build && pnpm --filter ./web build && node scripts/sync-embed.mjs   # vue-tsc + vite, the gate nothing else runs
+   node scripts/build-backend.mjs --out bin/filex-release-e2e   # the server binary
+   (cd backend && go vet ./...)                                 # the vet half of the backend suite
+   node scripts/check-embed.mjs --binary bin/filex-release-e2e  # the binary serves the UI just built, byte for byte
+   (cd desktop && npx tsc --noEmit -p .)                        # the desktop app's typecheck
    (cd desktop && pnpm run build && node scripts/fetch-cli.mjs --platform win32 && pnpm e2e:store)  # Windows, Developer Mode: the Store package as a Store copy; no window comes on screen (--keep-windows-hidden), only a test toast
    ```
+
+   **The Store copy runs only in a release that reaches the desktop app**
+   (#361): when no file changed since the last tag reaches the desktop
+   surface (`scripts/release/surfaces.mjs`), the Store package carries
+   nothing new to activate, and the pretag says so and skips it. In doubt
+   (no last tag to compare with, a file no rule places) it runs. A server
+   patch never runs it.
 
    **Off Windows the Store copy's check is deferred, never skipped** (#248).
    `store-e2e` installs and activates an MSIX, which only Windows can do (the
@@ -3036,22 +3024,27 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    printed PASS, not only "ALL PASSED": they do not run when the packaged app
    never opened. It does not hold the deploy.
 
-   The heavy suites run before the tag too, but not all here and not all
-   first. Where each runs is the **profile** (`--profile`, task #172):
+   The heavy suites run before the tag too - on GitHub, not here. Where each
+   runs is the **profile** (`--profile`, task #172, #361):
 
    | Profile | Here, in `pretag` (before the export) | Here, during the `gate` stage | GitHub, on the export commit (step 7) |
    |---|---|---|---|
-   | `minor` (the default) | the builds and vue-tsc, the embedded UI check, the unit suites in UTC, the desktop typecheck and unit suite, the Store copy, both images, the shop window instance | - (with `--gate circleci`: what CircleCI does not run) | every heavy suite, in `ci.yml`'s full matrix: the Go suite in shards and again under `-race`, the migrations on three engines and through the CLI, the unit suite on two clocks, Cypress, Playwright on three engines in parts and the Document Server specs with one, the store and S3 lines; and the dry run of the whole release |
-   | `patch` (X.Y.Z+1 only) | the builds, the images, the desktop and the Store copy always; every other gate only when something it reads changed since the last tag; the Go suite on the changed packages and every package that imports one; the three engines when the schema changed | - | the same as a minor: every suite |
-   | `full` | everything, as every release did up to 0.52 | - | the same |
-   | `server` (X.Y.Z+1 that reaches the server alone, chosen by itself) | the builds, both images, the embedded UI check, the shop window instance, and the changed Go packages with their importers under `-race`; nothing of the interface or the desktop app | - | ci.yml's build part before the tag; every other suite behind the release, read by `matrix-watch.mjs` before `auto_ok` is turned on ([A server patch](#a-server-patch)) |
+   | `minor` (the default) | the light gates: the builds with vue-tsc, `go vet`, the embedded UI check, the desktop typecheck, and the Store copy when the release reaches the desktop app | the candidate: the dry run's images by digest, their binary, the shop window (with `--gate circleci`: what CircleCI does not run) | every heavy suite, in `ci.yml`'s full matrix: both images, the unit suites in UTC and on Istanbul's clock, the desktop unit suite, the docs site, the Go suite in shards and again under `-race`, the migrations on three engines and through the CLI, Cypress, Playwright on three engines in parts and the Document Server specs with one, the store and S3 lines; and the dry run of the whole release |
+   | `patch` (X.Y.Z+1 only) | the same light gates | the same | the same as a minor: every suite |
+   | `server` (X.Y.Z+1 that reaches the server alone, chosen by itself) | the server's light gates: the builds, `go vet`, the embedded UI check; nothing of the desktop app | the same | the same as a minor: every suite, before the tag ([A server patch](#a-server-patch)) |
+   | `full` | everything here as well, as every release did up to 0.52: a person's choice, for a day no CI can be trusted | the same | the same |
 
-   Since `ci.yml` became the full matrix (#173), a minor runs no heavy suite
-   here: every one has its parts on GitHub, and the `gate` stage reads them
-   part by part (step 7). A heavy suite the CI being read does not run - with
-   `--gate circleci`, Cypress and this machine's clock - starts when the wait
-   starts and runs beside it, on the release commit, with the UI and the
-   binary it tests built again there; the stage passes only when both did. A
+   Since `ci.yml` became the full matrix (#173) a minor runs no heavy suite
+   here, and since #361 a patch and a server patch run none either: every one
+   has its parts on GitHub (`heavy` in `scripts/release/plan.mjs` names, for
+   each, the parts that stand for it), and the `gate` stage reads them part
+   by part (step 7). A patch's targeted Go suite, its migrations on a schema
+   change and the server patch's `-race` suite were gates here until
+   2026-11-18. A heavy suite the CI being read does not run - with
+   `--gate circleci`, Cypress, this machine's clock, the images and the docs
+   site - starts when the wait starts and runs beside it, on the release
+   commit, with the UI and the binary it tests built again there; the stage
+   passes only when both did. A
    green run of the whole chain on the build host can stand in for them
    (`--chain <result.json>`, from `scripts/chain`): it must be a finished green
    run of a whole-chain profile, on a clean checkout of a commit this release
@@ -3067,11 +3060,26 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    > fault the build host and GitHub had not. 0.51 ran the Go suite five times
    > and vitest eight. Every red sent the next run back to the start - about
    > 935 minutes over seven releases - and every patch ran the whole chain.
+   >
+   > And why the rest left it (#361, the owner's rule of 2026-11-18: the build
+   > host builds, lints and looks into what GitHub built; every test runs on
+   > GitHub): on 2026-11-17 v0.61.2 went red six rounds in a row on the
+   > server patch's `-race` gate here, each time on another timing test and
+   > never on a race or a fault, one to two hours a round, and its load
+   > pushed a neighbouring container on the build host out of memory. The
+   > unit suites, the desktop unit suite, the docs site with its anchor check
+   > and both image builds left with it: each is a part of the full matrix
+   > already. The release's `docs` stage keeps the two commands that read the
+   > sources alone, the links and the YAML; the anchor check reads the built
+   > site, and on 0.61.2's second round, left behind without that build, it
+   > stopped the stage (`releasePlan.test.ts` now refuses a gate here that
+   > reads what only a gate on GitHub makes).
 
    Gates run side by side in lanes (at most `jobs` at once, `plan.mjs`): the
-   builds, the unit suites, the desktop, the images and the Go module's WSL
-   mirror each keep one lane, and a gate that needs another's output waits for
-   it. **A red gate does not send the next run back to the start.** A gate that
+   builds, the desktop and the Go module's WSL mirror each keep one lane (in
+   `full`, the unit suites, the images, the docs site and the browser suites
+   too), and a gate that needs another's output waits for it. **A red gate
+   does not send the next run back to the start.** A gate that
    passed on exactly the same inputs - the content of the files it reads, the
    command it runs, this machine - passes from the cache
    (`.git/filex-release/gate-cache/`) and says so: a fix in `e2e/` runs the
@@ -3080,16 +3088,17 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    read, a working tree that is not `HEAD`, or an input outside the repository
    it cannot see means the gate runs. `--no-cache` runs every gate. Builds are
    never taken from the cache - later gates use what they make. The two
-   images are (#165), on what each is made of: the files its Dockerfile
-   copies, the Dockerfile, `.dockerignore` and the gate's own script - so a
+   images, built here only in `full`, are (#165), on what each is made of:
+   the files its Dockerfile copies, the Dockerfile, `.dockerignore` and the
+   gate's own script - so a
    fix to a test, the docs or the desktop app does not build them again. The
    key leaves out the commit and the date the build stamps into the
    throwaway image (CI builds the published ones), and the entry keeps the
    image's id: a hit holds only while that very image is still under its tag,
    since the two image gates after it run it.
 
-   **The images are built from the release commit, not from the working
-   tree** (#165): `git archive` of the commit, streamed to `docker build -`
+   **In `full`, the images are built from the release commit, not from the
+   working tree** (#165): `git archive` of the commit, streamed to `docker build -`
    (`scripts/release/gates/docker-build.mjs`). On the maintainer's workstation
    docker is the WSL docker-ce behind a forwarder, so `docker build .` read
    the checkout through WSL's 9P bridge, and BuildKit walked all of it - the
@@ -3105,8 +3114,9 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    checkout gives docker - and is red, before docker runs, when it does or
    when `.dockerignore` holds a pattern its reader does not know (`[...]`, a
    `\` escape, `**` inside a segment). With the walk gone the images need no
-   local build: they start beside the UI build, and the pretag's longest path
-   is the UI build and then the web unit suite - about 12-15 minutes.
+   local build: they start beside the UI build. (Every other profile builds
+   no image here since #361: ci.yml builds both on every push, and the dry
+   run builds the ones the tag run promotes.)
 
    The export (the next stage) runs no test suite of its own any more: GitHub
    runs both on the very commit that lands, before anything is tagged. What it
@@ -3122,8 +3132,10 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    nothing local had ever built an image. `web/tests/deploy/dockerFrontendInputs.test.ts`
    now fails if the build reaches a file the images do not copy, but only a
    real `docker build` proves the rest of the recipe - so both images are built
-   here, before the tag. v0.43.0's CI also failed a unit test that passed on
-   the UTC+3 machine it was cut on; the suite runs under `TZ=UTC` here too, so
+   before the tag: by ci.yml on the export commit, and by the dry run, whose
+   images this machine then pulls by digest and runs (step 7, the candidate).
+   v0.43.0's CI also failed a unit test that passed on the UTC+3 machine it was
+   cut on; the matrix runs the suite in UTC and again on Istanbul's clock, so
    the clock of whoever cuts the release cannot hide one again.
 
    Measured 2026-09-14, on v0.41.0: the explorer had been rebuilt and every
@@ -3265,6 +3277,40 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    ```
 
    The release then goes out without the macOS packages, and says so.
+
+   **Every profile waits for both, a server patch too** (#361). Until
+   2026-11-18 a server patch waited for ci.yml's `Go vet + build` part alone
+   and started no dry run ([A server patch](#a-server-patch) says why that
+   went).
+
+   **Then the candidate is looked into, here** (#361): what GitHub built, not
+   a copy built on this machine. Once the dry run passed and kept what the tag
+   run promotes, the gate downloads its `digests-amd64` artifact (one file per
+   image, named after its digest: `full/<hex>`, `slim/<hex>`), pulls both
+   images as `ghcr.io/brf-tech/filex@sha256:<hex>` - nothing is built here -
+   copies the full image's binary (`/usr/local/bin/filex`, a static CGO=0
+   build) out of it, and runs the plan's candidate gates on them
+   (`candidate` in `scripts/release/plan.mjs`, `scripts/release/candidate.mjs`):
+
+   - **both images report the release** - `filex --version` names the tag (a
+     release candidate stamps `v<version>`);
+   - **the full image serves the admin UI and `/embed.js`**, each followed to
+     the bundle it names and weighed (v0.43.0: an image whose frontend stage
+     produced nothing still answers both with 200);
+   - **the shop window**, a throwaway instance of that binary in demo mode
+     (step 12).
+
+   They are the tag run's own images: `promote-check` and `docker-manifest`
+   tag exactly these digests. Whatever the gates say, the images the gate
+   pulled (and only those) are removed again by their digest. On Windows the
+   image's Linux binary cannot run, and the shop window boots the binary the
+   pretag built from the release commit instead, and says so. The check that
+   a binary serves the UI just built stays in the pretag, on that binary: the
+   image's interface is built inside its Dockerfile, from the public tree, not
+   from this checkout's build, so there is nothing here to compare it with
+   byte for byte - it is weighed instead. A red candidate spends no number
+   either: fix `main` and `--resume`; a pull that could not be made is red
+   too, and `--resume` looks again.
 
    When GitHub Actions cannot run anything, this step waits on CircleCI
    instead: [When GitHub Actions is down](#when-github-actions-is-down).
@@ -3699,7 +3745,7 @@ ones not yet published apply on top of one another in this order:
     neither the Homebrew nor the winget secret and `FILEX_SURFACES` (no
     "latest" release), and `npm` and `desktop` do not run. It needs
     `.goreleaser.yml`'s `make_latest` in the tree, so it lands with the export
-    that brings it.
+    that brings it. (Its `verify` lane of its own went again with 20.)
 13. `release-desktop-previous-fixes.patch` (#273, 0.57.2), on top of 12 -
     already on the public `main` (e190ab82, 5397c16c): pushed from the
     public checkout while v0.57.2 waited at its gate and its tag run, the
@@ -3798,6 +3844,16 @@ ones not yet published apply on top of one another in this order:
     ([filex-watch's own release](#filex-watchs-own-release)).
     `filexWatchRelease.test.ts` holds it, and reads the patch when there is
     no public checkout.
+20. `release-server-promote.patch` (#361, 0.61.2), on top of 19: `verify`
+    asks a server patch (`surfaces: server`) what it asks every release -
+    ci.yml's full matrix and the dry run of everything on its commit, both
+    passed - and the tag run promotes that dry run's images (`promote=true`),
+    the very ones the release tool's gate pulled by digest and looked into.
+    The block of 12 that published a server patch once `Go vet + build` alone
+    was green (`evidence=github-server`, `promote=false`, `docker` building the
+    images in the tag run) is deleted; `desktop`, `npm` and the AUR still do
+    not run for one, and the run's summary says it is a server patch
+    ([A server patch](#a-server-patch)). `releaseSurfaces.test.ts` holds it.
 
 Apply them in the public checkout **after** the first preflight of
 `pnpm release X.Y.Z` passed (it wants that checkout in step with GitHub) and
@@ -3806,7 +3862,7 @@ one commit each (`git apply <patch>`, then commit by path) - and never push
 them on their own: the land pushes them with the export that brings their
 guards (`ciFullMatrix.test.ts`, `releasePromote.test.ts`,
 `releaseVerifyCircleci.test.ts`, `scripts/ci-parts.mjs`, `releaseArm64.test.ts`,
-`releaseDesktopUpgrade.test.ts`).
+`releaseDesktopUpgrade.test.ts`, `releaseSurfaces.test.ts`).
 A workflow pushed ahead of its export goes red on GitHub (0.52.0).
 
 9. **Publish the two update feeds, then prove they moved.** CI attaches every
@@ -3954,6 +4010,10 @@ A workflow pushed ahead of its export goes red on GitHub (0.52.0).
     node scripts/check-shop-window.mjs --published
     ```
 
+    `pnpm release` runs both: `--instance` at the gate, on the binary of the
+    image the release ships (step 7, the candidate; #361 - until 2026-11-18
+    on a binary the pretag built), and `--published` in its deploy checks.
+
     Three exit codes, and the last two are the point: **0** everything checked
     passed, **1** a defect is present and the release does not go out, **2**
     something *could not be checked* - no binary, no network, a GitHub rate
@@ -3965,7 +4025,7 @@ A workflow pushed ahead of its export goes red on GitHub (0.52.0).
     The third of this gate that needs neither a server nor the network -
     the URL grammar, the quickstart command, the publish paths that carry no
     converter - is `web/tests/deploy/shopWindow.test.ts`, so it runs on every
-    push and in `pnpm test`, and steps 6 and 7 already block the tag on it.
+    push and in `pnpm test`, and step 7 already blocks the tag on it.
     Nothing to run by hand.
 
     ⚠ `--instance` boots a throwaway on port 5941 with demo mode on, an
@@ -4005,7 +4065,7 @@ A workflow pushed ahead of its export goes red on GitHub (0.52.0).
     The six routes this script probes are the smoke test that the guard is
     installed at all; the Go test is what makes a **fourth** guarded prefix
     impossible to add unnoticed - it found `/metrics` on its first run. It runs
-    in `go test ./...`, so step 6 already blocks the tag on it. ⚠ Nothing in it
+    in `go test ./...`, so step 7 already blocks the tag on it. ⚠ Nothing in it
     names a route, and it has to stay that way: the moment it becomes a list it
     stops covering the surface nobody has written yet.
 
@@ -4065,10 +4125,11 @@ If something fails, fix forward - never delete a published tag.
 ### A server patch
 
 A patch whose changes reach the server alone goes out on a lane of its own
-(#252): about half an hour from the code being done to the maintainers'
-instances running it, where a patch of every surface takes two hours - and
-nothing it does not change gets a new version. The owner's rule, 2026-10-12:
-if the CLI or the interface did not change, they are not updated.
+(#252): nothing it does not change gets a new version. The owner's rule,
+2026-10-12: if the CLI or the interface did not change, they are not updated.
+Since #361 (2026-11-18) its lane differs from a patch of every surface in what
+it publishes, not in what it waits for: the same light gates here, the same
+full matrix and dry run on GitHub before the tag.
 
 **Which patch it is.** `scripts/release/surfaces.mjs` places every changed file
 on the surfaces it reaches - the server (both images, the server archives and
@@ -4099,46 +4160,54 @@ alone: the CLI binary links them, but no command runs them.
   that describe what changed. The README is read when it changed itself;
   the CHANGELOG entry and the Releases-page summary are asked for as always
   (`auditAsks` in `scripts/release/stages.mjs`).
-- **pretag**: the builds, both images and their smoke tests, the embedded UI
-  check, the shop window instance, and the Go packages the patch changed and
-  every package that imports them, **under `-race`** (`go-targeted.sh` with
-  `FILEX_GO_RACE=1`; it needs a C compiler, and says so). No unit suite of the
-  interface, no desktop typecheck, no Store copy: a server patch publishes
-  none of them (`serverSkip`), so nothing is deferred to a Windows machine
-  either.
-- **gate**: GitHub builds the export commit - ci.yml's `Go vet + build` part
-  of the push run, green (`serverGate`) - and no dry run is started.
+- **pretag**: the server's light gates - the builds with vue-tsc, `go vet`,
+  the embedded UI check (step 6). No desktop typecheck, no Store copy: a
+  server patch publishes neither (`serverSkip`), so nothing is deferred to a
+  Windows machine either.
+- **gate**: what every release waits for (step 7) - ci.yml's full matrix on
+  the export commit, part by part, the dry run of everything and what it
+  kept - then the candidate: the dry run's images, pulled by digest and
+  looked into here.
 - **sign**: both tags carry the line `surfaces: server` (the stage prints the
   commands with it, and refuses a server patch's tag without it, and any other
   release's tag with it).
-- **the tag run** (`release-surfaces.patch`, below): `plan` reads the line from
-  the tag; `verify` waits for that same build part instead of the full matrix
-  and a dry run; `docker` builds both images in the run (there is nothing to
-  promote); `binaries` makes the Release with the server archives and the CLI
-  binaries, without the CLI's Homebrew cask and winget pull request, and does
-  not mark it GitHub's latest release (`make_latest` in `.goreleaser.yml`):
-  every `releases/latest/download` link names a desktop package or a CLI
-  binary, and they stay on the last release that has them. `desktop` and `npm`
-  do not run.
+- **the tag run** (`release-surfaces.patch` and `release-server-promote.patch`,
+  below): `plan` reads the line from the tag; `verify` asks of the commit what
+  it asks of every release, and the run promotes the dry run's images
+  (`promote-check`, `docker-manifest`); `binaries` makes the Release with the
+  server archives and the CLI binaries, without the CLI's Homebrew cask and
+  winget pull request, and does not mark it GitHub's latest release
+  (`make_latest` in `.goreleaser.yml`): every `releases/latest/download` link
+  names a desktop package or a CLI binary, and they stay on the last release
+  that has them. `desktop`, its arm64 check, the AUR and `npm` do not run.
 - **ci and deploy**: the release tool reads back what a server patch
   publishes and names the rest as not this release's (`surface` on each
   published gate of `scripts/release/plan.mjs`).
-- **the ship**: backup, proxies, deploy, the manifest - with
-  `--no-auto vX.Y.Z`, so `auto_ok` is off - the Releases page, the Helm chart,
-  docs.filex.sh and the read-back; the desktop feed, its purge, npm and the
-  embeds are listed as not this release's and left as they are.
+- **the ship**: backup, proxies, deploy, the manifest (as for every release:
+  `auto_ok` is on unless the release carries a migration, which a patch never
+  does), the Releases page, the Helm chart, docs.filex.sh and the read-back;
+  the desktop feed, its purge, npm and the embeds are listed as not this
+  release's and left as they are.
 
-**Behind it: the full matrix, then `auto_ok`.** The push of the public `main`
-still runs ci.yml's whole matrix on the commit; it no longer holds the patch.
-`node scripts/release/matrix-watch.mjs X.Y.Z` reads it part by part: green, it
-regenerates the manifest with `FILEX_MANIFEST_AUTO=vX.Y.Z`
-(`scripts/gen-update-manifest.py --auto`, which a publishing wrapper that
-passes its own options alone carries too), purges it from the CDN, reads it
-back and says so; red, it leaves `auto_ok` off and says which parts failed -
-installs that update by themselves do not take the patch, and a person
-decides (a new patch, or a re-run that passed and the watcher again). Its
-outcome is kept in the release's record (`matrix`). The autonomous release
-round starts it (`scripts/train/auto.mjs`).
+> ⚠ Why a server patch waits for the whole matrix (#361, 2026-11-18). From
+> #252 until then a server patch waited at the gate for ci.yml's
+> `Go vet + build` part alone, started no dry run, ran the packages it
+> changed and their importers under `-race` in its pretag here instead, and
+> let the rest of the matrix run behind the release:
+> `scripts/release/matrix-watch.mjs` read it and switched the update
+> manifest's `auto_ok` on once it was green. On 2026-11-17 v0.61.2 went red
+> six rounds in a row on that `-race` gate, each time on another timing test
+> ("queue never drained", "op never finished", "TLS handshake timeout", "the
+> plugin did not finish within 15s") and never on a race or a fault - the
+> eight handlers shards, the three wasmplugin shards and the rest side by
+> side on one build host, one to two hours a round, whose load pushed a
+> neighbouring container out of memory. GitHub runs each of those shards on a
+> runner of its own. And the lane saved little: on the three green push runs
+> before it (43908732104, 43785626637, 43682968950) the whole matrix ended
+> 45.6, 56.4 and 47.9 minutes in, its `-race` parts alone 45.5, 47.9 and
+> 47.8, and the dry run takes 50-52 minutes beside it. So the lane of its own
+> at the gate, the `-race` gate here, the matrix watch and the ship's
+> `--no-auto` for a server patch are gone.
 
 ### filex-watch's own release
 
@@ -4210,8 +4279,9 @@ then runs `pnpm release` and does what the tool leaves to a person:
 | deploy | runs the ship (`filex-ship.sh`), pushes its Releases-page commit, then `--ack deploy` - which the release tool takes only once its own read-back is green. Before the ship the deploy checks are red by nature (they read what the ship deploys), so a red deploy starts the ship too; red again after the ship, the round stops |
 
 The stages that build (up to the export) hold `CHAIN_LOCK`; from the land on
-it holds nothing, since it waits for GitHub. A server patch's round then runs
-`matrix-watch.mjs`: GitHub's full matrix behind it, and `auto_ok` on.
+it holds nothing, since it waits for GitHub. A server patch's round waits for
+what every round waits for (#361): until 2026-11-18 it then ran a watch of
+GitHub's full matrix behind the release, which switched `auto_ok` on.
 
 **When it stops.** Red before the mains were pushed, the round rolls back -
 the stamp commit is dropped, the export's changes go to a stash in the public
@@ -4223,8 +4293,8 @@ store that holds the read-back (a Snap Store review) is `held`: the round
 ships what is out and reads the stores again every round, quietly, until they
 pass. Every round that started is said to a person (`FILEX_NOTIFY_*`), and
 `auto.mjs report` at 07:00 sums up the rounds since the last report and what
-they left to a person: a deferred Store check, a held store, a matrix that is
-not green, the replies on the issues, the language packs.
+they left to a person: a deferred Store check, a held store, the replies on
+the issues, the language packs.
 
 **Where it runs.** The release workspace (a container on the build host)
 holds both checkouts, the release train's settings
@@ -4316,10 +4386,13 @@ pnpm release X.Y.Z --plan --gate circleci      # what is read from CircleCI, and
 
 - The gate stage reads the `ci` workflow on the export commit instead of
   `ci.yml` and the dry run, and starts nothing on GitHub. The heavy gates
-  CircleCI does not run - Cypress, the unit suite on this machine's clock -
-  run here at the gate stage, beside the wait. A red run spends no number,
-  as on GitHub: re-run the workflow from its failed jobs on CircleCI, or fix
-  `main`, and resume.
+  CircleCI does not run - Cypress, the unit suite on this machine's clock,
+  both image builds, the docs site and its anchors - run here at the gate stage, beside the
+  wait - with `--profile full`, the only time the build host runs a suite,
+  and a person's choice like it. With
+  no dry run there is no candidate to look into either. A red run spends no
+  number, as on GitHub: re-run the workflow from its failed jobs on CircleCI,
+  or fix `main`, and resume.
 - The choice is kept for later resumes, and `--gate github` names GitHub
   again once Actions is back. The record says which CI passed the commit
   (`pnpm release X.Y.Z --status`), and so do the tag commands the tool prints.
@@ -4515,7 +4588,10 @@ For every line, in order:
 6. the checks, in the worktree: `[Unreleased]` well formed,
    `go build ./... && go vet ./...` on the module (through
    `scripts/lib/go-build.mjs`, so the maintainer's WSL works too; `--no-go`
-   skips it), and - when there are `--check` commands - the workspace
+   skips it), for an embargoed branch (`sec/<name>`) the Go tests of the
+   packages it changed and of their importers as well, since no CI sees it
+   before its release ([An embargoed fix](#an-embargoed-fix); `--no-go` is
+   refused for one), and - when there are `--check` commands - the workspace
    packages: `pnpm install --frozen-lockfile` when the lockfile changed, then a
    build of every workspace package another project depends on (`web` imports
    `@brftech/filex-core` from `packages/core/dist`, core imports

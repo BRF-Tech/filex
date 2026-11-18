@@ -33,6 +33,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/testutil/opswait"
 	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
@@ -95,7 +96,8 @@ func patient() *http.Client { return &http.Client{Timeout: 5 * time.Second} }
 // untilEmptied polls the status the admin page polls, until the run is over.
 func untilEmptied(t *testing.T, client *http.Client, base string) map[string]any {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	start := time.Now()
+	deadline := start.Add(opswait.Budget)
 	for time.Now().Before(deadline) {
 		status, body := doJSON(t, client, http.MethodGet, base+"/api/admin/trash/empty", nil)
 		require.Equal(t, http.StatusOK, status, "%v", body)
@@ -104,7 +106,7 @@ func untilEmptied(t *testing.T, client *http.Client, base string) map[string]any
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("the empty never finished")
+	t.Fatalf("the empty never finished %s", opswait.Waited(start))
 	return nil
 }
 

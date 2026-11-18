@@ -54,6 +54,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/testutil/opswait"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -240,7 +241,8 @@ func (f *stagedFixture) abort(t *testing.T, id string) int {
 // waitForOp polls the ops tray until the op leaves the queue.
 func (f *stagedFixture) waitForOp(t *testing.T, opID int64) string {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	start := time.Now()
+	deadline := start.Add(opswait.Budget)
 	for time.Now().Before(deadline) {
 		resp, err := f.client.Get(fmt.Sprintf("%s/api/files/ops/%d", f.srv.URL, opID))
 		require.NoError(t, err)
@@ -253,7 +255,7 @@ func (f *stagedFixture) waitForOp(t *testing.T, opID int64) string {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("op %d never finished", opID)
+	t.Fatalf("op %d never finished %s", opID, opswait.Waited(start))
 	return ""
 }
 

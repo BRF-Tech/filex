@@ -422,7 +422,6 @@ describe('the morning report', () => {
     const states = {
       'v0.57.1': {
         profile: 'server',
-        matrix: { state: 'red' },
         deferred: { 'store-deferred': { gate: 'the Store copy', checkedAck: 'store-checked' } },
         stages: { ci: { status: 'red', held: ['the Snap Store'] } },
       },
@@ -440,10 +439,11 @@ describe('the morning report', () => {
     expect(lines).toMatch(/request: v0\.57\.2 on aaaaaaaaaa - stopped: a gate is red/);
     expect(lines).toMatch(/the Store copy: deferred at the pretag; when it ran green elsewhere: --ack store-checked/);
     expect(lines).toMatch(/held by a store: the Snap Store/);
-    expect(lines).toMatch(/GitHub's full matrix behind the server patch: red/);
+    // #361: no matrix runs behind a server patch any more; nothing is owed for it.
+    expect(lines).not.toMatch(/full matrix behind/);
     expect(lines).toMatch(/the replies on the issues/);
     expect(morningReport({ rounds: [] })[0]).toBe('no round since the last report');
-    expect(owed({ profile: 'server', matrix: { state: 'green' }, stages: {} })).toEqual([]);
+    expect(owed({ profile: 'server', matrix: { state: 'red' }, stages: {} })).toEqual([]);
   });
 });
 

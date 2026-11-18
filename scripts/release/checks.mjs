@@ -712,32 +712,34 @@ export function readmeImages(markdown) {
 /**
  * What `pnpm release X.Y.Z --profile <name>` runs, and where.
  *
- *   minor  (the default) here, before the export: the builds and vue-tsc, the
- *          unit suites in UTC, the desktop and the Store copy, both images and
- *          the shop window (plan.pretag). The heavy suites (plan.heavy) are
- *          not run here first: those GitHub runs on the export commit (ci.yml)
- *          are read at the gate stage, and those it does not run yet run on
- *          this machine DURING the gate stage, beside GitHub's wait.
- *   patch  X.Y.Z+1 only. The builds and the packaging always (#76: two ghost
- *          releases died building, not testing), every other gate only when
- *          something it reads changed since the last release, the Go suite
- *          on the changed packages and their importers; GitHub still runs
- *          every suite on the export commit (#165, decision 5).
- *   full   everything here, before the export, as every release did up to
- *          0.52: for a day GitHub cannot be trusted with the heavy suites.
+ *   minor  (the default) here, before the export, the light gates alone: the
+ *          builds with vue-tsc, `go vet`, the embedded UI check, the desktop
+ *          typecheck and - when the release reaches the desktop app - the
+ *          Store copy (plan.pretag). Every heavy suite (plan.heavy) is a part
+ *          of ci.yml's full matrix on the export commit, read at the gate
+ *          stage with the release dry run beside it; nothing is tagged until
+ *          every part passed.
+ *   patch  X.Y.Z+1 only. The same light gates, and the same wait at the gate.
  *   server a SERVER patch (#252, scripts/release/surfaces.mjs serverPatch):
- *          X.Y.Z+1 whose changes reach the server alone. The server's gates
- *          here - the builds, both images and their smoke tests, the changed
- *          Go packages and their importers under -race - and nothing of the
- *          interface or the desktop app (`serverSkip`). The gate stage waits
- *          for ci.yml's build part alone (`serverGate`); GitHub's full matrix
- *          runs behind the release, and the update manifest offers the patch
- *          to automatic updates only once it passed (matrix-watch.mjs).
+ *          X.Y.Z+1 whose changes reach the server alone. The light gates of
+ *          the server (`serverSkip` leaves the desktop app out), the same
+ *          wait at the gate (#361: until 2026-11-18 it waited for ci.yml's
+ *          build part alone, ran the changed Go packages under -race here
+ *          instead, and let the rest of the matrix run behind the release),
+ *          and a tag run that publishes the server's surface alone.
+ *   full   everything here, before the export, as every release did up to
+ *          0.52: a person's choice for a day no CI can be trusted. The gate
+ *          stage still waits for GitHub.
  *
- * ⚠ Why the heavy suites left this machine (#165): from 0.50 to 0.52 the
- * pretag here found no product fault the build host and GitHub had not, ran
- * the Go suite a fifth and vitest an eighth time per release, and started
- * over after every red - 935 minutes lost over seven releases.
+ * ⚠⚠ Why no suite runs here (#165, #361): from 0.50 to 0.52 the pretag here
+ * found no product fault the build host and GitHub had not, ran the Go suite
+ * a fifth and vitest an eighth time per release, and started over after
+ * every red - 935 minutes lost over seven releases. And on 2026-11-17 the
+ * server patch's `-race` gate here went red six rounds in a row, each time
+ * on another timing test, never on a race or a fault, while its load pushed
+ * a neighbour's container on the build host out of memory. The owner's rule
+ * of 2026-11-18: the build host builds, lints and looks into what GitHub
+ * built; every test runs on GitHub.
  */
 export const PROFILES = ['minor', 'patch', 'full', 'server'];
 
@@ -746,14 +748,13 @@ const PROFILE_RANK = { server: -1, patch: 0, minor: 1, full: 2 };
 /**
  * True when a pretag that passed in profile `was` answers for `want` too. A
  * run recorded before profiles existed ran the whole chain: `full`. A server
- * pretag answers for nothing else (it leaves the interface and the desktop
- * app out), and only a server or a full one answers for a server patch (a
- * patch or a minor ran its Go packages without -race).
+ * pretag answers for nothing else (it leaves the desktop app out); every
+ * other pretag runs at least what a server patch's does (#361: the server's
+ * own `-race` gate left this machine).
  */
 export function profileCovers(was, want) {
   const w = was ?? 'full';
-  if (want === 'server') return w === 'server' || w === 'full';
-  return (PROFILE_RANK[w] ?? -2) >= (PROFILE_RANK[want] ?? Infinity) && w !== 'server';
+  return (PROFILE_RANK[w] ?? -2) >= (PROFILE_RANK[want] ?? Infinity);
 }
 
 /**
@@ -793,31 +794,38 @@ export const GATE_SOURCES = ['github', 'circleci'];
  * decides with it), or null when there is none to compare with - then
  * everything runs: in doubt, a gate runs.
  *
+ * `reached` is the list of surfaces those changes reach (surfaces.mjs →
+ * affectedSurfaces), or null when there is no list: then every surface.
+ *
  * `source` is where the gate stage reads the export commit's suites
  * (GATE_SOURCES). A heavy gate the plan does not give that source runs here
- * at the gate stage instead: with `circleci`, the Cypress suite and this
- * machine's clock run here, the suites CircleCI runs are read from it.
+ * at the gate stage instead: with `circleci`, the Cypress suite, this
+ * machine's clock, the images and the docs site run here, the suites
+ * CircleCI runs are read from it.
  *
  * A gate says, in the plan:
  *   always      runs in a patch too, whatever changed (builds, packaging)
  *   inputs      the files its verdict depends on (the gate cache's key)
  *   patchWhen   what makes a patch run it, when narrower than `inputs`
+ *   reaches     (pretag) a surface: it runs only in a release whose changes
+ *               reach it (#361: the Store copy, the desktop app)
  *   github      (heavy) the workflow that runs the same suite on GitHub
  *   circleci    (heavy) the CircleCI job that runs the same suite
  *               (.circleci/config.yml, workflow `ci`)
- *   patch       (heavy) 'changed': a patch runs it here when touched
- *   patchOnly   (heavy) only a patch runs it (the targeted Go suite)
- *   patchSkip   (heavy) why a patch does not run it here
  *   deferred    (pretag) this machine cannot run it: the pretag leaves it to
  *               one that can, once a person says so (deferredSpecs below)
  *   serverSkip  (pretag) why a server patch (#252) does not run it: it is
  *               about a surface a server patch does not publish
- *   serverOnly  (heavy) only a server patch runs it, here in its pretag
- *               (the changed Go packages under -race)
+ *
+ * ⚠ #361: no heavy gate runs here in a minor, a patch or a server patch -
+ * every one has its parts on GitHub (`github`), read at the gate stage. The
+ * patch's targeted Go suite, its migrations on a schema change and the
+ * server patch's `-race` suite were gates here until 2026-11-18.
  */
-export function selectGates({ pretag = [], heavy = [] }, profile, changed = null, { source = 'github' } = {}) {
+export function selectGates({ pretag = [], heavy = [] }, profile, changed = null, { source = 'github', reached = null } = {}) {
   if (!GATE_SOURCES.includes(source)) throw new Error(`gate source ${source}: the sources are ${GATE_SOURCES.join(', ')}`);
   const touched = (g) => changed == null || changed.some((f) => matchesInputs(g.patchWhen ?? g.inputs ?? ['**'], f));
+  const reaches = (g) => !g.reaches || reached == null || reached.includes(g.reaches);
   const remote = (g) => !!g[source];
   const out = { pretag: [], local: [], remote: [], skipped: [] };
   out.github = out.remote;
@@ -826,53 +834,18 @@ export function selectGates({ pretag = [], heavy = [] }, profile, changed = null
   const narrow = profile === 'patch' || profile === 'server';
   for (const g of pretag) {
     if (profile === 'server' && g.serverSkip) skip(g, g.serverSkip);
+    else if (!reaches(g)) skip(g, `the release changes nothing of the ${g.reaches} surface (scripts/release/surfaces.mjs)`);
     else if (!narrow || g.always || touched(g)) out.pretag.push(g);
     else skip(g, unchanged);
   }
   for (const g of heavy) {
-    if (g.serverOnly && profile !== 'server') {
-      skip(g, 'only a server patch runs it');
-      continue;
-    }
-    if (profile === 'server') {
-      // The server's own gate here; every other heavy suite runs on GitHub
-      // behind the release (#252), and holds the patch's automatic updates
-      // back, not the patch.
-      if (g.serverOnly) {
-        if (touched(g)) out.pretag.push(g);
-        else skip(g, unchanged);
-      } else {
-        skip(
-          g,
-          g.patchOnly
-            ? 'a server patch runs the packages it changed under -race instead'
-            : "GitHub's full matrix runs it behind a server patch; the update manifest offers the patch to automatic updates once it passed (matrix-watch.mjs)",
-        );
-      }
-      continue;
-    }
-    if (profile === 'full') {
-      if (g.patchOnly) skip(g, 'the whole suite runs here instead');
-      else out.pretag.push(g);
-    } else if (profile === 'minor') {
-      if (g.patchOnly) skip(g, 'only a patch runs it; the whole suite runs on GitHub');
-      else if (remote(g)) out.remote.push(g);
-      else out.local.push(g);
-    } else if ((g.patchOnly || g.patch === 'changed') && touched(g)) {
-      out.pretag.push(g);
-    } else if (remote(g) && !g.patchOnly) {
-      out.remote.push(g);
-    } else if (source !== 'github' && g.github && !g.patchOnly) {
-      // GitHub would run it for a patch, and the CI read in its place does
-      // not: here, at the gate stage, like a minor's.
-      out.local.push(g);
-    } else {
-      skip(g, g.patchOnly || g.patch === 'changed' ? unchanged : (g.patchSkip ?? `a patch runs it only on ${source === 'circleci' ? 'CircleCI' : 'GitHub'}`));
-    }
+    if (profile === 'full') out.pretag.push(g);
+    else if (remote(g)) out.remote.push(g);
+    else out.local.push(g);
   }
   // The gates that run at the gate stage take along the builds they are
   // `after`, transitively: the binary they test is built again there, from
-  // the release commit, beside GitHub's wait - never trusted to be still on
+  // the release commit, beside the CI's wait - never trusted to be still on
   // disk, and still current, from a pretag hours earlier.
   if (out.local.length) {
     const byName = new Map([...pretag, ...heavy].map((g) => [g.name, g]));

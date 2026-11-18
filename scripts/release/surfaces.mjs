@@ -9,9 +9,10 @@
 // embeds - two to two and a half hours for a change only the server carried,
 // and every unaffected surface got a "new" version of the same bytes. "If the
 // CLI or the UI did not change, it is not updated; if it did, it is." A
-// server patch now goes out on its own lane: the server's gates, then the
-// release, with GitHub's full matrix BEHIND it, and the update manifest's
-// auto_ok switched on only once that matrix is green (matrix-watch.mjs).
+// server patch now goes out on its own lane: the server's light gates, the
+// same wait for GitHub's full matrix and the dry run as every release (#361;
+// until 2026-11-18 the matrix ran behind it), and a tag run that publishes
+// the server's surface alone.
 //
 // ⚠ In doubt, everything: a changed file no rule below places makes the
 // release one of every surface, never a server patch.
@@ -141,7 +142,11 @@ export const SURFACE_RULES = [
   // The server's database: a server change, and one a patch may not carry
   // (docs/UPDATES.md: a release with migrations is never applied unasked).
   { globs: ['backend/db/**'], surfaces: ['server'], migrations: true },
-  { globs: ['docs/**', 'docs-site/**', 'README.md', 'README.*.md', 'SECURITY.md', 'CODE_OF_CONDUCT.md'], surfaces: ['docs'] },
+  // desktop/README.md is read in the repository and goes into no package
+  // (#361: a line added to it kept 0.61.2 off the server lane); the Store
+  // listing beside it (desktop/store/**) is the Microsoft Store's text, the
+  // desktop app's.
+  { globs: ['docs/**', 'docs-site/**', 'README.md', 'README.*.md', 'SECURITY.md', 'CODE_OF_CONDUCT.md', 'desktop/README.md'], surfaces: ['docs'] },
   { globs: ['desktop/**'], surfaces: ['desktop'] },
   // The interface: embedded in the server, synced into the desktop app,
   // published to npm and vendored into the embeds.
@@ -213,8 +218,9 @@ export function publishes(surfaces, surface) {
 
 /**
  * The line a server patch's tags carry, which release.yml's `plan` reads
- * (`surfaces: server`): the tag run then builds and publishes the server's
- * surface alone. A tag of every surface carries none.
+ * (`surfaces: server`): the tag run then publishes the server's surface
+ * alone - the dry run's images, promoted as for every release (#361). A tag
+ * of every surface carries none.
  */
 export const SURFACES_LINE = 'surfaces: server';
 

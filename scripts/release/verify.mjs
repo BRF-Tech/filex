@@ -118,8 +118,8 @@ export function updateManifest(name, url, opts = {}) {
       if (newest !== c.tag) {
         return { ok: false, detail: `${url} says the newest release is ${newest ?? 'nothing'}, not ${c.tag} — no install will be offered this release` };
       }
-      // #252: a server patch goes out with auto_ok false, and GitHub's full
-      // matrix behind it turns it on (matrix-watch.mjs): said, not judged.
+      // A release with auto_ok false (a migration, docs/UPDATES.md) is
+      // offered when asked, not taken by itself: said, not judged.
       const entry = (doc?.releases ?? []).find((r) => r?.version === c.tag);
       const auto = entry && entry.auto_ok === false ? '; auto_ok false: installs take it when asked, not by themselves (yet)' : '';
       return { ok: true, detail: `${url}: newest ${newest}${auto}` };

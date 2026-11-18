@@ -24,23 +24,24 @@
 //                                          alone, on the tagged commits (when the ci
 //                                          stage is held red by a store that is not
 //                                          ours to hurry). Confirms nothing.
-//   --profile minor|patch|full|server      which gates run where (task #172):
-//                                          minor (default) the fast gates here, the
-//                                          heavy suites on GitHub or here during the
-//                                          gate stage; patch (X.Y.Z+1 only) builds
-//                                          always, the rest only for what changed;
-//                                          full every gate here, as up to 0.52;
-//                                          server (#252) a patch only the server
-//                                          carries: its own gates, the server's
-//                                          surface alone, GitHub's full matrix
-//                                          behind it (chosen by itself when the
-//                                          changes allow; --profile patch to keep
-//                                          the whole patch)
+//   --profile minor|patch|full|server      which gates run where (task #172, #361):
+//                                          minor (default) and patch (X.Y.Z+1 only)
+//                                          the light gates here (builds, go vet,
+//                                          the embedded UI, the desktop typecheck),
+//                                          every suite on GitHub, waited for at
+//                                          the gate stage; server (#252) a patch
+//                                          only the server carries: the server's
+//                                          light gates, the same wait, the
+//                                          server's surface alone (chosen by
+//                                          itself when the changes allow;
+//                                          --profile patch to keep the whole
+//                                          patch); full every gate here as well,
+//                                          as up to 0.52 (a person's choice)
 //   --no-cache                             run every gate, even one that passed on
 //                                          exactly these inputs before
 //   --chain <result.json>                  a green scripts/chain run on this tree
-//                                          stands in for the heavy gates a minor
-//                                          would run here at the gate stage
+//                                          stands in for the heavy gates that run
+//                                          here at the gate stage (--gate circleci)
 //   --gate github|circleci                 where the gate stage reads the export
 //                                          commit's suites (task #181): GitHub
 //                                          (default), or CircleCI's workflow `ci`
@@ -227,19 +228,18 @@ for (const a of opts.acks) {
 
 if (opts.plan) {
   const profile = opts.profile ?? 'minor';
-  // A patch's choice depends on what changed since the newest release tag.
+  // A patch's choice, and every profile's gates of one surface (#361),
+  // depend on what changed since the newest release tag.
   let changed = null;
   let since = null;
-  if (profile === 'patch' || profile === 'server') {
-    try {
-      since = newestTag(gitOut(REPO, 'tag', '--list', 'v*').split('\n').map((t) => t.trim()).filter(Boolean));
-      if (since) changed = gitOut(REPO, 'diff', '--name-only', '--no-renames', since, 'HEAD').split('\n').filter(Boolean);
-    } catch {
-      changed = null;
-    }
+  try {
+    since = newestTag(gitOut(REPO, 'tag', '--list', 'v*').split('\n').map((t) => t.trim()).filter(Boolean));
+    if (since) changed = gitOut(REPO, 'diff', '--name-only', '--no-renames', since, 'HEAD').split('\n').filter(Boolean);
+  } catch {
+    changed = null;
   }
   const source = opts.gate ?? 'github';
-  const sel = selectGates(plan, profile, changed, { source });
+  const sel = selectGates(plan, profile, changed, { source, reached: changed ? affectedSurfaces(changed).surfaces : null });
   const ci = source === 'circleci' ? 'CircleCI' : 'GitHub';
   console.log(`${bold(`filex release ${tag}`)} — the plan, profile ${bold(profile)}${source !== 'github' ? `, gate ${bold(source)}` : ''}${since ? ` (${changed?.length ?? '?'} file(s) changed since ${since})` : ''} (nothing runs)\n`);
   const byStage = { preflight: plan.preflight, audit: plan.audit, docs: plan.docs, pretag: sel.pretag, export: plan.exportGates, gate: sel.local, ci: plan.published, deploy: plan.deployed };
@@ -251,6 +251,7 @@ if (opts.plan) {
       console.log(`      - ${g.name}${dim(where)}`);
     }
     if (s.id === 'gate') for (const g of sel.remote) console.log(`      - ${g.name}${dim(`  (read from ${source === 'circleci' ? `CircleCI ${g.circleci}` : g.github})`)}`);
+    if (s.id === 'gate' && source === 'github') for (const g of plan.candidate?.gates ?? []) console.log(`      - ${g.name}${dim("  (here, on the dry run's images, pulled by digest)")}`);
   });
   if (sel.skipped.length) {
     console.log(`\nnot run in the ${profile} profile:`);

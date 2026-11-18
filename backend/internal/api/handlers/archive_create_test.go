@@ -23,6 +23,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/testutil/archivetest"
+	"github.com/brf-tech/filex/backend/internal/testutil/opswait"
 )
 
 func craftedZip(t *testing.T, files map[string]string) []byte {
@@ -41,7 +42,8 @@ func craftedZip(t *testing.T, files map[string]string) []byte {
 
 func waitForArchiveOp(t *testing.T, svc *ops.Service, id int64) *ops.Op {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	start := time.Now()
+	deadline := start.Add(opswait.Budget)
 	for {
 		op, err := svc.Get(context.Background(), id)
 		require.NoError(t, err)
@@ -50,7 +52,7 @@ func waitForArchiveOp(t *testing.T, svc *ops.Service, id int64) *ops.Op {
 			return op
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("archive operation %d did not finish (status %s)", id, op.Status)
+			t.Fatalf("archive operation %d did not finish (status %s) %s", id, op.Status, opswait.Waited(start))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

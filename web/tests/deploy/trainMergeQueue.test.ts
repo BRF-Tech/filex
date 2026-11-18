@@ -30,10 +30,11 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { goShellArgv } from '../../../scripts/lib/go-build.mjs';
 import { parseBody, splitUnreleased, unreleasedProblems } from '../../../scripts/train/changelog-merge.mjs';
-import { chainVerdict, isEmbargoed, needsAChain } from '../../../scripts/lib/embargo.mjs';
+import { isEmbargoed } from '../../../scripts/lib/embargo.mjs';
+import { shq } from '../../../scripts/release/engine.mjs';
 import {
   CANDIDATE_REL,
-  embargoProblem,
+  embargoGoGate,
   goCheckScript,
   msgName,
   parseArgs,
@@ -478,70 +479,48 @@ describe('a check reads the workspace packages built from the merge', () => {
   );
 });
 
-// ── an embargoed branch enters only with its chain (task #182) ──────────────
+// ── an embargoed branch is tested here, since no CI sees it (#361) ──────────
 //
-// On 2026-10-10 an embargoed branch (sec/<name>) was pushed with
-// `-o ci.skip`: the private pipeline recorded a "skipped" run, nothing ran,
-// and the branch was merged into main that afternoon without the chain. The
-// queue now asks the private pipeline about an embargoed tip before it
-// merges anything, and an explicit --embargo-unchecked is written into the
-// merge commit, where the history keeps it.
+// The owner's decision of 2026-11-18: the private forge runs no pipeline any
+// more. GitHub cannot see an embargoed branch (sec/<name>) before the patch
+// release that ships it, and GitHub's temporary private forks of a security
+// advisory run no CI. So the queue tests it where it runs: the build and vet
+// every merge gets, and the Go tests of the packages it changed and of their
+// importers. Until then the forge's runner ran the whole chain on it and the
+// queue refused a tip without a green one (task #182, --embargo-unchecked).
 
-describe('an embargoed branch and its chain', () => {
-  const ROW = { branch: 'sec/hole', tip: 'f2cb5832aaaabbbbcccc', merged: false };
-  const SETTINGS = { EMBARGO_API: 'https://forge.example.com/api/v4/projects/7', EMBARGO_TOKEN_FILE: '/dev/null' };
-  const asks = (pipelines: unknown[]) => async () => pipelines;
-  const token = () => 'test-token';
+describe('an embargoed branch, tested by the queue', () => {
+  const has = (dirs: string[]) => (d: string) => dirs.includes(d.replace(/^\.\//, ''));
+  const wt = path.join(os.tmpdir(), 'mq-wt');
 
-  it('says whether the chain passed on a tip, and why not', () => {
-    expect(chainVerdict([{ status: 'success' }]).ok).toBe(true);
-    expect(chainVerdict([{ status: 'skipped' }, { status: 'success' }]).ok).toBe(true);
-    expect(chainVerdict([]).why).toMatch(/no pipeline/);
-    expect(chainVerdict([{ status: 'skipped' }]).why).toMatch(/skipped.*ci\.skip/);
-    expect(chainVerdict([{ status: 'running' }]).why).toMatch(/still running/);
-    expect(chainVerdict([{ status: 'failed' }, { status: 'skipped' }]).why).toMatch(/ended failed/);
-    // Only a chain that never ran needs starting: red is waiting for a fix.
-    expect(needsAChain([])).toBe(true);
-    expect(needsAChain([{ status: 'skipped' }])).toBe(true);
-    expect(needsAChain([{ status: 'failed' }])).toBe(false);
+  it('runs the tests of the Go packages an embargoed branch changed, and their importers', () => {
     expect(isEmbargoed('sec/hole')).toBe(true);
     expect(isEmbargoed('fix/sec-thing')).toBe(false);
+    const g = embargoGoGate({ branch: 'sec/hole', changed: ['backend/internal/perm/upgrade.go', 'CHANGELOG.md'], wt, bash: 'bash', hasGoFiles: has(['internal/perm']) })!;
+    expect(g.name).toMatch(/^go: test the packages sec\/hole changed and their importers/);
+    const line = g.cmd.join(' ');
+    expect(line).toContain(`FILEX_GO_DIRS=${shq('./internal/perm')}`);
+    expect(line).toContain('scripts/release/gates/go-targeted.sh');
+    expect(line, 'the app-plugin tests need the echo fixture').toContain('scripts/build-wasm-fixture.sh');
+    expect(line).not.toContain('FILEX_GO_RACE');
   });
 
-  it('asks only about an embargoed branch that is not in yet', async () => {
-    const never = async () => {
-      throw new Error('asked');
-    };
-    for (const row of [
-      { ...ROW, branch: 'fix/thing' },
-      { ...ROW, merged: true },
-      { ...ROW, tip: null },
-    ]) {
-      expect(await embargoProblem(row, { settings: SETTINGS, ask: never, token })).toBe('');
-    }
+  it('tests the whole module for a change it cannot place, and nothing for a branch that is not embargoed or changed no Go', () => {
+    const all = embargoGoGate({ branch: 'sec/hole', changed: ['backend/go.mod'], wt, bash: 'bash', hasGoFiles: has([]) })!;
+    expect(all.cmd.join(' ')).toContain(`FILEX_GO_DIRS=${shq('./...')}`);
+    expect(embargoGoGate({ branch: 'fix/thing', changed: ['backend/internal/perm/upgrade.go'], wt, bash: 'bash', hasGoFiles: has(['internal/perm']) })).toBeNull();
+    expect(embargoGoGate({ branch: 'sec/docs', changed: ['docs/SECURITY.md'], wt, bash: 'bash', hasGoFiles: has([]) })).toBeNull();
   });
 
-  it('refuses a tip whose chain was skipped, did not pass, or cannot be asked about', async () => {
-    expect(await embargoProblem(ROW, { settings: SETTINGS, ask: asks([{ status: 'skipped' }]), token })).toMatch(/sec\/hole: its pipeline was skipped/);
-    expect(await embargoProblem(ROW, { settings: SETTINGS, ask: asks([{ status: 'failed' }]), token })).toMatch(/ended failed/);
-    expect(await embargoProblem(ROW, { settings: {}, ask: asks([{ status: 'success' }]), token })).toMatch(/EMBARGO_API/);
-    const down = async () => {
-      throw new Error('GET /pipelines: 502');
-    };
-    expect(await embargoProblem(ROW, { settings: SETTINGS, ask: down, token })).toMatch(/could not be asked.*502/);
-    // Green: nothing to say.
-    expect(await embargoProblem(ROW, { settings: SETTINGS, ask: asks([{ status: 'success' }]), token })).toBe('');
-    // Told why not: nothing to refuse (the reason goes into the commit).
-    expect(await embargoProblem(ROW, { settings: SETTINGS, unchecked: 'shipped as a normal fix', ask: asks([]), token })).toBe('');
-  });
-
-  it('wants the reason in words', () => {
-    expect(() => parseArgs(['--queue', 'q', '--embargo-unchecked', '   '])).toThrow(/reason/);
-    expect(parseArgs(['--queue', 'q', '--embargo-unchecked', 'shipped as a normal fix']).embargoUnchecked).toBe('shipped as a normal fix');
+  it('asks the forge nothing, and takes no --embargo-unchecked', () => {
+    expect(() => parseArgs(['--queue', 'q', '--embargo-unchecked', 'why'])).toThrow(/unknown option --embargo-unchecked/);
+    const src = fs.readFileSync(path.join(REPO, 'scripts', 'train', 'merge-queue.mjs'), 'utf8');
+    expect(src).not.toMatch(/EMBARGO_API|EMBARGO_TOKEN_FILE|pipelinesFor|Embargo-Unchecked/);
+    expect(fs.existsSync(path.join(REPO, '.gitlab-ci.yml')), 'no pipeline on the private forge').toBe(false);
   });
 
   it(
-    'on a real history: does not start without the private pipeline, and says --embargo-unchecked in the commit',
+    'on a real history: an embargoed branch merges like any other, without a word to a forge',
     () => {
       const f = makeFixture();
       f.git('checkout', '-q', '-b', 'sec/hole');
@@ -551,20 +530,13 @@ describe('an embargoed branch and its chain', () => {
       f.git('checkout', '-q', 'main');
       write(path.join(f.root, 'msg', 'sec-hole.txt'), 'Merge sec/hole: the hole is closed.\n');
       write(path.join(f.root, 'RELEASE.md'), '```queue\nsec/hole\n```\n');
-
-      const refused = f.runQueue();
-      expect(refused.status, refused.stdout + refused.stderr).toBe(1);
-      expect(refused.stdout).toContain('NOT STARTED');
-      expect(refused.stdout).toContain('sec/hole: an embargoed branch enters only with a green chain');
-      expect(f.git('rev-list', '--count', 'HEAD')).toBe('1');
-
-      const waved = f.runQueue('--embargo-unchecked', 'shipped as a normal fix, decided by the owner');
-      expect(waved.status, waved.stdout + waved.stderr).toBe(0);
-      expect(waved.stdout).toContain('merged without a green chain');
+      const r = f.runQueue();
+      expect(r.status, r.stdout + r.stderr).toBe(0);
       const body = f.git('log', '-1', '--format=%B');
       expect(body).toContain('Merge sec/hole: the hole is closed.');
-      expect(body).toContain('Embargo-Unchecked: shipped as a normal fix, decided by the owner');
+      expect(body).not.toContain('Embargo-Unchecked');
     },
     TIMEOUT,
   );
 });
+

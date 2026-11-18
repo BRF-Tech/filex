@@ -34,8 +34,8 @@ type Gate = {
   patchWhen?: string[];
   github?: string;
   patch?: string;
-  patchOnly?: boolean;
-  serverOnly?: boolean;
+  reaches?: string;
+  serverSkip?: string;
   script?: string;
   sh?: unknown;
   vitest?: { files: string[] };
@@ -45,12 +45,14 @@ type Gate = {
 };
 const pretag = p.pretag as Gate[];
 const heavy = p.heavy as Gate[];
+const candidate = p.candidate.gates as Gate[];
 const every = [...pretag, ...heavy];
 const gate = (name: string) => every.find((g) => g.name === name)!;
 const BUILD_UI = 'build: packages, admin (vue-tsc + vite), embed';
 const BUILD_BIN = 'build: server binary';
-const GO_PATCH = 'go: vet + test, the packages a patch changed and their importers';
-const GO_SERVER = 'go: vet + test -race, the packages a server patch changed and their importers';
+const GO_VET = 'go: vet';
+const DESKTOP_TSC = 'desktop: typecheck';
+const STORE_COPY = 'desktop: the Store package works as a Store copy';
 const MIGRATIONS = 'go: migrations on sqlite, postgres AND mysql';
 
 /** gate-name fragment → why it is in the plan */
@@ -60,31 +62,40 @@ const REQUIRED: Record<string, Record<string, string>> = {
   },
   docs: {
     'every relative link resolves': 'CONTRIBUTING step 3',
-    'the site builds': 'lesson #34: a broken code span kills the build',
-    'every in-page anchor lands': '98 of 366 anchors were dead on a green build',
     'Helm chart lints and renders': 'lessons #430/#432',
   },
+  // #361: the light gates alone - every suite is GitHub's (`heavy`).
   pretag: {
     'build: packages, admin (vue-tsc': 'v0.38.1: vue-tsc was the only gate that saw the WIP files',
+    'go: vet': '#361: the vet half of the backend suite stays on the build host, in minutes',
     'serves the UI just built': '2026-09-14: a binary with a 16-hour-old UI',
-    'web unit (TZ=UTC': 'lesson #448: v0.43.0 CI failed in UTC',
-    'desktop: typecheck + unit': '0.43.x shipped a desktop window that never parsed (#52)',
+    'desktop: typecheck': '0.43.x shipped a desktop window that never parsed (#52)',
     'the Store package works as a Store copy': 'the GitHub runner never activates an MSIX; release.yml submits what it builds (2026-09-26)',
+  },
+  // #172: the heavy suites left the fast pretag, not the release; #361: in a
+  // minor, a patch and a server patch every one is a part of ci.yml's full
+  // matrix, read at the gate stage. `full` runs them here first.
+  heavy: {
     'docker: full image': 'v0.43.0: npm published, images never built',
     'docker: slim image': 'v0.43.0',
-    'both images report the release': 'the version is baked in',
-    'shop window: a throwaway instance': 'CONTRIBUTING step 12, before the tag',
-  },
-  // #172: the heavy suites left the fast pretag, not the release. The profile
-  // says where each runs (GitHub, here during the gate stage, or here first).
-  heavy: {
+    'web unit (TZ=UTC': 'lesson #448: v0.43.0 CI failed in UTC',
+    'packages unit (TZ=UTC)': 'the packages npm publishes',
+    'desktop: unit': '0.43.x shipped a desktop window that never parsed (#52)',
+    'the site builds': 'lesson #34: a broken code span kills the build',
+    'every in-page anchor lands': '98 of 366 anchors were dead on a green build',
     'go: echo.wasm fixture': 'without it the app-plugin tests skip in silence (lesson #960)',
     'go: vet + test': 'the backend suite',
-    'the packages a patch changed and their importers': 'a patch tests what it changed (2026-09-25 rule, #172)',
     'migrations on sqlite, postgres AND mysql': 'the parity tests skip without a DSN',
     "web unit (this machine's clock)": 'CI runs the unit suite in UTC only',
     'e2e: Cypress': 'the suite release.yml waits for',
     'e2e: Playwright': 'the journeys Cypress does not walk',
+  },
+  // #361: the images the release ships, pulled by digest from the dry run
+  // that built them, looked into before the tag.
+  candidate: {
+    'both images report the release': 'the version is baked in',
+    'serves the admin UI and /embed.js': 'v0.43.0: an image whose frontend stage produced nothing answers both with 200',
+    'the shop window, a throwaway instance': 'CONTRIBUTING step 12, before the tag (2026-09-07: seven defects a stranger found first)',
   },
   exportGates: {
     'go build (public module path)': 'lesson #55 checklist: the rewritten module builds IN the export',
@@ -111,10 +122,12 @@ const REQUIRED: Record<string, Record<string, string>> = {
   },
 };
 
+const lists: Record<string, Array<{ name: string }>> = { ...p, candidate };
+
 describe("this repository's release plan", () => {
   for (const [stage, gates] of Object.entries(REQUIRED)) {
     it(`${stage}: keeps every gate a past release needed`, () => {
-      const have = names(p[stage]);
+      const have = names(lists[stage]);
       for (const [fragment, why] of Object.entries(gates)) {
         expect(have.some((n) => n.includes(fragment)), `${stage} lost "${fragment}" — it exists because: ${why}`).toBe(true);
       }
@@ -144,12 +157,12 @@ describe("this repository's release plan", () => {
   });
 
   it('gate names are unique (each writes its own log, and keys its own cache entry)', () => {
-    for (const stage of ['preflight', 'audit', 'docs', 'pretag', 'heavy', 'exportGates', 'published', 'deployed']) {
-      const n = names(p[stage]);
+    for (const stage of ['preflight', 'audit', 'docs', 'pretag', 'heavy', 'candidate', 'exportGates', 'published', 'deployed']) {
+      const n = names(lists[stage]);
       expect(new Set(n).size, stage).toBe(n.length);
     }
     // The heavy gates run in pretag (full) or beside the gate stage: one name, one log.
-    expect(new Set(names(every)).size).toBe(every.length);
+    expect(new Set(names([...every, ...candidate])).size).toBe(every.length + candidate.length);
   });
 
   it('the browser suites wait for the binary they test, and come after it in a full run', () => {
@@ -195,24 +208,58 @@ describe("this repository's release plan", () => {
     expect(audit.builtin.join('\n')).toContain('bound to the release commit');
   });
 
-  it('the minor pretag is the fast one: the builds, vue-tsc, the unit suites in UTC, the desktop, the Store copy, the images', () => {
-    const minor = selectGates(p, 'minor', null);
-    expect(names(minor.pretag)).toEqual(names(pretag));
-    for (const n of names(minor.pretag)) {
-      expect(n, `${n} is a heavy suite in the fast pretag`).not.toMatch(/^go: |^e2e: |migrations|this machine's clock/);
+  // ⚠⚠ #361 (the owner, 2026-11-18): the build host builds, lints and looks
+  // into what GitHub built; every suite runs on GitHub. 0.61.2's six rounds
+  // went red on the build host's -race gate, each on another timing test.
+  it('the pretag is the light one: the builds, vue-tsc, go vet, the embedded UI, the desktop typecheck, the Store copy - no suite, no image', () => {
+    for (const profile of ['minor', 'patch', 'server']) {
+      const sel = selectGates(p, profile, null);
+      for (const g of sel.pretag) {
+        expect(g.name, `${g.name} is a suite or an image in the ${profile} pretag`).not.toMatch(/^e2e: |^docker: |unit|migrations|this machine's clock|shop window|site builds|vet \+ test/);
+        const text = `${g.script ?? ''} ${typeof g.sh === 'string' ? g.sh : ''}`;
+        expect(text, g.name).not.toMatch(/go test|pnpm[^&]*\btest\b|vitest|docker build/);
+        expect(g.vitest, `${g.name} runs vitest`).toBeUndefined();
+      }
     }
+    expect(names(selectGates(p, 'minor', null).pretag)).toEqual(names(pretag));
+    expect(names(pretag)).toEqual([BUILD_UI, BUILD_BIN, GO_VET, 'the binary serves the UI just built, byte for byte', DESKTOP_TSC, STORE_COPY]);
+    expect(gate(GO_VET).script).toBe('go vet ./...');
+    expect(gate(GO_VET).lane).toBe('go');
+    // go:embed wants backend/embed/admin, which a fresh tree gets from the UI build.
+    expect(gate(GO_VET).after).toEqual([BUILD_UI]);
   });
 
-  // #173/#174: since ci.yml's full matrix every heavy suite has its parts on
-  // GitHub - Playwright on three engines with and without a Document Server,
-  // the unit suite on Istanbul's clock, the echo fixture in every Go part -
-  // so a minor runs none of them here: the gate stage reads them part by part.
-  it('a minor reads every heavy suite from GitHub, part by part, and runs none here at the gate stage', () => {
-    const minor = selectGates(p, 'minor', null);
-    expect(names(minor.github).sort()).toEqual(heavy.filter((g) => !g.patchOnly && !g.serverOnly).map((g) => g.name).sort());
-    for (const g of minor.github) expect(g.github).toBe('ci.yml');
-    expect(minor.local).toEqual([]);
-    expect(names(minor.skipped.map((s: { gate: Gate }) => s.gate))).toEqual([GO_PATCH, GO_SERVER]);
+  // ⚠ #361, 0.61.2's second round: the docs stage's anchor check read the
+  // built site, and the site build had gone to GitHub - red on a fresh tree.
+  // What a gate here reads must not be what only a gate that left makes.
+  it('no local gate reads what only a heavy gate makes: the built site, the local images', () => {
+    const local = [...(p.preflight as Gate[]), ...(p.audit as Gate[]), ...(p.docs as Gate[]), ...pretag, ...(p.exportGates as Gate[]), ...candidate];
+    for (const g of local) {
+      const c = { repo: REPO, tag: 'v9.9.9', bash: 'bash', candidate: { full: 'f', slim: 's', bin: 'b' }, exportTarget: '/x', exportDir: '/x' };
+      let text = `${g.script ?? ''} ${typeof g.sh === 'string' ? g.sh : ''}`;
+      try {
+        text += ` ${typeof g.cmd === 'function' ? g.cmd(c).join(' ') : Array.isArray(g.cmd) ? (g.cmd as string[]).join(' ') : ''}`;
+      } catch {
+        /* a cmd that needs more of the context names no file here */
+      }
+      expect(text, `${g.name} reads the built docs site`).not.toMatch(/check-doc-anchors|vitepress build|\.vitepress\/dist/);
+      expect(text, `${g.name} reads an image built here`).not.toMatch(/filex-release:(full|slim)-/);
+      for (const a of g.after ?? []) expect(names(heavy), `${g.name} waits for a heavy gate`).not.toContain(a);
+    }
+    expect(gate('docs: every in-page anchor lands').after).toEqual(['docs: the site builds']);
+  });
+
+  // #361: a minor, a patch and a server patch alike: every heavy suite is
+  // read from GitHub, part by part, and none runs here at the gate stage.
+  it('a minor, a patch and a server patch read every heavy suite from GitHub, part by part, and run none here', () => {
+    for (const [profile, changed] of [['minor', null], ['patch', ['backend/internal/perm/upgrade.go']], ['server', ['backend/internal/api/handlers/x.go']]] as const) {
+      const sel = selectGates(p, profile, changed as string[] | null);
+      expect(names(sel.github).sort(), profile).toEqual(names(heavy).sort());
+      for (const g of sel.github) expect(g.github, `${profile}: ${g.name}`).toBe('ci.yml');
+      expect(sel.local, profile).toEqual([]);
+    }
+    expect(names(selectGates(p, 'minor', null).skipped.map((s: { gate: Gate }) => s.gate))).toEqual([]);
+    expect(names(selectGates(p, 'server', null).skipped.map((s: { gate: Gate }) => s.gate))).toEqual([DESKTOP_TSC, STORE_COPY]);
   });
 
   it('every heavy gate GitHub runs names its parts, and every part is a job of the full matrix', () => {
@@ -248,11 +295,13 @@ describe("this repository's release plan", () => {
   // run (Cypress, this machine's clock) runs here at the gate stage.
   it('with the gate on CircleCI, a minor reads Go, the engines and Playwright from it, and runs Cypress and this machine\'s clock here', () => {
     const minor = selectGates(p, 'minor', null, { source: 'circleci' });
-    expect(names(minor.remote).sort()).toEqual(['e2e: Playwright (whole)', 'go: echo.wasm fixture', MIGRATIONS, 'go: vet + test'].sort());
+    expect(names(minor.remote).sort()).toEqual(['e2e: Playwright (whole)', 'go: echo.wasm fixture', MIGRATIONS, 'go: vet + test', 'TZ=UTC takes effect for node here', 'web unit (TZ=UTC, like CI)', 'packages unit (TZ=UTC)', 'desktop: unit'].sort());
     for (const g of minor.remote as Array<Gate & { circleci?: string }>) expect(g.circleci, g.name).toBeTruthy();
     const local = names(minor.local);
     expect(local).toContain('e2e: Cypress (whole)');
     expect(local).toContain("web unit (this machine's clock)");
+    expect(local).toContain('docker: full image (docker/Dockerfile, amd64)');
+    expect(local).toContain('docs: the site builds');
     expect(local).toContain(BUILD_BIN);
     expect(local).toContain(BUILD_UI);
     expect(local).not.toContain('e2e: Playwright (whole)');
@@ -278,55 +327,53 @@ describe("this repository's release plan", () => {
     const full = selectGates(p, 'full', null);
     expect(full.github).toEqual([]);
     expect(full.local).toEqual([]);
-    for (const g of heavy) if (!g.patchOnly && !g.serverOnly) expect(names(full.pretag), g.name).toContain(g.name);
-    expect(names(full.pretag)).not.toContain(GO_PATCH);
-    expect(names(full.pretag)).not.toContain(GO_SERVER);
+    for (const g of heavy) expect(names(full.pretag), g.name).toContain(g.name);
   });
 
-  // #76 (2026-09-25): "a patch is a patch" - but the two ghost releases died
-  // building and packaging, not testing, so those run in every profile.
-  it('a patch builds and packages whatever it changed, and nothing else when nothing changed', () => {
-    const patch = selectGates(p, 'patch', []);
-    const ran = names(patch.pretag);
-    for (const g of pretag.filter((x) => x.always)) expect(ran, g.name).toContain(g.name);
-    for (const must of [BUILD_UI, BUILD_BIN, 'the binary serves the UI just built, byte for byte', 'docker: full image (docker/Dockerfile, amd64)', 'docker: slim image (docker/Dockerfile.slim, amd64)', 'desktop: the Store package works as a Store copy', 'desktop: typecheck + unit']) {
-      expect(ran, `a patch skips ${must}`).toContain(must);
+  // #76 (2026-09-25): the two ghost releases died building and packaging,
+  // not testing, so the builds run in every profile, whatever changed.
+  it('a patch runs the same light gates as a minor, whatever it changed', () => {
+    for (const changed of [[], ['e2e/tests/40-share.spec.ts', 'CHANGELOG.md'], ['backend/internal/perm/upgrade.go'], ['backend/db/migrations/sqlite/00087_x.sql']]) {
+      const patch = selectGates(p, 'patch', changed);
+      expect(names(patch.pretag), changed.join(', ')).toEqual(names(pretag));
+      expect(names(patch.github), changed.join(', ')).toContain('go: vet + test');
+      expect(names(patch.github), changed.join(', ')).toContain(MIGRATIONS);
+      for (const g of heavy) expect(names(patch.pretag), `${g.name} runs here in a patch`).not.toContain(g.name);
     }
-    for (const g of heavy) expect(ran, `${g.name} runs in a patch that changed nothing`).not.toContain(g.name);
   });
 
-  it('a patch that touched only e2e/ runs neither the Go suite nor the migrations here, and leaves them to GitHub', () => {
-    const patch = selectGates(p, 'patch', ['e2e/tests/40-share.spec.ts', 'CHANGELOG.md', 'web/package.json']);
-    const ran = names(patch.pretag);
-    expect(ran).not.toContain(GO_PATCH);
-    expect(ran).not.toContain(MIGRATIONS);
-    expect(ran).not.toContain('go: vet + test');
-    expect(names(patch.github)).toContain('go: vet + test');
-    expect(names(patch.github)).toContain(MIGRATIONS);
-    expect(ran).not.toContain('e2e: Playwright (whole)');
+  // #361 (the owner, 2026-11-18): the Store copy only in a release that
+  // reaches the desktop app - one that changed nothing the Store package
+  // carries has nothing new to activate. In doubt (no list), it runs.
+  it('the Store copy runs only when the changes reach the desktop app', () => {
+    expect(gate(STORE_COPY).reaches).toBe('desktop');
+    const store = (reached: string[] | null, profile = 'minor') => names(selectGates(p, profile, ['x'], { reached }).pretag).includes(STORE_COPY);
+    expect(store(null)).toBe(true);
+    expect(store(['server', 'ui', 'desktop'])).toBe(true);
+    expect(store(['server', 'docs'])).toBe(false);
+    expect(store(['server', 'ui', 'desktop'], 'patch')).toBe(true);
+    expect(store(['server', 'ui', 'desktop'], 'server'), 'a server patch sends nothing to the Store').toBe(false);
+    const why = selectGates(p, 'minor', ['x'], { reached: ['docs'] }).skipped.find((x: { gate: Gate }) => x.gate.name === STORE_COPY);
+    expect(why?.why).toMatch(/desktop surface/);
   });
 
-  it('a patch that touched a Go package runs the Go suite on what it changed; a schema change adds the three engines', () => {
-    const code = names(selectGates(p, 'patch', ['backend/internal/perm/upgrade.go']).pretag);
-    expect(code).toContain(GO_PATCH);
-    expect(code).not.toContain('go: vet + test');
-    expect(code).not.toContain(MIGRATIONS);
-    const schema = names(selectGates(p, 'patch', ['backend/db/migrations/sqlite/00087_x.sql']).pretag);
-    expect(schema).toContain(MIGRATIONS);
-    expect(schema).toContain(GO_PATCH);
-  });
-
-  it("a patch's Go gate names the packages it changed, and the whole module for a change it cannot place", () => {
-    const g = gate(GO_PATCH);
-    expect(g.script).toContain('scripts/release/gates/go-targeted.sh');
-    const sh = (changed: string[]) => {
-      const argv = g.cmd!({ repo: REPO, bash: 'bash', changed }, 'native');
-      return argv[argv.length - 1];
-    };
-    expect(sh(['backend/internal/perm/upgrade.go', 'e2e/x.spec.ts'])).toContain(`FILEX_GO_DIRS=${shq('./internal/perm')}`);
-    expect(sh(['backend/go.mod'])).toContain(`FILEX_GO_DIRS=${shq('./...')}`);
-    const wsl = g.cmd!({ repo: REPO, bash: 'bash', changed: ['backend/internal/perm/upgrade.go'] }, 'wsl');
-    expect(wsl[wsl.length - 1], 'under WSL the variable must be written into the command').toContain(`FILEX_GO_DIRS=${shq('./internal/perm')}`);
+  // #361: the image GitHub built - the one the tag run promotes - is pulled
+  // by digest from the dry run and looked into here; nothing is built.
+  it('the candidate is the dry run\'s images by digest, and its gates run on them and on their binary', () => {
+    const c = p.candidate;
+    expect(c.image).toBe('ghcr.io/brf-tech/filex');
+    expect(p.promotion.required, 'the artifact the candidate reads is one the gate already asks the dry run for').toContain(c.artifact);
+    expect(c.artifact).toBe('digests-amd64');
+    expect(c.variants).toEqual(['full', 'slim']);
+    expect(c.binary).toBe('/usr/local/bin/filex');
+    const ctx = { candidate: { full: 'ghcr.io/brf-tech/filex@sha256:aa', slim: 'ghcr.io/brf-tech/filex@sha256:bb', bin: '/tmp/x/filex' } };
+    const argv = (n: string) => (candidate.find((g) => g.name.includes(n))!.cmd as unknown as (c: object) => string[])(ctx);
+    expect(argv('report the release')).toEqual(['node', 'scripts/release/gates/docker-image.mjs', '--version', 'v9.9.9', ctx.candidate.full, ctx.candidate.slim]);
+    expect(argv('serves the admin UI')).toEqual(['node', 'scripts/release/gates/docker-image.mjs', '--serve', ctx.candidate.full]);
+    expect(argv('shop window')).toEqual(['node', 'scripts/check-shop-window.mjs', '--instance', '--boot', ctx.candidate.bin]);
+    for (const g of candidate) expect(g.inputs, `${g.name} reads an image, not files: never cached`).toBeUndefined();
+    const builtin = (STAGES.find((st: { id: string }) => st.id === 'gate') as { builtin: string[] }).builtin.join('\n');
+    expect(builtin).toMatch(/pulled by digest \(nothing is built\)/);
   });
 
   // ⚠ The cache may cost a run, never pass one: a gate that reads a file its
@@ -345,7 +392,7 @@ describe("this repository's release plan", () => {
         expect(g.inputs, `${g.name} reads an image, not files`).toBeUndefined();
       }
     }
-    for (const n of ['go: vet + test', GO_PATCH, MIGRATIONS, 'web unit (TZ=UTC, like CI)', "web unit (this machine's clock)", 'e2e: Cypress (whole)', 'e2e: Playwright (whole)']) {
+    for (const n of [GO_VET, DESKTOP_TSC, 'go: vet + test', MIGRATIONS, 'web unit (TZ=UTC, like CI)', 'packages unit (TZ=UTC)', 'desktop: unit', 'docs: the site builds', "web unit (this machine's clock)", 'e2e: Cypress (whole)', 'e2e: Playwright (whole)']) {
       expect(gate(n).inputs, `${n} has no inputs and runs every time`).toBeTruthy();
     }
   });
@@ -374,7 +421,7 @@ describe("this repository's release plan", () => {
   // BuildKit walking the checkout through WSL's 9P bridge (`docker build .`),
   // and the four pretag runs of 0.55.0 took 4.5 hours, nearly all of it that.
   it('builds the images from the release commit (git archive), never the working tree, and waits for no local build', () => {
-    const images = pretag.filter((g) => /^docker: (full|slim) image /.test(g.name));
+    const images = heavy.filter((g) => /^docker: (full|slim) image /.test(g.name));
     expect(images.map((g) => g.name)).toEqual(['docker: full image (docker/Dockerfile, amd64)', 'docker: slim image (docker/Dockerfile.slim, amd64)']);
     for (const g of images) {
       const argv = g.cmd!({ repo: REPO, tag: 'v9.9.9', releaseCommit: 'c0ffee' });
@@ -388,12 +435,12 @@ describe("this repository's release plan", () => {
     const script = fs.readFileSync(path.join(REPO, 'scripts', 'release', 'gates', 'docker-build.mjs'), 'utf8');
     expect(script).toMatch(/'archive', '--format=tar'/);
     expect(script, 'the context is stdin').toMatch(/'-t', opts\.tag, '-',\s*\]/);
-    // second in the list, beside the UI build: off the pretag's longest path
-    expect(names(pretag).indexOf(images[0]!.name)).toBeLessThan(names(pretag).indexOf(BUILD_BIN));
+    // #361: GitHub's in every profile but `full`
+    for (const g of images) expect((g as Gate & { githubJobs?: () => string[] }).githubJobs?.()).toEqual(['Docker image builds']);
   });
 
   it("an image's inputs are what its Dockerfile copies: a fix to a test of the desktop app or e2e, or the docs, leaves its key alone", () => {
-    for (const g of pretag.filter((x) => /^docker: (full|slim) image /.test(x.name))) {
+    for (const g of heavy.filter((x) => /^docker: (full|slim) image /.test(x.name))) {
       const dockerfile = /\((docker\/Dockerfile[^,]*),/.exec(g.name)![1]!;
       for (const src of dockerfileSources(fs.readFileSync(path.join(REPO, dockerfile), 'utf8'))!) expect(g.inputs, `${g.name}: ${src}`).toContain(src);
       for (const f of [dockerfile, '.dockerignore', 'scripts/release/gates/docker-build.mjs']) expect(matchesInputs(g.inputs!, f), `${g.name}: ${f}`).toBe(true);
@@ -474,7 +521,7 @@ describe("this repository's release plan", () => {
   // gate's own rsync of the Windows checkout, whose copy was older than the
   // echo app's main.go; every app-plugin test refused.
   it('builds the wasm fixture in the Go test gates themselves, before go test', () => {
-    for (const name of ['go: vet + test', GO_PATCH]) {
+    for (const name of ['go: vet + test']) {
       const g = gate(name) as { script: string };
       expect(g, `the plan has no "${name}" gate`).toBeTruthy();
       const fixture = g.script.indexOf('build-wasm-fixture.sh');

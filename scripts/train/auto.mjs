@@ -2,8 +2,8 @@
 // cut with nobody at the keyboard - in the release workspace on the build
 // host, started by a timer. It drives `pnpm release` (scripts/release.mjs),
 // does the steps that tool leaves to a person - the export commit and both
-// mains, the signed tags, the tag pushes, the ship (filex-ship.sh), a server
-// patch's matrix watch - and tells a person how every round ended.
+// mains, the signed tags, the tag pushes, the ship (filex-ship.sh) - and
+// tells a person how every round ended.
 //
 //   node scripts/train/auto.mjs request X.Y.Z --summary "one line" [--commit SHA]
 //                                   [--profile minor|patch|full|server] [--task N]
@@ -330,7 +330,6 @@ export function owed(state) {
   }
   const held = state.stages?.ci?.held;
   if (Array.isArray(held) && held.length) out.push(`held by a store: ${held.join(', ')} - the next round reads them again`);
-  if (state.profile === 'server' && state.matrix?.state !== 'green') out.push(`GitHub's full matrix behind the server patch: ${state.matrix?.state ?? 'not read yet'} (auto_ok stays off until it is green)`);
   return out;
 }
 
@@ -755,12 +754,6 @@ async function main(argv) {
     rec = await round({ cfg, repo, exp, plan, req, tag, version: req.version, dir: runDir, log, settings });
   } catch (e) {
     rec = { tag, started: new Date(t0).toISOString(), result: 'red', stage: '?', why: `the round crashed: ${e?.stack ?? e}` };
-  }
-  // A server patch: GitHub's full matrix behind it switches auto_ok on.
-  if (rec.result === 'released' && rec.profile === 'server') {
-    const w = step(path.join(runDir, 'matrix-watch.log'), process.execPath, [path.join(repo, 'scripts', 'release', 'matrix-watch.mjs'), req.version, ...(settings.file ? ['--env', settings.file] : [])], { cwd: repo });
-    rec.matrix = w.code === 0 ? 'green, auto_ok on' : w.code === 1 ? 'red, auto_ok off' : w.code === 3 ? 'not finished' : 'could not read';
-    if (w.code === 3) rec.result = 'watching';
   }
   rec.ended = new Date().toISOString();
   writeJson(path.join(roundsDir, `${stamp}-${tag}.json`), rec);

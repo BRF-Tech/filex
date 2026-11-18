@@ -11,11 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/testutil/opswait"
 )
 
 func waitForOp(t *testing.T, svc *ops.Service, id int64) *ops.Op {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	start := time.Now()
+	deadline := start.Add(opswait.Budget)
 	for {
 		op, err := svc.Get(context.Background(), id)
 		require.NoError(t, err)
@@ -23,7 +25,7 @@ func waitForOp(t *testing.T, svc *ops.Service, id int64) *ops.Op {
 			return op
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("op %d did not finish (status %s)", id, op.Status)
+			t.Fatalf("op %d did not finish (status %s) %s", id, op.Status, opswait.Waited(start))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

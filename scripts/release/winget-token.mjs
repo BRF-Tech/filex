@@ -33,7 +33,7 @@ export function redact(text, secret) {
   return secret && String(secret).length >= 4 ? s.split(String(secret)).join('[the token]') : s;
 }
 
-/** The release train's settings, as the ship and matrix-watch read them. */
+/** The release train's settings, as the ship reads them. */
 const trainSettings = () => loadSettings({ envVar: 'FILEX_TRAIN_ENV', fallback: 'filex-train.env' });
 
 /**

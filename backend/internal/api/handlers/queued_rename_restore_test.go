@@ -26,6 +26,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/testutil/opswait"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
@@ -111,7 +112,8 @@ func (q *queueRig) drain(t *testing.T, id int64) *ops.Op {
 	defer stop()
 	go q.svc.Run(run)
 	defer q.svc.Stop()
-	deadline := time.Now().Add(3 * time.Second)
+	start := time.Now()
+	deadline := start.Add(opswait.Budget)
 	for {
 		op, err := q.svc.Get(ctx, id)
 		require.NoError(t, err)
@@ -119,7 +121,7 @@ func (q *queueRig) drain(t *testing.T, id int64) *ops.Op {
 		case ops.StatusOK, ops.StatusFailed, ops.StatusPartial, ops.StatusCancelled:
 			return op
 		}
-		require.True(t, time.Now().Before(deadline), "op %d did not finish (status %s)", id, op.Status)
+		require.True(t, time.Now().Before(deadline), "op %d did not finish (status %s) %s", id, op.Status, opswait.Waited(start))
 		time.Sleep(10 * time.Millisecond)
 	}
 }

@@ -16,9 +16,9 @@ import os from 'node:os';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-import { FIXED, ciParts, completeName, gateParts } from '../ci-parts.mjs';
+import { FIXED, ciParts, completeName, frontendName, gateParts } from '../ci-parts.mjs';
 import { goShellArgv, goToolchain } from '../lib/go-build.mjs';
-import { dockerfileSources, goPackageDirs } from './checks.mjs';
+import { dockerfileSources } from './checks.mjs';
 import { docker, dockerImageId, run, shq, slash } from './engine.mjs';
 import { circleciPipelines } from './circleci.mjs';
 import { githubActions } from './github.mjs';
@@ -66,23 +66,6 @@ function goGate(name, dirOf, script, { exportsOf = null } = {}) {
 }
 
 /**
- * The Go packages a patch touched (`./internal/foo ./cmd/filex`), or `./...`
- * when that cannot be told: see goPackageDirs (checks.mjs).
- */
-function changedGoDirs(c) {
-  const backend = path.join(c.repo, 'backend');
-  const hasGoFiles = (d) => {
-    try {
-      return fs.readdirSync(path.join(backend, d)).some((f) => f.endsWith('.go'));
-    } catch {
-      return false;
-    }
-  };
-  const r = goPackageDirs(c.changed ?? null, hasGoFiles);
-  return r.all || !r.dirs.length ? './...' : r.dirs.join(' ');
-}
-
-/**
  * The public workflows' committed tree in the export checkout, for the cache
  * key of a vitest gate whose WORKFLOW_GUARDS read them (they are not in this
  * repository). null when they cannot be read or have uncommitted changes:
@@ -102,9 +85,6 @@ function workflowsTree(exportDir) {
  */
 const ECHO_FIXTURE = 'FILEX_BACKEND_DIR="$PWD" bash "$FILEX_CHECKOUT/scripts/build-wasm-fixture.sh"';
 
-/** A patch's Go suite: the changed packages and their importers (FILEX_GO_DIRS). */
-const GO_TARGETED = 'bash "$FILEX_CHECKOUT/scripts/release/gates/go-targeted.sh"';
-
 // What a gate's verdict depends on: the gate cache's key (engine.mjs) and a
 // patch's choice of gates (checks.mjs → selectGates). ⚠ A list that misses a
 // file the gate reads makes the cache pass a gate that would fail, so a list
@@ -112,12 +92,8 @@ const GO_TARGETED = 'bash "$FILEX_CHECKOUT/scripts/release/gates/go-targeted.sh"
 // a mirror holding the module alone (and the checkout's scripts they name),
 // the browser suites run the binary and the specs, never the documentation.
 const ALL = ['**'];
-const GO_INPUTS = ['backend/**', 'scripts/build-wasm-fixture.sh', 'scripts/lib/go-build.mjs', 'scripts/release/gates/go-targeted.sh'];
+const GO_INPUTS = ['backend/**', 'scripts/build-wasm-fixture.sh', 'scripts/lib/go-build.mjs'];
 const MIGRATION_INPUTS = [...GO_INPUTS, 'scripts/release/gates/engines.mjs'];
-// The three engines run in a patch only for a change to the schema or the
-// code that writes it (the whole suite still runs on GitHub, with both
-// engines as services).
-const MIGRATION_PATCH = ['backend/db/**', 'backend/internal/db/**', 'backend/go.mod', 'backend/go.sum', 'scripts/release/gates/engines.mjs'];
 const E2E_INPUTS = ['**', '!docs/**', '!docs-site/**', '!site/**'];
 
 /**
@@ -141,6 +117,8 @@ export function dockerInputs(repo, dockerfile) {
 const BUILD_UI = 'build: packages, admin (vue-tsc + vite), embed';
 const BUILD_BIN = 'build: server binary';
 const ECHO = 'go: echo.wasm fixture';
+const GO_VET = 'go: vet';
+const DESKTOP_TSC = 'desktop: typecheck';
 
 // What those two builds and the Store copy's check run: one string each, so
 // the steps a deferred Store check lists for a Windows machine are the
@@ -255,11 +233,13 @@ const WORKFLOW_GUARDS = [
   'the nightly desktop workflow runs every hour and by hand, and publishes nothing a release does',
   'every row is made by the nightly job script from the source, unsigned, and the arm64 snap goes to edge alone',
   "the night goes to ghcr as one artifact with its manifest, as nightly-<date> and nightly; old nights go without failing the run, a missing row fails it",
-  // #252: a server patch's tag run publishes the server's surface alone,
-  // once GitHub built its commit (packaging/ci/release-surfaces.patch,
+  // #252: a server patch's tag run publishes the server's surface alone
+  // (packaging/ci/release-surfaces.patch); #361: once its commit passed
+  // what every release's must, promoting the dry run's images
+  // (packaging/ci/release-server-promote.patch,
   // web/tests/deploy/releaseSurfaces.test.ts).
   "a tag that says surfaces: server publishes the server's surface alone: plan reads it, npm and the desktop job do not run",
-  'verify publishes a server patch once ci.yml built its commit, and nothing when the build part failed or never came',
+  "verify asks a server patch what it asks every release, and promotes the dry run's images",
   "a server patch's Release is not the latest, and carries no CLI package manager",
   // 0.50: the .deb and the AppImage open with Chromium's sandbox on, or
   // refuse. 0.52: the snap opens confined by snapd instead, and asks the
@@ -793,67 +773,61 @@ export default function plan({ repo, version, tag, platform = process.platform }
       },
     ],
 
-    // ── 3. docs: the four documentation commands, all required ──────────────
+    // ── 3. docs: the documentation commands that need no build ──────────────
+    // #361: the VitePress build and the anchors it carries are ci.yml's
+    // `Docs` part, read at the gate stage before anything is tagged (`heavy`:
+    // docs: the site builds, docs: every in-page anchor lands); the two here
+    // are seconds and read the sources alone.
+    // ⚠ A gate here reads no output of a gate that left this machine: the
+    // anchor check reads the BUILT site (.vitepress/dist), and on 0.61.2's
+    // second round, with the site build gone to GitHub, it stopped the docs
+    // stage on a fresh tree (releasePlan.test.ts: "no local gate reads ...").
     docs: [
       { name: 'docs: every relative link resolves', cmd: ['node', 'scripts/check-links.mjs'] },
-      // VitePress fails on a dead PAGE link; lesson #34: an inline code span
-      // broken over a line kills the build with a misleading line number.
-      { name: 'docs: the site builds', sh: 'cd docs-site && npm run build' },
-      // …and ignores dead #anchors entirely (98 of 366 were dead on a green build).
-      { name: 'docs: every in-page anchor lands', cmd: ['node', 'scripts/check-doc-anchors.mjs'] },
       // Lessons #430/#432: Helm templates are not YAML until rendered, and the
       // "every part on" switches are read from values.yaml, never typed.
       { name: 'docs: YAML parses, the Helm chart lints and renders', cmd: (c) => [c.bash, 'scripts/release/gates/yaml-helm.sh', '.'] },
     ],
 
-    // ── 5. pretag: the fast gates, on the release commit (task #172) ────────
-    // After the stamp, so a test that reads "the newest CHANGELOG section" or
-    // "the version in package.json" sees THIS release (two did not, on the
-    // 0.44.1 tag round, because they ran before the bump).
+    // ── 5. pretag: the light gates, on the release commit (task #172, #361) ─
+    // After the stamp, so a build that reads "the version in package.json"
+    // sees THIS release.
     //
-    // ⚠ Fast: the builds and vue-tsc, the unit suites in UTC, the desktop and
-    // the Store copy, both images, the shop window - about 12-15 minutes with
-    // the lanes side by side (`jobs`), the longest path the UI build and then
-    // the web unit suite (#165). It was 66-74 minutes at 0.55.0, and four runs
-    // of it 4.5 of that day's hours: the two image builds, one after the
-    // other, each spent ~31 minutes letting BuildKit walk the checkout over
-    // WSL's 9P bridge (dockerBuild above). The heavy suites are `heavy` below, and
-    // the profile (checks.mjs → PROFILES) says where they run. `always`: a
-    // patch runs it too, whatever changed - the builds and the packaging,
-    // because 0.43.0 and 0.44.0/0.44.1 died building, not testing (#76).
+    // ⚠⚠ Light, and nothing else (#361, the owner's rule of 2026-11-18): the
+    // builds with vue-tsc, `go vet`, the embedded UI check, the desktop app's
+    // typecheck and, when the release reaches the desktop app, the Store copy
+    // - minutes, on the build host. No test suite and no image build runs
+    // here: every one is a part of ci.yml's full matrix on the export commit,
+    // and the gate stage waits for all of them before anything is tagged
+    // (`heavy` below says which part stands for which gate). The image the
+    // release ships is looked into at the gate stage, pulled by digest from
+    // the dry run that built it (`candidate` below).
+    // ⚠ Why: 0.61.2's six rounds on 2026-11-17 went red on the build host's
+    // `-race` gate, each time on another timing test, never on a race or a
+    // fault - the eight handlers shards, the three wasmplugin shards and the
+    // rest side by side on one machine, 1-2 hours a round - and its load
+    // pushed a neighbour's container out of memory. GitHub runs every shard
+    // on a runner of its own. #165 had found the same of the heavy suites
+    // from 0.50 to 0.52: 935 minutes lost over seven releases.
+    // `always`: a patch runs it too, whatever changed (#76: 0.43.0 and
+    // 0.44.0/0.44.1 died building, not testing).
     jobs: 3,
     pretag: [
       { name: BUILD_UI, lane: 'build', always: true, sh: BUILD_UI_SH },
-      // v0.43.0: npm and the Release went out, the images never built —
-      // nothing local had ever built one. #165: built from the release
-      // commit's own tree (git archive), so they read nothing the local builds
-      // write and wait for none of them: second in the list, they start at
-      // once, beside the UI build, and are off the pretag's longest path.
-      { ...dockerBuild('docker/Dockerfile', 'full'), lane: 'docker', always: true },
-      { ...dockerBuild('docker/Dockerfile.slim', 'slim'), lane: 'docker', always: true },
-      { name: 'docker: both images report the release', lane: 'docker', always: true, cmd: ['node', 'scripts/release/gates/docker-image.mjs', '--version', tag, img('full'), img('slim')] },
-      { name: 'docker: the full image serves the admin UI and /embed.js', lane: 'docker', always: true, cmd: ['node', 'scripts/release/gates/docker-image.mjs', '--serve', img('full')] },
       // ⚠ Lane `go` holds every gate that goes through the WSL mirror of the
       // Go module (scripts/lib/go-build.mjs): each one rsyncs it with
       // --delete, and two at once would rewrite files under a running build.
       { name: BUILD_BIN, lane: 'go', always: true, after: [BUILD_UI], cmd: ['node', 'scripts/build-backend.mjs', '--out', bin] },
+      // #361: the vet half of the backend suite stays here - it compiles
+      // every package with its tests, in minutes, and needs no service. After
+      // the UI build: `//go:embed all:admin` needs backend/embed/admin, which
+      // a fresh tree has only once sync-embed has run.
+      { ...goGate(GO_VET, (c) => path.join(c.repo, 'backend'), 'go vet ./...'), lane: 'go', always: true, after: [BUILD_UI], inputs: GO_INPUTS },
       // 2026-09-14: a binary with a 16-hour-old UI passed every API check.
       { name: 'the binary serves the UI just built, byte for byte', lane: 'build', always: true, after: [BUILD_BIN], cmd: ['node', 'scripts/check-embed.mjs', '--binary', bin] },
-      // Lesson #448: v0.43.0's CI failed a test a UTC+3 machine had hidden.
-      { name: 'TZ=UTC takes effect for node here', lane: 'web', always: true, serverSkip: 'it is for the unit suites a server patch does not run', cmd: ['node', '-e', 'process.exit(new Date().getTimezoneOffset() === 0 ? 0 : 1)'], env: { TZ: 'UTC' } },
-      // The web suite reads the core package's build (lesson #1075).
-      {
-        name: 'web unit (TZ=UTC, like CI)',
-        lane: 'web',
-        serverSkip: 'a server patch changes no interface; GitHub runs the unit suite behind it',
-        after: [BUILD_UI],
-        inputs: ALL,
-        cacheExtra: (c) => workflowsTree(c.exportDir),
-        vitest: { cwd: 'web', files: [], env: (c) => ({ TZ: 'UTC', FILEX_WORKFLOWS_DIR: workflowsOf(c.exportDir) }), mustPass: WORKFLOW_GUARDS, maxWorkers: vitestWorkers },
-      },
-      { name: 'packages unit (TZ=UTC)', lane: 'web', after: [BUILD_UI], inputs: ALL, serverSkip: 'a server patch publishes no package', sh: "pnpm --filter './packages/*' test", env: { TZ: 'UTC' } },
-      // 0.43.x shipped a desktop window whose script never parsed (#52).
-      { name: 'desktop: typecheck + unit', lane: 'desktop', always: true, after: [BUILD_UI], inputs: ALL, serverSkip: 'a server patch publishes no desktop app', sh: 'cd desktop && npx tsc --noEmit -p . && pnpm test' },
+      // 0.43.x shipped a desktop window whose script never parsed (#52). Its
+      // unit suite is ci.yml's `Desktop unit tests` (heavy below).
+      { name: DESKTOP_TSC, lane: 'desktop', always: true, after: [BUILD_UI], inputs: ALL, serverSkip: 'a server patch publishes no desktop app', sh: 'cd desktop && npx tsc --noEmit -p .' },
       // A Store package proves itself only once Windows has installed AND
       // activated it, and the GitHub runner never has (v0.44.2 to v0.46.1 its
       // activation checks only warned). release.yml sends the package it
@@ -867,11 +841,15 @@ export default function plan({ repo, version, tag, platform = process.platform }
       // the pretag waits for --ack store-deferred, and the record carries the
       // check until --ack store-checked. `check` is red if anything ever runs
       // the deferred gate itself.
+      // #361: and only in a release whose changes reach the desktop app
+      // (`reaches`, scripts/release/surfaces.mjs): one that changed nothing
+      // the Store package carries has nothing new to activate.
       win
         ? {
             name: STORE_COPY,
             lane: 'desktop',
             always: true,
+            reaches: 'desktop',
             serverSkip: STORE_COPY_SERVER_SKIP,
             after: [BUILD_BIN],
             inputs: ALL,
@@ -882,30 +860,59 @@ export default function plan({ repo, version, tag, platform = process.platform }
             name: STORE_COPY,
             lane: 'desktop',
             always: true,
+            reaches: 'desktop',
             serverSkip: STORE_COPY_SERVER_SKIP,
             deferred: storeCopyDeferred('bin/filex-release-e2e.exe'),
             check: () => ({ ok: false, detail: 'store-e2e installs an MSIX: it runs on Windows with Developer Mode, or the pretag defers it (--ack store-deferred)' }),
           },
-      // CONTRIBUTING step 12, "before the tag": demo mode refuses writes,
-      // anonymous capabilities name no host. Exit 2 (could not check) is red.
-      { name: 'shop window: a throwaway instance', lane: 'e2e', always: true, after: [BUILD_BIN], cmd: ['node', 'scripts/check-shop-window.mjs', '--instance', '--boot', bin] },
     ],
 
-    // ── 5b. the heavy gates: where the profile says (task #172) ─────────────
-    // `github`: the workflow that runs the same suite on the export commit -
-    // a minor reads it there, at the gate stage, instead of running it here
-    // first; `githubJobs`, the jobs of ci.yml's matrix that stand for it, which
-    // the gate stage reads one by one (#173, #174: since the matrix, every
-    // heavy gate has its parts on GitHub, and a minor runs none of them here).
-    // Without one a minor runs it HERE during the gate stage, beside the CI's
-    // wait, on the release commit - with the builds it is `after`, made again
-    // there - or a green scripts/chain run stands in (--chain, `chainProfiles`
-    // below); with the gate on CircleCI (#181) that is what it does not run.
-    // `full` runs every one here in pretag. A patch runs the Go suite on what
-    // it changed (and its importers) and the migrations when the schema
-    // changed, and leaves the rest to GitHub (#165, decision 5; #76: e2e
-    // whole only in a minor or major).
+    // ── 5b. the heavy gates: GitHub's, part by part (task #172, #361) ───────
+    // `github`: the workflow that runs the same suite on the export commit,
+    // and `githubJobs` the jobs of ci.yml's full matrix that stand for it,
+    // which the gate stage reads one by one (#173, #174). Every heavy gate
+    // has its parts there, so a minor, a patch and a server patch run none of
+    // them here: the gate stage waits for every part (#361: a server patch
+    // too, and a patch's targeted Go suite and its migrations left this
+    // machine with it). `full` - a person's choice, for a day no CI can be
+    // trusted - runs every one here in pretag, as every release did up to
+    // 0.52. With the gate on CircleCI (#181) the ones CircleCI does not run
+    // (no `circleci`) run HERE during the gate stage, beside its wait, with
+    // the builds they are `after` made again there - or a green scripts/chain
+    // run stands in (--chain, `chainProfiles` below).
     heavy: [
+      // v0.43.0: npm and the Release went out, the images never built -
+      // nothing local had ever built one. ci.yml builds both on every push
+      // (`Docker image builds`), and the dry run builds, smoke-tests and
+      // pushes the ones a tag run promotes. #165: here (`full`) built from
+      // the release commit's own tree (git archive), so they read nothing the
+      // local builds write and wait for none of them.
+      { ...dockerBuild('docker/Dockerfile', 'full'), lane: 'docker', github: 'ci.yml', githubJobs: () => [FIXED.docker] },
+      { ...dockerBuild('docker/Dockerfile.slim', 'slim'), lane: 'docker', github: 'ci.yml', githubJobs: () => [FIXED.docker] },
+      // Lesson #448: v0.43.0's CI failed a test a UTC+3 machine had hidden.
+      { name: 'TZ=UTC takes effect for node here', lane: 'web', github: 'ci.yml', githubJobs: () => [frontendName('UTC')], circleci: 'web', cmd: ['node', '-e', 'process.exit(new Date().getTimezoneOffset() === 0 ? 0 : 1)'], env: { TZ: 'UTC' } },
+      // The web suite reads the core package's build (lesson #1075).
+      {
+        name: 'web unit (TZ=UTC, like CI)',
+        lane: 'web',
+        github: 'ci.yml',
+        githubJobs: () => [frontendName('UTC')],
+        circleci: 'web',
+        after: [BUILD_UI],
+        inputs: ALL,
+        cacheExtra: (c) => workflowsTree(c.exportDir),
+        vitest: { cwd: 'web', files: [], env: (c) => ({ TZ: 'UTC', FILEX_WORKFLOWS_DIR: workflowsOf(c.exportDir) }), mustPass: WORKFLOW_GUARDS, maxWorkers: vitestWorkers },
+      },
+      // ci.yml's frontend parts run the packages' suites beside the web one.
+      { name: 'packages unit (TZ=UTC)', lane: 'web', github: 'ci.yml', githubJobs: () => [frontendName('UTC')], circleci: 'web', after: [BUILD_UI], inputs: ALL, sh: "pnpm --filter './packages/*' test", env: { TZ: 'UTC' } },
+      { name: 'desktop: unit', lane: 'desktop', github: 'ci.yml', githubJobs: () => [FIXED.desktop], circleci: 'web', after: [BUILD_UI], inputs: ALL, sh: 'cd desktop && pnpm test' },
+      // Lesson #34: an inline code span broken over a line kills VitePress's
+      // build with a misleading line number. The docs stage here keeps the
+      // links, the anchors and the YAML; the site is ci.yml's `Docs` part.
+      { name: 'docs: the site builds', lane: 'docs', github: 'ci.yml', githubJobs: () => [FIXED.docs], inputs: ALL, sh: 'cd docs-site && npm run build' },
+      // VitePress ignores dead #anchors entirely (98 of 366 were dead on a
+      // green build). It reads the site the gate above built.
+      { name: 'docs: every in-page anchor lands', lane: 'docs', github: 'ci.yml', githubJobs: () => [FIXED.docs], after: ['docs: the site builds'], inputs: ALL, cmd: ['node', 'scripts/check-doc-anchors.mjs'] },
       // Without the fixture the app-plugin Go tests skip in silence.
       // ⚠⚠ In the Go module, and back into the CHECKOUT: the Playwright gate
       // below installs the checkout's echo.wasm, and on Windows Go builds in a
@@ -924,7 +931,6 @@ export default function plan({ repo, version, tag, platform = process.platform }
         github: 'ci.yml',
         githubJobs: (c) => gateParts(c.repo).go,
         circleci: 'build',
-        patchSkip: 'it is for the browser suite, which a patch leaves to GitHub',
       },
       // ⚠ The fixture AGAIN, in this gate's own mirror. Each Go gate rsyncs
       // its module with --delete, so the Windows checkout's gitignored
@@ -950,29 +956,6 @@ export default function plan({ repo, version, tag, platform = process.platform }
         circleci: 'build + go',
         inputs: GO_INPUTS,
       },
-      // A patch's Go suite: what it changed and everything that imports it
-      // (scripts/release/gates/go-targeted.sh); the whole module when the
-      // change cannot be placed (go.mod, a file at the module root).
-      {
-        ...goGate('go: vet + test, the packages a patch changed and their importers', (c) => path.join(c.repo, 'backend'), `${ECHO_FIXTURE} >/dev/null && ${GO_TARGETED}`, {
-          exportsOf: (c) => ` FILEX_GO_DIRS=${shq(changedGoDirs(c))}`,
-        }),
-        lane: 'go',
-        patchOnly: true,
-        inputs: GO_INPUTS,
-      },
-      // #252: a SERVER patch's Go suite - the packages it changed and their
-      // importers, under -race (the race detector is what the server's
-      // concurrency needs, and GitHub's -race parts run only behind it).
-      // CGO and a C compiler on the machine (go-targeted.sh says when not).
-      {
-        ...goGate('go: vet + test -race, the packages a server patch changed and their importers', (c) => path.join(c.repo, 'backend'), `${ECHO_FIXTURE} >/dev/null && ${GO_TARGETED}`, {
-          exportsOf: (c) => ` FILEX_GO_DIRS=${shq(changedGoDirs(c))} FILEX_GO_RACE=1`,
-        }),
-        lane: 'go',
-        serverOnly: true,
-        inputs: GO_INPUTS,
-      },
       // A migration that only works on sqlite bricks the first boot after an
       // upgrade for everyone else; the parity tests SKIP without a DSN.
       // In the Go lane: it runs in the same WSL mirror of the module.
@@ -986,9 +969,7 @@ export default function plan({ repo, version, tag, platform = process.platform }
         // #173: the parity suites, and the CLI's up, down three, up on all three.
         githubJobs: (c) => gateParts(c.repo).migrations,
         circleci: 'go',
-        patch: 'changed',
         inputs: MIGRATION_INPUTS,
-        patchWhen: MIGRATION_PATCH,
         cmd: ['node', 'scripts/release/gates/engines.mjs'],
       },
       // CI runs the unit suite in UTC only; this machine's clock is the one
@@ -1002,7 +983,6 @@ export default function plan({ repo, version, tag, platform = process.platform }
         after: [BUILD_UI],
         inputs: ALL,
         cacheExtra: (c) => workflowsTree(c.exportDir),
-        patchSkip: 'a patch runs the unit suite once, in UTC',
         vitest: { cwd: 'web', files: [], env: (c) => ({ FILEX_WORKFLOWS_DIR: workflowsOf(c.exportDir) }), mustPass: WORKFLOW_GUARDS, maxWorkers: vitestWorkers },
       },
       // The suite release.yml waits for, and the journeys it does not walk.
@@ -1018,7 +998,6 @@ export default function plan({ repo, version, tag, platform = process.platform }
         circleci: 'e2e',
         after: [BUILD_BIN, ECHO],
         inputs: E2E_INPUTS,
-        patchSkip: 'a patch runs no browser suite here (#76: whole only in a minor or major)',
         cmd: ['node', 'e2e/run.mjs', 'local', '--binary', bin],
       },
     ],
@@ -1138,15 +1117,16 @@ export default function plan({ repo, version, tag, platform = process.platform }
     // push of main) passed there. Only then are the tags made, and the tag
     // run's `verify` job refuses a commit without those two runs. A dry run
     // takes about as long as a release run; four hours is a stuck runner.
+    // ⚠ #361: in EVERY profile, a server patch's too. Until 2026-11-18 a
+    // server patch (#252) waited for ci.yml's build part alone and let the
+    // rest of the matrix run behind the release, with its own `-race` gate
+    // here instead; measured on the three green push runs before it
+    // (43908732104, 43785626637, 43682968950) the whole matrix ends 45.6,
+    // 56.4 and 47.9 minutes in, its -race parts alone 45.5, 47.9 and 47.8:
+    // the wait for everything costs a server patch minutes, and the dry run
+    // (50-52 minutes) runs beside it anyway.
     github: githubActions('BRF-Tech/filex'),
     gateWait: { pollMs: 60_000, timeoutMs: 4 * 3600_000, appearMs: 10 * 60_000 },
-    // #252: a SERVER patch's gate stage waits for this much of ci.yml on the
-    // export commit - the module vetted and built, which the tag run's
-    // `verify` asks for too - and starts no dry run: the rest of the full
-    // matrix runs behind the release, and the update manifest offers the
-    // patch to automatic updates only once it passed (matrix-watch.mjs).
-    serverGate: { parts: [FIXED.vet], pollMs: 30_000, timeoutMs: 45 * 60_000 },
-    matrixWatch: { pollMs: 60_000, timeoutMs: 3 * 3600_000, appearMs: 15 * 60_000 },
     // #173/#174: the push run of ci.yml is read part by part - every job of
     // its full matrix (scripts/ci-parts.mjs) must have run and passed, the
     // last of them `All tests (full)`, which is also what a tag run's
@@ -1162,6 +1142,37 @@ export default function plan({ repo, version, tag, platform = process.platform }
       required: ['digests-amd64', 'digests-arm64', 'release-files-windows', 'release-files-linux', 'release-files-linux-arm64', 'release-files-store'],
       optional: ['release-files-macos'],
     },
+    // ── 8b. the candidate: the image the release ships, looked into ────────
+    // #361: at the gate stage, once the dry run of the export commit passed
+    // and kept what the tag run promotes. Its images are pulled by digest
+    // (the `digests-amd64` artifact: the files `full/<hex>` and `slim/<hex>`)
+    // - nothing is built here - and the binary of the full image is copied
+    // out of it (CGO=0: it runs on any Linux). These gates then run on them,
+    // with `c.candidate` = { full, slim, bin }: the image refs by digest and
+    // the binary's path. They were the pretag's own until #361, on images and
+    // a binary built here - the shipped ones are GitHub's, and a tag run
+    // promotes exactly these images (release.yml, `promote-check`).
+    // On Windows (a release cut from the workstation) the image's Linux
+    // binary cannot run: the shop window boots the binary the pretag built,
+    // and says so.
+    candidate: {
+      image: 'ghcr.io/brf-tech/filex',
+      artifact: 'digests-amd64',
+      variants: ['full', 'slim'],
+      binary: '/usr/local/bin/filex',
+      localBinary: bin,
+      gates: [
+        // The version is baked in at the build: a candidate stamps v<version>.
+        { name: 'candidate: both images report the release', cmd: (c) => ['node', 'scripts/release/gates/docker-image.mjs', '--version', tag, c.candidate.full, c.candidate.slim] },
+        // v0.43.0: an image whose frontend stage produced nothing answers both with 200; the bundles are weighed.
+        { name: 'candidate: the full image serves the admin UI and /embed.js', cmd: (c) => ['node', 'scripts/release/gates/docker-image.mjs', '--serve', c.candidate.full] },
+        // CONTRIBUTING step 12, "before the tag": demo mode refuses writes,
+        // anonymous capabilities name no host, the advertised search works.
+        // Exit 2 (could not check) is red.
+        { name: 'candidate: the shop window, a throwaway instance of the release binary', cmd: (c) => ['node', 'scripts/check-shop-window.mjs', '--instance', '--boot', c.candidate.bin] },
+      ],
+    },
+
     // #181: when GitHub Actions is down, `--gate circleci` reads the workflow
     // `ci` of .circleci/config.yml on the export commit instead (no dry run).
     // The project's slug: `gh/BRF-Tech/filex` for an organization connected

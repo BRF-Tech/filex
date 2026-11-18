@@ -56,6 +56,7 @@ const COPY = [
   'scripts/release/circleci.mjs',
   'scripts/release/winget-token.mjs',
   'scripts/release/surfaces.mjs',
+  'scripts/release/candidate.mjs',
   'scripts/lib/notify.mjs',
   'scripts/lib/settings.mjs',
   'scripts/chain/env.mjs',

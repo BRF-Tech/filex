@@ -374,10 +374,20 @@ describe('ci.yml: the full matrix', () => {
 
       // Azure's mirror hangs: its try ends at its limit, the next mirror
       // fetches, and the run is green with a warning.
+      // ⚠ What the first try logged before its 1 s ran out depends on the
+      // machine's load, not on the script: on a busy workstation the
+      // stand-ins had not even started apt-get's "slow" line when the limit
+      // killed them (2026-11-18, a full deploy run beside a merge queue). So
+      // the first try is judged by what it did NOT do - fetch anything - and
+      // the second by what it did.
       r = run(['webkit'], { slow: 'azure', limits: '1 20' });
       expect(r.status, r.said).toBe(0);
       expect(r.said).toContain("::warning::apt did not fetch the system libraries in 1s; trying the mirrors after Azure's");
-      expect(r.log.slice(0, 6), r.said).toEqual(['sudo timeout 1', 'update', 'slow libfoo', 'sudo timeout 20', 'update', 'fetch libfoo']);
+      expect(r.log[0], r.said).toBe('sudo timeout 1');
+      const second = r.log.indexOf('sudo timeout 20');
+      expect(second, r.said).toBeGreaterThan(0);
+      expect(r.log.slice(1, second).filter((l) => !['update', 'slow libfoo'].includes(l)), `the first try did more than hang: ${r.said}`).toEqual([]);
+      expect(r.log.slice(second, second + 3), r.said).toEqual(['sudo timeout 20', 'update', 'fetch libfoo']);
       expect(r.log).toEqual(expect.arrayContaining([...installed, 'pnpm --dir e2e exec playwright install webkit']));
       expect(r.mirrors).toBe('https://archive.ubuntu.com/ubuntu/\tpriority:2\nhttps://security.ubuntu.com/ubuntu/\tpriority:3\n');
       expect(r.kept).toEqual(ALL);

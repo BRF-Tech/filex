@@ -1,23 +1,26 @@
 #!/usr/bin/env bash
 #
-# The Go gate of a patch release (`pnpm release X.Y.Z --profile patch`,
-# scripts/release/plan.mjs): go vet and go test on the packages the patch
-# changed and on every package that imports one of them - directly, through
-# another package, or from its tests - instead of the whole module.
+# go vet and go test on the packages a change touched and on every package
+# that imports one of them - directly, through another package, or from its
+# tests - instead of the whole module. The merge queue runs it on an
+# embargoed branch (scripts/train/merge-queue.mjs: no CI sees one before its
+# release, #361), and a person may run it by hand. Until 2026-11-18 it was
+# the Go gate of a patch release (and, under -race, of a server patch) on
+# the build host; the release reads GitHub's full matrix instead now.
 #
 #   FILEX_GO_DIRS   the changed package directories, relative to the module and
 #                   space-separated ("./internal/foo ./cmd/filex"), or "./..."
 #                   for the whole module. scripts/release/checks.mjs
 #                   (goPackageDirs) says which; empty means the whole module.
-#   FILEX_GO_RACE   1: the tests run under -race (#252: a server patch's gate,
-#                   which does not wait for GitHub's -race parts). The race
-#                   detector needs cgo and a C compiler: without one this says
-#                   so and fails, it never tests without -race instead.
+#   FILEX_GO_RACE   1: the tests run under -race, for a person's run (no
+#                   gate sets it since 2026-11-18). The race detector needs
+#                   cgo and a C compiler: without one this says so and fails,
+#                   it never tests without -race instead.
 #
-# Runs in the Go module: the release's goGate changes into it (under WSL, into
-# its mirror on WSL's own disk). GitHub still runs the whole suite on the
-# export commit (#165, decision 5); this is the patch's early answer, never
-# the only one.
+# Runs in the Go module: its caller changes into it (under WSL, into its
+# mirror on WSL's own disk). GitHub runs the whole suite on the export commit
+# of every release, before its tag; this is an early answer, never the only
+# one.
 #
 # ⚠ In doubt it tests more, never less: a directory `go list` cannot place,
 # or a list that comes out empty, means the whole module.
@@ -25,9 +28,9 @@ set -euo pipefail
 
 dirs="${FILEX_GO_DIRS:-./...}"
 race=()
-# The pretag builds both images beside this gate, with -race or without: the
-# run gets an hour, the targeted one as the whole one, and half the cores for
-# its packages. On v0.57.1's first round (load 60, -race) the handlers package
+# As the release's gate it ran beside both image builds, with -race or
+# without, so the run gets an hour, the targeted one as the whole one, and
+# half the cores for its packages. On v0.57.1's first round (load 60, -race) the handlers package
 # rang the 30-minute alarm 17 seconds into a test, and three timing tests
 # missed their bounds. On v0.58.2's first round (no -race, a storage patch)
 # the same package rang it beside a full image build, no test hung, and on the
@@ -38,7 +41,7 @@ par=(-p "$(( cores / 2 > 2 ? cores / 2 : 2 ))")
 if [ "${FILEX_GO_RACE:-}" = 1 ]; then
   export CGO_ENABLED=1
   cc="$(go env CC)"
-  command -v "${cc%% *}" >/dev/null 2>&1 || { echo "-race needs a C compiler and there is none here (go env CC: ${cc:-unset}): install one (gcc), or run the patch as --profile patch" >&2; exit 1; }
+  command -v "${cc%% *}" >/dev/null 2>&1 || { echo "-race needs a C compiler and there is none here (go env CC: ${cc:-unset}): install one (gcc), or run it without FILEX_GO_RACE" >&2; exit 1; }
   race=(-race)
 fi
 

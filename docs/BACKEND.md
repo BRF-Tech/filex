@@ -3580,7 +3580,7 @@ restart.
 
 ### `POST /api/admin/external/:name/test` ![admin](https://img.shields.io/badge/-admin-red)
 Probes the service's health endpoint - `${url}/healthcheck` for `onlyoffice`,
-`${url}/healthz` for `convert`, the bare URL for `drawio` - with a 3 s timeout,
+`${url}/healthz` for `convert`, the bare URL for `drawio` - for up to 5 s,
 stores the verdict on the row and returns
 `200 + { ok, name, reachable, url, state, detail }`. An unknown name is `404`.
 
@@ -3597,10 +3597,13 @@ the MCP tool `admin_external_test` takes the same optional body).
 
 `detail` is what the probe saw when the answer was not a healthy one, and is
 empty otherwise: `GET <url>/healthcheck returned HTTP 502`, `… no answer
-within 3s`, or the connection error (`… connection refused`, a DNS or TLS
-failure). For `onlyoffice`, a 502/503/504 adds that the Document Server's web
-server answered but its docservice did not - the network is fine and the fix
-is inside that container.
+within 5s`, or the connection error (`… connection refused`, a DNS or TLS
+failure). A quick failure - a refused connection, an error status - is asked
+once more within the same 5 s, and the detail then ends with `(2 attempts)`;
+a probe that got no answer is not asked again (since 0.61.2). For
+`onlyoffice`, a 502/503/504 adds that the Document Server's web server
+answered but its docservice did not - the network is fine and the fix is
+inside that container.
 
 ⚠ Reachable is not the same as configured: OnlyOffice also needs a JWT secret,
 and a Document Server with no secret set in filex answers this probe happily

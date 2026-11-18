@@ -180,10 +180,9 @@ Before a patch is applied without asking, **all** of these must hold:
 1. The policy allows it (`patch` or `minor`).
 2. The release is marked `auto_ok` in the manifest - a **kill switch**: a bad
    release can be pulled back from automatic distribution without deleting the
-   tag. A patch that changes only the server is published as soon as its own
-   checks passed, with `auto_ok` off, and turned on once the whole test suite
-   has passed on it too, usually within the hour: until then an install takes
-   it when asked, not by itself.
+   tag. Every release, a patch that changes only the server included, is
+   tagged only once the whole test suite passed on it, so the release tooling
+   holds none back with `auto_ok` off while tests still run.
 3. Neither the target nor any release being skipped over carries a schema
    migration. A patch that changes the schema is a packaging mistake, and filex
    treats it as "not really a patch" and asks.
@@ -290,9 +289,10 @@ Two fields are filex's own rather than GitHub's:
   anything, which is why this document exists at all. `--no-auto vX.Y.Z`
   turns it off for a release and every later run of the generator keeps it
   off; `--auto vX.Y.Z` (or `FILEX_MANIFEST_AUTO=vX.Y.Z` in its environment)
-  turns it back on - which the release tooling does for a server patch once
-  the full test suite passed on it
-  ([CONTRIBUTING.md → A server patch](CONTRIBUTING.md#a-server-patch)).
+  turns it back on. (Until 2026-11-18 the release tooling published a server
+  patch with `auto_ok` off and turned it on once the full test suite had
+  passed behind it; it now waits for that suite before the tag -
+  [CONTRIBUTING.md → A server patch](CONTRIBUTING.md#a-server-patch).)
 - **`migrations`** - makes "patches carry no schema changes" checkable instead
   of a promise, and makes an install confirm (so a backup is taken) before it
   takes a release that changes the schema. `scripts/gen-update-manifest.py`

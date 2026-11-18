@@ -30,6 +30,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/testutil/opswait"
 )
 
 type opsFixture struct {
@@ -119,8 +120,10 @@ func (f *opsFixture) runOp(t *testing.T, kind string, sources []string, dest str
 	// finished poll. It was 3 s: a copy whose rows the search index's content
 	// hook indexes inline (bleve, fsync per batch) took 0.3 s alone and over
 	// 3 s on a loaded machine with a busy disk, and the test went red with
-	// "did not finish; last status=running" for nothing it measures.
-	deadline := time.Now().Add(30 * time.Second)
+	// "did not finish; last status=running" for nothing it measures. Then
+	// 30 s; since 0.61.2 the one budget of every queue wait (opswait).
+	start := time.Now()
+	deadline := start.Add(opswait.Budget)
 	for {
 		cur, err := f.svc.Get(ctx, op.ID)
 		require.NoError(t, err)
@@ -130,7 +133,7 @@ func (f *opsFixture) runOp(t *testing.T, kind string, sources []string, dest str
 		}
 		if time.Now().After(deadline) {
 			f.svc.Stop()
-			t.Fatalf("op %d (%s) did not finish; last status=%s err=%s", op.ID, kind, cur.Status, cur.Error)
+			t.Fatalf("op %d (%s) did not finish; last status=%s err=%s %s", op.ID, kind, cur.Status, cur.Error, opswait.Waited(start))
 		}
 		time.Sleep(15 * time.Millisecond)
 	}

@@ -47,6 +47,7 @@ import (
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/tenantstore"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/testutil/opswait"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/versioning"
 )
@@ -242,7 +243,8 @@ func opIDOf(t *testing.T, res map[string]any) int64 {
 // waitOp follows an operation with op_get until it has ended.
 func (f *doorFix) waitOp(t *testing.T, tok string, id int64) map[string]any {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	start := time.Now()
+	deadline := start.Add(opswait.Budget)
 	for {
 		tl := f.tool(t, tok, "op_get", map[string]any{"id": id})
 		require.False(t, tl.IsError, tl.Text)
@@ -252,7 +254,7 @@ func (f *doorFix) waitOp(t *testing.T, tok string, id int64) map[string]any {
 			return op
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("operation %d did not end: %v", id, op)
+			t.Fatalf("operation %d did not end %s: %v", id, opswait.Waited(start), op)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

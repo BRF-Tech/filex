@@ -181,8 +181,8 @@ describe('selectGates: where the gate stage reads the heavy suites from', () => 
   const heavy = [
     { name: 'go', github: 'ci.yml', circleci: 'go' },
     { name: 'cypress', github: 'ci.yml', after: ['build'] },
-    { name: 'playwright', circleci: 'e2e', after: ['build'], patchSkip: 'no browser suite in a patch' },
-    { name: 'clock', after: ['build'], patchSkip: 'once, in UTC' },
+    { name: 'playwright', circleci: 'e2e', after: ['build'] },
+    { name: 'clock', after: ['build'] },
   ];
   const plan = { pretag: [build], heavy };
   const n = (list: Array<{ name: string }>) => list.map((g) => g.name);
@@ -202,14 +202,18 @@ describe('selectGates: where the gate stage reads the heavy suites from', () => 
     expect(n(cc.local)).toEqual(['build', 'cypress', 'clock']);
   });
 
-  it('a patch: a suite GitHub would have run and CircleCI does not runs here, it is not dropped', () => {
-    const gh = selectGates(plan, 'patch', []);
-    expect(n(gh.remote)).toEqual(['go', 'cypress']);
-    expect(n(gh.skipped.map((s: { gate: { name: string } }) => s.gate))).toEqual(['playwright', 'clock']);
-    const cc = selectGates(plan, 'patch', [], { source: 'circleci' });
-    expect(n(cc.remote)).toEqual(['go', 'playwright']);
-    expect(n(cc.local)).toEqual(['build', 'cypress']);
-    expect(n(cc.skipped.map((s: { gate: { name: string } }) => s.gate))).toEqual(['clock']);
+  // #361: a patch and a server patch read every heavy suite the CI runs, as
+  // a minor does; none is dropped, and none is cut down to what changed.
+  it('a patch and a server patch: the same as a minor, whatever changed', () => {
+    for (const profile of ['patch', 'server']) {
+      const gh = selectGates(plan, profile, []);
+      expect(n(gh.remote), profile).toEqual(['go', 'cypress']);
+      expect(n(gh.local), profile).toEqual(['build', 'playwright', 'clock']);
+      expect(gh.skipped, profile).toEqual([]);
+      const cc = selectGates(plan, profile, [], { source: 'circleci' });
+      expect(n(cc.remote), profile).toEqual(['go', 'playwright']);
+      expect(n(cc.local), profile).toEqual(['build', 'cypress', 'clock']);
+    }
   });
 
   it('full: everything here, whichever CI the gate would read', () => {
