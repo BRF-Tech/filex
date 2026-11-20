@@ -37,7 +37,7 @@ type PublicSlots struct {
 //	GET /api/public/s/{token}/slots
 func (h *PublicAPI) ShareSlots(w http.ResponseWriter, r *http.Request) {
 	h.headers(w)
-	sh, ok := h.loadShare(w, r, model.ShareKindDownload)
+	sh, ok := h.loadShare(w, r, model.DoorRead)
 	if !ok {
 		return
 	}
@@ -53,7 +53,7 @@ func (h *PublicAPI) ShareSlots(w http.ResponseWriter, r *http.Request) {
 //	GET /api/public/d/{token}/slots
 func (h *PublicAPI) DropSlots(w http.ResponseWriter, r *http.Request) {
 	h.headers(w)
-	sh, ok := h.loadShare(w, r, model.ShareKindDrop)
+	sh, ok := h.loadShare(w, r, model.DoorUpload)
 	if !ok {
 		return
 	}

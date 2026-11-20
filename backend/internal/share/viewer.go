@@ -11,6 +11,7 @@ import (
 	"time"    /* wiring:d2 */
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
 
 	"github.com/brf-tech/filex/backend/internal/httpx"
@@ -39,7 +40,9 @@ func (v *Viewer) HandleMetadata(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sh, err := v.Service.store.GetShareByToken(r.Context(), tok)
-	if err != nil {
+	// A read door: a file request is a blind drop and is not described
+	// (model.Share.Opens, GHSA-rcrp-r83c-g8hv).
+	if err != nil || !sh.Opens(model.DoorRead) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}

@@ -970,11 +970,12 @@ func appLinkEnded(ctx context.Context, reg *wasmplugin.Registry, sh *model.Share
 // Used by the embed.js viewer to decide whether to render a PIN prompt.
 func (h *Share) HandleMetadata(w http.ResponseWriter, r *http.Request) {
 	tok := pathParam(r, "token")
-	sh, err := h.Store.GetShareByToken(r.Context(), tok)
+	// A read door: a file request is not described here (linkAt).
+	sh, err := linkAt(r.Context(), h.Store, tok, model.DoorRead)
 	// ⚠ An app link's node is the ANCHOR its app hangs state on, not
 	// something the link hands out: nothing about it is answered here, the
 	// same 404 as an unknown token.
-	if err != nil || sh == nil || sh.IsApp() {
+	if err != nil || sh.IsApp() {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
@@ -1039,7 +1040,14 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	tok := pathParam(r, "token")
 	pin := h.extractPIN(r)
 
-	sh, err := h.Store.GetShareByToken(r.Context(), tok)
+	// ⚠⚠ A read door. A file request's token answers here exactly like an
+	// unknown one, before its PIN is asked or its folder is looked at: it is
+	// a blind drop, and the page below lists a folder, zips it and streams
+	// its files. This door used to check only for an app's page, so a file
+	// request opened here handed its whole folder to every uploader it was
+	// sent to (GHSA-rcrp-r83c-g8hv); linkAt now decides the kind for every
+	// door.
+	sh, err := linkAt(r.Context(), h.Store, tok, model.DoorRead)
 	if err != nil {
 		h.renderErrorPage(w, r, http.StatusNotFound, "notfound")
 		return

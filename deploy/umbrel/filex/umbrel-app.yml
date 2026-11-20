@@ -18,7 +18,7 @@ environment:
       The address share links, upload links and emails point to. By default it's this Umbrel's local address. Set it, for example to https://files.example.com, if people open filex through another address.
 category: files
 name: filex
-version: "0.61.2"
+version: "0.61.3"
 tagline: Self-hosted file manager for all your storages
 description: >-
   Sign in with the username and password Umbrel shows for the app. filex opens on a Files folder that is ready for uploads, and you can add more storages from its admin panel.
@@ -41,9 +41,10 @@ description: >-
 
   - Word, Excel and PowerPoint files edited in the browser once you install the office editor app from filex's own app store
 releaseNotes: |-
-  filex v0.61.2 - 2026-11-18
-  • A server patch is published only once the whole test suite passed on it, and is offered to automatic updates at once
-  • One slow answer from the Document Server no longer hides ONLYOFFICE for minutes
+  filex v0.61.3 - 2026-11-20
+  • A document window that freezes, crashes or cannot reach the server now says so in the desktop app's log
+  • The nightly builds are made on GitHub, from a commit anyone can look at
+  • A file request's link no longer opens its folder at the download address
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 
 developer: BRF-Tech

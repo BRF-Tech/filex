@@ -1866,7 +1866,9 @@ A live link has `expired` and `revoked` both false; "can I use this" is
 
 **404** for an unknown token and for a token of the other kind (a `/d/` link
 asked for here) - the same body for both, so an anonymous caller cannot
-separate "no such link" from "somebody else's link". **410** for a link that
+separate "no such link" from "somebody else's link". The same holds on every
+route under `/api/public/s/`, on `/s/{token}` and its `/f/…`, and on
+`/api/files/share/{token}`: a file request opens none of them. **410** for a link that
 existed and is gone, carrying the *same object shape* so a client renders it
 from what it already parses.
 
@@ -1879,7 +1881,8 @@ for an anonymous request.
 
 `{"pin": "1234"}` → **200** with the object above (`unlocked: true`) plus the
 unlock cookie · **401** `pin_wrong` · **429** `locked` (audited as
-`share.pin_locked`; the audit row carries the token's hash, never the token).
+`share.pin_locked`; the audit row carries the token's hash, never the token) ·
+**404** for a file request's token, like every route under `/api/public/s/`.
 With [bot protection](BOT-PROTECTION.md) on for `share_password` the body also
 carries `captcha_token` (or `captcha_local`), judged before the PIN: a refusal
 (**422** / **409**, as on the sign-in) spends none of the attempts.
@@ -1950,7 +1953,10 @@ rather than cutting it. `pin_max` is present with `needs_pin`, as on a share.
 
 ### `POST /api/public/d/{token}/pin` ![public](https://img.shields.io/badge/-public-lightgrey)
 
-The same gate, the same cookie and the same statuses as the `/s/` PIN.
+The same gate, the same cookie and the same statuses as the `/s/` PIN; a hit
+answers with the file request's state above (`unlocked: true`). **404** for a
+download link's or an app page's token: each surface takes only its own kind
+of link (`model.Share.Opens`; GHSA-rcrp-r83c-g8hv).
 
 ### `POST /api/public/d/{token}/captcha` ![public](https://img.shields.io/badge/-public-lightgrey)
 

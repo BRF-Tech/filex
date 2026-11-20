@@ -55,13 +55,13 @@ func newPublicFixture(t *testing.T) (*chi.Mux, *share.Service, db.Store, *model.
 	r.Get("/api/public/branding", pub.Branding)
 	r.Route("/api/public/s/{token}", func(r chi.Router) {
 		r.Get("/", pub.Share)
-		r.Post("/pin", pub.PIN)
+		r.Post("/pin", pub.SharePIN)
 		r.Post("/event", pub.Event)
 		r.Get("/file/{ref}", pub.File)
 	})
 	r.Route("/api/public/d/{token}", func(r chi.Router) {
 		r.Get("/", pub.DropState)
-		r.Post("/pin", pub.PIN)
+		r.Post("/pin", pub.DropPIN)
 		r.Post("/upload", pub.DropUpload)
 	})
 	r.Handle("/p/{token}", handlers.RetiredPagePrefix())

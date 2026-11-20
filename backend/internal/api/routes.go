@@ -1196,7 +1196,7 @@ func BuildRouter(d *Deps) http.Handler {
 	r.Get("/api/public/strings", pubAPI.Strings)
 	r.Route("/api/public/s/{token}", func(r chi.Router) {
 		r.Get("/", pubAPI.Share)
-		r.Post("/pin", pubAPI.PIN)
+		r.Post("/pin", pubAPI.SharePIN)
 		r.Post("/event", pubAPI.Event)
 		r.Get("/file/{ref}", pubAPI.File)
 		r.Get("/entries", pubAPI.Entries)
@@ -1209,7 +1209,7 @@ func BuildRouter(d *Deps) http.Handler {
 	})
 	r.Route("/api/public/d/{token}", func(r chi.Router) {
 		r.Get("/", pubAPI.DropState)
-		r.Post("/pin", pubAPI.PIN)
+		r.Post("/pin", pubAPI.DropPIN)
 		// The bot check's pass for the upload below (handlers/captcha.go).
 		r.Post("/captcha", captchaH.DropPass)
 		r.Post("/upload", pubAPI.DropUpload)

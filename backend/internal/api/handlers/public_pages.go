@@ -166,11 +166,12 @@ func withShellPage(r *http.Request, store db.Store, resolver *acl.Resolver, mult
 // branding (PublicAPI.LinkBranding) - so a dead link answers like an unknown
 // one in both, and neither says whose link the token was.
 func liveLink(ctx context.Context, store db.Store, resolver *acl.Resolver, multiTenant bool, token string, drop bool) *model.Share {
-	if store == nil {
-		return nil
+	door := model.DoorRead
+	if drop {
+		door = model.DoorUpload
 	}
-	sh, err := store.GetShareByToken(ctx, strings.ToLower(strings.TrimSpace(token)))
-	if err != nil || sh == nil || sh.IsDrop() != drop || sh.IsExpired(time.Now()) {
+	sh, err := linkAt(ctx, store, token, door)
+	if err != nil || sh.IsExpired(time.Now()) {
 		return nil
 	}
 	if !linkCreatorAllows(ctx, resolver, store, sh, multiTenant) {

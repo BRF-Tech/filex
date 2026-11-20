@@ -410,17 +410,18 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	defer cancel()
 	r = r.WithContext(ctx)
 	pin := r.FormValue("pin")
-	sh, err := h.Store.GetShareByToken(r.Context(), strings.ToLower(strings.TrimSpace(tok)))
-	if err != nil || sh == nil {
-		h.refuse(w, r, http.StatusNotFound, map[string]any{"error": "not_found"})
-		return
-	}
+	// The upload door: only a file request writes here (linkAt).
+	sh, err := linkAt(r.Context(), h.Store, tok, model.DoorUpload)
+	switch {
 	// ⚠ Named, not folded into not_found: whoever is holding this token can
 	// already open it at /s/, so saying "that is a download link" tells them
 	// nothing they do not have — and it is the difference between a caller
 	// fixing their URL and a caller filing a bug.
-	if !sh.IsDrop() {
+	case errors.Is(err, errWrongDoor):
 		h.refuse(w, r, http.StatusNotFound, map[string]any{"error": "not_a_drop_link"})
+		return
+	case err != nil:
+		h.refuse(w, r, http.StatusNotFound, map[string]any{"error": "not_found"})
 		return
 	}
 	if sh.IsExpired(time.Now()) {
@@ -801,13 +802,13 @@ func (h *Drop) notifyOwner(r *http.Request, sh *model.Share, node *model.Node, c
 // appropriate HTML error page otherwise. Returns ok=false when it has already
 // written a response.
 func (h *Drop) resolveKind(w http.ResponseWriter, r *http.Request, tok string) (*model.Share, bool) {
-	sh, err := h.Store.GetShareByToken(r.Context(), tok)
-	if err != nil {
-		h.renderDropError(w, r, http.StatusNotFound, "drop_notfound")
-		return nil, false
-	}
-	if !sh.IsDrop() {
+	sh, err := linkAt(r.Context(), h.Store, tok, model.DoorUpload)
+	switch {
+	case errors.Is(err, errWrongDoor):
 		h.renderDropError(w, r, http.StatusNotFound, "drop_notdrop")
+		return nil, false
+	case err != nil:
+		h.renderDropError(w, r, http.StatusNotFound, "drop_notfound")
 		return nil, false
 	}
 	if sh.IsExpired(time.Now()) {

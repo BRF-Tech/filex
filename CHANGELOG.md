@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.61.3] - 2026-11-20
+
 ### Added
 
 - **A document window that freezes, crashes or cannot reach the server now
@@ -33,6 +35,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Store's `edge` channel - all from that commit, which the version names
   (`0.62.0-nightly.<night>+<commit>`) and the image's labels link to its test
   run. [INSTALLATION.md → Nightly builds](docs/INSTALLATION.md#nightly-builds).
+
+### Security
+
+- **A file request's link no longer opens its folder at the download address**
+  ([GHSA-rcrp-r83c-g8hv](https://github.com/BRF-Tech/filex/security/advisories/GHSA-rcrp-r83c-g8hv)).
+  A file request (`/d/<token>`) is a blind drop: the people it is sent to put
+  files into its folder and are never shown what is already there. The
+  download page took the same token at `/s/<token>`, though, and served the
+  folder as if it had been shared: it listed every file already in it and
+  handed the whole folder out as a ZIP (`?zip=`), to anyone holding the link -
+  an uploader it was sent to, or anybody it was forwarded to. A PIN on the
+  request did not stop it, since its uploaders are given the PIN. Every
+  release with file requests through 0.61.2 is affected. One rule now decides
+  which links each public address takes: a file request answers only at `/d/`
+  and `/api/public/d/`, and at the download page, a file under a shared
+  folder, the embed metadata (`/api/files/share/<token>`) and `/api/public/s/`
+  it answers `404` like an unknown token, before its PIN is looked at; a
+  download link is refused the same way at a file request's addresses, its
+  PIN included. A file request's PIN now answers with the request's own
+  state, so its upload box keeps its limits and its folder's name after the
+  PIN. [SHARING.md](docs/SHARING.md#file-requests-upload--file-drop) has it.
+  Reported by @rockmelodies.
 
 ## [0.61.2] - 2026-11-18
 

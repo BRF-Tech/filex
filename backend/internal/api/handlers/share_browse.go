@@ -219,16 +219,17 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 	tok := pathParam(r, "token")
 	pin := h.extractPIN(r)
 
-	resolved, err := h.Store.GetShareByToken(r.Context(), strings.ToLower(tok))
-	if err != nil || resolved == nil || resolved.IsExpired(time.Now()) ||
+	// A read door: a file request is a blind drop and lists nothing (linkAt).
+	resolved, err := linkAt(r.Context(), h.Store, tok, model.DoorRead)
+	if err != nil || resolved.IsExpired(time.Now()) ||
 		!linkCreatorAllows(r.Context(), h.ACL, h.Store, resolved, h.Tenants.MultiTenant) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	// ⚠⚠ Only a FOLDER SHARE is browsed. An app page's node is the ANCHOR its
 	// state and follow-up job hang on, never a download (HandleDownload says
-	// so), and a file request is a blind drop and lists nothing.
-	if resolved.IsDrop() || resolved.IsApp() {
+	// so).
+	if resolved.IsApp() {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}

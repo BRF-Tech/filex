@@ -25,6 +25,10 @@ var ErrExpired = errors.New("share: expired")
 // ErrBadPIN is returned when an incorrect PIN is supplied.
 var ErrBadPIN = errors.New("share: bad pin")
 
+// ErrNotFound is returned by Resolve for a token that names no link it may
+// answer: a file request is never downloaded.
+var ErrNotFound = errors.New("share: not found")
+
 // SettingKeyMaxTTLDays is the settings row holding the longest life a NEW
 // share link may be given, in days. Absent = DefaultMaxTTLDays; "0" = no
 // ceiling. Written by the admin Protection page (PATCH /api/admin/protection
@@ -247,14 +251,20 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) (*model.Share, er
 	return s.store.CreateShare(ctx, sh)
 }
 
-// Resolve looks up a share by token and applies expiry/PIN checks.
+// Resolve looks up a share by token for a download and applies expiry/PIN
+// checks.
 //
 // pin may be empty when the share has no PIN configured. Returns
-// ErrExpired or ErrBadPIN as appropriate.
+// ErrExpired or ErrBadPIN as appropriate, and ErrNotFound for a file
+// request: it is a blind drop, never downloaded (model.Share.Opens,
+// GHSA-rcrp-r83c-g8hv), and its token answers before its PIN is compared.
 func (s *Service) Resolve(ctx context.Context, token, pin string) (*model.Share, error) {
 	sh, err := s.store.GetShareByToken(ctx, strings.ToLower(token))
 	if err != nil {
 		return nil, err
+	}
+	if !sh.Opens(model.DoorRead) {
+		return nil, ErrNotFound
 	}
 	if sh.IsExpired(time.Now()) {
 		return nil, ErrExpired

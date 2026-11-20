@@ -169,6 +169,45 @@ func (s *Share) StateAt(now time.Time) string {
 // IsDrop reports whether this is a public upload (file-drop) share.
 func (s *Share) IsDrop() bool { return s != nil && s.Kind == ShareKindDrop }
 
+// LinkDoor is what a public route does with the link token it was handed.
+// Every such route is one of two doors.
+type LinkDoor int
+
+const (
+	// DoorRead shows, lists or hands out what the link names: the /s/ page
+	// (its folder listing, its ZIP, its PIN form), a file under a shared
+	// folder (/s/{token}/f/…), the embed metadata (/api/files/share/{token})
+	// and the /api/public/s/ surface.
+	DoorRead LinkDoor = iota + 1
+	// DoorUpload writes into what the link names: the /d/ page and its
+	// upload, and the /api/public/d/ surface.
+	DoorUpload
+)
+
+// Opens reports whether this link answers at door. A file request opens only
+// the upload door: it is a blind drop, and whoever holds it - every uploader
+// it was sent to - must never list, zip, stream or be described what is
+// already in its folder. Every other link (a download share, an app's page)
+// opens only the read door. An unknown door opens for nothing.
+//
+// ⚠ The ONE answer to "may this kind of link come in here?". Each door used
+// to ask its own question and the /s/ page asked only "is this an app's
+// page?", so a file request's token opened at /s/ listed its folder
+// and handed it out as a ZIP (GHSA-rcrp-r83c-g8hv). The public doors resolve
+// a token through handlers.linkAt, which asks this.
+func (s *Share) Opens(door LinkDoor) bool {
+	if s == nil {
+		return false
+	}
+	switch door {
+	case DoorRead:
+		return !s.IsDrop()
+	case DoorUpload:
+		return s.IsDrop()
+	}
+	return false
+}
+
 // IsApp reports whether an app plugin answers this link — the visitor gets
 // that app's surface instead of a download or a folder listing.
 func (s *Share) IsApp() bool { return s != nil && s.PluginID > 0 && s.PageID != "" }

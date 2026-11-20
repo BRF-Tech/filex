@@ -385,7 +385,7 @@ type PublicShare struct {
 // Share answers a share link's state.
 func (h *PublicAPI) Share(w http.ResponseWriter, r *http.Request) {
 	h.headers(w)
-	sh, ok := h.loadShare(w, r, model.ShareKindDownload)
+	sh, ok := h.loadShare(w, r, model.DoorRead)
 	if !ok {
 		return
 	}
@@ -533,10 +533,34 @@ func linkCreator(ctx context.Context, store db.Store, sh *model.Share) (*model.U
 	return u, true
 }
 
-// PIN answers the PIN and, on a hit, mints the unlock cookie.
-func (h *PublicAPI) PIN(w http.ResponseWriter, r *http.Request) {
+// SharePIN answers a share's PIN (a download link or an app's page) and, on
+// a hit, mints the unlock cookie.
+//
+//	POST /api/public/s/{token}/pin
+func (h *PublicAPI) SharePIN(w http.ResponseWriter, r *http.Request) {
+	h.pin(w, r, model.DoorRead)
+}
+
+// DropPIN answers a file request's PIN and, on a hit, mints the unlock
+// cookie.
+//
+//	POST /api/public/d/{token}/pin
+func (h *PublicAPI) DropPIN(w http.ResponseWriter, r *http.Request) {
+	h.pin(w, r, model.DoorUpload)
+}
+
+// pin is the PIN gate of both surfaces.
+//
+// ⚠⚠ Held to its own surface's kind like every other door. It used to take
+// any link at either address and answer with the download page's description
+// of it, so a file request's PIN posted to /api/public/s/ came back with its
+// folder as a share's item, a download link's PIN posted to /api/public/d/
+// was taken too, and the file request's own screen was handed the share's
+// shape after its PIN (no limits, no folder: the upload box lost its rules).
+// A hit now answers the state the surface's own first call answers.
+func (h *PublicAPI) pin(w http.ResponseWriter, r *http.Request, door model.LinkDoor) {
 	h.headers(w)
-	sh, ok := h.loadShare(w, r, "")
+	sh, ok := h.loadShare(w, r, door)
 	if !ok {
 		return
 	}
@@ -568,6 +592,10 @@ func (h *PublicAPI) PIN(w http.ResponseWriter, r *http.Request) {
 		Path: basepath.CookiePath(r.Context()), HttpOnly: true, Secure: requestIsHTTPS(r), SameSite: http.SameSiteLaxMode,
 		MaxAge: int(share.UnlockTTL().Seconds()),
 	})
+	if door == model.DoorUpload {
+		writeJSON(w, http.StatusOK, h.dropState(r, sh, true))
+		return
+	}
 	writeJSON(w, http.StatusOK, h.describe(r, sh, true))
 }
 
@@ -595,7 +623,7 @@ func (h *PublicAPI) Event(w http.ResponseWriter, r *http.Request) {
 	// first means a locked link answers "no such app" when the plugin happens
 	// to be stopped, and "pin required" when it is not — which tells a caller
 	// who never got past the gate something about the instance behind it.
-	gate, ok := h.loadShare(w, r, model.ShareKindDownload)
+	gate, ok := h.loadShare(w, r, model.DoorRead)
 	if !ok {
 		return
 	}
@@ -921,7 +949,7 @@ func (h *PublicAPI) jobRefused(w http.ResponseWriter, code int, kind string) {
 // File serves a copy an app page exposed (`pub:N`), Range-capable.
 func (h *PublicAPI) File(w http.ResponseWriter, r *http.Request) {
 	h.headers(w)
-	sh, ok := h.loadShare(w, r, model.ShareKindDownload)
+	sh, ok := h.loadShare(w, r, model.DoorRead)
 	if !ok {
 		return
 	}
@@ -975,7 +1003,7 @@ type PublicEntry struct {
 // own, checked before anything is read.
 func (h *PublicAPI) Entries(w http.ResponseWriter, r *http.Request) {
 	h.headers(w)
-	sh, ok := h.loadShare(w, r, model.ShareKindDownload)
+	sh, ok := h.loadShare(w, r, model.DoorRead)
 	if !ok {
 		return
 	}
@@ -1133,10 +1161,16 @@ type dropLimits struct {
 // DropState answers a file-request link's state.
 func (h *PublicAPI) DropState(w http.ResponseWriter, r *http.Request) {
 	h.headers(w)
-	sh, ok := h.loadShare(w, r, model.ShareKindDrop)
+	sh, ok := h.loadShare(w, r, model.DoorUpload)
 	if !ok {
 		return
 	}
+	writeJSON(w, http.StatusOK, h.dropState(r, sh, h.unlocked(r, sh)))
+}
+
+// dropState is a file request's state as its screen reads it: the first
+// call (DropState) and a PIN that opened it (DropPIN) answer the same shape.
+func (h *PublicAPI) dropState(r *http.Request, sh *model.Share, unlocked bool) PublicDrop {
 	now := time.Now()
 	ds := parseDropSettings(sh.DropSettings)
 	if ds.AllowedExt == nil {
@@ -1145,7 +1179,7 @@ func (h *PublicAPI) DropState(w http.ResponseWriter, r *http.Request) {
 	out := PublicDrop{
 		Kind:      "drop",
 		NeedsPIN:  sh.PinHash != "",
-		Unlocked:  h.unlocked(r, sh),
+		Unlocked:  unlocked,
 		Expired:   sh.ExpiresAt != nil && now.After(*sh.ExpiresAt),
 		Locked:    sh.PinLocked(now),
 		ExpiresAt: sh.ExpiresAt,
@@ -1167,7 +1201,7 @@ func (h *PublicAPI) DropState(w http.ResponseWriter, r *http.Request) {
 	} else {
 		out.Revoked = true
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out
 }
 
 // DropUpload receives the files. The body, the limits, the quota accounting
@@ -1223,32 +1257,20 @@ func pathParam(r *http.Request, key string) string {
 	return d
 }
 
-// loadShare resolves a token to a live share of the wanted kind. It has
-// answered when ok is false.
+// loadShare resolves a token to a live share that opens at door (linkAt: a
+// file request at the upload door only, every other link at the read door
+// only). It has answered when ok is false.
 //
 // ⚠ An unknown token, a token of the OTHER kind and a token whose node has
 // gone are all 404 with the same body: which of the three it was is a fact
 // about somebody else's data, and an anonymous caller must not be able to
 // separate them. A link that existed and ran out is 410 — that one the
 // visitor is entitled to, because they were given the link.
-func (h *PublicAPI) loadShare(w http.ResponseWriter, r *http.Request, wantKind string) (*model.Share, bool) {
-	token := strings.ToLower(strings.TrimSpace(pathParam(r, "token")))
-	sh, err := h.Store.GetShareByToken(r.Context(), token)
-	if err != nil || sh == nil {
+func (h *PublicAPI) loadShare(w http.ResponseWriter, r *http.Request, door model.LinkDoor) (*model.Share, bool) {
+	sh, err := linkAt(r.Context(), h.Store, pathParam(r, "token"), door)
+	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 		return nil, false
-	}
-	switch wantKind {
-	case model.ShareKindDrop:
-		if !sh.IsDrop() {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
-			return nil, false
-		}
-	case model.ShareKindDownload:
-		if sh.IsDrop() {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
-			return nil, false
-		}
 	}
 	if sh.IsExpired(time.Now()) {
 		// The shape is the live one so a client renders "this link is gone"

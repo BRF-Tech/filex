@@ -422,6 +422,18 @@ left, `422 exceeds_remaining` with the `remaining` count when fewer places are
 left than files sent - and a file the storage did not take gives its place
 back.
 
+**A file request opens only its own addresses.** Its token answers at
+`/d/{token}` and `/api/public/d/{token}/*` and nowhere else. At a download
+link's addresses - `/s/{token}` (the page, its folder listing, its `?zip=`
+archive, its PIN form), `/s/{token}/f/…`, `/api/files/share/{token}` and
+`/api/public/s/{token}/*` - it answers `404` like a token that does not exist,
+before its PIN is asked, and a download link is refused the same way at a file
+request's addresses. (Through 0.61.2 `/s/{token}` took a file request's token:
+it listed the folder the request collects into, with every file already in it,
+and handed the whole folder out as a ZIP, to anyone the link had been sent to -
+GHSA-rcrp-r83c-g8hv.) A PIN that opens a file request answers with the file
+request's own state, the same as `GET /api/public/d/{token}`.
+
 **The creator's own limits apply too.** What is dropped lands in the
 creator's storage as the creator's file, so their role's limits hold on top
 of the link's: a file type their role blocks is refused (`415
