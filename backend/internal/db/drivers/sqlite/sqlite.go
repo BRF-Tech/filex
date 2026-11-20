@@ -143,6 +143,7 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	// The app store's state (00081), the same way.
 	s.AppStoreSQL = &db.AppStoreSQL{Pool: sqlDB, Time: db.CatalogueTime}
 	// The bot check's marks (00134), the same way; times are unix seconds.
+	s.MCPOAuthSQL = &db.MCPOAuthSQL{Pool: sqlDB, CurrentRead: mysql}
 	s.CaptchaMarkSQL = &db.CaptchaMarkSQL{Pool: sqlDB}
 	// An app's setup record (00138); times are unix seconds.
 	s.AppSetupSQL = &db.AppSetupSQL{Pool: sqlDB}
@@ -204,6 +205,8 @@ type Store struct {
 	// The bot check's marks (internal/db captcha_marks_sql.go, migration
 	// 00134).
 	*db.CaptchaMarkSQL
+	// Durable MCP OAuth state (00140).
+	*db.MCPOAuthSQL
 	// An app's setup record (internal/db app_setup_sql.go, migration 00138).
 	*db.AppSetupSQL
 	// Uploaders and their deletion links (internal/db uploaders_sql.go,

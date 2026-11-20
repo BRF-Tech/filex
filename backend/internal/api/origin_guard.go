@@ -37,6 +37,10 @@ var originGuardExempt = []string{
 	"/api/files/onlyoffice/callback",
 	// The desktop sign-in's second half: the PKCE verifier is the proof.
 	"/api/auth/desktop/exchange",
+	// OAuth machine endpoints authenticate clients/codes, never browser cookies.
+	"/api/oauth/register",
+	"/api/oauth/token",
+	"/api/oauth/revoke",
 	// S3 requests are signed (SigV4 headers or a presigned URL).
 	s3api.Prefix,
 }

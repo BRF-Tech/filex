@@ -676,7 +676,12 @@ func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// served this callback (v0.1.66's host fix) with zero open-redirect
 	// surface. Under a base path (FILEX_BASE_PATH) the path carries it — still a
 	// fixed path, still on the host that served the callback.
-	writeOIDCBounce(w, r, basepath.Path(r.Context(), "/admin/"))
+	target := basepath.Path(r.Context(), "/admin/")
+	// A pending MCP consent uses the same host, with only its validated request nonce.
+	if resume := mcpOAuthResumeTarget(r); resume != "" {
+		target = resume
+	}
+	writeOIDCBounce(w, r, target)
 }
 
 // oidcFailedPage is where a failed SSO sign-in sends the browser: the sign-in

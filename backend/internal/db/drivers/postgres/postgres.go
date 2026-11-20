@@ -130,6 +130,7 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	// The app store's state (00081), written once in internal/db.
 	s.AppStoreSQL = &db.AppStoreSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	// The bot check's marks (00134); times are unix seconds.
+	s.MCPOAuthSQL = &db.MCPOAuthSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	s.CaptchaMarkSQL = &db.CaptchaMarkSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// An app's setup record (00138); times are unix seconds.
 	s.AppSetupSQL = &db.AppSetupSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
@@ -190,6 +191,8 @@ type Store struct {
 	*db.AppStoreSQL
 	// The bot check's marks (internal/db captcha_marks_sql.go, 00134).
 	*db.CaptchaMarkSQL
+	// Durable MCP OAuth state (00140).
+	*db.MCPOAuthSQL
 	// An app's setup record (internal/db app_setup_sql.go, migration 00138).
 	*db.AppSetupSQL
 	// Uploaders and their deletion links (internal/db uploaders_sql.go,
