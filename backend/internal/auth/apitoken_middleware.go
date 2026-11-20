@@ -69,16 +69,23 @@ func TokenUserFrom(ctx context.Context) string {
 // to gate individual verbs. The token's owner is judged by admitTokenOwner,
 // as on the hybrid door: a disabled account, or one whose tenant is
 // suspended, is refused with 403.
-func APITokenMiddleware(store db.Store) func(http.Handler) http.Handler {
+func APITokenMiddleware(store db.Store, resourceMetadata ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/ai/mcp" && len(resourceMetadata) > 0 && resourceMetadata[0] != "" {
+				w = &mcpChallengeWriter{ResponseWriter: w, metadata: resourceMetadata[0]}
+			}
 			raw := extractAPIToken(r)
 			if raw == "" {
 				writeAuthErr(w, http.StatusUnauthorized, "missing api token")
 				return
 			}
 			ctx := r.Context()
-			tok, err := store.GetAPITokenByHash(ctx, hashAPIToken(raw))
+			hash := hashAPIToken(raw)
+			if r.URL.Path == "/api/ai/mcp" && strings.HasPrefix(raw, "fxo_") {
+				hash = HashMCPOAuthToken(raw)
+			}
+			tok, err := store.GetAPITokenByHash(ctx, hash)
 			if err != nil {
 				writeAuthErr(w, http.StatusUnauthorized, "invalid api token")
 				return
@@ -176,7 +183,15 @@ func admitTokenOwner(w http.ResponseWriter, r *http.Request, store db.Store, use
 		return "", false
 	}
 	ctx := r.Context()
-	if !TokenMayBeUsed(ctx, store, user, tok) {
+	mayUse := TokenMayBeUsed(ctx, store, user, tok)
+	if tok.Source == model.TokenSourceMCPOAuth && r.URL.Path == "/api/ai/mcp" {
+		// Reuse the ordinary API-use permission without letting any other
+		// driver accept this resource-bound token by id or by its secret.
+		ordinary := *tok
+		ordinary.Source = ""
+		mayUse = TokenMayBeUsed(ctx, store, user, &ordinary)
+	}
+	if !mayUse {
 		writeAuthErr(w, http.StatusUnauthorized, "this account may not use API tokens")
 		return "", false
 	}
@@ -261,6 +276,31 @@ func extractAPIToken(r *http.Request) string {
 func hashAPIToken(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
+}
+
+// HashMCPOAuthToken domain-separates MCP access tokens from general API keys.
+// Only the exact MCP resource performs this lookup; file protocols and the
+// hybrid API/session doors cannot resolve the same secret as a broader key.
+func HashMCPOAuthToken(raw string) string {
+	return hashAPIToken("filex-mcp-oauth\x00" + raw)
+}
+
+type mcpChallengeWriter struct {
+	http.ResponseWriter
+	metadata string
+}
+
+func (w *mcpChallengeWriter) WriteHeader(status int) {
+	if status == http.StatusUnauthorized {
+		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+w.metadata+`", scope="read mcp"`)
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *mcpChallengeWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *mcpChallengeWriter) FlushError() error {
+	return http.NewResponseController(w.ResponseWriter).Flush()
 }
 
 func writeAuthErr(w http.ResponseWriter, code int, msg string) {

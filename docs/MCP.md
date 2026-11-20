@@ -31,6 +31,74 @@ folder.
 
 ## API tokens
 
+### OAuth browser authorization
+
+OAuth-capable MCP clients can connect using only the MCP URL and a browser
+sign-in. This includes clients that cannot configure custom headers or paste
+an API key. The existing API-key workflow below remains available.
+
+1. Set `FILEX_PUBLIC_URL` to the installation's real HTTPS URL. HTTP is
+   accepted only on a literal loopback address for local development.
+2. Configure browser sign-in normally under **Identity providers**, for
+   example with Pocket ID. No additional Pocket ID client or callback is
+   needed: filex brokers its existing browser session into MCP authorization.
+3. Add `https://files.example.com/api/ai/mcp` to the AI client's remote MCP
+   connections and choose OAuth. The client discovers the endpoints and
+   registers itself; it must support OAuth dynamic client registration.
+4. Sign in to filex using the configured provider and review the client's
+   callback address and requested scopes. Select **Allow access** to finish.
+
+Filex publishes protected-resource metadata at
+`/.well-known/oauth-protected-resource/api/ai/mcp` and authorization-server
+metadata at `/.well-known/oauth-authorization-server`. An unauthenticated MCP
+request advertises the protected-resource document in `WWW-Authenticate`.
+For an installation at `/filex`, these well-known paths are
+`/.well-known/oauth-protected-resource/filex/api/ai/mcp` and
+`/.well-known/oauth-authorization-server/filex`; the authorization endpoints
+and MCP resource remain below `/filex`.
+
+The OAuth machine endpoints are `POST /api/oauth/register`,
+`POST /api/oauth/token`, and `POST /api/oauth/revoke`. Browser authorization
+uses `GET` and `POST /api/oauth/authorize`. Registration supports public
+clients (`token_endpoint_auth_method: none`) and confidential clients using
+`client_secret_basic` (the registration default) or `client_secret_post`.
+Every client must use Authorization Code with S256 PKCE and an exact registered
+callback. HTTPS callbacks are required except for HTTP on literal loopback
+addresses; callback fragments and embedded credentials are refused.
+
+The default grant is **`read mcp`**. `write`, `delete`, and a `root:` folder
+restriction can be requested explicitly. The existing self-service scope
+ceiling applies, and OAuth never issues `admin`. Every MCP request still
+checks the user's current account status, API/AI permissions, tenant status,
+and file grants. The resulting access token works only at the MCP resource;
+it cannot be used as a general filex API key or file-protocol credential.
+Pocket ID access tokens and filex session cookies are not accepted by MCP.
+
+Access tokens expire after one hour. Refresh tokens rotate, and an
+authorization ends after 30 days; reconnect with browser consent afterwards.
+Reusing a spent refresh token revokes its active successor. Revoke the
+connection by deleting its **MCP OAuth:** key on the API / MCP page, or send
+its refresh token to the advertised revocation endpoint. Access-token
+revocation at that endpoint is not implemented; unknown tokens return 200
+as required by the revocation protocol.
+
+Authorization state is persisted in the database, so a restart does not lose
+registered clients, pending sign-ins, codes, or refresh credentials. Clients
+expire after one year. Public registration allows 20 attempts per minute per
+resolved caller address per server process; configure trusted proxies so that
+address resolution is correct. At most 1,000 clients are stored, reserving
+space within the 10,000-record OAuth limit for active authorizations. Expired
+records are pruned on creation.
+
+**Initial limitation:** OAuth is available in single-tenant mode only. In
+multi-tenant mode the OAuth endpoints explicitly refuse setup and discovery
+is not advertised, preserving the existing tenant-domain login handoff and
+cookie boundaries. Existing API keys continue to work in either mode.
+
+This flow needs validation in the target client (for example Confer.to);
+support for a particular client's registration and callback behavior should
+not be inferred solely from a successful discovery response.
+
 A token is a **64-character hex string** (32 random bytes). It is shown **once**
 at creation time - only its **sha256 hash** is stored in the `api_tokens` table,
 so a lost token cannot be recovered, only revoked and re-issued.

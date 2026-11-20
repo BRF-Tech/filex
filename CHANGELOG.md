@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MCP clients can authenticate through OAuth** on single-tenant servers,
+  using filex's existing browser login, including OpenID Connect providers.
+  Includes discovery, dynamic client registration, explicit consent, S256
+  PKCE, scoped MCP-only access tokens, refresh rotation and refresh-token
+  revocation. Existing API-key clients continue to work. See [MCP.md](docs/MCP.md).
+
 ## [0.61.3] - 2026-11-20
 
 ### Added

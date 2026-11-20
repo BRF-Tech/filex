@@ -314,6 +314,9 @@ const (
 // (handlers/desktop_auth.go).
 const TokenSourceDesktop = "desktop"
 
+// TokenSourceMCPOAuth identifies an OAuth grant restricted to the MCP resource.
+const TokenSourceMCPOAuth = "mcp_oauth"
+
 // TokenSourceWatch marks a filex-watch key (handlers/storage_watch.go,
 // docs/FILEX-WATCH.md): the credential of the small program that reports the
 // folders that changed on the machine that owns a storage's disk. It is an API

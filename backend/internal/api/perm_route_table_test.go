@@ -48,7 +48,7 @@ import (
 // Public link pages (/p, /s, /d, /u), the protocol servers (/dav, /s3) and
 // /metrics are outside: the first have no account behind the request, the
 // protocols are phase 3, and /metrics is RequireAdmin.
-var permRoutePrefixes = []string{"/api/files/", "/api/ai/", "/api/auth/", "/api/tokens", "/api/me/", "/api/notifications/", "/api/sharex/", "/api/uploads"}
+var permRoutePrefixes = []string{"/api/files/", "/api/ai/", "/api/auth/", "/api/oauth/", "/api/tokens", "/api/me/", "/api/notifications/", "/api/sharex/", "/api/uploads"}
 
 type permRoute struct {
 	// route is a permission checked by handlers.RequirePermission before the
@@ -79,6 +79,10 @@ const (
 // The key is "METHOD pattern" as chi.Walk reports it; "* pattern" covers every
 // method of a route mounted with Handle (the MCP endpoint).
 var permRouteTable = map[string]permRoute{
+	"POST /api/oauth/register":  exemptBecause("public, bounded OAuth dynamic client registration; no account credential is accepted or issued"),
+	"POST /api/oauth/authorize": inHandler("a live browser session, one-use CSRF-bound consent, access.api, ai.use and the self-service scope ceiling"),
+	"POST /api/oauth/token":     inHandler("a client-bound PKCE code or rotating refresh token; current account, access.api, ai.use and scope ceiling are rechecked"),
+	"POST /api/oauth/revoke":    exemptBecause(whyWithdraw),
 	// ── the agent API: ai.use for the whole of /api/ai (the group gate) ──
 	"* /api/ai/mcp":              gated(perm.AIUse),
 	"POST /api/ai/delete":        gated(perm.AIUse),

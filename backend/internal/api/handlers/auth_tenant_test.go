@@ -20,6 +20,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/api"
 	"github.com/brf-tech/filex/backend/internal/api/handlers"
+	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -240,4 +241,24 @@ func TestCookieDomain_MultiTenant_NoValuesMeansHostOnly(t *testing.T) {
 	a := handlers.NewAuth(store, nil, nil, "https://operator.test", true, "")
 	clear := logoutClear(t, a, "files.localhost")
 	assert.False(t, strings.Contains(clear, "Domain="), "expected host-only cookie, got %q", clear)
+}
+
+func TestOIDCCallback_ResumesMCPOAuthAfterSessionCookie(t *testing.T) {
+	for _, base := range []string{"", "/filex"} {
+		t.Run(base, func(t *testing.T) {
+			_, store := testutil.NewTestDB(t)
+			a := handlers.NewAuth(store, nil, &fakeOIDC{
+				user: &model.User{ID: 1, Email: "u@example.test", Enabled: true}, token: "oidc-session",
+			}, "https://example.test", false, "")
+			req := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=x&state=y", nil)
+			req = req.WithContext(basepath.With(req.Context(), base))
+			nonce := strings.Repeat("ab", 32)
+			req.AddCookie(&http.Cookie{Name: "filex_mcp_oauth", Value: nonce})
+			rec := httptest.NewRecorder()
+			a.OIDCCallback(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code)
+			assert.Contains(t, sessionSetCookie(t, rec.Result()), "filex_session=oidc-session")
+			assert.Contains(t, rec.Body.String(), base+"/api/oauth/authorize?request="+nonce)
+		})
+	}
 }

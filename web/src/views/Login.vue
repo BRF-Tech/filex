@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { stashDesktopHandoff } from '@/lib/desktopHandoff';
+import { loginReturnTarget } from '@/lib/loginReturn';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import {
@@ -247,7 +248,7 @@ onMounted(async () => {
     const ok = await auth.redeemHandoff(ticket);
     handingOver.value = false;
     if (ok) {
-      router.push((route.query.redirect as string) || '/');
+      finishLogin();
       return;
     }
     localError.value = auth.error ?? t('login.errHandoff');
@@ -273,6 +274,12 @@ onMounted(async () => {
   }
 });
 
+function finishLogin() {
+  const next = loginReturnTarget(route.query.redirect, appBase());
+  if (next.browser) navigateTo(next.target);
+  else router.push(next.target);
+}
+
 async function submit() {
   if (signInLocked.value || signingIn.value) return;
   localError.value = null;
@@ -292,8 +299,7 @@ async function submit() {
     signingIn.value = false;
   }
   if (ok) {
-    const redirect = (route.query.redirect as string) || '/';
-    router.push(redirect);
+    finishLogin();
   } else if (auth.handoff) {
     goToTenant();
   } else if (!checkRefused()) {
