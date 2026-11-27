@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-11-27
+
+### Added
+
+- **MCP clients connect with OAuth: the MCP address and a browser sign-in,
+  no API key to paste** (task #374; thanks @benjaminstary, #140/#141). A
+  client that takes only a server URL (Confer was the one asked for) finds
+  filex's authorization server from a `401` on `/api/ai/mcp`, registers
+  itself, opens the browser on filex's own sign-in (a password, LDAP, or an
+  identity provider such as Pocket ID: nothing changes there), and the
+  person sees which app asks, at which address, as which account, for what,
+  and where the browser goes back to, before **Allow access**. The client
+  gets an hour-long key of the person's, labelled **MCP OAuth: \<client\>**
+  among their API keys, that opens `/api/ai/mcp` and nothing else, and a
+  refresh token that rotates (an old one coming back revokes the
+  connection). Authorization Code with S256 PKCE only, the exact registered
+  callback (a loopback one on any port), `read mcp` unless the client asks
+  for `write`, `delete` or a `root:` folder - never beyond what the person
+  may do, never `admin`; a connection lasts 30 days, and removing its key
+  ends it. On a **multi-tenant** install every address is its own issuer:
+  the platform's and each tenant's own, and a client, a code or a key made
+  at one is refused at every other; a sign-in handed to a tenant's address
+  takes the waiting connection along. Discovery (RFC 9728, RFC 8414),
+  dynamic registration (RFC 7591), revocation (RFC 7009), resource
+  indicators (RFC 8707). The API key way is unchanged. Under a base path
+  the discovery documents come before the base (`/.well-known/oauth-*/filex`):
+  the Helm chart's Ingress routes them when `basePath` is set, and the
+  sub-path samples in DEPLOYMENT.md do.
+  [MCP.md → Connecting with OAuth](docs/MCP.md#connecting-with-oauth-browser-sign-in).
+
+### Fixed
+
+- **MCP works behind a reverse proxy on the same machine** (task #374).
+  Caddy or nginx in front of filex on `127.0.0.1` sends every request over a
+  loopback connection with the public host name, and the MCP SDK's
+  DNS-rebinding guard refused each one with `403 Forbidden: invalid Host
+  header` - after filex had accepted the key - so neither an API key nor an
+  OAuth client could use `/api/ai/mcp` there. The guard is off for this
+  endpoint: it answers nobody without an API key in a header, which a page
+  that rebinds a name to `127.0.0.1` cannot send; a request without one is
+  still a `401`.
+  [MCP.md → MCP endpoint](docs/MCP.md#mcp-endpoint-apiaimcp).
+
 ## [0.61.3] - 2026-11-20
 
 ### Added

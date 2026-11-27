@@ -19,6 +19,7 @@ a set of verbs, optionally locked to a single sub-folder, and gated by the same
 handed to an agent that only ever sees - and can only ever touch - one project's
 folder.
 
+- [Connecting with OAuth (browser sign-in)](#connecting-with-oauth-browser-sign-in) - [Setting up OAuth](#setting-up-oauth) · [On a multi-tenant install](#on-a-multi-tenant-install)
 - [API tokens](#api-tokens) - [Creating a token](#creating-a-token) · [Scopes](#scopes) · [Root confinement](#root-confinement)
 - [REST surface (`/api/ai`)](#rest-surface-apiai)
 - [MCP endpoint (`/api/ai/mcp`)](#mcp-endpoint-apiaimcp)
@@ -28,6 +29,157 @@ folder.
 - [See also](#see-also)
 
 ---
+
+## Connecting with OAuth (browser sign-in)
+
+An MCP client that speaks OAuth connects with nothing but the MCP address: it
+finds filex's authorization server, registers itself, opens a browser where
+the person signs in to filex and allows the connection, and receives a key of
+its own. This is the way in for a client that takes a server URL and no
+headers or API key. The [API key](#api-tokens) way stays as it is.
+
+filex is the authorization server itself. The person signs in the way they
+always do (a password, LDAP, or an identity provider such as Pocket ID,
+Keycloak or Authentik), so nothing is configured at the identity provider for
+MCP: no new client and no new callback. Its tokens never reach MCP; what the
+client gets is a filex key.
+
+### Setting up OAuth
+
+1. Set `FILEX_PUBLIC_URL` to the address people use, over HTTPS. The issuer
+   and the protected resource are built from it, never from a request header.
+   (Plain HTTP is accepted only on this machine - a loopback address,
+   `localhost` or a name under `.localhost` - for a test install.)
+2. Make sure the reverse proxy passes `/.well-known/oauth-*` to filex (a
+   proxy that forwards every path does; under a base path the samples in
+   [Serving filex under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path)
+   and the Helm chart's `basePath` route them).
+3. In the client, add `https://files.example.com/api/ai/mcp` as a remote MCP
+   server and choose OAuth. The client registers itself (dynamic client
+   registration); it must support Authorization Code with S256 PKCE, as the
+   MCP specification requires.
+4. The browser opens filex's sign-in page, then a page that names the client,
+   the filex address, the account, what the client may do and the address the
+   browser goes back to. **Allow access** finishes; **Deny** sends the client
+   an `access_denied`.
+
+![The consent page an MCP client's sign-in ends on: the app, the filex address, the account, what the app may do, where the browser goes back to, Deny and Allow access](https://filex.sh/shots/mcpoauth/consent-800.97678a022055.png)
+
+A browser-based client (one whose OAuth and MCP requests come from a web page
+rather than its servers) also needs its origin in
+`FILEX_CORS_ALLOWED_ORIGINS`; the discovery documents answer any origin, and
+`WWW-Authenticate` and `Mcp-Session-Id` are exposed to a listed one.
+
+### What the client finds
+
+| | |
+|---|---|
+| A request to `/api/ai/mcp` without a key | `401` with `WWW-Authenticate: Bearer resource_metadata="https://files.example.com/.well-known/oauth-protected-resource/api/ai/mcp", scope="read mcp"`; with a key that no longer works, `error="invalid_token"` as well |
+| Protected-resource metadata (RFC 9728) | `/.well-known/oauth-protected-resource/api/ai/mcp` (and `/.well-known/oauth-protected-resource` at the root) |
+| Authorization-server metadata (RFC 8414) | `/.well-known/oauth-authorization-server` |
+| Registration (RFC 7591) | `POST /api/oauth/register` |
+| Authorization | `GET` and `POST /api/oauth/authorize` (the browser) |
+| Token, revocation (RFC 7009) | `POST /api/oauth/token`, `POST /api/oauth/revoke` |
+
+Under a base path (`FILEX_BASE_PATH=/filex`) the well-known segment comes
+first, as RFC 8414 and RFC 9728 want: `/.well-known/oauth-protected-resource/filex/api/ai/mcp`
+and `/.well-known/oauth-authorization-server/filex`; everything else stays
+below `/filex`.
+
+### The rules a client is held to
+
+- **Registration.** Public clients (`token_endpoint_auth_method: none`) and
+  confidential ones (`client_secret_basic`, the default, or
+  `client_secret_post`). One to ten callbacks: HTTPS, or HTTP on a loopback
+  address or `localhost`, with no credentials and no fragment. The name a
+  client gives itself is shown as its own and loses control and formatting
+  characters. A registration nobody uses to obtain a key is forgotten after
+  an hour; one that did is kept for 90 days after its last authorization.
+- **The callback** must be one the client registered, the very same string -
+  never a prefix or a pattern - except that a loopback callback may come back
+  on another port (RFC 8252: a native client listens where it can).
+- **PKCE** with `S256` is required; `plain` and a missing challenge are
+  refused. A code lives one minute and is used once; a code that comes back
+  after it was used revokes the key and the refresh token it made.
+- **The resource** (RFC 8707) is the address's MCP endpoint; an
+  authorization or a token request that names another resource is refused.
+  The answer to the browser carries `iss` (RFC 9207).
+
+### OAuth scopes
+
+The client asks for `read`, `write`, `delete`, `mcp` and at most one
+`root:<storage>://<path>`, space-separated; without a scope it gets
+**`read mcp`**, and `mcp` is always added. The answer never goes beyond what
+the person may do: `admin` is never issued, a viewer gets no `write` or
+`delete`, and a `root:` must be within the person's own access - the
+self-service rules of [Creating a token](#creating-a-token). Nothing else is
+accepted, a scope with a comma in it included (the stored list is
+comma-separated and could otherwise carry a permission level such as
+`comments:rw` past the list).
+
+On every request the key is judged like any other: the account must be on,
+its tenant not suspended, it must have `access.api` and `ai.use` (and its
+second factor if a rule requires one), and every file is reached through the
+person's grants and the key's `root:`.
+
+### The key and its lifetime
+
+The client gets an access token (`fxo_` and 64 hex characters) that lasts an
+hour and a refresh token. The access token is an API key of the person's,
+kind `app`, labelled **MCP OAuth: \<client name\>**; it is listed with their
+other keys (**API keys** in the explorer, **API / MCP** in the admin panel).
+It opens `/api/ai/mcp` and nothing else: no other `/api/ai` route, no
+`/api/files`, no WebDAV, SFTP or S3. Its hash is bound to the MCP address it
+was issued for, so the same secret matches nothing anywhere else.
+
+A refresh hands out a new access token and a new refresh token; the old
+refresh token is spent, and presenting it again revokes the whole
+authorization (RFC 9700). An authorization ends 30 days after the person
+allowed it; the client then asks again. Removing the **MCP OAuth** key ends
+the connection at its next refresh. A client ends it at `/api/oauth/revoke`
+with its refresh token or its access token.
+
+### On a multi-tenant install
+
+Every address filex answers on is an authorization server of its own: the
+platform's public URL, and each address a tenant owns - its host, an active
+own domain, its platform subdomain ([TENANT-ADMIN.md](TENANT-ADMIN.md)). Its
+issuer is that address, its resource that address's `/api/ai/mcp`, and the
+discovery documents say so for the address they are asked at. An address
+nobody provisioned has none: a forged `Host` never becomes an issuer.
+
+A client registered at one address, a code issued there, a refresh token and
+an access token belong to that address: at any other - another tenant's, the
+platform's - the client is unknown and the key matches nothing. On a tenant's
+own address only that tenant's accounts (and the platform's own) may allow a
+connection or use one; another tenant's account is shown the MCP address of
+its own organization instead. That is asked again on every request, so an
+address that passes to another tenant stops opening the connections made
+there, and a suspended tenant's keys stop with its sign-in.
+
+The platform's address serves every account that signs in there, as it serves
+their API keys. A person of a tenant with an address of its own who signs in
+there is handed to the tenant's address ([MULTI-TENANCY.md, Realms](MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for)):
+the connection waiting for that sign-in goes with them. The waiting
+authorization is bound to its browser by a cookie of the address it started
+on, which the tenant's address cannot read; the one-use handoff ticket that
+carries the sign-in carries the authorization's key as well, and the tenant's
+address moves the authorization to a fresh nonce bound to the browser that
+redeemed the ticket. The person allows it there, and the code goes back to
+the client from the issuer the client asked - the platform's - so the key
+opens the platform's MCP endpoint, as the client expects. Only the key
+travels, in the server's memory: never the nonce, never anything a URL or a
+log could show.
+
+### OAuth limits
+
+What a caller can make without signing in is bounded: per network (an IPv4
+address, an IPv6 /64) twenty registrations or authorization requests, then
+one a minute; at most 2,000 unused registrations and waiting authorizations
+at a time, apart from the room the signed-in authorizations live in; 10,000
+records in all. Configure [trusted proxies](CONFIGURATION.md#trusted-proxies) so the caller's
+address is the real one. All of it is kept in the database
+(`mcp_oauth_records`), so a restart loses nothing and replicas share it.
 
 ## API tokens
 
@@ -461,7 +613,11 @@ curl -X POST https://files.example.com/api/ai/mcp \
 > **Reverse proxy:** the `GET` transport opens a Server-Sent-Events stream, so
 > the proxy in front of filex must allow SSE - don't buffer the response, keep
 > the connection open, and don't strip the `X-Filex-Token` / `Authorization`
-> header. (Nginx: `proxy_buffering off;` for this location.)
+> header. (Nginx: `proxy_buffering off;` for this location.) A proxy on the
+> same machine that reaches filex on `127.0.0.1` is fine: the endpoint does not
+> compare the `Host` it is given with the loopback address it arrived on (the
+> MCP SDK's DNS-rebinding guard is off here, because nothing is answered
+> without an API key in a header, which a rebinding page cannot send).
 
 The tools each MCP session sees depend on the token's scopes: an `admin`-scoped
 token additionally sees every `admin_*` tool (below); a non-admin token never
@@ -960,6 +1116,24 @@ Almost always the reverse proxy: it's buffering the SSE stream, timing out the
 `GET`, or stripping the auth header. Allow SSE (disable response buffering) for
 `/api/ai/mcp` and pass the `X-Filex-Token` / `Authorization` header through.
 Confirm the backend directly with the `tools/list` curl above.
+
+### 403 Forbidden: invalid Host header
+Before 0.62 the MCP endpoint answered this when filex listened on `127.0.0.1`
+behind a reverse proxy on the same machine: the MCP SDK refused a loopback
+connection that named the public host. Upgrade; no proxy setting is needed.
+
+### OAuth: the browser says "This connection cannot go on"
+The page says why. **This request has expired** - the request was opened in
+another browser, answered already, or waited more than ten minutes: start the
+connection again from the client. **The app sent a request filex cannot
+accept** - the technical reason is printed under it (an unregistered
+callback, no S256 PKCE, another `resource`, a scope filex does not issue).
+**Your account may not connect apps** - the account lacks `access.api` or
+`ai.use`. On a multi-tenant install, **belongs to another organization** - the
+client was pointed at another tenant's address; use the one the page names.
+A client that gets `503 temporarily_unavailable` from `/api/oauth/*` is
+talking to an address with no authorization server: `FILEX_PUBLIC_URL` is not
+HTTPS, or on a multi-tenant install no tenant owns that address.
 
 ### `file too large for inline read`
 `file_read` rejects files over 8 MiB to avoid stuffing a huge blob into a

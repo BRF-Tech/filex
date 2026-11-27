@@ -638,9 +638,9 @@ next). Nothing to switch on: it is on by default.
 | **What counts** | A wrong password, and a wrong second-factor code. Not: the form asking for the code, a right password on a disabled account, an API token (not a password). |
 | **What resets** | A success resets the *account's* counter - never the address's, so one valid login between guesses cannot launder a spray. A protocol's cached credential and an API token do not reset it either (a busy client would wipe the counter with every request). |
 
-![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.c7d444544a47.png)
+![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.fb452a62a7a3.png)
 
-![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.4c65585bf49a.png)
+![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.b5a54a352378.png)
 
 **The IP allow-list** (`login.ip_allowlist`) is the way back in. An address on it is
 exempt from the per-address limit, and may sign in to **any** locked account (the
@@ -1430,7 +1430,8 @@ See [NOTIFICATIONS.md](NOTIFICATIONS.md).
 headers: `Authorization, Content-Type, X-Filex-Pin, Content-Range, Range,
 X-Filex-Accept-Prepare`. If you use API-token root confinement from a browser,
 add `X-Filex-Token` / `X-Filex-Root`. `Content-Range` and `Retry-After` are
-exposed to the page.
+exposed to the page, and `WWW-Authenticate` and `Mcp-Session-Id` too, for an
+MCP client that runs in a web page ([MCP.md → Setting up OAuth](MCP.md#setting-up-oauth)).
 
 ⚠ If you set `allowed_headers` yourself, keep **`Content-Range`** in it: every
 chunk of an upload larger than the chunk size (8 MiB by default) is a `PUT`
@@ -1464,7 +1465,10 @@ These pass, with no setting:
 - **Links that carry their own credential**: share and file-request links
   (`/s/…`, `/d/…`, `/api/public/…`), upload tickets (`/u/…`), a WebSocket
   `ticket`, S3 (signed), the document server's callback and the desktop
-  sign-in exchange.
+  sign-in exchange, and the OAuth endpoints an MCP client calls with its own
+  registration or code: `/api/oauth/register`, `/api/oauth/token` and
+  `/api/oauth/revoke` ([MCP.md → Connecting with OAuth](MCP.md#connecting-with-oauth-browser-sign-in);
+  the consent page, `/api/oauth/authorize`, is checked like any other).
 - **A client that is not a browser** (no `Sec-Fetch-Site`, `Origin` or
   `Referer` at all): scripts, `curl -b`, WebDAV and S3 clients.
 - **An origin in `FILEX_CORS_ALLOWED_ORIGINS`**, exactly or by its `*` pattern.

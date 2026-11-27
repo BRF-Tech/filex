@@ -418,7 +418,7 @@ the form has no field):
 
 | The platform's page: the Realm field empty and free | A tenant's own address: the field filled in and read-only |
 |---|---|
-| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.e687e03d5813.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.3524fc97650b.png) |
+| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.e39f19a99661.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.9a7750a04fb4.png) |
 
 **The handoff to a tenant's own address.** The session cookie belongs to the
 host it was set on. A realm typed on the platform's page for a tenant that has
@@ -542,6 +542,22 @@ never consulted and `PublicURL` is always the answer.
   bare apex - or one whose derived value would be a **public suffix**
   (`tenant.com.tr` → `.com.tr`, which browsers silently reject, breaking
   login) - must set `cookie_domain` explicitly.
+
+### MCP clients with OAuth (multi-tenant)
+
+An MCP client that connects with OAuth ([MCP.md, Connecting with OAuth](MCP.md#connecting-with-oauth-browser-sign-in))
+finds an authorization server on every address filex answers on: the
+platform's `FILEX_PUBLIC_URL` and each address a tenant owns (its `host`, an
+active own domain, its platform subdomain), each its own issuer with its own
+`/api/ai/mcp` as the protected resource. The address is resolved like the
+callback redirects above - an enabled provider row, else nothing - so an
+unprovisioned `Host` gets no issuer. A client, a code, a refresh token and an
+access token are bound to the address they were made at; on a tenant's own
+address only that tenant's accounts (and the platform's own) may allow or use
+a connection, asked again on every request. A sign-in handed from the
+platform's address to the tenant's (Realms) carries the waiting
+authorization in its ticket; the tenant's address re-binds it to the browser
+that redeemed the ticket, and the code goes back from the platform's issuer.
 
 ## 8. Supertenant & super-admin
 

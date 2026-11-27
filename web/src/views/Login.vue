@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { stashDesktopHandoff } from '@/lib/desktopHandoff';
+import { loginReturnTarget } from '@/lib/loginReturn';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import {
@@ -247,7 +248,11 @@ onMounted(async () => {
     const ok = await auth.redeemHandoff(ticket);
     handingOver.value = false;
     if (ok) {
-      router.push((route.query.redirect as string) || '/');
+      // An MCP client's authorization the sign-in was for continues on this
+      // address, where the server moved it (MCPOAuth.adopt).
+      const resume = auth.handoffResume ? loginReturnTarget(auth.handoffResume, appBase()) : null;
+      if (resume?.browser) navigateTo(resume.target);
+      else finishLogin(true);
       return;
     }
     localError.value = auth.error ?? t('login.errHandoff');
@@ -273,6 +278,19 @@ onMounted(async () => {
   }
 });
 
+/**
+ * Where a sign-in goes once the session is open. `?redirect=` may name an MCP
+ * authorization waiting on this address; after a handoff it names one that
+ * waited on the address the person signed in at, whose cookie this one cannot
+ * read - the server answers the one to continue (`resume`), so that redirect
+ * is not followed.
+ */
+function finishLogin(afterHandoff = false) {
+  const next = loginReturnTarget(route.query.redirect, appBase());
+  if (next.browser && !afterHandoff) navigateTo(next.target);
+  else router.push(next.browser ? '/' : next.target);
+}
+
 async function submit() {
   if (signInLocked.value || signingIn.value) return;
   localError.value = null;
@@ -292,8 +310,7 @@ async function submit() {
     signingIn.value = false;
   }
   if (ok) {
-    const redirect = (route.query.redirect as string) || '/';
-    router.push(redirect);
+    finishLogin();
   } else if (auth.handoff) {
     goToTenant();
   } else if (!checkRefused()) {

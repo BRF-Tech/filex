@@ -32,23 +32,11 @@ spec:
     - host: {{ .Values.ingress.host | quote }}
       http:
         paths:
-          - path: {{ $.Values.basePath | default "/" }}
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ include "filex.fullname" . }}
-                port:
-                  name: http
+          {{- include "filex.ingressPaths" $ | trim | nindent 10 }}
     {{- range .Values.ingress.extraHosts }}
     - host: {{ .host | quote }}
       http:
         paths:
-          - path: {{ $.Values.basePath | default "/" }}
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ include "filex.fullname" $ }}
-                port:
-                  name: http
+          {{- include "filex.ingressPaths" $ | trim | nindent 10 }}
     {{- end }}
 {{- end }}

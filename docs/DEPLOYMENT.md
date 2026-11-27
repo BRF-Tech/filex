@@ -225,8 +225,10 @@ example.com {
 
 	# filex under /filex. `handle`, NOT `handle_path`: filex needs the prefix.
 	# The matcher names /filex itself too - filex answers it with a redirect
-	# to /filex/ - and not /filexsomething.
-	@filex path /filex /filex/*
+	# to /filex/ - and not /filexsomething. The two /.well-known paths are the
+	# OAuth discovery documents an MCP client asks for, which come BEFORE the
+	# base (RFC 8414, RFC 9728; MCP.md → Connecting with OAuth).
+	@filex path /filex /filex/* /.well-known/oauth-authorization-server/filex /.well-known/oauth-protected-resource/filex/*
 	handle @filex {
 		reverse_proxy 127.0.0.1:5212 {
 			header_up X-Real-IP {remote_host}
@@ -288,11 +290,27 @@ example.com {
         proxy_buffering    off;
         proxy_read_timeout 3600s;
     }
+
+    # The OAuth discovery documents an MCP client asks for come BEFORE the
+    # base (RFC 8414, RFC 9728; MCP.md → Connecting with OAuth).
+    location = /.well-known/oauth-authorization-server/filex {
+        proxy_pass         http://127.0.0.1:5212;
+        proxy_set_header   Host              $http_host;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+    location ^~ /.well-known/oauth-protected-resource/filex/ {
+        proxy_pass         http://127.0.0.1:5212;
+        proxy_set_header   Host              $http_host;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
 ```
 
 **Traefik / a Kubernetes Ingress** - route ``PathPrefix(`/filex`)`` to filex and
-add **no** `StripPrefix` middleware; the Helm chart does this when you set
-`basePath` (see [INSTALLATION.md → Kubernetes](INSTALLATION.md#kubernetes-helm)).
+add **no** `StripPrefix` middleware; for MCP clients that connect with OAuth,
+``PathPrefix(`/.well-known/oauth-authorization-server/filex`)`` and
+``PathPrefix(`/.well-known/oauth-protected-resource/filex`)`` too. The Helm
+chart does all of this when you set `basePath` (see
+[INSTALLATION.md → Kubernetes](INSTALLATION.md#kubernetes-helm)).
 
 What else to know:
 

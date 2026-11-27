@@ -127,7 +127,7 @@ features:
     linkText: Integration docs
   - icon: 🤖
     title: MCP for AI agents
-    details: A token-authenticated automation surface that speaks Model Context Protocol - let agents browse, read, write and copy files, run an app's action such as Convert, work the trash, versions, archives and their own links, and hand them credential-free upload tickets for files too big to pass through a model. Every tool runs the explorer's own handler, so the rules are the explorer's, and an admin key reaches what the panel does. The REST half is described in an OpenAPI 3.1 file.
+    details: A token-authenticated automation surface that speaks Model Context Protocol - let agents browse, read, write and copy files, run an app's action such as Convert, work the trash, versions, archives and their own links, and hand them credential-free upload tickets for files too big to pass through a model. Every tool runs the explorer's own handler, so the rules are the explorer's, and an admin key reaches what the panel does. A client that takes only a URL connects with OAuth - a browser sign-in to filex and an approval, every tenant's address an issuer of its own. The REST half is described in an OpenAPI 3.1 file.
     link: /MCP
     linkText: MCP docs
   - icon: ✨

@@ -19,14 +19,80 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.61.2, 18 November 2026
-A patch for installs with an ONLYOFFICE Document Server, thanks to @trivnvdev-41 (PR #138). filex checks the Document Server's health before it offers the editor, and one slow answer used to hide the editor from everybody for two minutes: the check waited three seconds, once. It now waits up to five seconds, takes a second look after a quick failure such as a refused connection, and a failed check is trusted for 30 seconds instead of two minutes. A server that does not answer at all is not asked twice: it holds up the start of filex and the capabilities answer for one five-second wait, not two.
+::: tip Latest - v0.61.3, 20 November 2026
+Security patch for every install that uses file requests (GHSA-rcrp-r83c-g8hv, reported by @rockmelodies). A file request is a blind drop: the people it is sent to put files into its folder and are never shown what is already there. The download page took the same link, though, and served the folder as if it had been shared - it listed every file in it and handed the whole folder out as a ZIP to anyone holding the link, and a PIN on the request did not stop it, since its uploaders are given the PIN. Every release with file requests through 0.61.2 is affected. One rule now decides which links each public address takes: a file request answers only at its upload addresses, a download link only at the download ones, and the other kind gets the 404 of an unknown link. A file request's PIN also answers with the request's own state again, so its upload box keeps its limits and its folder's name. No migration and no setting: updating the server is the whole fix.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.61.2
-docker pull ghcr.io/brf-tech/filex:full-v0.61.2
+docker pull ghcr.io/brf-tech/filex:slim-v0.61.3
+docker pull ghcr.io/brf-tech/filex:full-v0.61.3
 ```
+
+## v0.61.3
+
+<span class="filex-release-date">20 November 2026</span>
+
+Security patch for every install that uses file requests (GHSA-rcrp-r83c-g8hv, reported by @rockmelodies). A file request is a blind drop: the people it is sent to put files into its folder and are never shown what is already there. The download page took the same link, though, and served the folder as if it had been shared - it listed every file in it and handed the whole folder out as a ZIP to anyone holding the link, and a PIN on the request did not stop it, since its uploaders are given the PIN. Every release with file requests through 0.61.2 is affected. One rule now decides which links each public address takes: a file request answers only at its upload addresses, a download link only at the download ones, and the other kind gets the 404 of an unknown link. A file request's PIN also answers with the request's own state again, so its upload box keeps its limits and its folder's name. No migration and no setting: updating the server is the whole fix.
+
+## What changed
+
+### Added
+
+- **A document window that freezes, crashes or cannot reach the server now
+  says so in the desktop app's log** (task #366). The windows a document
+  opens in - the viewer, the "Open with filex" editor and the app store -
+  left no trace when the page stopped answering or a request never came
+  back, so an editor that took no keystrokes for half an hour could not be
+  explained afterwards. Each now writes `[docwin]` lines for the page
+  hanging and answering again, its process or a frame inside it ending, a
+  load that failed and its console errors (at most ten a minute, repeats
+  counted), and `[docreq]` lines for its requests to the account's server
+  that fail, answer with an error or wait longer than 15 seconds. No line
+  carries a password, a token or a header: credential-looking values are
+  written as `*`. [DESKTOP.md → Troubleshooting](./DESKTOP.md#troubleshooting).
+
+### Changed
+
+- **The nightly builds are made on GitHub, from a commit anyone can look
+  at** (task #361). Every night the tip of the development branch goes to
+  this repository's `nightly` branch as one commit on top of `main`, GitHub's
+  full test matrix runs on it, and only a green run builds the nightly image
+  (`ghcr.io/brf-tech/filex:nightly`), the desktop packages on
+  [filex.sh/nightly](https://filex.sh/nightly/) and both snaps on the Snap
+  Store's `edge` channel - all from that commit, which the version names
+  (`0.62.0-nightly.<night>+<commit>`) and the image's labels link to its test
+  run. [INSTALLATION.md → Nightly builds](./INSTALLATION.md#nightly-builds).
+
+### Security
+
+- **A file request's link no longer opens its folder at the download address**
+  ([GHSA-rcrp-r83c-g8hv](https://github.com/BRF-Tech/filex/security/advisories/GHSA-rcrp-r83c-g8hv)).
+  A file request (`/d/<token>`) is a blind drop: the people it is sent to put
+  files into its folder and are never shown what is already there. The
+  download page took the same token at `/s/<token>`, though, and served the
+  folder as if it had been shared: it listed every file already in it and
+  handed the whole folder out as a ZIP (`?zip=`), to anyone holding the link -
+  an uploader it was sent to, or anybody it was forwarded to. A PIN on the
+  request did not stop it, since its uploaders are given the PIN. Every
+  release with file requests through 0.61.2 is affected. One rule now decides
+  which links each public address takes: a file request answers only at `/d/`
+  and `/api/public/d/`, and at the download page, a file under a shared
+  folder, the embed metadata (`/api/files/share/<token>`) and `/api/public/s/`
+  it answers `404` like an unknown token, before its PIN is looked at; a
+  download link is refused the same way at a file request's addresses, its
+  PIN included. A file request's PIN now answers with the request's own
+  state, so its upload box keeps its limits and its folder's name after the
+  PIN. [SHARING.md](./SHARING.md#file-requests-upload--file-drop) has it.
+  Reported by @rockmelodies.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0613---2026-11-20)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.61.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.61.3`
 
 ## v0.61.2
 
@@ -1406,69 +1472,13 @@ entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.57.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.57.0`
 
-## v0.56.3
-
-<span class="filex-release-date">13 October 2026</span>
-
-df, Explorer and Mountain Duck show the real disk instead of a made-up 1 PB: every surface that is asked how much room there is - SFTP, FTPS, NFS, WebDAV and filex mount - gives the same answer, the storage's own disk (or the storages added up at the root), capped by the account's quota. Indexing a large existing tree no longer eats the server's memory: extracted texts are written to the search index together, and indexing keeps to a memory budget, by default 25 percent of the memory filex was given (FILEX_SEARCH_MEMORY_PERCENT).
-
-## What changed
-
-### Fixed
-
-- **`df` and a mapped drive show the real disk, not 1 PB.** A client that asked
-  how much room there was got a made-up figure unless the account had a quota,
-  and a different one on every surface: `sftp df` and the Linux `filex mount`
-  said 1 PiB with nothing used, NFS 32 TiB, FTPS 1 TiB, the Windows mount 4 TiB
-  half full, and WebDAV nothing at all. Every surface now gives one answer:
-  inside a storage, the disk it is on (a local disk, an SMB share's volume, an
-  SFTP server that answers `statvfs`, a WebDAV server's quota); at the root
-  that lists the storages, those storages added up, a disk two of them share
-  counted once; either capped by the account's quota. SFTP's `statvfs`, FTPS's
-  `AVBL`, NFS's `FSSTAT`, WebDAV's RFC 4331 quota properties (Windows' mapped
-  drive) and `filex mount` (through the new `GET /api/files/manager?action=space`)
-  all read it. Only a location nothing can measure, such as an S3 bucket, still
-  answers a large empty disk
-  ([PROTOCOLS.md](./PROTOCOLS.md#free-space)). Reported by @gguglietti
-  ([GitHub #116](https://github.com/BRF-Tech/filex/issues/116)).
-
-- **Indexing a large existing tree no longer eats the server's memory.** Every
-  extracted text was written to the search index on its own, so the index made
-  one segment per file and spent its time merging them: measured on 13,500
-  files, about 5 GB resident and 6.5 GB of index files mid-merge after fifteen
-  minutes, rising with every file, where the settled index needed a fraction of
-  that. On a large RAID volume it took 63 GB and the host with it. Texts that
-  are ready together are now written together, and indexing keeps to a memory
-  budget: `FILEX_SEARCH_MEMORY_PERCENT` (default 25, at most 50) percent of the
-  memory filex was given - the container's limit, or the machine's RAM - above
-  which extraction and rebuilds wait for the index to give memory back
-  ([SEARCH.md](./SEARCH.md#content-search)). Reported by @gguglietti
-  ([GitHub #115](https://github.com/BRF-Tech/filex/issues/115)).
-
-- **A plugin in a long data directory starts.** A storage or app plugin talks
-  to filex over a Unix socket under `<data>/plugins/<name>/run/`, and a
-  socket's path may not be longer than about 108 characters (104 on macOS):
-  with a data directory longer than about 48 characters, such as a container
-  volume's host path, the plugin could not open its socket and the log said
-  only that it "did not print its handshake line". When the real path is too
-  long, filex now reaches the socket through a short private link in the temp
-  directory; the socket stays where it was, with its owner and permissions.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0563---2026-10-13)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.56.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.56.3`
-
 ## Earlier releases
 
-The 139 releases before v0.56.3, in brief. Full notes are on GitHub.
+The 140 releases before v0.57.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.56.3](https://github.com/BRF-Tech/filex/releases/tag/v0.56.3) | 13 October 2026 | df, Explorer and Mountain Duck show the real disk instead of a made-up 1 PB: every surface that is asked how much room there is - SFTP, FTPS, NFS, WebDAV and filex mount - gives the same answer, the storage's own disk (or the… |
 | [v0.56.2](https://github.com/BRF-Tech/filex/releases/tag/v0.56.2) | 12 October 2026 | Video, audio and PDF thumbnails read a file on a local storage in place instead of copying it whole to the temp directory first, so a folder of films no longer fills /tmp, and the copies a killed process left behind are removed… |
 | [v0.56.1](https://github.com/BRF-Tech/filex/releases/tag/v0.56.1) | 12 October 2026 | Every table in the product lays each row out under its name when its pane is too narrow to be a table - the details panel, the explorer on a phone or in a narrow pane, an admin page on a phone - instead of cutting the values to… |
 | [v0.56.0](https://github.com/BRF-Tech/filex/releases/tag/v0.56.0) | 11 October 2026 | Apps can edit a file of an end-to-end encrypted folder, or of a vault: the browser decrypts it for an app the person allowed, seals what the app keeps while it edits and encrypts what it saves before it leaves the browser, so the… |
@@ -1611,4 +1621,4 @@ The 139 releases before v0.56.3, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-11-18 from 159 published releases.</small>
+<small>Last refreshed 2026-11-20 from 160 published releases.</small>

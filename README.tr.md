@@ -283,7 +283,7 @@ Gezginin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md → The explorer](
 <tr>
 <td width="50%" valign="top">
 
-![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.58769eb1f1d4.png)
+![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.67f3a41ed9ac.png)
 
 <sub>…oturum açma sayfası da, henüz kimse oturum açmadan</sub>
 
@@ -354,7 +354,7 @@ Depolama ve protokollerin tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 </td>
 <td width="50%" valign="top">
 
-![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.c7e147b4cebb.png)
+![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.ad824dcc97a1.png)
 
 <sub>API anahtarları - kendinizinkini oluşturun, gezginde ya da gömülü bir gezginde (bir kişinin oturumuyla ya da API anahtarıyla; tek bir ortak *uygulama* API anahtarıyla vekil sunucu üzerinden çalışan gömülü bir gezginde bu öğe yer almaz)</sub>
 
@@ -427,7 +427,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.d6cc52c97dae.png)
+![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.27fb56814e5c.png)
 
 <sub>Paylaşım - PIN, son kullanma tarihi, indirme limiti, tek satırlık `curl`</sub>
 
@@ -459,7 +459,7 @@ Paylaşım ve korumanın tüm özellikleri ayrıntısıyla: [docs/FEATURES.md �
 <tr>
 <td width="50%" valign="top">
 
-![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.043e68a53922.png)
+![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.e280c4567086.png)
 
 <sub>Her yönetim tablosu - satır başına sabitlenmiş tek bir **Aksiyon** menüsü, gezgindeki ⋮ ile açılan menünün aynısı</sub>
 
@@ -547,14 +547,14 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <tr>
 <td width="50%" valign="top">
 
-![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.4c65585bf49a.png)
+![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.b5a54a352378.png)
 
 <sub>…ve kilitli bir hesabın oturum açma formunun söylediği; düğmesinde kilidin kalan süresi geri sayar</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Yönetim paneli](https://filex.sh/shots/admin-dashboard.3becd8ffe998.png)
+![Yönetim paneli](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
 
 <sub>Yönetim paneli</sub>
 
@@ -570,7 +570,7 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 </td>
 <td width="50%" valign="top">
 
-![Düğmesinin üstünde bot doğrulamasıyla oturum açma formu](https://filex.sh/shots/botprotection/login-captcha-dark-1440.77aef295650a.png)
+![Düğmesinin üstünde bot doğrulamasıyla oturum açma formu](https://filex.sh/shots/botprotection/login-captcha-dark-1440.350574fc7066.png)
 
 <sub>…ve düğmesinin üstünde bot doğrulamasıyla oturum açma formu</sub>
 
@@ -579,7 +579,7 @@ Kişiler ve erişimle ilgili tüm özellikler ayrıntısıyla: [docs/FEATURES.md
 <tr>
 <td width="50%" valign="top">
 
-![Demo açılış sayfası](https://filex.sh/shots/demo-landing.e484d8ad6b07.png)
+![Demo açılış sayfası](https://filex.sh/shots/demo-landing.009174679cab.png)
 
 <sub>Demo açılış sayfası</sub>
 
@@ -818,7 +818,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 <tr>
 <td width="50%" valign="top">
 
-![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.eb318cc10a90.png)
+![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.ba1f755e5221.png)
 
 <sub>Belge imzadayken - herkes için dondurulmuş, kimin imzaladığı ayrıntılarında</sub>
 
@@ -882,7 +882,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 <tr>
 <td width="50%" valign="top">
 
-![Uygulamalar listesi, uygulamaların arasında bir dil paketi](https://filex.sh/shots/langpack/apps-list-1440.004f0c819981.png)
+![Uygulamalar listesi, uygulamaların arasında bir dil paketi](https://filex.sh/shots/langpack/apps-list-1440.a5ebaa58f7d2.png)
 
 <sub>Kurulumdaki her uygulama ve aralarında bir **dil paketi** - çalışan hiçbir şeyi olmayan bir manifest; bu filex kurulumunun ne kadarını çevirdiğini söyler, paket gidince dili de gider</sub>
 
@@ -938,13 +938,20 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 **Bir ajan, ona verdiğiniz klasörde çalışır, başka hiçbir yerde değil.**
 
 - `/api/ai/mcp` adresinde yerleşik bir **MCP sunucusu** ve `/api/ai` adresinde, bir
-  OpenAPI 3.1 dosyasıyla tanımlanan bir REST yüzeyi.
+  OpenAPI 3.1 dosyasıyla tanımlanan bir REST yüzeyi. Yalnız bir adres alan bir istemci
+  **OAuth** ile bağlanır: kişi tarayıcıda filex'e girer (arkasında hangi kimlik sağlayıcı
+  olursa olsun) ve istemcinin neler yapabileceğini onaylar; çok kiracılı kurulumda her
+  kiracının adresi kendi yayıncısıdır.
 - Bir API anahtarı izinlerini eylem bazında taşır ve tek bir klasöre sınırlandırılabilir;
   verdiği hiçbir şey anahtarın kendisinden geniş olamaz.
 - Büyük bir dosya bir **yükleme bileti** üzerinden gider: kısa ömürlü, tek kullanımlık bir
   URL; böylece baytları hiçbir zaman modelin bağlamından geçmez.
 
 ```bash
+# OAuth: istemci giriş için bir tarayıcı açar
+claude mcp add filex --transport http https://files.example.com/api/ai/mcp
+
+# bir API anahtarı
 claude mcp add filex --transport http https://files.example.com/api/ai/mcp \
   --header "Authorization: Bearer <api-token>"
 ```

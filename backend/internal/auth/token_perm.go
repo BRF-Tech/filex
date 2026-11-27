@@ -52,6 +52,9 @@ func loaderFor(store db.Store) *perm.Loader {
 // the day a lookup by id or a new door reaches the row another way. Its one
 // door (handlers/storage_watch.go) does not come through here.
 func TokenMayBeUsed(ctx context.Context, store db.Store, u *model.User, tok *model.APIToken) bool {
+	if tok != nil && tok.Source == model.TokenSourceMCPOAuth {
+		return false // The MCP-only middleware owns this resource-bound credential.
+	}
 	if tok.DoorOnly() {
 		return false
 	}

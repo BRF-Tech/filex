@@ -260,7 +260,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![套用了运维人员主题的登录页](https://filex.sh/shots/appearance/themed-signin-1440.58769eb1f1d4.png)
+![套用了运维人员主题的登录页](https://filex.sh/shots/appearance/themed-signin-1440.67f3a41ed9ac.png)
 
 <sub>…登录页也是，这时还没有任何人登录</sub>
 
@@ -322,7 +322,7 @@ docker run -p 5212:5212 \
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.c7e147b4cebb.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.ad824dcc97a1.png)
 
 <sub>API keys（API 密钥）：在资源管理器或嵌入端里签发你自己的密钥（凭某个人的会话或令牌；用一个共享的*应用*令牌做代理的嵌入端没有这个条目）</sub>
 
@@ -386,7 +386,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![共享对话框](https://filex.sh/shots/share-modal.d6cc52c97dae.png)
+![共享对话框](https://filex.sh/shots/share-modal.27fb56814e5c.png)
 
 <sub>共享：PIN、过期时间、下载次数上限、单行 `curl` 命令</sub>
 
@@ -418,7 +418,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.043e68a53922.png)
+![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.e280c4567086.png)
 
 <sub>管理面板里的每张表格：每行一个固定的 **Actions**（操作）菜单，与资源管理器的 ⋮ 打开的是同一个菜单</sub>
 
@@ -498,14 +498,14 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![账户被锁定时的登录表单](https://filex.sh/shots/loginsecurity/login-locked-1440.4c65585bf49a.png)
+![账户被锁定时的登录表单](https://filex.sh/shots/loginsecurity/login-locked-1440.b5a54a352378.png)
 
 <sub>…以及账户被锁定时登录表单显示的内容，锁定的倒计时就在按钮上</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![管理仪表盘](https://filex.sh/shots/admin-dashboard.3becd8ffe998.png)
+![管理仪表盘](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
 
 <sub>管理面板</sub>
 
@@ -521,7 +521,7 @@ docker run -p 5212:5212 \
 </td>
 <td width="50%" valign="top">
 
-![按钮上方带机器人校验的登录表单](https://filex.sh/shots/botprotection/login-captcha-dark-1440.77aef295650a.png)
+![按钮上方带机器人校验的登录表单](https://filex.sh/shots/botprotection/login-captcha-dark-1440.350574fc7066.png)
 
 <sub>……以及登录表单，按钮上方是机器人校验</sub>
 
@@ -530,7 +530,7 @@ docker run -p 5212:5212 \
 <tr>
 <td width="50%" valign="top">
 
-![演示首页](https://filex.sh/shots/demo-landing.e484d8ad6b07.png)
+![演示首页](https://filex.sh/shots/demo-landing.009174679cab.png)
 
 <sub>演示首页</sub>
 
@@ -726,7 +726,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 <tr>
 <td width="50%" valign="top">
 
-![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.eb318cc10a90.png)
+![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.ba1f755e5221.png)
 
 <sub>等待签署期间：文档对每个人都是冻结的，谁已签署，在文档的详细信息里可以看到</sub>
 
@@ -790,7 +790,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 <tr>
 <td width="50%" valign="top">
 
-![Apps 列表，其中有一个语言包](https://filex.sh/shots/langpack/apps-list-1440.004f0c819981.png)
+![Apps 列表，其中有一个语言包](https://filex.sh/shots/langpack/apps-list-1440.a5ebaa58f7d2.png)
 
 <sub>实例上的每个应用，其中有一个**语言包**：一份没有任何可运行内容的清单，会说明自己翻译了这个 filex 的多少内容；语言包一走，它的语言也跟着走</sub>
 
@@ -845,11 +845,15 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 
 **智能体只在你交给它的文件夹里工作，别处一概不碰。**
 
-- 位于 `/api/ai/mcp` 的原生 **MCP 服务器**，以及位于 `/api/ai`、由一份 OpenAPI 3.1 文件描述的 REST 接口。
+- 位于 `/api/ai/mcp` 的原生 **MCP 服务器**，以及位于 `/api/ai`、由一份 OpenAPI 3.1 文件描述的 REST 接口。只接受一个 URL 的客户端可以通过 **OAuth** 连接：用户在浏览器中登录 filex（无论背后是哪个身份提供方），并批准它能做什么；在多租户部署中，每个租户的地址都是独立的签发方。
 - API 密钥的权限按动词划分，可以限定在单个文件夹内，而且它发放出去的任何东西，权限都不会超出密钥自身。
 - 大文件走**上传票据**：一个短时有效、只能用一次的 URL，所以文件的字节永远不必经过模型的上下文。
 
 ```bash
+# OAuth：客户端会打开浏览器进行登录
+claude mcp add filex --transport http https://files.example.com/api/ai/mcp
+
+# API 密钥
 claude mcp add filex --transport http https://files.example.com/api/ai/mcp \
   --header "Authorization: Bearer <api-token>"
 ```

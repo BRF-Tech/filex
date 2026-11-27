@@ -307,6 +307,7 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.ACL == nil {
 		d.ACL = acl.New(d.Store)
 	}
+	mcpOAuth := handlers.NewMCPOAuth(d.Store, d.ACL, d.Cfg.PublicURL, d.Cfg.MultiTenant)
 	// The bot check (internal/captcha): before the security headers, whose
 	// frame-src names the provider's widget while it is on.
 	if d.Captcha == nil {
@@ -489,6 +490,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// ⚠ Below the S3-host dispatch above — a dedicated S3 host is served at
 	// ITS root, never under the app's base — and below Logger, so a request
 	// refused for arriving outside the base is still in the access log.
+	r.Use(mcpOAuth.Discovery)
 	r.Use(basepath.Middleware(d.Cfg.BasePath))
 	// The routes' addresses on filex's own address (`/l/<code>`), under the
 	// base path like every route; their prefixes never shadow one of filex's
@@ -512,11 +514,14 @@ func BuildRouter(d *Deps) http.Handler {
 	// X-Filex-Text-Dialect: how a .csv an app reads is written (app_ui_csv.go),
 	// read by the explorer embedded on another origin too; X-Filex-Version:
 	// the version an app read, its next save's `expect` (app_ui_beside.go).
+	// WWW-Authenticate and Mcp-Session-Id: an MCP client running in a
+	// browser on a listed origin reads the OAuth challenge of a 401 and the
+	// session the MCP endpoint opened (docs/MCP.md, OAuth).
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   d.Cfg.CORS.AllowedOrigins,
 		AllowedMethods:   d.Cfg.CORS.AllowedMethods,
 		AllowedHeaders:   d.Cfg.CORS.AllowedHeaders,
-		ExposedHeaders:   []string{"Content-Length", "Content-Disposition", "Content-Range", "Retry-After", "X-Filex-Text-Dialect", "X-Filex-Version"},
+		ExposedHeaders:   []string{"Content-Length", "Content-Disposition", "Content-Range", "Retry-After", "X-Filex-Text-Dialect", "X-Filex-Version", "WWW-Authenticate", "Mcp-Session-Id"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -968,6 +973,9 @@ func BuildRouter(d *Deps) http.Handler {
 	// What a realm's sign-in may use (GET /api/auth/methods), and the
 	// buttons the sign-in page first draws (/api/capabilities `auth_sso`).
 	authh.Live = d.AuthLive
+	// A sign-in an MCP authorization sent the person to continues wherever
+	// the session is opened (handlers.MCPOAuth, the handoff ticket).
+	authh.MCPOAuth = mcpOAuth
 	ch.SSO = authh.SSOFor
 	// The realm's derived addresses end in the installation's e-mail token;
 	// server.New has already refused a bad one, so an error here is "unset".
@@ -1343,6 +1351,16 @@ func BuildRouter(d *Deps) http.Handler {
 		// Desktop authorization, app half. Unauthenticated on purpose: the
 		// desktop has no session yet — holding the PKCE verifier IS the proof.
 		r.Post("/desktop/exchange", desktopAuthH.Exchange)
+	})
+
+	r.Post("/api/oauth/register", mcpOAuth.Register)
+	r.Post("/api/oauth/token", mcpOAuth.Token)
+	r.Post("/api/oauth/revoke", mcpOAuth.Revoke)
+	r.Group(func(r chi.Router) {
+		r.Use(auth.MiddlewareWithToken(d.Store, false))
+		r.Use(tenantScope)
+		r.Get("/api/oauth/authorize", mcpOAuth.Authorize)
+		r.Post("/api/oauth/authorize", mcpOAuth.Authorize)
 	})
 
 	// ────── thumbs ──────
@@ -2912,7 +2930,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// The assistant calls these same tools in process, as its person.
 	assistantH.MCP = aiMCP
 	r.Route("/api/ai", func(r chi.Router) {
-		r.Use(auth.APITokenMiddleware(d.Store))
+		r.Use(auth.APITokenMiddleware(d.Store, mcpOAuth))
 		// Agents are tenant-scoped too — resolve the token user's provider
 		// (no-op unless multi-tenant mode is on). See docs/MULTI-TENANCY.md.
 		r.Use(tenantScope)

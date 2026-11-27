@@ -237,7 +237,10 @@ To serve filex under a path of the host instead of its root
 (`https://files.example.com/filex/`), set `basePath`: the chart sets
 `FILEX_BASE_PATH` and routes that path on the Ingress, passing it through
 unchanged - don't add a rewrite/strip annotation
-([Serving filex under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path)):
+([Serving filex under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path)).
+It routes the two OAuth discovery documents an MCP client asks for as well,
+which come before the base: `/.well-known/oauth-*/filex`
+([MCP.md → Connecting with OAuth](MCP.md#connecting-with-oauth-browser-sign-in)).
 
 ```bash
 helm install filex brf-tech/filex \

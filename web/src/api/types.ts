@@ -89,6 +89,12 @@ export interface LoginResponse {
   user?: User;
   token?: string; // optional bearer if cookie auth disabled
   handoff?: LoginHandoff;
+  /**
+   * A redeemed handoff that carried an MCP client's authorization: the path
+   * on THIS address where it continues (`/api/oauth/authorize?request=…`).
+   * The server's fixed path; the sign-in page checks it (lib/loginReturn).
+   */
+  resume?: string;
 }
 
 /** Driver names the backend registers. Not a closed set in practice —

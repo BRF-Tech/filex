@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-11-18",
+  "generatedAt": "2026-11-20",
   "releases": [
+    {
+      "tag": "v0.61.3",
+      "date": "2026-11-20T06:07:11Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.61.3",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Added\n\n- **A document window that freezes, crashes or cannot reach the server now\n  says so in the desktop app's log** (task #366). The windows a document\n  opens in - the viewer, the \"Open with filex\" editor and the app store -\n  left no trace when the page stopped answering or a request never came\n  back, so an editor that took no keystrokes for half an hour could not be\n  explained afterwards. Each now writes `[docwin]` lines for the page\n  hanging and answering again, its process or a frame inside it ending, a\n  load that failed and its console errors (at most ten a minute, repeats\n  counted), and `[docreq]` lines for its requests to the account's server\n  that fail, answer with an error or wait longer than 15 seconds. No line\n  carries a password, a token or a header: credential-looking values are\n  written as `*`. [DESKTOP.md → Troubleshooting](docs/DESKTOP.md#troubleshooting).\n\n### Changed\n\n- **The nightly builds are made on GitHub, from a commit anyone can look\n  at** (task #361). Every night the tip of the development branch goes to\n  this repository's `nightly` branch as one commit on top of `main`, GitHub's\n  full test matrix runs on it, and only a green run builds the nightly image\n  (`ghcr.io/brf-tech/filex:nightly`), the desktop packages on\n  [filex.sh/nightly](https://filex.sh/nightly/) and both snaps on the Snap\n  Store's `edge` channel - all from that commit, which the version names\n  (`0.62.0-nightly.<night>+<commit>`) and the image's labels link to its test\n  run. [INSTALLATION.md → Nightly builds](docs/INSTALLATION.md#nightly-builds).\n\n### Security\n\n- **A file request's link no longer opens its folder at the download address**\n  ([GHSA-rcrp-r83c-g8hv](https://github.com/BRF-Tech/filex/security/advisories/GHSA-rcrp-r83c-g8hv)).\n  A file request (`/d/<token>`) is a blind drop: the people it is sent to put\n  files into its folder and are never shown what is already there. The\n  download page took the same token at `/s/<token>`, though, and served the\n  folder as if it had been shared: it listed every file already in it and\n  handed the whole folder out as a ZIP (`?zip=`), to anyone holding the link -\n  an uploader it was sent to, or anybody it was forwarded to. A PIN on the\n  request did not stop it, since its uploaders are given the PIN. Every\n  release with file requests through 0.61.2 is affected. One rule now decides\n  which links each public address takes: a file request answers only at `/d/`\n  and `/api/public/d/`, and at the download page, a file under a shared\n  folder, the embed metadata (`/api/files/share/<token>`) and `/api/public/s/`\n  it answers `404` like an unknown token, before its PIN is looked at; a\n  download link is refused the same way at a file request's addresses, its\n  PIN included. A file request's PIN now answers with the request's own\n  state, so its upload box keeps its limits and its folder's name after the\n  PIN. [SHARING.md](docs/SHARING.md#file-requests-upload--file-drop) has it.\n  Reported by @rockmelodies.\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0613---2026-11-20)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.61.3",
+        "ghcr.io/brf-tech/filex:full-v0.61.3"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
     {
       "tag": "v0.61.2",
       "date": "2026-11-18T02:27:37Z",

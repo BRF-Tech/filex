@@ -277,7 +277,7 @@ Every explorer feature in full: [docs/FEATURES.md → The explorer](docs/FEATURE
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.58769eb1f1d4.png)
+![The sign-in page wearing the operator's theme](https://filex.sh/shots/appearance/themed-signin-1440.67f3a41ed9ac.png)
 
 <sub>…and the sign-in page, before anybody has signed in</sub>
 
@@ -348,7 +348,7 @@ Every storage and protocol feature in full: [docs/FEATURES.md → Storage and pr
 </td>
 <td width="50%" valign="top">
 
-![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.c7e147b4cebb.png)
+![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.ad824dcc97a1.png)
 
 <sub>API keys - mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry)</sub>
 
@@ -419,7 +419,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Share modal](https://filex.sh/shots/share-modal.d6cc52c97dae.png)
+![Share modal](https://filex.sh/shots/share-modal.27fb56814e5c.png)
 
 <sub>Sharing - PIN, expiry, download limit, one-line `curl`</sub>
 
@@ -451,7 +451,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.043e68a53922.png)
+![Admin → Shares, a row's Actions menu open](https://filex.sh/shots/signing/admin-table-actions-1440.e280c4567086.png)
 
 <sub>Every admin table - one pinned **Actions** menu per row, the same menu the explorer's ⋮ opens</sub>
 
@@ -474,7 +474,7 @@ Every sharing and protection feature in full: [docs/FEATURES.md → Sharing and 
 </td>
 <td width="50%" valign="top">
 
-![An uploader's key, shown once, with Download ShareX settings and the curl line](https://filex.sh/shots/uploaders/uploaders-key-dark-1440.d40e49640230.png)
+![An uploader's key, shown once, with Download ShareX settings and the curl line](https://filex.sh/shots/uploaders/uploaders-key-dark-1440.e7a79bb6cd34.png)
 
 <sub>Uploaders - a key for ShareX, curl or a script, shown once: ShareX's settings file is made for you, and every upload answers with a public or a private link and a deletion link ([docs/UPLOADERS.md](docs/UPLOADERS.md))</sub>
 
@@ -553,14 +553,14 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <tr>
 <td width="50%" valign="top">
 
-![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.4c65585bf49a.png)
+![The sign-in form on a locked account](https://filex.sh/shots/loginsecurity/login-locked-1440.b5a54a352378.png)
 
 <sub>…and what a locked account's sign-in form says, counting the lock down on its button</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Admin dashboard](https://filex.sh/shots/admin-dashboard.3becd8ffe998.png)
+![Admin dashboard](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
 
 <sub>Admin panel</sub>
 
@@ -576,7 +576,7 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 </td>
 <td width="50%" valign="top">
 
-![The sign-in form with the bot check above its button](https://filex.sh/shots/botprotection/login-captcha-dark-1440.77aef295650a.png)
+![The sign-in form with the bot check above its button](https://filex.sh/shots/botprotection/login-captcha-dark-1440.350574fc7066.png)
 
 <sub>…and the sign-in form, the bot check above its button</sub>
 
@@ -585,7 +585,7 @@ Every feature for people and access in full: [docs/FEATURES.md → People and ac
 <tr>
 <td width="50%" valign="top">
 
-![Demo landing](https://filex.sh/shots/demo-landing.e484d8ad6b07.png)
+![Demo landing](https://filex.sh/shots/demo-landing.009174679cab.png)
 
 <sub>Demo landing</sub>
 
@@ -828,7 +828,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.eb318cc10a90.png)
+![The document locked, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.ba1f755e5221.png)
 
 <sub>While it is out - the document frozen for everybody, who has signed in its details</sub>
 
@@ -892,7 +892,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 <tr>
 <td width="50%" valign="top">
 
-![The Apps list, a language pack among the apps](https://filex.sh/shots/langpack/apps-list-1440.004f0c819981.png)
+![The Apps list, a language pack among the apps](https://filex.sh/shots/langpack/apps-list-1440.a5ebaa58f7d2.png)
 
 <sub>Every app on the instance, and a **language pack** among them - a manifest with nothing that runs, which says how much of this filex it translates and leaves with it</sub>
 
@@ -947,7 +947,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 </td>
 <td width="50%" valign="top">
 
-![The share dialog after Get short link: the short address leads, the full link one copy away](https://filex.sh/shots/shortlinks/share-short-dark-1440.7e4a14e6f6a3.png)
+![The share dialog after Get short link: the short address leads, the full link one copy away](https://filex.sh/shots/shortlinks/share-short-dark-1440.9f4d0d218233.png)
 
 <sub>Short links - an app holding the link-shortener role puts **Get short link** in the share dialog, file requests, My shares and uploaders ([Short links](docs/APP-PLUGINS.md#short-links))</sub>
 
@@ -964,7 +964,9 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 **An agent works in the folder you gave it, and nowhere else.**
 
 - A native **MCP server** at `/api/ai/mcp`, and a REST surface at `/api/ai` described in an
-  OpenAPI 3.1 file.
+  OpenAPI 3.1 file. A client that takes only a URL connects with **OAuth**: the person signs
+  in to filex in the browser - whatever identity provider is behind it - and approves what it
+  may do; on a multi-tenant install every tenant's address is an issuer of its own.
 - An API key carries permissions by verb and can be confined to a single folder, and nothing
   it hands out can be wider than the key itself.
 - A large file goes through an **upload ticket**: a short-lived, single-use URL, so its bytes
@@ -977,13 +979,18 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
   ([docs/AI-ASSISTANT.md](docs/AI-ASSISTANT.md)).
 
 ```bash
+# OAuth: the client opens a browser for the sign-in
+claude mcp add filex --transport http https://files.example.com/api/ai/mcp
+
+# an API key
 claude mcp add filex --transport http https://files.example.com/api/ai/mcp \
   --header "Authorization: Bearer <api-token>"
 ```
 
 What an agent can do, what a key can never hand out, encrypted folders and upload tickets:
 [docs/FEATURES.md → AI agents and MCP](docs/FEATURES.md#ai-agents-and-mcp); the reference is
-[docs/MCP.md](docs/MCP.md), and the assistant's is [docs/AI-ASSISTANT.md](docs/AI-ASSISTANT.md).
+[docs/MCP.md](docs/MCP.md) ([Connecting with OAuth](docs/MCP.md#connecting-with-oauth-browser-sign-in)),
+and the assistant's is [docs/AI-ASSISTANT.md](docs/AI-ASSISTANT.md).
 
 <br>
 

@@ -69,6 +69,11 @@ type Auth struct {
 	// DemoUser is a demo's one-click account (FILEX_DEMO): its sign-in is the
 	// `demo_login` form, every other one `login`. "" outside a demo.
 	DemoUser string
+	// MCPOAuth is the MCP clients' authorization server. A sign-in it sent
+	// the person to is continued wherever the session ends up: a handoff
+	// ticket carries the waiting authorization to the tenant's address
+	// (MCPOAuth.adopt). Nil = none.
+	MCPOAuth *MCPOAuth
 }
 
 // handoffTTL is how long a sign-in handed to a tenant's address may take to
@@ -372,7 +377,8 @@ func (h *Auth) handOff(w http.ResponseWriter, r *http.Request, lr *auth.LoginRea
 	if origin == "" || origin == h.Tenants.Fallback() {
 		return false
 	}
-	t := auth.HandoffTicket{Purpose: auth.HandoffLogin, ActorID: u.ID, SubjectID: u.ID, Host: host, ProviderID: lr.Tenant.ID}
+	t := auth.HandoffTicket{Purpose: auth.HandoffLogin, ActorID: u.ID, SubjectID: u.ID, Host: host, ProviderID: lr.Tenant.ID,
+		OAuthRequest: h.MCPOAuth.pendingKey(r)}
 	code, err := h.Handoffs.Issue(t, handoffTTL)
 	if err != nil {
 		slog.Warn("login: could not hand the sign-in to the tenant's address; it stays here", slog.String("err", err.Error()))
@@ -435,7 +441,21 @@ func (h *Auth) Handoff(w http.ResponseWriter, r *http.Request) {
 	auth.AuditHandoff(ctx, h.Store, auth.AuditHandoffUsed, t, host, "")
 	h.adoptSignInLanguage(r, u)
 	h.setSessionCookie(w, r, token)
-	writeJSON(w, http.StatusOK, map[string]any{"user": u, "token": token})
+	out := map[string]any{"user": u, "token": token}
+	// An MCP authorization the person was signing in for continues here:
+	// the one the ticket carried from the address that issued it, else one
+	// this address's own cookie names (an SSO whose callback was elsewhere).
+	// `resume` is a fixed path on this address; the sign-in page goes there.
+	resume := ""
+	if t.OAuthRequest != "" {
+		resume = h.MCPOAuth.adopt(w, r, t.OAuthRequest)
+	} else if h.MCPOAuth != nil {
+		resume = mcpOAuthResumeTarget(r)
+	}
+	if resume != "" {
+		out["resume"] = resume
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // oidcHandOff is handOff for an OIDC callback: when the account's tenant has
@@ -463,7 +483,8 @@ func (h *Auth) oidcHandOff(r *http.Request, u *model.User, session string) strin
 	if origin == "" || origin == h.Tenants.Fallback() {
 		return ""
 	}
-	t := auth.HandoffTicket{Purpose: auth.HandoffLogin, ActorID: u.ID, SubjectID: u.ID, Host: strings.ToLower(strings.TrimSpace(p.Host)), ProviderID: p.ID}
+	t := auth.HandoffTicket{Purpose: auth.HandoffLogin, ActorID: u.ID, SubjectID: u.ID, Host: strings.ToLower(strings.TrimSpace(p.Host)), ProviderID: p.ID,
+		OAuthRequest: h.MCPOAuth.pendingKey(r)}
 	code, err := h.Handoffs.Issue(t, handoffTTL)
 	if err != nil {
 		slog.Warn("oidc: could not hand the sign-in to the tenant's address; it stays here", slog.String("err", err.Error()))
@@ -676,7 +697,12 @@ func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// served this callback (v0.1.66's host fix) with zero open-redirect
 	// surface. Under a base path (FILEX_BASE_PATH) the path carries it — still a
 	// fixed path, still on the host that served the callback.
-	writeOIDCBounce(w, r, basepath.Path(r.Context(), "/admin/"))
+	target := basepath.Path(r.Context(), "/admin/")
+	// A pending MCP consent uses the same host, with only its validated request nonce.
+	if resume := mcpOAuthResumeTarget(r); resume != "" {
+		target = resume
+	}
+	writeOIDCBounce(w, r, target)
 }
 
 // oidcFailedPage is where a failed SSO sign-in sends the browser: the sign-in

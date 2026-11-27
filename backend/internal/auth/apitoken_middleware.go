@@ -60,6 +60,29 @@ func TokenUserFrom(ctx context.Context) string {
 	return v
 }
 
+// MCPResourcePath is the MCP endpoint, below the base path: the one door an
+// OAuth access token (model.TokenSourceMCPOAuth) opens.
+const MCPResourcePath = "/api/ai/mcp"
+
+// MCPOAuthTokenPrefix starts every OAuth access token handlers.MCPOAuth
+// issues. A key minted on the API / MCP pages is plain hex and never starts
+// with it.
+const MCPOAuthTokenPrefix = "fxo_"
+
+// MCPOAuthDoor is what the MCP door asks the OAuth authorization server
+// (handlers.MCPOAuth) about a request.
+type MCPOAuthDoor interface {
+	// MCPResource is the OAuth protected resource the request arrived at -
+	// "https://<the address>/api/ai/mcp" - and the URL of its metadata, for
+	// the 401 challenge; both "" where OAuth is not offered (no HTTPS public
+	// URL, an address no tenant has).
+	MCPResource(r *http.Request) (resource, metadataURL string)
+	// AdmitsOAuthOwner reports whether u may use a grant of the address r
+	// arrived at: on a tenant's own address only that tenant's accounts (and
+	// the platform's own).
+	AdmitsOAuthOwner(r *http.Request, u *model.User) bool
+}
+
 // APITokenMiddleware authenticates a request strictly via an API token
 // (X-Filex-Token or Authorization: Bearer), attaches both the bound user
 // and the matched token to the context, and rejects anything else with 401.
@@ -69,16 +92,43 @@ func TokenUserFrom(ctx context.Context) string {
 // to gate individual verbs. The token's owner is judged by admitTokenOwner,
 // as on the hybrid door: a disabled account, or one whose tenant is
 // suspended, is refused with 403.
-func APITokenMiddleware(store db.Store) func(http.Handler) http.Handler {
+//
+// With an MCPOAuthDoor, the MCP endpoint is also an OAuth protected resource
+// (RFC 9728): a 401 there names the resource's metadata, and an OAuth access
+// token is looked up under a hash bound to the resource the request arrived
+// at (HashMCPOAuthToken). A token issued for one address - another tenant's,
+// or the platform's - matches nothing on this one.
+func APITokenMiddleware(store db.Store, oauth ...MCPOAuthDoor) func(http.Handler) http.Handler {
+	var door MCPOAuthDoor
+	if len(oauth) > 0 {
+		door = oauth[0]
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			resource := ""
+			var challenge *mcpChallengeWriter
+			if door != nil && r.URL.Path == MCPResourcePath {
+				var metadata string
+				resource, metadata = door.MCPResource(r)
+				if metadata != "" {
+					challenge = &mcpChallengeWriter{ResponseWriter: w, metadata: metadata}
+					w = challenge
+				}
+			}
 			raw := extractAPIToken(r)
 			if raw == "" {
 				writeAuthErr(w, http.StatusUnauthorized, "missing api token")
 				return
 			}
+			if challenge != nil {
+				challenge.presented = true
+			}
 			ctx := r.Context()
-			tok, err := store.GetAPITokenByHash(ctx, hashAPIToken(raw))
+			hash := hashAPIToken(raw)
+			if resource != "" && strings.HasPrefix(raw, MCPOAuthTokenPrefix) {
+				hash = HashMCPOAuthToken(resource, raw)
+			}
+			tok, err := store.GetAPITokenByHash(ctx, hash)
 			if err != nil {
 				writeAuthErr(w, http.StatusUnauthorized, "invalid api token")
 				return
@@ -90,6 +140,12 @@ func APITokenMiddleware(store db.Store) func(http.Handler) http.Handler {
 			user, err := store.GetUser(ctx, tok.UserID)
 			if err != nil || user == nil {
 				writeAuthErr(w, http.StatusUnauthorized, "token user not found")
+				return
+			}
+			// An OAuth grant opens the MCP endpoint of the address it was issued
+			// for, for an account that still belongs there; nothing else.
+			if tok.Source == model.TokenSourceMCPOAuth && (resource == "" || !door.AdmitsOAuthOwner(r, user)) {
+				writeAuthErr(w, http.StatusUnauthorized, "invalid api token")
 				return
 			}
 			username, ok := admitTokenOwner(w, r, store, user, tok)
@@ -176,7 +232,15 @@ func admitTokenOwner(w http.ResponseWriter, r *http.Request, store db.Store, use
 		return "", false
 	}
 	ctx := r.Context()
-	if !TokenMayBeUsed(ctx, store, user, tok) {
+	mayUse := TokenMayBeUsed(ctx, store, user, tok)
+	if tok.Source == model.TokenSourceMCPOAuth && r.URL.Path == MCPResourcePath {
+		// Reuse the ordinary API-use permission without letting any other
+		// driver accept this resource-bound token by id or by its secret.
+		ordinary := *tok
+		ordinary.Source = ""
+		mayUse = TokenMayBeUsed(ctx, store, user, &ordinary)
+	}
+	if !mayUse {
 		writeAuthErr(w, http.StatusUnauthorized, "this account may not use API tokens")
 		return "", false
 	}
@@ -261,6 +325,46 @@ func extractAPIToken(r *http.Request) string {
 func hashAPIToken(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
+}
+
+// HashMCPOAuthToken is the stored hash of an OAuth access token issued for
+// resource. It is domain-separated from a general API key's (hashAPIToken),
+// so only the MCP endpoint, which asks for it, can find the token: the file
+// protocols and the hybrid API/session doors look a secret up under the
+// plain hash and never resolve this one as a broader key. And it is bound to
+// the resource - the address the token was issued for - so the same secret
+// presented at another tenant's address, or at the platform's, matches no
+// row there.
+func HashMCPOAuthToken(resource, raw string) string {
+	return hashAPIToken("filex-mcp-oauth\x00" + resource + "\x00" + raw)
+}
+
+// mcpChallengeWriter adds the OAuth challenge (RFC 6750 section 3, RFC 9728
+// section 5.1) to a 401 from the MCP endpoint, so a client that has no
+// credential, or one that no longer works, finds the authorization server.
+type mcpChallengeWriter struct {
+	http.ResponseWriter
+	metadata string
+	// presented: the request carried a credential, so the 401 says it is
+	// invalid (the client refreshes or authorizes again).
+	presented bool
+}
+
+func (w *mcpChallengeWriter) WriteHeader(status int) {
+	if status == http.StatusUnauthorized {
+		v := `Bearer resource_metadata="` + w.metadata + `", scope="read mcp"`
+		if w.presented {
+			v += `, error="invalid_token"`
+		}
+		w.Header().Set("WWW-Authenticate", v)
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *mcpChallengeWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *mcpChallengeWriter) FlushError() error {
+	return http.NewResponseController(w.ResponseWriter).Flush()
 }
 
 func writeAuthErr(w http.ResponseWriter, code int, msg string) {

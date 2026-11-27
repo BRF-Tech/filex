@@ -112,6 +112,34 @@ func (rv Resolver) FromRequest(r *http.Request) string {
 	return rv.Fallback()
 }
 
+// Arrived returns the origin of the very address r arrived at, with the
+// tenant it belongs to, when that address is proven to be an enabled
+// tenant's (GetProviderByHost: its host, an active own domain or its platform
+// subdomain); "" and nil otherwise, and always on a single-tenant install.
+//
+// FromRequest answers where a tenant's LINKS go, which may be another of its
+// addresses (an operator-set host wins over the own domain the browser is
+// on). Arrived is for an answer that has to name the address the caller is
+// talking to: an OAuth issuer and its protected resource
+// (handlers.MCPOAuth), which a client compares with the URL it connected to.
+// The host is the request's, but only after it matched a provider row
+// exactly; scheme, port and base path follow the rules of origin and scheme
+// below.
+func (rv Resolver) Arrived(r *http.Request) (string, *model.Provider) {
+	if !rv.MultiTenant || rv.Store == nil || r == nil {
+		return "", nil
+	}
+	host := RequestHost(r)
+	if host == "" {
+		return "", nil
+	}
+	p, err := rv.Store.GetProviderByHost(r.Context(), host)
+	if err != nil || p == nil || !p.Enabled {
+		return "", nil
+	}
+	return rv.origin(host, rv.scheme(r)), p
+}
+
 // ForProvider returns a tenant's origin without a request — for the e-mails
 // and async work that run after the browser has gone.
 func (rv Resolver) ForProvider(ctx context.Context, providerID int64) string {

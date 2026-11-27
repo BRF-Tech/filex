@@ -1,6 +1,7 @@
 {
   "about": "Context for translators - not read by the server. `groups`: where the keys under a prefix appear (the longest matching prefix wins). `keys`: a note for one key. `vars`: what each {placeholder} holds; `key_vars` overrides it for one key. scripts/lib/i18n-catalogue.mjs merges this into filex-catalogue-context.json, and web/tests/i18n/langPackCatalogue.test.ts fails when a server key has no group or a placeholder no description.",
   "groups": {
+    "server.mcp_oauth.": "The page filex shows in the browser when an AI app (an MCP client such as Claude or an editor) asks, with OAuth, to use a person's files: the consent page (title, asks, self_named, can, the list of scope.* lines, return, the two buttons allow/deny, revoke) and the page that says why the request cannot go on (error_title and one error.*). \"API keys\" is the name of the explorer's panel where the person's keys and these connections are listed; keep the word the interface uses there.",
     "server.route.": "The page a visitor sees at an app's public address (a short link) when there is nothing to send them to: the link is not available, they tried too often, or the app is busy; and the button on an app's preview page (go).",
     "server.assistant.": "The AI assistant built into the explorer (Admin, Settings, AI assistant): the names of the actions it takes for a person (tool.*), each step's status, the question on the card that asks the person to approve an action that cannot be undone (confirm.*) and why it asks (why.*), the lines between the turns of a conversation (note.*), and the connection test on the settings page (test.*).",
     "server.coedit.": "Editing a file together in an app (the office editor): the question the explorer asks a person whose changes did not reach the others before their connection was lost, when the editor opens again. Shown above the app's frame with two buttons (apply / discard). {name} is the file's name, {count} how many changes.",
@@ -229,6 +230,10 @@
     "min": "the smallest number allowed"
   },
   "key_vars": {
+    "server.mcp_oauth.asks": {"client": "the name the app gave itself when it registered, e.g. Claude (or server.mcp_oauth.unnamed)", "address": "the filex address the app connects to, a host name, e.g. files.example.com", "account": "the signed-in person's email address"},
+    "server.mcp_oauth.scope.root": {"folder": "a storage and folder the access is limited to, as storage://folder"},
+    "server.mcp_oauth.return": {"host": "the host name of the app's own address the browser goes back to, e.g. claude.ai or 127.0.0.1:33418"},
+    "server.mcp_oauth.error.tenant": {"address": "the filex address the app tried to connect to, a host name", "mcp_url": "the full MCP address of the person's own organization, e.g. https://acme.files.example.com/api/ai/mcp"},
     "server.error.uploader_name_too_long": {"max": "a number of characters, e.g. 100"},
     "server.error.template_too_large": {"kb": "a size in kibibytes, the number alone, e.g. 128"},
     "server.error.uploader_link_days_invalid": {"max": "a number of days, e.g. 3650"},

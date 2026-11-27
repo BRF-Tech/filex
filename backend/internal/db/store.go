@@ -1269,6 +1269,12 @@ type Store interface {
 	// cards). nil storageIDs is every storage; an empty slice is none.
 	ThumbnailGenerators(ctx context.Context, storageIDs []int64) (map[string]int64, error)
 
+	// MCP OAuth records are opaque JSON. Secret keys are hashed by the caller.
+	// Creation is immutable; reads and single-use takes require expires_at>now.
+	CreateMCPOAuthRecord(ctx context.Context, kind, key, payload string, expiresAt int64) error
+	GetMCPOAuthRecord(ctx context.Context, kind, key string, now int64) (string, error)
+	TakeMCPOAuthRecord(ctx context.Context, kind, key string, now int64) (string, error)
+
 	// The bot check's shared state (migration 00134, internal/captcha): the
 	// outage flag and the once-only marks, a key and the unix second it ends.
 	// Written once for every engine (CaptchaMarkSQL).

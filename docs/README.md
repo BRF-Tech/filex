@@ -419,7 +419,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   and the third one, `drive`, was **removed** after v0.40.0; pass `simple`);
   an app that prints from an embed on another site needs that site in
   `FILEX_FRAME_ANCESTORS` (0.55)
-- [AI & MCP](MCP.md) - API tokens (including the `user` / `app` token kinds), the permissions a token names - at least one, and never a blank list meaning all of them, and holding on every surface the token reaches - the ceiling that stops a narrow token issuing a wider credential (`403 token_ceiling`), the MCP endpoint for agents, the [plugin tools](MCP.md#plugin-tools) that read plugins and leave install requests, and credential-free upload tickets for large local files
+- [AI & MCP](MCP.md) - [connecting with OAuth](MCP.md#connecting-with-oauth-browser-sign-in) (a browser sign-in and an approval for a client that takes only a URL, an issuer per address on a multi-tenant install), API tokens (including the `user` / `app` token kinds), the permissions a token names - at least one, and never a blank list meaning all of them, and holding on every surface the token reaches - the ceiling that stops a narrow token issuing a wider credential (`403 token_ceiling`), the MCP endpoint for agents, the [plugin tools](MCP.md#plugin-tools) that read plugins and leave install requests, and credential-free upload tickets for large local files
 
 ## Repo only - not published to docs.filex.sh
 

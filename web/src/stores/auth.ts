@@ -122,6 +122,11 @@ export const useAuthStore = defineStore('auth', () => {
   /** What the last refused sign-in said beyond "no": tries left, or a lock's wait. */
   const refusal = ref<LoginRefusal | null>(null);
   /**
+   * Where the last redeemed handoff continues an MCP client's authorization
+   * (LoginResponse.resume), null when it carried none.
+   */
+  const handoffResume = ref<string | null>(null);
+  /**
    * The last refused sign-in's status and body, for the bot check
    * (`useCaptcha().protect`): a 409 carries the fallback's challenge, a 422
    * the check's own refusal. Null after a sign-in that went through.
@@ -254,8 +259,11 @@ export const useAuthStore = defineStore('auth', () => {
     loading.value = true;
     error.value = null;
     refusal.value = null;
+    handoffResume.value = null;
     try {
-      return await adopt(await AuthApi.handoff(code, String(i18n.global.locale.value)));
+      const res = await AuthApi.handoff(code, String(i18n.global.locale.value));
+      handoffResume.value = typeof res.resume === 'string' ? res.resume : null;
+      return await adopt(res);
     } catch (e: unknown) {
       error.value = extractError(e, t('login.errHandoff'));
       return false;
@@ -342,6 +350,7 @@ export const useAuthStore = defineStore('auth', () => {
     loading,
     error,
     refusal,
+    handoffResume,
     captchaReply,
     signInReason,
     ready,

@@ -285,7 +285,7 @@ Alle Funktionen des Explorers im Detail: [docs/FEATURES.md → The explorer](doc
 <tr>
 <td width="50%" valign="top">
 
-![Die Anmeldeseite trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-signin-1440.58769eb1f1d4.png)
+![Die Anmeldeseite trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-signin-1440.67f3a41ed9ac.png)
 
 <sub>…und die Anmeldeseite, bevor sich irgendjemand angemeldet hat</sub>
 
@@ -358,7 +358,7 @@ Alle Funktionen zu Speicher und Protokollen im Detail: [docs/FEATURES.md → Sto
 </td>
 <td width="50%" valign="top">
 
-![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.c7e147b4cebb.png)
+![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.ad824dcc97a1.png)
 
 <sub>API-Schlüssel - erstellen Sie Ihre eigenen, im Explorer oder in einer Einbettung (Sitzung oder Schlüssel einer Person; eine Einbettung, die über einen Proxy mit einem gemeinsamen *App*-Schlüssel läuft, bekommt diesen Eintrag nicht)</sub>
 
@@ -431,7 +431,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.d6cc52c97dae.png)
+![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.27fb56814e5c.png)
 
 <sub>Freigaben - PIN, Ablaufdatum, Download-Limit, `curl`-Einzeiler</sub>
 
@@ -463,7 +463,7 @@ Alle Funktionen zu Freigaben und Schutz im Detail: [docs/FEATURES.md → Sharing
 <tr>
 <td width="50%" valign="top">
 
-![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.043e68a53922.png)
+![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.e280c4567086.png)
 
 <sub>Jede Tabelle im Adminbereich - ein angeheftetes Menü **Aktionen** pro Zeile, dasselbe Menü, das sich über das ⋮ des Explorers öffnet</sub>
 
@@ -552,14 +552,14 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <tr>
 <td width="50%" valign="top">
 
-![Das Anmeldeformular bei einem gesperrten Konto](https://filex.sh/shots/loginsecurity/login-locked-1440.4c65585bf49a.png)
+![Das Anmeldeformular bei einem gesperrten Konto](https://filex.sh/shots/loginsecurity/login-locked-1440.b5a54a352378.png)
 
 <sub>…und was das Anmeldeformular eines gesperrten Kontos sagt, während es die Sperre auf seiner Schaltfläche herunterzählt</sub>
 
 </td>
 <td width="50%" valign="top">
 
-![Übersicht im Adminbereich](https://filex.sh/shots/admin-dashboard.3becd8ffe998.png)
+![Übersicht im Adminbereich](https://filex.sh/shots/admin-dashboard.233358b87c3e.png)
 
 <sub>Adminbereich</sub>
 
@@ -575,7 +575,7 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 </td>
 <td width="50%" valign="top">
 
-![Das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche](https://filex.sh/shots/botprotection/login-captcha-dark-1440.77aef295650a.png)
+![Das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche](https://filex.sh/shots/botprotection/login-captcha-dark-1440.350574fc7066.png)
 
 <sub>…und das Anmeldeformular mit der Bot-Prüfung über der Schaltfläche</sub>
 
@@ -584,7 +584,7 @@ Alle Funktionen zu Personen und Zugriff im Detail: [docs/FEATURES.md → People 
 <tr>
 <td width="50%" valign="top">
 
-![Startseite der Demo](https://filex.sh/shots/demo-landing.e484d8ad6b07.png)
+![Startseite der Demo](https://filex.sh/shots/demo-landing.009174679cab.png)
 
 <sub>Startseite der Demo</sub>
 
@@ -825,7 +825,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 <tr>
 <td width="50%" valign="top">
 
-![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.eb318cc10a90.png)
+![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.ba1f755e5221.png)
 
 <sub>Solange es im Umlauf ist - das Dokument ist für alle eingefroren, in seinen Details steht, wer unterschrieben hat</sub>
 
@@ -889,7 +889,7 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 <tr>
 <td width="50%" valign="top">
 
-![Die Liste „Apps“, ein Sprachpaket unter den Apps](https://filex.sh/shots/langpack/apps-list-1440.004f0c819981.png)
+![Die Liste „Apps“, ein Sprachpaket unter den Apps](https://filex.sh/shots/langpack/apps-list-1440.a5ebaa58f7d2.png)
 
 <sub>Jede App auf der Instanz, darunter ein **Sprachpaket** - ein Manifest, in dem nichts läuft: Es sagt, wie viel von diesem filex es übersetzt, und mit ihm geht seine Sprache wieder</sub>
 
@@ -945,13 +945,20 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 **Ein Agent arbeitet in dem Ordner, den Sie ihm gegeben haben, und nirgendwo sonst.**
 
 - Ein nativer **MCP-Server** unter `/api/ai/mcp` und eine REST-Schnittstelle unter
-  `/api/ai`, beschrieben in einer OpenAPI-3.1-Datei.
+  `/api/ai`, beschrieben in einer OpenAPI-3.1-Datei. Ein Client, der nur eine URL annimmt,
+  verbindet sich per **OAuth**: Die Person meldet sich im Browser bei filex an - gleich,
+  welcher Identitätsanbieter dahintersteht - und genehmigt, was er tun darf; in einer
+  mandantenfähigen Installation ist jede Adresse eines Mandanten ein eigener Aussteller.
 - Ein API-Schlüssel trägt Berechtigungen pro Verb und kann auf einen einzigen Ordner
   beschränkt werden, und nichts, was er ausgibt, kann weiter reichen als der Schlüssel selbst.
 - Eine große Datei geht über ein **Upload-Ticket**: eine kurzlebige, nur einmal verwendbare
   URL, sodass ihre Bytes nie durch den Kontext des Modells wandern.
 
 ```bash
+# OAuth: der Client öffnet für die Anmeldung einen Browser
+claude mcp add filex --transport http https://files.example.com/api/ai/mcp
+
+# ein API-Schlüssel
 claude mcp add filex --transport http https://files.example.com/api/ai/mcp \
   --header "Authorization: Bearer <api-token>"
 ```

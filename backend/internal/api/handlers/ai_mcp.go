@@ -119,6 +119,18 @@ func NewAIMCP(store db.Store, resolver func(int64) (storage.Driver, error), admi
 	h.handler = mcp.NewStreamableHTTPHandler(h.getServer, &mcp.StreamableHTTPOptions{
 		Stateless:    true,
 		JSONResponse: true,
+		// The SDK's DNS-rebinding guard refuses a request that arrives on a
+		// loopback connection for a host name that is not a loopback one
+		// (403 "invalid Host header") - which is every request through a
+		// reverse proxy on the same machine (Caddy or nginx in front of
+		// 127.0.0.1:5212), so MCP did not work behind one. The guard is for a
+		// local server a web page could reach with no credential once it
+		// rebinds a name to 127.0.0.1; this endpoint answers nobody without an
+		// API key in a header (auth.APITokenMiddleware, the only route to this
+		// handler: /api/ai/mcp; the assistant calls the tools in memory),
+		// which such a page cannot send, and no cookie is read here.
+		// TestMCPBehindALoopbackProxy holds both halves.
+		DisableLocalhostProtection: true,
 	})
 	return h
 }

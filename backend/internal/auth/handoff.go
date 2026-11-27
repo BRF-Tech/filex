@@ -99,8 +99,15 @@ type HandoffTicket struct {
 	// port); ProviderID the tenant that host must name.
 	Host       string
 	ProviderID int64
-	IssuedAt   time.Time
-	ExpiresAt  time.Time
+	// OAuthRequest is the key of an MCP authorization the person was signing
+	// in for on the issuing address (handlers.MCPOAuth), "" for none. Its
+	// browser binding is a cookie of that address, which the target cannot
+	// read: the target moves the request to the browser that redeemed this
+	// ticket and continues it there. Only the key travels - the stored hash
+	// of the request's nonce, never the nonce.
+	OAuthRequest string
+	IssuedAt     time.Time
+	ExpiresAt    time.Time
 }
 
 // HandoffStore holds the tickets in flight.

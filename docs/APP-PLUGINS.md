@@ -210,7 +210,7 @@ the apps' sources were last checked for updates; **Check for updates** beside
 **Refresh** asks them now. A **language pack** sits in the same list - its row
 says what it is and, per language, how much of this filex it translates.
 
-![The Apps tab, a language pack among the apps](https://filex.sh/shots/langpack/apps-list-1440.004f0c819981.png)
+![The Apps tab, a language pack among the apps](https://filex.sh/shots/langpack/apps-list-1440.a5ebaa58f7d2.png)
 
 - **Enabled.** Switching an app off removes it from every menu at once; its
   data (settings, per-file state, the links it opened) stays - **including any
@@ -1323,7 +1323,7 @@ replaces the key; **Disconnect** forgets it and tells the store to forget it
 too. A store the screen shows but this filex is not connected to still takes
 requests; they wait until it is connected.
 
-![Trusted stores with the store connected, its key's fingerprint, and the Store screen settings under it](https://filex.sh/shots/store/store-connected-1440.1a7794ef7099.png)
+![Trusted stores with the store connected, its key's fingerprint, and the Store screen settings under it](https://filex.sh/shots/store/store-connected-1440.1afb4c153f8f.png)
 
 ## Install requests
 
@@ -1401,9 +1401,9 @@ when that install ends ([The store screen](#the-store-screen)). **Reject**
 works as for any request, and the person reads the reason on their *My
 requests*.
 
-![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.2e170a8f7f2e.png)
+![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.56a29aa5cd8d.png)
 
-![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.0a86bb8e62e9.png)
+![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.f0ddae5fb0d6.png)
 
 ### Leaving one
 
@@ -1594,7 +1594,7 @@ files to keep.
   audit trail saved - by anybody who may edit the document, not only the
   requester.
 
-  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.eb318cc10a90.png)
+  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.ba1f755e5221.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* - and,
@@ -1957,7 +1957,7 @@ dialog, and the text handed to the device's share sheet, carry the short
 address; an [uploader](UPLOADERS.md#make-an-uploader) can answer each upload
 with it. One app holds the role at a time.
 
-![The share dialog after Get short link: the short address leads, the full link one copy away (dark theme)](https://filex.sh/shots/shortlinks/share-short-dark-1440.7e4a14e6f6a3.png)
+![The share dialog after Get short link: the short address leads, the full link one copy away (dark theme)](https://filex.sh/shots/shortlinks/share-short-dark-1440.9f4d0d218233.png)
 
 [`backend/examples/app-shortlinks`](../backend/examples/app-shortlinks/main.go)
 is the smallest app that holds the role; the contract is

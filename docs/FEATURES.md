@@ -562,6 +562,15 @@ claude mcp add filex --transport http https://files.example.com/api/ai/mcp \
   --header "Authorization: Bearer <api-token>"
 ```
 
+**Or no key at all: OAuth.** A client that takes only a URL (a custom connector,
+an editor's remote MCP setting) finds filex's authorization server, registers,
+and opens the browser on filex's own sign-in - password, LDAP or any identity
+provider, nothing to configure there - where the person sees which app asks
+for what and allows it. The client gets an hour-long key of the person's that
+opens the MCP endpoint and nothing else, with a rotating refresh token; on a
+multi-tenant install every tenant's address is an issuer of its own
+([MCP.md → Connecting with OAuth](MCP.md#connecting-with-oauth-browser-sign-in)).
+
 **An AI assistant in the explorer** - off until an administrator sets it up on
 *Admin → Settings → AI assistant* against **Anthropic**, **OpenAI** or any
 OpenAI-compatible server, or a local **Ollama** that keeps everything on your
