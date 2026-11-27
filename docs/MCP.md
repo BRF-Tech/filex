@@ -19,6 +19,8 @@ a set of verbs, optionally locked to a single sub-folder, and gated by the same
 handed to an agent that only ever sees - and can only ever touch - one project's
 folder.
 
+The MCP server is listed in Glama's directory of MCP servers: [BRF-Tech/filex on Glama](https://glama.ai/mcp/servers/BRF-Tech/filex).
+
 - [Connecting with OAuth (browser sign-in)](#connecting-with-oauth-browser-sign-in) - [Setting up OAuth](#setting-up-oauth) · [On a multi-tenant install](#on-a-multi-tenant-install)
 - [API tokens](#api-tokens) - [Creating a token](#creating-a-token) · [Scopes](#scopes) · [Root confinement](#root-confinement)
 - [REST surface (`/api/ai`)](#rest-surface-apiai)

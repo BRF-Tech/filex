@@ -19,14 +19,71 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.61.3, 20 November 2026
-Security patch for every install that uses file requests (GHSA-rcrp-r83c-g8hv, reported by @rockmelodies). A file request is a blind drop: the people it is sent to put files into its folder and are never shown what is already there. The download page took the same link, though, and served the folder as if it had been shared - it listed every file in it and handed the whole folder out as a ZIP to anyone holding the link, and a PIN on the request did not stop it, since its uploaders are given the PIN. Every release with file requests through 0.61.2 is affected. One rule now decides which links each public address takes: a file request answers only at its upload addresses, a download link only at the download ones, and the other kind gets the 404 of an unknown link. A file request's PIN also answers with the request's own state again, so its upload box keeps its limits and its folder's name. No migration and no setting: updating the server is the whole fix.
+::: tip Latest - v0.62.0, 27 November 2026
+MCP clients can now connect to filex with OAuth, thanks to @benjaminstary (issue #140, PR #141). A client that takes only a server URL - Confer was the one asked for - is given filex's MCP address and nothing else: it finds filex's authorization server, registers itself and opens a browser on filex's own sign-in, a password, LDAP or whatever identity provider is behind it, so nothing is set up at the provider. The person then sees which app asks, at which address, as which account and for what, and allows it or not. The app gets a key of the person's, listed among their API keys as MCP OAuth with the app's name, that opens the MCP endpoint and nothing else and lasts an hour, with a refresh token that rotates; it never gets more than the person may do, never admin, and removing the key ends the connection. It needs FILEX_PUBLIC_URL set to the HTTPS address people use. On a multi-tenant install every address - the platform's and each tenant's own - is an issuer of its own, and what was issued at one is refused at every other. Under a base path the two discovery documents come before the base: the Helm chart's Ingress routes them, and so do the sub-path samples of the deployment guide. API keys work as before. MCP also answers behind a reverse proxy on the same machine now: with filex on 127.0.0.1 behind Caddy or nginx, every MCP request - with an API key or through OAuth - was refused with 403 (invalid Host header). The upgrade runs one database migration.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.61.3
-docker pull ghcr.io/brf-tech/filex:full-v0.61.3
+docker pull ghcr.io/brf-tech/filex:slim-v0.62.0
+docker pull ghcr.io/brf-tech/filex:full-v0.62.0
 ```
+
+## v0.62.0
+
+<span class="filex-release-date">27 November 2026</span>
+
+MCP clients can now connect to filex with OAuth, thanks to @benjaminstary (issue #140, PR #141). A client that takes only a server URL - Confer was the one asked for - is given filex's MCP address and nothing else: it finds filex's authorization server, registers itself and opens a browser on filex's own sign-in, a password, LDAP or whatever identity provider is behind it, so nothing is set up at the provider. The person then sees which app asks, at which address, as which account and for what, and allows it or not. The app gets a key of the person's, listed among their API keys as MCP OAuth with the app's name, that opens the MCP endpoint and nothing else and lasts an hour, with a refresh token that rotates; it never gets more than the person may do, never admin, and removing the key ends the connection. It needs FILEX_PUBLIC_URL set to the HTTPS address people use. On a multi-tenant install every address - the platform's and each tenant's own - is an issuer of its own, and what was issued at one is refused at every other. Under a base path the two discovery documents come before the base: the Helm chart's Ingress routes them, and so do the sub-path samples of the deployment guide. API keys work as before. MCP also answers behind a reverse proxy on the same machine now: with filex on 127.0.0.1 behind Caddy or nginx, every MCP request - with an API key or through OAuth - was refused with 403 (invalid Host header). The upgrade runs one database migration.
+
+## What changed
+
+### Added
+
+- **MCP clients connect with OAuth: the MCP address and a browser sign-in,
+  no API key to paste** (task #374; thanks @benjaminstary, #140/#141). A
+  client that takes only a server URL (Confer was the one asked for) finds
+  filex's authorization server from a `401` on `/api/ai/mcp`, registers
+  itself, opens the browser on filex's own sign-in (a password, LDAP, or an
+  identity provider such as Pocket ID: nothing changes there), and the
+  person sees which app asks, at which address, as which account, for what,
+  and where the browser goes back to, before **Allow access**. The client
+  gets an hour-long key of the person's, labelled **MCP OAuth: \&lt;client\>**
+  among their API keys, that opens `/api/ai/mcp` and nothing else, and a
+  refresh token that rotates (an old one coming back revokes the
+  connection). Authorization Code with S256 PKCE only, the exact registered
+  callback (a loopback one on any port), `read mcp` unless the client asks
+  for `write`, `delete` or a `root:` folder - never beyond what the person
+  may do, never `admin`; a connection lasts 30 days, and removing its key
+  ends it. On a **multi-tenant** install every address is its own issuer:
+  the platform's and each tenant's own, and a client, a code or a key made
+  at one is refused at every other; a sign-in handed to a tenant's address
+  takes the waiting connection along. Discovery (RFC 9728, RFC 8414),
+  dynamic registration (RFC 7591), revocation (RFC 7009), resource
+  indicators (RFC 8707). The API key way is unchanged. Under a base path
+  the discovery documents come before the base (`/.well-known/oauth-*/filex`):
+  the Helm chart's Ingress routes them when `basePath` is set, and the
+  sub-path samples in DEPLOYMENT.md do.
+  [MCP.md → Connecting with OAuth](./MCP.md#connecting-with-oauth-browser-sign-in).
+
+### Fixed
+
+- **MCP works behind a reverse proxy on the same machine** (task #374).
+  Caddy or nginx in front of filex on `127.0.0.1` sends every request over a
+  loopback connection with the public host name, and the MCP SDK's
+  DNS-rebinding guard refused each one with `403 Forbidden: invalid Host header` - after filex had accepted the key - so neither an API key nor an
+  OAuth client could use `/api/ai/mcp` there. The guard is off for this
+  endpoint: it answers nobody without an API key in a header, which a page
+  that rebinds a name to `127.0.0.1` cannot send; a request without one is
+  still a `401`.
+  [MCP.md → MCP endpoint](./MCP.md#mcp-endpoint-apiaimcp).
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0620---2026-11-27)
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.62.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.62.0`
 
 ## v0.61.3
 
@@ -1195,289 +1252,13 @@ A decimal typed into a CSV in ONLYOFFICE keeps the file's comma: in the Turkish 
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.57.1) · `ghcr.io/brf-tech/filex:slim-v0.57.1`
 
-## v0.57.0
-
-<span class="filex-release-date">17 October 2026</span>
-
-Office documents no longer need a Document Server: the Office editor app (0.4.0 or later) edits Word, Excel and PowerPoint in the browser and, on the server, converts them and draws their thumbnails with ONLYOFFICE's own converter and page layout compiled to WebAssembly, so a default install no longer runs an ONLYOFFICE container (one can still be connected). The explorer gains an AI assistant - Claude, OpenAI or a local Ollama - that works through filex's own tools with the person's own permissions; it stays off until an administrator turns it on. Every admin setting has one home: the admin menu has a Settings panel, the server's defaults are settings there (environment variables only seed them), and a tenant's administrator sees only the tenant's pages. A whole storage can be given to people and groups, and previews load no picture from another server until you ask. On the desktop, "Open with filex" takes any kind of file an app on your servers opens and moves files of any size without holding them in memory, and folder sync deletes from the computer only what the server still has. File names follow one rule at every door: control characters are refused, a right-to-left override can no longer hide an extension, and archives keep every name. Nightly builds of the desktop app are published every night. Security fixes are listed in the changelog.
-
-## What changed
-
-### Added
-
-- **A picture from another server in a file's preview waits for you.** A
-  Markdown file, a notebook's cells and HTML outputs and an app's release
-  notes on the update review loaded every picture they named, so opening a
-  shared file told the server a picture was on that the file was opened, and
-  from which IP address. Such a picture is now a placeholder with its alt
-  text and its server's name; clicking it asks in filex's own dialog, which
-  names the server: *Load image* loads that one, *Load all remote images in
-  this file* the others too until the file is closed. A `srcset` or
-  `<picture>` source from elsewhere is dropped. The new **User settings →
-  Preferences → Load remote images in previews** (off by default, kept on the
-  account) loads them without asking. A loaded picture goes with no referrer.
-  Thumbnails, folder previews and the file cards never load one, whatever the
-  setting says. The same in the web interface, the desktop app and every
-  embed ([FEATURES.md](./FEATURES.md#viewers-editors-search-and-thumbnails)).
-- **A Mermaid diagram and an EPUB book ask no other server either.** A
-  diagram's image node (`@{ img: ... }`), a picture in an HTML label and a
-  `themeCSS` url() were fetched while Mermaid laid the diagram out, and an
-  EPUB chapter loaded every picture, style sheet and font it named from
-  elsewhere. A diagram is now laid out in a frame of its own that fetches
-  nothing (Mermaid's `sandbox` level; `themeCSS` and `dompurifyConfig` can no
-  longer be set from a diagram), and its pictures from elsewhere are
-  placeholders like a Markdown file's. An EPUB chapter is drawn in a frame
-  that loads only the book's own files and sends no referrer; the reader says
-  when pictures were held, and *Load all remote images in this file* or the
-  setting draws it again with its pictures and style sheets (a url() in the
-  chapter's own styles and a font from elsewhere never load).
-- **Give a whole storage to people and groups.** A storage's page in the admin
-  panel has an **Access** section: pick a person or a group and a level, and
-  they reach every file and folder of the storage, however deep, on every
-  surface at once - the web interface, the desktop app, WebDAV, SFTP, FTPS,
-  NFS, the S3-compatible API and an AI agent. The level is changed in the row,
-  **Revoke all access** takes back the storage-wide assignments and leaves
-  every folder grant as it is, and where a folder grant and the storage's both
-  apply the higher one counts (nothing narrows access). With per-item access
-  control off the section says why nobody can be given the storage yet and
-  turns it on in place, asking first who keeps access. The explorer offers the
-  same on a storage row to whoever may manage it - an administrator, or a
-  person given the storage as owner (the storage list now says each caller's
-  level at every root, `storage_info[].perm`): **Access…** opens the access
-  dialog on the storage, with people and groups only - no link and no file
-  request. An assignment is an ordinary grant on the storage's root
-  (`POST /api/files/permissions {"path": "<storage>://"}`), so no table and no
-  route were added. **Folder access** and a group's page name such a grant
-  "Whole storage" instead of "/"
-  ([RBAC.md](./RBAC.md#a-whole-storage-for-people-and-groups)). Requested by
-  @gguglietti ([GitHub #117](https://github.com/BRF-Tech/filex/issues/117)).
-- **Nightly builds of the desktop app, every night: on
-  [filex.sh/nightly](https://filex.sh/nightly/) and the Snap Store's `edge`
-  channel.** Every night the nightly test run passes on a change, the desktop
-  app of that night is built for Windows (x64, arm64), macOS and Linux
-  (AppImage, `.deb`, `.rpm`; x64 and arm64) and goes to filex.sh/nightly, with
-  the night, the commit and the checksums, and as a snap to `edge` on x64 and
-  arm64: `sudo snap install filex-app --edge`. The last nights are kept on
-  ghcr.io (`ghcr.io/brf-tech/filex-desktop-nightly`). Its version names the
-  night and the commit (`0.57.0-nightly.20261014+2ca25999`). A nightly is not
-  supported and not signed; try it on a copy of your data
-  ([INSTALLATION.md](./INSTALLATION.md#nightly-builds)).
-
-- **What a nightly image is, read off the image.** `ghcr.io/brf-tech/filex:nightly`
-  now carries labels for the public commit it was built on
-  (`sh.filex.nightly.public-base`) and its night's test result
-  (`sh.filex.nightly.tests`) beside its commit, and a new
-  [Nightly builds](./INSTALLATION.md#nightly-builds) section says how to
-  try one, how to read which commit it is, and why it is not for the data you
-  keep.
-- **Search settings in the admin panel.** Whether filex reads the text inside
-  files, the largest file it reads, how much memory indexing may take and
-  whether an outdated index is repaired at startup are now settings an
-  administrator changes on **Admin → Settings → General** (the Search index
-  page links there; and through
-  `GET`/`PATCH /api/admin/search/settings` and the admin MCP tools
-  `admin_search_settings_get` / `_update`), instead of variables that need a
-  restart. The first three apply at once. `FILEX_SEARCH_CONTENT`,
-  `FILEX_SEARCH_CONTENT_MAX`, `FILEX_SEARCH_MEMORY_PERCENT` and
-  `FILEX_SEARCH_AUTO_REBUILD` (and their `config.yaml` keys) give these
-  settings their first value and are ignored after that, so an upgrading
-  install keeps what it had set
-  ([SEARCH.md](./SEARCH.md#configuration)). Follows up
-  [GitHub #115](https://github.com/BRF-Tech/filex/issues/115) (task #261).
-- **An AI assistant in the explorer.** The disabled "coming soon" button is
-  gone; in its place, once an administrator sets it up on **Admin → Settings
-  → AI assistant**, is an assistant that finds, reads, summarises, tidies up
-  and moves files - against **Anthropic** (Claude), **OpenAI** or any
-  OpenAI-compatible server (OpenRouter, vLLM, LM Studio), or a local
-  **Ollama** that keeps everything on your network. It works through filex's
-  own MCP tools, called inside the server **as the person who asks** - their
-  folder access, the `files.download` rule, their tenant and their root, no
-  key minted for it. Its panel streams the reply, shows every step a tool
-  took and takes the selection as context. A change that can be undone
-  (move, rename, copy, write, delete to the trash) happens at once with an
-  **Undo**; one that cannot (a public or upload link, an access change, a
-  delete with no trash) waits on an **approval card**. Encrypted folders,
-  `.fxe` files and the vault never reach a model - refused before the tool
-  runs and taken out of every listing - and every file content sent is in the
-  audit log (`assistant.content_sent`: who, which file, which provider and
-  model). **The assistant comes off; its new permission comes on for
-  everyone.** `ai.assistant` says who gets the button: every preset holds
-  it, and the first start of this version gives it to every saved role,
-  custom ones included - once, so a role an administrator takes it away from
-  keeps it away ([PERMISSIONS.md](./PERMISSIONS.md#things-to-know)).
-  *Hide the button* closes the assistant for everybody and keeps the
-  settings. The API key is
-  sealed with `FILEX_SECRET_KEY` and never shown again; tool steps, reply
-  length, a token budget per request, a timeout and a per-person rate are
-  limits on the same page. Conversations are kept per person on the server
-  for a set number of days (30 by default) and can be deleted from **User
-  settings → AI assistant**. The settings are also `GET`/`PATCH /api/admin/assistant` and the admin MCP tools `admin_ai_assistant_get` /
-  `_update` / `_test` ([AI-ASSISTANT.md](./AI-ASSISTANT.md)) (task #269).
-- **An app that edits a CSV is told how the file is written, and may say how
-  its save is.** `file.read` of a `.csv` answers `text_dialect`
-  (`{delimiter, bom, crlf, encoding}`, read by the server from the file; text
-  is decoded in the file's own encoding), and `file.save` takes
-  `csv: {delimiter, encoding, bom, eol}`, which the server checks against the
-  bytes. Apps written before it keep working: the server reads the bytes
-  either way
-  ([APP-PLUGINS-API.md → CSV files: how they are written](./APP-PLUGINS-API.md#csv-files-how-they-are-written)).
-- **Office conversions and office thumbnails without a Document Server.** The
-  Office editor app brings an office engine - ONLYOFFICE's converter and page
-  layout, compiled to WebAssembly - and filex runs it on the server: the
-  conversions apps ask for (`engines:office`: the Convert app, MCP's
-  `file_convert`) and the thumbnails of office documents, the work a Document
-  Server did. Apps need no change. filex runs the engine in a process of its
-  own (`filex office-engine`, with no network and none of filex's
-  environment), never inside its own binary; the engine comes with the app's
-  release as `engine.zip`, pinned by its manifest's new `engines.office` block
-  (derived permission `office-engine`); the install wizard's **Upload files**
-  takes it in a field of its own beside the interface bundle, and says which
-  file a manifest names is not chosen before it uploads anything. It is compiled once in the background
-  after the app is installed or updated, or filex is - 3.5 to 5 minutes, then
-  about a second from the cache in `<data dir>/office-engine/` - and is
-  *being prepared* meanwhile: a connected Document Server takes the work, and
-  without one a conversion fails as `office_preparing` and thumbnails wait.
-  When both are there, **Admin → Plugins → Default apps → Office engine**
-  chooses (the app's engine first by default) and shows how each stands
-  (`GET /api/admin/file-types` → `engines`, `PUT`/`DELETE /api/admin/file-types/engines/office`). The thumbnail drawer stays
-  ONLYOFFICE whichever back end draws, so existing pictures stay valid.
-  `FILEX_OFFICE_ENGINE_MAX_MB` (default 2048, 512 to 4096) caps the memory of
-  each of its modules; a process holding about twice that is ended on Linux
-  and Windows. Documents with SVG, EMF or WMF pictures, HTML to Markdown and
-  text in legacy code pages convert as a Document Server converts them; a
-  picture or style sheet a document links from another server is left out,
-  as a Document Server without a network leaves it, and nothing is fetched
-  ([ONLYOFFICE.md → The office engine without a Document Server](./ONLYOFFICE.md#the-office-engine-without-a-document-server),
-  [APP-PLUGINS-API.md → An app's office engine](./APP-PLUGINS-API.md#an-apps-office-engine-enginesoffice-057)).
-  The app kit's test host gains `PrepareOfficeEngine()`
-  ([PLUGIN-KIT.md → The office engine](./PLUGIN-KIT.md#the-office-engine)).
-- **Desktop: "Open with filex" takes every kind of file an app on your
-  servers opens.** A server with an app that opens PSD files opens a `.psd`
-  double-clicked on your own disk, in that app, with the same working copy and
-  write-back as an office document. The desktop asks every server it is signed
-  in to which kinds its apps open (their `viewer` views, Default apps'
-  switches and order included) at start, on an account change, every half
-  hour, when its window comes to the front and before a double-click; a
-  server that cannot be asked keeps what it said last. The installed Windows
-  app adds those kinds to "Open with" under the user's own hive (ProgId
-  `filex.AppDocument`) and takes them back when no server opens them, the
-  uninstaller removing them all; the `.deb`, `.rpm` and AppImage write a
-  hidden desktop entry and, for an extension the system has no type for, a
-  type of filex's own at a lower weight than a system one, removed with the
-  package. macOS, the Microsoft Store package and the snap, which cannot add a
-  type while they run, declare every kind the app store's apps open, at build
-  time, from the store's signed catalog (`desktop/build/app-kinds.json`,
-  `pnpm --dir desktop app-kinds:refresh`; the release audit checks it). Where
-  more than one server opens a kind the desktop asks which, and can remember
-  it; where none does it says so, and nothing is uploaded. filex never makes
-  itself the default for a kind. *App settings → Open documents with filex* shows
-  *Kinds filex opens: N, from the apps on your servers*, the list, and
-  **Refresh**
-  ([DESKTOP.md → Which kinds open with filex, and where](./DESKTOP.md#which-kinds-open-with-filex-and-where)).
-- **Desktop: "Open with filex" takes a large file, up to the server's own
-  limit.** The working copy goes up the way the explorer sends a large file -
-  from 8 MiB in parts, over the staged upload, the server checking its hash -
-  and the saved version comes back in ranged parts; a dropped connection costs
-  one part (the server says where to go on from), and a file saved again while
-  it comes back is taken whole. The 256 MB ceiling of the app's own is gone:
-  the limit is the server's `max_upload_size`.
-- **Desktop: "Open with filex" moves a large file without holding it in
-  memory.** The working copy goes up read from the document one part at a
-  time, and a save comes back streamed into a file in the app's data folder
-  (`openwith-spool`), hashed as it arrives and checked again as it replaces the
-  document; memory stays at a few parts whatever the size of the file. A
-  document saved again while it goes up is not committed half old and half
-  new: that upload is dropped and the document sent again
-  ([DESKTOP.md → What happens to the file](./DESKTOP.md#what-happens-to-the-file)).
-- **Desktop: "Open with filex" opens a kind in the app you chose for it.**
-  Where a server has more than one app for a kind, the account's own
-  **Always open with** choice - the one the browser follows - comes before
-  the administrator's Default apps order, as it does in the browser; an app
-  switched off for the kind is still not taken. On Linux an extension the
-  system gives several media types (`.otf`: a font and an OpenDocument
-  formula template) is registered for the ones the app says it opens.
-- **An app saves a legacy document beside it, as a Document Server's save
-  is.** The Office editor opens a `.doc`, `.xls` or `.ppt` and writes OOXML;
-  it says so (`file.save` `beside: 'docx'`), and filex writes the save
-  beside the file, which is left as it was, under a name filex chooses
-  (`rapor.docx`, `rapor (2).docx` when that is taken) and for a person who
-  may create files in that folder; the answer says where it went
-  (`{saved, name, beside}`), the person is told in the bell, the audit log
-  writes `file.app_saved_beside`, and later saves of the same opening go to
-  that file - in an editing session for every member (the session records
-  it: migration 00133). One writer for both editors: the Document Server's
-  callback now calls the same code (`internal/officesave`)
-  ([APP-PLUGINS-API.md → Saving beside the file, conflict copies](./APP-PLUGINS-API.md#saving-beside-the-file-conflict-copies)).
-- **A document changed while an app had it open gets a conflict copy, as
-  with a Document Server.** An app that asks for it (`file.save`
-  `conflict: 'copy'`) has a save of a file somebody else changed after it
-  was read written as `<name>.filex-conflict-<UTC time>.<ext>` beside it,
-  named in the answer, the other change kept; editing together, the
-  session's own record decides. Every read of an app's file names the
-  version handed over (`X-Filex-Version`), which the explorer sends back with
-  such a save. An app that does not ask (every app built for 0.56) gets the
-  0.56 answer, unchanged.
-- **The editor language fixed for everybody reaches the Office editor app
-  too.** The administrator's *Editor language* (External services →
-  ONLYOFFICE, `FILEX_ONLYOFFICE_LANG`) is handed to an app's interface as
-  `session.editor_lang`, read even with no Document Server configured
-  ([ONLYOFFICE.md → The editor's language](./ONLYOFFICE.md#the-editors-language)).
-- **Dictionaries for the office editor's other languages.** The languages
-  the app's release offers are listed on its page, *Admin → Plugins → Apps →
-  the app → Dictionaries*, and **Install** downloads one, every file checked
-  against the release's sha256 (the manifest's `ui.extras.dictionaries.catalog`,
-  a `filex-extras/1` catalog; `GET …/extras-catalog/{kind}`, `POST …/extras-catalog/{kind}/{item}`). Any other Hunspell dictionary (`.aff`,
-  `.dic`, `hyph_<lang>.dic`) can be uploaded there. The section shows only
-  for an app whose manifest names the kind (`ui.extras`): draw.io has none.
-  The editor checks that language from then on. The files are the app's, kept outside its
-  signed package: an upgrade keeps them, removing the app removes them. The
-  app's interface reads them under its own package address
-  (`extra/dictionaries/<lang>/<file>.txt`) with the `ui:package-fetch` grant
-  it already has; the install review's sentence for that grant now says so.
-  `GET /api/admin/app-plugins/{id}/extras`, `PUT` / `DELETE …/extras/<path>`; a change needs a signed-in administrator and is audited
-  (`app_plugin.extra_add`, `app_plugin.extra_remove`)
-  ([APP-PLUGINS.md → Dictionaries for the office editor](./APP-PLUGINS.md#dictionaries-for-the-office-editor)).
-- **A CSV in Greek (Windows-1253) or Baltic (Windows-1257) is recognised.**
-  The code page of a `.csv` is judged from its letters, now also by how well
-  they read as one language's alphabet, so a Lithuanian, Latvian or Greek
-  file opens with its own letters and is saved back in its page; Western,
-  Turkish, Central European and Cyrillic files are judged as before.
-- **Desktop: "Open with filex" edits in the Office editor app when the
-  server has no Document Server.** A Word, Excel, PowerPoint, OpenDocument,
-  RTF or CSV file double-clicked on your own disk opens in the app's editor
-  (`/files/edit?…&app=office-editor/editor`) whenever no ONLYOFFICE Document
-  Server answers and the app opens that type - also where a person or an
-  administrator once picked filex's own viewer, which cannot edit an office
-  document without a Document Server. With a Document Server the window opens
-  what it opened before, and an app an administrator switched off for a type
-  stays off. An edited `.doc`, `.xls` or `.ppt` comes home beside the document
-  as `rapor.docx` (`rapor (2).docx` when taken), the window's later saves over
-  that same file, as with a Document Server: the app's saves into the
-  desktop's working copy are taken as the Document Server's are
-  ([DESKTOP.md → Opening documents from your computer](./DESKTOP.md#opening-documents-from-your-computer)).
-- **An office document opens in the Office editor app, in the browser as on
-  the desktop, when there is no Document Server.** An earlier pick of
-  filex's own viewer for .docx and the rest - a person's "Always open with",
-  a Default apps rule, an "Open with" link - only said a Document Server is
-  missing; where an app opens the kind it is no longer chosen (it stays in
-  *Open with*). With a Document Server every pick holds as before.
-
-**This release has more to it than fits on one page.** The rest of the
-entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0570---2026-10-17).
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.57.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.57.0`
-
 ## Earlier releases
 
-The 140 releases before v0.57.0, in brief. Full notes are on GitHub.
+The 141 releases before v0.57.1, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.57.0](https://github.com/BRF-Tech/filex/releases/tag/v0.57.0) | 17 October 2026 | Office documents no longer need a Document Server: the Office editor app (0.4.0 or later) edits Word, Excel and PowerPoint in the browser and, on the server, converts them and draws their thumbnails with ONLYOFFICE's own… |
 | [v0.56.3](https://github.com/BRF-Tech/filex/releases/tag/v0.56.3) | 13 October 2026 | df, Explorer and Mountain Duck show the real disk instead of a made-up 1 PB: every surface that is asked how much room there is - SFTP, FTPS, NFS, WebDAV and filex mount - gives the same answer, the storage's own disk (or the… |
 | [v0.56.2](https://github.com/BRF-Tech/filex/releases/tag/v0.56.2) | 12 October 2026 | Video, audio and PDF thumbnails read a file on a local storage in place instead of copying it whole to the temp directory first, so a folder of films no longer fills /tmp, and the copies a killed process left behind are removed… |
 | [v0.56.1](https://github.com/BRF-Tech/filex/releases/tag/v0.56.1) | 12 October 2026 | Every table in the product lays each row out under its name when its pane is too narrow to be a table - the details panel, the explorer on a phone or in a narrow pane, an admin page on a phone - instead of cutting the values to… |
@@ -1621,4 +1402,4 @@ The 140 releases before v0.57.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-11-20 from 160 published releases.</small>
+<small>Last refreshed 2026-11-27 from 161 published releases.</small>

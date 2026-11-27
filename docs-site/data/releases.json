@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-11-20",
+  "generatedAt": "2026-11-27",
   "releases": [
+    {
+      "tag": "v0.62.0",
+      "date": "2026-11-27T06:54:24Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.62.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Added\n\n- **MCP clients connect with OAuth: the MCP address and a browser sign-in,\n  no API key to paste** (task #374; thanks @benjaminstary, #140/#141). A\n  client that takes only a server URL (Confer was the one asked for) finds\n  filex's authorization server from a `401` on `/api/ai/mcp`, registers\n  itself, opens the browser on filex's own sign-in (a password, LDAP, or an\n  identity provider such as Pocket ID: nothing changes there), and the\n  person sees which app asks, at which address, as which account, for what,\n  and where the browser goes back to, before **Allow access**. The client\n  gets an hour-long key of the person's, labelled **MCP OAuth: \\<client\\>**\n  among their API keys, that opens `/api/ai/mcp` and nothing else, and a\n  refresh token that rotates (an old one coming back revokes the\n  connection). Authorization Code with S256 PKCE only, the exact registered\n  callback (a loopback one on any port), `read mcp` unless the client asks\n  for `write`, `delete` or a `root:` folder - never beyond what the person\n  may do, never `admin`; a connection lasts 30 days, and removing its key\n  ends it. On a **multi-tenant** install every address is its own issuer:\n  the platform's and each tenant's own, and a client, a code or a key made\n  at one is refused at every other; a sign-in handed to a tenant's address\n  takes the waiting connection along. Discovery (RFC 9728, RFC 8414),\n  dynamic registration (RFC 7591), revocation (RFC 7009), resource\n  indicators (RFC 8707). The API key way is unchanged. Under a base path\n  the discovery documents come before the base (`/.well-known/oauth-*/filex`):\n  the Helm chart's Ingress routes them when `basePath` is set, and the\n  sub-path samples in DEPLOYMENT.md do.\n  [MCP.md → Connecting with OAuth](docs/MCP.md#connecting-with-oauth-browser-sign-in).\n\n### Fixed\n\n- **MCP works behind a reverse proxy on the same machine** (task #374).\n  Caddy or nginx in front of filex on `127.0.0.1` sends every request over a\n  loopback connection with the public host name, and the MCP SDK's\n  DNS-rebinding guard refused each one with `403 Forbidden: invalid Host\n  header` - after filex had accepted the key - so neither an API key nor an\n  OAuth client could use `/api/ai/mcp` there. The guard is off for this\n  endpoint: it answers nobody without an API key in a header, which a page\n  that rebinds a name to `127.0.0.1` cannot send; a request without one is\n  still a `401`.\n  [MCP.md → MCP endpoint](docs/MCP.md#mcp-endpoint-apiaimcp).\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0620---2026-11-27)\n\n- **Documentation** - <https://docs.filex.sh>\n- **Report a bug** - <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** - <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.62.0",
+        "ghcr.io/brf-tech/filex:full-v0.62.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 37
+    },
     {
       "tag": "v0.61.3",
       "date": "2026-11-20T06:07:11Z",

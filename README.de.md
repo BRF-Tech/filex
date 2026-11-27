@@ -16,6 +16,7 @@ SSO/LDAP, mandantenfähig, verschlüsselte Ordner, einbettbare Webkomponente, De
 
 [![Release](https://img.shields.io/github/v/release/BRF-Tech/filex?color=2f6ceb)](https://github.com/BRF-Tech/filex/releases)
 [![License: MIT](https://img.shields.io/github/license/BRF-Tech/filex?color=22c55e)](LICENSE)
+[![BRF-Tech/filex MCP server](https://glama.ai/mcp/servers/BRF-Tech/filex/badges/score.svg)](https://glama.ai/mcp/servers/BRF-Tech/filex)
 
 [English](README.md) · [Türkçe](README.tr.md) · **Deutsch** · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
