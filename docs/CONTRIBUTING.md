@@ -4128,6 +4128,32 @@ A workflow pushed ahead of its export goes red on GitHub (0.52.0).
     > the release's new strings got translated - over an hour on 0.52's
     > critical path.
 
+14. **Bring the listings outside filex to the release.** Nothing in the
+    train does these, and nothing reads them back:
+
+    - **The app-store pull requests that are still open** (CasaOS
+      IceWhaleTech/CasaOS-AppStore#1154, Umbrel getumbrel/umbrel-apps#6375):
+      one commit "filex: update to vX.Y.Z" on each pull request's branch,
+      from `deploy/{casaos,umbrel}` with the differences those copies keep
+      (Umbrel pins the image's index digest and keeps `releaseNotes: ""`;
+      CasaOS moves `version` and `update_at`). TrueNAS's own bot updates its
+      app; the Unraid template follows `:latest`.
+    - **The official MCP Registry** (`sh.filex/filex`): the published
+      `server.json` with the new `version` and its icon at the new tag, then
+      `mcp-publisher login dns --domain filex.sh` with the signing key from
+      the vault and `mcp-publisher publish`; read it back -
+      `GET https://registry.modelcontextprotocol.io/v0/servers/sh.filex%2Ffilex/versions/latest`
+      names the new version, `isLatest: true`.
+    - **The app store's validators** (apps.filex.sh): `filex-latest` and
+      `plugin-latest` on the new release, `filex-floor` on the previous
+      minor's last patch, and the same three tags in the operator's service
+      catalogue, so the catalogue keeps naming what runs.
+
+    > Why this is a numbered step: from 0.61.1 to 0.62.0 none of the three
+    > moved - the store pull requests and the registry stayed on 0.61.0 and
+    > the catalogue named validators two minors old - because they lived in
+    > a note about one release, not in this list.
+
 If something fails, fix forward - never delete a published tag.
 
 ### A server patch

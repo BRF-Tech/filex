@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Add user: Enter right after the username is filled in from the address
+  makes the account** (task #311). The form asks the server about the
+  address and the username while they are typed, and it asked first with
+  the username still empty ("Enter a username."). When the address's
+  suggestion then filled the username in, that answer stood under the new
+  name until the next check came back, and the form, which sends nothing
+  while a box says what is wrong, ignored an Enter pressed in that moment:
+  the dialog stayed open and nothing was made. An answer now counts only
+  while its box still holds the value it was about. The same in the profile
+  dialog, where **Save** stayed disabled for a corrected address or username
+  until its check returned.
+
 ## [0.62.0] - 2026-11-27
 
 ### Added

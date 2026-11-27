@@ -126,6 +126,7 @@ const inputValue = (w: VueWrapper, name: string) => (w.find(`input[name="${name}
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
+  checkAccount.mockImplementation(async () => ({}));
 });
 
 describe('Add user: a local account', () => {
@@ -220,6 +221,69 @@ describe('Add user: a local account', () => {
     expect(call.email).toBe('sso@corp.example');
     expect(call.password).toBeUndefined();
     expect(call.send_invite).toBeUndefined();
+  });
+
+  // Task #311 (Cypress spec 42, red on and off from 0.59.1): the address is
+  // checked with the username still empty - the server refuses that: "Enter a
+  // username." - and the address's suggestion fills the username in after
+  // that answer is back. The old answer stood under the suggested name until
+  // the next check came back, and the form, which sends nothing while a box
+  // says what is wrong, dropped the Enter pressed in that window: the dialog
+  // stayed open and nothing was made.
+  it('a suggestion that lands late keeps the name typed meanwhile, and the Enter that follows makes the account', async () => {
+    // The server's answer: an empty username is refused, a written one taken.
+    checkAccount.mockImplementation(async (q) =>
+      q.username !== undefined && !q.username.trim() ? { username: { error: 'username_invalid', message: 'Enter a username.' } } : {},
+    );
+    // Keyed by the address: a timer left by an earlier test asks too.
+    let land!: (s: { username: string; name: string }) => void;
+    const realSuggest = usersApi.suggest.getMockImplementation()!;
+    usersApi.suggest.mockImplementation((email: string) =>
+      email === 'late@corp.example' ? new Promise((r) => (land = r)) : realSuggest(email),
+    );
+    usersApi.create.mockResolvedValue({ id: 9, email: 'late@corp.example' });
+    const w = await openAdd();
+    await w.find('input[name="new-user-email"]').setValue('late@corp.example');
+    await byTestId(w, 'user-create-access-none').trigger('click');
+    // The address's check is back (the username was empty then); its
+    // suggestion is still on the way while the name is typed.
+    await suggested();
+    expect(checkAccount).toHaveBeenCalledWith({ email: 'late@corp.example', username: '', for: 'new' });
+    expect(usersApi.suggest).toHaveBeenCalledWith('late@corp.example');
+    await w.find('input[name="new-user-name"]').setValue('SSO Fixture');
+
+    land({ username: 'late', name: 'Late' });
+    usersApi.suggest.mockImplementation(realSuggest);
+    await flushPromises();
+    // The name typed by hand stays; the username the person left alone follows the address.
+    expect(inputValue(w, 'new-user-name')).toBe('SSO Fixture');
+    expect(inputValue(w, 'new-user-username')).toBe('late');
+    // RED before #311: "Enter a username." under the box that says "late".
+    expect(w.find('[data-testid="user-create-form"]').text()).not.toContain('Enter a username.');
+
+    // Enter, before the check of "late" has come back.
+    await byTestId(w, 'user-create-form').trigger('submit');
+    await flushPromises();
+    expect(usersApi.create).toHaveBeenCalledTimes(1);
+    expect(usersApi.create).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'late@corp.example', username: 'late', display_name: 'SSO Fixture', password: undefined }),
+    );
+    expect(w.find('dialog').attributes('open'), 'the dialog closed').toBeUndefined();
+  });
+
+  it('a refusal for the username that IS in the box still holds the form back', async () => {
+    checkAccount.mockImplementation(async (q) =>
+      q.username === 'admin' ? { username: { error: 'username_taken', message: 'The username admin is taken.' } } : {},
+    );
+    const w = await openAdd();
+    await w.find('input[name="new-user-email"]').setValue('new@corp.example');
+    await w.find('input[name="new-user-username"]').setValue('admin');
+    await byTestId(w, 'user-create-access-none').trigger('click');
+    await suggested();
+    expect(w.find('[data-testid="user-create-form"]').text()).toContain('The username admin is taken.');
+    await byTestId(w, 'user-create-form').trigger('submit');
+    await flushPromises();
+    expect(usersApi.create).not.toHaveBeenCalled();
   });
 
   it('says what the picked role gives', async () => {

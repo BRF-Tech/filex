@@ -10,7 +10,7 @@ import { useCapabilitiesStore } from '@/stores/capabilities';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import type { User, UserRole } from '@/api/types';
-import { accountChecker, foreignText, refusalField, type AccountCheckAnswer } from '@brftech/filex-core';
+import { accountChecker, foreignText, refusalField, refusalFor, type AccountCheckResult } from '@brftech/filex-core';
 import { AuthApi } from '@/api/auth';
 import { formatRelative } from '@/lib/format';
 
@@ -127,11 +127,22 @@ function scheduleSuggest(email: string) {
     }
   }, SUGGEST_DELAY_MS);
 }
-const checkedNew = ref<AccountCheckAnswer>({});
+/*
+ * ⚠⚠ The answer is kept with the values it was asked about, and a box says
+ * it only while it still holds them (core lib/accountRules `refusalFor`,
+ * task #311). The address is asked about with the username still empty -
+ * "Enter a username." - and the address's suggestion fills the username in a
+ * moment later: the old answer stood under the new name until the next one
+ * came back, and the form, which sends nothing while a box says what is
+ * wrong, dropped an Enter pressed in that window (Cypress spec 42, on and
+ * off from 0.59.1).
+ */
+const checkedNew = ref<AccountCheckResult | null>(null);
 const checkNewAccount = accountChecker((q) => AuthApi.checkAccount(q));
 watch([newEmail, newUsername], ([email, username]) => {
-  void checkNewAccount({ email, username, for: 'new' }).then((ans) => {
-    if (ans) checkedNew.value = ans;
+  const asked = { email, username, for: 'new' as const };
+  void checkNewAccount(asked).then((answer) => {
+    if (answer) checkedNew.value = { asked, answer };
   });
 });
 /** The server's sentence, isolated for the reader's direction. */
@@ -139,7 +150,7 @@ const serverSentence = (text: string | undefined): string => (text ? foreignText
 const newUsernameError = computed(() => {
   if (createRefusal.value?.field === 'username') return serverSentence(createRefusal.value.message);
   if (!newUsername.value.trim()) return '';
-  return serverSentence(checkedNew.value.username?.message);
+  return serverSentence(refusalFor(checkedNew.value, 'username', newUsername.value));
 });
 watch(newUsername, () => {
   if (createRefusal.value?.field === 'username') createRefusal.value = null;
@@ -168,7 +179,7 @@ const newEmailError = computed(() => {
   // Said while typing once something is typed, and for an empty box only
   // after a submit — an error on a box nobody has reached yet is noise.
   if (!createTried.value && !newEmail.value.trim()) return '';
-  return serverSentence(checkedNew.value.email?.message);
+  return serverSentence(refusalFor(checkedNew.value, 'email', newEmail.value));
 });
 
 function resetCreate() {
