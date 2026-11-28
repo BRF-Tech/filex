@@ -81,6 +81,39 @@ export function accountChecker(
   };
 }
 
+/** A check's answer together with the values it was asked about. */
+export interface AccountCheckResult {
+  asked: AccountCheckQuery;
+  answer: AccountCheckAnswer;
+}
+
+/**
+ * The server's sentence about `field`, said only while the box still holds
+ * the value the server judged (compared as the server stores it: trimmed,
+ * lower-case); a box that has changed since waits for its own answer.
+ *
+ * ⚠⚠ An answer is about the values it was ASKED about, not about whatever
+ * the box holds when it arrives (task #311). The Add user form asked about
+ * the address with the username still empty - refused, "Enter a username." -
+ * then the address's suggestion filled the username in, and the old refusal
+ * stood under the new name until the next check came back (the typing pause
+ * plus a round trip). A form sends nothing while a box says what is wrong
+ * with it, so an Enter pressed in that window did nothing, and the refusal
+ * was gone before anyone could read it: the dialog just stayed open (Cypress
+ * spec 42 went red on and off from 0.59.1). The save still judges every
+ * value, so a box with no answer yet holds nothing back.
+ */
+export function refusalFor(
+  result: AccountCheckResult | null | undefined,
+  field: 'email' | 'username',
+  value: string,
+): string {
+  if (!result) return '';
+  const asked = result.asked[field];
+  if (asked === undefined || normalizeUsername(asked) !== normalizeUsername(value)) return '';
+  return result.answer[field]?.message ?? '';
+}
+
 /**
  * The field a server refusal is about (`{error, message, field}` from
  * handlers/account_rules.go), so a form can put the server's sentence — it

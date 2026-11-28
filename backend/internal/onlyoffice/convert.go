@@ -266,9 +266,15 @@ type convertAnswer struct {
 
 // Converter talks to one document server.
 type Converter struct {
-	// DocumentServerURL is the document server's base address, as filex is
-	// configured with it. Results are only fetched from its origin.
+	// DocumentServerURL is the address filex reaches the document server at:
+	// requests go to it, and results are only fetched from its origin.
 	DocumentServerURL string
+	// BrowserURL is the document server's browser-facing address when filex
+	// reaches it at another one (GitHub #143), "" otherwise. A result named
+	// under it is fetched from DocumentServerURL instead (onDocumentServer):
+	// a document server behind a proxy may name its results on the address
+	// the proxy gives it.
+	BrowserURL string
 	// Secret signs every request; empty sends them unsigned (only the
 	// reverse-path probe's JWT question does).
 	Secret string
@@ -391,10 +397,11 @@ func (c *Converter) FetchResult(ctx context.Context, res *ConvertResult, maxByte
 	if res == nil || res.FileURL == "" {
 		return nil, transient("result", errors.New("no result"))
 	}
-	if !sameOrigin(res.FileURL, c.base()) {
+	fileURL, ok := onDocumentServer(res.FileURL, c.base(), c.BrowserURL)
+	if !ok {
 		return nil, transient("origin", ErrForeignOrigin)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, res.FileURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
 	if err != nil {
 		return nil, transient("result", err)
 	}
@@ -437,6 +444,48 @@ func sameOrigin(raw, base string) bool {
 	return strings.EqualFold(u.Scheme, b.Scheme) &&
 		strings.EqualFold(u.Hostname(), b.Hostname()) &&
 		effectivePort(u) == effectivePort(b)
+}
+
+// onDocumentServer answers the address filex fetches raw from - raw itself
+// when it is on base's origin (the address filex reaches the document server
+// at), raw moved onto base when it is under browser (the document server's
+// browser-facing address, when it differs: GitHub #143) - or false for an
+// address anywhere else, which is never fetched.
+//
+// ⚠ Moved, never fetched as given. The document server builds a result's or
+// a saved document's address from the request it answers, and an editor's
+// session reaches it through the browser's address: behind a proxy that ends
+// TLS that is https://office.example.com, which the filex container may not
+// reach at all. Fetching from base keeps the request on the address the
+// administrator gave filex for it (the ONLYOFFICE connector for Nextcloud
+// does the same, ReplaceDocumentServerUrlToInternal). Only what is under
+// browser's path is moved; the rest of that origin is not the document
+// server's.
+func onDocumentServer(raw, base, browser string) (string, bool) {
+	if sameOrigin(raw, base) {
+		return raw, true
+	}
+	if browser == "" || !sameOrigin(raw, browser) {
+		return "", false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", false
+	}
+	b, err := url.Parse(browser)
+	if err != nil {
+		return "", false
+	}
+	prefix := strings.TrimRight(b.EscapedPath(), "/")
+	p := u.EscapedPath()
+	if prefix != "" && p != prefix && !strings.HasPrefix(p, prefix+"/") {
+		return "", false
+	}
+	out := strings.TrimRight(base, "/") + strings.TrimPrefix(p, prefix)
+	if u.RawQuery != "" {
+		out += "?" + u.RawQuery
+	}
+	return out, true
 }
 
 func effectivePort(u *url.URL) string {

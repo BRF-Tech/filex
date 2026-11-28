@@ -112,7 +112,8 @@ func (s *Service) Converter(ctx context.Context) (*Converter, error) {
 	if u == "" || secret == "" {
 		return nil, ErrNotConfigured
 	}
-	return &Converter{DocumentServerURL: u, Secret: secret}, nil
+	base, browser := s.serverBase(ctx)
+	return &Converter{DocumentServerURL: base, BrowserURL: browser, Secret: secret}, nil
 }
 
 // ── what the door answered a purpose's fetch ────────────────────────────

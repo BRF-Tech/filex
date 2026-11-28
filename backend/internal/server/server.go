@@ -781,6 +781,15 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// `external_services` table on every use, so what the admin UI saves is
 	// what the running process does.
 	extResolver := external.New(store)
+	// The addresses filex itself reaches the services at, when they are not
+	// the rows' (GitHub #143): the resolver hands them to the document
+	// server's client, the capability probe asks there.
+	internalURLs := cfg.ExternalServices.InternalURLs()
+	for name, u := range internalURLs {
+		slog.Info("external service: filex reaches it at its internal address", slog.String("name", name), slog.String("internal_url", u))
+	}
+	extResolver.SetInternalURLs(internalURLs)
+	caps.SetInternalURLs(internalURLs)
 
 	// OnlyOffice integration.
 	//
@@ -813,6 +822,11 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// hostname fixes it in the admin page rather than in a restart.
 	ooSvc.LiveCallbackURL = func(ctx context.Context) string {
 		return extResolver.Get(ctx, external.OnlyOffice).CallbackURL
+	}
+	// The address filex's own requests go to (GitHub #143): conversions,
+	// thumbnails, the Test's questions, the download of a saved document.
+	ooSvc.LiveInternalURL = func(ctx context.Context) string {
+		return extResolver.Get(ctx, external.OnlyOffice).InternalURL
 	}
 	// The editor's language (onlyoffice/lang.go): the administrator's setting,
 	// read live like the URL, and the instance's language for a person who

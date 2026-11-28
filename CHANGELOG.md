@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.62.1] - 2026-11-28
+
+### Fixed
+
+- **Add user: Enter right after the username is filled in from the address
+  makes the account** (task #311). The form asks the server about the
+  address and the username while they are typed, and it asked first with
+  the username still empty ("Enter a username."). When the address's
+  suggestion then filled the username in, that answer stood under the new
+  name until the next check came back, and the form, which sends nothing
+  while a box says what is wrong, ignored an Enter pressed in that moment:
+  the dialog stayed open and nothing was made. An answer now counts only
+  while its box still holds the value it was about. The same in the profile
+  dialog, where **Save** stayed disabled for a corrected address or username
+  until its check returned.
+- **draw.io and ONLYOFFICE work behind a reverse proxy that ends TLS**
+  ([#143](https://github.com/BRF-Tech/filex/issues/143)). A service had one
+  URL, used both by the browser (the draw.io frame, ONLYOFFICE's `api.js`)
+  and by filex's own requests, so a setup where the browser opens
+  `https://draw.example.com` and the filex container reaches
+  `http://drawio:8080` could not be expressed: an `http://` URL is refused by
+  the browser on an `https://` page, and the proxy's redirect to `https://`
+  sent filex's check to the proxy, where it failed on its certificate or name.
+  `FILEX_DRAWIO_INTERNAL_URL` and `FILEX_ONLYOFFICE_INTERNAL_URL` give the
+  address filex reaches the service at: the health check and *Test now*, and
+  for ONLYOFFICE the conversions, office thumbnails, the Test's route back and
+  the download of a saved document go there, while everything the browser
+  loads keeps the service's URL. A saved document or a conversion result the
+  Document Server names on its browser-facing address is downloaded from the
+  internal one; any other address is still refused. Unset, nothing changes. A
+  server check that fails after a redirect now says where the redirect went.
+  [CONFIGURATION.md → External services](docs/CONFIGURATION.md#external-services),
+  [ONLYOFFICE.md → When filex needs a different address for the Document Server](docs/ONLYOFFICE.md#when-filex-needs-a-different-address-for-the-document-server).
+
 ## [0.62.0] - 2026-11-27
 
 ### Added

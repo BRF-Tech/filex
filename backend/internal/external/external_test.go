@@ -119,3 +119,37 @@ func TestCallbackURL_RoundTrip(t *testing.T) {
 	// An unreadable blob still yields a working server, just no callback URL.
 	require.Equal(t, "", external.CallbackURLFromOptions(`{oops`))
 }
+
+// GitHub #143: the address filex reaches a service at, when it is not the
+// row's URL (FILEX_ONLYOFFICE_INTERNAL_URL, FILEX_DRAWIO_INTERNAL_URL). URL
+// stays the browser's; ServerURL is where filex's own requests go.
+func TestInternalURL_ServerURLIsTheInternalAddressAndURLStaysTheBrowsers(t *testing.T) {
+	ctx := context.Background()
+	_, store := dbtest.NewTestDB(t)
+	require.NoError(t, store.UpsertExternalService(ctx, external.Drawio,
+		true, "https://draw.example.com/", "", "{}", time.Time{}, "ok"))
+	require.NoError(t, store.UpsertExternalService(ctx, external.OnlyOffice,
+		true, "https://office.example.com", "s3cr3t", "{}", time.Time{}, "ok"))
+	r := external.New(store)
+
+	got := r.Get(ctx, external.Drawio)
+	require.Empty(t, got.InternalURL, "none given: none")
+	require.Equal(t, "https://draw.example.com", got.ServerURL(), "and filex's requests go to the URL, as before")
+
+	r.SetInternalURLs(map[string]string{external.Drawio: " http://drawio:8080/ ", external.OnlyOffice: ""})
+	got = r.Get(ctx, external.Drawio)
+	require.Equal(t, "https://draw.example.com", got.URL, "the browser's address")
+	require.Equal(t, "http://drawio:8080", got.InternalURL)
+	require.Equal(t, "http://drawio:8080", got.ServerURL())
+	require.Equal(t, "https://draw.example.com", r.URL(ctx, external.Drawio), "URL is what the browser is handed")
+
+	oo := r.Get(ctx, external.OnlyOffice)
+	require.Empty(t, oo.InternalURL, "a blank value is no address")
+	require.Equal(t, "https://office.example.com", oo.ServerURL())
+
+	// Switched off is off, whatever the variable says.
+	require.NoError(t, store.UpsertExternalService(ctx, external.Drawio,
+		false, "https://draw.example.com", "", "{}", time.Time{}, "disabled"))
+	r.Invalidate()
+	require.False(t, r.Get(ctx, external.Drawio).Enabled)
+}

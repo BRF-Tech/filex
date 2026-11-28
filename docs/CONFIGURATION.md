@@ -848,9 +848,23 @@ run `filex settings reseed --external` and restart
 | `FILEX_ONLYOFFICE_URL` | ONLYOFFICE Document Server URL - optional: the [Office editor app](ONLYOFFICE.md#the-office-editor-app) edits office documents without one (see [ONLYOFFICE.md](ONLYOFFICE.md)) |
 | `FILEX_ONLYOFFICE_JWT` | Shared JWT secret - must match the Document Server |
 | `FILEX_ONLYOFFICE_CALLBACK_URL` | Address the Document Server uses to reach filex; empty means `FILEX_PUBLIC_URL`. Only needed when the browser's address and the container's address differ |
+| `FILEX_ONLYOFFICE_INTERNAL_URL` | The other direction: the address **filex** uses to reach the Document Server, when the browser's (`FILEX_ONLYOFFICE_URL`) is another - behind a reverse proxy that ends TLS, `https://office.example.com` for the browser and `http://onlyoffice` for the filex container. The health check, the Test, conversions, office thumbnails and the download of a saved document go there; the editor's `api.js`, the CSP and the capabilities keep the Document Server URL. Empty means the Document Server URL. Environment only, read at start; a value that is not an absolute http(s) address is logged and not used ([ONLYOFFICE.md → When filex needs a different address for the Document Server](ONLYOFFICE.md#when-filex-needs-a-different-address-for-the-document-server)) |
 | `FILEX_ONLYOFFICE_FRAME_ORIGIN` | The Document Server's own origin (`https://docs.example.com`), whose reverse proxy sends `/filex-frame/*` to filex: the editor's `api.js` then runs in a frame there instead of in filex's page ([ONLYOFFICE.md → The editor in a frame of its own](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)). The same site as filex is fine. On that host filex answers `/filex-frame/editor` and nothing else. Read at start (not on the admin page); a value that is not an origin, filex's own or `FILEX_APP_UI_ORIGIN` stops the server. YAML: `external_services.onlyoffice.frame_origin` |
 | `FILEX_ONLYOFFICE_LANG` | The editor's language: `auto` (each person's own filex language) or a language the editor offers (`de`, `fr`, `tr`, `pt-PT`, `zh-TW`, ...) for everybody. Seeds the editor language of the ONLYOFFICE row when it has none (an admin-UI choice stands; `filex settings reseed --external` writes the variable's again); unset, *External services → ONLYOFFICE → Editor language* decides, `auto` by default. A value the editor does not offer is logged and ignored. YAML: `external_services.onlyoffice.editor_lang` ([ONLYOFFICE.md → The editor's language](ONLYOFFICE.md#the-editors-language)) |
-| `FILEX_DRAWIO_URL` | Drawio embed URL (diagram editing) |
+| `FILEX_DRAWIO_URL` | Drawio embed URL (diagram editing) - the browser's: the diagram editor's frame loads from it |
+| `FILEX_DRAWIO_INTERNAL_URL` | The address filex's health check (and *Test now*) reaches draw.io at, when the browser's (`FILEX_DRAWIO_URL`) is another - `http://drawio:8080` behind a proxy that serves `https://draw.example.com`. Empty means `FILEX_DRAWIO_URL`. Environment only, read at start; a value that is not an absolute http(s) address is logged and not used. The [draw.io app](APP-PLUGINS.md#the-apps-that-ship-alongside-filex) needs neither: it is served by filex itself |
+
+**One service, two addresses.** A service's URL is the address the **browser**
+uses: the draw.io frame and the ONLYOFFICE editor load from it, and the
+Content Security Policy and the capabilities carry it. Behind a reverse proxy
+that ends TLS, filex's own container usually reaches the same service
+somewhere else (a container or Service name, over plain HTTP), and an
+`http://` URL redirected to `https://` by the proxy does not work for either
+side: the browser refuses an `http://` frame on an `https://` page, and filex's
+requests follow the redirect back to the proxy. `FILEX_DRAWIO_INTERNAL_URL` and
+`FILEX_ONLYOFFICE_INTERNAL_URL` give filex that second address (with the Helm
+chart, through `extraEnv`); when the server's check fails after a redirect, its
+detail line says where the redirect went and names the variable.
 
 The same Document Server draws the thumbnails of office documents and runs the
 apps' office conversions, unless the office engine the Office editor app

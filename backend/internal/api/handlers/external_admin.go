@@ -425,6 +425,10 @@ func (h *ExternalAdmin) Test(w http.ResponseWriter, r *http.Request) {
 			// it, since that is what is being tested.
 			target = &onlyoffice.Target{
 				DocumentServerURL: vals.url, Secret: vals.secret, CallbackURL: vals.callback, Draft: true,
+				// The questions go where filex reaches the document server
+				// (FILEX_ONLYOFFICE_INTERNAL_URL, GitHub #143): the form's
+				// URL is the browser's.
+				InternalURL: h.Live.Get(r.Context(), name).InternalURL,
 			}
 		}
 		reverse = h.ReversePath(r.Context(), target)

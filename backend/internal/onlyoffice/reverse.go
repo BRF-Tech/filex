@@ -263,7 +263,11 @@ const (
 // Target is the configuration a reverse-path check runs against.
 type Target struct {
 	DocumentServerURL string
-	Secret            string
+	// InternalURL is the address filex reaches the document server at when
+	// it is not DocumentServerURL (GitHub #143): the questions go there.
+	// Empty means DocumentServerURL.
+	InternalURL string
+	Secret      string
 	// CallbackURL is the address the document server is sent to. Empty means
 	// filex's public URL, as for a document.
 	CallbackURL string
@@ -276,7 +280,11 @@ type Target struct {
 // LiveTarget is the configuration in force right now.
 func (s *Service) LiveTarget(ctx context.Context) Target {
 	u, sec := s.settings(ctx)
-	return Target{DocumentServerURL: u, Secret: sec, CallbackURL: s.callbackBase(ctx)}
+	in, browser := s.serverBase(ctx)
+	if browser == "" {
+		in = ""
+	}
+	return Target{DocumentServerURL: u, InternalURL: in, Secret: sec, CallbackURL: s.callbackBase(ctx)}
 }
 
 // askConvert posts one conversion request for a probe: the fixed text file
@@ -314,6 +322,11 @@ func (s *Service) CheckReversePath(ctx context.Context, t *Target) ReverseResult
 	docURL := strings.TrimRight(tgt.DocumentServerURL, "/")
 	if docURL == "" {
 		return ReverseResult{Detail: "the document server URL is not configured"}
+	}
+	// The questions are filex's own requests: to the internal address, when
+	// there is one (GitHub #143).
+	if in := strings.TrimRight(strings.TrimSpace(tgt.InternalURL), "/"); in != "" {
+		docURL = in
 	}
 	base := strings.TrimRight(tgt.CallbackURL, "/")
 	if base == "" {

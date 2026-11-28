@@ -71,7 +71,7 @@ import UploadersPanel from './UploadersPanel.vue';
 import { formatInstant, localeTag, useLocale } from '../composables/useLocale';
 import { useSystemDark } from '../composables/useSystemDark';
 import { DEFAULT_BRAND_NAME } from '../composables/usePublicBranding';
-import { accountChecker, refusalField, type AccountCheckAnswer } from '../lib/accountRules';
+import { accountChecker, refusalField, refusalFor, type AccountCheckResult } from '../lib/accountRules';
 import { foreignText } from '../lib/direction';
 import { availableLocales } from '../lib/uiLocales';
 import { gateOnService } from '../lib/serviceGate';
@@ -332,23 +332,26 @@ const savingProfile = ref(false);
  * "Ayşe Yılmaz!" as a username came back as raw English in a toast.
  */
 const serverRefusal = ref<{ field: string; message: string } | null>(null);
-const checked = ref<AccountCheckAnswer>({});
+// The answer is kept with what it was asked about: a box typed since says
+// nothing until its own answer comes (lib/accountRules `refusalFor`, #311).
+const checked = ref<AccountCheckResult | null>(null);
 const checkAccount = accountChecker((q) => props.host.api.checkAccount?.(q) ?? Promise.resolve({}));
 watch([email, username], ([e, u]) => {
   serverRefusal.value = null;
-  void checkAccount({ email: e, username: u }).then((ans) => {
-    if (ans) checked.value = ans;
+  const asked = { email: e, username: u };
+  void checkAccount(asked).then((answer) => {
+    if (answer) checked.value = { asked, answer };
   });
 });
 /** The server's sentence, isolated for the reader's direction. */
 const said = (text: string | undefined): string => (text ? foreignText(currentLocale.value, text) : '');
 const emailError = computed(() => {
   if (serverRefusal.value?.field === 'email') return said(serverRefusal.value.message);
-  return said(checked.value.email?.message);
+  return said(refusalFor(checked.value, 'email', email.value));
 });
 const usernameError = computed(() => {
   if (serverRefusal.value?.field === 'username') return said(serverRefusal.value.message);
-  return said(checked.value.username?.message);
+  return said(refusalFor(checked.value, 'username', username.value));
 });
 const profileInvalid = computed(() => !!emailError.value || !!usernameError.value);
 

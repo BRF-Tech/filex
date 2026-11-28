@@ -81,6 +81,13 @@ type Service struct {
 	// be — which is why a document opened and its save never came back with
 	// nothing in filex's log to show for it (issue #17).
 	LiveCallbackURL func(ctx context.Context) string
+	// LiveInternalURL, when non-nil, returns the address FILEX reaches the
+	// document server at, when it is not the configured URL
+	// (FILEX_ONLYOFFICE_INTERNAL_URL, GitHub #143). Empty means the URL. The
+	// URL stays the browser's (api.js, the editor config's documentServerUrl);
+	// every request the filex process makes to the document server goes
+	// through serverBase.
+	LiveInternalURL func(ctx context.Context) string
 	// LiveEditorLang, when non-nil, returns the administrator's editor
 	// language: "auto" (each person's own) or a fixed language (External
 	// services → ONLYOFFICE, FILEX_ONLYOFFICE_LANG). Read on every editor
@@ -264,6 +271,31 @@ func (s *Service) settings(ctx context.Context) (string, string) {
 		return strings.TrimRight(u, "/"), sec
 	}
 	return s.DocumentServerURL, s.JWTSecret
+}
+
+// serverBase is the address filex's OWN requests to the document server go
+// to: the internal address when one is set (GitHub #143), else the URL in
+// force. browser is that URL - the browser's, which api.js loads from - when
+// it differs from base, "" otherwise: the document server names its results
+// and saved documents on the origin the request it answers came in on, and
+// an editor's session comes in on the browser's (onDocumentServer).
+//
+// ⚠ Every request filex sends the document server - a conversion, a
+// thumbnail, the Test's questions, the download of a saved document - goes
+// through here. One that reads settings() directly works wherever the two
+// addresses agree, and fails on exactly the install behind a TLS-ending proxy
+// that set the internal address.
+func (s *Service) serverBase(ctx context.Context) (base, browser string) {
+	u, _ := s.settings(ctx)
+	if u == "" {
+		return "", ""
+	}
+	if s.LiveInternalURL != nil {
+		if in := strings.TrimRight(strings.TrimSpace(s.LiveInternalURL(ctx)), "/"); in != "" && in != u {
+			return in, u
+		}
+	}
+	return u, ""
 }
 
 // callbackBase is the base URL the document server is told to come back to:
@@ -623,6 +655,9 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 	if docURL == "" || secret == "" {
 		return nil, errors.New("onlyoffice: not configured")
 	}
+	// filex downloads the saved document itself, so from the address it
+	// reaches the document server at (GitHub #143).
+	serverURL, browserURL := s.serverBase(r.Context())
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
@@ -681,7 +716,11 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 	if p.URL == "" {
 		return map[string]any{"error": 1, "message": "missing url"}, nil
 	}
-	if !sameOrigin(p.URL, docURL) {
+	// The document server names the saved document on the origin the
+	// editor's session came in on - the browser's. With an internal address
+	// set, it is moved onto that one; anywhere else is refused.
+	savedURL, onServer := onDocumentServer(p.URL, serverURL, browserURL)
+	if !onServer {
 		slog.Warn("onlyoffice callback refused: "+errForeignSave.Error(),
 			slog.Int64("storage", node.StorageID), slog.String("path", node.Path))
 		return map[string]any{"error": 1, "message": errForeignSave.Error()}, nil
@@ -738,11 +777,11 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 		return answer, nil
 	}
 
-	req, err := http.NewRequestWithContext(r.Context(), "GET", p.URL, nil)
+	req, err := http.NewRequestWithContext(r.Context(), "GET", savedURL, nil)
 	if err != nil {
 		return map[string]any{"error": 1, "message": "fetch saved doc: bad url"}, nil
 	}
-	resp, err := savedClient(docURL).Do(req)
+	resp, err := savedClient(serverURL).Do(req)
 	if err != nil {
 		if errors.Is(err, errForeignSave) {
 			slog.Warn("onlyoffice callback refused: a redirect off the document server",

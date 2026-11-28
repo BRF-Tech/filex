@@ -3589,6 +3589,11 @@ Probes the service's health endpoint - `${url}/healthcheck` for `onlyoffice`,
 `${url}/healthz` for `convert`, the bare URL for `drawio` - for up to 5 s,
 stores the verdict on the row and returns
 `200 + { ok, name, reachable, url, state, detail }`. An unknown name is `404`.
+When `FILEX_ONLYOFFICE_INTERNAL_URL` or `FILEX_DRAWIO_INTERNAL_URL` is set
+(the address filex reaches the service at, when the browser's is another:
+[CONFIGURATION.md → External services](CONFIGURATION.md#external-services)),
+the probe and, for `onlyoffice`, the questions of `service_to_filex` go there
+instead of `${url}`; `url` in the answer stays the service's URL, the browser's.
 
 The body is optional. With none, the **saved** configuration is tested. With
 `{ "enabled", "url", "secret", "callback_url" }` (any of them, the same fields
@@ -3604,7 +3609,9 @@ the MCP tool `admin_external_test` takes the same optional body).
 `detail` is what the probe saw when the answer was not a healthy one, and is
 empty otherwise: `GET <url>/healthcheck returned HTTP 502`, `… no answer
 within 5s`, or the connection error (`… connection refused`, a DNS or TLS
-failure). A quick failure - a refused connection, an error status - is asked
+failure). A probe that was redirected says where: `GET <url> (redirected to
+<address>): …`, and for `drawio` and `onlyoffice` the detail then names the
+internal-address variable. A quick failure - a refused connection, an error status - is asked
 once more within the same 5 s, and the detail then ends with `(2 attempts)`;
 a probe that got no answer is not asked again (since 0.61.2). For
 `onlyoffice`, a 502/503/504 adds that the Document Server's web server

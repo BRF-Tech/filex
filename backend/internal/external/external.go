@@ -27,6 +27,16 @@
 // behaving exactly as before and an edit to FILEX_ONLYOFFICE_URL still takes
 // effect. Anything env does not pin is owned by the admin UI and applies live,
 // with no restart.
+//
+// # Two addresses, two readers (GitHub #143)
+//
+// A row's URL is the BROWSER's: the draw.io frame and ONLYOFFICE's api.js
+// load from it, and the CSP and the capabilities carry it. The filex process
+// may have to reach the same service somewhere else - behind a reverse proxy
+// that ends TLS the browser opens https://draw.example.com while the filex
+// container talks to http://drawio:8080. FILEX_ONLYOFFICE_INTERNAL_URL and
+// FILEX_DRAWIO_INTERNAL_URL give that address (Settings.InternalURL); every
+// request the filex process makes goes to Settings.ServerURL().
 package external
 
 import (
@@ -64,12 +74,32 @@ type Settings struct {
 	// came back (issue #17, third round). Stored in options_json so no
 	// migration is needed and the row keeps one shape.
 	CallbackURL string
+	// InternalURL is the address FILEX itself reaches the service at, when it
+	// is not URL (FILEX_ONLYOFFICE_INTERNAL_URL, FILEX_DRAWIO_INTERNAL_URL;
+	// GitHub #143). Empty means URL. URL stays the browser's; the health check
+	// and, for ONLYOFFICE, every conversion, thumbnail, Test question and the
+	// download of a saved document go to ServerURL().
+	//
+	// ⚠ It exists because one URL cannot be both when a reverse proxy ends
+	// TLS: an http address is refused by the browser on an https page (mixed
+	// content), and the https one is the proxy's, which the filex container
+	// may not reach or may not be meant to go through.
+	InternalURL string
 	// EditorLang is the administrator's ONLYOFFICE editor language: "" or
 	// "auto" (each person's own) or a language code, AS STORED - the
 	// onlyoffice package reads it (onlyoffice.NormalizeEditorLang) and treats
 	// anything it does not offer as "auto". Set on External services or by
 	// FILEX_ONLYOFFICE_LANG; in options_json like CallbackURL, so no migration.
 	EditorLang string
+}
+
+// ServerURL is the address filex's own requests to the service go to: the
+// internal address when one is set, else URL.
+func (s Settings) ServerURL() string {
+	if s.InternalURL != "" {
+		return s.InternalURL
+	}
+	return s.URL
 }
 
 // OptionKeyCallbackURL is where CallbackURL lives inside options_json.
@@ -166,6 +196,31 @@ type Resolver struct {
 	mu     sync.RWMutex
 	cache  map[string]Settings
 	loaded time.Time
+
+	// internal is the address filex reaches each service at when it is not
+	// the row's URL (SetInternalURLs), by service name.
+	internal map[string]string
+}
+
+// SetInternalURLs gives the addresses filex reaches the services at when they
+// are not the rows' URLs (FILEX_ONLYOFFICE_INTERNAL_URL,
+// FILEX_DRAWIO_INTERNAL_URL), by service name. Set once, at start, before the
+// resolver is asked; an empty value is no address. Each one applies while its
+// service is configured: a switched-off service is off whatever is set here.
+func (r *Resolver) SetInternalURLs(m map[string]string) {
+	if r == nil {
+		return
+	}
+	next := make(map[string]string, len(m))
+	for name, u := range m {
+		if u = strings.TrimRight(strings.TrimSpace(u), "/"); u != "" {
+			next[name] = u
+		}
+	}
+	r.mu.Lock()
+	r.internal = next
+	r.loaded = time.Time{}
+	r.mu.Unlock()
 }
 
 // New constructs a Resolver. A nil store yields a Resolver that reports
@@ -212,6 +267,9 @@ func (r *Resolver) Get(ctx context.Context, name string) Settings {
 		r.mu.RUnlock()
 		return s
 	}
+	r.mu.RLock()
+	internal := r.internal
+	r.mu.RUnlock()
 	next := make(map[string]Settings, len(rows))
 	for _, row := range rows {
 		if row == nil {
@@ -223,6 +281,7 @@ func (r *Resolver) Get(ctx context.Context, name string) Settings {
 			URL:         url,
 			Secret:      row.SecretEnc,
 			CallbackURL: CallbackURLFromOptions(row.OptionsJSON),
+			InternalURL: internal[row.Name],
 			EditorLang:  EditorLangFromOptions(row.OptionsJSON),
 		}
 	}
@@ -234,7 +293,7 @@ func (r *Resolver) Get(ctx context.Context, name string) Settings {
 }
 
 // URL is the convenience form for the services that need nothing but the base
-// URL (drawio). Empty when the service is not usable.
+// URL (drawio): the BROWSER's address. Empty when the service is not usable.
 func (r *Resolver) URL(ctx context.Context, name string) string {
 	return r.Get(ctx, name).URL
 }

@@ -18,7 +18,7 @@ environment:
       The address share links, upload links and emails point to. By default it's this Umbrel's local address. Set it, for example to https://files.example.com, if people open filex through another address.
 category: files
 name: filex
-version: "0.62.0"
+version: "0.62.1"
 tagline: Self-hosted file manager for all your storages
 description: >-
   Sign in with the username and password Umbrel shows for the app. filex opens on a Files folder that is ready for uploads, and you can add more storages from its admin panel.
@@ -41,9 +41,9 @@ description: >-
 
   - Word, Excel and PowerPoint files edited in the browser once you install the office editor app from filex's own app store
 releaseNotes: |-
-  filex v0.62.0 - 2026-11-27
-  • MCP clients connect with OAuth: the MCP address and a browser sign-in, no API key to paste
-  • MCP works behind a reverse proxy on the same machine
+  filex v0.62.1 - 2026-11-28
+  • Add user: Enter right after the username is filled in from the address makes the account
+  • draw.io and ONLYOFFICE work behind a reverse proxy that ends TLS
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 
 developer: BRF-Tech

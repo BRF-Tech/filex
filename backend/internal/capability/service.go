@@ -66,6 +66,41 @@ type Service struct {
 	// office engine comes and goes with the document server's configuration
 	// (0.50), which an administrator changes without a restart.
 	appPluginEngines func(context.Context) map[string]bool
+
+	// internal is the address filex reaches a service at when it is not the
+	// row's URL (SetInternalURLs, GitHub #143), by service name.
+	internal map[string]string
+}
+
+// SetInternalURLs gives the addresses the health probe reaches the services
+// at when they are not the rows' URLs (FILEX_ONLYOFFICE_INTERNAL_URL,
+// FILEX_DRAWIO_INTERNAL_URL), by service name - the same map the external
+// resolver is given. The row's URL stays the one the capabilities report: it
+// is the browser's.
+func (s *Service) SetInternalURLs(m map[string]string) {
+	next := make(map[string]string, len(m))
+	for name, u := range m {
+		if u = strings.TrimRight(strings.TrimSpace(u), "/"); u != "" {
+			next[name] = u
+		}
+	}
+	s.mu.Lock()
+	s.internal = next
+	s.cached = nil
+	s.mu.Unlock()
+}
+
+// probeAddress is the address the health probe asks a service at: its
+// internal address when one is set, else url (the row's, or the admin page's
+// unsaved one).
+func (s *Service) probeAddress(name, url string) string {
+	s.mu.RLock()
+	in := s.internal[name]
+	s.mu.RUnlock()
+	if in != "" {
+		return in
+	}
+	return url
 }
 
 // New constructs a Service.
@@ -181,7 +216,7 @@ func (s *Service) ProbeExternal(ctx context.Context, name string) (*model.Extern
 	if err != nil {
 		return nil, err
 	}
-	st := externalState(name, es.Enabled, es.URL, es.SecretEnc)
+	st := externalState(name, es.Enabled, es.URL, s.probeAddress(name, es.URL), es.SecretEnc)
 	_ = s.store.UpdateExternalServiceState(ctx, name, *st.LastCheck, st.State)
 	s.Invalidate()
 	return st, nil
@@ -192,11 +227,13 @@ func (s *Service) ProbeExternal(ctx context.Context, name string) (*model.Extern
 // saved address, not the one in the box) - and stores nothing: the row's
 // verdict stays about the row, and the configuration in force is untouched.
 func (s *Service) ProbeExternalValues(name string, enabled bool, url, secret string) *model.ExternalServiceState {
-	return externalState(name, enabled, url, secret)
+	return externalState(name, enabled, url, s.probeAddress(name, url), secret)
 }
 
-// externalState is the one verdict both probes give.
-func externalState(name string, enabled bool, url, secret string) *model.ExternalServiceState {
+// externalState is the one verdict both probes give. url is the service's
+// configured (browser) address, which the state reports; probe is where the
+// health check goes - the internal address when one is set (GitHub #143).
+func externalState(name string, enabled bool, url, probe, secret string) *model.ExternalServiceState {
 	now := time.Now()
 	st := &model.ExternalServiceState{
 		Enabled:   enabled,
@@ -216,7 +253,7 @@ func externalState(name string, enabled bool, url, secret string) *model.Externa
 		// thing here rather than probing and calling it healthy.
 		st.State = "unconfigured"
 	default:
-		if ok, detail := probeHTTPDetail(externalProbeURL(name, url)); ok {
+		if ok, detail := probeHTTPDetail(externalProbeURL(name, probe)); ok {
 			st.State = "ok"
 		} else {
 			st.State = "unreachable"
@@ -342,7 +379,7 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 				st.State = "unconfigured"
 				_ = s.store.UpdateExternalServiceState(ctx, es.Name, time.Now(), "unconfigured")
 			} else if es.Enabled && es.URL != "" {
-				if probeHTTP(externalProbeURL(es.Name, es.URL)) {
+				if probeHTTP(externalProbeURL(es.Name, s.probeAddress(es.Name, es.URL))) {
 					st.State = "ok"
 					_ = s.store.UpdateExternalServiceState(ctx, es.Name, time.Now(), "ok")
 				} else {
@@ -527,21 +564,42 @@ func probeHTTPDetail(rawURL string) (bool, string) {
 }
 
 // probeHTTPOnce is one attempt, given what is left of probeTimeout.
+//
+// It follows redirects, as it always has (a service that answers on its
+// canonical address keeps working). When the answer that failed came after
+// one, the detail says where the redirect went (GitHub #143): an http address
+// that a reverse proxy sends on to https is the shape behind most of them,
+// and "GET http://x: x509: ..." alone does not say that the request ever left
+// for https://x.
 func probeHTTPOnce(rawURL string, timeout time.Duration) (ok, timedOut bool, detail string) {
-	client := &http.Client{Timeout: timeout}
+	var redirectedTo string
+	client := &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			redirectedTo = req.URL.String()
+			return nil
+		},
+	}
+	what := "GET " + rawURL
 	resp, err := client.Get(rawURL)
+	if redirectedTo != "" {
+		what += " (redirected to " + redirectedTo + ")"
+	}
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			return false, true, fmt.Sprintf("GET %s: no answer within %s", rawURL, probeTimeout)
+			return false, true, fmt.Sprintf("%s: no answer within %s", what, probeTimeout)
 		}
-		return false, false, fmt.Sprintf("GET %s: %s", rawURL, probeErrorText(err))
+		return false, false, fmt.Sprintf("%s: %s", what, probeErrorText(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 == 2 {
 		return true, false, ""
 	}
-	return false, false, fmt.Sprintf("GET %s returned HTTP %d", rawURL, resp.StatusCode)
+	return false, false, fmt.Sprintf("%s returned HTTP %d", what, resp.StatusCode)
 }
 
 // probeErrorText drops the `Get "<url>": ` prefix net/http puts in front of
@@ -564,7 +622,20 @@ func externalProbeHint(name, detail string) string {
 	if name == "onlyoffice" && gatewayError.MatchString(detail) {
 		return detail + " - the document server's web server answered, but its docservice did not: run `supervisorctl status` in that container"
 	}
+	// A failure after a redirect (GitHub #143): the address the browser uses
+	// is not one filex can follow to the service. The internal address is
+	// the way to give filex its own.
+	if env := internalURLEnv[name]; env != "" && strings.Contains(detail, " (redirected to ") {
+		return detail + " - if filex reaches this service at another address than the browser does (a reverse proxy that ends TLS, a container name), set " + env + " to that address"
+	}
 	return detail
+}
+
+// internalURLEnv names the variable that gives each service the address
+// filex reaches it at (config.go), for the probe's hint.
+var internalURLEnv = map[string]string{
+	"onlyoffice": "FILEX_ONLYOFFICE_INTERNAL_URL",
+	"drawio":     "FILEX_DRAWIO_INTERNAL_URL",
 }
 
 // gatewayError matches the detail of a probe whose last answer was a

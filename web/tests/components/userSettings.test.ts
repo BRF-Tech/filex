@@ -588,6 +588,28 @@ describe('UserSettingsModal', () => {
     expect(updateProfile).not.toHaveBeenCalled();
   });
 
+  // Task #311: an answer is about the value it was asked about. A username
+  // put right after a refused one is not held back by the old answer while
+  // its own check is still on the way (the save judges it in any case).
+  it('a username corrected after a refusal is not judged by the old answer', async () => {
+    const auth = useAuthStore();
+    auth.user = NON_ADMIN;
+    updateProfile.mockResolvedValue({ ...NON_ADMIN, username: 'ayse' });
+    const w = mountModal();
+    await w.vm.$nextTick();
+
+    await w.find('[data-testid="profile-username"]').setValue('ayşe');
+    await checked();
+    expect(w.find('[data-testid="profile-username-error"]').exists()).toBe(true);
+
+    // No pause for the next check: RED before #311 (the refusal of "ayşe"
+    // stood under "ayse" and Save stayed disabled until the answer came).
+    await w.find('[data-testid="profile-username"]').setValue('ayse');
+    expect(w.find('[data-testid="profile-username-error"]').exists()).toBe(false);
+    await w.find('[data-testid="user-settings-save-profile"]').trigger('click');
+    expect(updateProfile).toHaveBeenCalledWith(expect.objectContaining({ username: 'ayse' }));
+  });
+
   it('puts a refusal the server still makes under the box it is about, not in a toast', async () => {
     const auth = useAuthStore();
     auth.user = NON_ADMIN;

@@ -198,8 +198,10 @@ export {
   accountChecker,
   normalizeUsername,
   refusalField,
+  refusalFor,
   type AccountCheckAnswer,
   type AccountCheckQuery,
+  type AccountCheckResult,
   type AccountFieldRefusal,
 } from './lib/accountRules';
 export { downscaleImageToDataURL, type DownscaleOptions } from './lib/imageDownscale';

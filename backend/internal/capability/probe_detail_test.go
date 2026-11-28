@@ -228,3 +228,46 @@ func TestService_SilentServicesStayInsideTheRefreshBound(t *testing.T) {
 	}
 	assert.Equal(t, int32(len(services)), hits.Load(), "one attempt per silent service")
 }
+
+// GitHub #143, the reporter's attempt: the service's URL set to http, which
+// the reverse proxy redirects to https. The probe follows the redirect and
+// fails there - here on the TLS certificate, as it does on a proxy's
+// certificate the filex container does not trust or a name it cannot
+// resolve - and the detail said only "GET http://...: tls: ...", as if the
+// http address itself had answered with TLS. It now says where the redirect
+// went and names the variable that gives filex an address of its own.
+func TestProbeHTTPDetail_AFailureAfterARedirectSaysWhereItWent(t *testing.T) {
+	tlsOnly := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer tlsOnly.Close()
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, tlsOnly.URL+r.URL.Path, http.StatusMovedPermanently)
+	}))
+	defer proxy.Close()
+
+	ok, detail := probeHTTPDetail(proxy.URL + "/")
+	require.False(t, ok, "the redirect target's certificate is not one this process trusts")
+	assert.Contains(t, detail, "GET "+proxy.URL+"/ (redirected to "+tlsOnly.URL+"/)", detail)
+	assert.Contains(t, detail, "certificate", detail)
+
+	hint := externalProbeHint("drawio", detail)
+	assert.Contains(t, hint, "FILEX_DRAWIO_INTERNAL_URL", hint)
+	assert.Contains(t, externalProbeHint("onlyoffice", detail), "FILEX_ONLYOFFICE_INTERNAL_URL")
+
+	// A redirect that ends well is no failure, and says nothing.
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/healthy", http.StatusFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer good.Close()
+	ok, detail = probeHTTPDetail(good.URL + "/")
+	assert.True(t, ok, detail)
+	assert.Empty(t, detail)
+
+	// No redirect, no hint: a plain refusal reads as before.
+	assert.NotContains(t, externalProbeHint("drawio", "GET http://127.0.0.1:1/: connect: connection refused"), "INTERNAL_URL")
+}

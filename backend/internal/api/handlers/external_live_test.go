@@ -74,6 +74,9 @@ func liveExternalServer(t *testing.T, cfgMutate func(*config.Config)) (*extHarne
 	var nodeID int64
 	srv, client, store := testutil.NewTestServerWith(t, cfgMutate, func(d *api.Deps) {
 		d.External = external.New(d.Store)
+		// As server.New: the addresses filex reaches the services at
+		// (FILEX_*_INTERNAL_URL, GitHub #143).
+		d.External.SetInternalURLs(d.Cfg.ExternalServices.InternalURLs())
 		oo := onlyoffice.New(d.Store, nil, d.Cfg.ExternalServices.OnlyOffice.URL,
 			d.Cfg.ExternalServices.OnlyOffice.JWTSecret, d.Cfg.PublicURL, 0)
 		oo.Live = func(ctx context.Context) (string, string) {
@@ -87,6 +90,9 @@ func liveExternalServer(t *testing.T, cfgMutate func(*config.Config)) (*extHarne
 		// address works while the product ignores it.
 		oo.LiveCallbackURL = func(ctx context.Context) string {
 			return d.External.Get(ctx, external.OnlyOffice).CallbackURL
+		}
+		oo.LiveInternalURL = func(ctx context.Context) string {
+			return d.External.Get(ctx, external.OnlyOffice).InternalURL
 		}
 		// The editor's language, as server.New wires it (onlyoffice/lang.go).
 		oo.LiveEditorLang = func(ctx context.Context) string {

@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -888,6 +889,13 @@ type OnlyOfficeConfig struct {
 	// resolve the public hostname had no way to express the difference and its
 	// saves were silently lost (issue #17).
 	CallbackURL string `yaml:"callback_url"`
+	// InternalURL is the address FILEX reaches the document server at, when
+	// it is not URL (GitHub #143, FILEX_ONLYOFFICE_INTERNAL_URL): URL is the
+	// browser's (api.js loads from it), and filex's own requests - the health
+	// check, conversions, thumbnails, the download of a saved document - go
+	// here. Empty means URL. Read from the environment alone, at start, and
+	// applied over the ONLYOFFICE row's URL for those requests.
+	InternalURL string `yaml:"-"`
 	// FrameOrigin is where the editor's frame is served (task #92,
 	// FILEX_ONLYOFFICE_FRAME_ORIGIN): normally the document server's own
 	// origin, whose reverse proxy sends /filex-frame/* to filex. The editor's
@@ -907,7 +915,42 @@ type OnlyOfficeConfig struct {
 
 // DrawioConfig — embed URL.
 type DrawioConfig struct {
+	// URL is the browser's: the diagram editor's frame loads from it.
 	URL string `yaml:"url"`
+	// InternalURL is the address filex's health check reaches draw.io at,
+	// when it is not URL (GitHub #143, FILEX_DRAWIO_INTERNAL_URL). Empty
+	// means URL. Read from the environment alone, at start.
+	InternalURL string `yaml:"-"`
+}
+
+// InternalURLs is the address filex reaches each external service at, when it
+// is not the one the browser uses (GitHub #143), by service name - the
+// `external_services` rows' names, "onlyoffice" and "drawio". Only the
+// services that have one are in it. The external resolver and the capability
+// probe are both given this one map.
+func (e ExtServices) InternalURLs() map[string]string {
+	out := map[string]string{}
+	if u := strings.TrimRight(strings.TrimSpace(e.OnlyOffice.InternalURL), "/"); u != "" {
+		out["onlyoffice"] = u
+	}
+	if u := strings.TrimRight(strings.TrimSpace(e.Drawio.InternalURL), "/"); u != "" {
+		out["drawio"] = u
+	}
+	return out
+}
+
+// envServiceURL is a service address given by the environment: an absolute
+// http(s) URL, without its trailing slash. Anything else is said once, here,
+// and read as no address - the admin page refuses the same shape, and a
+// typo in a variable must not look like "the setting does not work".
+func envServiceURL(name, raw string) string {
+	v := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if u, err := url.Parse(v); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		slog.Warn("config: "+name+" is not an absolute http(s) address and is not used - docs/CONFIGURATION.md#external-services",
+			slog.String("value", v))
+		return ""
+	}
+	return v
 }
 
 // Mermaid needs no external service — diagrams render client-side in the
@@ -1679,6 +1722,9 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_ONLYOFFICE_CALLBACK_URL"); v != "" {
 		c.ExternalServices.OnlyOffice.CallbackURL = v
 	}
+	if v := os.Getenv("FILEX_ONLYOFFICE_INTERNAL_URL"); strings.TrimSpace(v) != "" {
+		c.ExternalServices.OnlyOffice.InternalURL = envServiceURL("FILEX_ONLYOFFICE_INTERNAL_URL", v)
+	}
 	if v := os.Getenv("FILEX_ONLYOFFICE_FRAME_ORIGIN"); strings.TrimSpace(v) != "" {
 		c.ExternalServices.OnlyOffice.FrameOrigin = strings.TrimSpace(v)
 	}
@@ -1690,6 +1736,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_DRAWIO_URL"); v != "" {
 		c.ExternalServices.Drawio.URL = v
+	}
+	if v := os.Getenv("FILEX_DRAWIO_INTERNAL_URL"); strings.TrimSpace(v) != "" {
+		c.ExternalServices.Drawio.InternalURL = envServiceURL("FILEX_DRAWIO_INTERNAL_URL", v)
 	}
 	if v := os.Getenv("FILEX_SYNC_INTERVAL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {

@@ -206,6 +206,9 @@ func NewTestServerWith(t *testing.T, cfgMutate func(*config.Config), depsMutate 
 	if cfgMutate != nil {
 		cfgMutate(&cfg)
 	}
+	// The addresses the probe reaches the external services at, when they are
+	// not the rows' (FILEX_*_INTERNAL_URL), as internal/server.New gives them.
+	caps.SetInternalURLs(cfg.ExternalServices.InternalURLs())
 
 	// ⚠ The SAME line internal/server.New runs (server.go → AttachSecret). The
 	// instance secret signs the PIN unlock cookie and, since migration 00049,

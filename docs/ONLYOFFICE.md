@@ -262,7 +262,7 @@ That's it - reopen an Office file in filex and it should launch the editor.
 | Address | Who has to reach it | How it is checked |
 |---|---|---|
 | the **Document Server URL** | your **browser** - it loads the editor's JavaScript straight from there | the admin page probes it **from your browser** |
-| the same **Document Server URL** | the **filex process** - it polls `/healthcheck` | the **Test** button |
+| the same **Document Server URL**, or `FILEX_ONLYOFFICE_INTERNAL_URL` when it is set | the **filex process** - it polls `/healthcheck`, asks for conversions and thumbnails, downloads the saved document | the **Test** button |
 | the **callback URL** (or `FILEX_PUBLIC_URL` when it is empty) | the **Document Server** - it fetches the document and POSTs the save back | the **Test** button asks the Document Server to download a one-shot URL through filex's signed document fetch endpoint and reports whether it arrived and was served |
 | the Document Server's **converted copy** (`<document-server>/cache/files/.../Editor.bin`) | your **browser** again - after the Document Server has fetched and converted the document, the editor loads the converted copy from this address | not by the Test. The Document Server builds this address from the `Host`, `X-Forwarded-Host` and `X-Forwarded-Proto` headers it receives, so the reverse proxy in front of it has to pass them (see [The browser leg after the download](#the-browser-leg-after-the-download)). When the editor says "Download failed", filex says whether it got this far |
 
@@ -339,12 +339,50 @@ The same field is in the admin page under the Document Server URL, and applies
 live. Leave it empty - the default, and what every single-address install
 wants - and the public URL is used.
 
+### When filex needs a different address for the Document Server
+
+The other direction has the same problem. Behind a reverse proxy that ends
+TLS, your browser opens the Document Server at `https://office.example.com`,
+while the filex container reaches it at `http://onlyoffice` (a container or
+Service name, plain HTTP). One URL cannot be both: an `http://` address is
+refused by the browser on an `https://` page (mixed content), and the
+`https://` one is the proxy's, which the container may not resolve or trust.
+Setting the URL to `http://` and letting the proxy redirect to `https://` does
+not help either - the redirect sends filex's own requests back to the proxy,
+and the Test then fails on the proxy's certificate or name. Give filex its own
+address with **`FILEX_ONLYOFFICE_INTERNAL_URL`**:
+
+```bash
+FILEX_ONLYOFFICE_URL=https://office.example.com   # the browser: api.js, the editor
+FILEX_ONLYOFFICE_INTERNAL_URL=http://onlyoffice   # filex's own requests
+```
+
+With it set, everything the filex process sends the Document Server goes
+there - the health check and the Test, conversions, office thumbnails, the
+download of a saved document - and everything the browser loads stays on the
+Document Server URL (the editor's `api.js`, the editor configuration, the
+Content Security Policy, the capabilities the explorer reads). The Document
+Server names a saved document and a conversion's result on the address the
+request came in on, which for an editor session is the browser's; filex
+downloads such an address from the internal one instead, keeping its path and
+query, and still refuses an address on any other origin (the ONLYOFFICE
+connector for Nextcloud does the same with its "address for internal requests
+from the server").
+
+It is read from the environment at start and applies whether the Document
+Server was configured by `FILEX_ONLYOFFICE_URL` or on the admin page. Unset -
+the default - filex uses the Document Server URL for both, as before. A value
+that is not an absolute `http://` or `https://` address is logged at start and
+not used. A failed Test after a redirect now says where the redirect went
+(`GET http://… (redirected to https://…): …`) and names this variable.
+
 ## Configuration reference
 
 | Env var | `config.yaml` | Required | Description |
 |---|---|---|---|
 | `FILEX_ONLYOFFICE_URL` | `external_services.onlyoffice.url` | yes | Document Server base URL (e.g. `https://office.example.com`) |
 | `FILEX_ONLYOFFICE_JWT` | `external_services.onlyoffice.jwt_secret` | yes | Shared HS256 secret - identical to the Document Server's `JWT_SECRET` |
+| `FILEX_ONLYOFFICE_INTERNAL_URL` | - (environment only) | no | The address **filex** uses to reach the Document Server, when the browser's address (`FILEX_ONLYOFFICE_URL`) is another: the health check, the Test, conversions, thumbnails and saved-document downloads go there; the browser keeps the Document Server URL. Empty (the default) means the Document Server URL. Read at start - see [When filex needs a different address for the Document Server](#when-filex-needs-a-different-address-for-the-document-server) |
 | `FILEX_ONLYOFFICE_CALLBACK_URL` | `external_services.onlyoffice.callback_url` | no | The address the **Document Server** uses to reach filex. Empty (the default) means `FILEX_PUBLIC_URL`. Set it only when those two must differ - see [When the Document Server needs a different address](#when-the-document-server-needs-a-different-address-from-your-users) |
 | `FILEX_ONLYOFFICE_FRAME_ORIGIN` | `external_services.onlyoffice.frame_origin` | no (recommended) | The Document Server's own origin (`https://docs.example.com`), whose proxy sends `/filex-frame/*` to filex: the editor's `api.js` runs in a frame there, not in filex's page. Read at start - see [The editor in a frame of its own](#the-editor-in-a-frame-of-its-own) |
 | `FILEX_APP_UI_ORIGIN` | `app_ui_origin` | no | The origin app interfaces are served from; when `FILEX_ONLYOFFICE_FRAME_ORIGIN` is empty the editor's frame is served there |

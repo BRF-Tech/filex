@@ -92,13 +92,48 @@ describe('users: reset password from the list (issue #25)', () => {
     cy.get('input[placeholder]').filter(':visible').first().type(email);
     cy.contains('[role="row"]', email, { timeout: 10000 }).should('be.visible');
 
-    cy.apiLogin().then((tok) => {
-      cy.request({ url: `/api/admin/users?q=${encodeURIComponent(email)}`, headers: { Authorization: `Bearer ${tok}` } }).then((res) => {
-        const items = (res.body.items ?? res.body) as Array<{ id: number; email: string }>;
-        const u = items.find((x) => x.email === email);
-        expect(u, 'the account exists').to.exist;
-        cy.request({ method: 'DELETE', url: `/api/admin/users/${u!.id}`, headers: { Authorization: `Bearer ${tok}` }, failOnStatusCode: false });
-      });
+    removeAccount(email);
+  });
+
+  // Task #311: the test above went red on and off from 0.59.1 (the dialog
+  // stayed open, nothing was made). Not the test: the form. It asks the
+  // server about the address with the username still empty - refused,
+  // "Enter a username." - the address's suggestion then fills the username
+  // in, and that old answer stood under the suggested name until the next
+  // check came back; an Enter pressed in that window was dropped. The failed
+  // run's order is made certain here: the answer about the empty username is
+  // back before the suggestion lands, and the check of the suggested name
+  // takes its time. Red every time on the form before the fix.
+  it('makes the account on an Enter pressed the moment the address’s suggestion lands', () => {
+    const email = `cypress-late-${Date.now()}@example.invalid`;
+    let emptyAnswered!: () => void;
+    const answered = new Promise<void>((r) => (emptyAnswered = r));
+    cy.uiLogin();
+    cy.intercept('POST', '**/api/auth/account/check', (req) => {
+      if (req.body?.username) req.on('response', (res) => res.setDelay(1500));
+      else req.on('after:response', () => emptyAnswered());
     });
+    cy.intercept('GET', '**/api/admin/users/suggest*', (req) => req.on('response', () => answered)).as('suggest');
+    cy.visit('/admin/users');
+    cy.contains('button', /add|new|ekle|yeni/i).filter(':visible').first().click();
+    dialog().find('input[type="email"]').type(email);
+    dialog().find('[data-testid="user-create-access-none"]').click();
+    cy.wait('@suggest');
+    dialog().find('input[name="new-user-username"]').should('not.have.value', '');
+    dialog().find('input[name="new-user-name"]').type('{enter}');
+    cy.get('dialog[open]', { timeout: 10000 }).should('not.exist');
+    removeAccount(email);
   });
 });
+
+/** The account the test made exists; it is removed again. */
+function removeAccount(email: string) {
+  cy.apiLogin().then((tok) => {
+    cy.request({ url: `/api/admin/users?q=${encodeURIComponent(email)}`, headers: { Authorization: `Bearer ${tok}` } }).then((res) => {
+      const items = (res.body.items ?? res.body) as Array<{ id: number; email: string }>;
+      const u = items.find((x) => x.email === email);
+      expect(u, 'the account exists').to.exist;
+      cy.request({ method: 'DELETE', url: `/api/admin/users/${u!.id}`, headers: { Authorization: `Bearer ${tok}` }, failOnStatusCode: false });
+    });
+  });
+}
