@@ -3609,9 +3609,9 @@ the MCP tool `admin_external_test` takes the same optional body).
 `detail` is what the probe saw when the answer was not a healthy one, and is
 empty otherwise: `GET <url>/healthcheck returned HTTP 502`, `… no answer
 within 5s`, or the connection error (`… connection refused`, a DNS or TLS
-failure). A probe that was redirected says where: `GET <url> (redirected to
-<address>): …`, and for `drawio` and `onlyoffice` the detail then names the
-internal-address variable. A quick failure - a refused connection, an error status - is asked
+failure). A probe that was redirected says where:
+`GET <url> (redirected to <address>): …`, and for `drawio` and `onlyoffice`
+the detail then names the internal-address variable. A quick failure - a refused connection, an error status - is asked
 once more within the same 5 s, and the detail then ends with `(2 attempts)`;
 a probe that got no answer is not asked again (since 0.61.2). For
 `onlyoffice`, a 502/503/504 adds that the Document Server's web server
